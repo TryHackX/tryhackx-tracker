@@ -73,12 +73,11 @@
         return n;
     }
 
+    // The widget's own token — its root names #shout-csrf with data-csrf — else the page's, the one the
+    // layout publishes on every page (1.71.0): window.csrfToken() in app.js, loaded before this file. It
+    // used to be a list of the ids some pages carried.
     function csrf() {
-        var i = document.getElementById('shout-csrf')
-             || document.getElementById('account-csrf')
-             || document.getElementById('search-csrf')
-             || document.querySelector('input[name="csrf_token"]');
-        return i ? i.value : '';
+        return typeof window.csrfToken === 'function' ? window.csrfToken(document.getElementById('shoutbox')) : '';
     }
     async function get(qs) {
         try {
@@ -449,9 +448,42 @@
                                         'data-left': Number(r.del_left) > 0 ? String(Number(r.del_left)) : null },
                             el('i', { className: 'bi bi-trash', 'aria-hidden': 'true' })));
             }
+            // The flag (1.71.0): somebody else's line, for a reader who may report it — the template's button.
+            if (r.can_report) ctl.push(reportButton(!!r.reported));
             if (ctl.length) row.appendChild(el('span', { className: 'shout-ctl' }, ctl));
             stampDeadlines(row, Date.now());
             return row;
+        }
+
+        /**
+         * The flag on a row (1.71.0, includes/reports.php) — exactly the template's: the outline flag and
+         * "Report", or, once this reader has reported the line, the filled flag and "Reported". labelReport()
+         * is also what re-words it after a live language switch, from the state it carries.
+         */
+        function reportButton(on) {
+            var b = el('button', { type: 'button', className: 'shout-report' + (on ? ' shout-report-on' : '') },
+                       el('i', { className: 'bi ' + (on ? 'bi-flag-fill' : 'bi-flag'), 'aria-hidden': 'true' }));
+            labelReport(b, on);
+            return b;
+        }
+        function labelReport(b, on) {
+            b.classList.toggle('shout-report-on', !!on);
+            b.title = t(on ? 'js.shout.reported_title' : 'js.shout.report_title');
+            b.setAttribute('aria-label', t(on ? 'js.shout.reported' : 'js.shout.report'));
+            if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
+            var i = b.querySelector('i');
+            if (i) i.className = 'bi ' + (on ? 'bi-flag-fill' : 'bi-flag');
+        }
+        /** Report a line: the box in the row (assets/js/reports.js), and the flag filled once it is sent. */
+        function reportLine(b) {
+            var row = b.closest('.shout-row');
+            if (!row) return;
+            if (b.classList.contains('shout-report-on')) {
+                if (typeof window.pubTip === 'function') window.pubTip(b, t('js.shout.reported_title'));
+                return;
+            }
+            if (!window.Reports || typeof window.Reports.open !== 'function') return;
+            window.Reports.open(b, row, { kind: 'shout', id: Number(row.dataset.id) || 0 }, function () { labelReport(b, true); });
         }
 
         /**
@@ -861,15 +893,25 @@
             countEl.textContent = t('js.shout.chars', { n: ta.value.length, max: maxChars });
         }
 
-        /** The one road out: whatever is said, said the same way. */
+        /**
+         * The one road out: whatever is said, said the same way — through the site's anti-spam layer
+         * (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for is solved in the site's box and the line
+         * sent again; a wait counts down on Send, the sentence beside it saying how long, and Send comes
+         * back by itself.
+         */
         async function postShout(body, after) {
-            var r = await post('shout_post', {
-                body: body,
-                // Whichever syntax they picked; the server validates it either way, and where the
-                // tracker's format is 'plain' there is no select and nothing to pick.
-                format: fmtEl && fmtEl.value ? fmtEl.value : format,
-            });
-            if (!r || !r.success) { note(errText(r, maxChars)); return false; }
+            // Whichever syntax they picked; the server validates it either way, and where the
+            // tracker's format is 'plain' there is no select and nothing to pick.
+            var fmt = fmtEl && fmtEl.value ? fmtEl.value : format;
+            var doPost = function (extra) { return post('shout_post', Object.assign({ body: body, format: fmt }, extra || {})); };
+            var r = window.Antispam ? await window.Antispam.send(doPost, { button: sendBtn, note: note, action: 'shout_post' })
+                                    : await doPost({});
+            if (!r || !r.success) {
+                // The layer's own sentence (and, for a wait, the countdown's) — else the room's own words.
+                if (r && r.antispam) { if (!(window.Antispam && window.Antispam.waiting(sendBtn))) note(r.message || errText(r, maxChars)); }
+                else note(errText(r, maxChars));
+                return false;
+            }
             note('');
             if (typeof after === 'function') after();
             if (r.row) {
@@ -886,12 +928,13 @@
         }
 
         async function send() {
-            if (!ta || !sendBtn) return;
+            // Enter in the box while Send counts down (or is out) does nothing: the button is the one door.
+            if (!ta || !sendBtn || sendBtn.disabled) return;
             var body = ta.value.trim();
             if (!body) { ta.focus(); return; }
             sendBtn.disabled = true;
             await postShout(body, function () { ta.value = ''; countUpdate(); fitComposer(); });
-            sendBtn.disabled = false;
+            if (!(window.Antispam && window.Antispam.waiting(sendBtn))) sendBtn.disabled = false;
         }
 
         /**
@@ -905,7 +948,7 @@
             if (!sendBtn || sendBtn.disabled) return;
             sendBtn.disabled = true;
             await postShout(':' + code + ':');
-            sendBtn.disabled = false;
+            if (!(window.Antispam && window.Antispam.waiting(sendBtn))) sendBtn.disabled = false;
         }
 
         /**
@@ -964,11 +1007,13 @@
          *
          * The same shape includes/shout.php calls a mention (shoutMentionTokens): an `@` not preceded
          * by a word character — so `bob@example` is not one here either — and the name characters
-         * after it up to the caret. A selection is not a caret, so it offers nothing.
+         * after it up to the caret. A selection is not a caret, so it offers nothing. A '.' or '-' just
+         * typed after a name ENDS it (1.71.0, shoutMentionCandidates()): "thanks @bob." closes the list
+         * instead of asking for names that start "bob."; the next letter ("@john.d") asks again.
          */
         function mentionToken() {
             if (!ta || typeof ta.selectionStart !== 'number' || ta.selectionStart !== ta.selectionEnd) return null;
-            var m = /(?:^|[^\w@])@([A-Za-z0-9_.-]{0,32})$/.exec(ta.value.slice(0, ta.selectionStart));
+            var m = /(?:^|[^\w@])@((?:[A-Za-z0-9_.-]{0,31}[A-Za-z0-9_])?)$/.exec(ta.value.slice(0, ta.selectionStart));
             return m ? { q: m[1], at: ta.selectionStart - m[1].length } : null;
         }
 
@@ -1236,14 +1281,20 @@
             if (!body) { ed.enote.textContent = t('js.shout.err_empty'); ed.ta.focus({ preventScroll: true }); return; }
             ed.busy = true;
             ed.save.disabled = true;
-            var r = await post('shout_edit', { id: ed.id, body: body });
+            // A correction passes the anti-spam layer too (1.71.0): a few seconds from the last one — a wait
+            // counts down on Save (assets/js/antispam.js).
+            var doPost = function (extra) { return post('shout_edit', Object.assign({ id: ed.id, body: body }, extra || {})); };
+            var r = window.Antispam
+                ? await window.Antispam.send(doPost, { button: ed.save, note: function (s) { ed.enote.textContent = s || ''; }, action: 'shout_edit' })
+                : await doPost({});
             ed.busy = false;
-            ed.save.disabled = false;
+            if (!(window.Antispam && window.Antispam.waiting(ed.save))) ed.save.disabled = false;
             if (editing !== ed) return;               // cancelled while the answer was on its way
             if (!r || !r.success) {
                 if (r && r.error === 'not_found') { closeEdit(false); ed.row.remove(); note(t('js.shout.err_not_found')); return; }
                 // Refused: the words stay in the box, so they can still be copied somewhere.
-                ed.enote.textContent = editErr(r);
+                if (r && r.antispam) { if (!(window.Antispam && window.Antispam.waiting(ed.save))) ed.enote.textContent = r.message || editErr(r); }
+                else ed.enote.textContent = editErr(r);
                 return;
             }
             var was = ed.row;
@@ -1289,6 +1340,7 @@
             if ((b = row.querySelector('.shout-edit'))) { b.title = t('js.shout.edit_title'); b.setAttribute('aria-label', t('js.shout.edit')); }
             if ((b = row.querySelector('.shout-del'))) { b.title = t('js.shout.delete_title'); b.setAttribute('aria-label', t('js.shout.delete')); }
             if ((b = row.querySelector('.shout-unpin'))) { b.title = t('js.shout.unpin_title'); b.setAttribute('aria-label', t('js.shout.unpin')); }
+            if ((b = row.querySelector('.shout-report'))) labelReport(b, b.classList.contains('shout-report-on'));
         }
 
         /** The open editor's own words, and its copy of the rail from the composer's, re-worded. */
@@ -1332,6 +1384,10 @@
             if (del && listEl.contains(del)) { askDelete(del); return; }
             var eb = e.target.closest('.shout-edit');
             if (eb && listEl.contains(eb)) { openEdit(eb); return; }
+            // The flag (1.71.0): the report's box in the row. Inside that box nothing below applies.
+            if (e.target.closest('.report-box')) return;
+            var rp = e.target.closest('.shout-report');
+            if (rp && listEl.contains(rp)) { reportLine(rp); return; }
             // Pinning asks nothing first: it is one line moving to the top of a room, and the strip
             // it lands in has an unpin beside it. Deleting is the one that cannot be taken back.
             // The pinned line's own pin takes it down again (1.67.0): it is a toggle.
@@ -1686,9 +1742,10 @@
             var reader = new FileReader();
             reader.onerror = function () { note(t('js.shout.err_failed'), true); };
             reader.onload = async function () {
+                if (btn.disabled) return;          // counting down (the anti-spam layer's wait), or already out
                 btn.disabled = true;
                 note(t('js.shout.uploading'));
-                var r = await post('shout_emote_upload', {
+                var body = {
                     code: code,
                     // Empty stays EMPTY. The server falls back to the prettified code
                     // (shoutEmotePrettyName: "thumbs_up" -> "Thumbs up") and checks that fallback for
@@ -1697,9 +1754,18 @@
                     name: (nameIn ? nameIn.value : '').trim(),
                     sticker: !!(stickIn && stickIn.checked),
                     data: String(reader.result),
-                });
-                btn.disabled = false;
-                if (!r || !r.success) { note(emoteErr(r), true); return; }
+                };
+                // Through the anti-spam layer's helper (1.71.0): a CAPTCHA it asks for, and the same upload
+                // again; a wait counts down on the button.
+                var doPost = function (extra) { return post('shout_emote_upload', Object.assign({}, body, extra || {})); };
+                var r = window.Antispam
+                    ? await window.Antispam.send(doPost, { button: btn, note: function (s) { note(s, true); }, action: 'shout_emote_upload' })
+                    : await doPost({});
+                if (!(window.Antispam && window.Antispam.waiting(btn))) btn.disabled = false;
+                if (!r || !r.success) {
+                    if (!(r && r.antispam && window.Antispam && window.Antispam.waiting(btn))) note(emoteErr(r), true);
+                    return;
+                }
                 var row = r.emote || r.added || r.row || null;
                 if (row && row.code && row.url && mine) {
                     var empty = mine.querySelector('.emote-empty');

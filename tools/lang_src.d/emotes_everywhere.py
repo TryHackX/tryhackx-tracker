@@ -22,7 +22,7 @@ def add(prefix, pairs):
         S[key] = v
 
 
-# ── Settings -> Shoutbox -> Emotes: the switch ───────────────────────────────
+# ── Settings -> Emoji & emotes -> Emotes and stickers: the switch (Shoutbox's until 1.71.0) ──
 add('settings', {
     'emotes_everywhere': ('Beyond the shoutbox', 'Poza shoutboxem'),
     'emotes_everywhere_hint': (

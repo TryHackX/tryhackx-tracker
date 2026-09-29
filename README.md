@@ -113,7 +113,7 @@ source before you send.
 
 ### Security
 - **Smart CAPTCHA** — point-based reCAPTCHA v2 system with modal overlay; CAPTCHA only appears after configurable activity threshold, with grace period after solving
-- **CSRF Protection** — token validation on all public form submissions and on every admin write (via the `X-CSRF-Token` header)
+- **CSRF Protection** — token validation on all public form submissions and on every admin write (via the `X-CSRF-Token` header); every public page publishes the session's token once (`<meta name="csrf-token">`) and every public script reads it through one helper, so a button works on whichever page it turns up (1.71.0)
 - **Login Hardening** — per-IP brute-force lockout on admin login (attempts + window now admin-configurable) + constant-time username/password comparison
 - **Admin Session Timeouts** — idle timeout and absolute lifetime cap; an expired session is destroyed server-side so a stale cookie can't be reused
 - **Rate Limiting** — per-IP throttling on report submission **and** on status checks, block lookups and appeal submissions (all admin-tunable, `0` = off), plus a duplicate-appeal guard
@@ -367,11 +367,14 @@ too) · **User accounts** (who may have an account, how they sign in and reach e
 **Profiles** (everything a member has and shows on a profile: the profile switch, favourites, the
 picture and cover, the description, likes / ratings, lists) · **Tracker & whitelist** (the mode and
 both accesslist files) · **OpenTracker service** · **Network & limits** (the UDP firewall and its address
-lists, kernel buffers, database memory) · **Statistics** · **Descriptions & ratings** (what members add
-to a torrent) · **Shoutbox** · **Sounds** · **Index** · **API & federation** · **Backups & maintenance**
+lists, kernel buffers, database memory) · **Statistics** · **Descriptions, comments & ratings** (what
+members add to a torrent; comments since 1.71.0) · **Shoutbox** (the room itself) · **Emoji & emotes** (1.71.0: the emoji picker and Font
+Awesome in it, the emotes and stickers and their manager — for every text with the picker, not only the
+room) · **Sounds** · **Index** · **API & federation** · **Backups & maintenance**
 (backups, archiving of old reports / appeals / sent mail, the health check, the audit log) ·
 **Languages** · **Admin credentials**. *All settings* reads group by group in that order; the
-section ids did not change, so every `#section-…` link still opens.
+section ids did not change, so every `#section-…` link still opens — and since 1.71.0 a link to
+anything inside a section (a sub-heading, a block such as `#admin-emotes`) opens that section too.
 
 
 | Section | Settings |
@@ -382,6 +385,7 @@ section ids did not change, so every `#section-…` link still opens.
 | **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), blacklist file path (+ Test; under Security until 1.69.0), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
 | **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
+| **Anti-spam** (Security & CAPTCHA, 1.71.0) | One layer for everything people write: on/off, a CAPTCHA after so many hits at a ladder's top, guests' CAPTCHA, staff exempt; per place (room, messages, comments, descriptions, reports, lists, profile description, emotes, votes) the free burst, the pauses and the quiet spell; new accounts (days, factor, links as words); new conversations an hour / a day; the duplicate window — see [One anti-spam layer](#one-anti-spam-layer-for-everything-people-write-1710) |
 | **Archiving & the e-mail log** (Backups & maintenance; "Public Pages" before 1.69.0) | Auto-archive days for reports and appeals, how long the sent-mail log is kept |
 | **Rate & length limits** (Security & CAPTCHA; "Rate Limits & Blacklist" before 1.69.0) | Reports/status-checks/block-lookups/appeals per hour (per IP), items per page, message length limits |
 | **Admin Access & Sessions** | **Admin sign-in address** (the `?action=` value that shows the sign-in form &mdash; move it off `admin` to keep bots off the form), **what other admin URLs answer when signed out** (redirect to the front page / show the form / 404), session idle timeout, absolute session cap, login lockout attempts/window, trusted proxy IPs, client IP header &mdash; see [Moving the admin sign-in address](#moving-the-admin-sign-in-address-1100) |
@@ -901,6 +905,13 @@ Two modes. **Up or down** is a percentage and a bar. **Five stars** shows five a
 half a star is a real value somebody cast rather than one inferred from a percentage; hovering
 previews what a click would set, and leaving puts back what is actually stored.
 
+**A vote can be taken back** (1.71.0). The thumb you pressed, or the half star at your rating, is
+shown pressed — and pressing it again removes your vote: from the counts, from your likes or ratings
+on your profile, from "Who has this". It is an operation of its own (`rate_hash` with `op: 'remove'`),
+not a guess from the value sent, behind every gate a vote passes and paid for like one — the hourly
+budget, the CAPTCHA points — and it only ever deletes the caller's own vote. Opening the Info panel
+costs nothing from that budget; only casting and taking back do.
+
 Counting is the easy part. A public voting button is the easiest thing on a site to automate, so four
 things stand in the way and none of them is sufficient alone: **one vote per identity enforced by a
 UNIQUE key in the database** (a check in PHP is a race two requests walk through), the shared rate
@@ -1018,8 +1029,8 @@ which cells have variants. Nothing is loaded until the picker first opens: the e
 tools/emoji_data.php <package> [--cap=16.0]` rewrites both files). Windows draws no country flags at
 all — it shows their two letters, everywhere, not only here.
 
-With a **Font Awesome Pro package** as the site's icon source (Settings → Site), **Settings → Shoutbox →
-Emoji in the picker** offers its faces — the `emoji` category of the package's own index, 113 in 7.3.1
+With a **Font Awesome Pro package** as the site's icon source (Settings → Site), **Settings → Emoji & emotes
+→ Emoji in the picker** (under Shoutbox until 1.71.0) offers its faces — the `emoji` category of the package's own index, 113 in 7.3.1
 — **instead of** the ordinary emoji or **mixed** with them (`shout_emoji_fa`: off / fa / mixed, off as
 shipped), drawn by default in a style you choose (`shout_emoji_fa_style`, else the site's own). A face
 travels in a shout as a token, `:fa-face-grin-tears:` or `:fa-face-grin-tears/duotone-light:` with a
@@ -1032,7 +1043,9 @@ owner's download script — and keeps what the site needs of it beside the packa
 **How much more of the package the picker offers** (1.70.0, `shout_emoji_fa_scope`, shown while the
 faces are on): the faces alone (as shipped); the faces, and a search that also finds **any icon** of the
 package, in a "Font Awesome" group after the emoji; or **every icon**, on one more page navigated by Font
-Awesome's own categories (a strip of chips, in the reader's language). Held down, every icon offers the
+Awesome's own categories — a strip of chips, from 1.71.0 each the category's own icon (the alphabet A B C,
+the numbers 1 2 3; `assets/emoji/fa-categories.json` names them), its name in the reader's language in the
+tooltip and for a screen reader. Held down, every icon offers the
 styles it is drawn in among those the site loads, and any icon travels as the same token —
 `:fa-rocket:`, `:fa-rocket/sharp-solid:` — drawn in the colour of the words, or as `[Rocket]` where Font
 Awesome cannot draw it. The icons beyond the faces are found by their English names and words, or by
@@ -1051,8 +1064,10 @@ at the room's size, in a description or a list's bounded to 96 px, in a profile'
 (no stickers there), in an e-mail as its code. Approved, switched-on emotes only, from the same image
 address. Each editor asks for the picker's data as its own context (`for` = message | description | bio |
 list), under the permission that writes that text. The emotes are the room's: with the shoutbox or its
-emotes off, or `emotes_everywhere` off (Settings → Shoutbox → Emotes, "Beyond the shoutbox"), a code
-there is its text again and those pickers offer the emoji alone.
+emotes off, or `emotes_everywhere` off (Settings → Emoji & emotes → Emotes and stickers, "Beyond the
+shoutbox"), a code there is its text again and those pickers offer the emoji alone. Since 1.71.0 the
+picker's settings and the emote manager are a group of their own in Settings, **Emoji & emotes**, beside
+Shoutbox — they serve the whole site — with the setting keys they always had.
 
 ### The shoutbox in the bar, a pinned line, and lines from the site (1.60.0)
 
@@ -1072,7 +1087,7 @@ chips of their own on the settings page.
 
 The composer's picker holds common Unicode emoji (drawn by the device's own font), the site's custom
 emotes as images, and stickers on their own tab; an emoji or emote lands at the caret, a sticker is
-sent at once. The owner manages emotes in Settings → Shoutbox; members with `shout.upload_emote` add
+sent at once. The owner manages emotes in Settings → Shoutbox (Settings → Emoji & emotes from 1.71.0); members with `shout.upload_emote` add
 their own on the Emotes page. Custom emotes are SVG/PNG/GIF/WebP up to 64 KB and 128 px, sniffed by
 their bytes — an SVG with a script or an event attribute is refused, and every emote is served with
 `nosniff` and a policy of its own. Settings → Sounds was tidied in the same release: the uploads are
@@ -1155,6 +1170,111 @@ told when their words are published, turned down, or replaced. Reading descripti
   ticked, your name shown and your group granted `content.public` — a section of the profile, right
   after Likes / Ratings: each torrent you wrote or co-wrote, your role in it, the date; sortable,
   searchable, paged. Settings → Profiles → *Descriptions on profiles* switches it off everywhere.
+
+### Comments on a torrent (1.71.0)
+
+The Info panel has a **Comments (N)** section after the rating: the thread reads oldest to newest and opens
+on its newest page (*Show earlier comments* above it), loaded when the section comes into view. Each comment
+shows its author's picture and name (a link to the profile), the time in the reader's zone, "edited" — "by a
+moderator" when it was one —, and the author's **Edit** and **Delete** as icon buttons. The composer is the
+site's editor with a comment's toolbar — **[b] [i] [u] [s]**, **[url]** while links are allowed, **[quote]**
+(one level), **[spoiler]**, **[code]** — the emoji picker (emoji, Font Awesome's icons, the site's emotes, a
+sticker drawn as an emote), a Preview and a counter of the characters a reader will see; **Ctrl+Enter**
+sends and **@** offers members' names. No pictures, tables, sizes or colours: the renderer is a comment's own
+allow-list (`includes/comments.php`), everything else stays the text that was typed, and a link carries
+`rel="nofollow noopener noreferrer ugc"` and asks before leaving the site. A comment by somebody you blocked
+is folded away until you open it; an account silenced by a moderator reads but does not write.
+
+- **Who** (Users → Groups): `comment.view`, `comment.post`, `comment.edit_own`, `comment.delete_own` (members
+  as shipped) and `comment.moderate` (moderators: edit anybody's — marked, audited, the author told — and
+  remove it with a reason the author is shown, one `comment.delete` audit line). Asked of the account, never
+  of a panel session. With accounts off there are no comments.
+- **Told**: the member who registered the torrent, the author of its description, the members who commented
+  before, and whoever a comment @-mentions — once each, in their own language, never the author, never across
+  a block, and only for the kinds they left on (account page, under the notifications: four switches). A
+  notification has a **Show** button that lands on the comment. Two sounds of their own — *a comment where I
+  am told of one* and *a comment that mentions me* — with site defaults in Settings → Sounds and a choice on
+  the account's Sounds tab; a comment plays its sound, not the notification's as well.
+- **Guests**, only if you grant the guest group `comment.post` (off as shipped): signed "Guest #4f2a" — a keyed
+  hash of the day and the address group, never the address — a CAPTCHA every time (no provider set up, no
+  guest comments), no links, and held for a moderator's *Let it through* while `comments_guest_review` is on
+  (as shipped). A guest cannot correct, delete, be told or be @-mentioned.
+- **Settings → Descriptions, comments & ratings → Comments**: on/off (`comments_enabled`, on), the length in
+  visible characters (`comment_max_chars`, 500; 20–5000 — the text with its tags may be four times that),
+  links (`comment_links`, on), how long a member may correct (`comment_edit_minutes`, 15) or delete
+  (`comment_delete_own_minutes`, 60; 0 = no limit) their own, comments to a page (20), comments an hour per
+  account (`comment_rate_per_hour`, 30), smart-CAPTCHA points per comment (`captcha_pts_comment`, 1), the
+  guests' review; and every group's comment permissions, read-only. Every comment write passes one function,
+  `commentFloodCheck()`, which asks the site's anti-spam layer (below) before the hourly limit.
+- **Data**: `hash_comments` (schema 83; soft-deleted rows keep who removed them and why), `users.comment_notify`
+  and `user_notifications.link`. Deleting an account deletes its comments. Endpoints: `comment_list`,
+  `comment_post`, `comment_edit`, `comment_delete`, `comment_approve`, `comment_prefs`.
+
+### Reporting comments, descriptions and shouts; warnings (1.71.0)
+
+A **flag** beside somebody else's comment, under a torrent's description and on a line of the shoutbox opens a
+small box in place — a reason, *Send* — and turns into **Reported** once sent (on every page after, too). Only
+the moderators read a report; the author never learns who sent it. One open report per member per thing; a
+member's reports an hour are limited; `content.report` (members as shipped).
+
+- **Reports page → Comments / Descriptions / Shouts** (each while its feature is on, each with its count of
+  things waiting): one card per reported thing — its words (and, when they changed or went, the words as
+  reported), where it lives, its author and what the account already is (banned, silenced, staff, reported and
+  warned how often, the latest warnings), and every report about it. Filters: status, reported member,
+  reporter, a date range, text. The page opens for any of its queues and shows only the tabs a person may see.
+- **Actions**: Close / Reopen (with an answer to the reporters and a note for the log), **Remove** the words
+  (each kind through its own delete), **Warn** the author, **silence** or **ban** the author for a length, and
+  lift either — never an account that can open the panel, never your own, never a ban without a date.
+- **Silent or loud**, for everything that reaches the author: silently, they are told nothing; as a warning,
+  they get one notification in their own language with your reason (required), kept on their account in
+  `user_warnings`. The count and the latest warnings are on every reported author's card and in **Users** (the
+  member's window); the member sees them among their notifications, nowhere public. The **message card** has the
+  same choice and a Warn of its own.
+- **Who** (Users → Groups): `panel.reports.comments.view` / `.handle`, `panel.reports.descriptions.view` /
+  `.handle`, `panel.reports.shouts.view` / `.handle` — the moderator group's as shipped. The message queue
+  (`panel.messages.*`) is still nobody's until you grant it. The reporters hear the outcome (closed, removed,
+  handled) in their language; every action is in the audit log's Reports group.
+- **Data** (schema 84): `content_reports` (beside `message_reports`, which is unchanged), `user_warnings`.
+  Endpoints: `content_report`, `admin/content_reports`, `admin/content_report_action` (`includes/reports.php`).
+  Every report passes one limit function, `contentReportFloodCheck()` — the anti-spam layer, then the hour's limit.
+
+### One anti-spam layer for everything people write (1.71.0)
+
+Every place people write asks one place before anything is written (`includes/antispam.php`): a line in the
+shoutbox and its correction, a sticker or an emote upload, a message and a message report, a comment and its
+correction, a torrent's description (the Info panel's and the whitelist form's), a list's name and description,
+the profile's description, a report, a vote. The answer is one of three — go; **wait this long** (the Send button
+counts it down on itself, the sentence beside it, and comes back by itself at zero with the words kept); or
+**prove you are a person** (the site's CAPTCHA box opens there and then, drawn on pages that had none, and the
+same words go again). A member is known by the account, a guest by the address group (an IPv4 address, an IPv6
+/64).
+
+- **A ladder per place**: a few writes free, then growing pauses, all forgotten after a quiet spell. The room
+  ships with three lines free, then 5, 15, 30 and 60 seconds, two quiet minutes; messages count the conversations
+  a member STARTS (3 free, then 30 s, 1, 2, 5 min; 10 minutes), not the lines of a chat; comments 2 free (15 s …
+  2 min; 5 minutes); descriptions 2 (1 … 30 min; an hour); reports 3 (30 s … 15 min; 30 minutes); lists 3 (10 s …
+  2 min; 10 minutes); the profile's description 3 (30 s … 5 min; 15 minutes); emote uploads 3 (30 s … 5 min; 30
+  minutes); votes 10 (2 … 30 s; 2 minutes). Every number is a setting.
+- **CAPTCHA**: at the top of a ladder — whoever keeps hitting its last step (3 times, `antispam_captcha_after`) is
+  asked on the next write, and solving it takes the pauses back to the first step. **Guests** solve one every time
+  they write (`antispam_guest_captcha`). With no provider set up, nobody can be asked: the pauses work alone, and
+  Settings says so.
+- **Messages**: new conversations an hour and a day (8 / 20; a new account 2 / 4); the same words to more than two
+  people refused; `rate_limit_pm` (240 an hour per address, Settings → People) is the send's own ceiling.
+- **New accounts** (the first `antispam_new_days`, 3): pauses and quiet spells × 2, their own conversation limits,
+  and links written then drawn as words — in the room, a comment, a list's description, the profile's description
+  — for good: it is decided from when the words were written.
+- **The same words twice** within ten minutes are refused in the room, a message to the same person, a comment and
+  a description (under eight characters never counts). **Corrections** are not laddered: a gap between two, that
+  is all (the room's `shout_flood_seconds`, which with the layer switched off is the room's old wall again).
+- **Staff** (`panel.access`) are not paced, not asked, and not new, while `antispam_staff_exempt` is on; the
+  duplicate rule is everybody's.
+- **Never open**: the check and the reservation are one locked step (`antispam_state`, the database's clock), so two
+  requests at once are served one after the other; a database that cannot answer is a refusal, not a pass. The audit
+  log hears of a subject refused three times in a row (`antispam.refuse`), at most once an hour each.
+- **Settings → Security & CAPTCHA → Anti-spam**: the switch, the CAPTCHA and staff rules, one row per place (burst,
+  pauses as a list, quiet spell), new accounts, messages, the duplicate window. Data (schema 85): `antispam_state`,
+  pruned by the janitor after two days.
 
 ### "Who has this": favourites, likes / ratings, lists (1.70.0)
 

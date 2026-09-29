@@ -45,6 +45,12 @@ require_once __DIR__ . '/includes/profilebio.php';
 require_once __DIR__ . '/includes/profilevotes.php';
 // The descriptions a member wrote, on the profile (v81): the gate, the parameters and the bounded read.
 require_once __DIR__ . '/includes/profiledescs.php';
+// Comments on a torrent (v83): the renderer, the rules, the people told, and every request the endpoints make.
+require_once __DIR__ . '/includes/comments.php';
+// Reports of comments, descriptions and shouts, and warnings (1.71.0): after comments.php, whose rows it reads.
+require_once __DIR__ . '/includes/reports.php';
+// One anti-spam layer for everything people write (1.71.0): every writer endpoint asks it before it writes.
+require_once __DIR__ . '/includes/antispam.php';
 require_once __DIR__ . '/includes/lists.php';
 // "Who has this" (1.70.0): the favourites, the likes / ratings and the lists of one torrent, every gate in SQL.
 require_once __DIR__ . '/includes/who.php';
@@ -150,6 +156,9 @@ $apiRoutes = [
     // Reported private messages — two endpoints, and their own permissions (includes/people.php).
     'admin/fetch_message_reports' => 'api/admin/fetch_message_reports.php',
     'admin/message_report_action' => 'api/admin/message_report_action.php',
+    // Reported comments, descriptions and shouts (1.71.0, includes/reports.php).
+    'admin/content_reports'       => 'api/admin/content_reports.php',
+    'admin/content_report_action' => 'api/admin/content_report_action.php',
     'admin/change_status'   => 'api/admin/change_status.php',
     'admin/block_hash'      => 'api/admin/block_hash.php',
     'admin/unblock_hash'    => 'api/admin/unblock_hash.php',
@@ -327,6 +336,18 @@ $apiRoutes = [
     'admin/user_bio'             => 'api/admin/user_bio.php',
     'richtext_preview'           => 'api/richtext_preview.php',
     'rate_hash'                  => 'api/rate_hash.php',
+    // Comments on a torrent (1.71.0, includes/comments.php): a thread's page (GET), a new one, a correction
+    // (GET the stored words / POST them), taking one down (the author's own, or a moderator's with a reason),
+    // letting a guest's held comment through, and the account's four "tell me when" switches. Each endpoint
+    // hands the request to a function there and sends back what it answers.
+    'comment_list'               => 'api/comment_list.php',
+    'comment_post'               => 'api/comment_post.php',
+    'comment_edit'               => 'api/comment_edit.php',
+    'comment_delete'             => 'api/comment_delete.php',
+    'comment_approve'            => 'api/comment_approve.php',
+    'comment_prefs'              => 'api/comment_prefs.php',
+    // A member reports a comment, a description or a shout (1.71.0, includes/reports.php).
+    'content_report'             => 'api/content_report.php',
     // ── People reaching each other (includes/people.php) ──
     'user_people'                => 'api/user_people.php',
     'user_messages'              => 'api/user_messages.php',
@@ -424,6 +445,11 @@ function adminEndpointPermission(string $endpoint): ?string {
         // NOT panel.reports.*: reading a reported private message is a different kind of access.
         'admin/fetch_message_reports' => 'panel.messages.view',
         'admin/message_report_action' => 'panel.messages.handle',
+        // Reported comments, descriptions and shouts (1.71.0): the KIND decides the permission —
+        // panel.reports.<kind>.view to read its queue, .handle to act — so the router asks only for the panel
+        // and each endpoint asks its kind's own (as admin/backup_action asks for its op).
+        'admin/content_reports'       => 'panel.access',
+        'admin/content_report_action' => 'panel.access',
         'admin/fetch_appeals'      => 'panel.reports.view',
         'admin/change_status'      => 'panel.reports.status',
         'admin/update_field'       => 'panel.reports.status',
@@ -542,7 +568,7 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endp
             'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status',
             'admin/ot_status', 'admin/sysctl_status', 'admin/dbmem_status', 'admin/ot_cluster_status',
             'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
-            'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users',
+            'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users', 'admin/content_reports',
             'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',
             'admin/fetch_fed_peers', 'admin/user_media'], true)) {
         session_write_close();

@@ -266,10 +266,15 @@ check('the row and length limits are clamped on read',
 // test that reads its own stale answer.
 $names = ['shtuser', 'shtmod', 'shtmute', 'shtnone', 'shtfriend', 'shtauto'];
 $in = implode(',', array_fill(0, count($names), '?'));
+// An earlier run's accounts, and what the anti-spam layer (1.71.0) kept about them.
+$db->prepare("DELETE s FROM antispam_state s JOIN users u ON s.subject = CONCAT('u:', u.id) WHERE u.username IN ($in)")->execute($names);
 $db->prepare("DELETE FROM users WHERE username IN ($in)")->execute($names);
+// The anti-spam layer (1.71.0) is OFF here, explicitly: this file writes far faster than a person, from accounts
+// made a second ago (whose links the layer would draw as text) — the layer's ladder is tests/antispam_test.php's.
+// What is left of it here is the room's own wall, `shout_flood_seconds`, measured by the layer's table.
 $cfgOn = array_merge($cfg, ['users_enabled' => '1', 'shout_enabled' => '1', 'users_require_email_verify' => '0',
                             'shout_max_chars' => '500', 'shout_flood_seconds' => '0', 'shout_format' => 'bbcode',
-                            'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1']);
+                            'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1', 'antispam_enabled' => '0']);
 $uid = [];
 foreach ($names as $name) {
     userCreate($db, $cfgOn, $name, $name . '@example.org', 'SmokePass123!', '127.0.0.1');
@@ -309,8 +314,19 @@ $cleanup = function () use ($db, $uid, $in, $names) {
     $db->prepare("DELETE FROM user_friends WHERE user_id IN ($q) OR friend_id IN ($q)")->execute(array_merge($ids, $ids));
     // The pictures and the group this run made, so a second run starts where the first one did.
     $db->prepare("DELETE FROM shout_emotes WHERE uploaded_by IN ($q) OR code LIKE 'zzauto%'")->execute($ids);
+    $db->prepare("DELETE FROM antispam_state WHERE subject IN ($q)")->execute(array_map(fn($id) => 'u:' . $id, $ids));
     $db->prepare("DELETE FROM users WHERE username IN ($in)")->execute($names);
     $db->exec("DELETE FROM user_groups WHERE slug = 'shtautog'");
+};
+// An empty room is also a room nobody has just spoken in. Since 1.71.0 WHEN somebody last spoke (the wall,
+// `shout_flood_seconds`, is measured from it) is the anti-spam layer's to know (antispam_state, context `shout`),
+// not the newest line in `shouts` — so emptying the room forgets this run's accounts there too.
+$emptyRoom = function () use ($db, $uid): void {
+    $db->exec("DELETE FROM shout_mentions");
+    $db->exec("DELETE FROM shouts");
+    $subs = array_map(fn($id) => 'u:' . $id, array_values($uid));
+    $db->prepare("DELETE FROM antispam_state WHERE context = 'shout' AND subject IN (" . implode(',', array_fill(0, count($subs), '?')) . ")")
+       ->execute($subs);
 };
 
 try {
@@ -321,8 +337,7 @@ try {
     $friend = $row('shtfriend');
     // An EMPTY room to start from. The counts below are exact numbers rather than differences, and
     // the table is this feature's own — nothing else in the suite keeps a fixture in it.
-    $db->exec("DELETE FROM shout_mentions");
-    $db->exec("DELETE FROM shouts");
+    $emptyRoom();
 
     // ── who may write ────────────────────────────────────────────────────────
     check('a member may write', shoutMayPost($db, $cfgOn, $me)['ok'] === true);
@@ -403,8 +418,7 @@ try {
     // ── reading: after, before, newest last ──────────────────────────────────
     // A known room again: six lines by one other person, so "the newest three" and "everything
     // before that id" are numbers rather than guesses.
-    $db->exec("DELETE FROM shout_mentions");
-    $db->exec("DELETE FROM shouts");
+    $emptyRoom();
     $mk = function (int $userId, string $body) use ($db): int {
         $db->prepare("INSERT INTO shouts (user_id, body, body_format) VALUES (?, ?, 'plain')")->execute([$userId, $body]);
         return (int)$db->lastInsertId();
@@ -569,8 +583,7 @@ try {
 
     // ── the lines the site says ──────────────────────────────────────────────
     // An empty room again: every count below is an exact number rather than a difference.
-    $db->exec("DELETE FROM shout_mentions");
-    $db->exec("DELETE FROM shouts");
+    $emptyRoom();
     $cfgSys = array_merge($cfgOn, ['shout_system_lines' => '1', 'site_name' => 'TestTracker',
                                    'default_language' => 'en', 'shout_flood_seconds' => '0']);
     check('off as shipped, the site says nothing at all',
@@ -714,8 +727,7 @@ try {
     // TWO READERS, TWO ZONES, ONE ROW. Noon UTC on 15 January, written while the database session
     // runs on an offset PHP does NOT — so a `new DateTime($row['created_at'])` in PHP's zone gets it
     // wrong, and the only way to the right hour is the database's own conversion.
-    $db->exec("DELETE FROM shout_mentions");
-    $db->exec("DELETE FROM shouts");
+    $emptyRoom();
     $noon = (new DateTimeImmutable('2026-01-15 12:00:00', new DateTimeZone('UTC')))->getTimestamp();
     $sessZone = date('P') === '+03:00' ? '+05:00' : '+03:00';
     $written = (new DateTimeImmutable('@' . $noon))->setTimezone(new DateTimeZone($sessZone))->format('Y-m-d H:i:s');
@@ -792,8 +804,7 @@ try {
 
     // ── 1.66.0: correcting a line, and the window on taking your own back ─────
     // Every switch this section leans on is SET here. An empty room, so the counts are exact.
-    $db->exec("DELETE FROM shout_mentions");
-    $db->exec("DELETE FROM shouts");
+    $emptyRoom();
     $cfgEd = array_merge($cfgOn, ['shout_edit_minutes' => '10', 'shout_delete_own_minutes' => '10',
                                   'shout_flood_seconds' => '0', 'shout_max_chars' => '500', 'shout_format' => 'bbcode',
                                   'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1', 'desc_max_images' => '3',
@@ -1060,6 +1071,13 @@ $adminJs = (string)file_get_contents($root . '/assets/js/admin-shout.js');
 check('Settings → Shoutbox shows who may read and who may write, from the groups endpoint',
       str_contains($tpl, 'id="shout-matrix"') && str_contains($adminJs, "apiCall('admin/fetch_groups')")
       && str_contains($adminJs, "'shout.upload_emote'"));
+// 1.71.0: the room's six there; the two emote permissions went with the emotes to Settings → Emoji & emotes,
+// a fold of their own under the manager — the same matrix, one request for both.
+check('… the room\'s six in Shoutbox\'s fold, the two emote permissions in a fold under the emote manager (Emoji & emotes)',
+      str_contains($adminJs, "ids: ['shout.view', 'shout.post', 'shout.edit_own', 'shout.delete_own', 'shout.edit_any', 'shout.moderate'] },")
+      && str_contains($adminJs, "{ wrap: 'emote-matrix-wrap', table: 'emote-matrix', ids: ['shout.upload_emote', 'shout.emote_auto'] },")
+      && strpos($tpl, 'id="emote-matrix"') > strpos($tpl, 'id="section-emotes"') && strpos($tpl, 'id="shout-matrix"') < strpos($tpl, 'id="section-emoji"')
+      && substr_count($adminJs, "apiCall('admin/fetch_groups')") === 1);
 $gids = array_column(settingsCatalogGroups(), 'id');
 check('Shoutbox and Sounds are chips of their own',
       in_array('shoutbox', $gids, true) && in_array('sounds', $gids, true), implode(',', $gids));
@@ -1382,9 +1400,9 @@ check('… and a pointer Cancel or Save does not hand the focus back to the penc
 check('the row\'s pin is a toggle on the page too: the pinned line\'s sends pin:false',
       str_contains($boxJs, "pin(Number(row.dataset.id) || 0, !p.classList.contains('shout-pin-on'))")
       && str_contains($boxJs, 'syncPins(row ? Number(row.id) || 0 : 0);'));
-check('the editor finds ITS token: a data-csrf naming it, then the nearest token field — the widget names #shout-csrf',
-      str_contains($appJs, "const namer = ta.closest('[data-csrf]');") && str_contains($appJs, "input[type=\"hidden\"][id$=\"-csrf\"]")
-      && str_contains($widget, 'data-csrf="shout-csrf">'));
+check('the editor finds ITS token through the site\'s one rule, csrfToken(ta) (1.71.0): a data-csrf naming its field first — the widget names #shout-csrf — then its form\'s, then the page\'s',
+      str_contains($appJs, 'const csrfOfEditor = () => csrfToken(ta);') && str_contains($appJs, "const namer = node ? node.closest('[data-csrf]') : null;")
+      && str_contains($appJs, 'csrf_token: csrfOfEditor() });') && str_contains($widget, 'data-csrf="shout-csrf">'));
 $prev = (string)file_get_contents($root . '/api/richtext_preview.php');
 check('a shout previews through the room\'s own renderer and rules, the ones posting uses',
       str_contains($prev, 'shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext(') && str_contains($prev, 'shoutBodyProblem($cfg, $text, $fmt)')

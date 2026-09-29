@@ -333,7 +333,8 @@ function emojiFaRenderHtml(string $html, array $cfg, ?string $lang = null): stri
  * and keywords in the reader's language with the English ones after them (the search's fallback), its
  * variants, and the ordinary emoji it falls back to. With a wider scope (1.70.0) also `catalog`: where
  * the catalogue of every icon is (its version), how many icons it holds, and its categories named in
- * the reader's language — the catalogue itself is fetched only when the picker needs it.
+ * the reader's language — the catalogue itself is fetched only when the picker needs it — each with the
+ * icons its chip shows (1.71.0), and `fallback`, the glyph of a category without them.
  */
 function emojiFaClientData(array $cfg, string $lang): array {
     $ctx = emojiFaContext($cfg);
@@ -367,9 +368,13 @@ function emojiFaClientData(array $cfg, string $lang): array {
     }
     if ($ctx['scope'] !== 'faces') {
         $cat = emojiFaCatalogInfo($ctx);
+        // 1.71.0: each category with the icon its chip shows (the name is its tooltip), and the glyph for one
+        // without — the picker draws whichever of them the catalogue has (emojiFaCategoryIcons()).
+        $icons = emojiFaCategoryIcons();
         if ($cat === null) $out['scope'] = 'faces';        // no catalogue after all: the faces, as before
         else $out['catalog'] = ['v' => $cat['v'], 'n' => $cat['icons'],
-                                'cats' => array_map(fn($id) => [$id, emojiFaCategoryLabel($id, $lang)], $cat['ids'])];
+                                'cats' => array_map(fn($id) => [$id, emojiFaCategoryLabel($id, $lang), $icons['cats'][$id] ?? []], $cat['ids']),
+                                'fallback' => $icons['fallback']];
     }
     return $out;
 }
@@ -401,16 +406,52 @@ function emojiFaCategoryLabel(string $id, string $lang): string {
     return $s !== $key ? $s : ucfirst(str_replace('-', ' ', $id));
 }
 
+/** The longest run of icons one category's chip may show (A B C). */
+const EMOJI_FA_CAT_RUN_MAX = 3;
+
+/**
+ * Font Awesome's categories as ICONS (1.71.0, assets/emoji/fa-categories.json): the picker's chips were the
+ * categories' names, seventy words in a strip, and the owner asked for Font Awesome's own icons in their
+ * place — there are fitting ones for nearly every category, and where one glyph says less than a few (the
+ * alphabet: A B C), a short run of them. Returns
+ *
+ *   cats      id => the names its chip shows (one to EMOJI_FA_CAT_RUN_MAX of them)
+ *   fallback  the generic glyph of a category without an entry — one a later version adds
+ *
+ * NAMES only, this project's choice, each in both of the owner's packages; whether the package in use has
+ * them is decided by the picker against the catalogue it holds (drawCats() in assets/js/emoji-picker.js),
+ * which also draws each in its own default style. A name that is not the token's grammar, or a run too
+ * long, is left out here, so the chip falls back rather than asking for a class nobody declared.
+ */
+function emojiFaCategoryIcons(): array {
+    static $d = null;
+    if ($d !== null) return $d;
+    $d = ['cats' => [], 'fallback' => ''];
+    $j = json_decode((string)@file_get_contents(dirname(__DIR__) . '/assets/emoji/fa-categories.json'), true);
+    if (!is_array($j)) return $d;
+    $name = fn($n) => is_string($n) && preg_match('/^[a-z0-9]+(?:-[a-z0-9]+){0,9}$/', $n);
+    if ($name($j['fallback'] ?? null)) $d['fallback'] = (string)$j['fallback'];
+    foreach ((array)($j['cats'] ?? []) as $id => $run) {
+        if (!is_string($id) || !preg_match('/^[a-z0-9]+(-[a-z0-9]+)*$/', $id) || !is_array($run)) continue;
+        $run = array_values(array_filter($run, $name));
+        if ($run && count($run) <= EMOJI_FA_CAT_RUN_MAX) $d['cats'][$id] = array_map('strval', $run);
+    }
+    return $d;
+}
+
 /**
  * A short fingerprint of what the picker would be told, for its URL (templates/partials/
  * shoutbox_widget.php): a new package, style, mode or scope is a new address, so the answer may be cached.
+ * The two committed files it carries words and names from count too — the faces', and (1.71.0) the
+ * categories' icons — so an edit to either is a new address rather than a day of the old answer.
  */
 function emojiFaVersion(array $cfg): string {
     $ctx = emojiFaContext($cfg);
     if ($ctx['mode'] === 'off') return 'off';
     $st = array_keys((array)($ctx['setup']['styles'] ?? []));
     return substr(hash('sha256', implode('|', [$ctx['mode'], $ctx['scope'], $ctx['style'], $ctx['id'], implode(',', $st), ICONPACK_CATALOG_FORMAT,
-                                             (string)@filemtime(dirname(__DIR__) . '/assets/emoji/fa-faces.json')])), 0, 12);
+                                             (string)@filemtime(dirname(__DIR__) . '/assets/emoji/fa-faces.json'),
+                                             (string)@filemtime(dirname(__DIR__) . '/assets/emoji/fa-categories.json')])), 0, 12);
 }
 
 /* ══ the emotes outside the room, and the picker in every editor (1.70.0) ══════════════════════════ */
@@ -425,10 +466,10 @@ const EMOTE_TOKEN_RE = '/:([a-z0-9_]{2,32}):/';
 /**
  * Where the picker can be opened, each the name of the text it writes — `shout` the room (as it always
  * was), `message` a private message, `description` a torrent's description and a proposed rewrite of
- * one, `bio` the profile's description, `list` a list's description. The `for` of api/shout_emoji.php and
- * api/shout_emotes.php, and of emojiPickerButton().
+ * one, `bio` the profile's description, `list` a list's description, `comment` (1.71.0) a comment under a
+ * torrent. The `for` of api/shout_emoji.php and api/shout_emotes.php, and of emojiPickerButton().
  */
-const EMOJI_PICKER_CONTEXTS = ['shout', 'message', 'description', 'bio', 'list'];
+const EMOJI_PICKER_CONTEXTS = ['shout', 'message', 'description', 'bio', 'list', 'comment'];
 
 /**
  * The `for` a request names: absent or empty is the room (what every request before 1.70.0 meant), one of
@@ -444,8 +485,8 @@ function emojiPickerFor($raw): ?string {
  * ['status' => int, 'error' => code] for the endpoint to answer with. The permission that writes the text
  * the context is about, asked the way the endpoint that saves it asks: the room's view (as before),
  * `pm.send`, `content.submit` or `content.propose` (a guest may hold them — the whitelist form is
- * public), `profile.bio`, `lists.use`. Each feature switched off is `disabled`; somebody signed out where
- * an account is needed is `login_required`.
+ * public), `profile.bio`, `lists.use`, and (1.71.0) whoever may write a comment. Each feature switched off
+ * is `disabled`; somebody signed out where an account is needed is `login_required`.
  */
 function emojiPickerGate(PDO $db, array $cfg, string $for): ?array {
     $on = static fn(string $fn): bool => function_exists($fn) && $fn($cfg);
@@ -469,6 +510,11 @@ function emojiPickerGate(PDO $db, array $cfg, string $for): ?array {
         case 'list':
             if (!$on('listsEnabled')) return $off;
             return $me && $can('lists.use') ? null : $who;
+        case 'comment':
+            // A comment (1.71.0): whoever may write one here — asked of the account, or of the guest group
+            // where the operator lets guests comment (commentMayPost(), includes/comments.php).
+            if (!$on('commentsEnabled')) return $off;
+            return function_exists('commentMayPost') && commentMayPost($db, $cfg, $me)['ok'] ? null : $who;
     }
     return ['status' => 400, 'error' => 'bad_for'];
 }

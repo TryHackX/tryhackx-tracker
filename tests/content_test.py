@@ -98,8 +98,12 @@ USER, PASS = "ctweb", "SmokePass123!"
 
 clear_throttles()
 was = {}
-for k in ("users_enabled", "wl_allow_description", "wl_allow_source_url", "wl_content_review", "wl_content_autopublish", "wl_edit_max_pending", "tracker_mode", "index_enabled", "index_search_enabled"):
+for k in ("users_enabled", "wl_allow_description", "wl_allow_source_url", "wl_content_review", "wl_content_autopublish", "wl_edit_max_pending", "tracker_mode", "index_enabled", "index_search_enabled",
+          "antispam_enabled"):
     was[k] = php("echo $cfg['" + k + "'] ?? '';").strip()
+# 1.71.0: the anti-spam layer OFF, explicitly — one fresh account sends three descriptions in a second here (the
+# layer's `description` ladder lets two through, then asks for a minute); the layer is tests/antispam_test.php's.
+php("setSetting($db, 'antispam_enabled', '0');")
 php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'wl_allow_description', '1'); setSetting($db, 'wl_allow_source_url', '1');"
     "setSetting($db, 'wl_content_review', '1'); setSetting($db, 'wl_content_autopublish', '0'); setSetting($db, 'wl_edit_max_pending', '3');"
     "setSetting($db, 'index_enabled', '1'); setSetting($db, 'index_search_enabled', '1');"

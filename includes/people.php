@@ -23,6 +23,10 @@
  * preference and overrules nobody who did.
  */
 
+// How fast a message may be sent — the conversations somebody starts, the same words to many people (1.71.0):
+// the site's one anti-spam layer, which the messages' endpoint asks wherever it is loaded from.
+require_once __DIR__ . '/antispam.php';
+
 /* ── the switches ─────────────────────────────────────────────────────────── */
 
 /** Private messages exist at all. Off, every endpoint answers 404 and no page draws an inbox. */
@@ -58,6 +62,12 @@ function pmWhoFor(array $cfg, array $user): string
 }
 
 function pmMaxPerDay(array $cfg): int { return max(1, min(1000, (int)($cfg['pm_max_per_day'] ?? 50) ?: 50)); }
+/**
+ * Messages an hour from one ADDRESS GROUP (rate_limit_pm, 1.71.0): the send's ceiling against a script with a
+ * list of accounts. It used to read `rate_limit_favourites`, which no setting ever defined — so always 240,
+ * the default here. The pace of one account is the anti-spam layer's (includes/antispam.php).
+ */
+function pmRatePerHour(array $cfg): int { return max(1, min(100000, (int)($cfg['rate_limit_pm'] ?? 240) ?: 240)); }
 function pmMaxChars(array $cfg): int  { return max(200, min(20000, (int)($cfg['pm_max_chars'] ?? 4000) ?: 4000)); }
 
 /**

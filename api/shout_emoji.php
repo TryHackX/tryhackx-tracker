@@ -4,7 +4,8 @@
  *
  *   ?v=<fingerprint>&lang=<code>   →  {success, mode, scope, style, classic, known, styles{key: {label, classes,
  *                                       layers}}, pages[{id, tab}], faces[{n, p, l, k, v[], e}],
- *                                       catalog?{v, n, cats[[id, label]]}}
+ *                                       catalog?{v, n, cats[[id, label, [icon names]]], fallback}}
+ *                                       (1.71.0: the icons a category's chip shows, assets/emoji/fa-categories.json)
  *   ?part=catalog&v=<version>      →  the package's catalogue of every icon (1.70.0, catalog.json:
  *                                       iconpackCatalogBuild() describes it), as stored
  *

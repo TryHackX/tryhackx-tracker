@@ -331,6 +331,14 @@
                         </div>
                         <small class="text-muted"><?= _h('a.users.bio_note') ?></small>
                     </div>
+                    <?php /* The warnings moderators gave this member (1.71.0, includes/reports.php): how many, and
+                             the latest five — from the Reports page, silently or loudly chosen there. Read-only:
+                             a warning is given where the report is. Shown for every account, "no warnings" too. */ ?>
+                    <div class="mb-2" id="ue-warnings">
+                        <label class="form-label wl-label"><?= _h('a.users.warnings_head') ?></label>
+                        <div class="ue-warnings-text small" id="ue-warnings-text"></div>
+                        <small class="text-muted"><?= _h('a.users.warnings_hint') ?></small>
+                    </div>
                     <div id="ue-alert"></div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>

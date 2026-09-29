@@ -130,7 +130,12 @@
             tr.appendChild(el('td', { className: 'wl-small', title: u.email ? (u.email_verified ? t('js.users.email_verified') : t('js.users.email_not_verified')) : '' },
                 el('span', { className: 'us-email' }, [el('span', { className: 'us-email-text', text: u.email || '—' }),
                     u.email && u.email_verified ? el('i', { className: 'bi bi-patch-check-fill text-success ms-1', title: t('js.users.verified') }) : null])));
-            tr.appendChild(el('td', {}, badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad')));
+            // …and how many warnings the member has had (1.71.0), beside the status: the latest ones are in the
+            // edit window.
+            const warned = Number(u.warnings) || 0;
+            tr.appendChild(el('td', {}, [badge(u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad'),
+                warned ? el('span', { className: 'us-warned', title: t('js.users.warned_badge', { n: warned }), 'aria-label': t('js.users.warned_badge', { n: warned }) },
+                            [el('i', { className: 'bi bi-exclamation-triangle', 'aria-hidden': 'true' }), ' ' + warned]) : null]));
             const gTd = el('td', {});
             (u.groups || []).forEach(g => {
                 const b = el('span', {
@@ -223,7 +228,28 @@
         $('ue-alert').textContent = '';
         ueMedia(u);
         ueBio(u);
+        ueWarnings(u);
         bootstrap.Modal.getOrCreateInstance($('usEditModal')).show();
+    }
+    /**
+     * The warnings this member has had (1.71.0): how many, and the latest five from admin/fetch_users — when,
+     * what came with it, the moderator's reason and who gave it. Read-only here; a warning is given on the
+     * Reports page, where the report is.
+     */
+    function ueWarnings(u) {
+        const box = $('ue-warnings-text');
+        if (!box) return;
+        box.textContent = '';
+        const n = Number(u.warnings) || 0;
+        if (!n) { box.appendChild(el('span', { className: 'text-muted', text: t('js.users.warnings_none') })); return; }
+        box.appendChild(el('div', { className: 'text-warning', text: t('js.users.warnings_count', { n }) }));
+        const ul = el('ul', { className: 'ue-warnings-list' });
+        (u.latest_warnings || []).forEach(w => {
+            ul.appendChild(el('li', { text: t('js.users.warning_line', {
+                at: String(w.at || '').slice(0, 16), action: t('js.users.warn_action_' + (w.action || 'warn')),
+                reason: w.reason || '', by: w.by || '—' }) }));
+        });
+        box.appendChild(ul);
     }
     /**
      * The description on their profile (1.69.0): the rendering admin/fetch_users sent — made by the

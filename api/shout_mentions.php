@@ -22,11 +22,21 @@
  * may only read the room has no use for it and no claim on it. Banned accounts and profiles hidden
  * from this reader are absent, the same two rules api/user_directory.php applies — a suggestion
  * that leads to somebody who has blocked you is worse than no suggestion.
+ *
+ * `for=comment` (1.71.0): the same list for a comment's composer (assets/js/comments.js), gated by the
+ * right to write a comment instead of the room's — commentMayPost(), asked of the account, so it works
+ * with the shoutbox off. A MEMBER's composer only: a guest's comment names nobody (includes/comments.php).
  */
-if (!shoutEnabled($cfg)) jsonResponse(['error' => 'disabled'], 403);
 $me = currentUser($db);
-if (!$me) jsonResponse(['error' => 'login_required'], 401);
-if (!userCan($db, $cfg, 'shout.post')) jsonResponse(['error' => 'no_permission'], 403);
+if ((string)($_GET['for'] ?? '') === 'comment') {
+    if (!function_exists('commentsEnabled') || !commentsEnabled($cfg)) jsonResponse(['error' => 'disabled'], 403);
+    if (!$me) jsonResponse(['error' => 'login_required'], 401);
+    if (!commentMayPost($db, $cfg, $me)['ok']) jsonResponse(['error' => 'no_permission'], 403);
+} else {
+    if (!shoutEnabled($cfg)) jsonResponse(['error' => 'disabled'], 403);
+    if (!$me) jsonResponse(['error' => 'login_required'], 401);
+    if (!userCan($db, $cfg, 'shout.post')) jsonResponse(['error' => 'no_permission'], 403);
+}
 
 // Read-only from here. PHP serialises one browser's requests on the session file, and somebody
 // typing would otherwise have every other thing their page asks for queued behind the typeahead.

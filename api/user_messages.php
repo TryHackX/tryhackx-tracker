@@ -37,8 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($op === 'send') {
         if (!userCan($db, $cfg, 'pm.send')) jsonResponse(['error' => 'no_permission'], 403);
         // Two ceilings, and they answer different questions: the IP one is about a script, the
-        // per-day one is about an account. Neither alone is enough.
-        if (!rateLimitAllow('pmsend', ipBucket(getClientIp($cfg)), (int)($cfg['rate_limit_favourites'] ?? 240), 3600)) {
+        // per-day one is about an account. Neither alone is enough. The IP one is messages' OWN
+        // (rate_limit_pm, 1.71.0) — it used to borrow the favourites' number.
+        if (!rateLimitAllow('pmsend', ipBucket(getClientIp($cfg)), pmRatePerHour($cfg), 3600)) {
             jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
         }
         $perDay = pmMaxPerDay($cfg);
@@ -55,6 +56,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$gate['ok']) jsonResponse(['error' => $gate['reason']], $gate['reason'] === 'not_found' ? 404 : 403);
 
         $body = trim((string)($input['body'] ?? ''));
+        // How fast (1.71.0): the site's one anti-spam layer (includes/antispam.php, context `message`) — paced
+        // by the conversations somebody STARTS (a first message in a thread with none), with an hour's and a
+        // day's limit of them (much tighter for a new account); the same words again to the same person, or to
+        // too many people at once, refused. Inside this transaction: the count above and the insert below are
+        // one step with the layer's own. A refusal COMMITS what the layer counted (nothing else is written by
+        // then) — the refusals in a row and a CAPTCHA now due must outlive the answer.
+        $tid0 = (int)$them['id'];
+        $thread0 = pmThreadFor($db, $uid, $tid0, false);
+        $newConversation = true;
+        if ($thread0) {
+            $has = $db->prepare("SELECT 1 FROM user_messages WHERE thread_id = ? LIMIT 1");
+            $has->execute([(int)$thread0['id']]);
+            $newConversation = !$has->fetchColumn();
+        }
+        $as = antispamCheck($db, $cfg, 'message', antispamSubject($me, getClientIp($cfg)), $body,
+                            ['target' => 'u:' . $tid0, 'new' => $newConversation, 'input' => $input]);
+        if (!$as['ok']) {
+            if ($db->inTransaction()) $db->commit();
+            jsonResponse($as['body'], (int)$as['status']);
+        }
         if ($body === '') jsonResponse(['error' => 'empty'], 400);
         $max = pmMaxChars($cfg);
         if (mb_strlen($body) > $max) jsonResponse(['error' => 'too_long', 'limit' => $max], 400);
@@ -76,6 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // hiding is "I am done with this for now", not "never show me this person again".
         $db->prepare("UPDATE message_threads SET last_message_at = NOW(), u_low_hidden = 0, u_high_hidden = 0 WHERE id = ?")
            ->execute([(int)$thread['id']]);
+        antispamRecord($db, $as['ticket']);
         $db->commit();
         // No notification. The message IS the notification: it is counted on the Messages tab and
         // added into the number on the account link, and reading it clears both. A second record of
@@ -132,6 +154,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Reporting your own message is not a thing to support: the queue is for what somebody else
         // sent you, and letting an account file against itself is a way to waste a moderator's time.
         if ((int)$msg['sender_id'] === $uid) jsonResponse(['error' => 'own_message'], 400);
+        // How fast (1.71.0): a report of a message passes the one limit every report passes — the anti-spam
+        // layer's `report` context and the hour's limit (contentReportFloodCheck(), includes/reports.php).
+        $rticket = null;
+        $flood = contentReportFloodCheck($db, $cfg, $me, getClientIp($cfg), $input, $rticket);
+        if ($flood !== null) {
+            if (isset($flood['body'])) jsonResponse($flood['body'], (int)$flood['status']);
+            jsonResponse(['error' => 'rate_limit', 'retry_after' => (int)($flood['retry_after'] ?? 3600)], 429);
+        }
         // The one before it, for context — and NOTHING else travels with the report.
         $ctx = $db->prepare("SELECT id FROM user_messages WHERE thread_id = ? AND id < ? ORDER BY id DESC LIMIT 1");
         $ctx->execute([(int)$msg['thread_id'], $mid]);
@@ -142,6 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
            ->execute([$mid, $ctxId ?: null, (int)$msg['thread_id'], $uid, (int)$msg['sender_id'],
                       mb_substr(trim((string)($input['reason'] ?? '')), 0, 500)]);
         $db->prepare("UPDATE user_messages SET reported = 1 WHERE id = ?")->execute([$mid]);
+        antispamRecord($db, $rticket);
         auditLog($db, 'pm.report', ['target_type' => 'user', 'target_id' => (int)$msg['sender_id'],
             'summary' => $me['username'] . ' → message #' . $mid]);
         jsonResponse(['success' => true, 'reported' => $mid]);

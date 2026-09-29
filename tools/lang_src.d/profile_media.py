@@ -86,16 +86,21 @@ add('settings', {
     # options name the place precisely, because "left" alone does not say WHERE in the card.
     'account_picture_side': ('Picture on the account page', 'Zdjęcie na stronie konta'),
     'account_cover_side': ('Cover on the account page', 'Okładka na stronie konta'),
-    'account_side_left': ('Left-hand card, after Account security', 'Lewa karta, pod Bezpieczeństwem konta'),
-    'account_side_right': ('Right-hand card, under Privacy', 'Prawa karta, pod Prywatnością'),
+    # 1.71.0: the Overview is a flow of cards in two columns the page balances, with the signed-in devices
+    # at the bottom; a side is a COLUMN now — the left one's top, under Profile, or the right one's foot,
+    # under Privacy.
+    'account_side_left': ('Left column, under Profile', 'Lewa kolumna, pod Profilem'),
+    'account_side_right': ('Right column, under Privacy', 'Prawa kolumna, pod Prywatnością'),
     'account_picture_side_hint': (
-        'Where the Picture block is drawn. With both blocks in one card the picture comes first. Nothing else '
-        'moves, and nothing changes on the profile page.',
-        'Gdzie rysuje się blok Zdjęcie. Gdy oba bloki są w jednej karcie, zdjęcie idzie pierwsze. Nic poza tym się '
-        'nie przesuwa i nic nie zmienia się na stronie profilu.'),
+        'Which column of the account page\'s Overview holds the Picture card. The page balances the two columns\' '
+        'heights, so the other cards may stand in either; with both cards in one column the picture comes first. '
+        'Nothing changes on the profile page.',
+        'W której kolumnie Przeglądu na stronie konta stoi karta Zdjęcie. Strona wyrównuje wysokość obu kolumn, '
+        'więc pozostałe karty mogą stanąć w każdej z nich; gdy obie karty są w jednej kolumnie, zdjęcie idzie '
+        'pierwsze. Nic nie zmienia się na stronie profilu.'),
     'account_cover_side_hint': (
-        'Where the Cover block is drawn, on its own — the picture has a setting of its own beside this one.',
-        'Gdzie rysuje się blok Okładka, niezależnie — zdjęcie ma własne ustawienie obok.'),
+        'Which column holds the Cover card, on its own — the picture has a setting of its own beside this one.',
+        'W której kolumnie stoi karta Okładka, niezależnie — zdjęcie ma własne ustawienie obok.'),
     'profiles_default_avatar': ('Default picture', 'Domyślne zdjęcie profilowe'),
     'profiles_default_avatar_hint': (
         'Shown for everybody without a picture of their own when the setting above says so. Framed with the same '
@@ -175,16 +180,18 @@ add('account', {
                        'JPEG, PNG, WebP albo GIF, do :kb KB. Najpierw go kadrujesz, dopiero potem cokolwiek jest wysyłane.'),
     'media_adjust': ('Adjust position', 'Dostosuj pozycję'),
     'media_remove': ('Remove', 'Usuń'),
+    # 1.71.0: each block is a card of the Overview, and what it IS moved into the line under its heading
+    # (account.card_avatar_desc / card_cover_desc, buttons_and_overview.py); the note keeps the details.
     'media_avatar_note': (
-        'Shown beside your name across the site. Location data and every other hidden detail are stripped from the '
-        'file, and an animated GIF keeps only its first frame. Removing it deletes it for good.',
-        'Widoczne obok Twojej nazwy w całym serwisie. Z pliku znikają dane o miejscu i wszystkie inne ukryte '
-        'informacje, a animowany GIF zachowuje tylko pierwszą klatkę. Usunięcie kasuje je na zawsze.'),
+        'Location data and every other hidden detail are stripped from the file, and an animated GIF keeps only '
+        'its first frame. Removing it deletes it for good.',
+        'Z pliku znikają dane o miejscu i wszystkie inne ukryte informacje, a animowany GIF zachowuje tylko '
+        'pierwszą klatkę. Usunięcie kasuje je na zawsze.'),
     'media_cover_note': (
-        'The wide image across the top of your profile. The whole image is kept and you choose the part that shows; '
-        'the same point stays in view on a phone. Removing it deletes it for good.',
-        'Szeroki obraz u góry Twojego profilu. Cały obraz zostaje zachowany, a Ty wybierasz, która część jest widoczna; '
-        'ten sam punkt widać także na telefonie. Usunięcie kasuje ją na zawsze.'),
+        'The whole image is kept and you choose the part that shows; the same point stays in view on a phone. '
+        'Removing it deletes it for good.',
+        'Cały obraz zostaje zachowany, a Ty wybierasz, która część jest widoczna; ten sam punkt widać także na '
+        'telefonie. Usunięcie kasuje ją na zawsze.'),
     'media_cover_none': ('No cover yet', 'Brak okładki'),
     'media_cover_default': ('The site default', 'Domyślna okładka serwisu'),
     'media_no_grant': (

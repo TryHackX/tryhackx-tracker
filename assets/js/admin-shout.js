@@ -44,11 +44,12 @@
 })();
 
 /**
- * Settings → Shoutbox → Emoji in the picker (1.70.0): how much of the Font Awesome package the picker
- * offers — the faces, the faces and a search of every icon, every icon by category — means something
- * only while the faces are on at all, so its control is shown only then. Hidden, it still saves what it
- * holds (a hidden field is part of the form), so switching the faces off and on again keeps the choice.
- * The server draws it hidden when the page opens with the faces off; this follows the select after that.
+ * Settings → Emoji & emotes → Emoji in the picker (1.70.0; under Shoutbox until 1.71.0): how much of the
+ * Font Awesome package the picker offers — the faces, the faces and a search of every icon, every icon by
+ * category — means something only while the faces are on at all, so its control is shown only then.
+ * Hidden, it still saves what it holds (a hidden field is part of the form), so switching the faces off
+ * and on again keeps the choice. The server draws it hidden when the page opens with the faces off; this
+ * follows the select after that.
  */
 (function () {
     'use strict';
@@ -61,7 +62,8 @@
 })();
 
 /**
- * Settings → Shoutbox → the emote manager (1.59.0, rebuilt in 1.59.1).
+ * Settings → Emoji & emotes → Emotes and stickers: the emote manager (1.59.0, rebuilt in 1.59.1; under
+ * Shoutbox until 1.71.0 — the same block, by the same id).
  *
  * The switches beside it are ordinary settings saved with the form. This is the other half: the
  * pictures themselves, which are rows rather than files, so adding and removing one is an API call
@@ -411,11 +413,12 @@
 })();
 
 /**
- * Settings → Shoutbox → who may read and who may write (1.60.0).
+ * Settings → Shoutbox → who may read and who may write (1.60.0) — and (1.71.0) Settings → Emoji & emotes
+ * → who may upload emotes.
  *
  * The SAME read-only matrix Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped
- * to the five `shout.*` ids and fed by the same endpoint — no new payload, and no second idea of
- * what a permission is. It is here because this is where somebody is standing when the question
+ * to the `shout.*` ids of its section and fed by the same endpoint — no new payload, and no second idea
+ * of what a permission is. It is here because this is where somebody is standing when the question
  * comes up: they have just switched the room on and want to know who can actually use it.
  *
  * READ-ONLY on purpose. Granting is one page away and belongs where every other grant is made; a
@@ -424,22 +427,55 @@
  *
  * Its own IIFE, like the two above: a page that is missing one of the three must still get the
  * others, and this one is the only one that does nothing at all until it is opened.
+ *
+ * 1.71.0: two folds. The emotes left Shoutbox for Settings → Emoji & emotes, and their two permissions
+ * (`shout.upload_emote`, `shout.emote_auto` — named for the room they were born in) went with them, to a
+ * fold of their own under the emote manager; Shoutbox's shows the room's six. One answer from the groups
+ * endpoint serves both, asked for when the first of them is opened.
  */
 (function () {
     'use strict';
-    const wrap = document.getElementById('shout-matrix-wrap');
-    const tbl = document.getElementById('shout-matrix');
-    if (!wrap || !tbl || !window.AdminCommon || typeof window.t !== 'function') return;
+    if (!window.AdminCommon || typeof window.t !== 'function') return;
     const { apiCall, el } = window.AdminCommon;
     const t = window.t;
     // Written out rather than filtered on the `shout.` prefix, so a permission added to the registry
     // later shows up here because somebody decided it should and not because it was named alike.
     // 1.66.0: correcting your own line and editing anybody's, beside the delete each one mirrors.
-    const IDS = ['shout.view', 'shout.post', 'shout.edit_own', 'shout.delete_own', 'shout.edit_any', 'shout.moderate',
-                 'shout.upload_emote', 'shout.emote_auto'];
-    let asked = false;
+    // 1.71.0: and Settings → Descriptions, comments & ratings → Comments — who may read, write, correct and
+    // moderate the comments under a torrent (includes/comments.php).
+    const FOLDS = [
+        { wrap: 'shout-matrix-wrap', table: 'shout-matrix',
+          ids: ['shout.view', 'shout.post', 'shout.edit_own', 'shout.delete_own', 'shout.edit_any', 'shout.moderate'] },
+        { wrap: 'emote-matrix-wrap', table: 'emote-matrix', ids: ['shout.upload_emote', 'shout.emote_auto'] },
+        { wrap: 'comment-matrix-wrap', table: 'comment-matrix',
+          ids: ['comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.moderate'] },
+    ];
+    // The one request, shared; a failure is forgotten, so closing a fold and opening it again retries.
+    let groupsAsked = null;
+    function groupsOnce() {
+        if (!groupsAsked) {
+            groupsAsked = apiCall('admin/fetch_groups').then((j) => (j && !j.error ? j : null), () => null)
+                .then((j) => { if (!j) groupsAsked = null; return j; });
+        }
+        return groupsAsked;
+    }
+    FOLDS.forEach((f) => {
+        const wrap = document.getElementById(f.wrap);
+        const tbl = document.getElementById(f.table);
+        if (!wrap || !tbl) return;
+        let done = false;
+        // Fetched when the fold is opened and not before: Settings already makes a dozen calls on
+        // arrival, and this one answers a question most visits to the page never ask.
+        wrap.addEventListener('toggle', async () => {
+            if (!wrap.open || done) return;
+            const j = await groupsOnce();
+            if (!j || done) return;
+            done = true;
+            render(tbl, f.ids, j.groups || [], j.permission_list || {});
+        });
+    });
 
-    function render(groups, permList) {
+    function render(tbl, IDS, groups, permList) {
         tbl.textContent = '';
         // Only the ids the registry actually knows: a row for a permission nothing can grant would
         // be a column of dots that never changes.
@@ -465,16 +501,4 @@
         });
         tbl.appendChild(tbody);
     }
-
-    // Fetched when the fold is opened and not before: Settings already makes a dozen calls on
-    // arrival, and this one answers a question most visits to the page never ask. `asked` is put
-    // back on a failure so closing and opening it again is a retry rather than a dead box.
-    wrap.addEventListener('toggle', async () => {
-        if (!wrap.open || asked) return;
-        asked = true;
-        let j;
-        try { j = await apiCall('admin/fetch_groups'); } catch (e) { asked = false; return; }
-        if (!j || j.error) { asked = false; return; }
-        render(j.groups || [], j.permission_list || {});
-    });
 })();

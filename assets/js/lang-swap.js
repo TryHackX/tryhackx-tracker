@@ -301,8 +301,9 @@
     // The attributes a translation reaches. Everything else is left exactly as rendered.
     // `data-title` is here for one reason: the Settings page puts each section's heading there and
     // its search reads it, so leaving it behind would let the visible heading and the searchable
-    // one disagree about what language the page is in.
-    var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title'];
+    // one disagree about what language the page is in. `data-tip` (1.71.0) is an icon button's
+    // explanation, shown in the site's tooltip where a word used to say what the button does.
+    var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title', 'data-tip'];
     // Subtrees the walk does not enter. Scripts and styles because their text is not language;
     // <textarea> because its text is what somebody typed.
     var OPAQUE = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, TEXTAREA: 1, SVG: 1, CANVAS: 1 };

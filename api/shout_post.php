@@ -24,7 +24,7 @@ if (!rateLimitAllow('shoutpost', ipBucket(getClientIp($cfg)), 120, 60)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 60], 429);
 }
 
-$r = shoutPost($db, $cfg, $me, (string)($input['body'] ?? ''), (string)($input['format'] ?? ''), getClientIp($cfg));
+$r = shoutPost($db, $cfg, $me, (string)($input['body'] ?? ''), (string)($input['format'] ?? ''), getClientIp($cfg), ['input' => $input]);
 // `lang` (1.66.0): the language the row was rendered for — see api/shout_list.php.
 if (!empty($r['ok'])) jsonResponse(['success' => true, 'row' => $r['row'], 'lang' => langCurrent()]);
 
@@ -39,6 +39,14 @@ switch ((string)$r['error']) {
         jsonResponse(['error' => 'muted', 'until' => $r['until'],
                       'message' => __('api.shout.muted', ['until' => (string)$r['until']])], 403);
     case 'flood':
+    case 'antispam':
+        // The site's anti-spam layer's own answer (1.71.0, includes/antispam.php): the sentence with the time
+        // in it, the seconds, the countdown's template, a CAPTCHA's provider. A wait keeps the room's old code.
+        if (!empty($r['antispam']['body'])) {
+            $b = $r['antispam']['body'];
+            if ($r['error'] === 'flood') $b['error'] = 'flood';
+            jsonResponse($b, (int)$r['antispam']['status']);
+        }
         jsonResponse(['error' => 'flood', 'retry_after' => (int)$r['retry_after'],
                       'message' => __('api.shout.flood', ['seconds' => (int)$r['retry_after']])], 429);
     case 'too_long':

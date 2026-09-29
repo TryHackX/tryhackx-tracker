@@ -355,27 +355,34 @@
         close();
     }
 
+    // The page's token (1.71.0): window.csrfToken() in app.js, loaded before this file. It read
+    // #account-csrf alone — safe only while the profile page happened to carry that id.
     function csrf() {
-        var f = document.getElementById('account-csrf');
-        return f ? f.value : '';
+        return typeof window.csrfToken === 'function' ? window.csrfToken(root) : '';
     }
 
     async function save() {
-        if (busy || !ta) return;
+        var anti = window.Antispam || null;
+        if (busy || !ta || (anti && anti.waiting(saveBtn))) return;
         setBusy(true);
         showError('');
-        var r = null;
-        try {
-            var res = await fetch(APP_API + 'profile_bio', {
-                method: 'POST', credentials: 'same-origin',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify({ csrf_token: csrf(), bio: ta.value }),
-            });
-            r = await res.json();
-        } catch (e) { r = null; }
+        var doPost = async function (extra) {
+            try {
+                var res = await fetch(APP_API + 'profile_bio', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(Object.assign({ csrf_token: csrf(), bio: ta.value }, extra || {})),
+                });
+                return await res.json();
+            } catch (e) { return null; }
+        };
+        // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for is solved
+        // and the same words saved again; a wait counts down on Save, the sentence in the error line.
+        var r = anti ? await anti.send(doPost, { button: saveBtn, note: showError, action: 'profile_bio' }) : await doPost({});
         setBusy(false);
+        if (anti && anti.waiting(saveBtn)) saveBtn.disabled = true;
         if (!r || !r.success) {
-            showError((r && (r.message || r.error)) || T('js.bio.failed'));
+            if (!(anti && anti.waiting(saveBtn))) showError((r && (r.message || r.error)) || T('js.bio.failed'));
             ta.focus();
             return;
         }

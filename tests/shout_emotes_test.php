@@ -80,12 +80,15 @@ check('… and approved_at is nullable, with no default to speak for a decision 
 // lists is what once stopped a fresh install at version 0), a guarded ALTER for an install that
 // already has the table, and a one-time data migration for the rows that pre-date it.
 $schemaSrc = (string)file_get_contents($root . '/includes/schema.php');
+// Counted in the emotes' own CREATEs (1.71.0: the comments' table has an `approved_at` of its own, in both lists).
+$emoteCreates = preg_match_all('/`is_sticker` TINYINT\(1\) NOT NULL DEFAULT 0,\s*`enabled` TINYINT\(1\) NOT NULL DEFAULT 1,\s*`approved_at` DATETIME DEFAULT NULL,/', $schemaSrc);
 check('the column is in both CREATEs, in a guarded ALTER, and backfilled once',
-      substr_count($schemaSrc, '`approved_at` DATETIME DEFAULT NULL') === 3
+      $emoteCreates === 2
+      && str_contains($schemaSrc, 'ALTER TABLE `shout_emotes` ADD COLUMN `approved_at` DATETIME DEFAULT NULL')
       && str_contains($schemaSrc, "schemaColumnExists(\$db, 'shout_emotes', 'approved_at')")
       && str_contains($schemaSrc, "schemaOnce(\$db, 'v65_emote_approved')")
       && str_contains($schemaSrc, 'UPDATE shout_emotes SET approved_at = created_at WHERE approved_at IS NULL'),
-      'CREATE/ALTER copies: ' . substr_count($schemaSrc, '`approved_at` DATETIME DEFAULT NULL'));
+      'CREATE copies: ' . $emoteCreates);
 $keys = array_unique(array_column($db->query("SHOW INDEX FROM `shout_emotes`")->fetchAll(PDO::FETCH_ASSOC), 'Key_name'));
 check('… the code and the bytes are both unique, and the uploader is indexed',
       in_array('uq_emote_code', $keys, true) && in_array('uq_emote_sha1', $keys, true) && in_array('idx_emote_user', $keys, true),
@@ -695,8 +698,11 @@ foreach (['shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 's
 }
 check('every setting is on the Settings page and in the search catalogue', $gone === [], implode(', ', $gone));
 $adminJs = (string)file_get_contents($root . '/assets/js/admin-shout.js');
-check('the manager is drawn in the shoutbox section and driven by admin-shout.js',
-      str_contains($tpl, 'id="admin-emotes"') && str_contains($tpl, 'id="admin-emote-drop"')
+// 1.71.0: in a section of its own under Settings → Emoji & emotes (a block of Shoutbox's until then).
+$emFrom = (int)strpos($tpl, 'id="section-emotes"');
+$emSecT = $emFrom > 0 ? substr($tpl, $emFrom, (int)strpos($tpl, 'class="settings-section"', $emFrom + 30) - $emFrom) : '';
+check('the manager is drawn in Settings → Emoji & emotes → Emotes and stickers and driven by admin-shout.js',
+      str_contains($tpl, 'id="section-emotes" data-group="emoji"') && str_contains($emSecT, 'id="admin-emotes"') && str_contains($emSecT, 'id="admin-emote-drop"')
       && str_contains($adminJs, "admin/shout_emotes"));
 // 1.59.1: the shape the owner asked for, checked by reading it rather than by trusting the diff.
 check('… as a TABLE with headings and a count, not a list',

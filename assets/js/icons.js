@@ -93,10 +93,22 @@
             if (words) el.setAttribute('data-label', ''); else el.removeAttribute('data-label');
         }
         if (words) fit(el, !after);
+        else if (solo(el)) fit(el, null);
         else if (el.style && el.style.getPropertyValue('--bi-mid')) {
             el.style.removeProperty('--bi-mid');
             if (p && p.style) p.style.removeProperty('--bi-sb');
         }
+    }
+
+    /**
+     * An icon button's glyph (1.71.0, `.ic-btn` — and the search box's magnifier): no words beside it, and the
+     * stylesheets centre its em box in the button and move its ink's middle to the box's middle by --bi-mid. So
+     * its own middle is measured as a glyph beside words is (fit()), and nothing else: there is no gap to space.
+     * Font Awesome 7's star stands 0.05em high in its em, and stood 1.6px above the middle of its button.
+     */
+    function solo(el) {
+        var p = el.parentNode;
+        return !!(p && p.classList && (p.classList.contains('ic-btn') || p.classList.contains('search-box-icon')));
     }
 
     /**
@@ -133,13 +145,14 @@
         }
         el.style.setProperty('--bi-mid', g.mid.toFixed(3) + 'em');
         var p = el.parentNode;
-        if (p && p.style) p.style.setProperty('--bi-sb', (wordsBefore ? g.l : g.r).toFixed(3) + 'em');
+        // `wordsBefore` null: an icon button's glyph (solo()), whose row has no gap to take the room off.
+        if (wordsBefore !== null && p && p.style) p.style.setProperty('--bi-sb', (wordsBefore ? g.l : g.r).toFixed(3) + 'em');
     }
     if (document.fonts && document.fonts.addEventListener) {
         document.fonts.addEventListener('loadingdone', function () {
             var list = pending;
             pending = [];
-            for (var i = 0; i < list.length; i++) if (list[i].isConnected && list[i].hasAttribute('data-label')) label(list[i]);
+            for (var i = 0; i < list.length; i++) if (list[i].isConnected && (list[i].hasAttribute('data-label') || solo(list[i]))) label(list[i]);
         });
     }
     /** The icons among one element's children, after its text changed. */

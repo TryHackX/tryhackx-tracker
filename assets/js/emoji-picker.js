@@ -121,6 +121,8 @@
      * Awesome's other icons in a group of their own after them.
      */
     var FIRST_CELLS = 120, MORE_CELLS = 200, SEARCH_MAX = 300, FA_SEARCH_MAX = 300;
+    /** The most icons one category's chip shows (1.71.0: the alphabet as A B C) — EMOJI_FA_CAT_RUN_MAX's twin. */
+    var CAT_RUN_MAX = 3;
     /** Between a cell's name and how to reach its variants, in its title. */
     var DASH = ' ' + String.fromCharCode(0x2014) + ' ';
     /**
@@ -184,7 +186,8 @@
      * Font Awesome as api/shout_emoji.php describes it, or null when the site offers none: the faces, the
      * styles that load (in the package's order, with their classes), the default style and its classic
      * fallback, and (1.70.0) the scope — `faces`, `search` or `all` — with, for the two wider ones, where
-     * the catalogue of every icon is and its categories named in the reader's language.
+     * the catalogue of every icon is and its categories named in the reader's language; (1.71.0) with the
+     * icons each category's chip shows (catalog.icons) and the glyph of one without (catalog.fallback).
      */
     function prepFa(j) {
         if (!j || !j.success || j.mode === 'off' || !Array.isArray(j.faces) || !j.faces.length || !j.styles) return null;
@@ -192,8 +195,12 @@
         var out = { styles: j.styles, pages: Array.isArray(j.pages) ? j.pages : [], faces: [], byName: {},
                     style: String(j.style || ''), classic: String(j.classic || ''),
                     scope: cg && (j.scope === 'search' || j.scope === 'all') ? j.scope : 'faces',
-                    catalog: cg ? { v: cg.v, n: Number(cg.n) || 0, names: {} } : null };
-        if (cg) cg.cats.forEach(function (c) { if (Array.isArray(c) && typeof c[0] === 'string') out.catalog.names[c[0]] = String(c[1] || c[0]); });
+                    catalog: cg ? { v: cg.v, n: Number(cg.n) || 0, names: {}, icons: {}, fallback: typeof cg.fallback === 'string' ? cg.fallback : '' } : null };
+        if (cg) cg.cats.forEach(function (c) {
+            if (!Array.isArray(c) || typeof c[0] !== 'string') return;
+            out.catalog.names[c[0]] = String(c[1] || c[0]);
+            out.catalog.icons[c[0]] = Array.isArray(c[2]) ? c[2].filter(function (n) { return typeof n === 'string' && n !== ''; }).slice(0, CAT_RUN_MAX) : [];
+        });
         j.faces.forEach(function (f) {
             if (!f || typeof f.n !== 'string' || !Array.isArray(f.v) || !f.v.length) return;
             var face = { n: f.n, p: String(f.p || ''), l: String(f.l || f.n), k: String(f.k || ''), v: f.v.filter(function (s) { return !!j.styles[s]; }), e: String(f.e || '') };
@@ -318,8 +325,9 @@
      * faces' answer says which (fa.scope): `faces`, the four pages above and nothing more; `search`, the
      * same pages, and the search also finds any icon of the package — a "Font Awesome" group after the
      * emoji; `all`, one more tab, "every icon", whose page is navigated by Font Awesome's own categories
-     * (seventy with the brands, too many for a row of tabs) on a strip of chips above the grid, each
-     * category drawn in slices like any long page. Every icon has variants: held down, it offers the
+     * (seventy with the brands, too many for a row of tabs) on a strip of chips above the grid — from
+     * 1.71.0 each chip the category's own icon, its name in the tooltip (catGlyphs()) — each category
+     * drawn in slices like any long page. Every icon has variants: held down, it offers the
      * styles it is drawn in among those the site loads, the default first. All of it comes from the
      * package's CATALOGUE — every icon's name, label, English words, categories and styles, one file per
      * package (catalog.json) — which is fetched only when the scope needs it: with `all` once the picker
@@ -764,14 +772,37 @@
             var order = catOrder();
             return order.filter(function (c) { return c.id === faCat; })[0] || order[0] || null;
         }
-        /** The chips: one per category, the chosen one pressed; one stop for the Tab key, the arrows walk them. */
+        /**
+         * What a category's chip shows (1.71.0): Font Awesome's own icon for it — or the short run the
+         * committed list names (A B C, 1 2 3) — each in its default style, the site's emoji style where the
+         * icon has it, else the classic family at that weight (faVariants()). Only names the catalogue
+         * here holds: a category whose icon this package lacks, or that the list does not name (one a later
+         * version adds), shows the generic glyph, else its own first icon — and with none of those, its
+         * name, as every chip did until now.
+         */
+        function catGlyphs(c) {
+            var want = fa.catalog.icons[c.id] || [], fb = fa.catalog.fallback;
+            var names = want.length && want.every(function (n) { return !!cat.byName[n]; }) ? want
+                      : fb && cat.byName[fb] ? [fb]
+                      : cat.byCat[c.i][0] ? [cat.byCat[c.i][0].n] : [];
+            return names.map(function (n) { return faGlyph(fa, n, cat.byName[n].v[0], true); });
+        }
+        /**
+         * The chips: one per category, the chosen one pressed; one stop for the Tab key, the arrows walk them.
+         * From 1.71.0 each is its icon, not its name — seventy words were a strip to read, not to scan — and
+         * the name is what a screen reader says (aria-label) and what the site's tooltip shows under a pointer
+         * or the keyboard's focus (data-tip, assets/js/app.js tipOnHover(); no `title`, whose box the browser
+         * would draw a second later). The line under the grid names the category on show, in words.
+         */
         function drawCats() {
             var now = catNow();
             catsEl.textContent = '';
             catOrder().forEach(function (c) {
                 var on = !!now && c.id === now.id;
-                var b = el('button', { type: 'button', className: 'shout-picker-cat' + (on ? ' active' : ''), 'aria-pressed': on ? 'true' : 'false',
-                                       tabindex: on ? '0' : '-1', title: t('js.shout.fa_cat_title', { name: c.l, n: c.n }), dataset: { c: c.id } }, c.l);
+                var g = catGlyphs(c);
+                var b = el('button', { type: 'button', className: 'shout-picker-cat' + (g.length > 1 ? ' shout-picker-cat-run' : g.length ? '' : ' shout-picker-cat-text') + (on ? ' active' : ''),
+                                       'aria-pressed': on ? 'true' : 'false', 'aria-label': c.l, tabindex: on ? '0' : '-1',
+                                       dataset: { c: c.id, tip: t('js.shout.fa_cat_title', { name: c.l, n: c.n }) } }, g.length ? g : c.l);
                 b.addEventListener('click', function () { chooseCat(c.id); });
                 catsEl.appendChild(b);
             });

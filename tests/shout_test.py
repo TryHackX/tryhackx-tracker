@@ -107,7 +107,11 @@ SETTINGS = ("users_enabled", "shout_enabled", "shout_placement", "shout_live_sec
             "shout_format", "shout_keep_rows", "shout_keep_days", "shout_rules",
             # 1.66.0: the two windows, the order, the switches the edit checks lean on
             "shout_edit_minutes", "shout_delete_own_minutes", "shout_order", "desc_max_images",
-            "account_picture_side", "account_cover_side")
+            "account_picture_side", "account_cover_side",
+            # 1.71.0: the anti-spam layer OFF, explicitly — this run writes faster than a person, from accounts
+            # made a second ago; its ladder is tests/antispam_test.php's. The room's own wall
+            # (shout_flood_seconds) still holds with the layer off, and is what the checks below measure.
+            "antispam_enabled")
 clear_throttles()
 was = {k: php("echo $cfg['" + k + "'] ?? '';") for k in SETTINGS}
 member_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\"); echo $st->fetchColumn();")
@@ -120,7 +124,7 @@ php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'shout_enabled', '1'
     "setSetting($db, 'shout_widget_rows', '5'); setSetting($db, 'shout_page_rows', '100');"
     "setSetting($db, 'shout_format', 'bbcode'); setSetting($db, 'shout_edit_minutes', '10');"
     "setSetting($db, 'shout_delete_own_minutes', '10'); setSetting($db, 'shout_order', 'bottom');"
-    "setSetting($db, 'desc_max_images', '3');"
+    "setSetting($db, 'desc_max_images', '3'); setSetting($db, 'antispam_enabled', '0');"
     "$db->prepare(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, ?) WHERE slug = 'member'\")"
     "   ->execute([json_encode(['shout.view' => true, 'shout.post' => true, 'shout.delete_own' => true, 'shout.edit_own' => true])]);"
     "$db->prepare(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, ?) WHERE slug = 'moderator'\")"

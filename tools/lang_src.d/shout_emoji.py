@@ -24,7 +24,7 @@ def add(prefix, pairs):
         S[key] = v
 
 
-# ── Settings -> Shoutbox -> Emoji in the picker ──────────────────────────────
+# ── Settings -> Emoji & emotes -> Emoji in the picker (under Shoutbox until 1.71.0) ──
 add('settings', {
     'shout_emoji_heading': ('Emoji in the picker', 'Emoji w wybieraku'),
     'shout_emoji_sub': (
@@ -44,14 +44,16 @@ add('settings', {
     'shout_emoji_fa_off': ('Off — the ordinary emoji', 'Wyłączone — zwykłe emoji'),
     'shout_emoji_fa_fa': ('Instead of the ordinary emoji', 'Zamiast zwykłych emoji'),
     'shout_emoji_fa_mixed': ('Mixed — both', 'Mieszane — jedne i drugie'),
+    # 1.71.0: "in a shout" became "in a text" — the section is the whole site's (Emoji & emotes), and a face
+    # is drawn in every text that has the picker since 1.70.0.
     'shout_emoji_fa_hint': (
         'The faces of the Font Awesome Pro package in use (:n), on pages of their own in the picker; held down, '
-        'a face offers every style it is drawn in among those the site loads. In a shout it is written '
+        'a face offers every style it is drawn in among those the site loads. In a text it is written '
         '<code>:fa-name:</code> and drawn as the face while this package and that style load — anywhere else '
         '(this switched off, another icon source, an e-mail) it is the ordinary emoji it stands for. Offered '
         'only while a Font Awesome Pro package is the site\'s icon source.',
         'Buźki paczki Font Awesome Pro, której używa strona (:n), na osobnych kartach wybieraka; przytrzymana '
-        'buźka pokazuje każdy styl, w którym jest rysowana, spośród wczytywanych przez stronę. W wypowiedzi '
+        'buźka pokazuje każdy styl, w którym jest rysowana, spośród wczytywanych przez stronę. W tekście '
         'zapisuje się jako <code>:fa-nazwa:</code> i jest rysowana jako buźka, dopóki ta paczka i ten styl są '
         'wczytywane — gdzie indziej (po wyłączeniu tej opcji, przy innym źródle ikon, w e-mailu) jest zwykłym '
         'emoji, któremu odpowiada. Dostępne tylko wtedy, gdy źródłem ikon strony jest paczka Font Awesome Pro.'),

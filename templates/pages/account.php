@@ -127,9 +127,21 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
 <?php endif; ?>
 
 <div class="acc-pane" id="acc-pane-overview">
-<div class="account-grid">
-    <div class="account-card">
+<?php /* THE OVERVIEW IN CARDS (1.71.0). It was two cards of very different heights — the Profile card on the
+         left grew with every browser this account had asked to be remembered on, the right one held the
+         groups, the language, the zone, Privacy and the cover — and a column stood half empty beside the
+         other. Each group is a card of its own now, under a heading and a line that says what it is for,
+         and the cards FLOW into two columns the browser balances (.acc-flow: CSS columns, no card split),
+         in this order, which is also the order on a phone: Profile, the picture and the cover when their
+         setting says the left column, what we may send you, your groups, the language, the zone, Privacy,
+         the picture and the cover when it says the right column, a linked sign-in. The part that grows —
+         the second factor and the signed-in browsers — is the last card, the full width, under both
+         columns. Every id, and every class a script or a check reads, is where it was: on the card that
+         is now the block. */ ?>
+<div class="acc-flow">
+    <section class="account-card acc-card" id="acc-card-profile">
         <h2><?= _h('account.profile') ?></h2>
+        <p class="acc-card-desc"><?= _h('account.card_profile_desc') ?></p>
         <table class="account-kv">
             <tr><td><?= _h('account.username') ?></td><td><?= sanitize($meUser['username']) ?></td></tr>
             <tr><td><?= _h('account.email') ?></td><td>
@@ -163,19 +175,19 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
         <?php if ($accHasEmail && !$accVerified): ?>
         <p class="text-muted acc-verify-note"><?= _h('account.verify_note') ?></p>
         <?php endif; ?>
+    </section>
         <?php
-        // THE PICTURE AND THE COVER (1.63.0, includes/usermedia.php). Two sub-sections in the shape
-        // the mail and language preferences use: they are how this account looks to everybody else.
-        // The drop zone is the Emotes page's own; a chosen file opens as a LOCAL preview in the
-        // editor (assets/js/media-editor.js) and nothing leaves the browser until Save, which sends
-        // the file and its framing in one request. Remove is drawn even without the permission:
-        // taking your own picture down is never something to be allowed to do.
+        // THE PICTURE AND THE COVER (1.63.0, includes/usermedia.php). A card each (1.71.0): they are how
+        // this account looks to everybody else. The drop zone is the Emotes page's own; a chosen file
+        // opens as a LOCAL preview in the editor (assets/js/media-editor.js) and nothing leaves the
+        // browser until Save, which sends the file and its framing in one request. Remove is drawn even
+        // without the permission: taking your own picture down is never something to be allowed to do.
         //
-        // WHICH CARD each one lands in is a setting of its own (1.66.0): `account_picture_side` and
+        // WHICH COLUMN each one stands in is a setting of its own (1.66.0): `account_picture_side` and
         // `account_cover_side` — until then `account_media_side` (1.64.0) moved both together. Each
-        // block is built once, into a buffer of its own, and echoed at one of two places: at the end
-        // of THIS card, after Account security, or at the end of the right-hand card, under the
-        // privacy answers. The ids and the classes are identical wherever a block lands, so
+        // block is built once, into a buffer of its own, and echoed at one of two places in the flow of
+        // cards: right after Profile (the left column's top) or right after Privacy (the right column,
+        // the end of the flow). The ids and the classes are identical wherever a block lands, so
         // media-editor.js finds exactly what it found before (it looks for #acc-avatar, #acc-cover and
         // #acc-media-data, never for a column) and nothing else on the page has to know the settings
         // exist. Output buffers rather than closures because this is a template: the blocks are
@@ -218,8 +230,9 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
         ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
         <?php ob_start(); ?>
         <?php if ($accAvOn): ?>
-        <div class="acc-mail-prefs acc-media" id="acc-avatar">
-            <h3 class="acc-sub"><?= _h('account.media_avatar_head') ?></h3>
+        <section class="account-card acc-card acc-media" id="acc-avatar">
+            <h2><?= _h('account.media_avatar_head') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_avatar_desc') ?></p>
             <div class="acc-media-row">
                 <?php /* The three sizes it is really drawn at — beside names in lists, in the shoutbox, on
                          the profile — so nobody has to guess what a crop will look like small. */ ?>
@@ -251,7 +264,7 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
             <?php if (!$accMayAv): ?>
             <p class="acc-perm-warn"><?= __('account.media_no_grant', ['perm' => 'profile.avatar']) ?></p>
             <?php endif; ?>
-        </div>
+        </section>
         <?php endif; ?>
         <?php
         $accAvatarHtml = (string)ob_get_clean();
@@ -261,8 +274,9 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                  exists that would let it, or a cover of its own is being kept. A block that could only
                  ever say "no" to somebody with no way to change that is left out altogether. */ ?>
         <?php if ($accCvOn && ($accMayCv || $accCvGroups || !empty($accMedia['cover']['has']))): ?>
-        <div class="acc-mail-prefs acc-media" id="acc-cover">
-            <h3 class="acc-sub"><?= _h('account.media_cover_head') ?></h3>
+        <section class="account-card acc-card acc-media" id="acc-cover">
+            <h2><?= _h('account.media_cover_head') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_cover_desc') ?></p>
             <?php /* A miniature of the real header: the same shape and the same painting as the band on
                      the profile page (.cv-paint), with the site's default cover when this account has
                      none of its own. */ ?>
@@ -301,15 +315,21 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
             <p class="acc-perm-warn"><?= __('account.media_cover_kept') ?></p>
                 <?php endif; ?>
             <?php endif; ?>
-        </div>
+        </section>
         <?php endif; ?>
         <?php
         $accCoverHtml = (string)ob_get_clean();
         endif;
         ?>
+    <?php /* The picture and the cover, each where its own setting says (1.66.0): here, right under
+             Profile — the left column's top, the picture's shipped place — or after Privacy, at the end
+             of the flow: the right column. Picture first when both land in one place. */ ?>
+    <?php if ($accPicSide === 'left') echo $accAvatarHtml; ?>
+    <?php if ($accCovSide === 'left') echo $accCoverHtml; ?>
         <?php if ($accHasEmail): ?>
-        <div class="acc-mail-prefs">
-            <h3 class="acc-sub"><?= _h('account.mail_prefs') ?></h3>
+    <section class="account-card acc-card acc-mail-card" id="acc-card-mail">
+            <h2><?= _h('account.mail_prefs') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_mail_desc') ?></p>
             <label class="search-check acc-pref-row">
                 <input type="checkbox" id="acc-mail-pref"><span class="search-check-box" aria-hidden="true"></span>
                 <span class="acc-pref-text">
@@ -324,16 +344,38 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                     <span class="acc-pref-note"><?= _h('account.pref_bulk_note') ?></span>
                 </span>
             </label>
-        </div>
+    </section>
         <?php endif; ?>
-
+    <section class="account-card acc-card" id="acc-card-groups">
+        <h2><?= _h('account.groups') ?></h2>
+        <p class="acc-card-desc"><?= _h('account.card_groups_desc') ?></p>
+        <?php /* Drawn here, where the page is written, and not only by the script (1.71.0): the columns are
+                 balanced on the cards' heights, and a card that grew from "Loading…" to its groups after the
+                 page had been laid out moved the cards after it into the other column as the page opened.
+                 assets/js/app.js (loadAccount()) draws the same rows again from user_me — with the date in
+                 the reader's own format — whenever the account is read. */ ?>
+        <div id="acc-groups"><?php
+            $accGroupRows = function_exists('userGroups') ? userGroups($db, (int)$meUser['id']) : [];
+            if (!$accGroupRows): ?><span class="text-muted"><?= _h('js.app.no_groups') ?></span><?php
+            else: foreach ($accGroupRows as $accG):
+                // The date as the script writes it — the stored clock reading, day first — so the row is the
+                // same length before and after the script draws it again.
+                $accGUntil = $accG['expires_at'] ? DateTime::createFromFormat('Y-m-d H:i:s', (string)$accG['expires_at']) : null;
+                ?><div class="acc-group"><strong<?= preg_match('/^#[0-9a-fA-F]{3,8}$/', (string)($accG['color'] ?? '')) ? ' style="color:' . sanitize((string)$accG['color']) . '"' : '' ?>><?= sanitize((string)$accG['name']) ?></strong><span class="text-muted"> — <?= $accG['expires_at']
+                ? _h('js.app.group_until', ['date' => $accGUntil ? $accGUntil->format('d.m.Y, H:i') : (string)$accG['expires_at']])
+                : _h('js.app.group_permanent') ?></span><?php if (trim((string)($accG['description'] ?? '')) !== ''): ?><div class="acc-group-desc text-muted"><?= sanitize((string)$accG['description']) ?></div><?php endif; ?></div><?php
+            endforeach; endif; ?></div>
+    </section>
+<?php ob_start(); /* the security card, printed under the columns (below) */ ?>
         <?php /* ── Account security ──────────────────────────────────────────────────────────────
-                 The second factor and the list of signed-in devices, in the card that already holds
-                 the mail and language preferences and in the row shape those use. Both answer the
-                 same question — "who else can be me?" — and neither is about what this account
-                 publishes, which is what the privacy block below is for. */ ?>
-        <div class="acc-mail-prefs acc-security-block" id="acc-security">
-            <h3 class="acc-sub"><?= _h('account.security') ?></h3>
+                 The second factor and the list of signed-in devices. Both answer the same question —
+                 "who else can be me?" — and neither is about what this account publishes, which is what
+                 the privacy card is for. The one card that GROWS (every browser asked to be remembered
+                 is a line), so since 1.71.0 it is the last one, the page's full width, under the two
+                 balanced columns — where it cannot make one of them longer than the other. */ ?>
+    <section class="account-card acc-card acc-wide acc-security-block" id="acc-security">
+            <h2><?= _h('account.security') ?></h2>
+            <p class="acc-card-desc"><?= _h($accTwofa['feature'] ? 'account.card_security_desc' : 'account.card_security_desc_sessions') ?></p>
             <?php if ($accTwofa['feature']): ?>
             <label class="search-check acc-pref-row">
                 <input type="checkbox" id="acc-2fa"<?= $accTwofa['enabled'] ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
@@ -370,20 +412,12 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                 </div>
                 <p class="text-muted acc-pref-note"><?= __('account.sessions_note') ?></p>
             </div>
-        </div>
-        <?php /* The picture and the cover, each where its own setting says (1.66.0): here, at the
-                 end of this card after Account security — the picture's shipped place — or at the
-                 end of the right-hand card further down. Picture first when both land here. */ ?>
-        <?php if ($accPicSide === 'left') echo $accAvatarHtml; ?>
-        <?php if ($accCovSide === 'left') echo $accCoverHtml; ?>
-    </div>
-    <div class="account-card">
-        <h2><?= _h('account.groups') ?></h2>
-        <div id="acc-groups"><span class="text-muted"><?= _h('common.loading') ?></span></div>
+    </section>
+<?php $accSecurityHtml = (string)ob_get_clean(); ?>
 <?php
-// The interface language lives here, under the groups, as a sub-section — not as a third card. A
-// card for one <select> read as a feature and sat mostly empty. Same sub-section style the Profile
-// card uses for the mail preferences, so the two cards look like each other.
+// The interface language: a card of its own since 1.71.0 (it was a sub-section under the groups, which
+// had been "not a third card: a card for one <select> read as a feature and sat mostly empty" — the
+// columns are made of small cards now, and its note is the line under its heading).
 //
 // Only when there is a choice. One language is not a preference, it is a fact about the site, and a
 // select with a single option is a control that teaches people it does nothing.
@@ -391,16 +425,16 @@ $accLangs = function_exists('langForUsers') ? langForUsers($cfg) : [];
 if (count($accLangs) > 1):
     $accLangNow = (string)($meUser['language'] ?? '');
 ?>
-        <div class="acc-mail-prefs acc-lang-block">
-            <h3 class="acc-sub"><?= _h('account.lang_head') ?></h3>
-            <p class="text-muted acc-verify-note acc-lang-note"><?= _h('account.lang_note') ?></p>
+    <section class="account-card acc-card acc-lang-block" id="acc-card-lang">
+            <h2><?= _h('account.lang_head') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.lang_note') ?></p>
             <select id="acc-language" class="acc-language">
                 <option value=""<?= $accLangNow === '' ? ' selected' : '' ?>><?= _h('account.lang_site') ?></option>
                 <?php foreach ($accLangs as $accCode => $accName): ?>
                 <option value="<?= sanitize($accCode) ?>"<?= $accLangNow === $accCode ? ' selected' : '' ?>><?= sanitize($accName) ?></option>
                 <?php endforeach; ?>
             </select>
-        </div>
+    </section>
 <?php endif; ?>
 <?php
 // THE ZONE THIS READER SEES TIMES IN (v68). Moved here in 1.64.0, under Interface language, because
@@ -419,9 +453,9 @@ $accTzOwn  = trim((string)($meUser['timezone'] ?? ''));
 if (!tzValidName($accTzOwn)) $accTzOwn = '';
 $accTzSite = new DateTimeZone(siteTimezone($cfg));
 ?>
-        <div class="acc-mail-prefs acc-tz-block" id="acc-tz">
-            <h3 class="acc-sub"><label for="acc-timezone"><?= _h('account.tz_head') ?></label></h3>
-            <p class="text-muted acc-verify-note acc-lang-note"><?= _h('account.tz_note') ?></p>
+    <section class="account-card acc-card acc-tz-block" id="acc-tz">
+            <h2><label for="acc-timezone"><?= _h('account.tz_head') ?></label></h2>
+            <p class="acc-card-desc"><?= _h('account.tz_note') ?></p>
             <?php /* A wrapper, because the "Saved" tooltip is drawn against an element and a <select>
                      cannot hold one — it is the wrapper pubTip() measures. */ ?>
             <span class="acc-tz-wrap" id="acc-timezone-wrap">
@@ -436,7 +470,7 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
                     <?php endforeach; ?>
                 </select>
             </span>
-        </div>
+    </section>
 <?php /* The privacy block belongs to whichever of these features is on: favourites, lists, or both.
          Gating it on favourites alone hid the lists switch on an install that runs lists without
          them. */ ?>
@@ -444,11 +478,10 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
           || $accVotes['public_ok'] || $accDescs['public_ok'] || $accDescs['credit_ok']
           || ($accLists['may_use'] && $accLists['public_ok'])
           || $accPeople['pm'] || $accPeople['directory']): ?>
-        <?php /* In the card that already holds the mail and language preferences, not a card of its
-                 own: these are two more answers about the same account, and a separate card would
-                 make them look like a separate subject. */ ?>
-        <div class="acc-mail-prefs acc-privacy-block" id="acc-privacy">
-            <h3 class="acc-sub"><?= _h('account.fav_privacy') ?></h3>
+        <?php /* A card of its own since 1.71.0 — the longest one, what others see of this account. */ ?>
+    <section class="account-card acc-card acc-privacy-block" id="acc-privacy">
+            <h2><?= _h('account.fav_privacy') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_privacy_desc') ?></p>
             <?php if ($accFav['may_use'] && ($accFav['may_publish'] || $accFav['publish_blocked'])): ?>
             <label class="search-check acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.fav_public_label') ?></span></label>
@@ -527,11 +560,11 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
                 <span><?= _h('account.fav_listed_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.fav_listed_hint') ?></p>
             <?php endif; ?>
-        </div>
+    </section>
 <?php endif; ?>
-<?php /* The picture and the cover when their settings say the right-hand card (1.66.0 — the cover's
-         shipped place): under the privacy answers, at the end of the things a member can change
-         about themselves. Exactly the markup built above — each block one piece, two possible places. */ ?>
+<?php /* The picture and the cover when their settings say the right column (1.66.0 — the cover's shipped
+         place): after the privacy answers, at the end of the flow of cards, which is the right column's
+         foot. Exactly the markup built above — each block one piece, two possible places. */ ?>
 <?php if ($accPicSide === 'right') echo $accAvatarHtml; ?>
 <?php if ($accCovSide === 'right') echo $accCoverHtml; ?>
 <?php
@@ -543,8 +576,9 @@ $accIdents = $accBridgeOn ? authIdentitiesForUser($db, (int)$meUser['id']) : [];
 $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
 ?>
 <?php if ($accBridgeOn): ?>
-        <div class="acc-mail-prefs acc-bridge-block" id="acc-bridge">
-            <h3 class="acc-sub"><?= _h('bridge.linked_heading') ?></h3>
+    <section class="account-card acc-card acc-bridge-block" id="acc-bridge">
+            <h2><?= _h('bridge.linked_heading') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_bridge_desc') ?></p>
             <?php if ($accIdents): ?>
             <?php foreach ($accIdents as $accId): ?>
             <p class="acc-bridge-line">
@@ -564,10 +598,11 @@ $accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
             <?php else: ?>
             <p class="text-muted acc-verify-note"><?= _h('bridge.not_linked') ?></p>
             <?php endif; ?>
-        </div>
+    </section>
 <?php endif; ?>
-    </div>
-</div>
+</div><?php /* /.acc-flow */ ?>
+<?php /* The second factor and the signed-in browsers: the card that grows, under both columns. */ ?>
+<?= $accSecurityHtml ?>
 
 </div><?php /* /#acc-pane-overview */ ?>
 
@@ -671,6 +706,21 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
 <div id="acc-notifications"><span class="text-muted"><?= _h('common.loading') ?></span></div>
 <div class="trans-pagination acc-notif-pagination" id="acc-notif-pagination"></div>
 <p class="text-muted acc-notif-note"><?= _h('account.notif_note') ?></p>
+<?php /* Which comments this account is told about (1.71.0, includes/comments.php, users.comment_notify): four
+         switches under the notifications they decide, each saved as it is ticked (assets/js/comments.js). Only
+         while comments exist and this account may read them — a switch about news it cannot receive is not one. */ ?>
+<?php if (function_exists('commentsEnabled') && commentsEnabled($cfg) && commentCan($db, $cfg, $meUser, 'comment.view')): ?>
+<?php $accCmPrefs = commentNotifyPrefs($meUser); ?>
+<div class="acc-comment-prefs" id="acc-comment-prefs">
+    <h3 class="acc-comment-prefs-head" id="acc-comment-prefs-head"><i class="bi bi-chat-left-text" aria-hidden="true"></i> <?= _h('account.comment_prefs_head') ?></h3>
+    <p class="text-muted acc-pref-note" id="acc-comment-prefs-note"><?= _h('account.comment_prefs_note') ?></p>
+    <?php foreach (['mine', 'desc', 'thread', 'mention'] as $accCmKey): ?>
+    <label class="search-check acc-check acc-comment-pref"><input type="checkbox" id="acc-cm-<?= $accCmKey ?>" data-pref="<?= $accCmKey ?>"<?= !empty($accCmPrefs[$accCmKey]) ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+        <span id="acc-cm-<?= $accCmKey ?>-label"><?= _h('account.comment_pref_' . $accCmKey) ?></span></label>
+    <?php endforeach; ?>
+    <span class="text-muted acc-comment-prefs-msg" id="acc-comment-prefs-msg" role="status" aria-live="polite"></span>
+</div>
+<?php endif; ?>
 
 <h2 class="section-heading-spaced"><?= _h('account.change_head') ?></h2>
 <div id="account-alert" class="alert"></div>

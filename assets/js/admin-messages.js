@@ -98,7 +98,19 @@
         if (st0.banned) facts.push(st0.banned_until ? t('js.msgrep.is_banned_until', { date: st0.banned_until.slice(0, 16) })
                                                     : t('js.msgrep.is_banned'));
         if (st0.staff) facts.push(t('js.msgrep.is_staff'));
+        // The warnings this account has had (1.71.0) — from this card, the reported comments', descriptions' and
+        // shouts' cards, anywhere a moderator chose to be loud.
+        if (st0.warnings > 0) facts.push(t('js.creport.warned_n', { n: st0.warnings }));
         if (facts.length) c.appendChild(el('div', 'msgrep-state', facts.join(' · ')));
+        if (st0.latest_warnings && st0.latest_warnings.length) {
+            var wl = el('ul', 'msgrep-warnings');
+            wl.setAttribute('aria-label', t('js.creport.latest_warnings'));
+            st0.latest_warnings.forEach(function (w) {
+                wl.appendChild(el('li', null, t('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' })));
+            });
+            c.appendChild(el('div', 'msgrep-warn-head text-muted', t('js.creport.latest_warnings')));
+            c.appendChild(wl);
+        }
         // What was already said about it: the answer the reporter was given, and the note for the log.
         if (rep.reply) c.appendChild(el('div', 'msgrep-answer', t('js.msgrep.answered', { text: rep.reply })));
         if (rep.note) c.appendChild(el('div', 'msgrep-answer text-muted', t('js.msgrep.noted', { text: rep.note })));
@@ -153,17 +165,55 @@
 
             var say = el('span', 'msgrep-said text-muted');
 
+            /* ── silently, or as a warning (1.71.0) ───────────────────────────────────────────
+             * What the AUTHOR is told when a line of theirs is removed, or they are silenced or banned:
+             * nothing, or a warning in their own language with the reason typed here — which a warning
+             * needs, and which is kept on the account. Silent is where the choice starts. */
+            var modeRow = el('div', 'msgrep-acts msgrep-mode');
+            modeRow.appendChild(el('span', 'msgrep-mode-label', t('js.creport.mode_label')));
+            var radio = function (value, label, on) {
+                var lab = el('label', 'msgrep-mode-opt');
+                var r = document.createElement('input');
+                r.type = 'radio';
+                r.name = 'msgrep-mode-' + rep.id;
+                r.value = value;
+                r.checked = !!on;
+                lab.appendChild(r);
+                lab.appendChild(document.createTextNode(' ' + label));
+                modeRow.appendChild(lab);
+                return r;
+            };
+            radio('silent', t('js.creport.mode_silent'), true);
+            var loudRadio = radio('loud', t('js.creport.mode_loud'), false);
+            var reasonIn = document.createElement('input');
+            reasonIn.type = 'text';
+            reasonIn.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reason-in';
+            reasonIn.placeholder = t('js.creport.reason_ph');
+            reasonIn.setAttribute('aria-label', t('js.creport.reason_ph'));
+            reasonIn.maxLength = 500;
+            modeRow.appendChild(reasonIn);
+            modeRow.title = t('js.creport.mode_hint');
+
             /** One action, posted with whatever is in the note field. */
             var run = async function (action, days, btn) {
+                var loud = action === 'warn' || loudRadio.checked;
+                if (loud && action !== 'close' && action !== 'reopen' && !reasonIn.value.trim()) {
+                    say.textContent = t('js.creport.err_reason');
+                    reasonIn.focus();
+                    return;
+                }
                 btn.disabled = true;
                 var r = await api('admin/message_report_action', 'POST',
-                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim(), reply: reply.value.trim() });
+                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim(), reply: reply.value.trim(),
+                                    mode: loud ? 'loud' : 'silent', reason: reasonIn.value.trim() });
                 btn.disabled = false;
                 if (r && r.success) { load(page); return; }
-                // The two refusals a moderator can actually hit, said in words rather than left as
+                // The refusals a moderator can actually hit, said in words rather than left as
                 // a button that did nothing.
                 say.textContent = t(r && r.error === 'target_is_staff' ? 'js.msgrep.err_staff'
                                   : r && r.error === 'target_is_you' ? 'js.msgrep.err_you'
+                                  : r && r.error === 'reason_required' ? 'js.creport.err_reason'
+                                  : r && r.error === 'ban_is_permanent' ? 'js.creport.err_permanent'
                                   : 'js.msgrep.err_failed');
             };
 
@@ -198,7 +248,13 @@
                 acts.appendChild(confirmThen(acts, t('js.msgrep.delete_q'), t('js.msgrep.delete'), 'btn-outline-danger',
                                              function (b) { run('delete_message', 0, b); }));
             }
+            // A warning and nothing else (1.71.0) — always told, so it asks the reason; never to staff.
+            if (!st.staff) {
+                acts.appendChild(confirmThen(acts, t('js.creport.warn_q', { user: rep.reported }), t('js.creport.warn'), 'btn-outline-warning',
+                                             function (b) { run('warn', 0, b); }));
+            }
             c.appendChild(acts);
+            if (!st.staff) c.appendChild(modeRow);
 
             /* ── what to do about the ACCOUNT ─────────────────────────────────────────────────
              * Deleting the line answers the message. It does not answer the person, and until now
@@ -277,26 +333,23 @@
 
     // The source tabs switch between the reports table and this view. The table's own script owns
     // the tab bar, so this listens rather than takes over: one click, two readers.
+    var TORRENT = ['reports', 'archives', 'appeals', 'appeal_archives'];
     document.addEventListener('click', function (e) {
         var tab = e.target.closest ? e.target.closest('.source-tab') : null;
         if (!tab) return;
         var mine = tab.dataset.source === 'messages';
         view.classList.toggle('d-hidden', !mine);
-        // Everything the reports table draws goes away while this view is up, and comes back after.
-        ['reports-table-card', 'pagination'].forEach(function (id) {
-            var n = document.getElementById(id);
-            if (n) n.classList.toggle('d-hidden', mine);
-        });
-        var toolbars = document.querySelectorAll('.admin-toolbar-card');
-        toolbars.forEach(function (n) {
-            if (view.contains(n)) return;
-            n.classList.toggle('d-hidden', mine);
-        });
+        // The torrent reports' toolbar, table and pages are up on their own four tabs and nowhere else
+        // (1.71.0: the reported comments, descriptions and shouts are tabs of this bar too).
+        var torrent = TORRENT.indexOf(tab.dataset.source) >= 0;
+        document.querySelectorAll('[data-torrent-part]').forEach(function (n) { n.classList.toggle('d-hidden', !torrent); });
         if (mine) load(1);
     });
 
     // The badge is worth having before anybody opens the tab: an unattended queue is the thing an
-    // operator most needs to be told about.
+    // operator most needs to be told about. When this is the first tab the session has (it may read
+    // messages and not the torrent queue), the page opens on it.
     load(1);
-    view.classList.add('d-hidden');
+    var own = document.querySelector('.source-tab[data-source="messages"]');
+    view.classList.toggle('d-hidden', !(own && own.classList.contains('active')));
 })();

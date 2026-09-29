@@ -80,7 +80,7 @@ function iconFaPackStyles(array $cfg): array {
 
 /**
  * The styles jsDelivr's Free builds offer the site's icons: solid, which has every Free icon, and
- * regular, which has 170 of them (41 of the names the map draws — iconFreeRegular()). Brands are
+ * regular, which has 170 of them (42 of the names the map draws — iconFreeRegular()). Brands are
  * always there and are not a choice: a brand icon exists in no other style.
  */
 function iconCdnStyles(int $major): array {
@@ -97,11 +97,13 @@ function iconCdnStyles(int $major): array {
  * both 6.7.2 and 7.3.1 (fontawesome-free's metadata/icon-families.json, familyStylesByLicense.free),
  * where the forty-one are the same. Everything else exists in Free only in solid, so a Free regular site
  * draws those solid rather than draw nothing (tests/iconpack_test.php holds this list to that metadata
- * wherever a copy of it is at hand).
+ * wherever a copy of it is at hand). 1.71.0 adds the forty-second, `clone` — the copy buttons' two
+ * overlapping squares, Bootstrap's `copy` drawn line for line — seen drawn by both Free regular webfonts
+ * (6.7.2 and 7.3.1) beside the missing-glyph box, where Font Awesome's `copy` is two sheets of paper.
  */
 function iconFreeRegular(): array {
     return ['bell', 'calendar-days', 'circle', 'circle-check', 'circle-play', 'circle-stop', 'circle-up', 'circle-user',
-            'circle-xmark', 'clipboard', 'comment-dots', 'copy', 'envelope', 'eye', 'eye-slash', 'face-smile', 'file',
+            'circle-xmark', 'clipboard', 'clone', 'comment-dots', 'copy', 'envelope', 'eye', 'eye-slash', 'face-smile', 'file',
             'file-audio', 'file-code', 'file-image', 'file-lines', 'flag', 'folder', 'folder-open', 'hard-drive', 'heart',
             'hourglass-half', 'id-badge', 'image', 'lightbulb', 'message', 'paper-plane', 'pen-to-square', 'rectangle-list', 'square',
             'square-check', 'star', 'thumbs-down', 'thumbs-up', 'trash-can', 'user'];
@@ -138,11 +140,15 @@ function iconFreeRegular(): array {
 function iconFaEntries(): array {
     return [
         'activity'                   => ['heart-pulse', 's', 'approx' => 1, 'pro' => 'wave-pulse'],   // ~ no bare pulse line in Free: the same line drawn through a heart
-        'archive'                    => ['box-archive', 's'],
+        // 1.71.0, the icon buttons (a conversation's Clear, the Info panel's Who has this and its "i", the rows'
+        // Magnet): where Pro has Bootstrap's outline of the very drawing, and Free has only the solid, Pro draws
+        // the outline (prorole), as the megaphone below — drawn beside Bootstrap's glyph from both Pro packages.
+        'archive'                    => ['box-archive', 's', 'prorole' => 'r'],
         'arrow-clockwise'            => ['arrow-rotate-right', 's'],
         'arrow-counterclockwise'     => ['arrow-rotate-left', 's'],
         'arrow-down'                 => ['arrow-down', 's'],
         'arrow-down-up'              => ['arrows-up-down', 's', 'approx' => 1, 'pro' => 'arrow-down-arrow-up'],   // ~ one double-headed arrow for Bootstrap's pair of arrows
+        'arrow-left'                 => ['arrow-left', 's'],   // a conversation's Back (1.71.0)
         'arrow-left-right'           => ['arrow-right-arrow-left', 's'],
         'arrow-repeat'               => ['arrows-rotate', 's'],
         'arrow-right'                => ['arrow-right', 's'],
@@ -186,6 +192,9 @@ function iconFaEntries(): array {
         'cloud-download'             => ['cloud-arrow-down', 's'],
         'code-slash'                 => ['code', 's'],
         'collection'                 => ['layer-group', 's', 'approx' => 1, 'pro' => 'rectangle-history', 'prorole' => 'r'],   // ~ a stack of cards: a stack of layers
+        // The copy buttons (1.71.0): Bootstrap's two overlapping squares are Font Awesome's `clone` line for line,
+        // outline in Free and Pro alike; Font Awesome's `copy` is two sheets of paper (bi-files, below).
+        'copy'                       => ['clone', 'r'],
         'cpu'                        => ['microchip', 's'],
         'crosshair'                  => ['crosshairs', 's'],
         'cup-hot'                    => ['mug-hot', 's'],   // the emoji picker's Food & drink tab (1.69.0)
@@ -240,7 +249,7 @@ function iconFaEntries(): array {
         'hourglass-split'            => ['hourglass-half', 'r'],
         'image'                      => ['image', 'r'],
         'inbox'                      => ['inbox', 's'],
-        'info-circle'                => ['circle-info', 's'],
+        'info-circle'                => ['circle-info', 's', 'prorole' => 'r'],   // with -fill a pair, which only Pro can draw as one
         'info-circle-fill'           => ['circle-info', 'f'],
         'journal-text'               => ['book', 's'],
         'key'                        => ['key', 's'],
@@ -252,7 +261,7 @@ function iconFaEntries(): array {
         'lock'                       => ['lock', 's'],
         'lock-fill'                  => ['lock', 'f'],
         'magic'                      => ['wand-magic-sparkles', 's'],
-        'magnet'                     => ['magnet', 's'],
+        'magnet'                     => ['magnet', 's', 'prorole' => 'r'],
         'megaphone'                  => ['bullhorn', 's', 'pro' => 'megaphone', 'prorole' => 'r'],   // the Appeals tab: Pro has Bootstrap's cone, in outline
         'palette'                    => ['palette', 's'],
         // ~ Free has no badge with a tick (badge-check is Pro's): the tick in a circle, which reads as
@@ -260,9 +269,11 @@ function iconFaEntries(): array {
         //   and filled as Bootstrap's pair are; Pro draws the badge itself.
         'patch-check'                => ['circle-check', 'r', 'approx' => 1, 'pro' => 'badge-check'],   // ~ the verified tick, in a circle
         'patch-check-fill'           => ['circle-check', 'f', 'approx' => 1, 'pro' => 'badge-check'],   // ~ the verified tick, in a filled circle
+        // The Info panel's description actions (1.71.0): a pen writes the first words, a nib a new version.
+        'pen'                        => ['pen', 's', 'prorole' => 'r'],
         'pencil'                     => ['pencil', 's'],
         'pencil-square'              => ['pen-to-square', 'r'],
-        'people'                     => ['user-group', 's'],
+        'people'                     => ['user-group', 's', 'prorole' => 'r'],   // with -fill a pair, which only Pro can draw as one
         'people-fill'                => ['users', 'f'],
         'person'                     => ['user', 'r'],
         'person-badge'               => ['id-badge', 'r'],
@@ -287,6 +298,7 @@ function iconFaEntries(): array {
         'search'                     => ['magnifying-glass', 's'],
         'send'                       => ['paper-plane', 'r'],
         'send-check'                 => ['envelope-circle-check', 's', 'approx' => 1],   // ~ a sent letter with a tick (no paper plane with one in Pro)
+        'share'                      => ['share-nodes', 's', 'prorole' => 'r'],   // the Info panel's Share (1.71.0)
         'shield-check'               => ['shield-halved', 's', 'approx' => 1, 'pro' => 'shield-check', 'prorole' => 'r'],   // ~ no shield with a tick in Free
         'shield-fill'                => ['shield', 'f'],
         'shield-lock'                => ['shield-halved', 's', 'approx' => 1, 'pro' => 'shield-keyhole', 'prorole' => 'r'],   // ~ no shield with a lock in Free
@@ -311,6 +323,7 @@ function iconFaEntries(): array {
         'three-dots'                 => ['ellipsis', 's'],
         'translate'                  => ['language', 's'],
         'trash'                      => ['trash-can', 'r'],
+        'trash-fill'                 => ['trash-can', 'f'],   // a Delete that waits for its second press (1.71.0)
         'tree'                       => ['tree', 's'],   // the emoji picker's Animals & nature tab (1.69.0)
         'trophy'                     => ['trophy', 's'],   // the emoji picker's Activities tab (1.69.0)
         'type-bold'                  => ['bold', 's'],
@@ -320,6 +333,7 @@ function iconFaEntries(): array {
         'ui-checks-grid'             => ['table-cells-large', 's', 'approx' => 1, 'pro' => 'grid-2', 'prorole' => 'r', 'proapprox' => 1],   // ~ a grid of ticked boxes: the grid; Pro has its four boxes, without the tick
         'unlock'                     => ['lock-open', 's'],
         'upload'                     => ['upload', 's'],
+        'vector-pen'                 => ['pen-nib', 's', 'prorole' => 'r'],   // Propose a rewrite (1.71.0): Bootstrap's nib, Pro's in outline
         'volume-mute'                => ['volume-xmark', 's'],
         'volume-up'                  => ['volume-high', 's'],
         'x'                          => ['xmark', 's'],

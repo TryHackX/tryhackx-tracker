@@ -146,8 +146,36 @@ check('catalogue: the blacklist file path is beside the whitelist file path, in 
       str_contains($wlSec, 'name="whitelist_path"') && str_contains($wlSec, 'name="blacklist_path"') && str_contains($wlSec, 'id="btn-test-blacklist"')
       && substr_count($tpl, 'name="blacklist_path" value="') === 1);   // the one field (the Test button's script names it too)
 $titles = array_column($groups, 'title', 'id');
+// 1.71.0: the content group names its comments too (the section between the descriptions and the ratings).
 check('catalogue: the two renamed groups say what they hold', ($titles['maintenance'] ?? '') === 'Backups & maintenance'
-      && ($titles['content'] ?? '') === 'Descriptions & ratings');
+      && ($titles['content'] ?? '') === 'Descriptions, comments & ratings' && ($groupOf['section-comments'] ?? '') === 'content');
+// 1.71.0: the emoji picker and the emotes out of Shoutbox, into a group of their own right after it — two
+// sections, the picker's and the pictures'; every one of their settings there and none left in the room's.
+$byId = array_column($groups, null, 'id');
+$gi = array_flip($ids);
+check('catalogue: Emoji & emotes is a group of its own, right after Shoutbox, with its icon and its words (and Shoutbox\'s no longer claim the emotes)',
+      ($titles['emoji'] ?? '') === 'Emoji & emotes' && ($byId['emoji']['icon'] ?? '') === 'bi-emoji-smile' && isset($gi['emoji'], $gi['shoutbox'])
+      && $gi['emoji'] === $gi['shoutbox'] + 1 && str_contains((string)$byId['emoji']['keywords'], 'emotes') && str_contains((string)$byId['emoji']['keywords'], 'emotki')
+      && !str_contains((string)$byId['shoutbox']['keywords'], 'emotes'));
+check('catalogue: its two sections — the picker, then the emotes and stickers', ($groupOf['section-emoji'] ?? '') === 'emoji' && ($groupOf['section-emotes'] ?? '') === 'emoji'
+      && array_keys(array_filter($groupOf, fn($g) => $g === 'emoji')) === ['section-emoji', 'section-emotes'] && ($groupOf['section-shout'] ?? '') === 'shoutbox');
+$secText = function (string $id) use ($tpl): string {
+    $from = (int)strpos($tpl, 'id="' . $id . '"');
+    return $from > 0 ? substr($tpl, $from, (int)strpos($tpl, 'class="settings-section"', $from + 30) - $from) : '';
+};
+$emojiKeys = ['shout_emoji_fa', 'shout_emoji_fa_style', 'shout_emoji_fa_scope'];
+$emoteKeys = ['shout_emotes_enabled', 'emotes_everywhere', 'shout_stickers_enabled', 'shout_emote_approval', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user'];
+$sEmoji = $secText('section-emoji'); $sEmotes = $secText('section-emotes'); $sShout = $secText('section-shout');
+$misplaced = array_merge(array_filter($emojiKeys, fn($k) => !str_contains($sEmoji, 'name="' . $k . '"')), array_filter($emoteKeys, fn($k) => !str_contains($sEmotes, 'name="' . $k . '"')),
+                         array_filter(array_merge($emojiKeys, $emoteKeys), fn($k) => str_contains($sShout, 'name="' . $k . '"')));
+check('catalogue: every emoji and emote setting in its section of Emoji & emotes (its key unchanged), none left in Shoutbox — which points the way on',
+      $misplaced === [] && str_contains($sEmotes, 'id="admin-emotes"') && str_contains($sEmoji, 'id="admin-shout-emoji"') && str_contains($sEmotes, 'id="emote-matrix-wrap"')
+      && str_contains($sShout, "__('settings.shout_emoji_moved', ['url' => '#section-emoji'])") && str_contains($sShout, 'id="shout-matrix-wrap"'), implode(', ', $misplaced));
+$asJs = (string)@file_get_contents($root . '/assets/js/admin-settings.js');
+check('a link to any id inside a section (an old block\'s, a sub-heading) opens that section under its chip and scrolls to it; the toolbar\'s margin covers them',
+      str_contains($asJs, "const sec = sections.find(s => s.el.id === id) || (target ? sections.find(s => s.el.contains(target)) : null);")
+      && str_contains($asJs, '(target && target !== sec.el && sec.el.contains(target) ? target : sec.el).scrollIntoView({ block: \'start\' });')
+      && str_contains((string)@file_get_contents($root . '/assets/css/admin.css'), '.settings-section, .settings-section [id] { scroll-margin-top: 9.5rem; }'));
 // every keyword key must be reachable from the page: a name="" control or a data-setting="" block
 preg_match_all('/name="([a-z0-9_]+)"/', $tpl, $mn);
 preg_match_all('/data-setting="([a-z0-9_]+)"/', $tpl, $ms);

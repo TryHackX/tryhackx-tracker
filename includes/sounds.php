@@ -64,6 +64,13 @@ function soundEventKinds(?array $cfg = null): array
         $kinds[] = 'shout';
         $kinds[] = 'mention';
     }
+    // The comments' two (1.71.0, includes/comments.php): somebody commented where I am told of it (my torrent,
+    // my description, a thread I wrote in), and a comment named me — the owner's "a new sound for somebody
+    // having commented", with the mention as its own event the way the room has one. Only while comments are.
+    if ($cfg !== null && function_exists('commentsEnabled') && commentsEnabled($cfg)) {
+        $kinds[] = 'comment';
+        $kinds[] = 'comment_mention';
+    }
     return $kinds;
 }
 

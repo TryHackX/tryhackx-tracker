@@ -522,7 +522,10 @@
     // Either block is enough to wire (1.66.0): each lands in whichever card its own setting names,
     // so there is no one wrapper round both any more — block() below finds each by its id.
     if (!data || !(document.getElementById('acc-avatar') || document.getElementById('acc-cover'))) return;
-    const csrf = () => { const n = document.getElementById('account-csrf'); return n ? n.value : ''; };
+    // The page's token (1.71.0): window.csrfToken() in app.js, which the account page loads before this
+    // file. It read #account-csrf alone. (Settings in the panel loads this file too, for open() only: this
+    // half returns above there.)
+    const csrf = () => (typeof window.csrfToken === 'function' ? window.csrfToken() : '');
 
     /** POST to user_avatar / user_cover. Multipart: the file, when there is one, travels as itself. */
     async function post(kind, fields, file) {

@@ -80,11 +80,17 @@ if ($ids) {
         }
     } catch (\Throwable $e) { $bridgeBy = []; }   // a database that predates v49 is not a failure
 }
+// The WARNINGS each account has had (1.71.0, includes/reports.php) — how many, and the latest five for the
+// member's window: a moderator deciding about a member needs what others already told them. One query for the
+// counts, one small one per account that has any.
+$warned = ($ids && function_exists('userWarningsSummary')) ? userWarningsSummary($db, $ids, 5) : [];
 foreach ($rows as &$r) {
     $r['id'] = (int)$r['id'];
     $r['email_verified'] = (int)$r['email_verified'];
     $r['groups'] = $byUser[$r['id']] ?? [];
     $r['identities'] = $bridgeBy[$r['id']] ?? [];
+    $r['warnings'] = (int)($warned[$r['id']]['count'] ?? 0);
+    $r['latest_warnings'] = $warned[$r['id']]['latest'] ?? [];
     // the mirrored panel admin — the UI greys out delete/ban/revoke-admin for this row
     $r['root_admin'] = userIsRootAdmin($r, $cfg);
     // The picture and the cover (1.63.0): whether there is one to take down in the edit modal, and

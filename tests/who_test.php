@@ -349,6 +349,46 @@ $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'whot_grant'")
     'favourites.view_others', 'rating.vote', 'rating.public', 'lists.use', 'lists.public', 'index.view'], true), JSON_UNESCAPED_SLASHES)]);
 userPermissionsForget(0);
 
+// A vote taken back (1.71.0, repRemoveVote() — the Info panel's second press): the member is out of the section at
+// once, the rows and the count, in either mode; nobody else is. Put back after, for the sections below.
+$takeBack = function (int $uid, array $c) use ($db, $H): array {
+    $GLOBALS['__current_user_loaded'] = true;
+    $GLOBALS['__current_user_cache'] = userFindById($db, $uid);
+    $r = repRemoveVote($db, $c, $H);
+    $GLOBALS['__current_user_loaded'] = false;
+    return $r;
+};
+$tb = $takeBack($M[25], $cfgOn);
+$after = $votes();
+check('a member takes their thumb back: out of the likes at once, the rows and the count, and nobody else is',
+      !empty($tb['success']) && $tb['removed'] === true && $after['total'] === 24 && !in_array('whot_m25', $names($after), true)
+      && $names($after) === array_merge(array_map(fn($i) => sprintf('whot_m%02d', $i), range(1, 20)), array_map(fn($i) => sprintf('whot_m%02d', $i), range(21, 24))),
+      json_encode([$tb['error'] ?? null, $after['total']]));
+$tb = $takeBack($S1, $cfgStars);
+$after = $votes($cfgStars);
+check('… and a rating taken back leaves the ratings the same way (22 → 21, whot_s1 gone, whot_s2 first still)',
+      !empty($tb['success']) && $tb['removed'] === true && $after['total'] === 21 && !in_array('whot_s1', $names($after), true) && $names($after)[0] === 'whot_s2',
+      json_encode([$tb['error'] ?? null, $after['total']]));
+$vIns->execute([$H, (string)$M[25], -1]);
+$vIns->execute([$H, (string)$S1, 7]);
+$rlKeys = ['repvote|user:' . $M[25], 'repvote|user:' . $S1];
+register_shutdown_function(function () use ($root, $rlKeys) {
+    // the hour's budget the two removals spent, out of the shared file under its lock
+    $file = $root . '/config/rate_limits.json';
+    $lock = @fopen($file . '.lock', 'c');
+    if ($lock) @flock($lock, LOCK_EX);
+    try {
+        $data = is_file($file) ? (json_decode((string)@file_get_contents($file), true) ?: []) : [];
+        $n0 = count($data);
+        foreach ($rlKeys as $k) unset($data[$k]);
+        if (count($data) !== $n0) @file_put_contents($file, json_encode($data));
+    } finally { if ($lock) { @flock($lock, LOCK_UN); @fclose($lock); } }
+});
+check('… (both put back for what follows: 25 likes, 22 ratings)', $votes()['total'] === 25 && $votes($cfgStars)['total'] === 22);
+$fjWho = $src('assets/js/favourites.js');
+check('the overlay asks its likes again when a vote changes under it, on its own torrent, while it is open',
+      preg_match("/document\.addEventListener\('rating:changed', function \(e\) \{\s*var d = e && e\.detail;\s*if \(box\.hidden \|\| !d \|\| d\.hash !== hash\) return;\s*secs\.forEach\(function \(s\) \{ if \(s\.name === 'votes' && s\.state !== 'gone'\) load\(s, false\); \}\);/", $fjWho) === 1);
+
 /* ══ 5. lists: the five gates, and the account's ══════════════════════════ */
 $lists = fn(?array $c = null, ?array $p = null) => whoListsPage($db, $c ?? $cfgOn, $H, $reader, $p ?? $all);
 $lb = $lists();

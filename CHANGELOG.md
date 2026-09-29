@@ -4,6 +4,891 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.71.0] — 2026-09-29
+
+The owner's next list, as one release. It opens with how a few places look and what their buttons say:
+where a word stood only because the public pages had no icon font until 1.68.0, an icon now stands — the
+Info panel's description actions, its head, its Copy buttons, the search results' Magnet, Copy and Info,
+a conversation's Back and Clear, the home page's copy buttons — each named for a screen reader and
+explained in the site's own tooltip, in every icon library the site can draw with; the panel's links take
+a colour of the panel's own; the account page's Overview comes out in two columns of about one height,
+each part under a heading that says what it is for, with the signed-in devices at the bottom; the links
+under the sign-in form stop turning pink; and the CAPTCHA widget in "Please verify you are human" loses
+the white edges 1.70.0's dark form controls gave it. No schema change in this part.
+
+Then the emoji picker: the page of every Font Awesome icon was navigated by seventy written words on a
+strip, and each is Font Awesome's own icon for its category now — the alphabet as A B C — its name in the
+tooltip; and the picker's settings and the emote manager leave Shoutbox for a group of their own in
+Settings, **Emoji & emotes**, since they serve every text on the site that has the picker. No schema
+change either, and no setting changed its key.
+
+And two things about voting. A vote from the Info panel opened on a profile or on the account page was
+answered "Invalid CSRF token": the vote read a token only the search page carried — and so did the panel's
+Refresh. The session's token is published once now, on every page, and every public script asks one helper
+for it, so no button can turn up on a page that lacks it again. And the vote you already cast — the same
+thumb, the same half star — pressed a second time, is taken back. No schema change here either.
+
+Then **comments on a torrent** (schema 83), planned first, as the owner asked: in the Info panel, after the
+rating, **Comments (N)** — a thread, and a composer with the emoji and the emotes, a comment's own few BBCode
+tags and never a picture, a link only while the operator allows one, a length the operator sets; five
+permissions; the people a comment is news to told, with two sounds of their own; and guests only where the
+operator lets them in — behind a CAPTCHA every time, and a moderator.
+
+Then **reports of what people write in public** (schema 84), planned first as well: a comment, a torrent's
+description and a shout can be reported from where they stand — a flag beside them, a reason, "Reported" after
+— and are worked on the Reports page in three tabs of their own, one card for each reported thing with every
+report about it; and whatever a moderator does that reaches the author is the moderator's choice, **silent or
+loud**: nothing said, or a **warning** in the author's own language, with the reason, kept on the account.
+
+And last, **one anti-spam layer for everything people write** (schema 85), planned first too. A line in the
+shoutbox and its correction, a message, a comment, a torrent's description, a list's name and description, the
+profile's description, a report, an emote and a vote all ask one place before they are written, and each gets one
+of three answers: go, wait this long — and Send counts it down on itself and comes back by itself —, or prove you
+are a person — and the site's CAPTCHA box opens there and then, and the same words go again. The room has the
+ladder the owner sketched: three lines free, then 5, 15, 30 and 60 seconds, and two quiet minutes forget it all;
+every other place has its own, in Settings. Guests solve a CAPTCHA every time; a new account starts fewer
+conversations and its links stay words for its first days; the same words twice are refused everywhere; and a
+database that cannot answer is a refusal, never a pass.
+
+### Changed — icons where words stood
+
+* **The owner's list**: the Info panel's description actions; a conversation's Back and Clear; the search
+  results' Magnet, Copy and Info; the home page's copy buttons, which were a drawing of their own that no
+  icon library reached; the Info panel's hash Copy and Share — "and look for the other places where a word
+  was used only because there was no icon font". The public pages had no icon font until 1.68.0, and
+  these were the words standing in for one. Each is an **icon button** now (`.ic-btn`): one glyph of the
+  library the site draws with — the markup is Bootstrap's `bi bi-*` as everywhere, which the map hands to
+  Font Awesome Free or Pro — its name for a screen reader in `aria-label`, and what it does in the site's
+  own tooltip (`data-tip`), shown by `pubTip()` while a mouse or a pen rests on the button (after a short
+  pause, so a pointer crossing a row does not flash one tip per button) and while the keyboard's focus is
+  on it, never on touch, gone when the button is pressed — whose own answer ("Copied!") takes its place.
+  No `title` on them: the browser drew its own box a second later. The live language switch swaps
+  `data-tip` as it swaps `title` and `aria-label`.
+* **The glyphs.** The description actions: a pen for the first words (Add a description), a nib for a
+  new version (Propose a rewrite), the pen on a square for Edit, the bin for Delete — whose first
+  press turns it into the filled bin, in the error colour, with "Click again to delete" held in the
+  tooltip and in its name until the second press or four seconds. The head: the star, the "+", the people
+  for "Who has this" (its three words took the room the torrent's name needs: on a phone the name stood
+  three letters to a line), the nodes of Share, the close. The rows: the magnet — still the primary one,
+  the filled accent box — the copy squares and the "i", and the star; the same Magnet and Info on every
+  torrent row the site draws (a profile's and the account's favourites, a list's window, the likes and the
+  descriptions tables), and the list window's remove. A conversation: the arrow back, and the archive box
+  for Clear (nothing is deleted; the next message brings the conversation back — the tooltip says so). The
+  copy buttons: the announce and donation boxes on the home page, the whitelist page's announce box and
+  its results' magnet, the Info panel's hash and magnet; a copy turns the glyph into the library's tick
+  for a second and a half. The search box's magnifier and its clearing cross were drawings too, and are
+  the library's glyphs now.
+* **The map** (`includes/icons.php`) has the six new names: `copy` is Font Awesome's `clone` — Bootstrap's
+  two overlapping squares line for line, in outline in Free and Pro alike (Font Awesome's own `copy` is two
+  sheets of paper; `clone` joins the names Free has in regular, drawn by both Free webfonts); `share` is
+  `share-nodes`, `pen` is `pen`, `vector-pen` is `pen-nib`, `trash-fill` the filled `trash-can`,
+  `arrow-left` itself. Where Pro has Bootstrap's own outline of the drawing and Free has only the solid,
+  Pro draws the outline (`prorole`), as the megaphone already did: share, the pen and the nib, and the
+  archive, the magnet, the "i" and the people — the last two the outline halves of pairs whose `-fill`
+  twin is the solid, which Pro can now draw as a pair. Drawn beside Bootstrap's glyph from Free 6.7.2 and
+  7.3.1 and the owner's Pro 6.7.2 and 7.3.1 before they went in.
+* **One box, the glyph in its middle, in every library.** An icon button is a square as tall as its row
+  (26px, a small button's height; 28px in the Info panel's head, whose controls were that tall), the glyph
+  at 1rem — a whole pixel, the star's too: at its old 1.05rem the glyph's box stood a fraction of a pixel
+  into its button and the star came out up to 1.3px above the middle in every library (its drawing is in
+  the middle of its em). It has no words to be level with, so it is not placed the way 1.69.0 places an
+  icon beside words (on the words' cap middle): its `<i>` and its glyph are blocks of line-height 1 —
+  which lays either font's em box exactly over the `<i>`, Bootstrap's and Font Awesome's alike — the `<i>`
+  is centred in the button, and the ink is moved by the glyph's own middle in its em: Bootstrap's from
+  the table 1.69.0 wrote (the nib and the filled bin added), Font Awesome's measured in the face it is
+  drawn in by the observer, as it measures a glyph beside words (Font Awesome 7's star stands 0.05em high
+  and stood 1.6px above the middle of its button until it was). The display is set at one class's weight
+  before `.d-hidden`, as 1.69.0's rows are, so a hidden button stays hidden. Measured in every icon mode —
+  see Tests.
+* **Left as words**, after going through every public page and every panel page and tab: what decides
+  something or sends a form (Sign in, Save, Send, Check, Mark all read, the panel's Test and Apply), the
+  people lists' Message / Add as friend / Block, the header buttons of the account page and a profile
+  (Share, Open my profile, Sign out — a header has the room), the list cards' Share / Edit / Delete and
+  their Public switch, the search toolbar's Share beside the count, the Info panel's Refresh (it answers
+  in words: "Asking…", "Refreshed"), and the panel's time ranges. The panel had its icon font all along:
+  none of its words stood in for one. The stats page's large pictograms and the footer's GitHub logo stay
+  drawings — pictures, not buttons.
+
+### Fixed — the Info panel's head: its star stood out of line
+
+* The star sat 1.3–1.6px above the "+" beside it (Bootstrap, and Font Awesome 7's star higher still), the
+  "+" and "Who has this" were bordered boxes of one size and Share of another, and the head's own 1rem gap
+  stood between them and Share and the close where 0.4rem stood between the rest. They are one row of
+  28px icon buttons now, one gap between each, every glyph within a pixel of its box's middle and every
+  box on one line (measured, see Tests) — the star keeps its bare look and its colours, in the same box.
+  On a phone the torrent's name has the room the words took.
+
+### Fixed — a sorted column's arrow stood apart from its name
+
+* With Bootstrap Icons, the sorted column's arrow in the likes and the descriptions tables' headers (and
+  the search results') stood 2.5px further from its name than the two-way arrows of the other columns:
+  Bootstrap draws the two-way arrow edge to edge in its square and a one-way arrow with 0.21em of room on
+  each side. The one-way arrow gives that room back; Font Awesome draws each glyph in a box of its own
+  width and needed nothing. 1.70.0's, found by the alignment check once its fixture gave the test account
+  a description of its own — the descriptions table on his profile and his account page.
+
+### Changed — the panel's links in the panel's own colour
+
+* **The owner**: the strong blue of Bootstrap's reboot, underlined, in the Settings help texts. Every
+  panel link took Bootstrap's LIGHT theme's link colour (#0d6efd) and its underline, which on the panel's
+  dark ground shouted out of the middle of every help text. The panel's links take its own accent now,
+  calmer — the hue of #4a9eff, lighter and less saturated: #81b1e4, #a6cbf2 under the pointer — through
+  Bootstrap's own variables, so the reboot rule, its hover and every visited link follow it (there is no
+  other visited colour in the panel). The underline stays only where it is needed: a plain link inside
+  words (a help text, a note, an alert, a list item, a folded "more") keeps one, thin and a little below
+  the letters, half-strength until pointed at; a link standing on its own has none. A link with a class of
+  its own is a component and keeps what its class says (the buttons, the menus, the tabs, the rows' own
+  link colours).
+
+### Changed — the account page's Overview: two columns of about one height, every part under a heading
+
+* **The owner's screenshot**: the Picture alone at the foot of the left column with empty space under it,
+  Privacy and the Profile cover running on in the right one. The Overview was two cards, and the left one
+  held the list of every browser the account had asked to be remembered: on the test account (24 of them)
+  it was 2045px against the right card's 1900, on one with two it would have ended some 600px short.
+* **Each group is a card of its own** now, under a heading and a line that says what it is for — Profile,
+  Picture, Profile cover, What we may send you, Your groups, Interface language, Time zone, Privacy, and
+  a linked sign-in — and the cards FLOW into two columns the browser balances (CSS columns, no card split
+  across them), in that order, which is also the order on a phone. Two columns wherever the Overview is
+  656px wide or more, one below. Measured at 1280, 1440 and 1920 (the page is 976px wide at all three): 1318 / 1376px in English
+  and 1379 / 1357 in Polish with the ratings off, 1505 / 1373 and 1379 / 1562 with them on — as even as
+  whole cards allow (no card could change sides and make them more even).
+* **The part that grows is at the bottom**: Account security — the second factor, the signed-in browsers
+  and "Sign out everywhere else" — is the last card, the page's full width, under both columns.
+* **Your groups** are drawn by the page as it is written, and by the script again as before: a card that
+  grew from "Loading…" once the page was laid out moved the cards after it into the other column as the
+  page opened.
+* **The Picture and Cover settings** name a column now: "Left column, under Profile" (the picture's
+  default) and "Right column, under Privacy" (the cover's), in the panel's words and hints; the blocks
+  stand exactly there. Their notes lost the sentence that is the card's line now.
+* **Adjust position and Remove** stand centred under the drop zone they act on, in both blocks; they hung
+  from its left corner (point 7).
+
+### Fixed — the links under the sign-in form turned pink once followed
+
+* "Register" and "Reset it" under the sign-in form — and the same links under the registration and reset
+  forms and the panel's sign-in — are the page's own way on, not something read and left behind, and
+  took the site's visited colour (#F6BAFF) once followed. They keep the link colour (#BAD7FF) now; a
+  link in the page's content still turns.
+
+### Fixed — the CAPTCHA widget's white edges
+
+* **The owner's screenshot**: white edges on the right and the bottom of the reCAPTCHA widget in "Please
+  verify you are human". 1.70.0 set `color-scheme: dark` on the root of both stylesheets, so the browser's
+  own parts of a form control are drawn for a dark page — and every element inherits it, the widget's
+  iframe included. The widget's own page declares no scheme (light), and where a frame and its page
+  disagree Chrome paints the page on an opaque canvas of the page's scheme: white, behind reCAPTCHA's dark
+  box, which does not cover its frame (302x76 in 304x78) — the rim, and the four corners round it.
+* The widget's box and the providers' challenge frames are in the "normal" scheme again (both
+  stylesheets): the frame is transparent, the dialog shows through, and nothing else changes — the page and
+  its fields stay dark. On the box, because Turnstile puts its frame inside a shadow root that only
+  inheritance reaches. Measured with each provider's published test key, on the registration form and on
+  the panel's sign-in, in the dark theme the site asks for and in the light one: reCAPTCHA's corners and its
+  unpainted strip were 245–253 of 255 in brightness and are 11 now; hCaptcha's and Turnstile's pixels were
+  not visibly touched (hCaptcha's light border is its own design), and they are in the same scheme now.
+
+### Changed — the picker's Font Awesome categories are icons
+
+* **The owner**: with every icon on offer (`shout_emoji_fa_scope` at "Every icon, by category"), the
+  picker's page of every Font Awesome icon is navigated by Font Awesome's own categories, and its strip was
+  seventy written words — "there are plenty of fitting icons", and for the alphabet "even three icons in
+  the button, A B C". Each chip is its category's icon now: one glyph, or a short run where one says less
+  than a few — the alphabet **A B C**, the numbers **1 2 3**, text formatting **B I U**, punctuation
+  **? ! &**, fruit and vegetables an apple and a carrot. The paw for the animals, the ringed planet for
+  astronomy, the tent for camping, the pie for the charts, the pram for childhood, the clapperboard for
+  film, the robot for science fiction, ™ for the brands, the ellipsis for everything else.
+* **Chosen by looking.** Every candidate was drawn from the owner's two Pro packages where they lie (read,
+  never copied), in solid, regular, light, thin and sharp solid of 6.7.2 and 7.3.1, at the chip's size and
+  larger; each of the 79 names chosen is an icon of both packages, declared by both stylesheets. Some went
+  on sight: 7.3.1 draws its light praying hands as a multicoloured glyph, a pumpkin's face stood beside the
+  Emoji chip's smile, two trucks would have been two categories that look alike, and Share's nodes are the
+  Share buttons' glyph.
+* **Names, committed**: `assets/emoji/fa-categories.json` — one entry for each of the 68 categories of the
+  owner's indexes and the catalogue's two pages of its own (Brands, Other), names only, nothing of Font
+  Awesome's files. The faces' answer carries each category's icons beside its name (and the file's date in
+  its address, so an edit is not a day of the old answer), and the picker draws a chip from the catalogue it
+  already holds: the icons named, when this package has every one of them, each in its own default style —
+  the site's emoji style where the icon is drawn in it, else the classic family at that weight, as a click
+  would insert it. A category whose icon the package lacks, or one the list does not name (a category a
+  later version adds), shows a generic glyph, the tag — with that missing too, its own first icon; with
+  nothing at all, its name, as every chip did.
+* **Its name is still there**, where it is needed: in the site's tooltip, under a resting pointer and on the
+  keyboard's focus ("Animals — 72 icons", "Zwierzęta — ikon: 72"), as the chip's name for a screen reader
+  (`aria-label`, with `aria-pressed`), and in the line under the grid, which names the category on show in
+  words — on a phone too, where no tooltip shows. No `title`: the browser drew its own box as well. The
+  chips keep the reader's alphabet (Brands and Other last), the category remembered, one Tab stop and the
+  arrows, Home and End.
+* **The chosen one reads at a glance**: FILLED with the accent, its icon in the card's ground — an accent
+  edge alone was one pill among seventy — and the keyboard's ring stands off it. A pill a little wider than
+  tall, a run a longer one, the glyphs in its middle; on a phone about a cell's height, the strip scrolling
+  inside the picker. Font Awesome 7 draws every icon in a box 1.25em wide, which set a run's letters a space
+  apart; a run's glyphs take their own width, as 6.7.2 draws them anyway.
+
+### Changed — Settings: Emoji & emotes, a group of its own
+
+* **The owner**: the emoji were mixed in with the shoutbox's settings, "and they are elaborate enough by now
+  to deserve a section of their own". They have a chip of their own, **Emoji & emotes** ("Emoji i
+  emotki"), right after Shoutbox, and two sections: **Emoji in the picker** — Font Awesome's faces, their
+  style, how much of the package the picker offers — and **Emotes and stickers** — the switches (the
+  emotes, "Beyond the shoutbox", the stickers, the approval), the upload limits, the waiting queue, the
+  table and the form that adds one. The group's first line says what it is for: every text that has the
+  picker, across the whole site — the shoutbox, private messages, torrent descriptions and the proposals
+  that rewrite them, list descriptions, the profile's description — and the one thing the pictures need
+  that the emoji do not: the shoutbox switched on, since the emotes are pictures it keeps (with a link).
+* **Nothing else moved.** The setting keys, their values and how they are saved are what they were — no
+  migration — and so are the ids the panel's script finds the two blocks by. The search finds them by their
+  labels and by their hidden words, filed under the new group now, in either language; Shoutbox's words no
+  longer claim the emotes. A link to either old block (`#admin-emotes`, `#admin-shout-emoji`) opens its new
+  section under its chip, scrolled to the block: a link to anything inside a section does now — a
+  sub-heading as well — clear of the sticky toolbar. No `#section-…` id moved.
+* **Shoutbox keeps the room**: its settings, who may read and write — six permissions now — and Purge, and
+  under its first line a second that says where the emoji and the emotes went, with the link. The two emote
+  permissions (`shout.upload_emote`, `shout.emote_auto`) left the room's matrix for one of their own under
+  the emote manager, "Who may upload emotes": the same read-only matrix, one request for both folds.
+* **Words that were the room's**: the table of emotes was "In the room" and is "On the site"; the section's
+  line says an emote is written as its code "in a shout — and, while 'Beyond the shoutbox' is on, in every
+  other text that has the picker"; the emotes' switch says off takes them out of every picker (it said off
+  "hides the picker", which has held the emoji as well since 1.69.0) and no longer repeats what they are,
+  which the line above it says; a face's token is written so "in a text", not "in a shout".
+
+### Fixed — "Invalid CSRF token" on a vote from a profile or the account page, and on any page a button meets
+
+* **The owner**: rating on a profile answered "Invalid CSRF token" — "check whether the same problem shows up
+  anywhere else, with other actions". There is one token per session, but every page published it under a
+  name of its own — `#search-csrf` on the search page, `#account-csrf` on the account page and on a profile,
+  `#shout-csrf` in the shoutbox, a hidden field in a form, nothing at all on the front page — and each script
+  read the one it knew. The Info panel's vote read `#search-csrf` alone, and the panel opens on a profile and
+  on the account page as well, where there is no such element: the vote went out with an empty token, from
+  both pages, in both rating modes. The panel's **Refresh** read the same one and was refused the same way.
+  It was the kind of bug 1.67.0 met once already (the shoutbox's Preview on the front page); four more
+  scripts — the second factor and the signed-in devices, the profile's description, the picture editor, the
+  sounds — read `#account-csrf` alone and worked only because their buttons have so far lived where that id is.
+* **Published once, asked in one place.** The layout puts the session's token on every page, once, as
+  `<meta name="csrf-token">` in the head — a meta, nothing for the policy's nonce to allow, and only where
+  there is a session for it to belong to — and every public script asks one helper, `csrfToken()`
+  (`assets/js/app.js`, on `window` for the other files): a widget that carries a token of its own says so with
+  `data-csrf` naming its field (the shoutbox), a form sends its own hidden field, everything else sends the
+  page's; a `data-csrf` naming a field that is not there falls through to the page's rather than sending
+  nothing. All thirty-two places a public script sends a token ask it: the votes and Refresh, the
+  description's panel and every editor's Preview, the account page's own requests (notifications, mail,
+  language, time zone, the account form, sign-out…), favourites, lists and privacy, people and messages, the
+  shoutbox, the second factor and the devices, the profile's description, the picture editor, the sounds. No
+  public script reads a page's own id any more; the ids stay in the pages, holding the same token, because
+  the tests read them.
+
+### Changed — the vote you cast, pressed again, is taken back
+
+* **The owner**: "a second click on the same element — a like, say — when we have already rated should remove
+  the rating, and it does not." It does now: the thumb you pressed, or the half star at your rating, pressed
+  a second time takes your vote back — out of the panel's numbers, the torrent's score, your likes or ratings
+  on your profile and in the account page's tab (at once: the panel says so with `rating:changed`, and the
+  table asks for its page again), and "Who has this" (asked afresh each time it opens, and while it is open
+  on that torrent).
+* **The pressed one shows it.** The thumb you cast is filled — the glyph the likes table draws a cast vote with
+  — in the colours of the bar above it, green or red, its words white, with `aria-pressed`; it was a faint
+  outline. The half star at your rating has a gold mark under it — the five stars show your rating or, before
+  you rate, the average, and the mark says which — and `aria-pressed`. Both say in their tooltips what a
+  second press does: "Your vote — press again to take it back", "3.5 stars — your rating; press again to take
+  it back". While a vote is on its way the buttons stand still, and a vote that did not go through says so
+  under them instead of doing nothing.
+* **An operation of its own, not a toggle.** The button knows it is pressed and asks `rate_hash` for
+  `{op: 'remove'}` — `repRemoveVote()` — instead of sending the same value again for the server to guess about
+  (the house rule since 1.67.0): a double click asks the same thing twice and cannot cast and take back in one
+  go, and taking back a vote that is not there succeeds and changes nothing. It deletes one row at most, the
+  caller's own — the identity a vote is cast with: the account, or for an anonymous voter the address (IPv6 by
+  its /64) — so an address never takes back the vote an account cast from it. It passes every gate a vote
+  passes — ratings on, who may vote, `rating.vote`, the hour's budget — and pays a vote's CAPTCHA points.
+  Votes are not in the audit log, and neither is taking one back. The totals are counted again in the site's
+  mode.
+* `includes/reputation.php` said there would be no "unvote", because a button that can be un-pressed "doubles
+  the surface for automation"; it says now why taking back costs exactly what voting costs, so the surface
+  stays the size it was. The ban's `repClear()` counted the totals again without the configuration — harmless
+  while every vote goes, which is what a ban does — and takes it now, required, so it cannot be left out again.
+
+### Fixed — opening the Info panel spent the reader's votes
+
+* Found on the way: the panel asks twice, every time it opens, whether its reader may vote — and each asking
+  spent a vote from the hour's budget (`rep_rate_per_hour`, 30 by default). Fifteen panels opened in an hour
+  left a member no vote at all, and each vote cost three, its own and the two of the panel it redraws: a thumb
+  pressed on and off a few times would soon have been refused. Asking only looks now (`rateLimitPeek()`);
+  a vote and a vote taken back spend.
+
+### Fixed — a group changed in a request kept its old permissions there
+
+* Found by the tests: an account's permissions are remembered for the request and forgotten when its groups
+  change — except that with e-mail verification off the memo's key is the bare id, which PHP keeps as a
+  number, and the forgetting compared it with a string: nothing was forgotten, and a grant followed by a page
+  in the same request (what `v1/users/grant` and the panel's grant do) answered with the permissions from
+  before. Compared as strings now (`userPermissionsForget()`).
+
+### Added — comments on a torrent
+
+* **The owner**: "add comments to hashes — plan it well, it has to be safe: some emoji, simple BBCode without
+  pictures, a link perhaps, a length to configure of course; a new notification sound for somebody having
+  commented; permissions and the rest."
+* **Where.** A section of the Info panel right after the rating block, **Comments (N)**. The count is all the
+  panel's one answer carries (`index_info` → `comments`); the thread is asked for (`comment_list`) when the
+  section comes into view in the panel, or is opened. It reads oldest to newest and opens on its newest page
+  (`comments_per_page`, 20) with *Show earlier comments* above it: a new comment lands at the end, beside the
+  composer, and a notification's link (`#comment-N`) lands on its comment, lit for a moment, loading earlier
+  pages until it is there. A row: the author's picture and name (a link to the profile where it opens for this
+  reader), the time in the READER's zone (the moment with its offset in the tooltip), "edited" — "edited by a
+  moderator" when it was one —, and the actions as this release's icon buttons: **Edit** (in place, the same
+  editor, the words as stored) and **Delete** (your own: the first press arms it, as the description's does;
+  somebody else's: a reason first). A comment by a member you blocked is folded away ("Hidden — this member is
+  blocked by you.", Show). In English and Polish, drawn again by the live language switch; on a phone the
+  buttons take a line of their own.
+* **The composer** is the site's editor with a comment's toolbar — B I U S, the link only for a writer who may
+  link, quote, spoiler, code — and the emoji picker in a new `comment` context: the emoji, Font Awesome's icons
+  as the site offers them and the emotes; a sticker is drawn as an emote, so there is no Stickers page. The
+  counter counts what a reader will see, as the server does; the Preview is the server's (`richtext_preview`
+  for `comment`); **Ctrl+Enter** sends; **@** offers members' names (the room's list, `shout_mentions` with
+  `for=comment`, gated by the right to comment). Somebody who may not write is told why instead — sign in, not
+  allowed, silenced by a moderator until a date (a mute stops writing and correcting, never taking your own
+  words back), or no CAPTCHA for guests.
+* **Safe by construction.** Not the shared renderer with a switch: a comment's list of tags is short, so it has
+  a walker of its own over the raw text, the profile description's kind (`commentParse()`,
+  `includes/comments.php`) — every run of text escaped on its way out, and the only tags in the output the ones
+  it writes: `[b] [i] [u] [s]`, `[spoiler]` / `[spoiler=title]`, `[quote]` / `[quote=name]` ONE level deep (a
+  quote inside a quote is its text), `[code]` (all of it literal), and `[url]` / `[url=…]` only while Settings
+  allows links and the writer is a member — through `richtextSafeUrl()`, with `rel="nofollow noopener
+  noreferrer ugc"`, a new tab and the "you are leaving" question; otherwise the tag is text, and a save refuses
+  it, so nobody is surprised by it later. No pictures, tables, sizes or colours: whatever else was typed is
+  shown as typed. Then, on the finished text only, what every text with the picker gets: `:fa-…:`, the emotes
+  at the size of the words, `@name` as a link to the profile. Cleaned first — control characters, the bidi
+  embeddings, overrides and isolates (how a link's words are made to lie) and the characters that draw nothing
+  go —, at most two line breaks in a row and 20 lines, 3 links, tags 8 deep.
+* **The length** is counted in characters a READER sees — the words, not the tags round them, in code points
+  (`comment_max_chars`, 500, clamped to 20–5000). The text as typed may be four times that (at most 20 000
+  characters and 60 000 bytes), and a text over 256 KB is refused before anything is done with it.
+* **Who.** Five permissions, asked of the ACCOUNT, never of a panel session's blanket: `comment.view`,
+  `comment.post`, `comment.edit_own` and `comment.delete_own` (members, granted once by the migration) and
+  `comment.moderate` (moderators, with view and post: edit anybody's — marked, audited, its author told — and
+  remove it with a reason its author is shown). A thread is exactly as visible as the Info panel it is in: a
+  hash the reader may not open has no comments to read or write. With accounts off there are no comments (the
+  legacy default says no to every `comment.*`). Correcting your own: for `comment_edit_minutes` (15; 0 never);
+  taking it back: for `comment_delete_own_minutes` (60; 0 without a limit). A comment is taken down SOFTLY:
+  gone for every reader, kept with who removed it, when and why.
+* **Guests**, only where the operator grants the guest group `comment.post` (nobody does as shipped): signed
+  "Guest #4f2a" — four characters of a keyed hash of the day and the address group, computed as it is
+  written: two guests on one day almost always differ, the same one tomorrow is somebody else, and nothing in
+  it leads back to an address, which is never shown. A CAPTCHA every time — with no provider set up there are no
+  guest comments, and the composer says so —, never a link, and held for a moderator while
+  `comments_guest_review` is on (as shipped): a moderator sees it in its place, marked, with *Let it through*,
+  and the people it is news to are told only then. A guest cannot correct or take back a comment, is told
+  nothing and cannot be @-mentioned. Settings says all of this beside the switches.
+* **Who is told** (`commentNotifyNew()`): the member who registered the torrent, the author of its published
+  description, the members who commented before (the latest fifty) and the members it @-mentions — once each,
+  by the strongest reason they have not switched off, in THEIR language; never its author, never across a
+  block either way, never somebody who may not read comments; a thread already unread in somebody's
+  notifications is not announced to them again (a mention always is). Four switches on the account page, under
+  the notifications — a torrent I registered, a description I wrote, a thread I commented in, a mention
+  (`users.comment_notify`, all on). A notification can say where it happened now (`user_notifications.link`,
+  only ever an address of the site's own), and the account page draws it as a **Show** button that marks it
+  read on the way.
+* **Two new sounds**: *somebody comments where I am told of it* (`comment`) and *a comment mentions me*
+  (`comment_mention`), with site defaults in Settings → Sounds (none as shipped, like every other) and a choice
+  on the account's Sounds tab. The pulse and `user_me` carry `unread_comment` and, of those,
+  `unread_comment_mention`; `sounds.js` plays the comment's sound and takes those out of the notification's
+  count — one comment, one sound.
+* **Settings → Descriptions, comments & ratings** (the group's new name; "Opisy, komentarze i oceny") →
+  **Comments**, between the descriptions and the ratings: `comments_enabled` (on), `comment_max_chars` (500),
+  `comment_links` (on), `comment_edit_minutes` (15), `comment_delete_own_minutes` (60), `comments_per_page` (20),
+  `comment_rate_per_hour` (30 an account — a guest's address group for guests; a correction counts too),
+  `captcha_pts_comment` (1, the smart CAPTCHA's points), `comments_guest_review` (on), and every group's comment
+  permissions, read-only; Settings → Sounds: `sound_default_comment`, `sound_default_comment_mention`. Each in
+  its four places: the default, the save's list and clamp, the form, the search's words.
+* **Data** (schema 83): `hash_comments` — the hash, the author (or a guest's tag and address group), the text as
+  written, `status` (visible, pending, deleted), when it was written, edited and by whom, let through, deleted
+  and by whom and why — indexed for a thread (`info_hash, status, id`), a member's comments and the queue;
+  `users.comment_notify`; `user_notifications.link`. No counter column: a torrent's count is a range of the
+  thread's index, and `index_hashes`, where one would go, is the table of millions of rows. Deleting an account
+  deletes its comments and forgets its moderation stamps on other people's (the audit log keeps the name).
+  Endpoints `comment_list`, `comment_post`, `comment_edit` (GET the words as stored, POST the change),
+  `comment_delete`, `comment_approve`, `comment_prefs` — thin: each is a request function in
+  `includes/comments.php` that answers a status and a body, so the tests put every refusal to it without a
+  server. Every POST sends `csrfToken()`.
+* **For what comes next.** Reports: `commentDelete()` takes `['notify' => false]` — the silent removal,
+  audited as silent; every row the page is handed carries `can_report` (false for now), and
+  `window.Comments.onActions(fn)` puts a button beside Edit and Delete in every row drawn; the held guest
+  comments are `commentPendingList()` and `commentApprove()`. One anti-spam layer: `commentFloodCheck()` is the
+  ONE gate every comment write passes — today a guest's CAPTCHA, a member's smart-CAPTCHA points and the hourly
+  limit — and its body is the only thing to replace.
+
+### Added — reports of comments, descriptions and shouts; a warning, loud or silent
+
+* **The owner**: "we already have a well-made system for reported messages. I would add reporting comments,
+  descriptions and even shouts from the shoutbox — so a tab for where each came from, some good filtering, and
+  permissions for it. Notifications too, like when an admin deletes our comment. And a choice whether it is
+  silent or loud (as a warning). Plan it, then do it."
+* **Reporting, from where the words are.** A **flag** beside somebody else's comment (among its actions in the
+  Info panel), under a torrent's description (beside Propose, Edit and Delete — the words published now) and
+  on a line of the shoutbox (among the line's controls): an icon button of this release's kind — its name for
+  a screen reader, what it does in the tooltip —, or a room control like its neighbours. Pressed, a small box
+  opens in place: *What is wrong with it?*, a reason of up to 300 characters, **Send** (or Enter), Cancel (or
+  Esc — which puts the box away and leaves the Info panel open), and the promise that only the moderators read
+  it and the author never learns who reported. Sent, the flag is filled, in the warning colour, and says
+  **Reported** — at once, and on every page after, from the server's own word on each row (`can_report`,
+  `reported`); pressed again it only says so. Never on your own words, a line the site said, or anything the
+  reader cannot see; one OPEN report per member per thing (the database's key — after it is closed, the same
+  member may report it again); a member's reports an hour are limited. `content.report`, members as shipped.
+* **Kept beside the message reports, not in them.** A new table, `content_reports`, and not `message_reports`
+  made generic: a message report is a privacy rule written into a schema — the reported line and the one before
+  it, never the conversation —, every query and test of that queue is built on its shape, and it is untouched.
+  The new kinds share one table, keyed by the thing reported (the kind, a comment's or a shout's id, the
+  torrent's hash), and each report keeps the words **as reported**: a shout is pruned by retention, and a
+  comment can be corrected or a description replaced after somebody reported it.
+* **The Reports page: a tab for where it came from.** **Comments**, **Descriptions** and **Shouts** beside the
+  torrent reports and the messages, each with its count of things waiting (a thing three people reported is
+  one to decide), each drawn while its feature is on and the session may read that queue. The page opens for
+  any of its queues and shows only the tabs the session holds — somebody given the comments alone opens it on
+  Comments; the torrent reports' own tabs, toolbar and table stay with `panel.reports.view`. No "All" tab: it
+  would either mix the torrent queue and the messages — other cards, other permissions — or be an "all" that is
+  not one. **One card for each reported thing**: its words once, drawn by their own renderer (a comment's
+  allow-list, a description's with its hidden parts shown, the room's for a shout — the markup a reader is
+  handed), and beside them the words as reported when they changed or went; a link to where it lives; its
+  author, and what the account already is — banned, silenced, staff, reported how often in all, warned how often
+  and the latest warnings; and every report about it, newest first, with its reason and what became of it.
+  **Filters**: the status, the reported member, the reporter, a date range and a text (reasons, the words,
+  notes, names); *Clear the filters*.
+* **What a moderator may do** (`panel.reports.<kind>.handle`), all the target's reports at once: **Close** (no
+  action) or **Reopen**; **Remove** the words through each kind's own function — a comment through
+  `commentDelete()` (the Reports page's authority; the removal still leaves who, when and why on the row), a
+  description through 1.70.0's `contentDelete()`, a shout through `shoutDelete()` —, refused if the words
+  changed since the card was drawn; **Warn** the author; **silence** the author (messages, shouts, comments…)
+  for a day, a week, a month or until lifted, or **ban** the account for a week, a month or until lifted — by
+  the database's clock — and lift either.
+  An answer to the reporters and a note for the log, as on the message card. The message card's rules for an
+  account: never one that can open the panel, never your own, never a ban without a date (the owner's, from
+  Users). A guest's comment has no account to act on: its words can be removed, nobody warned.
+* **Silent or loud.** Every action that reaches the author carries the choice, a pair of radio buttons on the
+  card. **Silently**: the author is told nothing — the words are simply gone, the silence simply applies.
+  **As a warning**: ONE notification of a new type, `warning`, in the AUTHOR's language — "Warning: your comment
+  on “…” was removed", "Warning about your description of “…”", "Warning: you are silenced until …" — with the
+  moderator's reason (a warning needs one: without it the card says so and nothing is done) and which warning
+  this is on the account; and a row in `user_warnings`. **Warn** is loud by what it is. Lifting a silence or a
+  ban is good news, not a warning: said plainly when loud, not at all when silent. The removal functions are
+  told not to tell the author themselves (`commentDelete()`'s and now `contentDelete()`'s `notify: false`), so a
+  loud removal is one notification, not two.
+* **Warnings** (`user_warnings`: the member, the reason, what it was about, what came with it, who gave it,
+  when): the count and the latest three on every reported author's card — the new ones and the message card —,
+  the count beside the status in **Users** and the latest five in the member's window there. The member sees
+  each warning among their notifications, marked with the library's warning sign and a bar in the warning
+  colour — and nowhere else, nothing public. An automatic silence after so many warnings was left out: it is a
+  setting of its own with its own questions (how many, over what time, never shortening a longer silence), and
+  the count is now on every card for a moderator to act on.
+* **The message card gets the same choice**: silent or loud for Delete the message, the silences and the bans,
+  a reason for the author, and **Warn**. A request without a choice — what every caller sent before this
+  release — is answered as it always was: the author told the plain fact.
+* **Who hears what.** The reporters hear the outcome, as on the message card — closed, removed, handled —, each
+  once, in THEIR language, with the moderator's answer when there is one; they learn nothing about the other
+  account beyond what the moderator writes. The author hears only a loud action. Nobody is ever told who
+  reported, and no reporter learns of another. Every action is an audit line in the log's Reports group
+  (`creport.file` for a member's report, `creport.close` / `reopen` / `remove` / `warn` / `mute` / `unmute` /
+  `ban` / `unban`), a warning one in Users (`user.warn`, and `pm.user.warn` from the message card), besides the
+  lines the removal functions write themselves.
+* **Permissions** (Users → Groups): `content.report` (members, granted once by the migration; no with accounts
+  off; guests nothing), and six for the Reports page — `panel.reports.comments.view` / `.handle`,
+  `panel.reports.descriptions.view` / `.handle`, `panel.reports.shouts.view` / `.handle` — granted once to the
+  moderator group and in its preset: the words were public already. The message queue (`panel.messages.*`)
+  stays with nobody, as before.
+* **Data** (schema 84): `content_reports` and `user_warnings`; an account deleted takes its reports and warnings
+  with it, and the reports about its comments and shouts (which went with it); a report about its description
+  stays with the torrent's words, without an author. Endpoints: `content_report` (a member's report),
+  `admin/content_reports` (the tabs' counts, a filtered page of cards) and `admin/content_report_action` — the
+  router asks only for the panel, and each asks the kind's own permission. Thin, each a request function in
+  `includes/reports.php`. For part F, one anti-spam layer: `contentReportFloodCheck()` is the ONE limit call a
+  report passes (today a plain hourly limit per account), and its body is the only thing to replace.
+
+### Added — one anti-spam layer for everything people write
+
+* **The owner**: "writing comments and descriptions is protected against spam, I take it — if somebody is too
+  quick it fires a CAPTCHA or something? And a guest could always have one? Are messages protected the same way,
+  so nobody starts sending spam? And the other sensitive places, the shoutbox, so nobody floods it? There a
+  growing interval would do: the first 2-3 messages without a limit, then a 5 second limiter, then 15, then 30,
+  and the whole limit expiring after about 2 minutes — or a CAPTCHA; plan it."
+* **What there was**: a file-based window per address (`rateLimitAllow()`, which lets everything through when its
+  file cannot be read and knows nothing about who is writing), a fixed five-second wall in the room, and no CAPTCHA
+  on anything a member writes. **What there is**: `includes/antispam.php`, asked by every place people write — a
+  line in the room and its correction, a sticker and an emote upload; a message and a message report; a comment and
+  its correction; a torrent's description (the Info panel's submission, proposal and Edit, and the whitelist
+  form's); a list's name and description; the profile's description; a report of a comment, a description or a
+  shout; and a vote — with one question and one answer: `antispamCheck($db, $cfg, $context,
+  antispamSubject($me, $ip), $words, $opts)` gives a reservation or a refusal; the caller writes, then
+  `antispamRecord()`, or hands the reservation back with `antispamRelease()` when the words are refused after the
+  check (too long, a bad tag) — so a refused write never costs a step. The **subject** is the account for a member
+  and the address group for a guest (an IPv4 address, an IPv6 /64); a member who changes address is the same member.
+* **A ladder per place.** A free burst, then growing pauses, all forgotten after a quiet spell; a write refused for
+  coming early does not climb it. As shipped (Settings can change every number):
+  the **room** 3 free, then 5 s, 15 s, 30 s, 60 s, reset after 2 minutes — the owner's sketch;
+  **messages** 3 new conversations free, then 30 s, 1, 2, 5 min, reset after 10 minutes — counted in
+  conversations STARTED, not lines: a conversation both people are in is a chat, and the other person can block;
+  **comments** 2 free, then 15 s, 30 s, 1, 2 min, 5 minutes — a comment is longer than a line, and the pattern of
+  comment spam is the same words under many torrents; **descriptions** 2 free, then 1, 5, 15, 30 min, an hour — a
+  considered text that goes to a moderator; **reports** 3 free, then 30 s, 2, 5, 15 min, 30 minutes — three reports
+  at once is somebody tidying up, thirty a campaign; **lists** 3 free, then 10 s, 30 s, 1, 2 min, 10 minutes —
+  renaming while sorting; the **profile's description** 3 free, then 30 s, 1, 2, 5 min, 15 minutes; **emote
+  uploads** 3 free, then 30 s, 1, 2, 5 min, 30 minutes; **votes** 10 free, then 2, 5, 10, 30 s, 2 minutes —
+  rating as one browses (the hourly budget of 1.18.0 stays). The pause is worked out when it is asked for, from
+  the last write and the numbers as Settings has them NOW, so a changed setting applies at once.
+* **Decided and reserved in one step, and never open.** A row per place and subject in `antispam_state`, taken
+  under `SELECT … FOR UPDATE` (the row made first by an upsert: an `INSERT IGNORE` takes a shared lock two racers
+  would deadlock on), the times unix seconds by the DATABASE's clock. Two requests at once are served one after the
+  other and the second sees the first's write: a double click cannot post twice, and ten connections cannot take
+  ten free lines. The message send holds a transaction of its own; the layer works inside it, the send's rollback
+  is the release, and a refusal is committed first so it counts. Any failure — no table, a lost connection, a
+  lookup before the lock — is a refusal, 503 "could not be checked, try again in a moment".
+* **A CAPTCHA at the top of a ladder**, not a wall on every form: whoever keeps hitting a ladder's LAST step — a
+  write made there, or an attempt refused while waiting there — `antispam_captcha_after` times (3) is asked for one
+  on the next write; solving it eases the level back to the edge of the burst, so the next pause is the first step
+  again. **A guest solves one every time** they write (a comment, a description; `antispam_guest_captcha`, on). The
+  order a person meets things in: how long to wait, then how many, then whether they said it already, and only then
+  the CAPTCHA — nobody solves a puzzle to be told to wait. The token is verified before the row is locked (a
+  verifier is a network call); a token the same request already verified — the whitelist form asks for its own —
+  counts.
+  **No provider set up**: nobody can be asked, so the layer paces alone, and Settings says so above the section (a
+  guest's comment is still impossible without one — the comments' own rule).
+* **Messages**: new conversations an hour and a day (8 and 20; a new account 2 and 4), counted from the messages
+  themselves; the same words to more than `antispam_pm_spread` people (2) within the duplicate window refused as
+  spam. The address ceiling on sending is the messages' own now, `rate_limit_pm` (240 an hour, Settings → People):
+  the send read `rate_limit_favourites`, a key no setting ever defined, so it was always its fallback.
+* **New accounts** — younger than `antispam_new_days` (3): every pause and the quiet spell × `antispam_new_factor`
+  (2), their own conversation limits, and the links they write in the room, a comment, a list's description and the
+  profile's description drawn as **words** (`antispam_new_links`). Decided when the words are drawn, from when they
+  were WRITTEN: a link written on the first day stays words on the fourth — nobody's spam goes live by itself three
+  days later — and one written once the account is trusted is a link; a moderator's correction re-dates the words.
+  The Preview and the comment composer say so before anything is sent.
+* **Staff** — an account holding `panel.access` — skip the ladders, the CAPTCHA escalation, the new-account rules
+  and the conversation limits while `antispam_staff_exempt` is on (as shipped): a moderator clearing a queue is not
+  paced, and the escalation is the ladder's, which staff do not climb. The plain duplicate rule is everybody's.
+* **The same words twice** — case and spacing aside — within `antispam_dup_seconds` (600) are refused in the room,
+  a message (to the same person), a comment and a description: 409 with its sentence. Under eight characters never
+  counts ("hi", "+1").
+* **Corrections** — a line's, a comment's — are not laddered and never asked a CAPTCHA or the duplicate rule: a
+  gap between two (the room's `shout_flood_seconds`, a comment's five seconds), no more.
+* **`shout_flood_seconds` is kept and folded in, not migrated**: with the layer on it is the floor under the room's
+  steps (the first lines stay free) and the gap between two corrections; with the layer switched off it is the
+  room's old wall between every two lines, as before. Its help says so in both languages.
+* **What the reader sees.** Every refusal is one shape — `error`, a sentence in the reader's language with the time
+  in it ("Too fast for the room — you can write again in 4 s."), `retry_after`, and `antispam` {kind, context,
+  seconds, and the same sentence with `{time}` where the time goes}; a CAPTCHA request also names the provider and
+  its PUBLIC key. `assets/js/antispam.js` serves every composer from it — the room (a line, a sticker, a
+  correction, an emote upload), a conversation and its report, a comment and its correction, the description
+  editor, the whitelist form, the lists' windows and the picker's "new list", the profile's description, the report
+  box, the vote buttons: on a wait, **Send counts down on itself** — disabled, the time drawn by the stylesheet from
+  `data-as-wait` (never a text node: the live language switch pairs a button's text nodes by position), the
+  sentence beside it ticking — and comes back by itself at zero with the words still in the box; a CAPTCHA request
+  opens **the site's CAPTCHA box** and the same request goes again with the token. A page that had no box (the room,
+  a conversation, a list) draws it and loads the provider's script the first time one is needed — the policy
+  already allows the chosen provider's hosts on every page (`captchaCspHosts()`, and `.htaccess`), which is what
+  lets a script be added then. A guest's comment composer has both from the start: a guest is always asked.
+* **Settings → Security & CAPTCHA → Anti-spam**: the switch, the CAPTCHA after how many hits, the guests' CAPTCHA,
+  the staff exemption; a grid of ladders — burst, pauses as a list ("5, 15, 30, 60"), quiet spell — one row per
+  place; new accounts (days, factor, links as words); messages (the four conversation limits, the spread); the
+  duplicate window. Every setting in its four places (defaults, the save's allow-list and clamps, the form, the
+  search's words), help in English and Polish.
+* **The log** hears of a subject refused three times in a row — `antispam.refuse`, in the Reports group — at most
+  once an hour per subject.
+* **Data** (schema 85): `antispam_state` — the ladder's level, the last write and the earliest next one, the hits
+  at the top and whether a CAPTCHA is due, the refusals in a row, the last correction, fingerprints of the last
+  words, a revision — pruned by the janitor after two days untouched; an account deleted takes its rows. 46 new
+  defaults: the layer's 40, `rate_limit_pm` and the five switches below (a database that already has one of them
+  keeps its own row).
+
+### Fixed — a vote could never be asked for a CAPTCHA; the per-form CAPTCHA switches had no defaults
+
+* `rate_hash` asked `isCaptchaRequired('vote')`, which reads a `recaptcha_on_vote` switch no setting ever defined:
+  the gate was dead code, and a script could vote as fast as the hourly budget allowed. A vote is on the anti-spam
+  layer now (context `vote`, above), and the refusal it can meet is peeked at first, spending nothing.
+* The CAPTCHA's per-form switches — the abuse report form, the panel's sign-in, the status check, the appeal and
+  the block check — were on the Settings page, in the save list and in the installer, but never among the defaults:
+  an install whose settings came from the migration was shown "Yes" for the report form (the form's fallback) while
+  the code read the missing key as no. The defaults are what the page shows for a missing key: the report form 1,
+  the other four 0 — so on such an install the report form now asks for a CAPTCHA (with a provider set up), as
+  Settings always said it did. An install that saved these switches keeps what it saved.
+
+### Fixed — "@name." at the end of a sentence was not a mention
+
+* A name followed by a full stop ("thanks, @smokeuser.") or a dash was looked up with them — a name may contain
+  both —, found nobody, and stayed text. Both parsers (the room's and the comments', one function:
+  `shoutMentionCandidates()`) try the token, then the token without its trailing dots and dashes — the longest
+  that is an account wins, so a name that really ends in a dot still does — and the punctuation stays text after
+  the link. Both suggestion lists (the room's and the comments') close at that punctuation instead of offering
+  names for "smokeuser.", and the next letter asks again.
+
+### Tests
+
+* `scratchpad/shots/icons_align_check.js`: an icon button is measured as what it is — a glyph with no words
+  to be level with: every shown `.ic-btn`, its glyph's ink middle against the middle of the box inside its
+  border, across and down, within 1px; the buttons of one row (the Info panel's head, the search results'
+  actions, a torrent row's, the description actions, a conversation's head, the copy boxes, the search
+  box) of one size and on one line within half a pixel, the line read inside the row. In every mode it
+  runs — Bootstrap Icons, Free 6.7.2 and 7.3.1, the owner's Pro 6.7.2 and 7.3.1 in solid and light and 7's
+  Jelly — in English and Polish, on a desktop and a phone, the Info panel in each of its states (no
+  description, somebody else's with Propose a rewrite, your own with Edit and Delete, and Delete armed —
+  held armed while it is measured) from two catalogue rows and a grant to the member group that it makes
+  and takes back; the tooltips hidden while it photographs. Its first full run found the star's 1.05rem
+  (up to 1.3px off) and 1.70.0's sort arrows (both above). And two things of its own: the search's hourly
+  budget (`rate_limit_index_search`, one bucket for the search, "Who has this" and the likes) ran out
+  about half way through a run, so the last modes' search pages drew no rows and measured nothing,
+  silently — the budget is cleared for each mode and a search that draws no rows fails; and a request the
+  browser could not make is listed beside the script errors (Windows' `ERR_NO_BUFFER_SPACE` on a long run
+  cost one run a stylesheet, and its page was measured in the browser's defaults). The last run: 0 failed;
+  892 icon buttons measured in each full mode and 804 in each style mode, the worst glyph +0.59px from its
+  box's middle with Bootstrap and −0.84px with Font Awesome (−1.00 in Jelly: the search box's 12px cross);
+  words beside icons as before (worst +0.87px, every gap within a pixel of its kind).
+* `scratchpad/shots/icons_check.js`: every icon button on the pages it visits, in every mode — one glyph, no
+  words, a name (`aria-label`) and a tooltip (`data-tip`), no `title`, no inline drawing in any button —
+  and the Info panel's sizes; a row of buttons is read by its buttons' names where they have no words.
+  972 checks, 0 failed, in seven modes (Bootstrap Icons, Free 6.7.2 and 7.3.1, the owner's Pro 6.7.2 and
+  7.3.1, and Pro in Sharp Solid and Duotone Light), 326 icon buttons on eight pages in each.
+* `scratchpad/shots/account_width_check.js`: the Overview at 1280, 1440 and 1920 in English and Polish, with
+  the ratings off and on — two columns, as even as whole cards allow (no card could change sides and make
+  them more even), Account security the last card and the full width — and one column on a phone.
+* `scratchpad/shots/media_check.js`: the picture and the cover in the column their setting names; Adjust
+  position and Remove centred under their drop zone within a pixel, on a desktop and a phone.
+* `scratchpad/shots/polish_check.js`: the Copy buttons are icons with names; the tooltip — not at once under
+  a pointer that crosses a row, shown after a rest, gone when the pointer leaves, shown on keyboard focus,
+  and "Copied!" in its place on a press; the links under the sign-in, registration and reset forms keep
+  the link colour once visited (a link in the content still turns); the panel's links on six pages — none in
+  Bootstrap's #0d6efd, a plain link in words #81b1e4 and underlined, a visited one the same.
+* `scratchpad/shots/captcha_check.js` (new; in the sweep after `security_check`): reCAPTCHA v2, hCaptcha and
+  Turnstile with their published test keys, on the registration form and on the panel's sign-in, with the
+  widget's dark and its light theme — twelve states: the widget's box and frame in the "normal" scheme while
+  the page and its fields stay dark, and no light pixel at the frame's corners and its unpainted strip.
+  Against 1.70.0's stylesheets (served in their place by request interception, `CAPTCHA_CSS_FROM`) all twelve
+  fail.
+* `fav_check.js`, `lists_check.js`, `share_check.js`, `content_check.js`, `descriptions_check.js`,
+  `picker_everywhere_check.js`, `who_check.js` and `panel_fixes_check.js` find and read the buttons that are
+  icons now by their names and tooltips; `descriptions_check.js` also the armed Delete (its name, the filled
+  bin, the tooltip held).
+* `tests/icons_test.php` (130 checks), a new section 7: the six new names and Pro's outlines; the places
+  drawing icons and not words; no inline drawing for the copy buttons or the search box; the tooltip's
+  listener, its options and the language switch's `data-tip`; the icon button's CSS (its display before
+  `.d-hidden`, the glyph a block, the middle) and the observer fitting an icon button's Font Awesome glyph.
+* `tests/usermedia_test.php` (159 checks): the Overview a flow of cards, the picture's and the cover's places
+  in it, Account security printed after it.
+* Before and after screenshots of every place, and the CAPTCHA check's, in the untracked
+  `scratchpad/shots1710/`.
+* `scratchpad/shots/emoji_picker_check.js`, the category chips in BOTH of the owner's packages — 6.7.2 and
+  7.3.1, each installed through the CLI for the run and deleted after: in English and Polish every chip is
+  the icon or the run the committed list names (so every name is in that package), drawn by its font, in
+  the site's style; no words, no `title`, its name as `aria-label` and with its count as the tooltip; one
+  chosen, pressed, the one Tab stop, filled with the accent. The keyboard (End, Home, Right: each chip it
+  reaches chosen and its tooltip shown), a resting mouse (no tip at once, the tip after a moment, gone when
+  the pointer leaves), a phone (the chips 35px, the strip scrolling, a tap choosing without a tooltip). The
+  style rule in an emoji style not every chosen icon has — 7.3.1's Jelly Regular: 32 glyphs in it, 47 in
+  Regular — and in 6.7.2's Sharp Solid (all 78). The fallback, the answer's names rewritten on their way to
+  the page: a missing name, a run with one missing and an empty list give the tag, the rest untouched; with
+  the tag missing too, the category's own first icon. The Font Awesome settings read in Settings → Emoji &
+  emotes. 112 checks, 0 failed, twice (the second with each page cleared of the category remembered before
+  it loads: the room's picker reads it as the page mounts it). The sheets of every chip, idle and chosen,
+  with both languages' tooltips, and the pickers: `scratchpad/shots1710/emoji-chips-*.png` (untracked —
+  Pro glyphs).
+* `scratchpad/shots/settings_groups_check.js` (49 checks, 0 failed): the Emoji & emotes chip in both
+  languages and first by its own section; every one of the ten settings in its section there and none left
+  in Shoutbox; found by a search in English and in Polish under the new chip; `#section-emoji`,
+  `#section-emotes` and the two old blocks' ids opening under it, in view; Shoutbox's line leading on.
+  `settings_hit_check.js` (61 checks, 0 failed): "Emotes and stickers" is a section's name now, marked
+  whole and clear of the icon its heading starts with; the icon-led block of the "icon" search is
+  Shoutbox's line. `picker_everywhere_check.js` (66 checks, 0 failed) reads "Beyond the shoutbox" in its new
+  section, under the new chip. `icons_align_check.js` on the page whose icons moved (Settings, in Bootstrap
+  Icons, Free 6.7.2 and 7.3.1 and the owner's Pro 6.7.2 and 7.3.1, English and Polish, desktop and phone):
+  0 failed, every icon beside words within 0.71px of level — the new headings' and Shoutbox's new line's
+  among them. `langswap_check.js`, `polish_check.js` and `iconpack_check.js`: 0 failed.
+* `tests/emoji_test.php` (95 checks with the owner's 7.3.1 installed, 90 without it), a new section 5b: the
+  file (an entry for every category and no other, runs of at most three, names only, a generic fallback),
+  its reader, the answer carrying each category's icons (with the package: every category's, the
+  alphabet's A B C, the fallback), the version, the picker's rule and the chip's name and tooltip, the
+  filled chip; the three Font Awesome controls in Settings → Emoji & emotes and none in Shoutbox.
+  `tests/admin_access_test.php` (312 checks): the group right after Shoutbox, its two sections, every
+  emoji and emote setting in them, the link to any id inside a section. `tests/iconpack_test.php` (201):
+  the picker's payload with the icons. `tests/shout_test.php` and `tests/shout_emotes_test.php`: the two
+  permission folds, the manager in its new section (their changed checks run on their own here — the
+  tests empty the room's tables, which this environment keeps). `tests/lang_test.php` 218 checks.
+* `scratchpad/shots/csrf_everywhere_check.js` (new; in the sweep after `profile_votes_check`), signed in as a
+  member with **the page's own token source only**: every hidden token field a template still carries is
+  taken out of the page as it is parsed, before any script can read it, so the layout's meta is the one thing
+  left. A guest on nineteen page types: one meta, in the head, the session's token. Votes, thumbs and stars,
+  from the Info panel on the search page, on the profile (opened from a favourites row) and on the account
+  page (from its favourites tab): cast — pressed, filled or marked, the tooltip — pressed again — taken back,
+  gone from the database, nothing pressed — the other thumb, the other values, each step read back from the
+  database; the front page has no Info panel (said, not skipped). Then every other POST each page type offers,
+  through its own buttons: the search page's star, "+" (a list made, the torrent put in and taken out),
+  Refresh, a description's Preview and submission; the profile's star and its description; somebody else's
+  profile — befriend and take it back, block and unblock; the account page's notifications, mail preference,
+  time zone, a privacy switch, the second factor, "sign out everywhere else" and the account form (each with a
+  wrong password: the server checks the token first, and "wrong password" is its word that the token was
+  right), a picture upload (multipart), a list made and deleted, a message's Preview and send, the sounds,
+  the interface language and back, sign-out; the front page's shoutbox — the Preview (the widget's
+  `data-csrf` names a field that is gone, and the page's token goes instead), a shout posted, edited and
+  deleted. A witness reads every POST — the token in its body, JSON or multipart, and its `X-CSRF-Token`
+  header — and wants the page's meta in each, and no CSRF refusal anywhere: 69 POSTs to twenty-five
+  endpoint-and-page pairs, 44 checks, 0 failed (twice). What must not happen for real — sign-out, a
+  picture's files, a message to smokepeer, deleting the read notifications — is answered by the check once its
+  token is read. Against the scripts from before this change (`CSRF_JS_FROM`, the pages' own fields kept with
+  `CSRF_STRIP=0`) it fails as the owner saw: the votes on the profile and on the account page refused
+  "Invalid CSRF token" in both modes, and on the search page a second press that does not take the vote back.
+* `scratchpad/shots/profile_votes_check.js`: in both modes, the Info panel opened from the account page's own
+  likes or ratings — the page whose token was `#account-csrf` — shows the vote pressed (the thumb filled in its
+  colour, or the half star marked; `aria-pressed`; the tooltip); pressed again, the vote is gone from the
+  database and the list is one row shorter at once, without a reload — and on the profile, for another member.
+  `scratchpad/shots/who_check.js`: the reader presses Good — pressed, with its tooltip — and "Who has this"
+  lists him with his thumb (26 people); Good again, and he is gone from the database and from the likes' rows
+  and count.
+* `tests/reputation_test.php` (81 checks), sections 7–9: the new rule's code; taking back against the live
+  schema in both modes — only the caller's own row, an address never the vote an account cast from it, an IPv6
+  /64 one voter, idempotent, refused wherever a vote is and in a vote's own words, counted again in stars (2.60
+  where a thumbs count would have written 0), `repClear()` with the configuration; the budget — ten looks spend
+  nothing, three actions spend three and the fourth is refused, leaving the vote; and `rate_hash` as requests
+  with a session and its token: the old shape still casts, `op: remove` takes back and pays a vote's CAPTCHA
+  points, asked again it changes nothing, a wrong or missing token is refused, an unknown operation is a 400.
+* `tests/csrf_token_test.php` (new, 29 checks): the meta in the layout — in the head, only with a session, no
+  script; the helper's three sources in their order; every token the public scripts send (32 places) is the
+  helper's answer, and no public script reads a page's own id; the pages as the local site renders them — a
+  guest on 23 addresses, a member on the search page, two profiles, the account page and the front page with
+  the shoutbox — one meta each with the session's token, the old ids holding the same value; another session,
+  another token; the server takes the token the page publishes and refuses another session's and none.
+* `tests/profile_votes_test.php` (150 checks) and `tests/who_test.php` (101): a vote taken back leaves the likes
+  or ratings list and "Who has this" at once, for the owner and for a reader, in both modes. The check in
+  `tests/shout_test.php` on the editor's token follows it to `csrfToken()` (evaluated on its own: the test
+  empties the room).
+* `tests/comments_test.php` (new, 146 checks): the schema both ways on a scratch database — fresh, and an upgrade
+  from 82 (the table, the two columns, the grant once, the two statements of the table identical); the settings
+  in their four places, clamped; the permissions, the presets and accounts off; the renderer on twelve hostile
+  inputs, read back as a DOM (only the tags and attributes it writes, no `javascript:`, a quote one level, code
+  literal, a link only where one may be); the limits (visible characters, the source, lines, links, depth); a
+  post's refusals in their order (the token, the feature, the hash, the reader's view of it, the permission, the
+  mute, the CAPTCHA, the hour, the words); guests — the tag, a CAPTCHA every time (through an injected verifier),
+  held, let through and only then told; the thread — its pages and "earlier", the reader's zone, blocked authors
+  folded; correcting and taking back — the windows, the mute, a moderator with a reason (audited, the author told)
+  and the silent removal; who is told — every reason once, by the strongest one switched on (mentions off, yet
+  in the thread: told as a participant), never across a block, in the recipient's language, never somebody who
+  may not read; the pulse's counts and the two sounds; a notification's link (an off-site one dropped); an
+  account going; the six endpoints through a child process. It leaves nothing behind — its accounts, group,
+  sticker, rows, audit lines and rate keys removed, the table's counter back.
+* `scratchpad/shots/comments_check.js` (new; in the sweep after `descriptions_check`), three people in a real
+  browser under an enforced policy: smokeuser writes the first comment — bold, an emoji and an emote from the
+  picker (no Stickers page; Esc closes the picker, not the panel), `@ccheck_m` offering the name (Enter takes it;
+  Esc on the list closes the list and leaves the panel open), the counter's visible characters, the server's
+  Preview — and Ctrl+Enter sends it: the row as described, the emote at the size of the words; a member whose
+  page is open with sounds on hears the MENTION sound on one pulse (the badge 1, the notification's chime not as
+  well), follows **Show** to the comment, lit and in view, the notification read; answers, and is told of the
+  answer back in Polish, their language, with the COMMENT sound; the author corrects one ("edited") and takes one
+  back with two presses; a moderator removes one — a reason asked (Esc puts the box away and leaves the panel
+  open), given; the author told with it, one audit line;
+  a block folds the blocked author's comments and silences a mention across it; the account page's four switches
+  (mentions off: told as a participant; on again) and the two sounds on the Sounds tab, then the live switch to
+  Polish; a mute (why and until when, Delete kept and Edit gone, 403 from the endpoint); a link (its `rel`, the
+  "you are leaving" question, Esc closing only it), then links off (no button, Ctrl+K putting none in, the old
+  link its text, a new one refused with the reason); a phone in Polish; the live switch redrawing the section;
+  a guest told the comments are for members. 64 checks, 0 failed; no script error, no policy violation.
+* Pinned things that moved with it: `tests/emoji_test.php` (the picker's contexts), `tests/admin_access_test.php`
+  (the group's name, its Comments section), `tests/groups_matrix_test.php` (the presets, the v83 grant),
+  `tests/pulse_test.py` (the pulse's two new numbers — numbers still, never content), `tests/sounds_test.py` (the
+  five events and their defaults, comments switched on by the test itself) and
+  `scratchpad/shots/settings_groups_check.js` (the chip's name in both languages).
+* `tests/content_reports_test.php` (new, 119 checks): the schema both ways on a scratch database — fresh, and an
+  upgrade from 83 from the same definitions — the one-open-report key (a second open report refused, a new one
+  after the first is closed allowed) and the grant once (members report, moderators the three queues, never the
+  message queue, guests nothing; taken away, it stays away); the permissions, the presets, accounts off, the
+  Reports page opening for any of its queues and each tab only its own; a report's refusals in their order (the
+  token, the kind, an account, the switch, the permission, nothing there for this reader — a hidden torrent, a
+  removed comment, the site's line, an unpublished description —, your own, the reason) and what is kept (the
+  words as reported, the author found); "already" and the hourly limit (the one call, and "already" spending
+  nothing); the flags on the rows the pages are drawn from; the queue — the kinds per session, the open targets,
+  GROUPING, the five filters, the renderers escaping, the words as reported beside changed ones —; every action on
+  every kind, silent and loud: the reporters told in THEIR languages with the answer, the author nothing or ONE
+  warning with the reason and its number, the removal through each kind's own function, the audit lines; the
+  guards (staff, yourself, a ban without a date, a reason for a warning, changed words, no account, gone); the
+  warnings counted and shown and nowhere public; an account going; the endpoint files as requests in a child
+  process — the report, the tabs' counts, a filtered page, an action, and the message card's silent, loud, Warn
+  and no-mode answers. It leaves nothing behind.
+* `scratchpad/shots/reports_check.js` (new; in the sweep after `msgreport_check`), under an enforced policy:
+  a member reports a comment (the flag named and explained, the box in the row, Esc leaving the panel open, an
+  empty reason refused, Enter sending, the filled flag, the database row), the description and a shout on the
+  front page; reloaded, still "Reported"; a second member in Polish; no flag on the author's own words. A
+  moderator's panel — through the public sign-in — has Comments, Descriptions and Shouts with their counts and no
+  Messages; one card with two reports; the filters narrow and let back; Close with an answer (both reporters told,
+  each in their language; the author nothing), Reopen; Remove as a warning (refused without a reason, then the
+  author's ONE warning in Polish with its number, nobody who reported named); Warn about the description (the
+  second warning); a silent silence and a silent removal of the shout. The author's account page shows the two
+  warnings marked; the owner's message card has the choice and Warn (refused without a reason, then the third
+  warning); a phone: the box and the panel's card inside the screen. 53 checks, 0 failed.
+* Pinned things that moved with it: `tests/groups_matrix_test.php` (the member's `content.report`, the moderator's
+  six, the v84 marker), `tests/avatar_names_test.py` (a shout row's exact set of fields: + `can_report`,
+  `reported`) and `scratchpad/shots/descriptions_check.js` (the description's actions end with the flag for a
+  reader who may report).
+* Found by the neighbours' checks on the way: `scratchpad/shots/shout_check.js` compares a row the poll appends with
+  the one the page drew — with the flag, a plain member's view of somebody else's line has a controls group too,
+  and the server wrote that group with the template's indentation between its buttons where the script writes
+  none (whitespace a flex row never shows, but the live language switch pairs a row's nodes by position): the
+  widget now writes the group as the script does, nothing between the buttons. And `polish_check.js` hovered the
+  Info panel's hash Copy where it had been measured — below the fold of its 900-pixel window since the comments
+  section stands between the rating and the technical record — so the pointer landed outside the page: it scrolls
+  the button into view first.
+* `tests/antispam_test.php` (new, 103 checks): the table on both schema paths from one definition (a fresh install,
+  and an upgrade on a scratch database — with no table at all first, where the layer must refuse); the layer's 40
+  settings and `rate_limit_pm` in their four places, clamped, and the five `recaptcha_on_*` defaults; the ladders
+  as numbers (the room exactly as sketched, the floor, a new account's factor) and live — the burst, each step, the
+  top repeated, the quiet reset, the layer off leaving the room's old wall and nothing else — time moved by
+  rewriting the row's instants, never slept; the CAPTCHA — three hits at the top, refused attempts counted, a bad
+  token and a good one, the ease back to the first step, guests every time, no provider and the pauses alone; new
+  accounts — stricter pauses, links drawn as words in the room, a comment, a list and the profile by when they
+  were written, staff never new; duplicates and the messages' spread; the new-conversation limits (hour, day, a
+  reply never counted); staff exempt, and not when the site says so; corrections (and one made with no gap still
+  remembered); a reservation handed back; failing CLOSED on every error; the audit once an hour; **two requests
+  racing** in two child processes — one line through, never two; the endpoint files as requests; every writer
+  endpoint in `api/` asking the layer (read from the files); the leftovers ("@name.", the votes' CAPTCHA, the
+  sounds test's cascade); the pages' half. It leaves nothing behind.
+* `scratchpad/shots/antispam_check.js` (new; in the sweep after `reports_check`), in a real browser under an
+  enforced policy, with accounts of its own: **the room's ladder** for a month-old account — three lines through,
+  the fourth refused (429, the first step, the time in the sentence), Send counting down on itself (disabled, the
+  seconds drawn by the stylesheet and no digit in the button's text, the sentence beside it, the words kept), a
+  second and a half later less, Enter in the box asking nothing, Send back by itself at zero with the words still
+  there, sent then, the next pause the second step (15 s), and — the row's clock moved back two minutes — a line
+  going at once as the first of a new streak; **a guest's comment** with Cloudflare Turnstile's published test keys
+  — the page carrying the provider, Send opening the site's box BEFORE anything is posted, the widget passing and
+  the SAME comment going once with its token, held for review, and a POST with no token answered 428 with the
+  sentence, the provider and its public key (never the secret); **a new account's burst** — two conversations
+  started, the third stopped with the new-account sentence and Send counting the hour down, nothing written to the
+  third person, a reply in a going conversation not paced; **links as words** — the new account's line drawn with
+  its link as words for its author and for another reader, the month-old account's a link with the site's rel and
+  target. No script error, no policy violation; everything put back. 29 checks, 0 failed.
+* **Every test and check that writes faster than a person now switches the layer OFF explicitly** (the project's
+  rule: a switch a check leans on is stated, never inherited) — it is on as shipped, and the smoke accounts the
+  checks sign in as are new accounts (links as words): `tests/comments_test.php`, `content_reports_test.php`,
+  `lists_test.php`, `profile_bio_test.php`, `shout_test.php` and their child runners' settings;
+  `tests/shout_test.py`, `shout_emotes_test.py`, `content_test.py` (saved and put back);
+  `scratchpad/shots/shout_check.js`, `comments_check.js`, `lists_check.js`, `polish_check.js`,
+  `profile_bio_check.js`, `csrf_everywhere_check.js`, `descriptions_check.js` and `content_check.js` — the eight
+  that failed with the layer on (a link drawn as words, a comment or a description paused, a list or a vote
+  refused), each put back as it found it. A guest's CAPTCHA is a switch of its own and still asks in
+  `comments_test.php`.
+* Pinned things that moved with it: `tests/content_reports_test.php` (`contentReportFloodCheck()` takes the request
+  and hands back a reservation), `tests/reputation_test.php` (the vote's CAPTCHA is the layer's; `rate_hash` asks the
+  refusal three times without spending; its runner loads the layer as `api.php` does), `tests/profile_bio_test.php`
+  (both renderings say whether the links are words); `includes/lists.php`, `people.php`, `reputation.php` and
+  `content.php` load the layer themselves, as the room's, the comments' and the reports' modules do, so an endpoint
+  on it works wherever its module is loaded from (`tests/audit_lists_test.php`'s runner stopped on it).
+  `tests/shout_emotes_test.php` counted `approved_at` in the whole schema file — the comments' table has one of its
+  own — and counts the emotes' two CREATEs and their ALTER now. The anti-spam switches sit before the "who has this"
+  pair in the save's list, where neither `who_test.php`'s pin nor `comments_test.php`'s is cut.
+* `tests/shout_test.php`: emptying the room also forgets this run's accounts in the layer's table — WHEN somebody
+  last spoke is the layer's to know now, not the newest line in `shouts` — and its accounts' rows go at the end.
+  The test empties `shouts`, so it was run whole on a scratch copy of the local database (a dump of it, and a copy
+  of the tree pointed there): 358 checks, 0 failed. `tests/sounds_test.php` deletes its accounts through
+  `userDeleteCascade()` in all four places (93 checks): it left group memberships pointing at nobody.
+* The neighbours, run after it: comments 145, content_reports 119, lists 114, profile_bio 114, reputation 81,
+  admin_access 312, lang 226, favourites 108, who 101, profile_votes 150, usermedia 159, install 36, audit 42,
+  audit_fixes 56, audit_lists 40, shout_emotes 184, emoji 90, people 100, content 199, csrf_token 29, sql_safety 8,
+  richtext 121, sounds 93, groups_matrix 61, icons 130, iconpack 202, version 24 and fifteen more — 0 failed each;
+  Python: content 18, pm_delete 21, audit_lists 19, avatar_names 44, message_report 17, pulse 14, sounds 45,
+  usermedia 61, guest_pages 42, csp_headers 8, ui_traffic_nav — 0 failed each. In the browser: shout, comments,
+  lists, layers, who, people, msgreport, reports, pulse, polish, emoji_picker, picker_everywhere, profile_bio,
+  profile_head, profile_votes, csrf_everywhere, account_width, descriptions, content, fav, settings_hit,
+  settings_groups, langswap, captcha, security, sounds and icons — 0 failed each; verify_all 52 renders, 0 problems.
+
 ## [1.70.0] — 2026-09-28
 
 The owner's list after a few days with 1.69.0, as one release. It opens with three small things he

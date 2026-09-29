@@ -17,6 +17,9 @@
  * person writes.
  */
 require_once __DIR__ . '/richtext.php';
+// How fast descriptions may be written, the same words twice, a guest's CAPTCHA (1.71.0): the site's one
+// anti-spam layer, which the description endpoints ask wherever they are loaded from.
+require_once __DIR__ . '/antispam.php';
 
 /** Descriptions or source links are switched on at all. */
 function contentEnabled(array $cfg): bool {
@@ -747,9 +750,14 @@ function contentDeleteRight(PDO $db, array $cfg, ?array $rec, ?array $me): ?stri
  * Take the words down — the caller has asked contentDeleteRight() and got $right. Returns
  * ['ok' => true, 'withdrawn' => n]. The author hears when somebody else did it; so does everybody
  * whose waiting proposal was withdrawn with it (but the one who did it).
+ *
+ * `$opts['notify'] === false` (1.71.0 part E, includes/reports.php): the author is NOT told here — the Reports
+ * page's removal is silent, or it is loud and the author gets ONE warning from there instead of two notices.
+ * The proposers whose waiting words went with it are still told: that is about their proposal, not a verdict
+ * on the author. The panel's caller has asked panelCan() itself; `$me` may be the owner's session (id 0).
  */
-function contentDelete(PDO $db, array $cfg, array $rec, array $me, string $right): array {
-    $meId = (int)$me['id'];
+function contentDelete(PDO $db, array $cfg, array $rec, array $me, string $right, array $opts = []): array {
+    $meId = (int)($me['id'] ?? 0);
     $name = contentNameFor($db, (string)$rec['info_hash']);
     $author = $rec['content_user_id'] ?? null;
     $col = $rec['kind'] === 'wl' ? 'whitelist_id' : 'hash_content_id';
@@ -772,7 +780,7 @@ function contentDelete(PDO $db, array $cfg, array $rec, array $me, string $right
             }
         }
     }
-    if ($right === 'any' && $author !== null && (int)$author !== $meId) {
+    if ($right === 'any' && $author !== null && (int)$author !== $meId && ($opts['notify'] ?? true) !== false) {
         contentNotify($db, (int)$author, __('notify.content_deleted', ['name' => $name]),
                       __('notify.content_deleted_body', ['name' => $name]));
     }
@@ -789,7 +797,8 @@ function contentDelete(PDO $db, array $cfg, array $rec, array $me, string $right
             'summary'     => (string)($me['username'] ?? ('#' . $meId)) . ' deleted the description of ' . $name
                              . ($right === 'own' ? ' (their own)' : ' by ' . ($authorName ?? 'nobody')),
             'detail'      => ['right' => $right, 'home' => $rec['kind'], 'id' => (int)$rec['id'], 'status' => (string)$rec['content_status'],
-                              'author_id' => $author !== null ? (int)$author : null, 'author' => $authorName, 'withdrawn' => $withdrawn],
+                              'author_id' => $author !== null ? (int)$author : null, 'author' => $authorName, 'withdrawn' => $withdrawn,
+                              'silent' => ($opts['notify'] ?? true) === false],
         ]);
     }
     return ['ok' => true, 'withdrawn' => $withdrawn];

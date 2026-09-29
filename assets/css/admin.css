@@ -13,12 +13,35 @@
     min-height: 100vh;
 }
 
+/* === Links (1.71.0) ===
+   Bootstrap's reboot draws every link in its LIGHT theme's strong blue (#0d6efd), underlined — on the
+   panel's dark ground it shouted out of the middle of every help text (Settings, Traffic, the Index and
+   Users notes). The panel's links take the panel's own accent instead, calmer — #4a9eff's hue, less
+   saturated and lighter (#81b1e4, #a6cbf2 under the pointer) — through Bootstrap's own variables, so the
+   reboot rule, its hover and every visited link follow it (an author colour on `a` is a visited link's
+   colour too). No underline by default: a link standing on its own — a name in a table, a menu, a card's
+   title — is told from text by where it stands. The underline stays where it is needed, on a plain link
+   INSIDE words (a help text, a note, an alert, a list item), where the colour alone would not tell it
+   from the sentence round it: thin, a little below the letters, half-strength until pointed at. A link
+   with a class of its own is a component (a .btn, a menu item, a tab, a page number, the rows' own link
+   styles further down) and keeps what its class says. */
+.admin-body {
+    --bs-link-color: #81b1e4; --bs-link-color-rgb: 129, 177, 228;
+    --bs-link-hover-color: #a6cbf2; --bs-link-hover-color-rgb: 166, 203, 242;
+}
+.admin-body a { text-decoration: none; }
+.admin-body :is(p, li, dd, small, label, details, .form-text, .settings-hint, .alert, .text-muted, .text-secondary) a:not([class]) {
+    text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.18em;
+    text-decoration-color: rgba(var(--bs-link-color-rgb), 0.5);
+}
+.admin-body :is(p, li, dd, small, label, details, .form-text, .settings-hint, .alert, .text-muted, .text-secondary) a:not([class]):hover { text-decoration-color: currentColor; }
+
 /* === Icons, in either library (1.68.0; where the glyph sits, 1.69.0) ===
    Every icon is written in Bootstrap's markup, `<i class="bi bi-NAME">`; with Font Awesome chosen the
    mapped classes are added beside the `bi` ones (includes/icons.php for the page, assets/js/icons.js
    for what scripts build), so a rule below that names a Font Awesome class cannot apply while Bootstrap
    Icons is chosen. Near the TOP of the file on purpose: at equal specificity every later rule that
-   sizes or places an icon (`.wl-copybox-btn .bi`, `.admin-emotes-title .bi`, …) still wins, exactly as
+   sizes or places an icon (`.wl-copybox-btn .bi`, `.admin-emote-add-title .bi`, …) still wins, exactly as
    it does over Bootstrap's own stylesheet.
 
    WHERE THE GLYPH SITS. An icon beside a word is level with it when the middle of the glyph is the
@@ -63,8 +86,8 @@
 :is(.bi-person-x, .bi-subscript) { --bi-mid: 0.44em; }
 :is(.bi-database-gear, .bi-scissors) { --bi-mid: 0.465em; }
 :is(.bi-box-arrow-in-down, .bi-database-down, .bi-folder2-open, .bi-sliders) { --bi-mid: 0.47em; }
-:is(.bi-youtube) { --bi-mid: 0.525em; }
-:is(.bi-check2, .bi-check2-all, .bi-collection, .bi-highlighter, .bi-link-45deg, .bi-trash) { --bi-mid: 0.53em; }
+:is(.bi-vector-pen, .bi-youtube) { --bi-mid: 0.525em; }
+:is(.bi-check2, .bi-check2-all, .bi-collection, .bi-highlighter, .bi-link-45deg, .bi-trash, .bi-trash-fill) { --bi-mid: 0.53em; }
 :is(.bi-heart, .bi-list-ul, .bi-quote) { --bi-mid: 0.535em; }
 :is(.bi-book) { --bi-mid: 0.54em; }
 :is(.bi-arrow-clockwise, .bi-arrow-counterclockwise, .bi-list-check) { --bi-mid: 0.55em; }
@@ -246,6 +269,10 @@
     margin-bottom: 1rem;
 }
 .captcha-box .captcha-widget { display: inline-block; max-width: 100%; }
+/* The widget's frame in its own page's colour scheme, not the panel's dark one (1.71.0 — the public
+   stylesheet says why): with `color-scheme: dark` inherited, Chrome painted the frame's light page on an
+   opaque white canvas and the dark reCAPTCHA box stood in a white rim. */
+.captcha-widget, iframe[src*="/recaptcha/"], iframe[src*="hcaptcha.com"], iframe[src*="challenges.cloudflare.com"] { color-scheme: normal; }
 .captcha-box .captcha-actions { margin-top: 1rem; }
 .captcha-box .captcha-cancel { padding: 0.4rem 1.1rem; font-size: 0.85rem; }
 
@@ -810,6 +837,50 @@
 .msgrep-confirm-q { font-size: 0.85rem; color: #e0e0e0; }
 .msgrep-said { font-size: 0.82rem; }
 .msgrep-note-in { max-width: 22rem; }
+
+/* Silently, or as a warning (1.71.0): the author's row on a report card — the choice, and the reason a warning
+   carries. Its own row, between the texts and the buttons, because it qualifies every button below it. */
+.msgrep-mode { gap: 0.3rem 0.8rem; font-size: 0.85rem; }
+.msgrep-mode-label { color: #adbac7; }
+.msgrep-mode-opt { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; white-space: nowrap; }
+.msgrep-mode-opt input { accent-color: #e0b15a; }
+.msgrep-reason-in { flex: 1 1 18rem; max-width: 32rem; }
+.msgrep-warn-head { font-size: 0.75rem; margin: 0.1rem 0 0.15rem; }
+.msgrep-warnings { font-size: 0.8rem; color: #c9a45c; margin: 0 0 0.5rem; padding-left: 1.1rem; }
+.msgrep-warnings li { overflow-wrap: anywhere; }
+
+/* Reported comments, descriptions and shouts (1.71.0): a card per reported thing, the message card's
+   shape — the words once, then every report about it. */
+.crep-filters { flex-wrap: wrap; gap: 0.45rem; }
+/* The text search a line of its own, the narrowing filters in one row under it. */
+.crep-filters .toolbar-search { flex: 1 1 100%; }
+.crep-name-in { width: 11rem; flex: 0 1 11rem; }
+.crep-date { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #adbac7; margin: 0; }
+.crep-date input { width: 9.5rem; }
+.crep-said { font-size: 0.85rem; color: #7ee787; min-height: 1.2rem; margin: 0 0 0.4rem; }
+.crep-kind { background: #30363d; color: #e0e0e0; }
+.crep-where { font-size: 0.8rem; }
+.crep-gone-mark { font-size: 0.8rem; font-style: italic; }
+.crep-was { border-style: dashed; }
+.crep-reports { margin-top: 0.4rem; }
+.crep-report-list { list-style: none; margin: 0; padding: 0; }
+.crep-report { border-left: 2px solid #30363d; padding: 0.25rem 0 0.25rem 0.6rem; margin-bottom: 0.35rem; }
+.crep-report-open { border-left-color: #e0b15a; }
+.crep-report-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; font-size: 0.85rem; }
+.crep-reporter { font-weight: 600; }
+.crep-outcome, .crep-other-words { font-size: 0.78rem; }
+.crep-report .msgrep-reason { margin: 0.1rem 0 0.1rem; overflow-wrap: anywhere; }
+.crep-mode-hint { flex: 1 1 100%; font-size: 0.75rem; }
+.crep-body img { max-width: 100%; height: auto; }
+/* A member's warnings in Users (1.71.0): the count beside the status, the latest ones in the edit window. */
+.us-warned { margin-left: 0.35rem; font-size: 0.8rem; color: #e0b15a; white-space: nowrap; }
+.ue-warnings-list { margin: 0.2rem 0 0.2rem; padding-left: 1.1rem; color: #c9a45c; }
+.ue-warnings-list li { overflow-wrap: anywhere; }
+@media (max-width: 575px) {
+    .crep-name-in, .crep-date input { width: 100%; flex: 1 1 100%; }
+    .crep-date { flex: 1 1 100%; }
+    .msgrep-reason-in { flex-basis: 100%; }
+}
 
 /* Which partner filed a report, beside the name they filed it under. Quiet on purpose: it is
    provenance, not a status — the row's own status badge is the one to read first. */
@@ -1652,8 +1723,9 @@ input[type="number"] {
 }
 /* A whole section: the same mark inside its padding, not over its frame. */
 .settings-section.settings-section-hit::before { top: 0.5rem; bottom: 0.5rem; }
-/* the sticky toolbar covers the top of the page: #section-... deep links must clear it */
-.settings-section { scroll-margin-top: 9.5rem; }
+/* the sticky toolbar covers the top of the page: #section-... deep links must clear it — and (1.71.0) a
+   link to something inside a section, which admin-settings.js openHash() scrolls to itself */
+.settings-section, .settings-section [id] { scroll-margin-top: 9.5rem; }
 /* search results: precise hits first, then whole sections that only match the group name */
 .settings-divider { margin: 0 0 0.75rem; padding: 0.35rem 0.1rem; border-top: 1px dashed #333; color: #6b7280; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 @media (max-width: 767px) { .settings-toolbar { position: static; } }
@@ -1947,8 +2019,8 @@ input[type="number"] {
 .rt-emote { height: 1.4em; width: auto; max-width: 8em; vertical-align: -0.28em; margin: 0 0.1em; }
 .rt-sticker { display: inline-block; max-width: min(128px, 100%); max-height: 128px; height: auto; width: auto; margin: 0.15rem 0; vertical-align: bottom; }
 .rt-sticker.rt-sticker-small { max-width: min(96px, 100%); max-height: 96px; }
-/* Settings → Shoutbox → Emoji in the picker: the scope, shown only while the faces are on
-   (assets/js/admin-shout.js). Bootstrap's columns set no display, but a later rule could. */
+/* Settings → Emoji & emotes → Emoji in the picker (Shoutbox's until 1.71.0): the scope, shown only while
+   the faces are on (assets/js/admin-shout.js). Bootstrap's columns set no display, but a later rule could. */
 #admin-shout-emoji [data-setting][hidden] { display: none !important; }
 /* Review queue.
    A card used to be a run-on line: name, hash, date and then the text, with nothing saying what the
@@ -2940,14 +3012,13 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 .admin-sound-add-row .form-control { flex: 1 1 auto; min-width: 0; }
 .admin-sound-add-row .btn { flex: 0 0 auto; white-space: nowrap; }
 
-/* ── Settings → Shoutbox → the emotes, rebuilt in the sounds shape (1.59.1) ──────────────────────
+/* ── Settings → Emoji & emotes → the emotes, rebuilt in the sounds shape (1.59.1; under Shoutbox until
+   1.71.0, when the block became a section of its own and its heading the section's h5) ──────────────
    What it replaced: four settings in a ragged grid with `Per member` alone on a row, then a LIST
    whose preview sat far left, a gap, the code, the meta, and three buttons hugging the right edge.
    A table with headings answers the questions in the order somebody asks them — what is it, what is
    it called, how big, whose, since when — and the buttons say what they do rather than what the row
    currently is. */
-.admin-emotes-title { margin-bottom: 0.35rem; font-size: 0.9rem; color: #c3ccd8; }
-.admin-emotes-title .bi { color: #4d9fd6; }
 .admin-emotes-head { display: flex; align-items: center; gap: 0.5rem; margin: 1.25rem 0 0.4rem; }
 /* "4 of 9 switched on". Not an error at any value — it is the reason a code that is typed correctly
    can still do nothing, which is the one thing a list of pictures cannot show by itself. */

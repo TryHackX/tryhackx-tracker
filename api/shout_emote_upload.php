@@ -28,6 +28,11 @@ if (!userCan($db, $cfg, 'shout.upload_emote')) {
 if (!rateLimitAllow('emoteupload', ipBucket(getClientIp($cfg)), 30, 300)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 300], 429);
 }
+// …and one member's pace (1.71.0): the site's one anti-spam layer (includes/antispam.php, context `emote`) —
+// a few uploads free, then growing pauses. A picture refused below hands its reservation back.
+$as = antispamCheck($db, $cfg, 'emote', antispamSubject($me, getClientIp($cfg)), null, ['input' => $input]);
+if (!$as['ok']) jsonResponse($as['body'], (int)$as['status']);
+$emoteTicket = $as['ticket'];
 
 // Refused before the base64 is decoded: 4/3 of the cap plus padding is the longest string that
 // could possibly decode to an acceptable size, so anything past it is answered without allocating.
@@ -35,13 +40,19 @@ $maxKb = shoutEmoteMaxKb($cfg);
 $b64 = (string)($input['data'] ?? '');
 if (($comma = strpos($b64, ',')) !== false && str_starts_with($b64, 'data:')) $b64 = substr($b64, $comma + 1);
 if (strlen($b64) > (int)($maxKb * 1024 * 4 / 3) + 64) {
+    antispamRelease($db, $emoteTicket);
     jsonResponse(['error' => 'too_large', 'message' => __('api.emote.too_large', ['kb' => $maxKb])], 413);
 }
 $bytes = base64_decode($b64, true);
-if ($bytes === false || $bytes === '') jsonResponse(['error' => 'not_image', 'message' => __('api.emote.not_image')], 400);
+if ($bytes === false || $bytes === '') {
+    antispamRelease($db, $emoteTicket);
+    jsonResponse(['error' => 'not_image', 'message' => __('api.emote.not_image')], 400);
+}
 
 $r = shoutEmoteStore($db, $cfg, (string)($input['code'] ?? ''), (string)($input['name'] ?? ''), $bytes,
                      (int)$me['id'], !empty($input['sticker']));
+if (empty($r['ok'])) antispamRelease($db, $emoteTicket);
+else antispamRecord($db, $emoteTicket);
 if (empty($r['ok'])) {
     // The lang key carries the limit it was judged against, so the message names the same number
     // the form under it printed.

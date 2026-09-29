@@ -32,6 +32,10 @@
  * built from anonymous votes is a weak signal. Pretending otherwise would be the actual failure.
  */
 
+// How fast votes may come, and the CAPTCHA a voter meets at the top of that (1.71.0): the site's one anti-spam
+// layer, which rate_hash asks wherever it is loaded from.
+require_once __DIR__ . '/antispam.php';
+
 function repEnabled(array $cfg): bool { return ($cfg['rep_enabled'] ?? '0') === '1'; }
 
 /** 'off' | 'users' | 'all' — who may cast a vote. */
@@ -86,8 +90,16 @@ function repVoterKey(PDO $db, array $cfg): ?array {
     return ['type' => 'ip', 'key' => $ip, 'weight' => repAnonWeight($cfg)];
 }
 
-/** Why this visitor may not vote right now, or null. */
-function repVoteRefusal(PDO $db, array $cfg): ?string {
+/**
+ * Why this visitor may not vote right now, or null.
+ *
+ * $spend: whether this call is a vote (or a vote taken back) and pays for itself out of the hour's budget.
+ * Only repCastVote() and repRemoveVote() spend; a page asking whether to DRAW the buttons (the Info panel,
+ * rate_hash's GET) only looks (1.71.0). Every call spent before, and the Info panel asks twice per
+ * opening, so fifteen panels opened in an hour left a member (30 votes an hour) no vote at all — and each
+ * vote cost three, its own and the two of the panel it redraws.
+ */
+function repVoteRefusal(PDO $db, array $cfg, bool $spend = false): ?string {
     if (!repEnabled($cfg)) return __('api.rep.off');
     $who = repWhoCanVote($cfg);
     if ($who === 'off') return __('api.rep.read_only');
@@ -103,8 +115,9 @@ function repVoteRefusal(PDO $db, array $cfg): ?string {
             ? __('api.rep.no_access_account')
             : __('api.rep.no_access_anon');
     }
-    if (function_exists('rateLimitAllow')
-        && !rateLimitAllow('repvote', $voter['type'] . ':' . $voter['key'], repRatePerHour($cfg), 3600)) {
+    $bucket = $voter['type'] . ':' . $voter['key'];
+    if ($spend ? (function_exists('rateLimitAllow') && !rateLimitAllow('repvote', $bucket, repRatePerHour($cfg), 3600))
+               : (function_exists('rateLimitPeek') && !rateLimitPeek('repvote', $bucket, repRatePerHour($cfg), 3600))) {
         return __('api.rep.rate_limited');
     }
     return null;
@@ -113,10 +126,21 @@ function repVoteRefusal(PDO $db, array $cfg): ?string {
 /**
  * Record a vote. Returns the fresh totals, or an error.
  *
- * $vote is 1 or -1. Voting the same way twice is idempotent; voting the other way changes the
- * existing vote rather than adding a second one. There is no third state and no "unvote": a button
- * that can be un-pressed doubles the surface for automation and buys nothing a change of mind does
- * not already cover.
+ * $vote is 1 or -1 (thumbs) or 1..10 (stars). Voting the same way twice is idempotent; voting the other
+ * way changes the existing vote rather than adding a second one.
+ *
+ * ── taking a vote back (1.71.0) ──────────────────────────────────────────────
+ *
+ * There used to be no "unvote", on the reasoning that a button that can be un-pressed doubles the surface
+ * for automation and buys nothing a change of mind does not cover. It does buy something: a vote cast by
+ * mistake, or on a torrent somebody no longer has an opinion about, could only be turned into the
+ * opposite opinion — and the likes on a profile and "Who has this" show every vote with a name. So a vote
+ * can be taken back, and the surface stays the size it was because removing is not a free action: it is
+ * repRemoveVote(), a separate and EXPLICIT operation (rate_hash {op: 'remove'}) behind exactly the gates a
+ * vote passes — the same refusal (switches, who may vote, rating.vote), the same hourly budget, the same
+ * CAPTCHA points — and it can only ever delete the caller's own row. The toggle lives in the button (the
+ * house rule since 1.67.0): the page knows which thumb is pressed and asks for what it wants, and the
+ * server does exactly that, so a double click repeats one request instead of casting and taking back.
  */
 function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
     $hash = strtolower(trim($hash));
@@ -126,7 +150,7 @@ function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
             ? __('api.rep.value_stars')
             : __('api.rep.value_thumbs')];
     }
-    $refusal = repVoteRefusal($db, $cfg);
+    $refusal = repVoteRefusal($db, $cfg, true);
     if ($refusal !== null) return ['error' => $refusal];
     $voter = repVoterKey($db, $cfg);
 
@@ -141,6 +165,30 @@ function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
 
     repRecount($db, $hash, $cfg);
     return ['success' => true] + repFor($db, $cfg, $hash);
+}
+
+/**
+ * Take this voter's vote on a hash back (1.71.0 — see "taking a vote back" above repCastVote()).
+ *
+ * The same gates as a vote, in the same order, and the same cost: a removal spends from the hour's budget
+ * like a vote does (and the endpoint adds the same CAPTCHA points). It deletes ONE row at most — the one
+ * the same identity would cast: repVoterKey(), the account, or the address bucket for an anonymous voter
+ * — so nobody's vote but the caller's can be touched, and an account's vote is never an address's. The
+ * totals are counted again in the site's mode. Idempotent: taking back a vote that is not there
+ * succeeds, with `removed` false, and changes nothing.
+ */
+function repRemoveVote(PDO $db, array $cfg, string $hash): array {
+    $hash = strtolower(trim($hash));
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['error' => __('api.common.invalid_hash')];
+    $refusal = repVoteRefusal($db, $cfg, true);
+    if ($refusal !== null) return ['error' => $refusal];
+    $voter = repVoterKey($db, $cfg);
+
+    $st = $db->prepare("DELETE FROM hash_votes WHERE info_hash = ? AND voter_type = ? AND voter_key = ?");
+    $st->execute([$hash, $voter['type'], $voter['key']]);
+    $removed = $st->rowCount() > 0;
+    if ($removed) repRecount($db, $hash, $cfg);
+    return ['success' => true, 'removed' => $removed] + repFor($db, $cfg, $hash);
 }
 
 /**
@@ -254,11 +302,19 @@ function repMyVote(PDO $db, array $cfg, string $hash): int {
  */
 function repCaptchaPoints(array $cfg): int { return max(0, min(100, (int)($cfg['captcha_pts_vote'] ?? 2))); }
 
-/** Wipe every vote on a hash — used when a hash is banned, so a ban does not leave a score behind. */
-function repClear(PDO $db, string $hash): int {
+/**
+ * Wipe every vote on a hash — used when a hash is banned, so a ban does not leave a score behind.
+ *
+ * Counted again in the site's mode, like every other recount (1.71.0): it was called without $cfg on the
+ * grounds that the mode does not matter once every vote is gone, which is true of the numbers today and
+ * is exactly the kind of truth the next change to repRecount() does not know it has to keep. $cfg is
+ * required, so a caller cannot leave it out again.
+ */
+function repClear(PDO $db, array $cfg, string $hash): int {
+    $hash = strtolower($hash);
     $st = $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?");
-    $st->execute([strtolower($hash)]);
+    $st->execute([$hash]);
     $n = $st->rowCount();
-    if ($n) repRecount($db, strtolower($hash));   // mode does not matter: everything is zero now
+    if ($n) repRecount($db, $hash, $cfg);
     return $n;
 }

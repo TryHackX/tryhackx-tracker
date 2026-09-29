@@ -51,9 +51,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$own) jsonResponse(['error' => 'not_found'], 404);
     }
 
+    // How fast (1.71.0): a list's name and its description are words other people can read, and they pass the
+    // site's one anti-spam layer (includes/antispam.php, context `list`: a few free, then growing pauses).
+    // Showing, hiding and deleting your own list is not writing. `$listAnswer` answers every write below and
+    // tells the layer whether the write happened (antispamRecord) or not (antispamRelease).
+    $lticket = null;
+    if (in_array($op, ['create', 'rename', 'edit', 'describe'], true)) {
+        $as = antispamCheck($db, $cfg, 'list', antispamSubject($me, getClientIp($cfg)), null, ['input' => $input]);
+        if (!$as['ok']) jsonResponse($as['body'], (int)$as['status']);
+        $lticket = $as['ticket'];
+    }
+    $listAnswer = function (array $body, int $status) use ($db, &$lticket): void {
+        if ($status === 200 && !empty($body['success'])) antispamRecord($db, $lticket);
+        else antispamRelease($db, $lticket);
+        jsonResponse($body, $status);
+    };
+
     if ($op === 'create') {
         $name = trim((string)($input['name'] ?? ''));
-        if ($name === '') jsonResponse(['error' => 'name_required'], 400);
+        if ($name === '') $listAnswer(['error' => 'name_required'], 400);
         $name = mb_substr($name, 0, 80);
         $max = listsMaxPerUser($cfg);
         // Count, slug and insert are three statements about one account, and two tabs pressing
@@ -69,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cnt->execute([$uid]);
             if ((int)$cnt->fetchColumn() >= $max) {
                 $db->rollBack();
-                jsonResponse(['error' => 'too_many_lists', 'limit' => $max], 409);
+                $listAnswer(['error' => 'too_many_lists', 'limit' => $max], 409);
             }
             $slug = listUniqueSlug($db, $uid, $name);
             $db->prepare("INSERT INTO user_lists (user_id, name, slug, description) VALUES (?, ?, ?, '')")
@@ -81,26 +97,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // 23000 is the unique key: this person already has a list with that slug. It is an
             // answer the page can use ("pick another name"), not a fault — a bare 500 here read as
             // "the site is broken" for something the site understood perfectly well.
-            if ((string)$e->getCode() === '23000') jsonResponse(['error' => 'duplicate_name'], 409);
+            if ((string)$e->getCode() === '23000') $listAnswer(['error' => 'duplicate_name'], 409);
             throw $e;
         }
-        jsonResponse(['success' => true, 'id' => $newId, 'name' => $name, 'slug' => $slug, 'is_public' => false, 'items' => 0]);
+        $listAnswer(['success' => true, 'id' => $newId, 'name' => $name, 'slug' => $slug, 'is_public' => false, 'items' => 0], 200);
     }
 
     if ($op === 'rename') {
         $name = mb_substr(trim((string)($input['name'] ?? '')), 0, 80);
-        if ($name === '') jsonResponse(['error' => 'name_required'], 400);
+        if ($name === '') $listAnswer(['error' => 'name_required'], 400);
         // The SLUG IS NOT REBUILT. It is the address somebody may already have been given, and a
         // rename is not a reason to break a link that is out in the world.
         $db->prepare("UPDATE user_lists SET name = ? WHERE id = ? AND user_id = ?")->execute([$name, $id, $uid]);
-        jsonResponse(['success' => true, 'name' => $name, 'slug' => (string)$own['slug']]);
+        $listAnswer(['success' => true, 'name' => $name, 'slug' => (string)$own['slug']], 200);
     }
 
     if ($op === 'edit' || $op === 'describe') {
         // Validated, limited and stored in one place (includes/lists.php): the name when it is `edit`,
         // the description either way. The rate limit above counts it like every other list write.
         $r = listEditRequest($db, $cfg, $me, $own, $input, $op === 'edit');
-        jsonResponse($r['body'], $r['status']);
+        $listAnswer($r['body'], (int)$r['status']);
     }
 
     if ($op === 'visibility') {

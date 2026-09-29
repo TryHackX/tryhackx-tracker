@@ -141,7 +141,7 @@ function userPermissionList(): array {
         'shout.edit_any' => 'Edit anyone\'s shout',
         // Adding a picture to a room everybody reads is not "writing in the shoutbox", so it is not
         // part of shout.post (1.59.0). The admin group passes every check anyway; the owner uploads
-        // from Settings → Shoutbox. Give this to a group and its members may add emotes and stickers
+        // from Settings → Emoji & emotes (Shoutbox until 1.71.0). Give this to a group and its members may add emotes and stickers
         // of their own, up to shout_emote_per_user each — every one of them sniffed, capped and
         // refused unless it is really a picture.
         // 1.65.0: NO MEMBER still gets it, and that rule has not moved. What changed is that the
@@ -176,6 +176,22 @@ function userPermissionList(): array {
         // Clearing your own is never behind this — the endpoint accepts an empty text from any
         // signed-in account, grant or no grant.
         'profile.bio'    => 'Write a description on their profile (shown only while the account holds this)',
+        // ── comments on a torrent (v83, includes/comments.php) ──
+        // Reading and writing are two ids, as for the shoutbox: an operator may open the words to guests
+        // without letting them write (and a guest who writes is signed "Guest #xxxx", behind a CAPTCHA
+        // every time, held for a moderator unless Settings says otherwise). Correcting and taking back
+        // your own are windows the operator sets; anybody's is the moderator's, with a reason the author
+        // is shown. None of them exists with accounts off (userLegacyDefault()).
+        'comment.view'       => 'Read the comments under a torrent',
+        'comment.post'       => 'Write comments under a torrent (a guest group holding this comments as "Guest", with a CAPTCHA every time)',
+        'comment.edit_own'   => 'Correct their own comments for a while (comment_edit_minutes)',
+        'comment.delete_own' => 'Delete their own comments for a while (comment_delete_own_minutes)',
+        'comment.moderate'   => 'Delete or edit anybody\'s comment with a reason, and release a guest\'s held comment',
+        // ── reports of what people write in public (v84, includes/reports.php) ──
+        // ONE id for the three kinds — a comment, a torrent's description, a shout — as pm.report is one for
+        // messages: "may this account put somebody's public words in front of a moderator". A member's; an
+        // account only (a report is answered to its reporter); NO with accounts off (userLegacyDefault()).
+        'content.report'     => 'Report a comment, a description or a shout to the moderators',
 
         // ── the admin panel ──
         //
@@ -203,6 +219,16 @@ function userPermissionList(): array {
         // `panel.messages.handle` closes a report or deletes the message it names.
         'panel.messages.view'   => 'See reported private messages (only the reported line and the one before it)',
         'panel.messages.handle' => 'Close a message report, or delete the message it names',
+        // v84 (includes/reports.php): the Reports page's queues of PUBLIC words, one pair per kind — reading the
+        // queue, and acting on it (close, remove the words, warn, silence or ban the author, each silently or as
+        // a warning). Unlike the message queue these ARE the moderator's by default (the v84 grant): the words
+        // were public already. Any one `view` opens the Reports page, showing only that kind's tab.
+        'panel.reports.comments.view'       => 'PANEL — see reported comments',
+        'panel.reports.comments.handle'     => 'PANEL — act on reported comments (close, remove, warn, silence, ban the author)',
+        'panel.reports.descriptions.view'   => 'PANEL — see reported torrent descriptions',
+        'panel.reports.descriptions.handle' => 'PANEL — act on reported descriptions (close, remove, warn, silence, ban the author)',
+        'panel.reports.shouts.view'         => 'PANEL — see reported shouts',
+        'panel.reports.shouts.handle'       => 'PANEL — act on reported shouts (close, remove, warn, silence, ban the author)',
         'panel.appeals.resolve'  => 'PANEL — resolve and restore appeals',
         'panel.whitelist.view'   => 'PANEL — see the Whitelist and Index pages',
         'panel.whitelist.add'    => 'PANEL — register hashes from the panel',
@@ -266,7 +292,15 @@ function userGroupPresets(): array {
                         // The room is moderated from the room, not from a panel page (1.58.0), so the
                         // reading ids come with it — see the v63 grant in includes/schema.php. Editing
                         // anybody's line is the v72 grant, to this group alone.
-                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.edit_any'],
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.edit_any',
+                        // v83: comments — read, write, and take down or edit anybody's (with a reason) from
+                        // the Info panel, where the thread is; a guest's held comment is let through here too.
+                        'comment.view', 'comment.post', 'comment.moderate',
+                        // v84: the Reports page's queues of reported comments, descriptions and shouts — read
+                        // and act on each (never the message queue: panel.messages.* stays out, see above).
+                        'panel.reports.comments.view', 'panel.reports.comments.handle',
+                        'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
+                        'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -299,7 +333,12 @@ function userGroupPresets(): array {
                         // shout.edit_own is v72's, beside the delete it mirrors; profile.bio is v74's,
                         // rating.public v75's; content.delete_own and content.public v81's.
                         'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar', 'profile.bio',
-                        'rating.public', 'content.delete_own', 'content.public'],
+                        'rating.public', 'content.delete_own', 'content.public',
+                        // v83: comments on a torrent — read, write, and their own corrected or taken back
+                        // for as long as the two windows say.
+                        'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own',
+                        // v84: report a comment, a description or a shout to the moderators.
+                        'content.report'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -343,7 +382,9 @@ function userLegacyDefault(string $perm): bool {
     // The same for the three content ids of v81: content.public is consent to a list on a profile, and
     // deleting is an author's or a moderator's — without accounts there is neither, and the rule below
     // would otherwise let every passer-by take any description down.
-    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any'], true)) return false;
+    // content.report (v84) for the same reason: a report is filed by an account and answered to it — with
+    // accounts off there is nobody to file one or to be told what became of it.
+    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any', 'content.report'], true)) return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     // The other way round from rating.* and content.*, and for the reason that decides both: those
     // two work without accounts, so answering false would switch them off for every install that
@@ -357,9 +398,13 @@ function userLegacyDefault(string $perm): bool {
     // with, so the whole feature is closed rather than thrown open. profile.* (v69) for the same
     // reason: a picture and a cover belong to an account, and without accounts there is none to
     // hang one on.
+    // comment.* (v83) for the shoutbox's reason: a comment is signed with an account (or, where the
+    // operator allows it, as a guest of a site that HAS accounts), and "accounts off" is "no comments at
+    // all" — commentsEnabled() says the same, this is the second wall.
     if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
         || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')
-        || str_starts_with($perm, 'shout.') || str_starts_with($perm, 'profile.')) return false;
+        || str_starts_with($perm, 'shout.') || str_starts_with($perm, 'profile.')
+        || str_starts_with($perm, 'comment.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 
@@ -839,8 +884,11 @@ function userPermissionsForget(int $userId = 0): void {
     $cache = &userPermCacheRef();
     if ($userId <= 0) { $cache = []; return; }
     foreach (array_keys($cache) as $k) {
-        // the key is the id, optionally followed by the verification flag: "7", "7|vt", "7|vu"
-        if ($k === (string)$userId || str_starts_with((string)$k, $userId . '|')) unset($cache[$k]);
+        // the key is the id, optionally followed by the verification flag: "7", "7|vt", "7|vu" — and PHP
+        // stores the plain "7" as the INTEGER key 7, so both sides are compared as strings (1.71.0: the
+        // strict `$k === '7'` never matched it, and with e-mail verification off an account's memo was
+        // never forgotten — a group changed in the request kept answering with the old permissions)
+        if ((string)$k === (string)$userId || str_starts_with((string)$k, $userId . '|')) unset($cache[$k]);
     }
 }
 
@@ -957,6 +1005,24 @@ function userDeleteCascade(PDO $db, int $userId): array {
         $n = contentForgetAccount($db, $userId);
         if ($n > 0) $gone['descriptions_unlinked'] = $n;
     }
+    // Comments (v83) ARE deleted — the person's own words in a conversation, like their shouts and
+    // messages, not the torrent's the way a description is — and every moderation stamp that names the
+    // account (a comment it edited, took down or let through) forgets it (includes/comments.php).
+    if (function_exists('commentForgetAccount')) {
+        foreach (commentForgetAccount($db, $userId) as $label => $n) if ($n > 0) $gone[$label] = $n;
+    }
+    // Reports and warnings (v84, includes/reports.php). The reports this account FILED go — a report is its
+    // reporter's word, and it is answered to them. So do the reports ABOUT its comments and shouts, which went
+    // with it above (nothing is left to judge); a report about a description it wrote stays with the torrent's
+    // words, as the description does, and forgets whose they were. Its warnings go with it; a warning it GAVE
+    // as a moderator forgets the account and keeps the name (as the audit log does).
+    $del("DELETE FROM content_reports WHERE reporter_id = ?", [$userId], 'reports_filed');
+    $del("DELETE FROM content_reports WHERE author_id = ? AND kind IN ('comment','shout')", [$userId], 'reports_about');
+    $del("UPDATE content_reports SET author_id = NULL WHERE author_id = ?", [$userId], 'reports_unlinked');
+    $del("DELETE FROM user_warnings WHERE user_id = ?", [$userId], 'warnings');
+    $del("UPDATE user_warnings SET by_id = NULL WHERE by_id = ?", [$userId], 'warnings_given_unlinked');
+    // The anti-spam layer's state for the account (v85, includes/antispam.php): its pace, its last words.
+    $del("DELETE FROM antispam_state WHERE subject = ?", ['u:' . $userId], 'antispam');
     $del("DELETE FROM users WHERE id = ?", [$userId], 'user');
     return $gone;
 }
@@ -1221,9 +1287,22 @@ function userValidOrderId(string $id): bool {
 // Notifications
 // ─────────────────────────────────────────────────────────────────────────────
 
-function userNotify(PDO $db, int $userId, string $type, string $title, string $body = ''): void {
-    $db->prepare("INSERT INTO user_notifications (user_id, type, title, body) VALUES (?, ?, ?, ?)")
-       ->execute([$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null]);
+/**
+ * One notification. `$link` (v83) is where it happened, as a SITE-RELATIVE address the account page offers
+ * as a button — `?action=…` and nothing else: anything that is not one is dropped rather than stored, so
+ * this column can never carry an off-site address or a script into the page. It is written only when there
+ * is one, so every caller from before it (and a database whose migration has not run) is untouched.
+ */
+function userNotify(PDO $db, int $userId, string $type, string $title, string $body = '', ?string $link = null): void {
+    $link = ($link !== null && preg_match('/^\?action=[A-Za-z0-9_\-]+(?:&[A-Za-z0-9_\-]+=[A-Za-z0-9_.\-%]*)*(?:#[A-Za-z0-9_\-]+)?$/', $link)
+             && strlen($link) <= 255) ? $link : null;
+    if ($link === null) {
+        $db->prepare("INSERT INTO user_notifications (user_id, type, title, body) VALUES (?, ?, ?, ?)")
+           ->execute([$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null]);
+        return;
+    }
+    $db->prepare("INSERT INTO user_notifications (user_id, type, title, body, link) VALUES (?, ?, ?, ?, ?)")
+       ->execute([$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null, $link]);
 }
 
 /**

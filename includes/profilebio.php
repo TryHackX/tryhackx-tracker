@@ -37,6 +37,7 @@
  * counting half of profileBioParse() for the live counter; the server's count is the one that decides.
  */
 require_once __DIR__ . '/richtext.php';
+require_once __DIR__ . '/antispam.php';
 
 const PROFILE_BIO_MAX_MIN     = 20;
 const PROFILE_BIO_MAX_MAX     = 1000;
@@ -134,6 +135,9 @@ function profileBioUrl(string $raw): ?string
 function profileBioParse(string $s, array $cfg): array
 {
     static $el = ['b' => 'strong', 'i' => 'em', 'u' => 'u', 's' => 's', 'url' => 'a'];
+    // A new account's words (1.71.0, `rt_links_text` — see richtextLinkAttrs()): a [url] is its words, no link.
+    // Counted exactly as a link is, so the save judges the same text the same way.
+    $asText = ($cfg['rt_links_text'] ?? '') === '1';
     $out = '';
     $chars = 0;
     $links = 0;
@@ -150,8 +154,9 @@ function profileBioParse(string $s, array $cfg): array
     };
     // Closing a link whose words were empty (`[url=…][/url]`) writes the address as its words: a link
     // nobody can see is not a link anybody can use.
-    $close = function (array $frame) use (&$out, &$chars, $text, $el): void {
+    $close = function (array $frame) use (&$out, &$chars, $text, $el, $asText): void {
         if ($frame['tag'] === 'url' && $chars === $frame['mark']) $text((string)$frame['url']);
+        if ($frame['tag'] === 'url' && $asText) return;
         $out .= '</' . $el[$frame['tag']] . '>';
     };
     $inLink = function () use (&$stack): bool {
@@ -198,7 +203,7 @@ function profileBioParse(string $s, array $cfg): array
             if ($url === null) { $bad++; $text($tok); continue; }
             if (++$links > PROFILE_BIO_MAX_LINKS) { $text($tok); continue; }
             $stack[] = ['tag' => 'url', 'mark' => $chars, 'url' => $url];
-            $out .= '<a' . richtextLinkAttrs($url, $cfg) . '>';
+            if (!$asText) $out .= '<a' . richtextLinkAttrs($url, $cfg) . '>';
             continue;
         }
         // [url]address[/url]: the address is everything up to the next closer, taken whole. No
@@ -210,9 +215,9 @@ function profileBioParse(string $s, array $cfg): array
         $url = profileBioUrl(substr($s, $pos, $nextCloser - $pos));
         if ($url === null) { $bad++; $text($tok); continue; }
         if (++$links > PROFILE_BIO_MAX_LINKS) { $text($tok); continue; }
-        $out .= '<a' . richtextLinkAttrs($url, $cfg) . '>';
+        if (!$asText) $out .= '<a' . richtextLinkAttrs($url, $cfg) . '>';
         $text($url);
-        $out .= '</a>';
+        if (!$asText) $out .= '</a>';
         $pos = $nextCloser + strlen('[/url]');
     }
     $text(substr($s, $pos));
@@ -236,7 +241,7 @@ function profileBioParse(string $s, array $cfg): array
  * sees are still counted as typed (a token counts as its letters — profileBioParse() is unchanged).
  * The shortcode emoji of descriptions (`:fire:`) are still not here: the picker never writes them.
  */
-function profileBioRender(?string $source, array $cfg, ?PDO $db = null): string
+function profileBioRender(?string $source, array $cfg, ?PDO $db = null, bool $linksText = false): string
 {
     $c = profileBioClean((string)$source);
     if ($c === '') return '';
@@ -246,7 +251,8 @@ function profileBioRender(?string $source, array $cfg, ?PDO $db = null): string
         $c = implode("\n", array_slice($lines, 0, PROFILE_BIO_MAX_LINES - 1)) . "\n"
            . implode(' ', array_filter(array_slice($lines, PROFILE_BIO_MAX_LINES - 1), fn($l) => $l !== ''));
     }
-    return profileBioTokens(profileBioParse($c, $cfg)['html'], $cfg, $db);
+    // `$linksText` (1.71.0): written while the account was new — its links are words (includes/antispam.php).
+    return profileBioTokens(profileBioParse($c, $linksText ? ['rt_links_text' => '1'] + $cfg : $cfg)['html'], $cfg, $db);
 }
 
 /** The token stage of profileBioRender(), on its finished HTML: Font Awesome's icons, then the emotes. */
@@ -305,7 +311,10 @@ function profileBioFor(PDO $db, array $cfg, array $owner): string
     if (trim($src) === '') return '';
     $uid = (int)($owner['id'] ?? 0);
     if ($uid <= 0 || !userIdHasPermission($db, $cfg, $uid, 'profile.bio')) return '';
-    return profileBioRender($src, $cfg, $db);
+    // Written while the account was new (its created_at against bio_updated_at): the links are words.
+    $linksText = function_exists('antispamWrittenNew')
+        && antispamWrittenNew($db, $cfg, $uid, antispamAgeAt($owner['created_at'] ?? null, $owner['bio_updated_at'] ?? null));
+    return profileBioRender($src, $cfg, $db, $linksText);
 }
 
 /** Write it: the cleaned text, or NULL for none. The stamp moves either way. */
@@ -363,21 +372,35 @@ function profileBioSaveRequest(PDO $db, array $cfg, ?array $me, array $input, st
         $until = function_exists('pmMutedUntil') ? pmMutedUntil($me) : null;
         if ($until !== null) return $fail(403, 'muted', ['until' => $until]);
     }
+    // How fast (1.71.0): the site's one anti-spam layer (includes/antispam.php, context `bio`) — a few saves
+    // free, then growing pauses. Taking your words away is never paced: that is not writing.
+    $ticket = null;
+    if (!$clearing) {
+        $t = antispamCheck($db, $cfg, 'bio', antispamSubject($me, $ip), null, ['input' => $input]);
+        if (!$t['ok']) return ['status' => (int)$t['status'], 'body' => $t['body']];
+        $ticket = $t['ticket'];
+    }
     if (!rateLimitAllow('profile_bio', 'u' . $uid, PROFILE_BIO_RATE, 3600)) {
+        antispamRelease($db, $ticket);
         $r = $fail(429, 'rate_limit');
         $r['body']['retry_after'] = 3600;
         return $r;
     }
     if (!$clearing) {
         $bad = profileBioProblem($clean, $cfg);
-        if ($bad !== null) return $fail(400, $bad['code'], $bad['vars']);
+        if ($bad !== null) {
+            antispamRelease($db, $ticket);
+            return $fail(400, $bad['code'], $bad['vars']);
+        }
     }
     profileBioStore($db, $uid, $clean);
+    antispamRecord($db, $ticket);
     $p = $clearing ? ['html' => '', 'chars' => 0] : profileBioParse($clean, $cfg);
     return ['status' => 200, 'body' => [
         'success' => true,
-        // The server's own HTML — the page puts exactly this in place and renders nothing itself.
-        'html'    => $clearing ? '' : profileBioRender($clean, $cfg, $db),
+        // The server's own HTML — the page puts exactly this in place and renders nothing itself. Written just
+        // now: while the account is new, its links are words (1.71.0).
+        'html'    => $clearing ? '' : profileBioRender($clean, $cfg, $db, antispamLinksTextNow($db, $cfg, $me)),
         'text'    => $clean,
         'chars'   => (int)$p['chars'],
         'max'     => profileBioMax($cfg),

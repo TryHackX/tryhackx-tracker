@@ -24,16 +24,78 @@
 
     const PROVIDERS = ['recaptcha', 'recaptcha_v3', 'turnstile', 'hcaptcha'];
 
+    // A box asked for by an ANSWER rather than by the page (1.71.0): see window.captchaEnsure() below.
+    let lazy = null;             // {provider, site_key} from the server's answer
+    let lazyScript = false;      // the provider's script was put in the page by captchaEnsure()
+
     function provider() {
-        if (typeof CAPTCHA_PROVIDER === 'undefined') return 'recaptcha';
-        return PROVIDERS.indexOf(CAPTCHA_PROVIDER) !== -1 ? CAPTCHA_PROVIDER : 'recaptcha';
+        if (typeof CAPTCHA_PROVIDER !== 'undefined') return PROVIDERS.indexOf(CAPTCHA_PROVIDER) !== -1 ? CAPTCHA_PROVIDER : 'recaptcha';
+        if (lazy && PROVIDERS.indexOf(lazy.provider) !== -1) return lazy.provider;
+        return 'recaptcha';
     }
 
     function siteKey() {
         if (typeof CAPTCHA_SITEKEY !== 'undefined') return CAPTCHA_SITEKEY;
         if (typeof RECAPTCHA_SITEKEY !== 'undefined') return RECAPTCHA_SITEKEY;
-        return '';
+        return lazy ? String(lazy.site_key || '') : '';
     }
+
+    /**
+     * The CAPTCHA box ON DEMAND (1.71.0). The pages whose forms always ask (registration, sign-in, the reports
+     * and status forms, the whitelist form) carry the provider's script and the box from the start
+     * (templates/layout.php). Every other page — a room, a conversation, a list, a profile — learns both from
+     * the SERVER's answer when the anti-spam layer asks for a CAPTCHA (includes/antispam.php: `captcha:
+     * {provider, site_key}`, the public key only): the box is drawn and the provider's script loaded here, once,
+     * the first time one is needed, and never on a page where nobody is asked. The policy allows the providers'
+     * hosts on every page (captchaCspHosts()), which is what lets a script be added now. True when there is
+     * something to ask with.
+     */
+    window.captchaEnsure = function (info) {
+        if (typeof CAPTCHA_PROVIDER === 'undefined') {
+            if (!lazy) {
+                if (!info || PROVIDERS.indexOf(String(info.provider || '')) === -1 || !info.site_key) return false;
+                lazy = { provider: String(info.provider), site_key: String(info.site_key) };
+            }
+            if (!lazyScript) {
+                lazyScript = true;
+                const p = provider();
+                const s = document.createElement('script');
+                s.async = true;
+                s.defer = true;
+                s.src = p === 'turnstile' ? 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onCaptchaApiLoad&render=explicit'
+                      : p === 'hcaptcha' ? 'https://js.hcaptcha.com/1/api.js?onload=onCaptchaApiLoad&render=explicit'
+                      : p === 'recaptcha_v3' ? 'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent(siteKey())
+                      : 'https://www.google.com/recaptcha/api.js?onload=onCaptchaApiLoad&render=explicit';
+                document.head.appendChild(s);
+            }
+        }
+        // The box the widget providers draw into — the layout's own markup, built the same way.
+        if (provider() !== 'recaptcha_v3' && !document.getElementById('captcha-overlay')) {
+            const tt = (k, d) => (typeof window.t === 'function' ? window.t(k) : d);
+            const overlay = document.createElement('div');
+            overlay.className = 'captcha-overlay';
+            overlay.id = 'captcha-overlay';
+            const box = document.createElement('div');
+            box.className = 'captcha-box';
+            const p = document.createElement('p');
+            p.textContent = tt('js.captcha.verify_human', 'Please verify you are human');
+            const w = document.createElement('div');
+            w.id = 'captcha-widget';
+            w.className = 'captcha-widget';
+            const acts = document.createElement('div');
+            acts.className = 'captcha-actions';
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'btn btn-secondary captcha-cancel';
+            cancel.id = 'captcha-cancel';
+            cancel.textContent = tt('js.captcha.cancel', 'Cancel');
+            acts.appendChild(cancel);
+            box.append(p, w, acts);
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+        }
+        return siteKey() !== '';
+    };
 
     /** The SDK is loaded AND (where the provider offers an onload signal) fully set up. */
     function libReady() {

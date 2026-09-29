@@ -37,6 +37,12 @@ require_once __DIR__ . '/includes/profilebio.php';
 require_once __DIR__ . '/includes/profilevotes.php';
 // The descriptions a member wrote, on the profile and the account page (v81): the same shape.
 require_once __DIR__ . '/includes/profiledescs.php';
+// Comments on a torrent (v83): what the layout, the account page and the Settings page ask about them.
+require_once __DIR__ . '/includes/comments.php';
+// Reports of comments, descriptions and shouts, and warnings (1.71.0): after comments.php, whose rows it reads.
+require_once __DIR__ . '/includes/reports.php';
+// One anti-spam layer (1.71.0): the pages ask it whether a new account's links are text, and what a composer says.
+require_once __DIR__ . '/includes/antispam.php';
 require_once __DIR__ . '/includes/lists.php';
 // "Who has this" (1.70.0): which of its three sections the Info panel's overlay carries for this reader.
 require_once __DIR__ . '/includes/who.php';

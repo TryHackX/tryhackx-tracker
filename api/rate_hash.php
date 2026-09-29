@@ -13,7 +13,14 @@
  * an anonymous vote worth less than an account's.
  *
  * GET returns the current standing without voting, so a page can show a score to somebody who is
- * not allowed to change it.
+ * not allowed to change it. It only LOOKS at the hourly budget (repVoteRefusal() without spending).
+ *
+ * POST {hash, vote, csrf_token} casts — {op: 'vote'} is the same, and the default. POST {hash, op: 'remove',
+ * csrf_token} takes this reader's vote back (1.71.0, repRemoveVote()): the page's second press on the thumb
+ * or the half star it already cast. An explicit operation, not a toggle: the page says what it wants and
+ * this does exactly that — removing a vote that is not there succeeds and changes nothing. A removal
+ * passes every gate a vote does and pays the same: the CAPTCHA points below and the hour's budget.
+ *   → {success, rating, my_vote[, removed]}
  */
 if (!repEnabled($cfg)) jsonResponse(['error' => __('api.rep.disabled')], 404);
 
@@ -31,23 +38,38 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
                   'why_not' => repVoteRefusal($db, $cfg)]);
 }
 
-if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
+if (empty($input['csrf_token']) || !is_string($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
     jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
-// The CAPTCHA joins in through the points scheme already here: steady use is never interrupted,
-// fifty votes in a minute meets a challenge, and nobody had to write a bot detector.
-if (captchaConfigured($cfg) && isCaptchaRequired($cfg, 'vote')) {
-    $token = (string)($input['captcha_token'] ?? '');
-    if ($token === '' || !verifyCaptcha($token, $cfg)) {
-        jsonResponse(['error' => 'captcha_required', 'captcha' => true], 428);
-    }
-    onCaptchaSolved();
+// Which of the two: asked for by name, never guessed from the vote's value (1.71.0).
+$op = $input['op'] ?? 'vote';
+if (!is_string($op) || !in_array($op, ['vote', 'remove'], true)) {
+    jsonResponse(['error' => __('api.rep.unknown_op')], 400);
 }
+
+// How fast, and the CAPTCHA (1.71.0): the site's one anti-spam layer (includes/antispam.php, context `vote`) —
+// ten free (somebody rating as they browse), then 2 s, 5 s, 10 s and 30 s between votes, two quiet minutes and
+// it starts over; whoever keeps at the top meets a CAPTCHA. Until 1.71.0 a vote could never meet one: the gate
+// here asked isCaptchaRequired('vote'), which reads a `recaptcha_on_vote` switch no setting ever defined.
+// Asked only of somebody who may vote at all (the refusal peeked first, spending nothing); a vote taken back is
+// a press of the same button and costs the same. A vote still adds `captcha_pts_vote` to the smart score the
+// site's forms read (the report, status and appeal forms, the sign-in).
+if (($why = repVoteRefusal($db, $cfg)) !== null) jsonResponse(['error' => $why], 403);
+$as = antispamCheck($db, $cfg, 'vote', antispamSubject(usersEnabled($cfg) ? currentUser($db) : null, getClientIp($cfg)), null, ['input' => $input]);
+if (!$as['ok']) jsonResponse($as['body'] + ['captcha' => $as['kind'] === 'captcha'], (int)$as['status']);
 addCaptchaPoints($cfg, 'vote');
 
+if ($op === 'remove') {
+    $r = repRemoveVote($db, $cfg, $hash);
+    if (!empty($r['error'])) { antispamRelease($db, $as['ticket']); jsonResponse(['error' => $r['error']], 403); }
+    antispamRecord($db, $as['ticket']);
+    jsonResponse(['success' => true, 'removed' => (bool)$r['removed'], 'rating' => repFor($db, $cfg, $hash),
+                  'my_vote' => repMyVote($db, $cfg, $hash)]);
+}
 $vote = (int)($input['vote'] ?? 0);
 $r = repCastVote($db, $cfg, $hash, $vote);
-if (!empty($r['error'])) jsonResponse(['error' => $r['error']], 403);
+if (!empty($r['error'])) { antispamRelease($db, $as['ticket']); jsonResponse(['error' => $r['error']], 403); }
+antispamRecord($db, $as['ticket']);
 jsonResponse(['success' => true, 'rating' => repFor($db, $cfg, $hash),
               'my_vote' => repMyVote($db, $cfg, $hash)]);

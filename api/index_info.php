@@ -171,6 +171,10 @@ $canEdit = $canPropose && $meId > 0 && $rec !== null && $rec['content_status'] =
         && userIdHasPermission($db, $cfg, $meId, 'content.propose') && userIdHasPermission($db, $cfg, $meId, 'content.view');
 // Delete (1.70.0): 'own' | 'any' | null — contentDeleteRight(), the one api/content_delete.php asks.
 $deleteRight = contentDeleteRight($db, $cfg, $rec, $me);
+// Report (1.71.0, includes/reports.php): somebody else's PUBLISHED words, to a reader holding content.report who
+// may read them — and whether they already did (an open report of theirs), which the button shows.
+$reportFlags = ($canContent && $hasWords && function_exists('contentReportDescFlags'))
+    ? contentReportDescFlags($db, $cfg, $me, $hash, $rec) : ['can' => false, 'reported' => false];
 
 jsonResponse([
     'success'   => true,
@@ -215,6 +219,8 @@ jsonResponse([
                                          'description_format' => (string)$rec['description_format'],
                                          'source_url' => (string)($rec['source_url'] ?? '')] : null,
     'can_content_delete'  => $deleteRight,
+    'can_content_report'  => (bool)$reportFlags['can'],
+    'content_reported'    => (bool)$reportFlags['reported'],
     'content_formats'   => richtextFormats($cfg),
     'content_max'       => richtextMaxChars($cfg),
     'stats' => [
@@ -237,4 +243,7 @@ jsonResponse([
     'vote_refusal' => repEnabled($cfg) ? repVoteRefusal($db, $cfg) : null,
     'can_refresh' => ($cfg['search_allow_sl_refresh'] ?? '0') === '1',
     'can_files'   => userCan($db, $cfg, 'index.files'),
+    // Comments (1.71.0, includes/comments.php): whether the section is drawn and how many there are — the
+    // thread itself is its own request (api/comment_list.php), made when the section comes into view.
+    'comments'    => function_exists('commentPanelInfo') ? commentPanelInfo($db, $cfg, $me, $hash) : null,
 ]);

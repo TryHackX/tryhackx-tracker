@@ -678,5 +678,47 @@ check('the layout loads the script (and the tab router in it) while the feature 
       str_contains($src('templates/layout.php'), "|| (function_exists('profileVotesEnabled') && profileVotesEnabled(\$cfg))): ?>"));
 check('the privacy endpoint saves the flag with the others', str_contains($src('api/user_privacy.php'), "'profile_listed', 'votes_public'] as \$flag"));
 
+/* ══ 8. a vote taken back leaves the list at once (1.71.0) ═════════════════ */
+// Last, on section 5's own fixtures: the sections before count the owner's twelve votes. The owner takes back
+// a thumb and a star through repRemoveVote() — as the Info panel's second press does — and the next page of
+// the list (what the table asks for on `rating:changed`) is without them, the torrent's numbers counted again.
+$db->prepare("INSERT INTO user_groups (slug, name, description, color, priority, is_default, is_system, permissions) VALUES ('pvtest_rate', 'pvtest_rate', '', '', 2, 0, 0, ?)")
+   ->execute([json_encode(['rating.vote' => true])]);
+pvOnlyIn($db, $ownT, 'pvtest_rate');
+$GLOBALS['__current_user_loaded'] = true;
+$GLOBALS['__current_user_cache'] = userFindById($db, $ownT);
+$rlKey = 'repvote|user:' . $ownT;
+register_shutdown_function(function () use ($root, $rlKey) {
+    // the hour's budget the two removals spent, out of the shared file under its lock
+    $file = $root . '/config/rate_limits.json';
+    $lock = @fopen($file . '.lock', 'c');
+    if ($lock) @flock($lock, LOCK_EX);
+    try {
+        $data = is_file($file) ? (json_decode((string)@file_get_contents($file), true) ?: []) : [];
+        if (array_key_exists($rlKey, $data)) { unset($data[$rlKey]); @file_put_contents($file, json_encode($data)); }
+    } finally { if ($lock) { @flock($lock, LOCK_UN); @fclose($lock); } }
+});
+$before = $list($cfgOn, $ownT, [], $me);
+$beforeOther = $list($cfgOn, $ownT, [], $stranger);   // a reader of the profile (who is not shown every row the owner is)
+$gone = repRemoveVote($db, $cfgOn, $T[1]);
+$after = $list($cfgOn, $ownT, [], $me);
+$afterOther = $list($cfgOn, $ownT, [], $stranger);
+$t1 = $db->query("SELECT votes_up, votes_down, votes_count, score_x100 FROM index_hashes WHERE info_hash = " . $db->quote($T[1]))->fetch(PDO::FETCH_ASSOC);
+check('thumbs: the owner takes back a vote and the list is one shorter at once — for the owner and for a reader of the profile',
+      !empty($gone['success']) && $gone['removed'] === true && $before['total'] === 12 && $after['total'] === 11
+      && $afterOther['total'] === $beforeOther['total'] - 1 && in_array($T[1], array_column($beforeOther['rows'], 'info_hash'), true)
+      && !in_array($T[1], array_column($after['rows'], 'info_hash'), true) && !in_array($T[1], array_column($afterOther['rows'], 'info_hash'), true),
+      json_encode([$gone['error'] ?? null, $before['total'], $after['total'], $beforeOther['total'], $afterOther['total']]));
+check('… and the torrent\'s own numbers are counted again (5 votes → 4, all up)',
+      array_map('intval', $t1 ?: []) === ['votes_up' => 4, 'votes_down' => 0, 'votes_count' => 4, 'score_x100' => 10000], json_encode($t1));
+$sBefore = $list($cfgStars, $ownT, [], $me);
+$goneS = repRemoveVote($db, $cfgStars, $X1);
+$sAfter = $list($cfgStars, $ownT, [], $me);
+$x1 = $db->query("SELECT votes_count, score_x100 FROM index_hashes WHERE info_hash = " . $db->quote($X1))->fetch(PDO::FETCH_ASSOC);
+check('stars: the rating taken back leaves the ratings list too, and the torrent has no rating left',
+      !empty($goneS['success']) && $goneS['removed'] === true && $sAfter['total'] === $sBefore['total'] - 1
+      && !in_array($X1, array_column($sAfter['rows'], 'info_hash'), true) && array_map('intval', $x1 ?: []) === ['votes_count' => 0, 'score_x100' => 0],
+      json_encode([$goneS['error'] ?? null, $sBefore['total'], $sAfter['total'], $x1]));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

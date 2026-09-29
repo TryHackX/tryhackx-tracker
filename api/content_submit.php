@@ -34,13 +34,24 @@ $p = parseMagnetOrHash((string)($input['hash'] ?? ''));
 if ($p['hash'] === null) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
 
 $me = usersEnabled($cfg) ? currentUser($db) : null;
+// How fast (1.71.0): the site's one anti-spam layer (includes/antispam.php, context `description`) — two free,
+// then a minute, five, fifteen, thirty; an hour of quiet and it starts over; the same words again refused; a
+// GUEST solves a CAPTCHA every time (while a provider is set up). A submission, a proposal and an Edit alike —
+// every one is words a moderator reads. The words refused afterwards hand the reservation back.
+$as = antispamCheck($db, $cfg, 'description', antispamSubject($me, getClientIp($cfg)),
+                    trim((string)($input['description'] ?? '')) . "\n" . trim((string)($input['source_url'] ?? '')), ['input' => $input]);
+if (!$as['ok']) jsonResponse($as['body'], (int)$as['status']);
 $r = contentAttach($db, $cfg, $p['hash'], [
     'description'        => (string)($input['description'] ?? ''),
     'description_format' => (string)($input['description_format'] ?? 'bbcode'),
     'source_url'         => (string)($input['source_url'] ?? ''),
     'kind'               => (string)($input['kind'] ?? 'rewrite'),
 ], $me, getClientIp($cfg));
-if (empty($r['ok'])) jsonResponse(['error' => (string)$r['error']], (int)($r['code'] ?? 400));
+if (empty($r['ok'])) {
+    antispamRelease($db, $as['ticket']);
+    jsonResponse(['error' => (string)$r['error']], (int)($r['code'] ?? 400));
+}
+antispamRecord($db, $as['ticket']);
 
 jsonResponse([
     'success'  => true,

@@ -31,8 +31,12 @@
     const AC = window.AudioContext || window.webkitAudioContext;
     // Which count plays which event. A message from a friend and one from anyone else are two
     // events: the callers hand over the total and the friends' share, and the difference is the rest.
+    // The comments' two (1.71.0): a comment where the reader is told of one, and a comment that names them —
+    // counted from the notifications they leave (api/user_pulse.php: unread_comment, of which
+    // unread_comment_mention), so observe() takes them OUT of `unread` below: one comment, one sound.
     const KEYS = { unread: 'notification', unread_pm_friend: 'message_friend', unread_pm_other: 'message',
-                   unread_shout_friend: 'shout_friend', unread_shout_other: 'shout', unread_shout_mention: 'mention' };
+                   unread_shout_friend: 'shout_friend', unread_shout_other: 'shout', unread_shout_mention: 'mention',
+                   unread_comment_other: 'comment', unread_comment_mention: 'comment_mention' };
     // The three of those that the room can ALSO announce by itself (1.61.0, `shout:new`). One batch
     // of lines can reach this file down either road, and it has to be heard once.
     const SHOUT_KEYS = { unread_shout_friend: 1, unread_shout_other: 1, unread_shout_mention: 1 };
@@ -140,6 +144,16 @@
             const total = Math.max(0, Number(c.unread_shout) || 0);
             if (c.unread_shout_friend === undefined || c.unread_shout_friend === null) { c.unread_shout_other = total; delete c.unread_shout_friend; }
             else c.unread_shout_other = Math.max(0, total - Math.max(0, Number(c.unread_shout_friend) || 0));
+        }
+        // The comments' (1.71.0): the notifications about comments, and of those the mentions. They are
+        // notifications too — inside `unread`, the badge's one number — so the plain notification's count here
+        // is what is left without them, and a comment plays the comment's sound and not both.
+        if (c.unread_comment !== undefined && c.unread_comment !== null) {
+            const total = Math.max(0, Number(c.unread_comment) || 0);
+            const named = Math.max(0, Number(c.unread_comment_mention) || 0);
+            c.unread_comment_other = Math.max(0, total - named);
+            c.unread_comment_mention = named;
+            if (c.unread !== undefined && c.unread !== null) c.unread = Math.max(0, (Number(c.unread) || 0) - total);
         }
         Object.keys(KEYS).forEach((key) => {
             if (c[key] === undefined || c[key] === null) return;
@@ -290,8 +304,9 @@
             e.preventDefault();
             const btn = $('snd-save');
             btn.disabled = true;
-            const r = typeof postJson === 'function'
-                ? await postJson('user_sound_prefs', { csrf_token: $('account-csrf').value, prefs: current() }) : null;
+            // The page's token (1.71.0, window.csrfToken() in app.js): it read #account-csrf alone.
+            const r = typeof postJson === 'function' && typeof window.csrfToken === 'function'
+                ? await postJson('user_sound_prefs', { csrf_token: window.csrfToken(), prefs: current() }) : null;
             btn.disabled = false;
             if (!r || !r.success) { say((r && r.error) || t('js.sounds.save_failed')); return; }
             data.prefs = r.prefs;

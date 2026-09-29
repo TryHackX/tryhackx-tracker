@@ -722,6 +722,204 @@
                 </div>
             </div>
 
+            <?php /* One anti-spam layer for everything people write (1.71.0, includes/antispam.php): the room,
+                     messages, comments, descriptions, reports, lists, the profile's description, emote uploads
+                     and votes. A master switch, the CAPTCHA escalation and the guests' CAPTCHA, the staff's
+                     exemption; then a ladder per place (a free burst, growing pauses, forgotten after a quiet
+                     spell); a new account's rules; the messages' conversation limits; the duplicate window.
+                     Every value is shown as its reader clamps it, so the page never shows a number the site
+                     does not use. Without a CAPTCHA provider the layer paces alone, and says so here. */ ?>
+            <?php
+            $asOn = function_exists('antispamOn') ? antispamOn($cfg) : true;
+            $asLabels = ['shout' => 'settings.antispam_ctx_shout', 'message' => 'settings.antispam_ctx_message',
+                         'comment' => 'settings.antispam_ctx_comment', 'description' => 'settings.antispam_ctx_description',
+                         'report' => 'settings.antispam_ctx_report', 'list' => 'settings.antispam_ctx_list',
+                         'bio' => 'settings.antispam_ctx_bio', 'emote' => 'settings.antispam_ctx_emote', 'vote' => 'settings.antispam_ctx_vote'];
+            $asPmMember = function_exists('antispamPmLimits') ? antispamPmLimits($cfg, false) : ['hour' => 8, 'day' => 20];
+            $asPmNew = function_exists('antispamPmLimits') ? antispamPmLimits($cfg, true) : ['hour' => 2, 'day' => 4];
+            ?>
+            <div class="settings-section" id="section-antispam" data-group="security" data-title="<?= _h('settings.antispam_heading') ?>">
+                <h5><?= _h('settings.antispam_heading') ?></h5>
+                <p class="settings-hint mb-2"><?= __('settings.antispam_intro') ?></p>
+                <?php if (!(function_exists('antispamCaptchaAvailable') && antispamCaptchaAvailable($cfg))): ?>
+                <p class="alert alert-warning py-2 small mb-3" id="antispam-no-captcha"><?= __('settings.antispam_no_captcha', ['url' => '#section-captcha']) ?></p>
+                <?php endif; ?>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="antispam_enabled">
+                        <label class="form-label"><?= _h('settings.antispam_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="antispam_enabled">
+                            <option value="1" <?= $asOn ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= !$asOn ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.antispam_enabled_hint', ['url' => '#section-shout']) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="antispam_captcha_after">
+                        <label class="form-label"><?= _h('settings.antispam_captcha_after') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_captcha_after" value="<?= (int)(function_exists('antispamCaptchaAfter') ? antispamCaptchaAfter($cfg) : 3) ?>" min="0" max="50">
+                        <small class="settings-hint"><?= _h('settings.antispam_captcha_after_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="antispam_guest_captcha">
+                        <label class="form-label"><?= _h('settings.antispam_guest_captcha') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="antispam_guest_captcha">
+                            <option value="1" <?= ($cfg['antispam_guest_captcha'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.yes') ?></option>
+                            <option value="0" <?= ($cfg['antispam_guest_captcha'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.antispam_guest_captcha_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="antispam_staff_exempt">
+                        <label class="form-label"><?= _h('settings.antispam_staff_exempt') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="antispam_staff_exempt">
+                            <option value="1" <?= ($cfg['antispam_staff_exempt'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.yes') ?></option>
+                            <option value="0" <?= ($cfg['antispam_staff_exempt'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.antispam_staff_exempt_hint') ?></small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-antispam-ladders"><i class="bi bi-bar-chart-steps"></i> <?= _h('settings.antispam_ladders_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.antispam_ladders_sub') ?></small></h6>
+                <div class="antispam-ladders">
+                    <div class="row g-2 d-none d-md-flex antispam-ladder-head" aria-hidden="true">
+                        <div class="col-md-4"><?= _h('settings.antispam_col_where') ?></div>
+                        <div class="col-md-2"><?= _h('settings.antispam_col_burst') ?></div>
+                        <div class="col-md-4"><?= _h('settings.antispam_col_steps') ?></div>
+                        <div class="col-md-2"><?= _h('settings.antispam_col_reset') ?></div>
+                    </div>
+                    <?php
+                    // One row per place, each of its three fields in a block that names its key (data-setting) — the
+                    // keys written out, as every other setting on this page is. The field is drawn by $asField with the
+                    // value as its reader clamps it (antispamLadder()).
+                    $asField = function (string $ctx, string $part) use ($cfg, $asLabels): string {
+                        $lad = function_exists('antispamLadder') ? antispamLadder($cfg, $ctx) : ['burst' => 0, 'steps' => [], 'reset' => 600];
+                        $label = __('settings.antispam_col_' . $part);
+                        $aria = sanitize(__($asLabels[$ctx]) . ' — ' . $label);
+                        $cls = 'form-control form-control-sm bg-dark text-light border-secondary';
+                        $name = 'antispam_' . $ctx . '_' . $part;
+                        $in = $part === 'steps'
+                            ? '<input type="text" inputmode="numeric" class="' . $cls . '" name="' . $name . '" value="' . sanitize(implode(', ', $lad['steps']))
+                              . '" maxlength="80" autocomplete="off" aria-label="' . $aria . '">'
+                            : '<input type="number" class="' . $cls . '" name="' . $name . '" value="' . (int)$lad[$part] . '"'
+                              . ($part === 'burst' ? ' min="0" max="50"' : ' min="10" max="604800"') . ' aria-label="' . $aria . '">';
+                        return '<label class="form-label d-md-none small">' . sanitize($label) . '</label>' . $in;
+                    };
+                    $asName = function (string $ctx) use ($asLabels): string {
+                        return '<span class="antispam-ladder-name">' . sanitize(__($asLabels[$ctx])) . '</span>'
+                             . '<small class="settings-hint d-block">' . __($asLabels[$ctx] . '_hint') . '</small>';
+                    };
+                    ?>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="shout">
+                        <div class="col-12 col-md-4"><?= $asName('shout') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_shout_burst"><?= $asField('shout', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_shout_steps"><?= $asField('shout', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_shout_reset"><?= $asField('shout', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="message">
+                        <div class="col-12 col-md-4"><?= $asName('message') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_message_burst"><?= $asField('message', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_message_steps"><?= $asField('message', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_message_reset"><?= $asField('message', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="comment">
+                        <div class="col-12 col-md-4"><?= $asName('comment') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_comment_burst"><?= $asField('comment', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_comment_steps"><?= $asField('comment', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_comment_reset"><?= $asField('comment', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="description">
+                        <div class="col-12 col-md-4"><?= $asName('description') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_description_burst"><?= $asField('description', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_description_steps"><?= $asField('description', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_description_reset"><?= $asField('description', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="report">
+                        <div class="col-12 col-md-4"><?= $asName('report') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_report_burst"><?= $asField('report', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_report_steps"><?= $asField('report', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_report_reset"><?= $asField('report', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="list">
+                        <div class="col-12 col-md-4"><?= $asName('list') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_list_burst"><?= $asField('list', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_list_steps"><?= $asField('list', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_list_reset"><?= $asField('list', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="bio">
+                        <div class="col-12 col-md-4"><?= $asName('bio') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_bio_burst"><?= $asField('bio', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_bio_steps"><?= $asField('bio', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_bio_reset"><?= $asField('bio', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="emote">
+                        <div class="col-12 col-md-4"><?= $asName('emote') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_emote_burst"><?= $asField('emote', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_emote_steps"><?= $asField('emote', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_emote_reset"><?= $asField('emote', 'reset') ?></div>
+                    </div>
+                    <div class="row g-2 align-items-center antispam-ladder" data-ctx="vote">
+                        <div class="col-12 col-md-4"><?= $asName('vote') ?></div>
+                        <div class="col-4 col-md-2" data-setting="antispam_vote_burst"><?= $asField('vote', 'burst') ?></div>
+                        <div class="col-8 col-md-4" data-setting="antispam_vote_steps"><?= $asField('vote', 'steps') ?></div>
+                        <div class="col-12 col-md-2" data-setting="antispam_vote_reset"><?= $asField('vote', 'reset') ?></div>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-antispam-new"><i class="bi bi-person-plus"></i> <?= _h('settings.antispam_new_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.antispam_new_sub') ?></small></h6>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="antispam_new_days">
+                        <label class="form-label"><?= _h('settings.antispam_new_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_new_days" value="<?= (int)(function_exists('antispamNewDays') ? antispamNewDays($cfg) : 3) ?>" min="0" max="90">
+                        <small class="settings-hint"><?= _h('settings.antispam_new_days_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="antispam_new_factor">
+                        <label class="form-label"><?= _h('settings.antispam_new_factor') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_new_factor" value="<?= (int)(function_exists('antispamNewFactor') ? antispamNewFactor($cfg) : 2) ?>" min="1" max="10">
+                        <small class="settings-hint"><?= _h('settings.antispam_new_factor_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="antispam_new_links">
+                        <label class="form-label"><?= _h('settings.antispam_new_links') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="antispam_new_links">
+                            <option value="1" <?= ($cfg['antispam_new_links'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.yes') ?></option>
+                            <option value="0" <?= ($cfg['antispam_new_links'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.antispam_new_links_hint') ?></small>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-antispam-pm"><i class="bi bi-envelope"></i> <?= _h('settings.antispam_pm_heading') ?> <small class="settings-hint fw-normal"><?= __('settings.antispam_pm_sub', ['url' => '#section-people']) ?></small></h6>
+                <div class="row g-3">
+                    <div class="col-6 col-md-2" data-setting="antispam_pm_new_hour">
+                        <label class="form-label"><?= _h('settings.antispam_pm_new_hour') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_pm_new_hour" value="<?= (int)$asPmMember['hour'] ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-6 col-md-2" data-setting="antispam_pm_new_day">
+                        <label class="form-label"><?= _h('settings.antispam_pm_new_day') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_pm_new_day" value="<?= (int)$asPmMember['day'] ?>" min="0" max="10000">
+                    </div>
+                    <div class="col-6 col-md-2" data-setting="antispam_pm_new_hour_new">
+                        <label class="form-label"><?= _h('settings.antispam_pm_new_hour_new') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_pm_new_hour_new" value="<?= (int)$asPmNew['hour'] ?>" min="0" max="1000">
+                    </div>
+                    <div class="col-6 col-md-2" data-setting="antispam_pm_new_day_new">
+                        <label class="form-label"><?= _h('settings.antispam_pm_new_day_new') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_pm_new_day_new" value="<?= (int)$asPmNew['day'] ?>" min="0" max="10000">
+                    </div>
+                    <div class="col-12 col-md-4" data-setting="antispam_pm_spread">
+                        <label class="form-label"><?= _h('settings.antispam_pm_spread') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_pm_spread" value="<?= (int)(function_exists('antispamPmSpread') ? antispamPmSpread($cfg) : 2) ?>" min="0" max="50">
+                        <small class="settings-hint"><?= _h('settings.antispam_pm_spread_hint') ?></small>
+                    </div>
+                    <div class="col-12"><small class="settings-hint"><?= _h('settings.antispam_pm_limits_hint') ?></small></div>
+                </div>
+
+                <h6 class="mt-4 mb-1" id="section-antispam-dup"><i class="bi bi-files"></i> <?= _h('settings.antispam_dup_heading') ?></h6>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="antispam_dup_seconds">
+                        <label class="form-label"><?= _h('settings.antispam_dup_seconds') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="antispam_dup_seconds" value="<?= (int)(function_exists('antispamDupSeconds') ? antispamDupSeconds($cfg) : 600) ?>" min="0" max="86400">
+                    </div>
+                    <div class="col-md-8"><small class="settings-hint d-block mt-md-4"><?= _h('settings.antispam_dup_hint') ?></small></div>
+                </div>
+            </div>
+
             <?php /* Rate & length limits: the per-address hourly limits of the public report, status,
                      block-check and appeal forms — the same four forms the CAPTCHA sections above guard,
                      which is why they are here and not under Network & limits (that group is the
@@ -1225,6 +1423,14 @@
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_per_day" value="<?= sanitize($cfg['pm_max_per_day'] ?? '50') ?>" min="1" max="1000">
                         <small class="settings-hint"><?= _h('settings.pm_day_hint') ?></small>
                     </div>
+                    <?php /* Messages' own address ceiling (1.71.0) — the send read `rate_limit_favourites`, a key no
+                             setting defined, so it was 240 and nowhere to be changed. One account's pace, the
+                             conversations it starts and the same words to many people are the anti-spam layer's. */ ?>
+                    <div class="col-md-3" data-setting="rate_limit_pm">
+                        <label class="form-label"><?= _h('settings.rate_limit_pm') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_pm" value="<?= sanitize((string)(function_exists('pmRatePerHour') ? pmRatePerHour($cfg) : ($cfg['rate_limit_pm'] ?? '240'))) ?>" min="1" max="100000">
+                        <small class="settings-hint"><?= __('settings.rate_limit_pm_hint', ['url' => '#section-antispam']) ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.pm_chars') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_max_chars" value="<?= sanitize($cfg['pm_max_chars'] ?? '4000') ?>" min="200" max="20000">
@@ -1568,7 +1774,7 @@
             <?php /* A member's likes or ratings on the profile (1.69.0, includes/profilevotes.php): a section of
                      its own inside Profiles, like the description's above it, so the categories can be
                      rearranged without taking either apart. The one switch sits UNDER the rating system's
-                     own (Descriptions & ratings → Ratings): with ratings off it has nothing to show, and the hint says so
+                     own (Descriptions, comments & ratings → Ratings): with ratings off it has nothing to show, and the hint says so
                      beside the control rather than leaving the operator to wonder why the tab is gone. */ ?>
             <div class="settings-section" id="section-profile-votes" data-group="profiles" data-title="<?= _h('settings.profile_votes_heading') ?>">
                 <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.profile_votes_heading') ?></h5>
@@ -1600,7 +1806,7 @@
 
             <?php /* The descriptions a member wrote, on the profile (1.70.0, includes/profiledescs.php): a
                      section of its own inside Profiles, like the likes' above it. The one switch sits UNDER
-                     descriptions themselves (Descriptions & ratings): with descriptions and source links
+                     descriptions themselves (Descriptions, comments & ratings): with descriptions and source links
                      both off there is nothing to list, and the hint says so beside the control. */ ?>
             <div class="settings-section" id="section-profile-descs" data-group="profiles" data-title="<?= _h('settings.profile_descs_heading') ?>">
                 <h5><i class="bi bi-journal-text"></i> <?= _h('settings.profile_descs_heading') ?></h5>
@@ -2639,9 +2845,85 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                 </div>
             </div>
 
-            <?php /* Ratings — includes/reputation.php. After the descriptions, in the group now called
-                     "Descriptions & ratings" (1.69.0; "Descriptions & review" before, a name nobody looking
-                     for the ratings would open): what members add to a torrent, in words or in votes. */ ?>
+            <?php /* Comments on a torrent (1.71.0, includes/comments.php) — between the descriptions and the
+                     ratings, in the group now called "Descriptions, comments & ratings": what members (and,
+                     where the operator allows it, guests) say under a torrent in its Info panel. The switches
+                     and numbers here; WHO may read, write, correct and moderate is the permissions (the fold
+                     at the end shows every group's). */ ?>
+            <div class="settings-section" id="section-comments" data-group="content" data-title="<?= _h('settings.comments_heading') ?>">
+                <h5><i class="bi bi-chat-left-text"></i> <?= _h('settings.comments_heading') ?></h5>
+                <small class="settings-hint d-block mb-2"><?= __('settings.comments_intro') ?></small>
+                <small class="settings-hint d-block mb-3" id="comments-guests-note"><?= __('settings.comments_guests_intro', ['captcha' => '#section-captcha']) ?></small>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="comments_enabled">
+                        <label class="form-label"><?= _h('settings.comments_enabled') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="comments_enabled">
+                            <option value="1" <?= ($cfg['comments_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['comments_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.comments_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_max_chars">
+                        <label class="form-label"><?= _h('settings.comment_max_chars') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="comment_max_chars" value="<?= sanitize((string)commentMax($cfg)) ?>" min="<?= COMMENT_MAX_MIN ?>" max="<?= COMMENT_MAX_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.comment_max_chars_hint', ['min' => COMMENT_MAX_MIN, 'max' => COMMENT_MAX_MAX, 'lines' => COMMENT_MAX_LINES]) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_links">
+                        <label class="form-label"><?= _h('settings.comment_links') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="comment_links">
+                            <option value="1" <?= ($cfg['comment_links'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.comment_links_on') ?></option>
+                            <option value="0" <?= ($cfg['comment_links'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.comment_links_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.comment_links_hint', ['max' => COMMENT_MAX_LINKS]) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comments_per_page">
+                        <label class="form-label"><?= _h('settings.comments_per_page') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="comments_per_page" value="<?= sanitize((string)commentsPerPage($cfg)) ?>" min="<?= COMMENT_PAGE_MIN ?>" max="<?= COMMENT_PAGE_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.comments_per_page_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_edit_minutes">
+                        <label class="form-label"><?= _h('settings.comment_edit_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="comment_edit_minutes" value="<?= sanitize((string)commentEditMinutes($cfg)) ?>" min="0" max="1440">
+                        <small class="settings-hint"><?= __('settings.comment_edit_minutes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_delete_own_minutes">
+                        <label class="form-label"><?= _h('settings.comment_delete_own_minutes') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="comment_delete_own_minutes" value="<?= sanitize((string)commentDeleteOwnMinutes($cfg)) ?>" min="0" max="1440">
+                        <small class="settings-hint"><?= __('settings.comment_delete_own_minutes_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_rate_per_hour">
+                        <label class="form-label"><?= _h('settings.comment_rate_per_hour') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="comment_rate_per_hour" value="<?= sanitize((string)commentRatePerHour($cfg)) ?>" min="1" max="1000">
+                        <small class="settings-hint"><?= __('settings.comment_rate_per_hour_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="captcha_pts_comment">
+                        <label class="form-label"><?= _h('settings.captcha_pts_comment') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="captcha_pts_comment" value="<?= sanitize((string)max(0, min(100, (int)($cfg['captcha_pts_comment'] ?? 1)))) ?>" min="0" max="100">
+                        <small class="settings-hint"><?= __('settings.captcha_pts_comment_hint', ['url' => '#section-captcha-smart']) ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comments_guest_review">
+                        <label class="form-label"><?= _h('settings.comments_guest_review') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="comments_guest_review">
+                            <option value="1" <?= ($cfg['comments_guest_review'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.comments_guest_review_on') ?></option>
+                            <option value="0" <?= ($cfg['comments_guest_review'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.comments_guest_review_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.comments_guest_review_hint') ?></small>
+                    </div>
+                </div>
+                <?php /* Who may read, write, correct and moderate — the same read-only matrix Shoutbox and the
+                         emote manager have (assets/js/admin-shout.js, one answer from the groups endpoint for
+                         every fold on the page); granting is Users → Groups. */ ?>
+                <details class="gr-matrix-wrap mt-3" id="comment-matrix-wrap">
+                    <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('settings.comment_matrix_title') ?></summary>
+                    <small class="settings-hint d-block mt-2"><?= __('settings.comment_matrix_hint') ?></small>
+                    <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="comment-matrix"></table></div>
+                </details>
+            </div>
+
+            <?php /* Ratings — includes/reputation.php. After the descriptions (and, from 1.71.0, the comments), in
+                     the group now called "Descriptions, comments & ratings" (1.69.0 "Descriptions & ratings";
+                     "Descriptions & review" before, a name nobody looking for the ratings would open): what
+                     members add to a torrent, in words or in votes. */ ?>
             <div class="settings-section" id="section-reputation" data-group="content" data-title="<?= _h('settings.rep_heading') ?>">
                 <h5><i class="bi bi-hand-thumbs-up"></i> <?= _h('settings.rep_heading') ?></h5>
                 <small class="settings-hint d-block mb-3"><?= __('settings.rep_intro_1') ?>
@@ -2709,7 +2991,11 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                      the form. */ ?>
             <div class="settings-section" id="section-shout" data-group="shoutbox" data-title="<?= _h('settings.shout_title') ?>">
                 <h5><i class="bi bi-chat-left-dots"></i> <?= _h('settings.shout_title') ?></h5>
-                <small class="settings-hint d-block mb-3"><?= __('settings.shout_intro') ?></small>
+                <small class="settings-hint d-block mb-2"><?= __('settings.shout_intro') ?></small>
+                <?php /* 1.71.0: the emoji picker and the emotes left this card for a group of their own;
+                         somebody who knew where they were finds the way on from here. A link to the
+                         section's own id: admin-settings.js opens it under its chip. */ ?>
+                <small class="settings-hint d-block mb-3" id="shout-emoji-moved"><i class="bi bi-emoji-smile"></i> <?= __('settings.shout_emoji_moved', ['url' => '#section-emoji']) ?></small>
                 <div class="row g-3">
                     <div class="col-md-3" data-setting="shout_enabled">
                         <label class="form-label"><?= _h('settings.shout_enabled') ?></label>
@@ -2842,35 +3128,69 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                 </div>
                 <?php /* Who may read and who may write, per group: the same read-only matrix
                          Users → Groups draws (renderMatrix in assets/js/admin-users.js), scoped to
-                         the five shout.* ids and fed by the same endpoint — no second idea of what a
-                         permission is, and no new payload. Folded, and filled only when it is
+                         the room's own shout.* ids and fed by the same endpoint — no second idea of
+                         what a permission is, and no new payload. Folded, and filled only when it is
                          opened: it answers a question that is asked once, usually right after the
-                         room is switched on for the first time. */ ?>
+                         room is switched on for the first time. (The two emote ids went with the
+                         emotes in 1.71.0: Emoji & emotes has their matrix.) */ ?>
                 <details class="gr-matrix-wrap mt-3" id="shout-matrix-wrap">
                     <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('settings.shout_matrix_title') ?></summary>
                     <small class="settings-hint d-block mt-2"><?= __('settings.shout_matrix_hint') ?></small>
                     <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="shout-matrix"></table></div>
                 </details>
-                <?php /* ── Emoji in the picker (1.69.0, includes/emoji.php) ───────────────────────
-                         The ordinary emoji are Unicode characters drawn by the reader's own device font:
-                         nothing about them to switch, so the block says what the picker offers and has
-                         controls only for Font Awesome's faces — and those only while a Font Awesome Pro
-                         package is the site's icon source, as it is SAVED (emojiFaContext()). Otherwise
-                         the block says how to get there; the two settings keep whatever they held, since
-                         a control that is not drawn is not sent. */
-                      $shoutFa = function_exists('emojiFaContext') ? emojiFaContext($cfg) : ['available' => false];
-                      $shoutFaWant = (string)($cfg['shout_emoji_fa'] ?? 'off');
-                      $shoutFaStyle = (string)($cfg['shout_emoji_fa_style'] ?? '');
-                      /* 1.70.0: how much more of the package the picker offers. The select is drawn with the
-                         other two and shown only while the faces are on (assets/js/admin-shout.js hides it
-                         for "off"; hidden, it still saves what it holds). Its note counts the catalogue —
-                         built here from the package's own index when the package came from 1.69.0
-                         without one (emojiFaCatalogInfo()). */
-                      $shoutFaScope = function_exists('emojiFaScope') ? emojiFaScope($cfg) : 'faces';
-                      $shoutFaCat = !empty($shoutFa['available']) && function_exists('emojiFaCatalogInfo') ? emojiFaCatalogInfo($shoutFa) : null; ?>
-                <div class="mt-4" id="admin-shout-emoji">
-                    <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emoji_heading') ?></h6>
-                    <small class="settings-hint d-block mb-3"><?= __('settings.shout_emoji_sub') ?></small>
+                <div class="mt-3" id="admin-shout">
+                    <label class="form-label"><?= _h('settings.shout_purge') ?></label>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <input type="number" class="form-control bg-dark text-light border-secondary" id="shout-purge-days" min="0" max="3650" placeholder="<?= _h('settings.shout_purge_days_ph') ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <?php /* Not `btn-sm`: it stands beside a full-height number box in a row
+                                     aligned on its bottom edge, and a small button there was visibly
+                                     shorter than the thing it acts on. */ ?>
+                            <button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
+                        </div>
+                    </div>
+                    <small class="settings-hint"><?= __('settings.shout_purge_hint') ?></small>
+                </div>
+            </div>
+
+            <?php /* ── Emoji & emotes (1.71.0) ───────────────────────────────────────────────────────
+                     The emoji picker, Font Awesome's icons in it, and the emotes and stickers somebody
+                     uploads. They were two blocks of Settings → Shoutbox, where they grew up — the picker
+                     and the pictures were the room's — but from 1.70.0 every text that has the picker takes
+                     them (a private message, a torrent's description and a proposed rewrite of it, a list's
+                     description, the profile's), and they had become most of that card: the one place
+                     nobody looking for "emotes in messages" would think to open. A group of their own, in two
+                     sections — the picker, and the pictures. The setting keys, the ids the scripts drive
+                     (#admin-shout-emoji, #admin-emotes, assets/js/admin-shout.js) and the endpoints are what
+                     they were; a link to one of the old blocks' ids still opens it (admin-settings.js
+                     openHash() finds the section round any id), and Shoutbox keeps what is the room's.
+
+                     ── Emoji in the picker (1.69.0, includes/emoji.php) ─────────────────────────
+                     The ordinary emoji are Unicode characters drawn by the reader's own device font:
+                     nothing about them to switch, so the section says what the picker offers and has
+                     controls only for Font Awesome's faces — and those only while a Font Awesome Pro
+                     package is the site's icon source, as it is SAVED (emojiFaContext()). Otherwise
+                     the section says how to get there; the settings keep whatever they held, since
+                     a control that is not drawn is not sent. */
+                  $shoutFa = function_exists('emojiFaContext') ? emojiFaContext($cfg) : ['available' => false];
+                  $shoutFaWant = (string)($cfg['shout_emoji_fa'] ?? 'off');
+                  $shoutFaStyle = (string)($cfg['shout_emoji_fa_style'] ?? '');
+                  /* 1.70.0: how much more of the package the picker offers. The select is drawn with the
+                     other two and shown only while the faces are on (assets/js/admin-shout.js hides it
+                     for "off"; hidden, it still saves what it holds). Its note counts the catalogue —
+                     built here from the package's own index when the package came from 1.69.0
+                     without one (emojiFaCatalogInfo()). */
+                  $shoutFaScope = function_exists('emojiFaScope') ? emojiFaScope($cfg) : 'faces';
+                  $shoutFaCat = !empty($shoutFa['available']) && function_exists('emojiFaCatalogInfo') ? emojiFaCatalogInfo($shoutFa) : null; ?>
+            <div class="settings-section" id="section-emoji" data-group="emoji" data-title="<?= _h('settings.shout_emoji_heading') ?>">
+                <h5><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emoji_heading') ?></h5>
+                <?php /* The group's own line first: what "the whole site" means here, and the one thing the
+                         pictures need that the emoji do not — the room they are kept by. */ ?>
+                <small class="settings-hint d-block mb-2"><?= __('settings.emoji_intro', ['url' => '#section-shout']) ?></small>
+                <small class="settings-hint d-block mb-3"><?= __('settings.shout_emoji_sub') ?></small>
+                <div id="admin-shout-emoji">
                     <?php if (!empty($shoutFa['available'])): ?>
                     <div class="row g-3">
                         <div class="col-md-4" data-setting="shout_emoji_fa">
@@ -2912,27 +3232,30 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     <small class="settings-hint d-block" data-setting="shout_emoji_fa"><i class="bi bi-info-circle"></i> <?= _h('settings.shout_emoji_fa_unavailable') ?></small>
                     <?php endif; ?>
                 </div>
-                <?php /* ── Emotes and stickers (1.59.0, rebuilt in 1.59.1) ──────────────────────
-                         Its own block rather than six more cells in the grid above: the switches, the
-                         table and the form that adds one are three parts of a single subject, and in
-                         the grid the numbers ended up on a row of their own with `Per member` orphaned
-                         beside two empty cells. Same shape as Settings → Sounds, which is the block
-                         this one was measured against.
+            </div>
 
-                         The emoji are the block above: Unicode characters drawn by the reader's own
-                         device font, and — with a Font Awesome Pro package — Font Awesome's faces.
+            <?php /* ── Emotes and stickers (1.59.0, rebuilt in 1.59.1; a section of its own in 1.71.0) ──
+                     Its own section rather than more cells in a grid: the switches, the table and the form
+                     that adds one are three parts of a single subject, and in a grid the numbers ended up on
+                     a row of their own with `Per member` orphaned beside two empty cells. Same shape as
+                     Settings → Sounds, which is the block this one was measured against.
 
-                         The file input has no name on purpose — it is not a setting and never travels
-                         with the form; assets/js/admin-shout.js reads the file and posts it to
-                         admin/shout_emotes as base64, and the server decides from the BYTES what it is
-                         (and refuses an SVG carrying anything executable). */ ?>
-                <?php /* No data-approval any more: whether a row is waiting is a fact of the row
-                         (`approved_at` is NULL), not of the setting. Handing the script the switch
-                         as well only let it hide a queue somebody is still waiting on. */ ?>
-                <div class="mt-4" id="admin-emotes"
+                     The emoji are the section above: Unicode characters drawn by the reader's own device
+                     font, and — with a Font Awesome Pro package — Font Awesome's faces and icons.
+
+                     The file input has no name on purpose — it is not a setting and never travels with the
+                     form; assets/js/admin-shout.js reads the file and posts it to admin/shout_emotes as
+                     base64, and the server decides from the BYTES what it is (and refuses an SVG carrying
+                     anything executable).
+
+                     No data-approval any more: whether a row is waiting is a fact of the row (`approved_at`
+                     is NULL), not of the setting. Handing the script the switch as well only let it hide a
+                     queue somebody is still waiting on. */ ?>
+            <div class="settings-section" id="section-emotes" data-group="emoji" data-title="<?= _h('settings.shout_emotes_manage') ?>">
+                <h5><i class="bi bi-image"></i> <?= _h('settings.shout_emotes_manage') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= __('settings.shout_emotes_sub') ?></small>
+                <div id="admin-emotes"
                      data-max-kb="<?= (int)(function_exists('shoutEmoteMaxKb') ? shoutEmoteMaxKb($cfg) : 64) ?>">
-                    <h6 class="admin-emotes-title"><i class="bi bi-emoji-smile"></i> <?= _h('settings.shout_emotes_manage') ?></h6>
-                    <small class="settings-hint d-block mb-3"><?= __('settings.shout_emotes_sub') ?></small>
                     <?php /* 1.70.0: four switches on the first row (the emotes, beyond the room, the
                              stickers, the approval) and the three numbers on the second — col-md-3 and
                              col-md-4, so neither row leaves a cell orphaned. */ ?>
@@ -3033,21 +3356,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     </div>
                     <small class="settings-hint"><?= __('settings.shout_emotes_hint') ?></small>
                 </div>
-                <div class="mt-3" id="admin-shout">
-                    <label class="form-label"><?= _h('settings.shout_purge') ?></label>
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-3">
-                            <input type="number" class="form-control bg-dark text-light border-secondary" id="shout-purge-days" min="0" max="3650" placeholder="<?= _h('settings.shout_purge_days_ph') ?>">
-                        </div>
-                        <div class="col-md-3">
-                            <?php /* Not `btn-sm`: it stands beside a full-height number box in a row
-                                     aligned on its bottom edge, and a small button there was visibly
-                                     shorter than the thing it acts on. */ ?>
-                            <button type="button" class="btn btn-outline-danger w-100" id="shout-purge-run"><i class="bi bi-trash"></i> <?= _h('settings.shout_purge_run') ?></button>
-                        </div>
-                    </div>
-                    <small class="settings-hint"><?= __('settings.shout_purge_hint') ?></small>
-                </div>
+                <?php /* Who may upload one, and whose upload skips the queue (1.71.0): the two emote
+                         permissions, the same read-only matrix as Shoutbox's (assets/js/admin-shout.js),
+                         which until now showed them among the room's own. */ ?>
+                <details class="gr-matrix-wrap mt-3" id="emote-matrix-wrap">
+                    <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('settings.emote_matrix_title') ?></summary>
+                    <small class="settings-hint d-block mt-2"><?= __('settings.emote_matrix_hint') ?></small>
+                    <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="emote-matrix"></table></div>
+                </details>
             </div>
 
             <div class="settings-section" id="section-sounds" data-group="sounds" data-title="<?= _h('settings.sounds_heading') ?>">
@@ -3141,6 +3457,29 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                                 <?= $sndOptions((string)($cfg['sound_default_mention'] ?? '')) ?>
                             </select>
                             <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_mention" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
+                    <?php endif; ?>
+                    <?php /* The comments' two (1.71.0): offered only while comments are on, like the events. */ ?>
+                    <?php if (function_exists('commentsEnabled') && commentsEnabled($cfg)): ?>
+                    <div class="col-md-3" data-setting="sound_default_comment">
+                        <label class="form-label" for="setting-sound_default_comment"><?= _h('settings.sounds_default_comment') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_comment" id="setting-sound_default_comment" data-snd-label="<?= _h('settings.sounds_ev_comment') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_comment'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_comment" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_comment_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="sound_default_comment_mention">
+                        <label class="form-label" for="setting-sound_default_comment_mention"><?= _h('settings.sounds_default_comment_mention') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_comment_mention" id="setting-sound_default_comment_mention" data-snd-label="<?= _h('settings.sounds_ev_comment_mention') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_comment_mention'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_comment_mention" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
                         </div>
                         <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
                     </div>

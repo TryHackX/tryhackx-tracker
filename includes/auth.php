@@ -41,9 +41,14 @@ function adminPanelActions(): array {
  */
 function adminNavItems(): array {
     // `perm` is the panel permission that opens this page. Settings has none on purpose: no
-    // permission id exists for it, so only the owner's own session reaches it.
+    // permission id exists for it, so only the owner's own session reaches it. `any` (1.71.0) lists more
+    // ids that open it as well: the Reports page holds several queues, each behind its own view — the
+    // torrent reports and appeals (perm), the reported messages and the reported comments, descriptions and
+    // shouts — and somebody trusted with one queue opens the page on that queue's tab alone
+    // (templates/admin/dashboard.php draws only the tabs the session may see).
     return [
-        ['action' => 'admin',           'label' => 'Reports',   'icon' => 'bi-flag',        'anchor' => '',                  'perm' => 'panel.reports.view'],
+        ['action' => 'admin',           'label' => 'Reports',   'icon' => 'bi-flag',        'anchor' => '',                  'perm' => 'panel.reports.view',
+         'any' => ['panel.messages.view', 'panel.reports.comments.view', 'panel.reports.descriptions.view', 'panel.reports.shouts.view']],
         ['action' => 'admin-whitelist', 'label' => 'Whitelist', 'icon' => 'bi-list-check',  'anchor' => '',                  'perm' => 'panel.whitelist.view'],
         ['action' => 'admin-index',     'label' => 'Index',     'icon' => 'bi-collection',  'anchor' => '#section-index',    'perm' => 'panel.whitelist.view'],
         ['action' => 'admin-traffic',   'label' => 'Traffic',   'icon' => 'bi-speedometer2','anchor' => '#section-netlimit', 'perm' => 'panel.traffic.view'],
@@ -53,10 +58,17 @@ function adminNavItems(): array {
     ];
 }
 
+/** May this panel session open this nav item: its `perm`, or any id of its `any` list (1.71.0). */
+function adminNavItemAllowed(PDO $db, array $cfg, array $item): bool {
+    if (panelCan($db, $cfg, (string)$item['perm'])) return true;
+    foreach ((array)($item['any'] ?? []) as $p) if (panelCan($db, $cfg, (string)$p)) return true;
+    return false;
+}
+
 /** The nav items THIS panel session may open. The owner sees all of them. */
 function adminNavItemsFor(PDO $db, array $cfg): array {
     if (!function_exists('panelCan')) return adminNavItems();
-    return array_values(array_filter(adminNavItems(), fn($i) => panelCan($db, $cfg, $i['perm'])));
+    return array_values(array_filter(adminNavItems(), fn($i) => adminNavItemAllowed($db, $cfg, $i)));
 }
 
 /** May this panel session open ?action=<$action>? Settings and the dashboard are owner-only. */
@@ -64,7 +76,7 @@ function adminPageAllowed(PDO $db, array $cfg, string $action): bool {
     if (!function_exists('panelCan')) return true;
     if ($action === 'settings') return panelCan($db, $cfg, 'panel.settings.__never__');
     foreach (adminNavItems() as $i) {
-        if ($i['action'] === $action) return panelCan($db, $cfg, $i['perm']);
+        if ($i['action'] === $action) return adminNavItemAllowed($db, $cfg, $i);
     }
     return panelCan($db, $cfg, 'panel.unknown.__never__');   // unknown page → owner only
 }

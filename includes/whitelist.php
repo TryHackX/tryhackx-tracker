@@ -861,7 +861,7 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
             if (function_exists('repClear')) {
                 $voted = $db->prepare("SELECT DISTINCT info_hash FROM hash_votes WHERE info_hash IN ($ph)");
                 $voted->execute($chunk);
-                foreach ($voted->fetchAll(PDO::FETCH_COLUMN) as $h) repClear($db, (string)$h);
+                foreach ($voted->fetchAll(PDO::FETCH_COLUMN) as $h) repClear($db, $cfg, (string)$h);
             }
         } catch (\Throwable $e) {
             // Older schema without these tables: the ban itself is what matters and must not fail.

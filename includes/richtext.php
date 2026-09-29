@@ -182,8 +182,17 @@ function richtextValidate(string $text, string $format, array $cfg): ?string {
  * explaining BBCode does not get its example silently rendered.
  */
 
-/** Wrap a URL for output, marking off-site links so the page can warn before following them. */
+/**
+ * Wrap a URL for output, marking off-site links so the page can warn before following them.
+ *
+ * '' makes every caller write the words instead of a link — which is exactly what `rt_links_text` asks for
+ * (1.71.0, includes/antispam.php): the words of a NEW account, whose links are drawn as text. Not a setting
+ * anybody saves: a caller sets it on its own copy of the configuration for one render. Every link the
+ * renderer builds from what somebody typed comes through here ([url], Markdown's [text](address), a bare
+ * address, [youtube]); [email] asks the same flag itself.
+ */
 function richtextLinkAttrs(string $url, array $cfg): string {
+    if (($cfg['rt_links_text'] ?? '') === '1') return '';
     $safe = richtextSafeUrl($url);
     if ($safe === null) return '';
     $attrs = ' href="' . htmlspecialchars($safe, ENT_QUOTES, 'UTF-8') . '"'
@@ -528,13 +537,15 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
             // The platform's own mark before the words (1.68.0; it was a play-triangle character).
             return $a === '' ? $url : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $id . '</a>';
         }, $s);
-        $s = preg_replace_callback('/\[email=([^\]]{1,190})\](.*?)\[\/email\]/is', function ($m) {
-            $e = richtextSafeEmail($m[1]);
+        // A new account's words (`rt_links_text`, see richtextLinkAttrs()): an address is words too.
+        $mailText = ($cfg['rt_links_text'] ?? '') === '1';
+        $s = preg_replace_callback('/\[email=([^\]]{1,190})\](.*?)\[\/email\]/is', function ($m) use ($mailText) {
+            $e = $mailText ? null : richtextSafeEmail($m[1]);
             return $e === null ? $m[2] : '<a href="mailto:' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8')
                                        . '" rel="nofollow noopener">' . $m[2] . '</a>';
         }, $s);
-        $s = preg_replace_callback('/\[email\](.*?)\[\/email\]/is', function ($m) {
-            $e = richtextSafeEmail($m[1]);
+        $s = preg_replace_callback('/\[email\](.*?)\[\/email\]/is', function ($m) use ($mailText) {
+            $e = $mailText ? null : richtextSafeEmail($m[1]);
             return $e === null ? $m[1] : '<a href="mailto:' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8')
                                        . '" rel="nofollow noopener">' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8') . '</a>';
         }, $s);

@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 82;  // 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+const TRACKER_SCHEMA_VERSION = 85;  // 85 = one anti-spam layer for everything people write (includes/antispam.php): `antispam_state` (a row per context and subject — the account, or a guest's address group: the ladder's level, the last write and the earliest next one as unix seconds by the database's clock, the hits at the top of the ladder and whether a CAPTCHA is due, the refusals in a row, the last correction, the fingerprints of the last words, a revision counter; '*' rows throttle the audit), the settings antispam_enabled (1) / antispam_captcha_after (3) / antispam_guest_captcha (1) / antispam_staff_exempt (1) / antispam_new_days (3) / antispam_new_factor (2) / antispam_new_links (1) / antispam_dup_seconds (600) / antispam_pm_new_hour (8) / _day (20) / _hour_new (2) / _day_new (4) / antispam_pm_spread (2) and per context (shout, message, comment, description, report, list, bio, emote, vote) antispam_<context>_burst / _steps / _reset, rate_limit_pm (240: messages' own address ceiling instead of the favourites' one), and — defaults at last — the five recaptcha_on_<form> switches the Settings page always showed (report 1, login / status / appeal / block_check 0); 84 = reports of what people write in public, and warnings (includes/reports.php): `content_reports` (a comment, a torrent's description or a shout — kind, target id, the torrent's hash, whose words they were, the reporter and their reason, the words AS REPORTED and their format, open | closed with `open_slot` 1 / NULL so a UNIQUE key allows one OPEN report per member per target, what closed it, who and when, the note for the log and the answer to the reporter), `user_warnings` (the member, the moderator's reason, what it was about — kind, id, torrent —, what came with it, who gave it, when), and granted once (v84_reports) content.report to member and panel.reports.{comments,descriptions,shouts}.{view,handle} to moderator — the message queue (panel.messages.*) still to nobody, the guest group nothing; 83 = comments on a torrent (includes/comments.php): `hash_comments` (by info hash; the source as typed + its format, a guest's tag and address group, status visible | pending — a guest's, held for a moderator — | deleted, and who edited, let through or took it down, when and why; keys for a thread's page and count, a member's comments, the guest queue), users.comment_notify (15: the four kinds of news a member is told of), user_notifications.link (where a notification happened, site-relative), the settings comments_enabled (1) / comment_max_chars (500) / comment_links (1) / comment_edit_minutes (15) / comment_delete_own_minutes (60) / comments_per_page (20) / comment_rate_per_hour (30) / captcha_pts_comment (1) / comments_guest_review (1) and the two sound defaults sound_default_comment / sound_default_comment_mention (''), and granted once (v83_comments) comment.view + comment.post + comment.edit_own + comment.delete_own to member and comment.view + comment.post + comment.moderate to moderator — the guest group nothing; 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
                                     // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
                                     // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
@@ -581,6 +581,11 @@ function trackerSchemaStatements(): array {
             -- 'my profile is public' and 'put me in the directory' are different sentences: one is
             -- about a page somebody may be sent, the other about being FOUND by strangers browsing.
             `profile_listed` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v83: which comments this account is told about (includes/comments.php, COMMENT_NOTIFY_*):
+            -- a bit each for a comment on a torrent it registered (1), on a description it wrote (2), in
+            -- a thread it commented in (4), and an @-mention of it (8). 15 = all four, the default — a
+            -- bitmask so the fan-out asks it in the one query that finds the people.
+            `comment_notify` TINYINT UNSIGNED NOT NULL DEFAULT 15,
             UNIQUE KEY `uq_users_username` (`username`),
             UNIQUE KEY `uq_users_email` (`email`),
             KEY `idx_users_status` (`status`),
@@ -650,6 +655,10 @@ function trackerSchemaStatements(): array {
             `body` TEXT DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `read_at` DATETIME DEFAULT NULL,
+            -- v83: where the notification happened, as a SITE-RELATIVE address (`?action=…`) the account
+            -- page offers as a button (Show the comment); NULL for the ones that are about the account
+            -- itself. Only this code writes it (userNotify()), never somebody's text.
+            `link` VARCHAR(255) DEFAULT NULL,
             KEY `idx_un_user` (`user_id`, `read_at`),
             KEY `idx_un_created` (`created_at`)
         ) $engine",
@@ -1175,6 +1184,150 @@ function trackerSchemaStatements(): array {
             KEY `idx_votes_voter` (`voter_type`, `voter_key`, `created_at`)
         ) $engine",
 
+        // ── Comments on a torrent (v83, includes/comments.php) ────────────────────────────────────
+        //
+        // Keyed by the INFO HASH, like the votes above, and not by a whitelist or an index row: a torrent
+        // the tracker has only seen and one it registered are commented on alike, and a hash that moves
+        // from one home to the other keeps its thread.
+        //
+        // `body` is the source AS TYPED (cleaned — commentClean()), rendered when a page is drawn, so a
+        // fix to the renderer reaches every comment already stored; `body_format` is 'bbcode' for all of
+        // them today ('plain' — every character text — is the renderer's answer to anything else), and is
+        // here so a later syntax never has to guess what an old row is.
+        //
+        // `user_id` NULL is a GUEST (possible only where the operator granted comment.post to the guest
+        // group): `guest_tag` is the short pseudonym that tells two guests apart on one day without saying
+        // anything about them (a keyed hash of the day and the address group — never the address), and
+        // `ip_bucket` that address group, kept for the operator and never shown. A member's row has
+        // neither: the account is who wrote it.
+        //
+        // `status`: 'visible'; 'pending' — a guest's comment held for a moderator (comments_guest_review),
+        // the queue part E's Reports page works through; 'deleted' — taken down, SOFTLY: the row keeps who
+        // took it down, when and why (`delete_reason`, shown to the author), and nobody reads it any more.
+        // A correction leaves `edited_at` / `edited_by` (the author, or a moderator — which every reader is
+        // shown); a released guest comment `approved_at` / `approved_by`.
+        //
+        // The keys answer the questions asked: a thread's page from either end and its count (hash,
+        // status, id); a member's comments — the account's deletion, the participants of a thread, the
+        // queue's filters (user, created); the guest queue across every torrent (status, created).
+        "CREATE TABLE IF NOT EXISTS `hash_comments` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `guest_tag` CHAR(4) DEFAULT NULL,
+            `body` TEXT NOT NULL,
+            `body_format` ENUM('bbcode','plain') NOT NULL DEFAULT 'bbcode',
+            `status` ENUM('visible','pending','deleted') NOT NULL DEFAULT 'visible',
+            `ip_bucket` VARCHAR(45) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `edited_at` DATETIME DEFAULT NULL,
+            `edited_by` INT UNSIGNED DEFAULT NULL,
+            `approved_at` DATETIME DEFAULT NULL,
+            `approved_by` INT UNSIGNED DEFAULT NULL,
+            `deleted_at` DATETIME DEFAULT NULL,
+            `deleted_by` INT UNSIGNED DEFAULT NULL,
+            `delete_reason` VARCHAR(255) DEFAULT NULL,
+            KEY `idx_hc_hash` (`info_hash`, `status`, `id`),
+            KEY `idx_hc_user` (`user_id`, `created_at`),
+            KEY `idx_hc_status` (`status`, `created_at`)
+        ) $engine",
+
+        // ── Reports of what people write in public, and warnings (v84, includes/reports.php) ─────
+        //
+        // A table of its OWN beside `message_reports`, not that table made generic: a message report is a
+        // privacy rule written into a schema (exactly the reported message and the one before it), and every
+        // query, gate and test of the message queue is built on that shape. These three kinds are public
+        // words — a comment, a torrent's description, a shout — and share one table and one card.
+        //
+        // The TARGET is (kind, target_id, info_hash): a comment's or a shout's id, and the torrent a comment
+        // or a description belongs to; a description is its torrent's (target_id 0), a shout has no torrent
+        // (''). `author_id` is whose words they were when reported (NULL: a guest, the site, nobody).
+        // `snapshot` is the words AS REPORTED, in `snapshot_format` — a shout is pruned by retention, and a
+        // comment or a description can be corrected or replaced after the report, so the moderator reads
+        // what the reporter read as well as what is there now.
+        //
+        // ONE OPEN REPORT PER MEMBER PER TARGET, held by the database: `open_slot` is 1 while a report is
+        // open and NULL once it is closed, and a UNIQUE key does not compare NULLs — so a member has at most
+        // one open report on a target, and may report it again after the first was closed. (No generated
+        // column: MySQL 5.7 and MariaDB would each want their own syntax for it.) The unique key's prefix
+        // answers "the reports of one target"; the queue asks by kind and status.
+        //
+        // `outcome` is what closed it (closed | removed | warned | muted | banned); `note` stays in the panel,
+        // `reply` is what the reporter is told — the two texts of the message queue.
+        "CREATE TABLE IF NOT EXISTS `content_reports` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `kind` ENUM('comment','description','shout') NOT NULL,
+            `target_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `info_hash` CHAR(40) NOT NULL DEFAULT '',
+            `author_id` INT UNSIGNED DEFAULT NULL,
+            `reporter_id` INT UNSIGNED NOT NULL,
+            `reason` VARCHAR(500) NOT NULL DEFAULT '',
+            `snapshot` TEXT NOT NULL,
+            `snapshot_format` VARCHAR(16) NOT NULL DEFAULT 'plain',
+            `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+            `open_slot` TINYINT UNSIGNED DEFAULT 1,
+            `outcome` VARCHAR(16) NOT NULL DEFAULT '',
+            `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `handled_at` DATETIME DEFAULT NULL,
+            `note` VARCHAR(500) NOT NULL DEFAULT '',
+            `reply` VARCHAR(500) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`),
+            KEY `idx_crep_queue` (`kind`, `status`, `created_at`),
+            KEY `idx_crep_author` (`author_id`),
+            KEY `idx_crep_reporter` (`reporter_id`, `created_at`)
+        ) $engine",
+
+        // A WARNING: a moderator told a member, in their notifications, that something they did was wrong —
+        // the loud half of every action on a report (includes/reports.php). Kept here so the next moderator
+        // sees the count and the latest ones on the member's card and in Users; the member sees each one as a
+        // notification and nowhere else. `source_kind` / `source_id` / `info_hash` say what it was about (a
+        // comment, a description — its torrent —, a shout, a message; '' for none), `action` what came with
+        // it (warn | remove | mute | ban), `by_id` / `by_name` the moderator (NULL id: the owner's session).
+        "CREATE TABLE IF NOT EXISTS `user_warnings` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `reason` VARCHAR(500) NOT NULL DEFAULT '',
+            `source_kind` VARCHAR(16) NOT NULL DEFAULT '',
+            `source_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `info_hash` CHAR(40) NOT NULL DEFAULT '',
+            `action` VARCHAR(16) NOT NULL DEFAULT 'warn',
+            `by_id` INT UNSIGNED DEFAULT NULL,
+            `by_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_warn_user` (`user_id`, `created_at`),
+            KEY `idx_warn_by` (`by_id`)
+        ) $engine",
+
+        // ── One anti-spam layer for everything people write (v85, includes/antispam.php) ────────
+        //
+        // A row per (context, subject): the context is where the words go (shout, message, comment,
+        // description, report, list, bio, emote, vote — and '*', a subject's audit throttle), the subject who
+        // writes them ('u:<account id>', or 'g:<address group>' for a guest). `level` is the writes of the
+        // current streak, `last_at` the last one, `next_at` the earliest the next may come, `top_hits` the
+        // writes and attempts at the top of the ladder since it last eased, `captcha` 1 while a CAPTCHA is due,
+        // `refused` the refusals in a row, `edit_at` the last correction, `recent` the fingerprints of the last
+        // words (JSON [[fingerprint, at, target]], for the duplicate and spread rules), `rev` a counter every
+        // change bumps (a reservation is handed back only if nobody wrote since). Every time is unix seconds by
+        // the DATABASE's clock, stored as a number: no zone can reinterpret it, and a web server with a drifting
+        // clock cannot let a burst through. Rows nobody touched for two days are pruned by the janitor.
+        "CREATE TABLE IF NOT EXISTS `antispam_state` (
+            `context` VARCHAR(16) NOT NULL,
+            `subject` VARCHAR(64) NOT NULL,
+            `level` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `last_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            `next_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            `top_hits` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `captcha` TINYINT(1) NOT NULL DEFAULT 0,
+            `refused` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `edit_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            `recent` VARCHAR(1000) NOT NULL DEFAULT '',
+            `rev` INT UNSIGNED NOT NULL DEFAULT 0,
+            `updated_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (`context`, `subject`),
+            KEY `idx_as_updated` (`updated_at`)
+        ) $engine",
+
         // ── Outgoing bulk mail, one row per recipient ────────────────────
         // Nothing is sent from a web request. The panel writes rows here and the janitor drains them
         // at a configured rate, because this server sends through PHP's mail() with no relay in front
@@ -1492,7 +1645,15 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     // for every existing account, which is "none written": an upgrade puts words on nobody's page.
     if (!schemaColumnExists($db, 'users', 'bio')) $uparts[] = "ADD COLUMN `bio` TEXT DEFAULT NULL";
     if (!schemaColumnExists($db, 'users', 'bio_updated_at')) $uparts[] = "ADD COLUMN `bio_updated_at` DATETIME DEFAULT NULL";
+    // v83: which comments this account is told about — see the CREATE above. 15 (all four) for every
+    // existing account, the same answer a new one starts with.
+    if (!schemaColumnExists($db, 'users', 'comment_notify')) $uparts[] = "ADD COLUMN `comment_notify` TINYINT UNSIGNED NOT NULL DEFAULT 15";
     if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
+
+    // v83: where a notification happened — see the CREATE above. NULL for every row already written.
+    if (!schemaColumnExists($db, 'user_notifications', 'link')) {
+        $out[] = "ALTER TABLE `user_notifications` ADD COLUMN `link` VARCHAR(255) DEFAULT NULL";
+    }
 
     // v56: a message no longer leaves a notification behind.
     //
@@ -1700,6 +1861,90 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `late` TINYINT(1) NOT NULL DEFAULT 0,
         PRIMARY KEY (`shout_id`, `user_id`),
         KEY `idx_mention_user` (`user_id`, `shout_id`)
+    ) $engine";
+
+    // v83: comments on a torrent (includes/comments.php). Same definition as the CREATE above — a split
+    // between the two lists is the bug that once stopped a fresh install at version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `hash_comments` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `info_hash` CHAR(40) NOT NULL,
+        `user_id` INT UNSIGNED DEFAULT NULL,
+        `guest_tag` CHAR(4) DEFAULT NULL,
+        `body` TEXT NOT NULL,
+        `body_format` ENUM('bbcode','plain') NOT NULL DEFAULT 'bbcode',
+        `status` ENUM('visible','pending','deleted') NOT NULL DEFAULT 'visible',
+        `ip_bucket` VARCHAR(45) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `edited_at` DATETIME DEFAULT NULL,
+        `edited_by` INT UNSIGNED DEFAULT NULL,
+        `approved_at` DATETIME DEFAULT NULL,
+        `approved_by` INT UNSIGNED DEFAULT NULL,
+        `deleted_at` DATETIME DEFAULT NULL,
+        `deleted_by` INT UNSIGNED DEFAULT NULL,
+        `delete_reason` VARCHAR(255) DEFAULT NULL,
+        KEY `idx_hc_hash` (`info_hash`, `status`, `id`),
+        KEY `idx_hc_user` (`user_id`, `created_at`),
+        KEY `idx_hc_status` (`status`, `created_at`)
+    ) $engine";
+
+    // v84: reports of comments, descriptions and shouts, and warnings (includes/reports.php). Same definitions
+    // as the CREATEs above — a split between the two lists is the bug that once stopped a fresh install at
+    // version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `content_reports` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `kind` ENUM('comment','description','shout') NOT NULL,
+        `target_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `info_hash` CHAR(40) NOT NULL DEFAULT '',
+        `author_id` INT UNSIGNED DEFAULT NULL,
+        `reporter_id` INT UNSIGNED NOT NULL,
+        `reason` VARCHAR(500) NOT NULL DEFAULT '',
+        `snapshot` TEXT NOT NULL,
+        `snapshot_format` VARCHAR(16) NOT NULL DEFAULT 'plain',
+        `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+        `open_slot` TINYINT UNSIGNED DEFAULT 1,
+        `outcome` VARCHAR(16) NOT NULL DEFAULT '',
+        `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+        `handled_at` DATETIME DEFAULT NULL,
+        `note` VARCHAR(500) NOT NULL DEFAULT '',
+        `reply` VARCHAR(500) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`),
+        KEY `idx_crep_queue` (`kind`, `status`, `created_at`),
+        KEY `idx_crep_author` (`author_id`),
+        KEY `idx_crep_reporter` (`reporter_id`, `created_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_warnings` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `reason` VARCHAR(500) NOT NULL DEFAULT '',
+        `source_kind` VARCHAR(16) NOT NULL DEFAULT '',
+        `source_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `info_hash` CHAR(40) NOT NULL DEFAULT '',
+        `action` VARCHAR(16) NOT NULL DEFAULT 'warn',
+        `by_id` INT UNSIGNED DEFAULT NULL,
+        `by_name` VARCHAR(64) NOT NULL DEFAULT '',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY `idx_warn_user` (`user_id`, `created_at`),
+        KEY `idx_warn_by` (`by_id`)
+    ) $engine";
+
+    // v85: one anti-spam layer (includes/antispam.php). Same definition as the CREATE above — a split between
+    // the two lists is the bug that once stopped a fresh install at version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `antispam_state` (
+        `context` VARCHAR(16) NOT NULL,
+        `subject` VARCHAR(64) NOT NULL,
+        `level` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `last_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        `next_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        `top_hits` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `captcha` TINYINT(1) NOT NULL DEFAULT 0,
+        `refused` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `edit_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        `recent` VARCHAR(1000) NOT NULL DEFAULT '',
+        `rev` INT UNSIGNED NOT NULL DEFAULT 0,
+        `updated_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        PRIMARY KEY (`context`, `subject`),
+        KEY `idx_as_updated` (`updated_at`)
     ) $engine";
 
     // v64: the emotes and stickers `:code:` stands for. Same definition as the CREATE above — a
@@ -2422,6 +2667,33 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         'moderator' => ['content.delete_any'],
     ]);
 
+    // v83: comments on a torrent (includes/comments.php). Members read them, write them, and correct or
+    // take back their own for as long as the two windows say; taking down or editing ANYBODY's — and
+    // letting a guest's held comment through — is the moderator's, and only the moderator's (reading
+    // and writing come with it: a moderator acts from the Info panel, in the thread). GUEST GETS
+    // NOTHING: a passer-by reading the members' words is the operator's decision, like the descriptions
+    // (content.view is a member's too), and a guest may write only where the operator also grants
+    // comment.post to the guest group — every such comment behind a CAPTCHA, and by default held for a
+    // moderator. ONCE: an operator who takes any of these away afterwards keeps it away.
+    schemaGrantOnce($db, 'v83_comments', [
+        'member'    => ['comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own'],
+        'moderator' => ['comment.view', 'comment.post', 'comment.moderate'],
+    ]);
+
+    // v84: reports of comments, descriptions and shouts (includes/reports.php). Members may report what they
+    // can read (`content.report`, one id for the three kinds, as `pm.report` is one for messages); the
+    // moderator reads and works each kind's queue on the Reports page — six ids, a view and a handle per
+    // kind, so an operator can hand one queue to one person. The MESSAGE queue is not among them and stays
+    // with nobody (panel.messages.*, see its note in includes/users.php). GUEST GETS NOTHING: a report is
+    // filed by an account, which is who hears what became of it. ONCE: an operator who takes any of these
+    // away afterwards keeps it away.
+    schemaGrantOnce($db, 'v84_reports', [
+        'member'    => ['content.report'],
+        'moderator' => ['panel.reports.comments.view', 'panel.reports.comments.handle',
+                        'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
+                        'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
+    ]);
+
     // `shout_order` back to 'bottom' where it says 'top'. Changing the DEFAULT does nothing to a row
     // that already exists, and every install that ran 1.64.0 got the row: 'top' was the shipped
     // default for one afternoon, the owner used it and rejected it, and nobody else can have chosen
@@ -2985,6 +3257,10 @@ function trackerSchemaDefaultSettings(): array {
         'sound_default_shout_friend'  => '',
         'sound_default_shout'         => '',
         'sound_default_mention'       => '',
+        // v83: somebody commented where I am told of it, and a comment named me (includes/comments.php) —
+        // offered while comments are on, '' like the others until the owner picks.
+        'sound_default_comment'       => '',
+        'sound_default_comment_mention' => '',
         // ── The shoutbox (v63, includes/shout.php) ─────────────────────────────────────────────
         // OFF, like every new feature here. `shout_placement` decides where the box is drawn; the
         // two row counts are how much history the widget and the page start with. `shout_format` is
@@ -3150,6 +3426,68 @@ function trackerSchemaDefaultSettings(): array {
         // both off, and another member's list only with their group's `content.public`, their own
         // users.descriptions_public (0 until they say so) and their name shown on their descriptions.
         'profile_descriptions_enabled' => '1',
+        // ── Comments on a torrent (v83, includes/comments.php) ───────────────────────────────────
+        // ON: the owner asked for them, and who may read and write is the permissions (comment.view /
+        // comment.post, members; nothing for guests until the operator grants it). The length counts
+        // what a READER sees (clamped 20–5000; the source may be four times that, never over 20 000
+        // characters); links ON (members only — a guest's are always text); a member may correct their
+        // own for 15 minutes and take it back for 60 (0 = no correcting / no limit); twenty to a page,
+        // thirty an hour for an account (or an address, for guests), one CAPTCHA point each; and a
+        // guest's comment waits for a moderator.
+        'comments_enabled'            => '1',
+        'comment_max_chars'           => '500',
+        'comment_links'               => '1',
+        'comment_edit_minutes'        => '15',
+        'comment_delete_own_minutes'  => '60',
+        'comments_per_page'           => '20',
+        'comment_rate_per_hour'       => '30',
+        'captcha_pts_comment'         => '1',
+        'comments_guest_review'       => '1',
+        // ── One anti-spam layer (v85, includes/antispam.php) ─────────────────────────────────────
+        // ON. Per context a free burst, then growing pauses (seconds), all forgotten after `reset` quiet
+        // seconds — the room exactly as the owner sketched it (three lines free, then 5, 15, 30, 60; two
+        // minutes resets it); comments slower; messages counted by the conversations somebody STARTS, not by
+        // line; descriptions and reports much slower (a moderator reads every one of them); lists, the
+        // profile's description and emote uploads are one person's own things, a few saves free; votes ten
+        // free (somebody rating as they browse), then short pauses. Three hits at the top of a ladder and a
+        // CAPTCHA is due; a guest solves one every time they write. A new account (three days) waits twice as
+        // long, starts fewer conversations and its links are text. The same words again within ten minutes
+        // are refused; the same words to more than two people, as spam. Staff are exempt from the pauses.
+        'antispam_enabled'            => '1',
+        'antispam_captcha_after'      => '3',   // top-of-ladder hits before a CAPTCHA (0 = never)
+        'antispam_guest_captcha'      => '1',
+        'antispam_staff_exempt'       => '1',
+        'antispam_new_days'           => '3',   // 0 = no new-account rules
+        'antispam_new_factor'         => '2',
+        'antispam_new_links'          => '1',
+        'antispam_dup_seconds'        => '600', // 0 = no duplicate rule
+        'antispam_pm_new_hour'        => '8',   // new conversations an hour / a day (0 = no limit)
+        'antispam_pm_new_day'         => '20',
+        'antispam_pm_new_hour_new'    => '2',   // …for a new account
+        'antispam_pm_new_day_new'     => '4',
+        'antispam_pm_spread'          => '2',   // the same words to at most this many people (0 = no rule)
+        'antispam_shout_burst'        => '3',   'antispam_shout_steps'       => '5,15,30,60',     'antispam_shout_reset'       => '120',
+        'antispam_message_burst'      => '3',   'antispam_message_steps'     => '30,60,120,300',  'antispam_message_reset'     => '600',
+        'antispam_comment_burst'      => '2',   'antispam_comment_steps'     => '15,30,60,120',   'antispam_comment_reset'     => '300',
+        'antispam_description_burst'  => '2',   'antispam_description_steps' => '60,300,900,1800', 'antispam_description_reset' => '3600',
+        'antispam_report_burst'       => '3',   'antispam_report_steps'      => '30,120,300,900', 'antispam_report_reset'      => '1800',
+        'antispam_list_burst'         => '3',   'antispam_list_steps'        => '10,30,60,120',   'antispam_list_reset'        => '600',
+        'antispam_bio_burst'          => '3',   'antispam_bio_steps'         => '30,60,120,300',  'antispam_bio_reset'         => '900',
+        'antispam_emote_burst'        => '3',   'antispam_emote_steps'       => '30,60,120,300',  'antispam_emote_reset'       => '1800',
+        'antispam_vote_burst'         => '10',  'antispam_vote_steps'        => '2,5,10,30',      'antispam_vote_reset'        => '120',
+        // Messages' own address ceiling (an hour, per address group). The send used to read
+        // `rate_limit_favourites` — a key no setting ever defined, so always its fallback, 240: the same
+        // number, now a setting of the messages' own that an operator can find and change.
+        'rate_limit_pm'               => '240',
+        // The CAPTCHA's per-form switches (v85): on the Settings page, in the save list and in install.php
+        // since they exist, but never among the defaults — an install whose settings came from the migration
+        // was shown "Yes" for the abuse report form (the form's own fallback) while the code read the missing
+        // key as no. The values here are what the page shows for a missing key.
+        'recaptcha_on_report'         => '1',
+        'recaptcha_on_login'          => '0',
+        'recaptcha_on_status'         => '0',
+        'recaptcha_on_appeal'         => '0',
+        'recaptcha_on_block_check'    => '0',
         // ── People reaching each other (v52) ─────────────────────────────────────────────────
         // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
         // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a

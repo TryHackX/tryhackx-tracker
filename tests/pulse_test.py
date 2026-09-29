@@ -108,10 +108,13 @@ try:
     check("a member gets the two counts and the cadence", s == 200 and j.get("success") and j.get("unread") == 0 and j.get("unread_pm") == 0 and j.get("live") == 45, (s, j))
     # The shoutbox adds three more numbers (1.58.0) and only when the room exists and this reader may
     # read it, so they are allowed here rather than required — the rule under test is that the pulse
-    # carries NUMBERS and never a line of anybody's text.
+    # carries NUMBERS and never a line of anybody's text. The comments add two (1.71.0, while they are on):
+    # the comment notifications waiting, and of those the ones that mention the reader.
     check("… and nothing else — numbers, never content",
           set(j.keys()) <= {"success", "unread", "unread_pm", "unread_pm_friend", "live",
-                            "unread_shout", "unread_shout_friend", "unread_shout_mention"}, list(j.keys()))
+                            "unread_shout", "unread_shout_friend", "unread_shout_mention",
+                            "unread_comment", "unread_comment_mention"}, list(j.keys()))
+    check("… every one of them a number", all(isinstance(v, int) for k, v in j.items() if k.startswith("unread")), j)
     php("userNotify($db, " + str(uid) + ", 'account', 'Pulse fixture', 'a line');")
     s, j = me.api("user_pulse")
     check("a notification that landed is counted on the next pulse", j.get("unread") == 1, j)

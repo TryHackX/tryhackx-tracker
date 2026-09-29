@@ -177,12 +177,23 @@ check('the site defaults are reported only when the library has them',
       soundSiteDefaults(['sound_default_notification' => 'b:ding', 'sound_default_message' => 'c:424242'], $lib) === ['notification' => 'b:ding', 'message_friend' => '', 'message' => '']);
 
 // ── what a page is handed, with a real account ───────────────────────────────
-$db->prepare("DELETE FROM users WHERE username = ?")->execute(['sndtest']);
+// The accounts this test makes go through the account-deletion cascade (userDeleteCascade(), includes/users.php),
+// never a plain DELETE FROM users: that left their group memberships behind as orphans in user_group_members,
+// and the messages and threads between them (1.71.0).
+$gone = function (array $names) use ($db): void {
+    foreach ($names as $name) {
+        $st = $db->prepare("SELECT id FROM users WHERE username = ?");
+        $st->execute([$name]);
+        $id = (int)$st->fetchColumn();
+        if ($id > 0) userDeleteCascade($db, $id);
+    }
+};
+$gone(['sndtest']);
 userCreate($db, $cfg, 'sndtest', 'sndtest@example.org', 'SmokePass123!', '127.0.0.1');
 $uid = (int)$db->query("SELECT id FROM users WHERE username = 'sndtest'")->fetchColumn();
 check('the account exists', $uid > 0);
 // how many of the waiting messages are from friends
-$db->prepare("DELETE FROM users WHERE username IN (?, ?)")->execute(['sndfriend', 'sndother']);
+$gone(['sndfriend', 'sndother']);
 userCreate($db, $cfg, 'sndfriend', 'sndfriend@example.org', 'SmokePass123!', '127.0.0.1');
 userCreate($db, $cfg, 'sndother', 'sndother@example.org', 'SmokePass123!', '127.0.0.1');
 $fid = (int)$db->query("SELECT id FROM users WHERE username = 'sndfriend'")->fetchColumn();
@@ -198,7 +209,7 @@ check('two messages wait, none from a friend yet', pmUnreadCount($db, $uid) === 
 $db->prepare("INSERT INTO user_friends (user_id, friend_id, status, accepted_at) VALUES (?, ?, 'accepted', NOW())")->execute([$uid, $fid]);
 check('… and one of them is from a friend once the friendship is accepted', pmUnreadCountFriends($db, $uid) === 1);
 $db->prepare("DELETE FROM user_friends WHERE user_id = ? OR friend_id = ?")->execute([$uid, $uid]);
-$db->prepare("DELETE FROM users WHERE username IN (?, ?)")->execute(['sndfriend', 'sndother']);
+$gone(['sndfriend', 'sndother']);
 $u = ['id' => $uid];                       // no sound_prefs key: read from the table
 $cfgOn = array_merge($cfg, ['users_enabled' => '1', 'sounds_enabled' => '1', 'sound_default_notification' => 'b:ding', 'sound_default_message' => '']);
 try {
@@ -224,7 +235,7 @@ try {
     check('… and it is gone from the library', !isset(soundLibrary($db)['c:' . $id]));
     check('deleting again says no', !soundDelete($db, $id));
 } finally {
-    $db->prepare("DELETE FROM users WHERE username = ?")->execute(['sndtest']);
+    $gone(['sndtest']);
     $db->exec("DELETE FROM sounds WHERE name LIKE 'st-%'");
     foreach ($wasDefault as $k => $v) setSetting($db, 'sound_default_' . $k, $v);
 }
@@ -242,8 +253,10 @@ check('the upload refuses an oversized body before reading it', str_contains($ad
 check('a rename is an op of its own, and an id nobody has is a 404 rather than a 400',
       str_contains($adm, "\$op === 'rename'") && str_contains($adm, "'api.sounds.unknown' ? 404 : 400"));
 $tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+// Eight since 1.71.0: the comments' two (a comment, a comment that mentions me) beside the room's three.
 check('the site-default selects are two groups, and each says which event it answers',
-      str_contains($tpl, 'data-sound-own') && substr_count($tpl, 'data-snd-label="') === 6 && str_contains($tpl, "settings.sounds_group_shipped"));
+      str_contains($tpl, 'data-sound-own') && substr_count($tpl, 'data-snd-label="') === 8 && str_contains($tpl, "settings.sounds_group_shipped")
+      && str_contains($tpl, 'name="sound_default_comment"') && str_contains($tpl, 'name="sound_default_comment_mention"'));
 $adminJs = (string)file_get_contents($root . '/assets/js/admin-sounds.js');
 check('the panel draws a table, keeps "Used as" honest from the selects themselves, and slots an option into the right group',
       str_contains($adminJs, 'admin-sounds-table') && str_contains($adminJs, "s.addEventListener('change', paintUsed)")

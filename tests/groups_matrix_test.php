@@ -84,6 +84,10 @@ $MEMBER = array_merge($GUEST, [
     // v81 (1.70.0): deleting a description they are the author of, and the list of the descriptions they
     // wrote on their profile — with their own yes.
     'content.delete_own', 'content.public',
+    // v83 (1.71.0): comments on a torrent — read, write, and their own corrected or taken back for a while.
+    'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own',
+    // v84 (1.71.0): report a comment, a description or a shout to the moderators.
+    'content.report',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
@@ -103,7 +107,14 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               // v72 (1.66.0): editing anybody's line, to this group ONLY and never with shout.moderate.
               'shout.edit_any',
               // v81 (1.70.0): taking down anybody's published description from the Info panel.
-              'content.delete_any'];
+              'content.delete_any',
+              // v83 (1.71.0): comments — read, write, and take down or edit anybody's (with a reason).
+              'comment.view', 'comment.post', 'comment.moderate',
+              // v84 (1.71.0): the Reports page's queues of reported comments, descriptions and shouts — never the
+              // message queue (panel.messages.*), which stays with nobody.
+              'panel.reports.comments.view', 'panel.reports.comments.handle',
+              'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
+              'panel.reports.shouts.view', 'panel.reports.shouts.handle'];
 
 /* ══ 1. the presets ════════════════════════════════════════════════════════ */
 // includes/users.php has claimed since 1.21.0 that "users_test.php checks every id here is real".
@@ -164,7 +175,11 @@ $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                         ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
                                         ['content.view'],
                                         ['shout.edit_any'],
-                                        ['content.delete_any']));
+                                        ['content.delete_any'],
+                                        ['comment.view', 'comment.post', 'comment.moderate'],
+                                        ['panel.reports.comments.view', 'panel.reports.comments.handle',
+                                         'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
+                                         'panel.reports.shouts.view', 'panel.reports.shouts.handle']));
 check('the moderator preset and the moderator seed agree',
       array_values(array_diff($modSeedPlus, $presets['moderator']['perms'])) === []
       && array_values(array_diff($presets['moderator']['perms'], $modSeedPlus)) === [],
@@ -244,8 +259,8 @@ try {
     $sdb->exec("DELETE FROM user_groups WHERE slug = 'premium'");
     // …and from before 1.66.0 as well: the v72 grant (shout.edit_own) has not happened on it yet, and
     // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public) nor 1.70.0's v81 one
-    // (content.delete_own, content.public).
-    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content')");
+    // (content.delete_own, content.public) nor 1.71.0's v83 one (the comments) and v84 one (reporting).
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports')");
     trackerSchemaDataMigrations($sdb, $scfg);
     $after = $perms($sdb, 'member');
     check('the migration puts the missing matrix ids on an existing member group',

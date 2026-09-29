@@ -346,18 +346,39 @@ $shoutFaVer  = $shoutFaMode !== 'off' ? emojiFaVersion($cfg) : '';
                      "Unpin", and pressing it takes the line down (1.67.0) — as the server does when it
                      is asked to pin the line that is already pinned. */ ?>
             <?php $shoutPinOn = !empty($s['pinned']); ?>
-            <?php if ($shoutMod || !empty($s['editable']) || !empty($s['deletable'])): ?>
-            <span class="shout-ctl">
-                <?php if (!empty($s['editable'])): ?>
-                <button type="button" class="shout-edit" title="<?= _h('shout.edit_title') ?>" aria-label="<?= _h('shout.edit') ?>"<?= (int)($s['edit_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['edit_left'] . '"' : '' ?>><i class="bi bi-pencil" aria-hidden="true"></i></button>
-                <?php endif; ?>
-                <?php if ($shoutMod): ?>
-                <button type="button" class="shout-pin<?= $shoutPinOn ? ' shout-pin-on' : '' ?>" title="<?= _h($shoutPinOn ? 'shout.unpin_title' : 'shout.pin_title') ?>" aria-label="<?= _h($shoutPinOn ? 'shout.unpin' : 'shout.pin') ?>"><i class="bi <?= $shoutPinOn ? 'bi-pin-angle-fill' : 'bi-pin-angle' ?>" aria-hidden="true"></i></button>
-                <?php endif; ?>
-                <?php if (!empty($s['deletable'])): ?>
-                <button type="button" class="shout-del" title="<?= _h('shout.delete_title') ?>" aria-label="<?= _h('shout.delete') ?>"<?= (int)($s['del_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['del_left'] . '"' : '' ?>><i class="bi bi-trash" aria-hidden="true"></i></button>
-                <?php endif; ?>
-            </span>
+            <?php /* The flag (1.71.0, includes/reports.php): somebody else's line, for a reader who may report it
+                     (`can_report`) — filled, and saying so, once they have (`reported`). assets/js/shoutbox.js draws
+                     the same button, and asks assets/js/reports.js for the box. */ ?>
+            <?php $shoutRepOn = !empty($s['reported']); ?>
+            <?php if ($shoutMod || !empty($s['editable']) || !empty($s['deletable']) || !empty($s['can_report'])):
+                /* Written with NOTHING between the buttons (1.71.0): the script builds the group that way, and
+                   the two renderers draw one markup — the live language switch pairs a row's nodes by position,
+                   and scratchpad/shots/shout_check.js compares a polled row with the page's. With the flag, a
+                   row that was never anybody's to touch has a group too, and the template's indentation between
+                   the buttons was the one difference left. A glyph that depends on the state is named in a
+                   variable first, so every icon attribute written here still begins `bi bi-` or holds no name
+                   (tests/icons_test.php: the server-side filter must see each one). */
+                $shoutPinIcon = $shoutPinOn ? 'bi-pin-angle-fill' : 'bi-pin-angle';
+                $shoutRepIcon = $shoutRepOn ? 'bi-flag-fill' : 'bi-flag';
+                $shoutCtl = [];
+                if (!empty($s['editable'])) {
+                    $shoutCtl[] = '<button type="button" class="shout-edit" title="' . _h('shout.edit_title') . '" aria-label="' . _h('shout.edit') . '"'
+                        . ((int)($s['edit_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['edit_left'] . '"' : '') . '><i class="bi bi-pencil" aria-hidden="true"></i></button>';
+                }
+                if ($shoutMod) {
+                    $shoutCtl[] = '<button type="button" class="shout-pin' . ($shoutPinOn ? ' shout-pin-on' : '') . '" title="' . _h($shoutPinOn ? 'shout.unpin_title' : 'shout.pin_title')
+                        . '" aria-label="' . _h($shoutPinOn ? 'shout.unpin' : 'shout.pin') . '"><i class="bi ' . $shoutPinIcon . '" aria-hidden="true"></i></button>';
+                }
+                if (!empty($s['deletable'])) {
+                    $shoutCtl[] = '<button type="button" class="shout-del" title="' . _h('shout.delete_title') . '" aria-label="' . _h('shout.delete') . '"'
+                        . ((int)($s['del_left'] ?? 0) > 0 ? ' data-left="' . (int)$s['del_left'] . '"' : '') . '><i class="bi bi-trash" aria-hidden="true"></i></button>';
+                }
+                if (!empty($s['can_report'])) {
+                    $shoutCtl[] = '<button type="button" class="shout-report' . ($shoutRepOn ? ' shout-report-on' : '') . '" title="' . _h($shoutRepOn ? 'shout.reported_title' : 'shout.report_title')
+                        . '" aria-label="' . _h($shoutRepOn ? 'shout.reported' : 'shout.report') . '"' . ($shoutRepOn ? ' aria-pressed="true"' : '')
+                        . '><i class="bi ' . $shoutRepIcon . '" aria-hidden="true"></i></button>';
+                } ?>
+            <span class="shout-ctl"><?= implode('', $shoutCtl) ?></span>
             <?php endif; ?>
         </div>
         <?php endforeach; ?>

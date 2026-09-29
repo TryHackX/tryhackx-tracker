@@ -26,8 +26,13 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
  * on the whitelist's description switch answered 404 on a tracker that has descriptions off and
  * messages on. One renderer, one rate limit, and the gate that matches the text.
  */
-$for = in_array($input['for'] ?? '', ['message', 'shout', 'list'], true) ? (string)$input['for'] : 'description';
-if ($for === 'list') {
+$for = in_array($input['for'] ?? '', ['message', 'shout', 'list', 'comment'], true) ? (string)$input['for'] : 'description';
+if ($for === 'comment') {
+    // A comment (1.71.0): whoever may write one here — the account, or a guest where the operator allows
+    // guests (commentMayPost(), includes/comments.php). It previews through its OWN renderer below.
+    if (!function_exists('commentsEnabled') || !commentsEnabled($cfg)) jsonResponse(['error' => 'disabled'], 404);
+    if (!commentMayPost($db, $cfg, currentUser($db))['ok']) jsonResponse(['error' => __('api.content.access_required')], 403);
+} elseif ($for === 'list') {
     // A list's description (1.70.0): the permission that writes one, like its save (api/user_lists.php).
     if (!function_exists('listsEnabled') || !listsEnabled($cfg)) jsonResponse(['error' => 'lists_disabled'], 404);
     if (!currentUser($db) || !userCan($db, $cfg, 'lists.use')) jsonResponse(['error' => __('api.content.access_required')], 403);
@@ -59,6 +64,35 @@ if (!rateLimitAllow('rtpreview', ipBucket(getClientIp($cfg)), $perMin, 60)) {
 
 $text = (string)($input['text'] ?? '');
 $fmt  = (string)($input['format'] ?? 'bbcode');
+
+if ($for === 'comment') {
+    // A COMMENT previews as its thread will draw it (commentRenderHtml(): the comment's own allow-list, the
+    // writer's right to link — a guest's links are text —, the @-names and the emotes) and is judged by
+    // exactly what its save refuses (commentProblem()). The counter counts what a READER sees against the
+    // comment's limit; pictures are never allowed. The source is capped before anything is walked.
+    $me = currentUser($db);
+    $clean = commentClean($text);
+    $cap = commentSourceCap($cfg);
+    if (mb_strlen($clean) > $cap || strlen($clean) > COMMENT_SOURCE_BYTES) {
+        jsonResponse(['error' => __('api.comment.too_long_source', ['max' => $cap]), 'too_long' => true,
+                      'length' => mb_strlen($clean), 'limit' => $cap], 400);
+    }
+    $mayLink = commentWriterMayLink($cfg, $me);
+    $p = commentParse($clean, $cfg, $mayLink);
+    // A new account's links are drawn as text (1.71.0, includes/antispam.php) — the Preview shows them so.
+    $ctx = commentRenderContext($db, $cfg, $me, [$clean]) + ['links' => $mayLink && !antispamLinksTextNow($db, $cfg, $me)];
+    $bad = $clean === '' ? null : commentProblem($clean, $cfg, $mayLink);
+    jsonResponse([
+        'success' => true,
+        'html'    => commentRenderHtml($clean, 'bbcode', $cfg, $ctx),
+        'format'  => 'bbcode',
+        'length'  => (int)$p['chars'],
+        'limit'   => commentMax($cfg),
+        'images'  => ['used' => 0, 'limit' => 0],
+        'links'   => ['used' => (int)$p['links'], 'limit' => $mayLink ? COMMENT_MAX_LINKS : 0],
+        'problem' => $bad !== null ? __('api.comment.' . $bad['code'], $bad['vars']) : null,
+    ]);
+}
 // The syntaxes THIS writer may choose from. A shout's are the room's (shoutFormatChoices(): both, or
 // 'plain' when the room formats nothing) — not the description switches, which used to turn a
 // Markdown shout into BBCode here on a site that allows Markdown only in the room (1.67.0).
@@ -89,7 +123,8 @@ if ($for === 'shout') {
     // room does not support comes out here the way it would come out once said, and the sentence
     // under the box is the one pressing Enter would get, with the room's length limit in it.
     $me = currentUser($db);
-    $html = shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext($db, $cfg, is_array($me) ? $me : [], [$text]));
+    $html = shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext($db, $cfg, is_array($me) ? $me : [], [$text])
+                                             + ['links_text' => antispamLinksTextNow($db, $cfg, is_array($me) ? $me : null)]);
     $problem = shoutBodyProblem($cfg, $text, $fmt);
 } elseif ($for === 'list') {
     // A LIST's description (1.70.0) previews as its window draws it (listDescRender(): the renderer, the
@@ -97,7 +132,7 @@ if ($for === 'shout') {
     // Its counter counts what a reader sees (listDescVisible(), the twin of the one the editor counts
     // with while typing) against its own limit, and no picture is allowed at all.
     $clean = listDescClean($text);
-    $html = listDescRender($db, $cfg, $clean, $fmt);
+    $html = listDescRender($db, $cfg, $clean, $fmt, antispamLinksTextNow($db, $cfg, currentUser($db)));
     $bad = listDescProblem($clean, $fmt, $cfg);
     $problem = $bad !== null ? __('api.lists.' . $bad['code'], $bad['vars']) : null;
     jsonResponse([

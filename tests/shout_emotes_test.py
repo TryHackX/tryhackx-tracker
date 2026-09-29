@@ -119,7 +119,10 @@ def b64(data):
 USER, PAL, PASS = "emopyuser", "emopypal", "SmokePass123!"
 SETTINGS = ("users_enabled", "shout_enabled", "shout_placement", "shout_live_seconds", "shout_flood_seconds",
             "shout_format", "shout_emotes_enabled", "shout_stickers_enabled", "shout_emote_max_kb",
-            "shout_emote_max_px", "shout_emote_per_user", "shout_emote_approval")
+            "shout_emote_max_px", "shout_emote_per_user", "shout_emote_approval",
+            # 1.71.0: the anti-spam layer OFF, explicitly — this run uploads and writes faster than a person,
+            # from accounts made a second ago; the layer is tests/antispam_test.php's.
+            "antispam_enabled")
 clear_throttles()
 was = {k: php("echo $cfg['" + k + "'] ?? '';") for k in SETTINGS}
 member_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\"); echo $st->fetchColumn();")
@@ -131,6 +134,7 @@ php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'shout_enabled', '1'
     # The approval gate OFF for the body of this run: every check below is about what an upload IS
     # and what the room does with it. The gate has a section of its own near the end.
     "setSetting($db, 'shout_emote_per_user', '20'); setSetting($db, 'shout_emote_approval', '0');"
+    "setSetting($db, 'antispam_enabled', '0');"
     "$db->exec(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions,"
     " '{\\\"shout.view\\\":true,\\\"shout.post\\\":true,\\\"shout.delete_own\\\":true}') WHERE slug = 'member'\");"
     "$db->exec(\"UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\\\"shout.upload_emote\\\"') WHERE slug = 'member'\");"
@@ -421,6 +425,10 @@ try:
 finally:
     php("$db->exec(\"DELETE FROM shout_emotes WHERE code LIKE 'zzpy%'\");"
         "$db->exec('DELETE FROM shout_mentions'); $db->exec('DELETE FROM shouts');"
+        # What the anti-spam layer (1.71.0) kept about the two accounts: the room remembers its last line even
+        # with the layer off (the wall, shout_flood_seconds, is measured from it).
+        "$db->prepare(\"DELETE s FROM antispam_state s JOIN users u ON s.subject = CONCAT('u:', u.id) WHERE u.username IN (?, ?)\")"
+        "   ->execute(['" + USER + "', '" + PAL + "']);"
         "$db->prepare('DELETE FROM users WHERE username IN (?, ?)')->execute(['" + USER + "', '" + PAL + "']);"
         "$db->prepare(\"UPDATE user_groups SET permissions = ? WHERE slug = 'member'\")->execute([" + json.dumps(member_before) + "]);"
         + "".join("setSetting($db, '%s', '%s');" % (k, v) for k, v in was.items()))

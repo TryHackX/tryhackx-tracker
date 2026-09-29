@@ -137,6 +137,17 @@ if ($descText !== '') {
     $e = richtextValidate($descText, $descFmt, $cfg);
     if ($e !== null) jsonResponse(['error' => $e], 400);
 }
+// Words attached to a torrent pass the site's one anti-spam layer (1.71.0, includes/antispam.php, context
+// `description`) exactly as the Info panel's do — before anything is written, like every rule above: either
+// the whole submission is acceptable or nothing happens. The CAPTCHA this form asks for itself (public mode,
+// every time) counts as the guest's.
+$descTicket = null;
+if ($sourceUrl !== '' || $descText !== '') {
+    $as = antispamCheck($db, $cfg, 'description', antispamSubject($submitUser, $ip), $descText . "\n" . $sourceUrl,
+                        ['input' => $input, 'captcha_ok' => wasCaptchaJustSolved()]);
+    if (!$as['ok']) jsonResponse($as['body'], (int)$as['status']);
+    $descTicket = $as['ticket'];
+}
 
 $addCtx = ['source' => 'web', 'ip' => $ip, 'auto_meta' => false];
 if ($submitUser !== null) {
@@ -173,12 +184,19 @@ if ($sourceUrl !== '' || $descText !== '') {
         $ca = contentAttach($db, $cfg, $res['hash'],
             ['description' => $descText, 'description_format' => $descFmt, 'source_url' => $sourceUrl],
             $submitUser, $ip);
-        if (empty($ca['ok'])) jsonResponse(['error' => (string)$ca['error']], (int)($ca['code'] ?? 400));
+        if (empty($ca['ok'])) {
+            antispamRelease($db, $descTicket);
+            jsonResponse(['error' => (string)$ca['error']], (int)($ca['code'] ?? 400));
+        }
+        antispamRecord($db, $descTicket);
+        $descTicket = null;
         $contentSaved = !empty($ca['saved']);
         $contentPending = !empty($ca['pending']);
         $contentProposed = !empty($ca['proposed']);
         break;
     }
+    // Nothing was registered to attach the words to: nothing was written, and the layer is told so.
+    antispamRelease($db, $descTicket);
 }
 
 // Everything that was just added has to prove itself: metadata in, and at least one peer announcing

@@ -1515,8 +1515,8 @@ add('', {
         'Wobec 100% dla zalogowanego konta. 0 = głosy anonimowe są liczone, ale niczego nie zmieniają.'),
     'settings.rep_captcha_pts_vote': ('CAPTCHA points per vote',
         'Punkty CAPTCHA za głos'),
-    'settings.rep_captcha_pts_vote_hint': ('A vote adds this to the same score every other action feeds. Steady use is never interrupted; fifty votes in a minute meets a challenge, without anybody having to write a bot detector.',
-        'Głos dodaje tyle do tego samego wyniku, który zasilają wszystkie inne akcje. Spokojne korzystanie nigdy nie jest przerywane; pięćdziesiąt głosów w minutę trafia na wyzwanie, bez pisania przez kogokolwiek wykrywacza botów.'),
+    'settings.rep_captcha_pts_vote_hint': ('A vote adds this to the smart score the site\'s forms read (the report, status and appeal forms, the sign-in). A vote\'s own CAPTCHA is the anti-spam layer\'s (Security → Anti-spam): steady use is never interrupted, and somebody voting as fast as a script meets one.',
+        'Głos dodaje tyle do inteligentnego wyniku, który czytają formularze serwisu (zgłoszenie nadużycia, status, odwołanie, logowanie). Własną CAPTCHA głosu daje ochrona przed spamem (Bezpieczeństwo → Ochrona przed spamem): spokojne ocenianie nigdy nie jest przerywane, a kto głosuje w tempie skryptu, trafia na nią.'),
     'settings.rep_enabled_hint': ('Ratings apply to <strong>any hash the catalogue knows</strong>, not only registered ones — a torrent does not have to be on the whitelist to be rated.',
         'Oceny dotyczą <strong>każdego hasha znanego katalogowi</strong>, nie tylko zarejestrowanych — torrent nie musi być wpisany na whitelistę, żeby dało się go ocenić.'),
     'settings.rep_heading': ('Ratings',
@@ -2013,11 +2013,14 @@ add('', {
     'settings.group_opentracker': ('OpenTracker service', 'Usługa OpenTracker'),
     'settings.group_network': ('Network & limits', 'Sieć i limity'),
     'settings.group_stats': ('Statistics', 'Statystyki'),
-    # 1.69.0: "Descriptions & review" until the ratings had to be findable by the chip's name.
-    'settings.group_content': ('Descriptions & ratings', 'Opisy i oceny'),
+    # 1.69.0: "Descriptions & review" until the ratings had to be findable by the chip's name — and
+    # 1.71.0 names the comments (tools/lang_src.d/comments.py), the section between the two.
+    'settings.group_content': ('Descriptions, comments & ratings', 'Opisy, komentarze i oceny'),
     # 1.60.0: two chips of their own. The shoutbox was filed under "Descriptions & review" and the
     # sounds under "User accounts", which is where they landed rather than where anybody looks.
     'settings.group_shoutbox': ('Shoutbox', 'Shoutbox'),
+    # 1.71.0: the emoji picker, Font Awesome's icons and the emotes and stickers, out of Shoutbox.
+    'settings.group_emoji': ('Emoji & emotes', 'Emoji i emotki'),
     'settings.group_sounds': ('Sounds', 'Dźwięki'),
     'settings.group_index': ('Index', 'Indeks'),
     'settings.group_integrations': ('API & federation', 'API i federacja'),
@@ -2433,8 +2436,12 @@ add('', {
     'settings.shout_max_chars_hint': ('Characters per shout. A shout is a sentence, not a post.',
         'Znaków na wypowiedź. Wypowiedź to zdanie, nie post.'),
     'settings.shout_flood_seconds': ('Interval between shouts', 'Odstęp między wypowiedziami'),
-    'settings.shout_flood_seconds_hint': ('Seconds one account has to wait before saying something else. 0 = no interval.',
-        'Sekundy, które jedno konto musi odczekać przed kolejną wypowiedzią. 0 = bez odstępu.'),
+    'settings.shout_flood_seconds_hint': ('Seconds between two corrections of a line, and the shortest pause the room\'s anti-spam ladder may '
+        'ask for (Security & CAPTCHA → Anti-spam: its first lines stay free). With the anti-spam layer switched off, the wait '
+        'between every two lines, as before 1.71.0. 0 = none.',
+        'Sekundy między dwiema poprawkami wypowiedzi i najkrótsza przerwa, jakiej może zażądać drabinka antyspamowa pokoju '
+        '(Bezpieczeństwo i CAPTCHA → Ochrona przed spamem: pierwsze wypowiedzi pozostają wolne). Przy wyłączonej ochronie — '
+        'odstęp między każdymi dwiema wypowiedziami, jak przed 1.71.0. 0 = brak.'),
     'settings.shout_keep_rows': ('Keep this many lines', 'Trzymaj tyle linii'),
     'settings.shout_keep_rows_hint': ('Anything older than the newest N is deleted for good by the janitor.',
         'Wszystko starsze niż najnowsze N kasuje janitor na dobre.'),
@@ -2498,14 +2505,17 @@ add('', {
     'settings.sounds_ev_mention': ('@-mention', 'Wzmianka @'),
 })
 
-# ── 1.59.0: the shoutbox's emotes and stickers (Settings → Shoutbox) ────────
+# ── 1.59.0: the shoutbox's emotes and stickers (Settings → Shoutbox; Settings → Emoji & emotes from 1.71.0) ──
 #
 # Emoji are deliberately absent from this card: a smiley in a shout is a Unicode character drawn by
 # the reader's own device font, so there is nothing about them to configure.
 add('', {
     'settings.shout_emotes_enabled': ('Custom emotes', 'Własne emotki'),
-    'settings.shout_emotes_enabled_hint': ('Pictures somebody uploaded, written as <code>:code:</code> in a shout. Off hides the picker, stops the tokens being drawn and closes the image address. Emoji are not affected — those are ordinary characters and always work.',
-        'Obrazki, które ktoś wgrał, pisane w wypowiedzi jako <code>:code:</code>. Wyłączone chowa wybierak, przestaje rysować tokeny i zamyka adres obrazka. Emoji to nie dotyczy — to zwykłe znaki i działają zawsze.'),
+    # 1.71.0: "Off hides the picker" was the room's picker of 1.59.0, which held nothing else; the picker
+    # has the emoji now, and off takes only the pictures out of it — out of every picker. What the pictures
+    # are is the section's own line now, just above.
+    'settings.shout_emotes_enabled_hint': ('Off takes them out of every picker, stops their <code>:code:</code> being drawn and closes the image address. Emoji are not affected — those are ordinary characters and always work.',
+        'Wyłączone zabiera je z każdego wybieraka, przestaje rysować ich <code>:code:</code> i zamyka adres obrazka. Emoji to nie dotyczy — to zwykłe znaki i działają zawsze.'),
     'settings.shout_stickers_enabled': ('Stickers', 'Naklejki'),
     'settings.shout_stickers_enabled_hint': ('A shout that is nothing but one sticker token is drawn big instead of inline. Off, a sticker is just another emote.',
         'Wypowiedź, która jest tylko tokenem naklejki, rysuje się duża zamiast w linii. Wyłączone — naklejka jest zwykłą emotką.'),
@@ -2537,9 +2547,11 @@ add('', {
 
 # ── 1.59.1: the block rebuilt in the shape of Settings → Sounds, and the approval gate ──────────
 add('', {
-    'settings.shout_emotes_sub': ('Pictures somebody uploaded, written as <code>:code:</code> in a shout. They are rows in the database rather than files, so a backup that carries the database carries them too.',
-        'Obrazki, które ktoś wgrał, pisane w wypowiedzi jako <code>:code:</code>. To wiersze w bazie, nie pliki, więc kopia zapasowa bazy niesie i je.'),
-    'settings.shout_emotes_list': ('In the room', 'W pokoju'),
+    # 1.71.0 (a section of its own under Emoji & emotes): in every text with the picker, not only a shout,
+    # and the table's heading the site's rather than the room's.
+    'settings.shout_emotes_sub': ('Pictures somebody uploaded, written as <code>:code:</code> in a shout — and, while “Beyond the shoutbox” is on, in every other text that has the picker. They are rows in the database rather than files, so a backup that carries the database carries them too.',
+        'Obrazki, które ktoś wgrał, pisane w wypowiedzi jako <code>:code:</code> — a gdy włączone jest „Poza shoutboxem”, także w każdym innym tekście, który ma wybierak. To wiersze w bazie, nie pliki, więc kopia zapasowa bazy niesie i je.'),
+    'settings.shout_emotes_list': ('On the site', 'Na stronie'),
     'settings.shout_emotes_add_heading': ('Add one', 'Dodaj nową'),
     'settings.shout_emote_approval': ('A member\'s upload waits', 'Wgranie od członka czeka'),
     'settings.shout_emote_approval_hint': ('On, a picture uploaded by an ACCOUNT is stored switched off and waits for you above the table — nobody else sees it anywhere until you approve it. What you add here never waits. Uploading at all needs <code>shout.upload_emote</code>, which nobody has until you grant it in Users → Groups; a group that also holds <code>shout.emote_auto</code> skips this queue and its uploads are visible the moment they land.',
@@ -2627,8 +2639,9 @@ add('', {
     'settings.shout_system_lines_hint': ('The tracker says so in the room when a torrent is registered — one line per batch, never one per hash. It names the submitter only where that submitter is public; otherwise it says a torrent arrived without naming anybody. These lines belong to nobody: members cannot delete them, they are nobody\'s unread and they make no sound.',
         'Tracker pisze w pokoju, gdy ktoś zarejestruje torrent — jedna linia na paczkę, nigdy jedna na hash. Nazywa zgłaszającego tylko tam, gdzie jest on publiczny; inaczej pisze, że torrent się pojawił, nie wymieniając nikogo. Te wpisy nie należą do nikogo: członkowie ich nie skasują, nikomu nie liczą się jako nieprzeczytane i nie wydają dźwięku.'),
     'settings.shout_matrix_title': ('Who may read and who may write', 'Kto może czytać, a kto pisać'),
-    'settings.shout_matrix_hint': ('The eight shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
-        'Osiem uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
+    # 1.71.0: six — the two emote permissions went with the emotes (settings.emote_matrix_*).
+    'settings.shout_matrix_hint': ('The six shoutbox permissions across your groups, as they stand right now. Read-only here: grants are made in Users → Groups, where every other permission is, so there is one place that decides and one place that shows.',
+        'Sześć uprawnień shoutboksa we wszystkich grupach, tak jak wyglądają w tej chwili. Tutaj tylko do odczytu: nadaje się je w Użytkownicy → Grupy, tam gdzie wszystkie pozostałe — jedno miejsce decyduje, jedno pokazuje.'),
 })
 
 # ── 1.61.0: the address the room answers on ────────────────────────────────

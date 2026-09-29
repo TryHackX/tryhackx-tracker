@@ -498,8 +498,6 @@ add('js.app', {
         'Zły'),
     'vote_bad_title': ('Fake, mislabelled or broken',
         'Fałszywy, źle opisany lub uszkodzony'),
-    'vote_captcha': ('Please solve the CAPTCHA on the page and try again.',
-        'Rozwiąż CAPTCHA na stronie i spróbuj ponownie.'),
     'vote_failed': ('That did not go through.',
         'To się nie powiodło.'),
     'vote_good': ('Good',

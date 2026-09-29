@@ -35,11 +35,10 @@
         return n;
     }
 
+    // The page's token (1.71.0): window.csrfToken() in app.js, loaded before this file, reads the one the
+    // layout publishes on every page — not a list of the ids some pages carried.
     function csrf() {
-        var i = document.getElementById('account-csrf')
-             || document.getElementById('search-csrf')
-             || document.querySelector('input[name="csrf_token"]');
-        return i ? i.value : '';
+        return typeof window.csrfToken === 'function' ? window.csrfToken() : '';
     }
     async function get(qs) {
         try {
@@ -378,10 +377,17 @@
             // one more place to click through to the profile.
             head.appendChild(el('a', { className: 'pm-head-name', href: BASE + '?action=u&name=' + encodeURIComponent(name) },
                                 [face(j.with || name, j.with_avatar, 32, 'pm-head-av'), name]));
-            var back = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.pm.back') });
+            // Back and Clear as icons (1.71.0): an arrow back to the inbox, the archive box for "off my list"
+            // (nothing is deleted — the next message brings the conversation back). Named for a screen
+            // reader, explained in the site's tooltip (data-tip, assets/js/app.js).
+            var back = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn pm-back',
+                                      'aria-label': t('js.pm.back'), dataset: { tip: t('js.pm.back_title') } },
+                          el('i', { className: 'bi bi-arrow-left', 'aria-hidden': 'true' }));
             back.addEventListener('click', function () { stopPoll(); pane.hidden = true; openWith = null; loadInbox(); });
             head.appendChild(back);
-            var hide = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.pm.hide') });
+            var hide = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn pm-hide',
+                                      'aria-label': t('js.pm.hide'), dataset: { tip: t('js.pm.hide_title') } },
+                          el('i', { className: 'bi bi-archive', 'aria-hidden': 'true' }));
             hide.addEventListener('click', async function () {
                 await post('user_messages', { op: 'hide', with: name });
                 stopPoll();
@@ -450,10 +456,24 @@
             var x = document.getElementById('pmreport-close');
             if (x) x.onclick = close;
             go.onclick = async function () {
+                if (go.disabled) return;
                 go.disabled = true;
-                var r = await post('user_messages', { op: 'report', message: id, reason: why.value.trim() });
-                go.disabled = false;
-                if (!r || !r.success) { msg.textContent = t('js.pm.report_failed'); return; }
+                // A report passes the anti-spam layer as every report does (1.71.0): a CAPTCHA it asks for, the
+                // same report again; a wait counts down on the button, the sentence beside it.
+                var payload = { op: 'report', message: id, reason: why.value.trim() };
+                var doPost = function (extra) { return post('user_messages', Object.assign({}, payload, extra || {})); };
+                var r = window.Antispam
+                    ? await window.Antispam.send(doPost, { button: go, note: function (s) { msg.textContent = s || ''; }, action: 'user_messages' })
+                    : await doPost({});
+                if (!(window.Antispam && window.Antispam.waiting(go))) go.disabled = false;
+                if (!r || !r.success) {
+                    if (r && (r.antispam || r.error === 'captcha_cancelled')) {
+                        if (!(window.Antispam && window.Antispam.waiting(go))) msg.textContent = r.message || t('js.pm.report_failed');
+                    } else {
+                        msg.textContent = t('js.pm.report_failed');
+                    }
+                    return;
+                }
                 reportFace(btn, true);
                 btn.disabled = true;
                 close();
@@ -570,19 +590,32 @@
         }
 
         send.addEventListener('click', async function () {
+            if (send.disabled) return;
             var body = ta.value.trim();
             if (!body) { ta.focus(); return; }
             var fmtEl = rich ? document.getElementById('pm-body-format') : null;
             send.disabled = true;
-            var r = await post('user_messages', {
+            var payload = {
                 op: 'send', to: name, body: body,
                 // Whichever tab they wrote in. The server validates it either way — richtext.php is
                 // the one place that decides what a message may contain.
                 format: fmtEl && fmtEl.value ? fmtEl.value : 'bbcode',
-            });
-            send.disabled = false;
+            };
+            // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for is
+            // solved and the message sent again; a wait — a new conversation too soon, too many of them this
+            // hour — counts down on Send, with the server's sentence beside it.
+            var doPost = function (extra) { return post('user_messages', Object.assign({}, payload, extra || {})); };
+            var r = window.Antispam
+                ? await window.Antispam.send(doPost, { button: send, note: function (s) { msg.textContent = s || ''; }, action: 'user_messages' })
+                : await doPost({});
+            if (!(window.Antispam && window.Antispam.waiting(send))) send.disabled = false;
             if (!r || !r.success) {
-                msg.textContent = t('js.pm.why_' + ((r && r.error) || 'failed'));
+                // The layer's refusals carry their own sentence; the send's own codes are the dictionary's.
+                if (r && (r.antispam || r.error === 'captcha_cancelled')) {
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t('js.pm.why_failed');
+                } else {
+                    msg.textContent = t('js.pm.why_' + ((r && r.error) || 'failed'));
+                }
                 return;
             }
             ta.value = '';

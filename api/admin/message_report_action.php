@@ -2,9 +2,13 @@
 /**
  * What a moderator may do with a reported message.
  *
- *   POST admin/message_report_action {id, action, note, days?}
- *     action: 'close' | 'reopen' | 'delete_message' | 'mute' | 'unmute' | 'ban' | 'unban'
+ *   POST admin/message_report_action {id, action, note, days?, mode?, reason?}
+ *     action: 'close' | 'reopen' | 'delete_message' | 'warn' | 'mute' | 'unmute' | 'ban' | 'unban'
  *     days:   for 'mute' and 'ban' — 0 means "until somebody lifts it"
+ *     mode:   (1.71.0) for every action that reaches the author — 'silent': they are told nothing; 'loud': a
+ *             WARNING in their own language with the moderator's `reason` (required), and a row in
+ *             `user_warnings` (includes/reports.php, userWarn()). 'warn' is always loud. NO mode — what every
+ *             caller sent before 1.71.0 — is what it always was: the author told the plain fact.
  *
  * Closing says a person looked; deleting removes the line that was reported and NOTHING else in the
  * conversation. Muting stops that account writing MESSAGES; banning stops the account. There is
@@ -38,6 +42,10 @@ $note   = mb_substr(trim((string)($input['note'] ?? '')), 0, 500);
 // answered nobody. The reporter learns what happened to the report, never what happened to the
 // other account beyond what the moderator chooses to write.
 $reply  = mb_substr(trim((string)($input['reply'] ?? '')), 0, 500);
+// Silent or loud (1.71.0) — see the header. '' is the behaviour from before the choice existed.
+$mode   = in_array($input['mode'] ?? null, ['silent', 'loud'], true) ? (string)$input['mode'] : '';
+if ($action === 'warn') $mode = 'loud';
+$reason = mb_substr(trim((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string)($input['reason'] ?? ''))), 0, 500);
 if ($id < 1) jsonResponse(['error' => __('api.report.invalid_id')], 400);
 
 $st = $db->prepare("SELECT r.*, reporter.username AS reporter_name, reported.username AS reported_name
@@ -78,7 +86,19 @@ if ($action === 'close' || $action === 'reopen') {
     jsonResponse(['success' => true, 'status' => $to]);
 }
 
+/**
+ * The loud half (1.71.0): a WARNING goes to an account the panel may act on — never one that can open the
+ * panel, never yourself (the same rule as a mute) — and only with the moderator's reason, which is its body.
+ * Asked BEFORE anything is done, so a refusal leaves the message and the account as they were.
+ */
+$loudGate = function () use ($db, $cfg, $rep, $reason): void {
+    $why = function_exists('reportAccountGuard') ? reportAccountGuard($db, $cfg, (int)$rep['reported_user_id']) : '';
+    if ($why !== '') jsonResponse(['error' => $why], $why === 'no_author' ? 400 : 403);
+    if ($reason === '') jsonResponse(['error' => 'reason_required'], 400);
+};
+
 if ($action === 'delete_message') {
+    if ($mode === 'loud') $loudGate();
     // The reported line only. The context row is left where it is: it belongs to the other person,
     // it was never what anybody complained about, and removing it would edit a conversation rather
     // than answer a report.
@@ -87,14 +107,36 @@ if ($action === 'delete_message') {
        ->execute([$note, $reply !== '' ? $reply : null, mb_substr((string)(auditActor($db)['name'] ?? 'admin'), 0, 64), $id]);
     // Both people hear. The reporter: the line they complained about is gone. Its author: one of
     // their messages was removed — the fact and nothing else, because the note is the moderator's
-    // and the reply is the reporter's.
+    // and the reply is the reporter's. (1.71.0: unless the moderator chose silence — nothing — or a
+    // warning, which says the same with their reason and is kept on the account.)
     $tellReporter('notify.report_message_removed');
-    userNotify($db, (int)$rep['reported_user_id'], 'account', __('notify.message_removed'), __('notify.message_removed_body'));
+    $warning = null;
+    if ($mode === '') {
+        userNotify($db, (int)$rep['reported_user_id'], 'account', __('notify.message_removed'), __('notify.message_removed_body'));
+    } elseif ($mode === 'loud') {
+        $warning = userWarn($db, $cfg, (int)$rep['reported_user_id'], $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'remove');
+    }
     auditLog($db, 'pm.message.delete', [
         'target_type' => 'user', 'target_id' => (int)$rep['reported_user_id'],
-        'summary' => $who, 'detail' => ['report' => $id, 'message' => (int)$rep['message_id'], 'note' => $note !== '' ? $note : null, 'reply' => $reply !== '' ? $reply : null],
+        'summary' => $who, 'detail' => ['report' => $id, 'message' => (int)$rep['message_id'], 'note' => $note !== '' ? $note : null, 'reply' => $reply !== '' ? $reply : null,
+                                        'mode' => $mode !== '' ? $mode : null, 'reason' => $reason !== '' ? $reason : null, 'warning' => $warning],
     ]);
     jsonResponse(['success' => true, 'deleted' => (int)$rep['message_id'], 'status' => 'closed']);
+}
+
+/* ── a warning, and nothing else (1.71.0) ─────────────────────────────────────────────────── */
+if ($action === 'warn') {
+    $loudGate();
+    $warning = userWarn($db, $cfg, (int)$rep['reported_user_id'], $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'warn');
+    // Like a mute: the report is answered, not closed — the card keeps it for the moderator to close.
+    $db->prepare("UPDATE message_reports SET note = ?, reply = ?, handled_by = ?, handled_at = NOW() WHERE id = ?")
+       ->execute([$note, $reply !== '' ? $reply : null, mb_substr((string)(auditActor($db)['name'] ?? 'admin'), 0, 64), $id]);
+    $tellReporter('notify.report_handled');
+    auditLog($db, 'pm.user.warn', [
+        'target_type' => 'user', 'target_id' => (int)$rep['reported_user_id'],
+        'summary' => $who, 'detail' => ['report' => $id, 'warning' => $warning, 'reason' => $reason, 'note' => $note !== '' ? $note : null, 'reply' => $reply !== '' ? $reply : null],
+    ]);
+    jsonResponse(['success' => true, 'action' => 'warn', 'warning' => $warning]);
 }
 
 /* ── the two that change what an ACCOUNT may do ────────────────────────────────────────────── */
@@ -113,17 +155,27 @@ if (in_array($action, ['mute', 'unmute', 'ban', 'unban'], true)) {
     // calendar can hold: a mute measured in centuries is a permanent one that nobody labelled.
     $days  = max(0, min(3650, (int)($input['days'] ?? 0)));
     $until = $days > 0 ? date('Y-m-d H:i:s', time() + $days * 86400) : null;
+    // A warning with a silence or a ban needs the moderator's reason (1.71.0) — asked before either is applied.
+    if ($mode === 'loud' && ($action === 'mute' || $action === 'ban') && $reason === '') jsonResponse(['error' => 'reason_required'], 400);
+    $warning = null;
 
     if ($action === 'mute' || $action === 'unmute') {
         // "For ever" is stored as a date far enough away to mean it. The column stays one kind of
         // thing — a moment — so every reader is one comparison and there is no second case.
         $set = $action === 'mute' ? ($until ?? '2099-12-31 23:59:59') : null;
         $db->prepare("UPDATE users SET pm_muted_until = ? WHERE id = ?")->execute([$set, $target]);
-        userNotify($db, $target, 'account',
-            __($action === 'mute' ? 'notify.muted' : 'notify.unmuted'),
-            $action === 'mute'
-                ? ($until !== null ? __('notify.muted_until', ['date' => $until]) : __('notify.muted_forever'))
-                : __('notify.unmuted_body'));
+        // What the account is told (1.71.0): as before when no mode was chosen; nothing when silent; when loud,
+        // a silence comes as a warning with the reason, and lifting one is said plainly (good news is no warning).
+        if ($mode === '' || ($mode === 'loud' && $action === 'unmute')) {
+            userNotify($db, $target, 'account',
+                __($action === 'mute' ? 'notify.muted' : 'notify.unmuted'),
+                $action === 'mute'
+                    ? ($until !== null ? __('notify.muted_until', ['date' => $until]) : __('notify.muted_forever'))
+                    : __('notify.unmuted_body'));
+        } elseif ($mode === 'loud') {
+            $warning = userWarn($db, $cfg, $target, $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'mute',
+                                $days > 0 ? time() + $days * 86400 : null);
+        }
     } else {
         $ban = $action === 'ban';
         // A ban the OWNER made from the Users page carries no date. This card may neither shorten it
@@ -140,7 +192,12 @@ if (in_array($action, ['mute', 'unmute', 'ban', 'unban'], true)) {
         // A banned account's sessions end on their next request anyway (currentUser() refuses a
         // status that is not 'active'), and its remembered devices are worth taking with it.
         if ($ban && function_exists('userSignOutOthers')) userSignOutOthers($db, $target, false);
-        if (!$ban) userNotify($db, $target, 'account', __('notify.unbanned'), __('notify.unbanned_body'));
+        if (!$ban && $mode !== 'silent') userNotify($db, $target, 'account', __('notify.unbanned'), __('notify.unbanned_body'));
+        // A ban told as a warning (1.71.0): read when the account can read again, and kept on it.
+        if ($ban && $mode === 'loud') {
+            $warning = userWarn($db, $cfg, $target, $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'ban',
+                                $days > 0 ? time() + $days * 86400 : null);
+        }
     }
 
     $db->prepare("UPDATE message_reports SET note = ?, reply = ?, handled_by = ?, handled_at = NOW() WHERE id = ?")
@@ -152,7 +209,8 @@ if (in_array($action, ['mute', 'unmute', 'ban', 'unban'], true)) {
     auditLog($db, 'pm.user.' . $action, [
         'target_type' => 'user', 'target_id' => $target,
         'summary' => $who . ($days > 0 ? ' (' . $days . 'd)' : ''),
-        'detail' => ['report' => $id, 'days' => $days, 'until' => $until, 'note' => $note !== '' ? $note : null, 'reply' => $reply !== '' ? $reply : null],
+        'detail' => ['report' => $id, 'days' => $days, 'until' => $until, 'note' => $note !== '' ? $note : null, 'reply' => $reply !== '' ? $reply : null,
+                     'mode' => $mode !== '' ? $mode : null, 'reason' => $reason !== '' ? $reason : null, 'warning' => $warning],
     ]);
     jsonResponse(['success' => true, 'action' => $action, 'until' => $until]);
 }

@@ -37,14 +37,25 @@ function auditActionGroups(): array {
                        'iconpack.install', 'iconpack.activate', 'iconpack.styles', 'iconpack.delete', 'iconpack.manage', 'iconpack.reindex'],
         // content.delete (1.70.0): a description taken down from the Info panel — its author's own, or
         // anybody's by a holder of content.delete_any (includes/content.php, contentDelete()).
-        'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject', 'content.delete'],
+        // comment.* (1.71.0, includes/comments.php): a moderator taking a comment down or editing somebody
+        // else's, and a guest's held comment let through. The author tidying their own writes no line.
+        'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject', 'content.delete',
+                       'comment.delete', 'comment.edit', 'comment.approve'],
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
-        'reports'  => ['report.status', 'report.delete', 'report.restore', 'report.email', 'appeal.resolve'],
+        // creport.* (1.71.0, includes/reports.php): a member's report of a comment, a description or a shout, and
+        // everything the Reports page did about one — closed, reopened, the words removed, the author warned,
+        // silenced or banned (and lifted). The warning itself is filed under users (user.warn).
+        // antispam.refuse (1.71.0, includes/antispam.php): somebody the anti-spam layer refused three times in a row —
+        // once an hour per account or address group at most; beside the reports, where a moderator looks for abuse.
+        'reports'  => ['report.status', 'report.delete', 'report.restore', 'report.email', 'appeal.resolve',
+                       'creport.file', 'creport.close', 'creport.reopen', 'creport.remove', 'creport.warn',
+                       'creport.mute', 'creport.unmute', 'creport.ban', 'creport.unban', 'antispam.refuse'],
         // 'user.create' was mapped from admin/user_create since the log was written and named in no
         // group, so every account the panel made was filed under 'other'. v1/users/provision writes
         // the same action now, which is how it was noticed.
-        'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media', 'user.bio'],
+        'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media', 'user.bio',
+                       'user.warn'],
         'machine'  => ['tracker.mode', 'tracker.restart', 'tracker.reload', 'netlimit.apply', 'iplist.change', 'sysctl.apply',
                        'ot.apply', 'ot.cluster', 'livesync.apply', 'backup.run', 'backup.restore',
                        'backup.delete', 'backup.download', 'tuner.run'],

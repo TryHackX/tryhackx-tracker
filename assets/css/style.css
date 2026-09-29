@@ -44,8 +44,8 @@
 :is(.bi-person-x, .bi-subscript) { --bi-mid: 0.44em; }
 :is(.bi-database-gear, .bi-scissors) { --bi-mid: 0.465em; }
 :is(.bi-box-arrow-in-down, .bi-database-down, .bi-folder2-open, .bi-sliders) { --bi-mid: 0.47em; }
-:is(.bi-youtube) { --bi-mid: 0.525em; }
-:is(.bi-check2, .bi-check2-all, .bi-collection, .bi-highlighter, .bi-link-45deg, .bi-trash) { --bi-mid: 0.53em; }
+:is(.bi-vector-pen, .bi-youtube) { --bi-mid: 0.525em; }
+:is(.bi-check2, .bi-check2-all, .bi-collection, .bi-highlighter, .bi-link-45deg, .bi-trash, .bi-trash-fill) { --bi-mid: 0.53em; }
 :is(.bi-heart, .bi-list-ul, .bi-quote) { --bi-mid: 0.535em; }
 :is(.bi-book) { --bi-mid: 0.54em; }
 :is(.bi-arrow-clockwise, .bi-arrow-counterclockwise, .bi-list-check) { --bi-mid: 0.55em; }
@@ -295,6 +295,18 @@ a:hover { opacity: 0.8; text-decoration: underline; }
     margin-bottom: 1rem;
 }
 .captcha-box .captcha-widget { display: inline-block; max-width: 100%; }
+/* The widget's frame in its OWN page's colour scheme (1.71.0). Every provider draws its widget in an
+   iframe whose page declares no scheme — "normal", which is light — and since 1.70.0 this page declares
+   `color-scheme: dark` on :root, which every element inherits, the iframe included. Where the frame and
+   its page disagree, Chrome paints the frame's page on an opaque canvas of that page's scheme: white. The
+   dark reCAPTCHA box leaves the right and bottom edge of its 304x78 frame unpainted, so it stood in a
+   white rim — the owner's "graphical glitch". The frame is given the scheme its page is in, so it is
+   transparent again; nothing else changes (the form controls stay dark). Set on the widget's box, since
+   Turnstile puts its frame in a shadow root that only inheritance reaches, and on the challenge windows
+   reCAPTCHA and hCaptcha open at the end of <body>. Measured with each provider's test key, in the dark
+   theme the site asks for and in the light one: the rim is gone, hCaptcha's and Turnstile's own borders
+   stay as they draw them. */
+.captcha-widget, iframe[src*="/recaptcha/"], iframe[src*="hcaptcha.com"], iframe[src*="challenges.cloudflare.com"] { color-scheme: normal; }
 .captcha-box .captcha-actions { margin-top: 1rem; }
 .captcha-box .captcha-cancel { padding: 0.4rem 1.1rem; font-size: 0.85rem; }
 
@@ -579,6 +591,10 @@ ul.feature-list li::before {
    why). Its display at one class's weight, placed after `.btn`'s inline-block and before `.d-hidden`, so
    that a hidden button stays hidden; the row's layout is at the top. */
 .btn:where(:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) { display: inline-flex; }
+/* An icon button (1.71.0, "Icon buttons" further down): a box its glyph is centred in, in either library.
+   Its display here for the same reason: one class's weight, after `.btn`'s and `.copy-btn`'s own, before
+   `.d-hidden`. */
+.ic-btn { display: inline-flex; }
 
 /* Link styled as a button (home page "Register your torrent" CTA) — identical to <button class="btn">: the
    generic a / a:visited / a:hover rules would otherwise paint it pink and underline it. */
@@ -1816,6 +1832,10 @@ footer p { margin: 0.25rem 0; }
 .user-remember { display: block; margin: 0.4rem 0; color: var(--text-muted); font-size: 0.9rem; }
 .user-remember input { margin-right: 0.4rem; vertical-align: -0.1em; }
 .user-links { text-align: center; color: var(--text-muted); margin-top: 1rem; }
+/* The links under a sign-in, register or reset form (and the panel's sign-in) are the page's own way on —
+   Register, Reset it, Sign in, Back — not something read and left behind: no visited colour (1.71.0). A
+   followed "Register" turned pink and read as if something had happened there. */
+.user-links a:visited { color: var(--link); }
 .nav-unread { display: inline-block; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; vertical-align: 0.1em; }
 /* The shoutbox's own number (1.60.0). It wears the badge shape and not the badge COLOUR: two solid
    pills in one bar read as one thing counted twice, and these two count different things — that one
@@ -1824,9 +1844,22 @@ footer p { margin: 0.25rem 0; }
 .nav-shout-unread { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
 .account-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .account-head h1 { margin: 0; }
-.account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin: 1.25rem 0; }
+/* The Overview (1.71.0): a card for each group, FLOWING into two columns that the browser balances
+   (CSS columns — `column-fill: balance` is their default — and no card split across them), in the
+   template's order, which is the reading order on a phone too. It was a grid of two cards, and the left
+   one grew with every browser the account had asked to be remembered on while the right held the rest:
+   one column stood half empty beside the other. Two columns wherever each can be 20rem wide (656px
+   with the gap), one below.
+   The part that grows, the signed-in browsers, is a card of the page's full width under the columns
+   (.acc-wide), where it can make neither column longer. */
+.acc-flow { columns: 2 20rem; column-gap: 1rem; margin: 1.25rem 0 0; }
+.acc-flow > .account-card { break-inside: avoid; margin: 0 0 1rem; }
+.account-card.acc-wide { margin: 0 0 1.25rem; }
 .account-card { background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.25rem; }
 .account-card h2 { margin-top: 0; font-size: 1.05rem; }
+/* Each card's heading, and the line under it that says what the card is for. */
+.acc-card > h2 { margin-bottom: 0.2rem; }
+.acc-card-desc { margin: 0 0 0.7rem; font-size: 0.8rem; line-height: 1.5; color: var(--text-muted); }
 .account-kv { width: 100%; border-collapse: collapse; }
 .account-kv td { padding: 0.3rem 0.5rem 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .account-kv td:first-child { color: var(--text-muted); white-space: nowrap; width: 38%; }
@@ -1868,14 +1901,14 @@ footer p { margin: 0.25rem 0; }
 
 /* The two mail switches were rows in the Profile table, where a two-line explanation had to fit a
    272 px cell and made one row 137 px tall. They are choices, not facts about the account, so they
-   get the card's full width and read as a short list of decisions. */
-.acc-mail-prefs { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
-.acc-sub { margin: 0 0 0.5rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); font-weight: 600; }
-/* .search-check is an inline-flex nowrap toolbar control and is defined further down this file, so
+   get a card's full width and read as a short list of decisions. (Until 1.71.0 each group was a
+   ruled-off `.acc-mail-prefs` block under an `.acc-sub` heading inside one of two cards; each is a
+   card of its own now, `.acc-card`, under an h2 — the two classes went with it.)
+   .search-check is an inline-flex nowrap toolbar control and is defined further down this file, so
    these need the extra class to win: without it the rows shrink-wrap to their text and two rows of
    the same list come out different widths. */
-.acc-mail-prefs .acc-pref-row { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.4rem 0; white-space: normal; }
-.acc-mail-prefs .acc-pref-row .search-check-box { margin-top: 0.18rem; }
+.acc-card .acc-pref-row { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.4rem 0; white-space: normal; }
+.acc-card .acc-pref-row .search-check-box { margin-top: 0.18rem; }
 .acc-pref-row + .acc-pref-row { border-top: 1px solid var(--border); }
 .acc-pref-text { display: flex; flex-direction: column; gap: 0.1rem; }
 .acc-pref-name { font-size: 0.9rem; }
@@ -2076,6 +2109,11 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    little more weight than the word "Files" does. */
 .info-box .files-head { padding: 0.9rem 1.1rem; }
 .info-box .files-head h3 { font-size: 1.05rem; line-height: 1.35; }
+/* Its controls are one row of icon buttons (1.71.0): the star, the "+", Who has this, Share and the close,
+   one gap between each (the head's own 1rem stood between Who has this and Share, and Share and the
+   close), and the title kept that 1rem from the first of them. */
+.info-box .files-head { column-gap: 0.4rem; }
+.info-box .files-head h3 { margin-right: 0.6rem; }
 .info-box .files-body { padding: 1rem 1.1rem 1.1rem; }
 .files-close { background: transparent; border: 0; color: var(--text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
 .files-close:hover { color: var(--error); }
@@ -2138,6 +2176,12 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .search-sortable:hover { color: #fff; }
 .search-sort-icon { font-size: 0.7rem; opacity: 0.45; margin-left: 0.2rem; }
 .search-sort-icon.active { opacity: 1; color: var(--accent); }
+/* The sorted column's arrow as near its name as the others' (1.71.0): Bootstrap draws the two-way arrow
+   edge to edge in its square and a one-way arrow with 0.21em of room on each side, so the sorted column's
+   arrow stood 2.5px further from its words than the two-way arrows beside it — measured on the header
+   buttons of the likes and descriptions tables, whose gaps D2 holds equal. The one-way arrow gives that
+   room back. Font Awesome draws each glyph in a box of its own width and needs nothing. */
+.search-sort-icon:is(.bi-arrow-down, .bi-arrow-up):not([class*=" fa-"]) { margin-left: calc(0.2rem - 0.22em); }
 .search-sort-priority { font-size: 0.55rem; color: var(--accent); font-weight: bold; margin-left: 1px; }
 .search-name mark, .ftree mark { background: rgba(74, 158, 255, 0.35); color: inherit; padding: 0 1px; border-radius: 2px; }
 .search-files-chip.chip-hit { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 6px rgba(74, 158, 255, 0.35); }
@@ -2325,7 +2369,13 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .rep-bar-up { display: block; height: 100%; background: #3fa45b; }
 .rep-label { margin-top: 0.35rem; font-size: 0.85rem; }
 .rep-acts { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
-.rep-btn.rep-mine { outline: 1px solid rgba(255,255,255,0.45); }
+/* The thumb already cast is PRESSED (1.71.0) — its glyph filled, the button in the colours of the bar above
+   (green up, red down) where it was a faint outline — and pressing it again takes the vote back. */
+.rep-btn.rep-mine { color: #fff; }
+.rep-btn-up.rep-mine { background: rgba(63, 164, 91, 0.32); border-color: #3fa45b; }
+.rep-btn-up.rep-mine:hover { background: rgba(63, 164, 91, 0.45); border-color: #6fce8b; }
+.rep-btn-down.rep-mine { background: rgba(180, 67, 60, 0.34); border-color: #c9544b; }
+.rep-btn-down.rep-mine:hover { background: rgba(180, 67, 60, 0.48); border-color: #ff8a8a; }
 .search-rep { font-size: 0.8rem; white-space: nowrap; }
 .search-rep-up { color: #6fce8b; }
 .search-rep-down { color: #ff8a8a; }
@@ -2363,6 +2413,9 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .star-hit-l { left: 0; }
 .star-hit-r { right: 0; }
 .star-hit:focus-visible { outline: 2px solid #4a9eff; outline-offset: 1px; border-radius: 2px; }
+/* Your own rating (1.71.0): the half star you pressed carries a mark under it — the five stars show your
+   rating or, before you rate, the average, and the mark says which — and pressing it again takes it back. */
+.star-hit-mine::after { content: ''; position: absolute; left: 12%; right: 12%; bottom: -5px; height: 2px; border-radius: 1px; background: #f0b429; }
 .search-rep-stars { color: #f0b429; white-space: nowrap; }
 /* The review state, as an icon beside the name — the same place and rhythm as the WL badge.
    The colour carries the meaning at a glance and the shape carries it for everybody else. */
@@ -2393,7 +2446,6 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
        colour scheme is (:root, 1.70.0) — this select was the first place it was set. */
 }
 .acc-language:focus { outline: none; border-color: var(--accent); }
-.acc-lang-note { margin: 0 0 0.45rem; }
 
 /* A custom home section: the page's own type scale, not a comment's. */
 .rt-home { line-height: 1.6; }
@@ -2620,12 +2672,17 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .acc-media-side { flex: 1 1 13rem; min-width: 0; display: flex; flex-direction: column; gap: 0.45rem; }
 .acc-media-side-wide { margin-top: 0.6rem; }
 .acc-media-drop { padding: 0.65rem 0.6rem; }
-.acc-media-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+/* Centred under the drop zone they act on (1.71.0): the zone is the side column's full width, and the
+   row of Adjust position / Remove hung from its left corner, off the middle the zone's icon and words
+   stand on. */
+.acc-media-acts { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.4rem; }
 /* The shoutbox's in-place question, which is `flex: 0 0 auto` in a room's wide row. Here the card is
    narrow: unshrinkable, the sentence ran out of the card and under the next one, which then painted
    over its buttons. So it takes a line of its own and wraps inside it. */
 .acc-media-acts .shout-confirm { margin-left: 0; flex: 1 1 100%; min-width: 0; }
-.acc-media-status { font-size: 0.8rem; color: var(--success); }
+/* What a save or a removal answers takes a line of its own under the buttons (1.71.0), centred as they are:
+   beside them it pushed the centred pair off their drop zone's middle for as long as it was said. */
+.acc-media-status { font-size: 0.8rem; color: var(--success); flex: 1 1 100%; text-align: center; }
 .acc-media-status.is-bad { color: #e0b15a; }
 .acc-media-status:empty { display: none; }
 .acc-cover-now {
@@ -2920,9 +2977,9 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pm-editor textarea:focus { outline: none; box-shadow: none; border-color: transparent; }
 .pm-editor .rt-preview { min-height: 6rem; max-height: 18rem; }
 /* ── Account security: the second factor, and where this account is signed in ─────────────────
-   The rows reuse .acc-pref-row from the mail preferences above them — same card, same shape, so
-   the block reads as one more set of answers about this account rather than as a new subject. */
-.acc-security-block { margin-top: 1.2rem; }
+   The rows reuse .acc-pref-row from the mail preferences — the same shape, so the block reads as one
+   more set of answers about this account. A card of its own since 1.71.0, the Overview's last, the
+   page's full width (.acc-wide). */
 .acc-2fa-box { margin: 0.7rem 0 0.5rem; padding: 0.9rem 1rem; border: 1px solid var(--control-border);
     border-radius: var(--radius); background: var(--bg-code); }
 /* The setup is a sequence — read this, scan that, type this — so it stacks, with the square and the
@@ -3284,6 +3341,139 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     font: inherit; font-size: 0.8em; line-height: 1.3; padding: 0 0.5em; cursor: pointer; vertical-align: 0.05em; }
 .info-credit-more:hover { border-color: var(--accent); }
 .info-credit-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Icon buttons (1.71.0) ────────────────────────────────────────────────────────────────────────
+   Where a word stood only because the public pages had no icon font until 1.68.0, a glyph says it now:
+   the Info panel's description actions, the rest of its head beside the star and the "+", its Copy
+   buttons; the search results' and every torrent row's Magnet and Info, the search's Copy; a
+   conversation's Back and Clear; the announce and donation copy buttons. Each is `.ic-btn`, with its name
+   for a screen reader in aria-label and its explanation in the site's tooltip (data-tip, shown by
+   pubTip() on hover and on keyboard focus — assets/js/app.js).
+   ONE BOX, THE GLYPH IN ITS MIDDLE, IN EITHER LIBRARY. A square as tall as the row it stands in
+   (--ic-box: a small button's 26px; 28px in the Info panel's head, whose controls were that tall), the
+   glyph at 1rem. An icon here has no words beside it, so it is not put on a line of words the way the
+   rules at the top of this file place such an icon (`top`, the cap middle): the <i> and its glyph are
+   blocks of line-height 1, which lays either font's em box exactly over the <i> — Bootstrap's (ascent
+   1em, descent 0) and Font Awesome's (0.875 / 0.125em, the same place in 6 and 7) — and the <i> is
+   centred in the button. What remains is the glyph's own drawing: its ink's middle is moved to the em's
+   middle (--bi-mid: Bootstrap's table at the top of this file, 0.375em — the em's middle — for Font
+   Awesome). Sideways Bootstrap's glyphs are centred in their 1em square, and Font Awesome's in the fixed
+   1.25em slot the top of this file gives an icon-only button. */
+.ic-btn, .btn.ic-btn:has(> .bi) {
+    align-items: center; justify-content: center; column-gap: 0;
+    width: var(--ic-box, 1.625rem); min-width: 0; height: var(--ic-box, 1.625rem); padding: 0;
+    font-size: 1rem; line-height: 1; flex: 0 0 auto;
+}
+.ic-btn > .bi, .search-box-icon > .bi { top: 0; display: block; line-height: 1; --bi-mid0: 0.5em; translate: 0 calc(var(--bi-mid, var(--bi-mid0)) - var(--bi-mid0)); }
+.ic-btn > .bi[class*=" fa-"], .search-box-icon > .bi[class*=" fa-"] { --bi-mid0: 0.375em; }
+.ic-btn > .bi::before, .ic-btn > .bi::after, .search-box-icon > .bi::before, .search-box-icon > .bi::after { display: block; line-height: 1; }
+.ic-btn.copied { color: var(--success, #4caf50); border-color: var(--success, #4caf50); }
+/* A WHOLE PIXEL. Every glyph of a row is the row's 1rem — the star too (it had 1.05rem), the Info panel's
+   close, the corner copy button: a 16.8px glyph box stands a fraction of a pixel into a 26px or 28px
+   button, the glyph is drawn on a line rounded to a whole pixel, and the star came out 0.8–1.3px above its
+   box's middle in every library (the close's × 0.8–0.9px) where a 16px glyph is within half a pixel —
+   measured (icons_align_check.js). The star is borderless, its box the others'. */
+.fav-star.ic-btn, .copy-btn.ic-btn { font-size: 1rem; }
+/* The Info panel's head: the star, the "+", "Who has this", Share and the close, one row of 28px boxes
+   whose glyphs stand on one line (1.71.0 — the star stood a pixel and a half above the "+" beside it). The
+   close's glyph at the row's size, not the 0.75em of the old multiplication sign's button. */
+.files-head .ic-btn { --ic-box: 1.75rem; }
+.files-close.ic-btn > .bi { font-size: 1rem; }
+/* The search box's magnifier and its clearing cross: the library's glyphs at the size the drawings had,
+   the cross in the round 24px target it always had. */
+.search-box-icon { font-size: 0.875rem; }
+.search-clear.ic-btn { --ic-box: 1.5rem; font-size: 0.75rem; }
+/* The search results' actions: three icons and the star, 26px each, their gaps and the cell's 24px of
+   padding (145px) — the column the three words needed (15em, 213px) is a quarter narrower. On a phone,
+   where the words wrapped inside 10.5em, it is about as wide as it was (the phone rule above loses to
+   this one) and holds all four on one line. */
+.search-c-actions { width: 9.75rem; }
+/* The whitelist form's result rows stack on a phone; the copy button keeps its square, at the end. */
+@media (max-width: 600px) { .wl-magnet > .wl-copy.ic-btn { align-self: flex-end; } }
+
+/* ── Comments on a torrent (1.71.0, assets/js/comments.js) ──────────────────────────────────────────
+   A section of the Info panel after the rating, folded like the file list: the thread oldest to newest,
+   each comment a row — the author (picture and name, or "Guest #tag"), the time, the marks, and the
+   actions as the panel's other icon buttons at the row's end — and the composer at its foot, the site's
+   editor with a comment's toolbar. A held guest comment has the warning colour's edge; the comment a
+   notification's link lands on is lit for a moment. */
+.info-comments > summary { display: flex; align-items: center; }
+.info-comments .cm-head-icon { margin-right: 0.4em; opacity: 0.8; }
+.cm-section-body { padding: 0 0.8rem 0.8rem; }
+.cm-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.cm-row { border-top: 1px solid var(--border); padding-top: 0.6rem; scroll-margin: 2rem; min-width: 0; }
+.cm-list > .cm-row:first-child { border-top: 0; padding-top: 0; }
+.cm-row.cm-held { border-left: 3px solid var(--warning); padding-left: 0.6rem; }
+.cm-row.cm-target { background: rgba(74, 158, 255, 0.10); border-radius: 6px; }
+.cm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.55rem; font-size: 0.85rem; min-height: 1.625rem; }
+.cm-who { font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; min-width: 0; overflow-wrap: anywhere; }
+.cm-av { width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto; }
+.cm-guest, .cm-gone { font-weight: 500; font-style: italic; color: var(--text-muted); }
+.cm-time, .cm-edited { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
+.cm-edited { font-style: italic; }
+.cm-held-badge { font-size: 0.72rem; line-height: 1.5; padding: 0 0.5em; border: 1px solid var(--warning); border-radius: 999px; color: var(--warning); }
+.cm-acts { margin-left: auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.cm-acts[hidden] { display: none; }
+.cm-delete[data-armed="1"] { color: var(--error); border-color: var(--error); }
+.cm-text { margin-top: 0.3rem; overflow-wrap: anywhere; }
+.cm-text[hidden] { display: none; }
+.cm-text .rt-quote { margin: 0.35rem 0; }
+.cm-blocked { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; font-size: 0.85rem; }
+.cm-reason, .cm-edit-foot, .cm-compose-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.45rem; }
+.cm-reason-label { flex: 1 1 100%; font-size: 0.82rem; color: var(--text-muted); }
+.cm-reason-input { flex: 1 1 14rem; min-width: 0; }
+.cm-edit-box { margin-top: 0.4rem; }
+.cm-edit-reason { display: block; width: 100%; margin-top: 0.4rem; }
+.cm-earlier { margin: 0 0 0.6rem; }
+.cm-earlier[hidden], .cm-empty[hidden], .cm-status[hidden], .cm-pending-note[hidden] { display: none; }
+.cm-empty, .cm-status { font-size: 0.85rem; margin: 0.2rem 0 0; }
+.cm-pending-note { font-size: 0.82rem; color: var(--warning); margin: 0 0 0.5rem; }
+/* The @ list is the shoutbox's, hung from the composer (the editor's own box clips what leaves it). */
+.cm-compose { position: relative; margin-top: 0.9rem; }
+.cm-as, .cm-why { font-size: 0.82rem; margin: 0 0 0.35rem; }
+.cm-editor textarea {
+    display: block; width: 100%; min-height: 5.5rem; margin: 0; padding: 0.55rem 0.7rem; border: 0; border-radius: 0;
+    background: var(--bg-code); color: var(--text); font: inherit; resize: vertical;
+}
+.cm-editor textarea:focus { outline: none; box-shadow: none; }
+.cm-editor .rt-preview { min-height: 5.5rem; }
+.cm-hint { font-size: 0.75rem; margin: 0.3rem 0 0; }
+.cm-help:empty { display: none; }
+.cm-send-msg, .cm-edit-msg, .cm-reason-msg { font-size: 0.82rem; }
+/* The account page: which comments I am told about, under the notifications they decide. */
+.acc-comment-prefs { margin: 1rem 0 0.5rem; max-width: 42rem; }
+.acc-comment-prefs-head { font-size: 1rem; margin: 0 0 0.3rem; }
+.acc-comment-prefs-msg { font-size: 0.82rem; }
+@media (max-width: 600px) {
+    /* On a phone the actions take a line of their own under the name and the time, at its end. */
+    .cm-acts { flex-basis: 100%; justify-content: flex-end; }
+    .cm-section-body { padding: 0 0.55rem 0.6rem; }
+}
+
+/* ── Reporting a comment, a description or a shout (1.71.0, assets/js/reports.js) ─────────────────
+   The flag: an icon button in a comment's row and the description's actions, a room control in a shout's
+   row; once this reader has reported the thing it is the filled flag in the warning colour, and says so.
+   The box opens in place, under what it is about — the whole row's width, a line of its own in a shout's
+   row (which wraps), the reason's field taking the room the buttons leave. Prefix `report-`: `rep-` is the
+   ratings'. */
+.report-btn.is-reported { color: var(--warning); border-color: var(--warning); }
+.report-box { display: flex; flex-direction: column; gap: 0.35rem; flex: 1 1 100%; margin-top: 0.45rem; padding: 0.55rem 0.65rem;
+              border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 255, 255, 0.03); font-size: 0.85rem; }
+.report-label { font-size: 0.82rem; color: var(--text-muted); }
+.report-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+.report-input { flex: 1 1 14rem; min-width: 0; }
+.report-private { font-size: 0.75rem; }
+.report-msg { font-size: 0.82rem; }
+.report-msg:empty { display: none; }
+.shout-row > .report-box { margin-top: 0.3rem; }
+.shout-report:hover { color: var(--warning); }
+.shout-report-on { color: var(--warning); }
+/* The room a row's controls take when there are four of them: a moderator's view of somebody else's line
+   (the pencil, the pin, the bin and the flag) — 1.5rem each, the gaps, and the group's own margin. */
+.shout-row:has(> .shout-ctl > :nth-child(4)) { padding-right: 7.05rem; }
+/* A WARNING among the notifications (1.71.0): what a moderator told this member, marked as one. */
+.acc-notif-warning { border-left: 3px solid var(--warning); padding-left: 0.6rem; }
+.acc-notif-warning .acc-notif-head .bi { color: var(--warning); }
 
 /* ── Sounds (1.56.0): the note beside the account link, and the account page's tab ────────── */
 .sound-chip { display: inline-block; margin-left: 0.5em; padding: 0.05em 0.55em; border-radius: 999px; border: 1px solid var(--border); font-size: 0.72rem; color: var(--text-muted); cursor: default; vertical-align: 0.1em; white-space: nowrap; }
@@ -3886,18 +4076,32 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 /* Font Awesome's categories (1.70.0): the "every icon" page's own row under the tabs — seventy of them,
    so a strip that scrolls sideways like the tabs (the script keeps the chosen one in view and lets a
    wheel scroll it) — each the site's pill, as .search-files-chip draws it: no fill, an edge, the muted
-   words; the accent for the one chosen and under the pointer or the keyboard. */
+   ink. From 1.71.0 a chip is the category's ICON, not its name (the name is its tooltip and what a
+   screen reader says): one glyph in a pill a little wider than tall, or a short run of them (A B C, 1 2 3)
+   in a longer one, the glyphs centred as flex items of line-height 1 — Font Awesome draws each in the
+   middle of its em. Under the pointer or the keyboard the ink brightens and the edge takes the accent;
+   the chosen one is FILLED with the accent, its glyph in the card's ground, so which category is on show
+   reads at a glance across a strip of look-alike pills (an accent edge alone was one pill among seventy).
+   The keyboard's ring stands off the pill, so it shows on the filled one too. */
 .shout-picker-cats {
     display: flex; flex-wrap: nowrap; gap: 0.3rem; padding: 0.35rem 0.4rem; border-bottom: 1px solid var(--border);
     overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: var(--control-border) transparent;
 }
 .shout-picker-cat {
-    flex: 0 0 auto; margin: 0; padding: 0.05rem 0.6rem;
+    flex: 0 0 auto; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 0.14rem;
+    min-width: 2.25rem; height: 1.85rem; margin: 0; padding: 0 0.55rem;
     background: transparent; border: 1px solid var(--control-border); border-radius: 999px;
-    color: var(--text-muted); font: inherit; font-size: 0.75rem; line-height: 1.5; white-space: nowrap; cursor: pointer;
+    color: var(--text-muted); font: inherit; font-size: 0.75rem; line-height: 1; white-space: nowrap; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
 }
-.shout-picker-cat:hover, .shout-picker-cat:focus-visible { color: var(--text); border-color: var(--accent); outline: none; }
-.shout-picker-cat.active { color: var(--accent); border-color: var(--accent); background: var(--control-bg); }
+.shout-picker .shout-picker-cat .fai { display: block; font-size: 0.95rem; line-height: 1; vertical-align: 0; }
+/* A run is read as one word — A B C, 1 2 3 — so each glyph takes its own width: Font Awesome 7 draws every
+   icon in a fixed 1.25em box, which set the letters a space apart; 6 draws them at their own width already. */
+.shout-picker .shout-picker-cat-run .fai { --fa-width: auto; }
+.shout-picker-cat:hover, .shout-picker-cat:focus-visible { color: var(--text); border-color: var(--accent); }
+.shout-picker-cat:focus { outline: none; }
+.shout-picker-cat:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.shout-picker-cat.active { color: var(--bg-card); background: var(--accent); border-color: var(--accent); }
 /* A search's group (1.70.0): "Font Awesome: 37" on a line of its own across the grid, before the icons
    it names — a divider, not a cell: the arrows and Enter never land on it. */
 .shout-picker-group {
@@ -3936,8 +4140,10 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     /* The whole width of a phone, less the margin the script keeps it inside. */
     .shout-picker { width: calc(100vw - 16px); }
     .shout-picker-grid { height: 10rem; }
-    /* A finger is wider than a pointer: the cells a little bigger, still eight or nine to a row. */
+    /* A finger is wider than a pointer: the cells a little bigger, still eight or nine to a row — and the
+       category chips with them (1.71.0), about the cells' height. */
     .shout-picker-cell, .shout-picker-vopt { min-width: 2.35rem; height: 2.35rem; }
+    .shout-picker-cat { min-width: 2.6rem; height: 2.2rem; }
 }
 
 /* ── a picture in a shout, and the lightbox it opens into (1.62.0) ──
@@ -4124,4 +4330,22 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
        leave the column it sat in half empty. */
     .emote-grid { grid-template-columns: repeat(2, 1fr); }
     .emote-grid-big { grid-template-columns: 1fr; }
+}
+
+/* ── The anti-spam layer's countdown on a Send button (1.71.0, assets/js/antispam.js) ──────────────────
+   While the layer says "wait", the button's own face gives way to the time left — "12 s", then "4:59" —
+   drawn from data-as-wait by ::after, never written into the button as a text node (the live language switch
+   pairs a button's text nodes by position). The button keeps its width and its place; its label and any icon
+   stay in the markup, only unseen, for a screen reader, which also hears the sentence in the note beside it. */
+button.as-waiting { position: relative; color: transparent !important; cursor: default; }
+button.as-waiting > * { visibility: hidden; }
+button.as-waiting[data-as-wait]::after {
+    content: attr(data-as-wait);
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    white-space: nowrap;
+    color: var(--warning);
+    font-variant-numeric: tabular-nums;
+    visibility: visible;
+    pointer-events: none;
 }

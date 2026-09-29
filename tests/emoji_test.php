@@ -206,12 +206,20 @@ check('… in the save allow-list, the mode and the scope coerced like the room\
 $kw = settingsCatalogKeywords();
 check('… with search words', !empty($kw['shout_emoji_fa']) && !empty($kw['shout_emoji_fa_style']) && str_contains((string)($kw['shout_emoji_fa_scope'] ?? ''), 'kategorie'));
 $tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
-$sp = strpos($tpl, 'id="section-shout"');
-$sec = $sp !== false ? substr($tpl, $sp, (int)strpos($tpl, 'class="settings-section"', $sp + 20) - $sp) : '';
-check('… and in Settings → Shoutbox: the three controls, offered only while a Pro package is the icon source, a note otherwise',
-      str_contains($sec, 'name="shout_emoji_fa"') && str_contains($sec, 'name="shout_emoji_fa_style"') && str_contains($sec, "!empty(\$shoutFa['available'])")
+// 1.71.0: the controls left Settings → Shoutbox for a group of their own, Emoji & emotes — its first section
+// the picker's, the second the emotes' — and the room keeps none of them.
+$secOf = function (string $id) use ($tpl): string {
+    $sp = strpos($tpl, 'id="' . $id . '"');
+    return $sp !== false ? substr($tpl, $sp, (int)strpos($tpl, 'class="settings-section"', $sp + 20) - $sp) : '';
+};
+$sec = $secOf('section-emoji');
+$shoutSec = $secOf('section-shout');
+check('… and in Settings → Emoji & emotes (1.71.0; Shoutbox until then): the three controls, offered only while a Pro package is the icon source, a note otherwise',
+      str_contains($tpl, 'id="section-emoji" data-group="emoji"') && str_contains($tpl, 'id="section-emotes" data-group="emoji"')
+      && str_contains($sec, 'name="shout_emoji_fa"') && str_contains($sec, 'name="shout_emoji_fa_style"') && str_contains($sec, "!empty(\$shoutFa['available'])")
       && str_contains($sec, "__('settings.shout_emoji_fa_hint'") && str_contains($sec, "_h('settings.shout_emoji_fa_unavailable')")
-      && strpos($sec, 'id="admin-shout-emoji"') < strpos($sec, 'id="admin-emotes"'));
+      && str_contains($sec, 'id="admin-shout-emoji"') && strpos($tpl, 'id="section-emoji"') < strpos($tpl, 'id="admin-emotes"')
+      && !str_contains($shoutSec, 'name="shout_emoji_fa') && !str_contains($shoutSec, 'id="admin-shout-emoji"') && !str_contains($shoutSec, 'id="admin-emotes"'));
 $adminShout = (string)file_get_contents($root . '/assets/js/admin-shout.js');
 check('… the scope beside them, drawn hidden while the faces are off and shown by the mode select (a hidden field still saves), its hint counting the catalogue',
       str_contains($sec, 'name="shout_emoji_fa_scope"') && str_contains($sec, "data-setting=\"shout_emoji_fa_scope\"<?= \$shoutFaWant === 'off' ? ' hidden' : '' ?>")
@@ -259,7 +267,54 @@ check('all 68 of Font Awesome\'s categories and the two pages of the catalogue\'
       count($ownCatIds) === 68 && $noName === [] && $samePl <= 4 && emojiFaCategoryLabel('animals', 'pl') === 'Zwierzęta' && emojiFaCategoryLabel('food-beverage', 'en') === 'Food & drink'
       && emojiFaCategoryLabel('a-new-one', 'pl') === 'A new one', implode(', ', $noName));
 check('… sent with the faces\' answer in the reader\'s language, not carried by every page (no emoji.* in the public bundle)',
-      !array_filter(LANG_JS_PUBLIC, fn($p) => str_starts_with($p, 'emoji.')) && str_contains((string)file_get_contents($root . '/includes/emoji.php'), "'cats' => array_map(fn(\$id) => [\$id, emojiFaCategoryLabel(\$id, \$lang)], \$cat['ids'])"));
+      !array_filter(LANG_JS_PUBLIC, fn($p) => str_starts_with($p, 'emoji.')) && str_contains((string)file_get_contents($root . '/includes/emoji.php'), "'cats' => array_map(fn(\$id) => [\$id, emojiFaCategoryLabel(\$id, \$lang), \$icons['cats'][\$id] ?? []], \$cat['ids'])"));
+
+/* ══ 5b. the categories as icons (1.71.0) ══════════════════════════════════════════════════════
+ * The owner: the chips of the picker's "every icon" page were written words, and Font Awesome has a
+ * fitting icon for nearly every category — the alphabet even as A B C. Each chip is the icon (or a short
+ * run of them) this project chose, committed as NAMES in assets/emoji/fa-categories.json; the name is its
+ * tooltip and what a screen reader says. Every name is in both of the owner's packages (the browser half
+ * installs each and sees every chip draw its own icon: scratchpad/shots/emoji_picker_check.js); one the
+ * package in use lacks, or a category without an entry, falls back to a generic glyph. */
+$catJson = (string)file_get_contents($root . '/assets/emoji/fa-categories.json');
+$CI = json_decode($catJson, true);
+$nameRe = '/^[a-z0-9]+(?:-[a-z0-9]+){0,9}$/';
+$badCI = [];
+foreach ((array)($CI['cats'] ?? []) as $cid => $run) {
+    if (!is_array($run) || count($run) < 1 || count($run) > EMOJI_FA_CAT_RUN_MAX) { $badCI[] = "$cid: a run of " . (is_array($run) ? count($run) : '?'); continue; }
+    foreach ($run as $nm) if (!is_string($nm) || !preg_match($nameRe, $nm)) $badCI[] = "$cid: " . json_encode($nm);
+}
+$wantCI = array_merge($ownCatIds, ['brands', 'other']);
+check('fa-categories.json: format 1, an entry for every one of the 68 categories and the catalogue\'s two pages — no more — each one icon or a run of up to ' . EMOJI_FA_CAT_RUN_MAX . ', every name in the token\'s grammar, a generic fallback',
+      is_array($CI) && ($CI['format'] ?? 0) === 1 && is_string($CI['fallback'] ?? null) && preg_match($nameRe, $CI['fallback'])
+      && array_keys((array)$CI['cats']) === $wantCI && $badCI === [] && EMOJI_FA_CAT_RUN_MAX === 3,
+      json_encode(['missing' => array_values(array_diff($wantCI, array_keys((array)($CI['cats'] ?? [])))), 'extra' => array_values(array_diff(array_keys((array)($CI['cats'] ?? [])), $wantCI)), 'bad' => $badCI]));
+check('… the runs where one glyph says less: the alphabet A B C, the numbers 1 2 3, text formatting B I U, punctuation ? ! &, fruit and a vegetable',
+      $CI['cats']['alphabet'] === ['a', 'b', 'c'] && $CI['cats']['numbers'] === ['1', '2', '3'] && $CI['cats']['text-formatting'] === ['bold', 'italic', 'underline']
+      && $CI['cats']['punctuation-symbols'] === ['question', 'exclamation', 'ampersand'] && $CI['cats']['fruits-vegetables'] === ['apple-whole', 'carrot']
+      && count(array_filter($CI['cats'], fn($r) => count($r) > 1)) === 5);
+check('… and the file holds names only: no glyph, no code point, nothing of Font Awesome\'s files',
+      !preg_match('/\\\\u[ef][0-9a-f]{3}|[\x{E000}-\x{F8FF}]|@font-face|url\(|woff/iu', $catJson));
+$CIr = emojiFaCategoryIcons();
+check('emojiFaCategoryIcons() reads it as it is (70 categories, the fallback) — and keeps what it reads to names and short runs',
+      count($CIr['cats']) === 70 && $CIr['cats'] === $CI['cats'] && $CIr['fallback'] === $CI['fallback']
+      && str_contains($emSrc = (string)file_get_contents($root . '/includes/emoji.php'), "if (\$run && count(\$run) <= EMOJI_FA_CAT_RUN_MAX) \$d['cats'][\$id] = array_map('strval', \$run);")
+      && str_contains($emSrc, "\$name = fn(\$n) => is_string(\$n) && preg_match('/^[a-z0-9]+(?:-[a-z0-9]+){0,9}\$/', \$n);"));
+check('… sent with each category of the faces\' answer, with the fallback; a new file is a new address for that answer (emojiFaVersion())',
+      str_contains($emSrc, "'fallback' => \$icons['fallback']]") && str_contains($emSrc, "(string)@filemtime(dirname(__DIR__) . '/assets/emoji/fa-categories.json')"));
+check('the picker takes them (prepFa()) and draws each chip from the catalogue it holds: the named icons when the package has every one, else the fallback, else the category\'s own first icon, else its name — each icon in its own default style',
+      str_contains($pjs, 'var CAT_RUN_MAX = 3;') && str_contains($pjs, 'out.catalog.icons[c[0]] = Array.isArray(c[2])')
+      && str_contains($pjs, 'var names = want.length && want.every(function (n) { return !!cat.byName[n]; }) ? want')
+      && str_contains($pjs, ': fb && cat.byName[fb] ? [fb]') && str_contains($pjs, ': cat.byCat[c.i][0] ? [cat.byCat[c.i][0].n] : [];')
+      && str_contains($pjs, 'return faGlyph(fa, n, cat.byName[n].v[0], true);'));
+check('… a chip is its icon, named for a screen reader (aria-label: the category) and explained in the site\'s tooltip (data-tip: the name and the count) — no browser title, no words beside the icon',
+      str_contains($pjs, "'aria-pressed': on ? 'true' : 'false', 'aria-label': c.l, tabindex: on ? '0' : '-1',")
+      && str_contains($pjs, "dataset: { c: c.id, tip: t('js.shout.fa_cat_title', { name: c.l, n: c.n }) } }, g.length ? g : c.l);")
+      && !str_contains($pjs, "title: t('js.shout.fa_cat_title'"));
+check('… the chosen chip filled with the accent, the others an edge; a run a longer pill; on a phone about a cell\'s height',
+      str_contains($css0 = (string)file_get_contents($root . '/assets/css/style.css'), '.shout-picker-cat.active { color: var(--bg-card); background: var(--accent); border-color: var(--accent); }')
+      && str_contains($css0, '.shout-picker .shout-picker-cat .fai { display: block; font-size: 0.95rem;')
+      && str_contains($css0, '.shout-picker-cat { min-width: 2.6rem; height: 2.2rem; }'));
 
 /* ══ 6. the picker's script, and the widget ═══════════════════════════════════════ */
 check('the script carries no emoji: the grid is data, asked for when the picker opens (ensureData(), from the widget\'s data-emoji-files)',
@@ -346,10 +401,14 @@ if ($uid > 0) {
         $jAll = $get($cfgAll, $sess, ['lang' => 'pl']);
         $catFile = (string)@file_get_contents(iconpackCatalogPath($m['id']));
         $catJ = json_decode($catFile, true) ?: [];
-        check('with the scope at `all` the answer says so, where the catalogue is and how many icons it holds, its categories in Polish',
+        // 1.71.0: each category with its chip's icons (the committed names), and the fallback.
+        $allCats = (array)($jAll['catalog']['cats'] ?? []);
+        check('with the scope at `all` the answer says so, where the catalogue is and how many icons it holds, its categories in Polish — each with its chip\'s icons (1.71.0)',
               ($jAll['scope'] ?? '') === 'all' && ($jAll['catalog']['v'] ?? '') === iconpackCatalogVersion($m) && ($jAll['catalog']['n'] ?? 0) === ($catJ['count'] ?? -1)
-              && in_array(['animals', 'Zwierzęta'], (array)($jAll['catalog']['cats'] ?? []), true) && isset($jAll['styles']['brands']),
-              json_encode(['scope' => $jAll['scope'] ?? null, 'catalog' => array_diff_key((array)($jAll['catalog'] ?? []), ['cats' => 1])]));
+              && in_array(['animals', 'Zwierzęta', ['paw']], $allCats, true) && in_array(['alphabet', 'Alfabet', ['a', 'b', 'c']], $allCats, true)
+              && count($allCats) === count((array)($catJ['cats'] ?? [])) && !array_filter($allCats, fn($c) => ($c[2] ?? null) !== ($CI['cats'][$c[0]] ?? []))
+              && ($jAll['catalog']['fallback'] ?? '') === $CI['fallback'] && isset($jAll['styles']['brands']),
+              json_encode(['scope' => $jAll['scope'] ?? null, 'catalog' => array_diff_key((array)($jAll['catalog'] ?? []), ['cats' => 1]), 'first' => array_slice($allCats, 0, 3)]));
         $jc = $get($cfgAll, $sess, ['part' => 'catalog', 'v' => iconpackCatalogVersion($m)]);
         check('?part=catalog: the package\'s catalogue as stored (' . ($catJ['count'] ?? 0) . ' icons in ' . count((array)($catJ['cats'] ?? [])) . ' categories)',
               ($jc['count'] ?? null) === ($catJ['count'] ?? -1) && ($jc['icons'] ?? null) === ($catJ['icons'] ?? []) && ($jc['cats'] ?? null) === ($catJ['cats'] ?? []),
@@ -381,7 +440,7 @@ check('… in the save allow-list and among the switches coerced to 0/1',
       str_contains($save, "'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',") && str_contains($save, "'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',"));
 check('… with search words, in both languages', str_contains((string)(settingsCatalogKeywords()['emotes_everywhere'] ?? ''), 'messages') && str_contains((string)(settingsCatalogKeywords()['emotes_everywhere'] ?? ''), 'wiadomosci'));
 $emSec = substr($tpl, (int)strpos($tpl, 'id="admin-emotes"'), 6000);
-check('… and in Settings → Shoutbox → Emotes, beside the switch it depends on (four switches to a row, the numbers on the next)',
+check('… and in Settings → Emoji & emotes → Emotes and stickers (Shoutbox\'s until 1.71.0), beside the switch it depends on (four switches to a row, the numbers on the next)',
       str_contains($emSec, 'data-setting="emotes_everywhere"') && str_contains($emSec, 'name="emotes_everywhere"')
       && strpos($emSec, 'name="shout_emotes_enabled"') < strpos($emSec, 'name="emotes_everywhere"') && strpos($emSec, 'name="emotes_everywhere"') < strpos($emSec, 'name="shout_stickers_enabled"')
       && substr_count(substr($emSec, 0, (int)strpos($emSec, 'data-setting="shout_emote_max_kb"')), 'class="col-md-3"') === 4);
@@ -425,9 +484,11 @@ check('every editor\'s toolbar has the button, as its own context: the whitelist
       str_contains($tplW, "emojiPickerButton(\$db, \$cfg, \$baseUrl, 'description', 'wl-desc-emoji')") && str_contains($tplI, "emojiPickerButton(\$db, \$cfg, \$baseUrl, 'description', 'info-desc-emoji')")
       && str_contains($tplA, "emojiPickerButton(\$db, \$cfg, \$baseUrl, 'message', 'pm-body-emoji')")
       && strpos($tplW, 'wl-desc-emoji') > strpos($tplW, 'id="wl-desc-tools"') && strpos($tplW, 'wl-desc-emoji') < strpos($tplW, '<textarea id="wl-desc"'));
+// 1.71.0: and `comment`, a comment under a torrent (includes/comments.php) — tests/comments_test.php has the rest.
 check('`for`: absent or empty is the room, a context is itself, anything else nothing (refused, never read as another)',
       emojiPickerFor(null) === 'shout' && emojiPickerFor('') === 'shout' && emojiPickerFor('message') === 'message' && emojiPickerFor('list') === 'list'
-      && emojiPickerFor('MESSAGE') === null && emojiPickerFor('panel') === null && emojiPickerFor(['message']) === null && EMOJI_PICKER_CONTEXTS === ['shout', 'message', 'description', 'bio', 'list']);
+      && emojiPickerFor('comment') === 'comment'
+      && emojiPickerFor('MESSAGE') === null && emojiPickerFor('panel') === null && emojiPickerFor(['message']) === null && EMOJI_PICKER_CONTEXTS === ['shout', 'message', 'description', 'bio', 'list', 'comment']);
 $attrs = emojiPickerAttrs(['for' => 'message', 'files' => ['en' => '/a"b.json'], 'fa' => 'mixed"><x', 'fa_v' => 'v1', 'emotes' => true, 'stickers' => false, 'emotes_page' => true]);
 check('the button\'s data, escaped: the context, the files, Font Awesome\'s mode and fingerprint, what is offered',
       $attrs === ' data-emoji-for="message" data-emoji-files="{&quot;en&quot;:&quot;/a\&quot;b.json&quot;}" data-emoji-fa="mixed&quot;&gt;&lt;x" data-emoji-fa-v="v1" data-emotes="1" data-stickers="0" data-emotes-page="1"', $attrs);

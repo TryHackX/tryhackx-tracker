@@ -129,7 +129,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $lid = (int)($_GET['list'] ?? 0);
 if ($lid < 1) jsonResponse(['error' => 'not_found'], 404);
 
-$st = $db->prepare("SELECT l.*, u.username, u.status, u.lists_public FROM user_lists l
+// `author_age_s` (1.71.0): how old the owner's account was when the list was last written — a new account's
+// links are drawn as text (antispamWrittenNew(), includes/antispam.php).
+$st = $db->prepare("SELECT l.*, u.username, u.status, u.lists_public,
+                           TIMESTAMPDIFF(SECOND, u.created_at, l.updated_at) AS author_age_s FROM user_lists l
                     JOIN users u ON u.id = l.user_id WHERE l.id = ? LIMIT 1");
 $st->execute([$lid]);
 $list = $st->fetch(PDO::FETCH_ASSOC);
@@ -235,7 +238,8 @@ jsonResponse([
     'list'     => ['id' => (int)$list['id'], 'name' => (string)$list['name'], 'slug' => (string)$list['slug'],
                    'description' => (string)($list['description'] ?? ''),
                    'description_format' => listDescFormatOf($list['description_format'] ?? null),
-                   'description_html' => listDescRender($db, $cfg, $list['description'] ?? '', $list['description_format'] ?? null),
+                   'description_html' => listDescRender($db, $cfg, $list['description'] ?? '', $list['description_format'] ?? null,
+                                                        antispamWrittenNew($db, $cfg, (int)$list['user_id'], $list['author_age_s'] ?? null)),
                    'is_public' => (int)$list['is_public'] === 1,
                    'owner' => (string)$list['username'], 'own' => $isOwn],
     'rows'     => $slice,

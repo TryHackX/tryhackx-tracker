@@ -604,5 +604,60 @@ check('the star rating is built from icons, half stars kept (clipped box, not a 
       !preg_match('/\.star::(before|after)/', $cssAll) && str_contains($cssAll, '.star-half .star-front { width: 50%; }')
       && str_contains((string)file_get_contents($root . '/assets/js/app.js'), "back.appendChild(iconEl('bi bi-star-fill'));"));
 
+// ── 7. icons where words stood (1.71.0) ─────────────────────────────────────
+// The owner: "icons instead of words" — the Info panel's description actions, its head, its Copy buttons, the
+// search results' Magnet / Copy / Info, a conversation's Back and Clear, the home page's copy buttons (an inline
+// drawing no library reached). Each is an icon button (.ic-btn) with its name in aria-label and its explanation
+// in data-tip, the site's tooltip. The map draws the new names in every library, Free and Pro.
+$e71 = iconFaEntries();
+check('1.71.0: the new names are mapped — copy is Font Awesome\'s `clone` (Bootstrap\'s two squares; Free has it in regular), share, the pen and the nib, the filled bin, the arrow back',
+      ($e71['copy'] ?? null) === ['clone', 'r'] && in_array('clone', iconFreeRegular(), true)
+      && ($e71['share'] ?? null) === ['share-nodes', 's', 'prorole' => 'r'] && ($e71['pen'] ?? null) === ['pen', 's', 'prorole' => 'r']
+      && ($e71['vector-pen'] ?? null) === ['pen-nib', 's', 'prorole' => 'r'] && ($e71['trash-fill'] ?? null) === ['trash-can', 'f']
+      && ($e71['arrow-left'] ?? null) === ['arrow-left', 's'], json_encode(array_intersect_key($e71, array_flip(['copy', 'share', 'pen', 'vector-pen', 'trash-fill', 'arrow-left']))));
+check('… and where Pro has Bootstrap\'s outline of the drawing, Pro draws it: the archive, the "i", the people, the magnet',
+      ($e71['archive']['prorole'] ?? '') === 'r' && ($e71['info-circle']['prorole'] ?? '') === 'r'
+      && ($e71['people']['prorole'] ?? '') === 'r' && ($e71['magnet']['prorole'] ?? '') === 'r'
+      && !isset($e71['archive']['pro']) && !isset($e71['magnet']['pro']));
+$src71 = fn(string $rel): string => (string)file_get_contents($root . '/' . $rel);
+$app71 = $src71('assets/js/app.js');
+check('1.71.0: the places draw icons, not words — the Info panel\'s head (Share, the close) and description actions, its Copy buttons, the search rows',
+      str_contains($src71('templates/partials/info_overlay.php'), 'class="search-share share-btn info-share ic-btn" id="info-share"')
+      && str_contains($src71('templates/partials/info_overlay.php'), '<i class="bi bi-share" aria-hidden="true"></i>')
+      && str_contains($app71, "iconButton('a', 'btn btn-small search-act-btn search-act-magnet', 'bi-magnet'")
+      && str_contains($app71, "'bi-copy', t('js.app.copy'), t('js.app.copy_magnet_title')")
+      && str_contains($app71, "'bi-info-circle', t('js.app.info'), t('js.app.info_title')")
+      && str_contains($app71, "canAdd ? 'bi-pen' : 'bi-vector-pen'") && str_contains($app71, "'bi-pencil-square', t('js.app.desc_edit')")
+      && str_contains($app71, "glyph('bi-trash-fill')") && str_contains($app71, "iconButton('button', 'btn btn-secondary btn-small info-copy', 'bi-copy', label)")
+      && str_contains($app71, "'search-share fav-who-open', 'bi-people'"));
+check('… a conversation\'s Back and Clear, the torrent rows\' Magnet and Info, the star and the "+" named in the tooltip',
+      str_contains($src71('assets/js/people.js'), "className: 'bi bi-arrow-left'") && str_contains($src71('assets/js/people.js'), "className: 'bi bi-archive'")
+      && str_contains($src71('assets/js/favourites.js'), "className: 'bi bi-magnet'") && str_contains($src71('assets/js/favourites.js'), "className: 'bi bi-info-circle'")
+      && str_contains($src71('assets/js/favourites.js'), "btn.dataset.tip = on ? t('js.fav.remove') : t('js.fav.add');")
+      && str_contains($src71('assets/js/favourites.js'), "'search-share lp-open ic-btn'"));
+$svgIn = [];
+foreach (['includes/homeblocks.php', 'templates/pages/whitelist.php', 'templates/pages/search.php'] as $rel) if (str_contains($src71($rel), '<svg')) $svgIn[] = $rel;
+check('… and no inline drawing stands for an icon in the announce, donation and whitelist copy buttons or the search box: the library\'s copy, magnifier and cross',
+      $svgIn === [] && substr_count($src71('includes/homeblocks.php'), '<i class="bi bi-copy" aria-hidden="true"></i>') === 2
+      && str_contains($src71('templates/pages/whitelist.php'), 'class="copy-btn ic-btn" data-copy="wl-announce-copy"')
+      && str_contains($src71('templates/pages/search.php'), '<i class="bi bi-search" aria-hidden="true"></i>')
+      && str_contains($src71('templates/pages/search.php'), 'class="search-clear ic-btn" id="search-clear"')
+      && !str_contains($app71, '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline'),
+      implode(', ', $svgIn));
+check('… each explained in the site\'s tooltip on hover and keyboard focus (pubTip held, quiet), swapped by the live language switch',
+      str_contains($app71, 'function tipOnHover()') && str_contains($app71, "pubTip(el, text, { hold: true, quiet: true })")
+      && str_contains($app71, "if (e.pointerType === 'touch') return;") && str_contains($app71, "if (!opts.hold) hideTimer = setTimeout(")
+      && str_contains($src71('assets/js/lang-swap.js'), "var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title', 'data-tip'];"));
+$st71 = $src71('assets/css/style.css');
+check('1.71.0: an icon button is one box with the glyph in its middle in either library — its display at one class\'s weight before .d-hidden, its <i> and glyph a block of line-height 1, the ink moved by the glyph\'s own middle',
+      ($icAt = strpos($st71, "\n.ic-btn { display: inline-flex; }")) !== false && $icAt < (int)strpos($st71, "\n.d-hidden {")
+      && str_contains($st71, '.ic-btn > .bi, .search-box-icon > .bi { top: 0; display: block; line-height: 1; --bi-mid0: 0.5em; translate: 0 calc(var(--bi-mid, var(--bi-mid0)) - var(--bi-mid0)); }')
+      && str_contains($st71, '.ic-btn > .bi[class*=" fa-"], .search-box-icon > .bi[class*=" fa-"] { --bi-mid0: 0.375em; }')
+      && str_contains($st71, 'width: var(--ic-box, 1.625rem); min-width: 0; height: var(--ic-box, 1.625rem); padding: 0;')
+      && !preg_match('/\.ic-btn[^{]*\{[^}]*display: inline-flex; align-items/', $st71));
+check('… and a Font Awesome glyph of an icon button is measured in its own face for that middle, as a glyph beside words is (the observer)',
+      str_contains($ojs2, 'else if (solo(el)) fit(el, null);') && str_contains($ojs2, "p.classList.contains('ic-btn')")
+      && str_contains($ojs2, "if (wordsBefore !== null && p && p.style) p.style.setProperty('--bi-sb'"));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

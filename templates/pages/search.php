@@ -50,9 +50,12 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
       data-announce-extra="<?= sanitize(implode(' ', $sExtra)) ?>">
     <div class="search-toolbar">
         <div class="search-box">
-            <span class="search-box-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+            <?php /* The magnifier and the clearing cross are the icon library's (1.71.0), not drawings of their own
+                     that no library reaches — the cross an icon button like the rest, named for a screen reader
+                     and explained in the site's tooltip. */ ?>
+            <span class="search-box-icon" aria-hidden="true"><i class="bi bi-search" aria-hidden="true"></i></span>
             <input type="text" id="search-input" maxlength="200" placeholder="<?= _h($canFiles ? 'search.placeholder_files' : 'search.placeholder') ?>" autocomplete="off">
-            <button type="button" class="search-clear" id="search-clear" title="<?= _h('search.clear') ?>" hidden><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <button type="button" class="search-clear ic-btn" id="search-clear" aria-label="<?= _h('search.clear') ?>" data-tip="<?= _h('search.clear') ?>" hidden><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <label class="search-check" title="<?= _h('search.best_title') ?>"><input type="checkbox" id="search-best" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.best') ?></label>
         <?php if ($canFiles): ?>

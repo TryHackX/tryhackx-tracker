@@ -142,10 +142,12 @@ def stable(html):
     Since 1.39.0 every inline <script> carries a Content-Security-Policy nonce, which is fresh on
     every single request by design. A byte comparison of two renders is therefore always unequal,
     and this check — which exists to prove the test restored the settings it changed — would fail
-    for a reason that has nothing to do with settings. CSRF tokens have the same property."""
+    for a reason that has nothing to do with settings. CSRF tokens have the same property — the hidden
+    fields, and since 1.71.0 the <meta name="csrf-token"> every page's head carries."""
     import re as _re
     html = _re.sub(r'nonce="[^"]*"', 'nonce="_"', html)
     html = _re.sub(r'(name="csrf_token"[^>]*value=")[^"]*"', r'\1_"', html)
+    html = _re.sub(r'(<meta name="csrf-token" content=")[^"]*"', r'\1_"', html)
     return html
 
 

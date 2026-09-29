@@ -140,7 +140,9 @@ function showFormSubmitError(form, alert, btn, json, messages = {}) {
     const map = { rate_limit: t('js.app.rate_limit'), ...messages };
     const code = json && json.error;
     alert.className = 'alert alert-error show';
-    alert.textContent = (code && map[code]) ? map[code] : (code || t('js.app.error_occurred'));
+    // A code this form has words for; else the sentence the server already wrote (the anti-spam layer's answers
+    // carry one, 1.71.0); else the code itself.
+    alert.textContent = (code && map[code]) ? map[code] : ((json && typeof json.message === 'string' && json.message) || code || t('js.app.error_occurred'));
     if (json && Array.isArray(json.fields)) {
         json.fields.forEach(f => {
             const input = form.querySelector(`[name="${f}"]`);
@@ -314,16 +316,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-// Copy text helper
+// Copy text helper: the announce and donation copy buttons (includes/homeblocks.php, the whitelist page).
+// Since 1.71.0 their glyph is the icon library's (an inline drawing of its own ignored the library the
+// site draws with), and a copy swaps it for the library's tick — the class, so Font Awesome's observer
+// maps it too — and says "Copied!" in the site's tooltip, which takes the place of the button's name.
 function copyText(btn, sourceId) {
     const el = document.getElementById(sourceId);
     const text = el ? el.textContent.trim() : '';
     if (!text) return;
     navigator.clipboard.writeText(text).then(() => {
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-        btn.style.color = 'var(--success, #4caf50)';
-        setTimeout(() => { btn.innerHTML = orig; btn.style.color = ''; }, 1500);
+        const i = btn.querySelector(':scope > .bi');
+        if (i) {
+            if (!btn.dataset.glyph) btn.dataset.glyph = [...i.classList].filter((c) => !c.startsWith('fa-')).join(' ');
+            i.className = 'bi bi-check-lg';
+        }
+        btn.classList.add('copied');
+        if (typeof window.pubTip === 'function') window.pubTip(btn, t('js.common.copied'));
+        clearTimeout(btn.__copyTimer);
+        btn.__copyTimer = setTimeout(() => {
+            const j = btn.querySelector(':scope > .bi');
+            if (j && btn.dataset.glyph) j.className = btn.dataset.glyph;
+            delete btn.dataset.glyph;
+            btn.classList.remove('copied');
+        }, 1500);
     });
 }
 
@@ -552,7 +567,7 @@ async function handleStatusCheck(e) {
     const body = {
         search_query: query,
         email: email,
-        csrf_token: form.querySelector('[name="csrf_token"]')?.value || '',
+        csrf_token: csrfToken(form),
     };
 
     try {
@@ -1010,7 +1025,7 @@ async function handleWhitelistSubmit(e) {
         const srcEl = document.getElementById('wl-source');
         const descEl = document.getElementById('wl-desc');
         const fmtEl = document.getElementById('wl-desc-format');
-        const payload = { input: ta.value, csrf_token: form.csrf_token.value };
+        const payload = { input: ta.value, csrf_token: csrfToken(form) };
         if (srcEl && srcEl.value.trim()) payload.source_url = srcEl.value.trim();
         if (descEl && descEl.value.trim()) {
             payload.description = descEl.value;
@@ -1065,7 +1080,11 @@ async function handleWhitelistSubmit(e) {
                 'CAPTCHA verification failed': t('js.app.captcha_failed'),
             };
             showFormSubmitError(form, alert, btn, json, messages);
-            if (json && json.retry_after) startCooldown(btn, Math.min(120, parseInt(json.retry_after, 10) || 60));
+            // The anti-spam layer's wait (1.71.0 — a description attached too soon after the last): the button
+            // counts down the time the server named, whole; the old hourly limits keep their two-minute cooldown.
+            if (json && json.antispam && window.Antispam && window.Antispam.waitSeconds(json) > 0) {
+                window.Antispam.countdown(btn, window.Antispam.waitSeconds(json), {});
+            } else if (json && json.retry_after) startCooldown(btn, Math.min(120, parseInt(json.retry_after, 10) || 60));
             if (json && Array.isArray(json.results)) renderWhitelistResults(json);
         }
     } catch {
@@ -1107,13 +1126,24 @@ function renderWhitelistResults(json) {
             mrow.className = 'wl-magnet';
             const mcode = document.createElement('code');
             mcode.textContent = magnet;
+            // The library's copy glyph (1.71.0), as the announce box above it has: named for a screen reader,
+            // explained in the site's tooltip, and the tick with "Copied!" once it has copied (copyText()).
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'copy-btn wl-copy';
-            b.title = t('js.app.copy_magnet');
-            b.textContent = t('js.app.copy');
+            b.className = 'copy-btn wl-copy ic-btn';
+            b.setAttribute('aria-label', t('js.app.copy_magnet'));
+            b.dataset.tip = t('js.app.copy_magnet');
+            const bi = document.createElement('i');
+            bi.className = 'bi bi-copy';
+            bi.setAttribute('aria-hidden', 'true');
+            b.appendChild(bi);
             b.addEventListener('click', () => {
-                navigator.clipboard.writeText(magnet).then(() => { b.textContent = t('js.app.copied'); setTimeout(() => { b.textContent = t('js.app.copy'); }, 1500); });
+                navigator.clipboard.writeText(magnet).then(() => {
+                    bi.className = 'bi bi-check-lg';
+                    b.classList.add('copied');
+                    if (typeof window.pubTip === 'function') window.pubTip(b, t('js.common.copied'));
+                    setTimeout(() => { bi.className = 'bi bi-copy'; b.classList.remove('copied'); }, 1500);
+                });
             });
             mrow.appendChild(mcode);
             mrow.appendChild(b);
@@ -1844,6 +1874,38 @@ async function loadStatsHome(forceSync = false) {
     }
 }
 
+/* ── the CSRF token, for every public script (1.71.0) ───────────────────────────
+ *
+ * There is one token per session, but the pages published it under names of their own — #search-csrf,
+ * #account-csrf (the account page AND a profile), the shoutbox's #shout-csrf, a form's hidden field, the
+ * front page nothing — and each script read the one it knew. A script whose button turned up on another
+ * page posted an empty token and was answered "Invalid CSRF token": the shoutbox's Preview on the front
+ * page (1.67.0), then every vote from the Info panel opened on a profile or the account page (castVote()
+ * read only #search-csrf, and so did the panel's Refresh). Fixed one reader at a time, the next page that
+ * reuses a widget brings the bug back; so the layout publishes the token ONCE, on every page
+ * (<meta name="csrf-token">, templates/layout.php), and every public script asks HERE, nearest first:
+ *   · a widget that carries a token of its own says so with `data-csrf` on itself or an ancestor,
+ *     NAMING the element that holds it (the shoutbox: data-csrf="shout-csrf");
+ *   · a form that carries its own hidden `csrf_token` field (sign-in, registration, reset, report…);
+ *   · otherwise the page's.
+ * A `data-csrf` naming an element that is not there falls through to the page's rather than sending an
+ * empty token. The old ids stay in the templates: the checks and the tests read them.
+ */
+function csrfToken(el) {
+    const node = el && el.nodeType === 1 ? el : null;
+    const namer = node ? node.closest('[data-csrf]') : null;
+    const named = namer ? document.getElementById(namer.dataset.csrf) : null;
+    if (named && typeof named.value === 'string' && named.value !== '') return named.value;
+    const form = node ? node.closest('form') : null;
+    const own = form ? form.querySelector('input[name="csrf_token"]') : null;
+    if (own && own.value) return own.value;
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? (meta.getAttribute('content') || '') : '';
+}
+// On window as well: favourites.js, people.js, shoutbox.js and the account page's scripts are files of
+// their own, and name the dependency (the way they name window.askInPlace).
+window.csrfToken = csrfToken;
+
 /* ── the two request helpers, at FILE scope on purpose ───────────────────────
  *
  * These used to live inside the accounts IIFE below, and two later features called them from their
@@ -1904,6 +1966,10 @@ const closeOnBackdrop = (box, close) => {
 const escLayerZ = (n) => { const z = parseInt(getComputedStyle(n).zIndex, 10); return Number.isFinite(z) ? z : 0; };
 const escLayerTop = (box) => {
     if (document.querySelector('.leave-modal')) return false;
+    // The CAPTCHA's box (1.71.0: a comment can ask for one inside the Info panel) keeps its own Esc too — and so
+    // do an open @ list (a comment's composer has the shoutbox's) and a moderator's reason box while it has the
+    // focus: Esc closes the list, or puts the reason away, not the window. So does a report's box (1.71.0, reports.js).
+    if (document.querySelector('.captcha-overlay.show, .shout-mention-pop, .cm-reason:focus-within, .report-box:focus-within')) return false;
     if ([...document.querySelectorAll('.shout-picker')].some((p) => !p.hidden)) return false;
     const mine = escLayerZ(box);
     for (const o of document.querySelectorAll('.files-overlay')) {
@@ -2011,7 +2077,8 @@ window.askInPlace = askInPlace;
 (function () {
     'use strict';
     const $id = (x) => document.getElementById(x);
-    const csrfOf = (form) => (form.querySelector('[name="csrf_token"]') || $id('account-csrf') || { value: '' }).value;
+    // The form's own token field, else the page's (csrfToken() above; it used to fall back to #account-csrf).
+    const csrfOf = (form) => csrfToken(form);
     // An address is checked with its DOMAIN treated as a HOSTNAME. The old test was
     //   /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     // which asked only "is there an @ and a dot after it", and therefore accepted
@@ -2099,15 +2166,22 @@ window.askInPlace = askInPlace;
      * an absolutely positioned button. It follows the anchor if the page scrolls under it, and is
      * announced to a screen reader, which is the only way somebody who cannot see it learns that
      * the button did anything.
+     *
+     * `opts` (1.71.0), for the name of an icon button shown while it is pointed at or focused
+     * (tipOnHover() below): `hold` keeps it until the returned handle's drop() — no fade on a timer —
+     * and `quiet` leaves the role off, because that name is the button's aria-label already and a
+     * screen reader would otherwise hear it twice. A later tip for the same anchor replaces it, which
+     * is how "Copied!" takes the place of "Copy the magnet link" under the pointer that pressed it.
      */
     const pubTips = new WeakMap();
-    function pubTip(target, text) {
-        if (!target || !document.body) return;
+    function pubTip(target, text, opts) {
+        if (!target || !document.body) return null;
+        opts = opts || {};
         const old = pubTips.get(target);
         if (old) old.drop();
         const tip = document.createElement('span');
         tip.className = 'pub-tip';
-        tip.setAttribute('role', 'status');
+        if (!opts.quiet) tip.setAttribute('role', 'status');
         tip.textContent = text;
         document.body.appendChild(tip);
         const GAP = 6, EDGE = 8;
@@ -2152,12 +2226,98 @@ window.askInPlace = askInPlace;
         window.addEventListener('scroll', onMove, true);
         window.addEventListener('resize', onMove);
         requestAnimationFrame(() => tip.classList.add('show'));
-        hideTimer = setTimeout(() => { tip.classList.remove('show'); goneTimer = setTimeout(drop, 250); }, 1800);
+        if (!opts.hold) hideTimer = setTimeout(() => { tip.classList.remove('show'); goneTimer = setTimeout(drop, 250); }, 1800);
+        return entry;
     }
     // Exported in 1.61.0: the shoutbox's refresh button says "Nothing new" in exactly this shape,
     // and a tooltip written a second time in assets/js/shoutbox.js would be a second set of timings,
     // a second class name and a second thing to notice when this one changes.
     window.pubTip = pubTip;
+
+    /**
+     * What an icon button is for, in the site's tooltip (1.71.0).
+     *
+     * A button that shows a glyph instead of a word — Magnet, Copy, Info, Share, "Who has this", the Info
+     * panel's description actions, a conversation's Back and Clear — carries its name in aria-label (what
+     * a screen reader says) and its explanation in `data-tip`. This shows that explanation in pubTip()'s
+     * box while a mouse or a pen rests on the button (after a short pause, so a pointer crossing a row
+     * does not flash one tip per button) and while the keyboard's focus is on it; it goes when the
+     * pointer or the focus leaves, when the button is pressed (the press's own answer — "Copied!" — takes
+     * its place) and on Esc. Not on touch: a tap is a press, and a tip that appears as the finger lands
+     * would only cover what it answers. One listener set for the whole page, so buttons drawn later —
+     * the Info panel, a search's rows, a conversation — need nothing of their own. `title` is not used
+     * for these: the browser would draw its own box as well, a second later.
+     */
+    function tipOnHover() {
+        let cur = null, timer = 0, waiting = null;
+        const textOf = (el) => el.getAttribute('data-tip') || el.getAttribute('aria-label') || '';
+        const tipEl = (t) => (t && t.closest ? t.closest('[data-tip]') : null);
+        const hide = () => {
+            clearTimeout(timer);
+            timer = 0; waiting = null;
+            if (cur) { if (cur.entry) cur.entry.drop(); cur = null; }
+        };
+        const show = (el) => {
+            const text = textOf(el);
+            if (!text || !el.isConnected) return;
+            hide();
+            cur = { el, entry: pubTip(el, text, { hold: true, quiet: true }) };
+        };
+        document.addEventListener('pointerover', (e) => {
+            if (e.pointerType === 'touch') return;
+            const el = tipEl(e.target);
+            // An armed button (a Delete waiting for its second press) holds its own tip until it disarms.
+            if (!el || (cur && cur.el === el) || waiting === el || el.dataset.armed === '1') return;
+            hide();
+            waiting = el;
+            timer = setTimeout(() => { timer = 0; waiting = null; show(el); }, 350);
+        });
+        document.addEventListener('pointerout', (e) => {
+            const el = tipEl(e.target);
+            if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+            if ((cur && cur.el === el) || waiting === el) hide();
+        });
+        document.addEventListener('focusin', (e) => {
+            const el = tipEl(e.target);
+            if (!el || el.dataset.armed === '1') return;
+            let visible = true;
+            try { visible = el.matches(':focus-visible'); } catch (err) { /* an old engine: show it */ }
+            if (visible) show(el);
+        });
+        document.addEventListener('focusout', (e) => { if (cur && tipEl(e.target) === cur.el) hide(); });
+        document.addEventListener('pointerdown', hide, true);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') hide(); }, true);
+    }
+    tipOnHover();
+
+    /**
+     * An icon-only button (1.71.0): the library's glyph (Bootstrap's markup, mapped to Font Awesome when
+     * that is the site's library), its NAME for a screen reader and its EXPLANATION for the tooltip above
+     * (the name again when there is nothing more to say). `tag` 'a' for a link that looks like one.
+     */
+    function iconButton(tag, cls, icon, name, tip) {
+        const b = document.createElement(tag);
+        if (tag === 'button') b.type = 'button';
+        b.className = cls + ' ic-btn';
+        b.setAttribute('aria-label', name);
+        b.dataset.tip = tip || name;
+        b.appendChild(iconEl('bi ' + icon));
+        return b;
+    }
+    /** An icon button's glyph, swapped for a moment (a tick once something was copied) and put back. */
+    function swapGlyph(btn, icon, ms) {
+        const i = btn.querySelector(':scope > .bi');
+        if (!i) return;
+        // Bootstrap's classes only: Font Awesome's are the observer's (assets/js/icons.js), added again.
+        if (!btn.dataset.glyph) btn.dataset.glyph = [...i.classList].filter((c) => !c.startsWith('fa-')).join(' ');
+        i.className = 'bi ' + icon;
+        clearTimeout(btn.__glyphTimer);
+        btn.__glyphTimer = setTimeout(() => {
+            const j = btn.querySelector(':scope > .bi');
+            if (j && btn.dataset.glyph) j.className = btn.dataset.glyph;
+            delete btn.dataset.glyph;
+        }, ms || 1500);
+    }
     /** Accelerating "held backspace" clear (same effect as the admin toolbars). */
     function animatedClearPub(input, done) {
         if (!input) { if (done) done(); return; }
@@ -2359,11 +2519,15 @@ window.askInPlace = askInPlace;
         }
         json.notifications.forEach(n => {
             const item = document.createElement('div');
-            item.className = 'acc-notif' + (n.read_at ? ' acc-notif-read' : '');
+            // A WARNING (1.71.0, includes/reports.php) is marked as one: the moderator's words about something
+            // this member did. Here, and nowhere public.
+            const warning = n.type === 'warning';
+            item.className = 'acc-notif' + (n.read_at ? ' acc-notif-read' : '') + (warning ? ' acc-notif-warning' : '');
             const head = document.createElement('div');
             head.className = 'acc-notif-head';
             const strongEl = document.createElement('strong');
-            strongEl.textContent = n.title;
+            if (warning) strongEl.append(iconEl('bi bi-exclamation-triangle'), ' ');
+            strongEl.append(n.title);
             head.appendChild(strongEl);
             const when = document.createElement('span');
             when.className = 'text-muted';
@@ -2391,6 +2555,24 @@ window.askInPlace = askInPlace;
                 go.href = '#' + tab;
                 go.textContent = t('js.app.notif_go_' + tab);
                 acts.appendChild(go);
+            } else if (typeof n.link === 'string' && /^\?action=[A-Za-z0-9_-]+(?:&[A-Za-z0-9_-]+=[A-Za-z0-9_.%-]*)*(?:#[A-Za-z0-9_-]+)?$/.test(n.link)) {
+                // Where it happened (1.71.0, user_notifications.link — a comment, and where to read it): the
+                // server writes only a site-relative address, and this draws nothing else.
+                const go = document.createElement('a');
+                go.className = 'btn btn-secondary btn-small acc-notif-go acc-notif-link';
+                go.href = n.link;
+                go.textContent = t('js.app.notif_go_link');
+                // Going to read it is reading it: marked on the way out (keepalive, so the page leaving does not
+                // cancel the request), and the badge is not left counting what the reader went to see.
+                go.addEventListener('click', () => {
+                    if (n.read_at) return;
+                    try {
+                        fetch(APP_API + 'user_notifications', { method: 'POST', keepalive: true, credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify({ csrf_token: csrfToken(), ids: [n.id] }) });
+                    } catch (e) { /* the page goes on either way */ }
+                });
+                acts.appendChild(go);
             }
             if (!n.read_at) {
                 const mark = document.createElement('button');
@@ -2398,7 +2580,7 @@ window.askInPlace = askInPlace;
                 mark.className = 'btn btn-secondary btn-small';
                 mark.textContent = t('js.app.mark_read');
                 mark.addEventListener('click', async () => {
-                    await postJson('user_notifications', { csrf_token: $id('account-csrf').value, ids: [n.id] });
+                    await postJson('user_notifications', { csrf_token: csrfToken(), ids: [n.id] });
                     loadNotifications(); loadAccount();
                 });
                 acts.appendChild(mark);
@@ -2528,21 +2710,21 @@ window.askInPlace = askInPlace;
         loadNotifications(1);
         $id('acc-mark-all').addEventListener('click', async (e) => {
             const btn = e.currentTarget;
-            const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, all: 1 });
+            const r = await postJson('user_notifications', { csrf_token: csrfToken(), all: 1 });
             pubTip(btn, r && r.success ? (r.marked > 0 ? t('js.app.marked_read', {n: r.marked}) : t('js.app.nothing_unread')) : t('js.app.failed'));
             loadNotifications(); loadAccount();
         });
         const delRead = $id('acc-delete-read');
         if (delRead) delRead.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
-            const r = await postJson('user_notifications', { csrf_token: $id('account-csrf').value, delete_read: 1 });
+            const r = await postJson('user_notifications', { csrf_token: csrfToken(), delete_read: 1 });
             pubTip(btn, r && r.success ? (r.deleted > 0 ? t('js.app.deleted_n', {n: r.deleted}) : t('js.app.nothing_to_delete')) : t('js.app.failed'));
             if (r && r.success) loadNotifications(1);
         });
         const cancelEc = $id('acc-cancel-echange');
         if (cancelEc) cancelEc.addEventListener('click', async () => {
             cancelEc.disabled = true;
-            const r = await postJson('user_update', { csrf_token: $id('account-csrf').value, cancel_email_change: 1 });
+            const r = await postJson('user_update', { csrf_token: csrfToken(), cancel_email_change: 1 });
             if (r && r.success) location.reload();
             else cancelEc.disabled = false;
         });
@@ -2566,7 +2748,7 @@ window.askInPlace = askInPlace;
                 if (!box) return;
                 box.addEventListener('change', async () => {
                     const r = await postJson('user_email_prefs', {
-                        csrf_token: $id('account-csrf').value, enabled: box.checked ? 1 : 0, type });
+                        csrf_token: csrfToken(), enabled: box.checked ? 1 : 0, type });
                     if (r && r.success) lab.textContent = r.enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled');
                     else { box.checked = !box.checked; }
                 });
@@ -2581,7 +2763,7 @@ window.askInPlace = askInPlace;
         if (langSel) langSel.addEventListener('change', async () => {
             langSel.disabled = true;
             const r = await postJson('user_language', {
-                csrf_token: $id('account-csrf').value, language: langSel.value });
+                csrf_token: csrfToken(), language: langSel.value });
             if (r && r.success) { window.location.reload(); return; }
             langSel.disabled = false;
         });
@@ -2596,7 +2778,7 @@ window.askInPlace = askInPlace;
             tzSel.addEventListener('change', async () => {
                 const wrap = $id('acc-timezone-wrap') || tzSel.parentNode;
                 tzSel.disabled = true;
-                const r = await postJson('user_update', { csrf_token: $id('account-csrf').value, timezone: tzSel.value });
+                const r = await postJson('user_update', { csrf_token: csrfToken(), timezone: tzSel.value });
                 tzSel.disabled = false;
                 if (r && r.success) { tzWas = tzSel.value; pubTip(wrap, t('js.app.saved')); return; }
                 tzSel.value = tzWas;
@@ -2606,12 +2788,12 @@ window.askInPlace = askInPlace;
         const verifyBtn = $id('acc-verify-send');
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
-            const r = await postJson('user_verify_send', { csrf_token: $id('account-csrf').value });
+            const r = await postJson('user_verify_send', { csrf_token: csrfToken() });
             if (r && r.success && r.sent) { verifyBtn.textContent = t('js.app.verify_sent') + ' '; verifyBtn.appendChild(iconEl('bi bi-check-lg')); }
             else { verifyBtn.textContent = t('js.app.failed'); verifyBtn.title = (r && (r.message || r.error)) || t('js.app.verify_could_not_send'); setTimeout(() => { verifyBtn.textContent = t('js.app.verify_resend'); verifyBtn.disabled = false; }, 4000); }
         });
         $id('account-logout').addEventListener('click', async () => {
-            await postJson('user_logout', { csrf_token: $id('account-csrf').value });
+            await postJson('user_logout', { csrf_token: csrfToken() });
             try {   // the pulse lease is this account's; the next person at this browser gets none of it
                 Object.keys(localStorage).filter(k => k.startsWith('thx_pulse')).forEach(k => localStorage.removeItem(k));
             } catch (e) { /* private mode */ }
@@ -2648,7 +2830,7 @@ window.askInPlace = askInPlace;
             const hadEmail = curEmail !== '' && curEmail !== 'none';
             const newEmail = emailIn.value.trim();
             if (![vMail(true), vMail2(true), vPass(true), vPass2(true)].every(Boolean)) return;
-            const body = { csrf_token: $id('account-csrf').value, current_password: $id('acc-cur-pass').value };
+            const body = { csrf_token: csrfToken(), current_password: $id('acc-cur-pass').value };
             // an emptied box removes the address; anything different from the current one changes it
             if (newEmail !== (hadEmail ? curEmail : '')) body.email = newEmail;
             if (passIn.value !== '') body.new_password = passIn.value;
@@ -2748,6 +2930,16 @@ window.askInPlace = askInPlace;
     // swap has already put the right text in that node, and there is nothing left to put back.
     let flashTimer = 0;
     function flashShared(btn) {
+        // An icon button (1.71.0 — the Info panel's Share and Copy) keeps its box: its glyph turns into the
+        // library's tick for the same second and a half, and "Copied!" is said in the site's tooltip, where
+        // the button's name was.
+        if (btn.classList.contains('ic-btn')) {
+            swapGlyph(btn, 'bi-check-lg', 1500);
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1500);
+            pubTip(btn, t('js.common.copied'));
+            return;
+        }
         if (btn.dataset.flashing === '1') return;
         const orig = btn.textContent;
         btn.dataset.flashing = '1';
@@ -2780,14 +2972,12 @@ window.askInPlace = askInPlace;
     // The list cards in assets/js/favourites.js hand over a list's address through this too, so the
     // site has one clipboard routine and one fallback rather than two that drift apart.
     window.ShareLink = share;
-    /** A small Copy beside a value in the Info panel. Same path, same fallback, same "Copied". */
+    /**
+     * A small Copy beside a value in the Info panel. Same path, same fallback, same "Copied". An icon
+     * since 1.71.0 — the library's copy glyph, named for what it copies ("Copy the info hash").
+     */
     function copyButton(text, label) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn btn-secondary btn-small info-copy';
-        b.textContent = t('js.app.copy');
-        b.title = label;
-        b.setAttribute('aria-label', label);
+        const b = iconButton('button', 'btn btn-secondary btn-small info-copy', 'bi-copy', label);
         b.addEventListener('click', () => share(b, text, label));
         return b;
     }
@@ -2835,6 +3025,9 @@ window.askInPlace = askInPlace;
      * previews what a click would set, which is the whole reason a star widget feels different
      * from a number field — and leaving restores what is really stored, so a hover never lies
      * about the current state.
+     *
+     * The half star at your own rating is PRESSED (1.71.0): aria-pressed, a mark under it, and a tooltip
+     * saying that pressing it again takes the rating back — which is what pressing it does.
      */
     function buildStars(r, json, hash) {
         const wrap = document.createElement('div');
@@ -2878,11 +3071,17 @@ window.askInPlace = askInPlace;
                     hit.type = 'button';
                     hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
                     const value = i + part;
-                    hit.title = value === 1 ? t('js.app.stars_one') : t('js.app.stars_many', {n: value});
+                    const words = value === 1 ? t('js.app.stars_one') : t('js.app.stars_many', {n: value});
+                    // Your own rating: pressed, and a second press takes it back (the server is asked to
+                    // remove it, not to cast the same value again).
+                    const pressed = value === mine;
+                    hit.title = pressed ? t('js.app.stars_mine_title', {stars: words}) : words;
                     hit.setAttribute('aria-label', t('js.app.rate_aria', {n: value}));
+                    hit.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+                    if (pressed) hit.classList.add('star-hit-mine');
                     hit.addEventListener('mouseenter', () => paint(value));
                     hit.addEventListener('focus', () => paint(value));
-                    hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap));
+                    hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap, pressed));
                     st.appendChild(hit);
                 });
             }
@@ -2915,29 +3114,67 @@ window.askInPlace = askInPlace;
         return wrap;
     }
 
-    async function castVote(hash, dir, holder) {
-        const csrf = ($id('search-csrf') || {}).value || '';
-        const r = await postJson('rate_hash', { hash, vote: dir, csrf_token: csrf });
-        if (!r) return;
-        if (r.captcha) {
-            // The points scheme decided this visitor needs a challenge. Reopening the panel is
-            // the honest way to get one: the CAPTCHA belongs to the page, not to this button.
-            holder.textContent = t('js.app.vote_captcha');
+    /**
+     * A vote — or, since 1.71.0, taking one back: `pressed` is the button saying it is the vote already
+     * cast (the same thumb, the same half star), and then the server is asked to REMOVE this reader's vote
+     * ({op: 'remove'}), otherwise to cast `value`. The toggle lives in the button and the request says
+     * exactly what it wants, so a double click asks the same thing twice and the second changes nothing —
+     * it can never cast and take back in one go. The buttons stand still while the request is out.
+     *
+     * The token is the page's (csrfToken()): it read #search-csrf alone, which exists on the search page
+     * only, so a vote from the Info panel opened on a profile or the account page was refused.
+     */
+    async function castVote(hash, value, holder, pressed) {
+        if (holder.dataset.voting === '1') return;
+        holder.dataset.voting = '1';
+        const buttons = [...holder.querySelectorAll('button')];
+        buttons.forEach(b => { b.disabled = true; });
+        const body = pressed ? { hash, op: 'remove', csrf_token: csrfToken(holder) }
+                             : { hash, vote: value, csrf_token: csrfToken(holder) };
+        const whyLine = () => {
+            let why = holder.querySelector('.rep-why');
+            if (!why) {
+                why = document.createElement('div');
+                why.className = 'rep-label rep-why text-muted';
+                holder.appendChild(why);
+            }
+            return why;
+        };
+        // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a vote at the top of its ladder
+        // meets a CAPTCHA — solved in the site's box, drawn on demand here, and the same vote sent again (it used
+        // to say "solve the CAPTCHA on the page", and there was never one to solve).
+        const doPost = (extra) => postJson('rate_hash', Object.assign({}, body, extra || {}));
+        const r = window.Antispam ? await window.Antispam.send(doPost, { action: 'rate_hash' }) : await doPost({});
+        const release = () => { delete holder.dataset.voting; buttons.forEach(b => { b.disabled = false; }); };
+        const wait = window.Antispam ? window.Antispam.waitSeconds(r) : 0;
+        if (wait > 0) {
+            // Too fast: the buttons rest for the time the server named, the line under them counting it down.
+            const why = whyLine();
+            const tpl = r.antispam && r.antispam.tpl;
+            const until = Date.now() + wait * 1000;
+            const tick = () => {
+                const left = Math.ceil((until - Date.now()) / 1000);
+                if (left <= 0 || !holder.isConnected) { clearInterval(timer); release(); if (why.isConnected) why.textContent = ''; return; }
+                why.textContent = tpl ? tpl.split('{time}').join(window.Antispam.timeText(left)) : (r.message || '');
+            };
+            const timer = setInterval(tick, 500);
+            tick();
             return;
         }
-        if (!r.success) {
-            const why = document.createElement('div');
-            why.className = 'rep-label text-muted';
-            why.textContent = r.error || t('js.app.vote_failed');
-            holder.appendChild(why);
+        if (!r || !r.success) {
+            release();
+            whyLine().textContent = (r && (r.message || r.error)) || t('js.app.vote_failed');
             return;
         }
         // Redraw from the server's answer, never from an optimistic guess: the whole value of a
         // score is that it is the server's count and not the browser's.
         openInfo(hash, null);
         // …and tell whatever else on the page shows this vote: the likes / ratings table (1.69.0,
-        // assets/js/favourites.js) the panel may have been opened from asks for its page again.
-        document.dispatchEvent(new CustomEvent('rating:changed', { detail: { hash } }));
+        // assets/js/favourites.js) the panel may have been opened from asks for its page again, and
+        // "Who has this" its likes, where it is open on this torrent. `vote` is the reader's vote now
+        // (0 once it is taken back).
+        document.dispatchEvent(new CustomEvent('rating:changed',
+            { detail: { hash, vote: Number(r.my_vote) || 0, removed: !!pressed } }));
     }
 
     /**
@@ -3029,13 +3266,11 @@ window.askInPlace = askInPlace;
                 if (lb) infoActs.appendChild(lb);
             }
             if (infoCanFavWho && typeof window.openWhoFavourited === 'function') {
-                const w = document.createElement('button');
-                w.type = 'button';
                 // A class of its own: the panel's head now holds a star, a "+" and this, and
                 // "the first button that is not the star" stopped being a description of it.
-                w.className = 'search-share fav-who-open';
-                w.title = t('js.fav.who_title');
-                w.textContent = t('js.fav.who');
+                // An icon since 1.71.0 — the people who have it — in a head of icons: the words took
+                // the width the torrent's name needs, three letters a line on a phone.
+                const w = iconButton('button', 'search-share fav-who-open', 'bi-people', t('js.fav.who'), t('js.fav.who_title'));
                 w.addEventListener('click', () => window.openWhoFavourited(hash));
                 infoActs.appendChild(w);
             }
@@ -3102,8 +3337,10 @@ window.askInPlace = askInPlace;
                 btn.disabled = true;
                 const prev = btn.textContent;
                 btn.textContent = t('js.app.asking');
+                // The page's token, whichever page the panel is on (it read #search-csrf alone, and
+                // on a profile or the account page the refresh was refused like the votes were).
                 const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
-                    op: 'refresh', csrf_token: ($id('search-csrf') || {}).value || '' });
+                    op: 'refresh', csrf_token: csrfToken(btn) });
                 if (r && r.success) {
                     seedV.textContent = Number(r.seeders).toLocaleString();
                     leechV.textContent = Number(r.leechers).toLocaleString();
@@ -3201,17 +3438,22 @@ window.askInPlace = askInPlace;
             if (json.can_vote && r.mode !== 'stars') {
                 const acts = document.createElement('div');
                 acts.className = 'rep-acts';
+                // The thumb already cast is PRESSED (1.71.0): its glyph filled — the likes table's and
+                // "Who has this" draw a cast vote so — the button in the thumb's colour, aria-pressed,
+                // and its tooltip says a second press takes the vote back, which is what it does.
                 const mk = (dir, icon, label, title) => {
+                    const mine = json.my_vote === dir;
                     const b = document.createElement('button');
                     b.type = 'button';
-                    b.className = 'btn btn-secondary btn-small rep-btn' + (json.my_vote === dir ? ' rep-mine' : '');
-                    b.append(icon, ' ' + label);
-                    b.title = title;
-                    b.addEventListener('click', () => castVote(hash, dir, rep));
+                    b.className = 'btn btn-secondary btn-small rep-btn rep-btn-' + (dir > 0 ? 'up' : 'down') + (mine ? ' rep-mine' : '');
+                    b.setAttribute('aria-pressed', mine ? 'true' : 'false');
+                    b.append(iconEl(mine ? icon + '-fill' : icon), ' ' + label);
+                    b.title = mine ? t('js.app.vote_mine_title') : title;
+                    b.addEventListener('click', () => castVote(hash, dir, rep, mine));
                     return b;
                 };
-                acts.appendChild(mk(1, iconEl('bi bi-hand-thumbs-up'), t('js.app.vote_good'), t('js.app.vote_good_title')));
-                acts.appendChild(mk(-1, iconEl('bi bi-hand-thumbs-down'), t('js.app.vote_bad'), t('js.app.vote_bad_title')));
+                acts.appendChild(mk(1, 'bi bi-hand-thumbs-up', t('js.app.vote_good'), t('js.app.vote_good_title')));
+                acts.appendChild(mk(-1, 'bi bi-hand-thumbs-down', t('js.app.vote_bad'), t('js.app.vote_bad_title')));
                 rep.appendChild(acts);
             } else if (!json.can_vote && json.vote_refusal) {
                 const why = document.createElement('div');
@@ -3220,6 +3462,13 @@ window.askInPlace = askInPlace;
                 rep.appendChild(why);
             }
             body.appendChild(rep);
+        }
+
+        // 3b. what people say about it (1.71.0, assets/js/comments.js): the section, with the count this answer
+        //     carries; the thread itself is asked for when the section comes into view.
+        if (json.comments && window.Comments && typeof window.Comments.section === 'function') {
+            const cs = window.Comments.section(json, hash);
+            if (cs) body.appendChild(cs);
         }
 
         // 4. the rest: provenance and identity, under a heading so it reads as a footnote to the
@@ -3559,11 +3808,9 @@ window.askInPlace = askInPlace;
     // sender's query, filter and page number with it.
     const OWNED = ['search', 'search_files', 'content', 'sort', 'page', 'per_page', 'hash'];
 
-    /** The CSRF token whichever page this panel is on carries; empty when the page has none. */
+    /** The CSRF token of whichever page this panel is on (csrfToken(): the layout's, since 1.71.0 on every page). */
     function csrfForContent() {
-        const el = document.querySelector('#wl-form input[name="csrf_token"]') || $id('account-csrf')
-            || $id('search-csrf') || document.querySelector('input[name="csrf_token"]');
-        return el ? el.value : '';
+        return csrfToken(infoOverlay);
     }
 
     /** The address of a member's profile, built from this page's own (the panel runs on several pages). */
@@ -3676,42 +3923,58 @@ window.askInPlace = askInPlace;
         const tpl = $id('info-desc-tpl');
         const row = document.createElement('div');
         row.className = 'info-desc-acts info-section';
-        const button = (cls, text, title) => {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'btn btn-secondary btn-small ' + cls;
-            b.textContent = text;
-            if (title) b.title = title;
+        // Icon buttons (1.71.0), one glyph for each action: a pen writes the first words, a pen's nib a
+        // new version (a rewrite), the pen on a square edits the text as it stands, the bin deletes it. The
+        // action's name is what a screen reader says (aria-label), its explanation the site's tooltip.
+        const button = (cls, icon, name, tip) => {
+            const b = iconButton('button', 'btn btn-secondary btn-small ' + cls, icon, name, tip);
             row.appendChild(b);
             return b;
         };
         if ((canAdd || canPropose) && tpl) {
-            button('info-desc-open', canAdd ? t('js.app.desc_add') : t('js.app.desc_propose'), canAdd ? '' : t('js.app.desc_propose_title'))
+            button('info-desc-open', canAdd ? 'bi-pen' : 'bi-vector-pen', canAdd ? t('js.app.desc_add') : t('js.app.desc_propose'),
+                   canAdd ? t('js.app.desc_add_title') : t('js.app.desc_propose_title'))
                 .addEventListener('click', () => openContentEditor(json, row, hash, canAdd ? 'add' : 'rewrite'));
         }
         // Edit (1.70.0), beside Propose a rewrite: the same editor, opened with the text as it stands.
         if (canEdit && tpl) {
-            button('info-desc-edit', t('js.app.desc_edit'), t('js.app.desc_edit_title'))
+            button('info-desc-edit', 'bi-pencil-square', t('js.app.desc_edit'), t('js.app.desc_edit_title'))
                 .addEventListener('click', () => openContentEditor(json, row, hash, 'edit'));
         }
         // Delete (1.70.0): two clicks, no dialog — the second is the confirmation, and the button says so in
-        // between, as a list's Delete does.
+        // between, as a list's Delete does. As an icon (1.71.0) it says so with the filled bin, in the error
+        // colour, and with "Click again to delete" in the site's tooltip for as long as it stays armed — its
+        // name for a screen reader turns into the same words.
         if (del) {
-            const d = button('info-desc-delete', t('js.app.desc_delete'), t(del === 'own' ? 'js.app.desc_delete_title_own' : 'js.app.desc_delete_title_any'));
+            const delName = t('js.app.desc_delete'), delTip = t(del === 'own' ? 'js.app.desc_delete_title_own' : 'js.app.desc_delete_title_any');
+            const d = button('info-desc-delete', 'bi-trash', delName, delTip);
             const say = document.createElement('span');
             say.className = 'text-muted info-desc-msg info-desc-delete-msg';
             say.setAttribute('aria-live', 'polite');
-            let armTimer = 0;
-            const disarm = () => { clearTimeout(armTimer); d.dataset.armed = '0'; d.classList.remove('is-armed'); d.textContent = t('js.app.desc_delete'); };
+            let armTimer = 0, armTip = null;
+            const glyph = (icon) => { const i = d.querySelector(':scope > .bi'); if (i) i.className = 'bi ' + icon; };
+            const disarm = () => {
+                clearTimeout(armTimer);
+                d.dataset.armed = '0';
+                d.classList.remove('is-armed');
+                glyph('bi-trash');
+                d.setAttribute('aria-label', delName);
+                d.dataset.tip = delTip;
+                if (armTip) { armTip.drop(); armTip = null; }
+            };
             d.addEventListener('click', async () => {
                 if (d.dataset.armed !== '1') {
                     d.dataset.armed = '1';
                     d.classList.add('is-armed');
-                    d.textContent = t('js.app.desc_delete_sure');
+                    glyph('bi-trash-fill');
+                    d.setAttribute('aria-label', t('js.app.desc_delete_sure'));
+                    d.dataset.tip = t('js.app.desc_delete_sure');
+                    armTip = pubTip(d, t('js.app.desc_delete_sure'), { hold: true });
                     armTimer = setTimeout(disarm, 4000);
                     return;
                 }
                 clearTimeout(armTimer);
+                if (armTip) { armTip.drop(); armTip = null; }
                 d.disabled = true;
                 const r = await postJson('content_delete', { csrf_token: csrfForContent(), hash });
                 if (!r || !r.success) {
@@ -3725,6 +3988,14 @@ window.askInPlace = askInPlace;
                 setTimeout(() => openInfo(hash, json.name), 900);
             });
             row.appendChild(say);
+        }
+        // Report (1.71.0, includes/reports.php): somebody else's published words, for a reader who may report them
+        // (the server's `can_content_report`) — the flag and its box are assets/js/reports.js's; pressed after it
+        // was sent (`content_reported`), it only says so. Before the delete's words, beside the other actions.
+        if (json.can_content_report && window.Reports && typeof window.Reports.button === 'function') {
+            const rb = window.Reports.button({ kind: 'description', hash }, !!json.content_reported, 'info-desc-report', body, row);
+            const sayEl = row.querySelector('.info-desc-delete-msg');
+            if (sayEl) row.insertBefore(rb, sayEl); else row.appendChild(rb);
         }
         if (row.children.length) body.appendChild(row);
     }
@@ -3767,15 +4038,27 @@ window.askInPlace = askInPlace;
         const send = $id('info-desc-send'), cancel = $id('info-desc-cancel'), msg = $id('info-desc-msg');
         cancel.addEventListener('click', () => { editor.remove(); opened.forEach((b) => { b.hidden = false; }); });
         send.addEventListener('click', async () => {
+            if (send.disabled) return;
             const text = ta ? ta.value.trim() : '';
             const sUrl = src ? src.value.trim() : '';
             if (!text && !sUrl) { msg.textContent = t('js.app.desc_empty'); return; }
             send.disabled = true;
-            const r = await postJson('content_submit', { csrf_token: csrfForContent(), hash,
+            // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for — a
+            // guest's every time — is solved in the site's box and the same words sent again; a wait counts down
+            // on this button with the server's sentence beside it.
+            const payload = { csrf_token: csrfForContent(), hash,
                 description: text, description_format: fmtEl ? fmtEl.value : 'bbcode', source_url: sUrl,
-                kind: mode === 'edit' ? 'edit' : 'rewrite' });
-            send.disabled = false;
+                kind: mode === 'edit' ? 'edit' : 'rewrite' };
+            const doPost = (extra) => postJson('content_submit', Object.assign({}, payload, extra || {}));
+            const r = window.Antispam
+                ? await window.Antispam.send(doPost, { button: send, note: (s) => { msg.textContent = s || ''; }, action: 'content_submit' })
+                : await doPost({});
+            if (!(window.Antispam && window.Antispam.waiting(send))) send.disabled = false;
             if (!r || !r.success) {
+                if (r && (r.antispam || r.error === 'captcha_cancelled')) {
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t('js.app.desc_failed');
+                    return;
+                }
                 msg.textContent = !r ? t('js.app.desc_failed') : (r.error === 'rate_limit' ? t('js.app.desc_rate_limited') : (r.error || t('js.app.desc_failed')));
                 return;
             }
@@ -4211,29 +4494,27 @@ window.askInPlace = askInPlace;
                     const actWrap = document.createElement('div');
                     actWrap.className = 'search-c-actions-inner';
                     if (r.info_hash) {
-                        const a = document.createElement('a');
+                        // Icons (1.71.0): the magnet, a copy, the "i" — words only because the public
+                        // pages had no icon font until 1.68.0. Magnet stays the primary one: the filled
+                        // accent box, the other two the quiet secondary ones. Each is named for a screen
+                        // reader and explained in the site's tooltip (iconButton()).
+                        const a = iconButton('a', 'btn btn-small search-act-btn search-act-magnet', 'bi-magnet', t('js.app.magnet'), t('js.app.magnet_title'));
                         a.href = magnetFor(r.info_hash, r.name);
-                        a.className = 'btn btn-small search-act-btn';
-                        a.title = t('js.app.magnet_title');
-                        a.textContent = t('js.app.magnet');
                         actWrap.appendChild(a);
-                        const copy = document.createElement('button');
-                        copy.type = 'button';
-                        copy.className = 'btn btn-secondary btn-small search-act-btn';
-                        copy.title = t('js.app.copy_magnet_title');
-                        copy.textContent = t('js.app.copy');
+                        const copy = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-copy', 'bi-copy', t('js.app.copy'), t('js.app.copy_magnet_title'));
                         copy.addEventListener('click', () => {
                             if (!navigator.clipboard) return;
                             navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
-                                .then(() => { copy.replaceChildren(iconEl('bi bi-check-lg')); copy.classList.add('copied'); setTimeout(() => { copy.textContent = t('js.app.copy'); copy.classList.remove('copied'); }, 1200); })
+                                .then(() => {
+                                    swapGlyph(copy, 'bi-check-lg', 1200);
+                                    copy.classList.add('copied');
+                                    setTimeout(() => copy.classList.remove('copied'), 1200);
+                                    pubTip(copy, t('js.common.copied'));
+                                })
                                 .catch(() => {});
                         });
                         actWrap.appendChild(copy);
-                        const info = document.createElement('button');
-                        info.type = 'button';
-                        info.className = 'btn btn-secondary btn-small search-act-btn';
-                        info.title = t('js.app.info_title');
-                        info.textContent = t('js.app.info');
+                        const info = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-info', 'bi-info-circle', t('js.app.info'), t('js.app.info_title'));
                         info.addEventListener('click', () => openInfo(r.info_hash, r.name));
                         actWrap.appendChild(info);
                         if (canFav && window.Favourites) actWrap.appendChild(window.Favourites.makeStar(r.info_hash, !!r.fav));
@@ -4716,27 +4997,12 @@ window.askInPlace = askInPlace;
     // whitelist form's field, #account-csrf, #search-csrf, any name="csrf_token" — and every page that
     // mounted the editor somewhere new had to be added to it. The shoutbox never was: its token is
     // #shout-csrf, the list did not know that id, and on the front page the Preview tab posted an
-    // empty token and was answered "Invalid CSRF token". So the editor asks its own surroundings,
-    // nearest first, instead of a list that has to know every page:
-    //   · a `data-csrf` on the textarea or any ancestor NAMES the element holding its token (the
-    //     shoutbox says data-csrf="shout-csrf" on its root, which covers the composer and every
-    //     line's in-place editor alike);
-    //   · otherwise the nearest token there is — the textarea's own form, then its widget, then
-    //     outwards: any hidden `name="csrf_token"` field or `<something>-csrf` field;
-    //   · the walk ends at the document, which is the page-wide fallback the list used to be.
-    // A `data-csrf` that names nothing (the panel's <body> carries the token's VALUE under that
-    // name) finds no element and simply falls through to the walk.
-    const TOKEN_FIELD = 'input[name="csrf_token"], input[type="hidden"][id$="-csrf"]';
-    const csrfEl = () => {
-        const namer = ta.closest('[data-csrf]');
-        const named = namer ? document.getElementById(namer.dataset.csrf) : null;
-        if (named && typeof named.value === 'string') return named;
-        for (let n = ta.parentElement; n; n = n.parentElement) {
-            const near = n.querySelector(TOKEN_FIELD);
-            if (near) return near;
-        }
-        return null;
-    };
+    // empty token and was answered "Invalid CSRF token". So the editor asked its own surroundings,
+    // nearest first — and since 1.71.0 that is the site's one rule for every script, csrfToken() at
+    // the top of this file: a `data-csrf` on the textarea or an ancestor NAMING the element that holds
+    // its token (the shoutbox's root says data-csrf="shout-csrf", which covers the composer and every
+    // line's in-place editor alike), else the textarea's own form's field, else the page's token.
+    const csrfOfEditor = () => csrfToken(ta);
     let timer = null;
     let lastShown = null;          // {key, ok} — what the box is currently displaying
     // The emoji, the emotes and the stickers (1.70.0, assets/js/emoji-picker.js): the picker on the
@@ -4839,7 +5105,7 @@ window.askInPlace = askInPlace;
         }
         box.textContent = t('js.app.rendering');
         const r = await postJson('richtext_preview', {
-            text, format: f, for: previewFor, csrf_token: (csrfEl() || {}).value || '' });
+            text, format: f, for: previewFor, csrf_token: csrfOfEditor() });
         if (!r) { box.textContent = t('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
         if (!r.success) { box.textContent = r.error || t('js.app.render_failed'); lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist

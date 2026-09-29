@@ -52,6 +52,27 @@ $allowed = [
     'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
     'sounds_enabled', 'sound_default_notification', 'sound_default_message_friend', 'sound_default_message',
     'sound_default_shout_friend', 'sound_default_shout', 'sound_default_mention',
+    // the comments' two sounds (1.71.0, includes/comments.php)
+    'sound_default_comment', 'sound_default_comment_mention',
+    // comments on a torrent (1.71.0, includes/comments.php)
+    'comments_enabled', 'comment_max_chars', 'comment_links', 'comment_edit_minutes', 'comment_delete_own_minutes',
+    'comments_per_page', 'comment_rate_per_hour', 'captcha_pts_comment', 'comments_guest_review',
+    // one anti-spam layer for everything people write (1.71.0, includes/antispam.php) — the switches, the new
+    // account's rules, the messages' conversation limits, the duplicate window, and a ladder per context
+    'antispam_enabled', 'antispam_captcha_after', 'antispam_guest_captcha', 'antispam_staff_exempt',
+    'antispam_new_days', 'antispam_new_factor', 'antispam_new_links', 'antispam_dup_seconds',
+    'antispam_pm_new_hour', 'antispam_pm_new_day', 'antispam_pm_new_hour_new', 'antispam_pm_new_day_new', 'antispam_pm_spread',
+    'antispam_shout_burst', 'antispam_shout_steps', 'antispam_shout_reset',
+    'antispam_message_burst', 'antispam_message_steps', 'antispam_message_reset',
+    'antispam_comment_burst', 'antispam_comment_steps', 'antispam_comment_reset',
+    'antispam_description_burst', 'antispam_description_steps', 'antispam_description_reset',
+    'antispam_report_burst', 'antispam_report_steps', 'antispam_report_reset',
+    'antispam_list_burst', 'antispam_list_steps', 'antispam_list_reset',
+    'antispam_bio_burst', 'antispam_bio_steps', 'antispam_bio_reset',
+    'antispam_emote_burst', 'antispam_emote_steps', 'antispam_emote_reset',
+    'antispam_vote_burst', 'antispam_vote_steps', 'antispam_vote_reset',
+    // messages' own address ceiling (1.71.0; the send read `rate_limit_favourites`, a key no setting defined)
+    'rate_limit_pm',
     // the shoutbox (1.58.0, includes/shout.php)
     'shout_enabled', 'shout_placement', 'shout_order', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
     'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days',
@@ -404,6 +425,30 @@ $intClamp = [
     // The description's visible characters, from includes/profilebio.php like the ceilings above. No 0:
     // a description of no characters is the feature switch beside it spelled badly.
     'profile_bio_max' => [PROFILE_BIO_MAX_MIN, PROFILE_BIO_MAX_MAX, PROFILE_BIO_MAX_DEFAULT],
+    // Comments (1.71.0, includes/comments.php): the length a reader sees and the page from there, like the
+    // description above. The two windows are the shoutbox's kind — 0 is a real answer for both, meaning
+    // opposite things (no correcting at all; no limit on taking your own back) — and a day at most.
+    'comment_max_chars' => [COMMENT_MAX_MIN, COMMENT_MAX_MAX, COMMENT_MAX_DEFAULT],
+    'comment_edit_minutes' => [0, 1440, 15], 'comment_delete_own_minutes' => [0, 1440, 60],
+    'comments_per_page' => [COMMENT_PAGE_MIN, COMMENT_PAGE_MAX, COMMENT_PAGE_DEFAULT],
+    'comment_rate_per_hour' => [1, 1000, 30], 'captcha_pts_comment' => [0, 100, 1],
+    // The anti-spam layer (1.71.0, includes/antispam.php) — the same ceilings its readers clamp to. 0 is a real
+    // answer where it means "no such rule" (the escalation, the new-account period, the duplicate window, a
+    // conversation limit, the spread) and where it means "no free burst"; a factor of 1 is "no stricter".
+    'antispam_captcha_after' => [0, 50, 3], 'antispam_new_days' => [0, 90, 3], 'antispam_new_factor' => [1, 10, 2],
+    'antispam_dup_seconds' => [0, 86400, 600],
+    'antispam_pm_new_hour' => [0, 1000, 8], 'antispam_pm_new_day' => [0, 10000, 20],
+    'antispam_pm_new_hour_new' => [0, 1000, 2], 'antispam_pm_new_day_new' => [0, 10000, 4], 'antispam_pm_spread' => [0, 50, 2],
+    'antispam_shout_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_shout_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 120],
+    'antispam_message_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_message_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 600],
+    'antispam_comment_burst' => [0, ANTISPAM_BURST_MAX, 2], 'antispam_comment_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 300],
+    'antispam_description_burst' => [0, ANTISPAM_BURST_MAX, 2], 'antispam_description_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 3600],
+    'antispam_report_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_report_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 1800],
+    'antispam_list_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_list_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 600],
+    'antispam_bio_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_bio_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 900],
+    'antispam_emote_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_emote_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 1800],
+    'antispam_vote_burst' => [0, ANTISPAM_BURST_MAX, 10], 'antispam_vote_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 120],
+    'rate_limit_pm' => [1, 100000, 240],
     'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
     'wl_edit_max_pending' => [0, 50, 3],
     'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
@@ -469,10 +514,20 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
+          'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
           'who_votes_enabled', 'who_lists_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
+          'comments_enabled', 'comment_links', 'comments_guest_review',
           'profile_descriptions_enabled', 'shout_nav', 'shout_system_lines', 'profile_votes_enabled', 'avatars_enabled', 'covers_enabled', 'profile_bio_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// ── The anti-spam layer's ladders (1.71.0, includes/antispam.php) ──
+// A ladder's pauses are typed as a list ("5, 15, 30, 60"): kept as its readers parse it — whole seconds, each
+// 1 s to a day, at most eight, the order as typed — so what is stored is exactly what antispamLadder() reads.
+// An empty list is a real answer: that context is never paced (its duplicate rule and its CAPTCHA still hold).
+foreach (ANTISPAM_CONTEXTS as $asCtx) {
+    $k = 'antispam_' . $asCtx . '_steps';
+    if (isset($data[$k])) $data[$k] = implode(',', antispamParseSteps((string)$data[$k]));
 }
 // ── The shoutbox ──
 // Coerced rather than refused, like every other closed set on this page: an unknown value is a bug
@@ -544,8 +599,10 @@ if (isset($data['account_cover_side']) && !in_array($data['account_cover_side'],
 if (isset($data['shout_rules'])) {
     $data['shout_rules'] = mb_substr(trim(preg_replace('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/u', ' ', $data['shout_rules']) ?? ''), 0, 500);
 }
-// A site-default sound must be one the library has; anything else is "nothing" (includes/sounds.php).
-foreach (soundEventKinds() as $k) {
+// A site-default sound must be one the library has; anything else is "nothing" (includes/sounds.php). The
+// comments' two are judged whether or not comments are on right now (1.71.0): the select is only drawn while
+// they are, but a key that can be saved is a key that is checked.
+foreach (array_unique(array_merge(soundEventKinds(), ['comment', 'comment_mention'])) as $k) {
     $key = 'sound_default_' . $k;
     if (isset($data[$key]) && (string)$data[$key] !== '' && !isset(soundLibrary($db)[(string)$data[$key]])) $data[$key] = '';
 }

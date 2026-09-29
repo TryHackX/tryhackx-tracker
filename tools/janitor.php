@@ -49,6 +49,7 @@ require_once $root . '/includes/wlprobe.php';
 require_once $root . '/includes/digest.php';
 require_once $root . '/includes/people.php';
 require_once $root . '/includes/shout.php';
+require_once $root . '/includes/antispam.php';
 
 /**
  * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
@@ -290,6 +291,13 @@ try {
     if (function_exists('pmTypingPrune')) {
         $tp = pmTypingPrune($db);
         if ($tp > 0 && in_array('-v', $argv ?? [], true)) echo "[pm] pruned $tp stale typing rows\n";
+    }
+
+    // The anti-spam layer's state (1.71.0, includes/antispam.php): a row nobody touched for two days holds
+    // nothing any rule still reads — every ladder has reset and every window has closed long before.
+    if (function_exists('antispamPrune')) {
+        $ap = antispamPrune($db);
+        if ($ap > 0 && in_array('-v', $argv ?? [], true)) echo "[antispam] pruned $ap idle rows\n";
     }
 
     // The shoutbox's retention, both halves at once: older than shout_keep_days, and beyond

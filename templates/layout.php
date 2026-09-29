@@ -12,6 +12,22 @@ $timelineNeeded = ($action === 'stats' && ($cfg['tracker_stats_enabled'] ?? '0')
     && userCan($db, $cfg, 'stats.timeline'));
 // the logged-in user (null when the account system is off or nobody is signed in) — nav + pages use it
 $navUser = usersEnabled($cfg) ? currentUser($db) : null;
+// Comments (1.71.0, includes/comments.php): the pages that carry the Info panel carry its thread's script too —
+// and, where a comment can ask for a CAPTCHA (a guest's every time; a member's when the site's points say so),
+// the CAPTCHA's own box, which the other pages load for their forms.
+$commentsHere = in_array($action, ['search', 'u', 'account'], true) && function_exists('commentsEnabled') && commentsEnabled($cfg);
+// Reporting a comment, a description or a shout (1.71.0, includes/reports.php): the flag's box, for a reader whose
+// account may report while any of the three is on. The rows it serves say themselves whether a flag is drawn.
+$reportsHere = $navUser !== null && function_exists('contentReportMayReport') && contentReportMayReport($db, $cfg, $navUser)
+    && (contentReportKindOn($cfg, 'comment') || contentReportKindOn($cfg, 'description') || contentReportKindOn($cfg, 'shout'));
+// A GUEST who may comment solves a CAPTCHA every time (the anti-spam layer's guest rule, includes/antispam.php), so
+// the box and its script are on the page from the start. A member meets one only at the top of a ladder, rarely:
+// the box is then drawn on demand from the server's answer (assets/js/captcha.js), and nobody else's page loads a
+// provider's script for nothing.
+if ($commentsHere && !$recaptchaNeeded && $navUser === null && captchaConfigured($cfg) && function_exists('commentMayPost')
+    && commentMayPost($db, $cfg, $navUser)['ok'] && function_exists('antispamGuestCaptcha') && antispamGuestCaptcha($cfg)) {
+    $recaptchaNeeded = true;
+}
 // The account page's Picture and Cover drop zones (1.63.0) are the Emotes page's own, with the
 // picture and cover editor's stylesheet and script behind them — only while either feature is on,
 // so an account page without them costs nothing.
@@ -22,6 +38,17 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php /* THE SESSION'S CSRF TOKEN, ONCE, ON EVERY PAGE (1.71.0). There is one token, but every page
+             published it under a name of its own (#search-csrf, #account-csrf on the account page and a
+             profile, the shoutbox's #shout-csrf, a form's hidden field; the front page none) and each script
+             read the one it knew — so a vote from the Info panel opened on a profile or the account page sent
+             an empty token and was answered "Invalid CSRF token". Here once, for every public script to find
+             through window.csrfToken() (assets/js/app.js). A meta, not a script: nothing for the policy's
+             nonce to allow. Only with a session to belong to — index.php starts one for every page. The old
+             ids stay where they were. */ ?>
+    <?php if (session_id() !== '' && !empty($csrfToken)): ?>
+    <meta name="csrf-token" content="<?= sanitize((string)$csrfToken) ?>">
+    <?php endif; ?>
     <?php if ($action === 'apidocs'): ?>
     <?php /* Unlisted, not secret: it is handed to one partner in a mail, and a search engine
              indexing it would put an integration guide for this tracker in front of everybody who
@@ -85,6 +112,9 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <?php endif; ?>
     </script>
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
+    <?php /* The anti-spam layer as a page meets it (1.71.0): the countdown on a Send button, the CAPTCHA asked
+             for and the same request sent again. Every public page, before everything that writes. */ ?>
+    <script src="<?= $baseUrl ?>assets/js/antispam.js<?= assetVer('assets/js/antispam.js') ?>"></script>
     <?php /* The picture beside every name (1.63.0), before everything that draws a row of people. */ ?>
     <script src="<?= $baseUrl ?>assets/js/avatar.js<?= assetVer('assets/js/avatar.js') ?>"></script>
     <?php /* The emoji picker (1.70.0): the shoutbox's and every editor's — the whitelist form, the Info
@@ -121,6 +151,17 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
              as the setting, so the page still renders while the feature's own half is landing. */ ?>
     <?php if (function_exists('shoutEnabled') && shoutEnabled($cfg)): ?>
     <script src="<?= $baseUrl ?>assets/js/shoutbox.js<?= assetVer('assets/js/shoutbox.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* Comments on a torrent (1.71.0): the Info panel's thread and composer, on the three pages that have the
+             panel, and the account page's "which comments am I told about". After app.js: it asks it for the
+             token, the requests and the CAPTCHA. */ ?>
+    <?php if ($commentsHere): ?>
+    <script src="<?= $baseUrl ?>assets/js/comments.js<?= assetVer('assets/js/comments.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* Reporting (1.71.0): after comments.js, whose rows it puts its flag in, and after the shoutbox's
+             script, which asks it for the box. */ ?>
+    <?php if ($reportsHere): ?>
+    <script src="<?= $baseUrl ?>assets/js/reports.js<?= assetVer('assets/js/reports.js') ?>"></script>
     <?php endif; ?>
     <?php /* The account page's security block: the second factor and the signed-in devices. Only
              on that page — both halves are drawn nowhere else, and there is no reason for every

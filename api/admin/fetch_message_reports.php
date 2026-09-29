@@ -117,8 +117,13 @@ if ($names) {
                               (SELECT COUNT(*) FROM message_reports mr WHERE mr.reported_user_id = u.id) AS reports
                          FROM users u WHERE u.username IN ($ph)");
     $q->execute($names);
-    foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $u) {
+    $people = $q->fetchAll(PDO::FETCH_ASSOC);
+    // …and the warnings they have had (1.71.0, includes/reports.php): how many, and the latest few.
+    $warned = function_exists('userWarningsSummary') ? userWarningsSummary($db, array_map(fn($u) => (int)$u['id'], $people)) : [];
+    foreach ($people as $u) {
         $state[(string)$u['username']] = [
+            'warnings'        => (int)($warned[(int)$u['id']]['count'] ?? 0),
+            'latest_warnings' => $warned[(int)$u['id']]['latest'] ?? [],
             'banned'       => (string)$u['status'] === 'banned',
             'banned_until' => $u['banned_until'] ? (string)$u['banned_until'] : null,
             'muted_until'  => ($u['pm_muted_until'] !== null && strtotime((string)$u['pm_muted_until']) > time())

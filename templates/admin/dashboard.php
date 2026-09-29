@@ -23,18 +23,42 @@
             <?php $current = 'admin'; $navExtra = $svcName !== '' ? __DIR__ . '/_tracker_service.php' : null; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
+        <?php
+        /* WHICH QUEUES this session may see (1.71.0). The page opens for any of their view permissions
+           (adminNavItems()' `any`), and draws only the tabs the session holds: the torrent reports and their
+           appeals (panel.reports.view), the reported messages (panel.messages.view), and the reported comments,
+           descriptions and shouts (panel.reports.<kind>.view, each while its feature is on). The first tab drawn
+           is the one the page opens on. */
+        $torrentTabs = panelCan($db, $cfg, 'panel.reports.view');
+        $msgTab = pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view');
+        $crKinds = function_exists('contentReportPanelKinds')
+            ? array_keys(array_filter(contentReportPanelKinds($db, $cfg), fn($k) => $k['on'])) : [];
+        $firstTab = $torrentTabs ? 'reports' : ($msgTab ? 'messages' : ($crKinds ? $crKinds[0] . 's' : ''));
+        // Each kind's own glyph, as Settings draws it: the comments' bubble, a description's card, the room's.
+        $crTabs = ['comment' => ['comments', 'bi-chat-left-text', 'a.reports.tab_comments'],
+                   'description' => ['descriptions', 'bi-card-text', 'a.reports.tab_descriptions'],
+                   'shout' => ['shouts', 'bi-chat-left-dots', 'a.reports.tab_shouts']];
+        ?>
         <!-- Source Tabs -->
         <div class="source-tabs">
+            <?php if ($torrentTabs): ?>
             <button class="source-tab active" data-source="reports"><i class="bi bi-inbox"></i> <?= _h('a.reports.tab_active') ?> <span id="reports-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="archives"><i class="bi bi-archive"></i> <?= _h('a.reports.tab_archives') ?> <span id="archives-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeals"><i class="bi bi-megaphone"></i> <?= _h('a.reports.tab_appeals') ?> <span id="appeals-badge" class="appeals-count-badge d-hidden"></span></button>
             <button class="source-tab" data-source="appeal_archives"><i class="bi bi-archive"></i> <?= _h('a.reports.tab_appeal_archives') ?></button>
+            <?php endif; ?>
             <?php /* Reported private messages. Behind its own permission, because reading one is a
                      different kind of access from working the torrent queue — and the tab is not
                      drawn at all for somebody who does not hold it, rather than drawn and refused. */ ?>
-            <?php if (pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view')): ?>
-            <button class="source-tab" data-source="messages"><i class="bi bi-chat-left-text"></i> <?= _h('a.reports.tab_messages') ?> <span id="msgrep-badge" class="appeals-count-badge d-hidden"></span></button>
+            <?php if ($msgTab): ?>
+            <button class="source-tab<?= $firstTab === 'messages' ? ' active' : '' ?>" data-source="messages"><i class="bi bi-chat-left-text"></i> <?= _h('a.reports.tab_messages') ?> <span id="msgrep-badge" class="appeals-count-badge d-hidden"></span></button>
             <?php endif; ?>
+            <?php /* Reported comments, descriptions and shouts (1.71.0, includes/reports.php): a tab each, each with
+                     its own count of the things waiting — drawn while the feature is on and the session holds that
+                     kind's view. One view below serves all three (assets/js/admin-contentreports.js). */ ?>
+            <?php foreach ($crKinds as $k): [$src, $icon, $label] = $crTabs[$k]; ?>
+            <button class="source-tab<?= $firstTab === $src ? ' active' : '' ?>" data-source="<?= $src ?>" data-crep-kind="<?= $k ?>"><i class="bi <?= $icon ?>"></i> <?= _h($label) ?> <span id="crep-badge-<?= $k ?>" class="appeals-count-badge d-hidden"></span></button>
+            <?php endforeach; ?>
             <!-- The page links that used to sit here are gone. They predate the shared header bar, which
                  now lists every page from the same adminNavItems() list; keeping both meant Reports was
                  the only page showing its navigation twice, once in each row. Every other page's tab bar
@@ -65,8 +89,42 @@
             <div class="trans-pagination" id="msgrep-pagination"></div>
         </div>
 
+        <?php /* Reported comments, descriptions and shouts (1.71.0): one view for the three tabs, drawn by
+                 assets/js/admin-contentreports.js — a card per reported THING (its words, all its reports, its
+                 author), found by status, the reported member, the reporter, a date range and a text. */ ?>
+        <?php if ($crKinds): ?>
+        <div id="crep-view" class="d-hidden">
+            <div class="admin-toolbar-card">
+                <div class="toolbar-row crep-filters">
+                    <div class="toolbar-search">
+                        <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
+                        <div class="search-input-wrap">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="crep-search" maxlength="100" placeholder="<?= _h('a.creport.search_ph') ?>" aria-label="<?= _h('a.creport.search_ph') ?>">
+                        </div>
+                    </div>
+                    <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="crep-status" aria-label="<?= _h('js.reports.col_status') ?>">
+                        <option value="open"><?= _h('status.b_pending') ?></option>
+                        <option value="closed"><?= _h('status.b_checked') ?></option>
+                        <option value="all"><?= _h('a.reports.f_all') ?></option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary crep-name-in" id="crep-author" maxlength="64" placeholder="<?= _h('a.creport.author_ph') ?>" aria-label="<?= _h('a.creport.author_ph') ?>">
+                    <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary crep-name-in" id="crep-reporter" maxlength="64" placeholder="<?= _h('a.creport.reporter_ph') ?>" aria-label="<?= _h('a.creport.reporter_ph') ?>">
+                    <label class="crep-date"><span><?= _h('a.creport.from') ?></span> <input type="date" class="form-control form-control-sm bg-dark text-light border-secondary" id="crep-from"></label>
+                    <label class="crep-date"><span><?= _h('a.creport.to') ?></span> <input type="date" class="form-control form-control-sm bg-dark text-light border-secondary" id="crep-to"></label>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="crep-clear"><i class="bi bi-x-lg"></i> <?= _h('a.creport.clear') ?></button>
+                </div>
+            </div>
+            <div class="msgrep-note settings-hint crep-note"><?= _h('a.creport.note') ?></div>
+            <div id="crep-said" class="crep-said" aria-live="polite"></div>
+            <div id="crep-list"></div>
+            <div class="trans-pagination" id="crep-pagination"></div>
+        </div>
+        <?php endif; ?>
+
         <!-- Toolbar -->
-        <div class="admin-toolbar-card">
+        <?php /* The torrent reports' own toolbar, table and pages (`data-torrent-part`): shown on their four tabs
+                 only, and never drawn visible for a session that may not read them (1.71.0). */ ?>
+        <div class="admin-toolbar-card<?= $torrentTabs ? '' : ' d-hidden' ?>" data-torrent-part>
             <div class="toolbar-row">
                 <div class="toolbar-search">
                     <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
@@ -88,7 +146,7 @@
             </div>
         </div>
 
-        <div class="table-responsive" id="reports-table-card">
+        <div class="table-responsive<?= $torrentTabs ? '' : ' d-hidden' ?>" id="reports-table-card" data-torrent-part>
             <table class="table table-dark table-hover dash-table" id="reports-table">
                 <colgroup id="reports-colgroup">
                     <col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">
@@ -113,7 +171,7 @@
                 <tbody id="reports-body"></tbody>
             </table>
         </div>
-        <div class="admin-pagination" id="pagination"></div>
+        <div class="admin-pagination<?= $torrentTabs ? '' : ' d-hidden' ?>" id="pagination" data-torrent-part></div>
     </div>
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
@@ -310,10 +368,17 @@
     <script src="<?= $baseUrl ?>assets/js/admin.js<?= assetVer('assets/js/admin.js') ?>"></script>
     <?php /* The reported-messages view. Loaded only where the permission is held, because the tab
              that opens it is not drawn otherwise and the endpoint behind it answers 403. */ ?>
-    <?php if (pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view')): ?>
-    <?php /* …and the picture beside the two names on each card (1.63.0). */ ?>
+    <?php if ($msgTab || $crKinds): ?>
+    <?php /* …and the picture beside the names on each card (1.63.0) — the message cards' and (1.71.0) the
+             reported comments', descriptions' and shouts'. */ ?>
     <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
+    <?php endif; ?>
+    <?php if ($msgTab): ?>
     <script src="<?= $baseUrl ?>assets/js/admin-messages.js<?= assetVer('assets/js/admin-messages.js') ?>"></script>
+    <?php endif; ?>
+    <?php /* Reported comments, descriptions and shouts (1.71.0): only where a tab for one is drawn. */ ?>
+    <?php if ($crKinds): ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-contentreports.js<?= assetVer('assets/js/admin-contentreports.js') ?>"></script>
     <?php endif; ?>
 </body>
 </html>

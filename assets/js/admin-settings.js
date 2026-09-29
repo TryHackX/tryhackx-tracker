@@ -482,9 +482,16 @@
         if (n) el.textContent = n;
     });
 
-    /** #section-… links (e.g. from the Traffic page's "Timeline settings" button) still work. */
+    /**
+     * #section-… links (e.g. from the Traffic page's "Timeline settings" button) still work — and from
+     * 1.71.0 a link to anything INSIDE a section too: a sub-heading (#section-shout-nav), or a block that
+     * moved into a section of its own (#admin-emotes and #admin-shout-emoji were blocks of Shoutbox until
+     * the emoji and the emotes got their own group). The section round it is opened under its own chip
+     * and marked, and the page scrolls to the element itself.
+     */
     function openHash() {
-        const id = (location.hash || '').replace('#', '');
+        let id = (location.hash || '').replace('#', '');
+        try { id = decodeURIComponent(id); } catch (e) { /* a malformed escape: the id as written */ }
         // A PLAIN LOAD IS "ALL SETTINGS", AND HAS TO GO THROUGH THE SAME PASS AS CLICKING IT.
         //
         // Without this the page was left exactly as PHP rendered it and applyGroup() never ran on
@@ -492,12 +499,13 @@
         // you arrived on it — the same view behaving two different ways depending on how you got
         // there.
         if (!id) { applyGroup(); return; }
-        const sec = sections.find(s => s.el.id === id);
+        const target = document.getElementById(id);
+        const sec = sections.find(s => s.el.id === id) || (target ? sections.find(s => s.el.contains(target)) : null);
         if (!sec) { applyGroup(); return; }
         group = sec.group;
         input.value = '';
         applyGroup();
-        sec.el.scrollIntoView({ block: 'start' });
+        (target && target !== sec.el && sec.el.contains(target) ? target : sec.el).scrollIntoView({ block: 'start' });
         sec.el.classList.add('settings-section-hit');
         setTimeout(() => sec.el.classList.remove('settings-section-hit'), 2500);
     }

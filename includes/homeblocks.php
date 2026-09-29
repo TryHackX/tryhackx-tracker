@@ -146,7 +146,9 @@ function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
     foreach ($extraUrls as $eu) $copyParts[] = $eu;
 ?>
 <div class="code-block pos-relative">
-    <button class="copy-btn" data-copy="announce-copy" title="<?= _h('home.announce_copy') ?>"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    <?php /* The icon library's copy glyph (1.71.0), not a drawing of its own that no library reaches; its name
+             for a screen reader, and the same words in the site's tooltip (data-tip, assets/js/app.js). */ ?>
+    <button type="button" class="copy-btn ic-btn" data-copy="announce-copy" aria-label="<?= _h('home.announce_copy') ?>" data-tip="<?= _h('home.announce_copy') ?>"><i class="bi bi-copy" aria-hidden="true"></i></button>
     <?php if (!empty($httpUrl)): ?>
     <div class="label"><?= $httpLabel ?></div><code><?= sanitize($httpUrl) ?></code>
     <?php endif; ?>
@@ -252,7 +254,7 @@ $homePublicReg = ($homeWhitelist || $homeSched) && ($cfg['whitelist_public_enabl
 </div>
 <?php else: ?>
 <div class="card pos-relative">
-    <button class="copy-btn" data-copy="copy-df-<?= $i ?>" title="<?= _h('home.donate_copy', ['label' => $dfLabel]) ?>"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    <button type="button" class="copy-btn ic-btn" data-copy="copy-df-<?= $i ?>" aria-label="<?= _h('home.donate_copy', ['label' => $dfLabel]) ?>" data-tip="<?= _h('home.donate_copy', ['label' => $dfLabel]) ?>"><i class="bi bi-copy" aria-hidden="true"></i></button>
     <p><strong><?= $dfLabel ?>:</strong></p><span class="donate-addr" id="copy-df-<?= $i ?>"><?= sanitize($dfValue) ?></span>
 </div>
 <?php endif; ?>

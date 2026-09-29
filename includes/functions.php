@@ -34,7 +34,7 @@ require_once __DIR__ . '/icons.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.70.0';
+const TRACKER_VERSION = '1.71.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -931,6 +931,25 @@ function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3
     } finally {
         if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
     }
+}
+
+/**
+ * Would rateLimitAllow() let this through — WITHOUT spending a hit? (1.71.0)
+ *
+ * For a page that SHOWS whether an action is possible. Asking must not cost what doing costs: the Info
+ * panel asked twice per opening whether its reader could vote (api/index_info.php), each asking spent a
+ * vote from the hour's budget, and a member who opened fifteen panels could not vote at all. Reads the
+ * map as rateLimitAllow() leaves it — whole, since every write is a rename — and writes nothing.
+ */
+function rateLimitPeek(string $action, string $ip, int $max, int $windowSec = 3600): bool {
+    if ($max <= 0) return true;
+    $file = __DIR__ . '/../config/rate_limits.json';
+    if (!is_file($file)) return true;
+    $raw  = @file_get_contents($file);
+    $data = $raw ? (json_decode($raw, true) ?: []) : [];
+    $now  = time();
+    $hits = array_filter((array)($data[$action . '|' . $ip] ?? []), fn($t) => ($now - (int)$t) < $windowSec);
+    return count($hits) < $max;
 }
 
 /** The body of rateLimitAllow(), run with the lock held. */

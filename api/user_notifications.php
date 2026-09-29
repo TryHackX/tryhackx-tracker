@@ -39,7 +39,15 @@ $cnt->execute([(int)$u['id']]);
 $total = (int)$cnt->fetchColumn();
 $pages = max(1, (int)ceil($total / $perPage));
 $page = min($page, $pages);
-$st = $db->prepare("SELECT id, type, title, body, created_at, read_at FROM user_notifications
+// `link` (v83): where it happened, site-relative — the page offers it as a button (a comment's "Show").
+// A database whose migration has not run yet has no such column: the list is read without it.
+$cols = 'id, type, title, body, created_at, read_at, link';
+try {
+    $db->query("SELECT link FROM user_notifications LIMIT 0");
+} catch (\Throwable $e) {
+    $cols = 'id, type, title, body, created_at, read_at, NULL AS link';
+}
+$st = $db->prepare("SELECT $cols FROM user_notifications
                     WHERE user_id = ? ORDER BY (read_at IS NULL) DESC, id DESC LIMIT ? OFFSET ?");
 $st->bindValue(1, (int)$u['id'], PDO::PARAM_INT);
 $st->bindValue(2, $perPage, PDO::PARAM_INT);

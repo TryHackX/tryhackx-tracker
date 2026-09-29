@@ -824,21 +824,30 @@ try {
     $db->exec("INSERT IGNORE INTO settings (`key`, `value`) VALUES ('schema_once_v72_account_sides', '" . time() . "')");
 }
 
-// The template: each block buffered on its own and echoed at exactly one of two places, the left
-// one AFTER Account security and the right one under the privacy answers; nothing wraps both.
+// The template: each block buffered on its own and echoed at exactly one of two places in the Overview's flow
+// of cards (1.71.0 — two columns the page balances): the left one right under the Profile card, before the
+// groups (the left column's top), the right one after the privacy answers (the flow's end, the right column's
+// foot); nothing wraps both. The signed-in devices are a card of their own, printed after the flow, under both.
 $acc = (string)file_get_contents($root . '/templates/pages/account.php');
-$secAt = strpos($acc, 'id="acc-security"');
+$profAt = strpos($acc, 'id="acc-card-profile"');
 $leftPic = strpos($acc, "if (\$accPicSide === 'left') echo \$accAvatarHtml;");
 $leftCov = strpos($acc, "if (\$accCovSide === 'left') echo \$accCoverHtml;");
-$card2 = strpos($acc, '<h2><?= _h(\'account.groups\') ?></h2>');
+$card2 = strpos($acc, 'id="acc-card-groups"');
 $privAt = strpos($acc, 'id="acc-privacy"');
 $rightPic = strpos($acc, "if (\$accPicSide === 'right') echo \$accAvatarHtml;");
 $rightCov = strpos($acc, "if (\$accCovSide === 'right') echo \$accCoverHtml;");
-check('on the left each block sits in the first card after Account security, picture first',
-      $secAt !== false && $leftPic !== false && $leftCov !== false && $card2 !== false
-      && $secAt < $leftPic && $leftPic < $leftCov && $leftCov < $card2);
-check('on the right each sits in the second card under the privacy answers, picture first',
-      $privAt !== false && $rightPic !== false && $rightCov !== false && $card2 < $privAt && $privAt < $rightPic && $rightPic < $rightCov);
+$flowEnd = strpos($acc, "</div><?php /* /.acc-flow */ ?>");
+$secOut = strpos($acc, '<?= $accSecurityHtml ?>');
+check('on the left each block sits right under the Profile card, before the groups, picture first',
+      $profAt !== false && $leftPic !== false && $leftCov !== false && $card2 !== false
+      && $profAt < $leftPic && $leftPic < $leftCov && $leftCov < $card2);
+check('on the right each sits after the privacy answers, at the end of the flow, picture first',
+      $privAt !== false && $rightPic !== false && $rightCov !== false && $flowEnd !== false
+      && $card2 < $privAt && $privAt < $rightPic && $rightPic < $rightCov && $rightCov < $flowEnd);
+check('the Overview is a flow of cards, and Account security (the signed-in devices) is printed after it, the full width',
+      str_contains($acc, '<div class="acc-flow">') && $secOut !== false && $flowEnd < $secOut
+      && str_contains($acc, 'class="account-card acc-card acc-wide acc-security-block" id="acc-security"')
+      && str_contains($acc, '$accSecurityHtml = (string)ob_get_clean();'));
 check('the two blocks are two buffers, with the editor\'s data printed once and no wrapper round both',
       substr_count($acc, 'id="acc-media-data"') === 1 && !str_contains($acc, '<div id="acc-media">')
       && str_contains($acc, '$accAvatarHtml = (string)ob_get_clean();') && str_contains($acc, '$accCoverHtml = (string)ob_get_clean();'));

@@ -44,7 +44,16 @@
  * Mentions are resolved ONCE, when the shout is written (`shout_mentions`), rather than by parsing
  * every body on every read — a rename afterwards does not retro-mention somebody, which is the
  * behaviour a person expects from "did this line mean me".
+ *
+ * ── how fast (1.71.0) ─────────────────────────────────────────────────────────────────────────
+ *
+ * Asked of the site's one anti-spam layer (includes/antispam.php, context `shout`): three lines free,
+ * then 5, 15, 30 and 60 seconds between lines, two quiet minutes and it starts over — the owner's own
+ * sketch — with `shout_flood_seconds` as the least pause once any pause applies, the gap between two
+ * corrections, and, with the layer switched off, the room's old fixed wall between every two lines.
+ * A new account's links are drawn as text (antispamWrittenNew()).
  */
+require_once __DIR__ . '/antispam.php';
 
 /* ── the switches, all clamped on read ─────────────────────────────────────── */
 
@@ -251,7 +260,25 @@ function shoutMayPost(PDO $db, array $cfg, ?array $user): array
 
 /* ── mentions ──────────────────────────────────────────────────────────────── */
 
-/** The @-tokens in a body, as written, without deciding yet whether they name anybody. */
+/**
+ * The names a token may be, the whole of it first: "@bob.." → ["bob..", "bob.", "bob"] (1.71.0).
+ *
+ * The name's characters are userValidUsername()'s, and '.' and '-' are among them — so "thanks @bob." used to
+ * look up an account called "bob." and mention nobody: the full stop that ENDS a sentence was read as part of
+ * the name. A run of '.' / '-' at the end is sentence punctuation unless an account's name really ends with it:
+ * the longest candidate that is an account wins, and a name with a dot inside ("john.doe") is the whole token.
+ */
+function shoutMentionCandidates(string $token): array
+{
+    $out = [$token];
+    while (strlen($token) > 3 && ($token[strlen($token) - 1] === '.' || $token[strlen($token) - 1] === '-')) {
+        $token = substr($token, 0, -1);
+        $out[] = $token;
+    }
+    return $out;
+}
+
+/** The @-tokens in a body, as written, and the names each may be (shoutMentionCandidates()) — nothing looked up yet. */
 function shoutMentionTokens(string $body): array
 {
     // Not preceded by a word character (so an e-mail address is not a mention) and not by another
@@ -259,11 +286,13 @@ function shoutMentionTokens(string $body): array
     // looked up.
     if (!preg_match_all('/(?<![\w@])@([A-Za-z0-9_.-]{3,32})/', $body, $m)) return [];
     $out = [];
-    foreach ($m[1] as $name) {
-        $k = mb_strtolower($name);
-        if (!isset($out[$k])) $out[$k] = $name;
+    foreach ($m[1] as $token) {
+        foreach (shoutMentionCandidates($token) as $name) {
+            $k = mb_strtolower($name);
+            if (!isset($out[$k])) $out[$k] = $name;
+        }
     }
-    return $out;   // lower-case key => the token as it was typed
+    return $out;   // lower-case key => the name as it was typed
 }
 
 /**
@@ -271,21 +300,28 @@ function shoutMentionTokens(string $body): array
  *
  * Five because a mention is a nudge, not a mailing list — and because the row count per shout is
  * what decides whether `shout_mentions` stays a small table. The author is dropped rather than
- * refused: @-ing yourself is a typo, not an offence.
+ * refused: @-ing yourself is a typo, not an offence. Each token names the LONGEST of its candidates
+ * that is an account (1.71.0: "@bob." is bob, unless there is a "bob.").
  */
 function shoutParseMentions(PDO $db, string $body, int $authorId): array
 {
-    $tokens = shoutMentionTokens($body);
-    if (!$tokens) return [];
-    $names = array_slice(array_values($tokens), 0, 20);   // look up a bounded number, keep five
+    if (!preg_match_all('/(?<![\w@])@([A-Za-z0-9_.-]{3,32})/', $body, $m)) return [];
+    $cands = [];
+    foreach ($m[1] as $token) foreach (shoutMentionCandidates($token) as $c) $cands[mb_strtolower($c)] = $c;
+    $names = array_slice(array_values($cands), 0, 40);   // look up a bounded number, keep five
     $in = implode(',', array_fill(0, count($names), '?'));
-    $st = $db->prepare("SELECT id FROM users WHERE username IN ($in) LIMIT 20");
+    $st = $db->prepare("SELECT id, username FROM users WHERE username IN ($in) LIMIT 40");
     $st->execute($names);
+    $found = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $u) $found[mb_strtolower((string)$u['username'])] = (int)$u['id'];
     $ids = [];
-    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
-        $id = (int)$id;
-        if ($id <= 0 || $id === $authorId || in_array($id, $ids, true)) continue;
-        $ids[] = $id;
+    foreach ($m[1] as $token) {
+        foreach (shoutMentionCandidates($token) as $c) {
+            $id = $found[mb_strtolower($c)] ?? 0;
+            if ($id <= 0) continue;
+            if ($id !== $authorId && !in_array($id, $ids, true)) $ids[] = $id;
+            break;
+        }
         if (count($ids) >= 5) break;
     }
     return $ids;
@@ -337,11 +373,17 @@ function shoutLinkMentions(string $html, array $known, string $baseUrl, string $
         }
         if ($inLink > 0 || $part === '' || !str_contains($part, '@')) continue;
         $parts[$i] = preg_replace_callback('/(?<![\w@])@([A-Za-z0-9_.-]{3,32})/', function ($m) use ($known, $baseUrl, $meKey) {
-            $key = mb_strtolower($m[1]);
-            if (!isset($known[$key])) return $m[0];
-            $cls = 'shout-mention' . ($meKey !== '' && $key === $meKey ? ' shout-mention-me' : '');
-            return '<a class="' . $cls . '" href="' . htmlspecialchars($baseUrl . '?action=u&name=' . rawurlencode($known[$key]), ENT_QUOTES, 'UTF-8')
-                 . '">@' . htmlspecialchars($m[1], ENT_QUOTES, 'UTF-8') . '</a>';
+            // The longest candidate that is an account (shoutMentionCandidates()): "@bob." links bob and leaves
+            // the full stop after the link as the text it is — unless an account really is called "bob.".
+            foreach (shoutMentionCandidates($m[1]) as $cand) {
+                $key = mb_strtolower($cand);
+                if (!isset($known[$key])) continue;
+                $cls = 'shout-mention' . ($meKey !== '' && $key === $meKey ? ' shout-mention-me' : '');
+                return '<a class="' . $cls . '" href="' . htmlspecialchars($baseUrl . '?action=u&name=' . rawurlencode($known[$key]), ENT_QUOTES, 'UTF-8')
+                     . '">@' . htmlspecialchars($cand, ENT_QUOTES, 'UTF-8') . '</a>'
+                     . htmlspecialchars(substr($m[1], strlen($cand)), ENT_QUOTES, 'UTF-8');
+            }
+            return $m[0];
         }, $part) ?? $part;
     }
     return implode('', $parts);
@@ -437,12 +479,17 @@ function shoutRenderContext(PDO $db, array $cfg, array $me, array $bodies): arra
  */
 function shoutBodyHtml(string $body, string $format, array $cfg, array $ctx): string
 {
+    // A new account's links are TEXT (1.71.0, `links_text` — shoutShape() asks antispamWrittenNew() per line):
+    // the renderer builds no link at all (richtextLinkAttrs() under `rt_links_text`), and no picture is made
+    // into one either. The words, the address as words, stay.
+    $asText = !empty($ctx['links_text']);
     // A Font Awesome face (:fa-NAME:, 1.69.0) is drawn in 'plain' as well, as an emote is: the picker
     // puts it in the box whatever the room's format, and plain means no markup, not no emoji.
     $html = $format === 'plain'
         ? (function_exists('emojiFaRenderHtml') ? emojiFaRenderHtml(nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false), $cfg)
                                                   : nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false))
-        : shoutLinkImages(richtextRender($body, $format, $cfg, true), (string)($ctx['img_title'] ?? ''));
+        : ($asText ? richtextRender($body, $format, ['rt_links_text' => '1'] + $cfg, true)
+                   : shoutLinkImages(richtextRender($body, $format, $cfg, true), (string)($ctx['img_title'] ?? '')));
     return shoutRenderEmotes(shoutLinkMentions($html, (array)($ctx['known'] ?? []), (string)($ctx['base'] ?? ''), (string)($ctx['me_name'] ?? '')),
                              (array)($ctx['emotes'] ?? []), (string)($ctx['base'] ?? ''), !empty($ctx['stickers']));
 }
@@ -451,49 +498,52 @@ function shoutBodyHtml(string $body, string $format, array $cfg, array $ctx): st
 
 /**
  * Write a shout. ['ok' => true, 'row' => …] or ['ok' => false, 'error' => code] with codes
- * disabled | no_permission | muted | flood | empty | too_long | invalid_body.
+ * disabled | no_permission | muted | flood | antispam | empty | too_long | invalid_body.
  *
  * The ORDER is the endpoint's order and is part of the contract: who somebody is comes before how
  * fast they are typing, and both come before what they typed — being told "too long" by a room you
  * may not write in at all is an answer to a question nobody asked.
+ *
+ * How fast is the site's one anti-spam layer (1.71.0, includes/antispam.php, context `shout`): the
+ * room's ladder with `shout_flood_seconds` as its floor — and with the layer switched off, that setting
+ * alone, between every two lines, as it always was. Measured by the DATABASE's clock, from the last line
+ * the layer saw this account write (a line the SITE says about somebody never passes it, so registering
+ * a torrent does not gag the person it names). A wait is still `flood` with `retry_after`; any other
+ * refusal of the layer's (a CAPTCHA due, the same words again) is `antispam`; both carry the layer's own
+ * answer in `antispam` for the endpoint to hand on. `$opts['input']` is the request (a CAPTCHA token).
  */
-function shoutPost(PDO $db, array $cfg, array $user, string $body, string $format, string $ip): array
+function shoutPost(PDO $db, array $cfg, array $user, string $body, string $format, string $ip, array $opts = []): array
 {
     $gate = shoutMayPost($db, $cfg, $user);
     if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until'], 'row' => null];
     $uid = (int)$user['id'];
 
-    // Flood: measured by the DATABASE's clock against the row's own timestamp, so a web server
-    // whose clock drifts from MariaDB's cannot let a burst through (or refuse an honest shout).
-    $wait = shoutFloodSeconds($cfg);
-    if ($wait > 0) {
-        // `is_system = 0`: a line the SITE said about this account (v66 — "a torrent was
-        // registered", signed with the submitter) is not this account typing, and counting it here
-        // would mean registering a torrent silently gagged the person for the flood interval.
-        $st = $db->prepare("SELECT TIMESTAMPDIFF(SECOND, created_at, NOW()) FROM shouts WHERE user_id = ? AND is_system = 0 ORDER BY id DESC LIMIT 1");
-        $st->execute([$uid]);
-        $since = $st->fetchColumn();
-        if ($since !== false && $since !== null && (int)$since < $wait) {
-            return ['ok' => false, 'error' => 'flood', 'retry_after' => max(1, $wait - (int)$since), 'row' => null];
-        }
-    }
-
     $body = trim($body);
-    if ($body === '') return ['ok' => false, 'error' => 'empty', 'row' => null];
+    $t = antispamCheck($db, $cfg, 'shout', antispamSubject($user, $ip), $body, ['input' => (array)($opts['input'] ?? []), 'verify' => $opts['verify'] ?? null]);
+    if (!$t['ok']) {
+        return ['ok' => false, 'error' => $t['kind'] === 'wait' ? 'flood' : 'antispam', 'retry_after' => (int)$t['seconds'],
+                'antispam' => $t, 'row' => null];
+    }
+    $ticket = $t['ticket'];
+    // What they typed, now — and a refusal of the words hands the reserved line back to the layer.
+    $refuse = function (array $r) use ($db, $ticket): array { antispamRelease($db, $ticket); return $r; };
+
+    if ($body === '') return $refuse(['ok' => false, 'error' => 'empty', 'row' => null]);
     $max = shoutMaxChars($cfg);
-    if (mb_strlen($body) > $max) return ['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null];
+    if (mb_strlen($body) > $max) return $refuse(['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null]);
 
     // 'plain' is the whole feature's answer, not this shout's: when the site says plain, nothing is
     // parsed and there is nothing to validate beyond the length above. The rest is shoutBodyProblem(),
     // the same answer the composer's Preview gives (1.67.0).
     $format = in_array($format, shoutFormatChoices($cfg), true) ? $format : shoutFormat($cfg);
     $bad = shoutBodyProblem($cfg, $body, $format);
-    if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
+    if ($bad !== null) return $refuse(['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null]);
 
     $bucket = function_exists('ipBucket') && $ip !== '' ? ipBucket($ip) : '';
     $db->prepare("INSERT INTO shouts (user_id, body, body_format, ip_bucket) VALUES (?, ?, ?, ?)")
        ->execute([$uid, $body, $format, mb_substr($bucket, 0, 45)]);
     $id = (int)$db->lastInsertId();
+    antispamRecord($db, $ticket);
 
     foreach (shoutParseMentions($db, $body, $uid) as $mid) {
         // IGNORE: the primary key is the pair, and two mentions of one person in one line are one.
@@ -583,8 +633,12 @@ const SHOUT_ROW_SELECT = "SELECT s.id, s.user_id, s.body, s.body_format, s.creat
                                  s.pinned_at, s.edited_at, s.edited_by, u.username, u.avatar_sha,
                                  UNIX_TIMESTAMP(s.created_at) AS created_ts,
                                  UNIX_TIMESTAMP(s.edited_at) AS edited_ts,
-                                 TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
+                                 TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s,
+                                 TIMESTAMPDIFF(SECOND, u.created_at, COALESCE(s.edited_at, s.created_at)) AS author_age_s
                             FROM shouts s LEFT JOIN users u ON u.id = s.user_id";
+// `author_age_s` (1.71.0): how old the author's account was when these words were last written — a new
+// account's links are drawn as text (antispamWrittenNew(), includes/antispam.php). Both DATETIMEs of this
+// database, so the difference is the same whatever zone they were written in.
 // `edited_ts` and `age_s` (1.66.0): when the words last changed, as an instant for the same reason
 // `created_ts` is one, and how old the line is — by the DATABASE's clock, the one `created_at` was
 // written on — so the two windows (edit, delete-your-own) are measured without PHP's clock taking part.
@@ -764,6 +818,10 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
         }
     }
 
+    // Which lines THIS reader may report to the moderators, and has already reported (1.71.0, includes/reports.php):
+    // somebody else's line, never one the site said, for a reader holding content.report — one query for the batch.
+    $reportFlags = function_exists('contentReportFlags') ? contentReportFlags($db, $cfg, $meId > 0 ? $me : null, 'shout', $raw) : [];
+
     $out = [];
     foreach ($raw as $r) {
         $system = !empty($r['is_system']);
@@ -811,6 +869,8 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
         // under their name. Compared on the raw ids, so it still holds after the author's account goes.
         $editedTs = (isset($r['edited_ts']) && is_numeric($r['edited_ts'])) ? (int)$r['edited_ts'] : null;
         $editedBy = (($r['edited_by'] ?? null) === null) ? 0 : (int)$r['edited_by'];
+        // Written while the account was new: its links are text (1.71.0, includes/antispam.php).
+        $render['links_text'] = !$system && $authorId > 0 && antispamWrittenNew($db, $cfg, $authorId, $r['author_age_s'] ?? null);
         $out[] = [
             'id'          => (int)$r['id'],
             'user'        => $authorName !== '' ? $authorName : $siteName,
@@ -860,6 +920,9 @@ function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
             // announcement is nobody's unread (shoutUnreadCounts agrees) and must not be the reason
             // a friend's chime plays.
             'friend'      => !$system && $authorId > 0 && isset($pals[$authorId]),
+            // The flag on the row (1.71.0): may this reader report the line, and have they (an open report).
+            'can_report'  => !empty($reportFlags[(int)$r['id']]['can']),
+            'reported'    => !empty($reportFlags[(int)$r['id']]['reported']),
         ];
     }
     return $out;
@@ -966,11 +1029,16 @@ function shoutPin(PDO $db, array $cfg, array $me, int $id, bool $on): array
  * 1.66.0: your own only for `shout_delete_own_minutes` (0 = no limit) — 'too_late' after that, and
  * measured by the database against `created_at`, never by anything the request carries.
  * `shout.moderate` is held by no window.
+ *
+ * `$opts['authority'] === 'panel'` (1.71.0 part E, includes/reports.php): the Reports page, whose caller has
+ * already asked panelCan() for `panel.reports.shouts.handle` — a moderator's removal whatever the account behind
+ * the panel session holds; the owner's own session (no account, id 0) stamps no one.
  */
-function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
+function shoutDelete(PDO $db, array $cfg, array $me, int $id, array $opts = []): array
 {
     $meId = (int)($me['id'] ?? 0);
-    if ($meId <= 0) return ['ok' => false, 'error' => 'no_permission'];
+    $panel = ($opts['authority'] ?? '') === 'panel';
+    if ($meId <= 0 && !$panel) return ['ok' => false, 'error' => 'no_permission'];
     $st = $db->prepare("SELECT s.id, s.user_id, s.is_system, u.username,
                                TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
                           FROM shouts s LEFT JOIN users u ON u.id = s.user_id
@@ -981,8 +1049,8 @@ function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
 
     // Nobody owns a line the site said, not even the account it names — so taking one down is a
     // moderator's act and `shout.delete_own` never reaches it.
-    $own = empty($row['is_system']) && $row['user_id'] !== null && (int)$row['user_id'] === $meId;
-    $mayModerate = userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
+    $own = empty($row['is_system']) && $row['user_id'] !== null && $meId > 0 && (int)$row['user_id'] === $meId;
+    $mayModerate = $panel || userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
     if (!$mayModerate && !($own && userIdHasPermission($db, $cfg, $meId, 'shout.delete_own'))) {
         return ['ok' => false, 'error' => 'no_permission'];
     }
@@ -991,7 +1059,7 @@ function shoutDelete(PDO $db, array $cfg, array $me, int $id): array
         if ($win > 0 && (int)$row['age_s'] >= $win) return ['ok' => false, 'error' => 'too_late'];
     }
     $db->prepare("UPDATE shouts SET deleted_by = ?, deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL")
-       ->execute([$meId, $id]);
+       ->execute([$meId > 0 ? $meId : null, $id]);
     if (!$own && function_exists('auditLog')) {
         auditLog($db, 'shout.delete', ['target_type' => 'user', 'target_id' => (int)$row['user_id'],
             'summary' => (string)($me['username'] ?? '#' . $meId) . ' → shout #' . $id . ' by ' . (string)$row['username']]);
@@ -1107,14 +1175,15 @@ function shoutSyncMentions(PDO $db, int $shoutId, string $body, int $authorId): 
  * limit — and rendered by the same function, so a corrected line is byte for byte what the poll
  * would hand anybody.
  *
- * The flood interval is `shout_flood_seconds` between two EDITS by one account, on the database's
- * clock (idx_shouts_edited_by), so an edit box is not a way round the interval posting has; a post
- * does not count against it, because fixing the typo in what you just said is the commonest edit
- * there is. The address ceiling is the endpoint's (api/shout_edit.php).
+ * The flood interval is `shout_flood_seconds` between two EDITS by one account — asked of the site's
+ * anti-spam layer as a CORRECTION (1.71.0, includes/antispam.php: never laddered, no duplicate rule, no
+ * CAPTCHA; the gap between two corrections, on the database's clock), so an edit box is not a way round
+ * the interval posting has; a post does not count against it, because fixing the typo in what you just
+ * said is the commonest edit there is. The address ceiling is the endpoint's (api/shout_edit.php).
  *
  * Words that did not change change nothing: no mark, no mention pass, no audit line.
  */
-function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body): array
+function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body, string $ip = ''): array
 {
     $gate = shoutMayPost($db, $cfg, $me);
     if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until'], 'row' => null];
@@ -1125,31 +1194,31 @@ function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body): array
     $why = shoutEditRight($db, $cfg, $meId, $row);
     if ($why !== '') return ['ok' => false, 'error' => $why, 'row' => null];
 
-    $wait = shoutFloodSeconds($cfg);
-    if ($wait > 0) {
-        $st = $db->prepare("SELECT TIMESTAMPDIFF(SECOND, MAX(edited_at), NOW()) FROM shouts WHERE edited_by = ?");
-        $st->execute([$meId]);
-        $since = $st->fetchColumn();
-        if ($since !== false && $since !== null && (int)$since < $wait) {
-            return ['ok' => false, 'error' => 'flood', 'retry_after' => max(1, $wait - (int)$since), 'row' => null];
-        }
+    $t = antispamCheck($db, $cfg, 'shout', antispamSubject($me, $ip), null, ['mode' => 'edit', 'edit_gap' => shoutFloodSeconds($cfg)]);
+    if (!$t['ok']) {
+        return ['ok' => false, 'error' => $t['kind'] === 'wait' ? 'flood' : 'antispam', 'retry_after' => (int)$t['seconds'],
+                'antispam' => $t, 'row' => null];
     }
+    $ticket = $t['ticket'];
+    $refuse = function (array $r) use ($db, $ticket): array { antispamRelease($db, $ticket); return $r; };
 
     $body = trim($body);
-    if ($body === '') return ['ok' => false, 'error' => 'empty', 'row' => null];
+    if ($body === '') return $refuse(['ok' => false, 'error' => 'empty', 'row' => null]);
     $max = shoutMaxChars($cfg);
-    if (mb_strlen($body) > $max) return ['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null];
+    if (mb_strlen($body) > $max) return $refuse(['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null]);
     // The format the line was WRITTEN in. Changing it in an edit would change how every other word
     // of it renders, which is not a correction — and it is the one the reader has been reading.
     $format = (string)$row['body_format'];
     $bad = shoutBodyProblem($cfg, $body, $format);
-    if ($bad !== null) return ['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null];
+    if ($bad !== null) return $refuse(['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null]);
 
     $changed = $body !== (string)$row['body'];
+    if (!$changed) antispamRelease($db, $ticket);   // words that did not change are not a correction either
     if ($changed) {
         $st = $db->prepare("UPDATE shouts SET body = ?, edited_at = NOW(), edited_by = ? WHERE id = ? AND deleted_at IS NULL");
         $st->execute([$body, $meId, $id]);
-        if ($st->rowCount() < 1) return ['ok' => false, 'error' => 'not_found', 'row' => null];   // deleted meanwhile
+        if ($st->rowCount() < 1) return $refuse(['ok' => false, 'error' => 'not_found', 'row' => null]);   // deleted meanwhile
+        antispamRecord($db, $ticket);
         $authorId = $row['user_id'] === null ? 0 : (int)$row['user_id'];
         shoutSyncMentions($db, $id, $body, $authorId);
         // Somebody ELSE's words: an audited act, like taking a line down — who changed it and when,
@@ -1641,7 +1710,9 @@ function shoutRenderEmotes(string $html, array $emotes, string $baseUrl = '', bo
  *   description  emotes, and a sticker BOUNDED (96 px): a description is a page about a torrent, read in
  *   list         the Info panel down to a phone's width — a picture beside the words, not instead of them;
  *   bio          emotes, and a sticker drawn as an emote: a profile's description is a line or two under a
- *                name, and a 128-pixel picture would be the whole of it. Its picker offers no stickers;
+ *   comment      name, and a 128-pixel picture would be the whole of it — and (1.71.0) a comment under a
+ *                torrent is a line in a thread, where a big picture is the thing the owner said no to
+ *                ("simple BBCode without pictures"). Their pickers offer no stickers;
  *   e-mail       nothing — a token stays the text it was typed as (richtextRenderForEmail() never calls
  *                the stage; the images would be fetched from this site by somebody's mail client).
  * With `shout_stickers_enabled` off a sticker is an emote everywhere, as it is in the room.
@@ -1676,6 +1747,8 @@ function emoteStickerMode(string $for, array $cfg): string
         'shout'               => 'room',
         'message'             => 'sticker',
         'description', 'list' => 'small',
+        // Written out, not left to the default: a comment's sticker is an emote BY DECISION (1.71.0).
+        'bio', 'comment'      => 'emote',
         default               => 'emote',
     };
 }

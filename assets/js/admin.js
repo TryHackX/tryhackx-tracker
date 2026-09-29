@@ -59,9 +59,16 @@ function confirmAction(message) {
     });
 }
 
+// The four tabs this file owns (1.71.0): the torrent reports, their archive, the appeals and theirs. The other
+// tabs of the bar — reported messages, comments, descriptions, shouts — belong to their own scripts
+// (admin-messages.js, admin-contentreports.js), and a session that may not read the torrent queue is not drawn
+// these four at all (templates/admin/dashboard.php), so nothing here is asked for it.
+const TORRENT_SOURCES = ['reports', 'archives', 'appeals', 'appeal_archives'];
+const hasTorrentTabs = () => !!document.querySelector('.source-tab[data-source="reports"]');
+
 document.addEventListener('DOMContentLoaded', () => {
     updateSortIcons();
-    loadReports();
+    if (hasTorrentTabs()) loadReports();
 
     document.getElementById('btn-logout').addEventListener('click', handleLogout);
     document.getElementById('btn-archive-all').addEventListener('click', handleArchiveAll);
@@ -104,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cell) inlineEdit(cell, parseInt(cell.dataset.editId, 10), cell.dataset.editField);
     });
 
-    loadAppealsBadge();
+    if (hasTorrentTabs()) loadAppealsBadge();
     initTrackerService();
 
     // Multi-level sorting
@@ -172,6 +179,8 @@ document.addEventListener('DOMContentLoaded', () => {
         tab.addEventListener('click', () => {
             document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
+            // Another script's tab: marked active here (one bar, one active tab), its view drawn by its script.
+            if (!TORRENT_SOURCES.includes(tab.dataset.source)) return;
             source = tab.dataset.source;
             currentPage = 1;
             filterStatus = 'all';

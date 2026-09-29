@@ -1250,9 +1250,12 @@ check('Free metadata on a Pro package names no icon: its tokens stay text (only 
 $cdAll = emojiFaClientData($cfgS(['shout_emoji_fa_scope' => 'all']), 'pl');
 $cdSearch = emojiFaClientData($cfgS(['shout_emoji_fa_scope' => 'search']), 'en');
 $cdFaces = emojiFaClientData($cfgS(['shout_emoji_fa_scope' => 'faces']), 'en');
-check('with `all` or `search` the picker is told where the catalogue is (the package\'s hash), how many icons, the categories in the reader\'s language, and Brands\' classes',
+// 1.71.0: each category with the icons its chip shows (assets/emoji/fa-categories.json) — the emoji category's
+// face; none for a category the list does not name — and the generic glyph the picker falls back to.
+check('with `all` or `search` the picker is told where the catalogue is (the package\'s hash), how many icons, the categories in the reader\'s language with their chips\' icons, and Brands\' classes',
       $cdAll['scope'] === 'all' && ($cdAll['catalog']['v'] ?? '') === iconpackCatalogVersion($sm) && ($cdAll['catalog']['n'] ?? 0) === count($synNames)
-      && ($cdAll['catalog']['cats'] ?? null) === [['emoji', 'Emoji'], ['synthetic', 'Synthetic']] && isset($cdAll['styles']['brands']) && $cdAll['classic'] === 'solid'
+      && ($cdAll['catalog']['cats'] ?? null) === [['emoji', 'Emoji', ['face-smile']], ['synthetic', 'Synthetic', []]] && ($cdAll['catalog']['fallback'] ?? null) === 'tag'
+      && isset($cdAll['styles']['brands']) && $cdAll['classic'] === 'solid'
       && $cdSearch['scope'] === 'search' && isset($cdSearch['catalog']) && !isset($cdFaces['catalog']) && $cdFaces['scope'] === 'faces' && !isset($cdFaces['styles']['brands']),
       json_encode(['all' => array_diff_key($cdAll, ['faces' => 1, 'styles' => 1]), 'faces' => array_diff_key($cdFaces, ['faces' => 1, 'styles' => 1])]));
 check('… the scope is part of the answer\'s fingerprint; a package without a trusted index is `faces` whatever the setting',

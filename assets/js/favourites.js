@@ -38,15 +38,11 @@
         return n;
     }
 
-    // Every public page carries a token, but under a different name each time: the search page has
-    // #search-csrf, the account page #account-csrf, the forms a hidden name="csrf_token". Ask for all
-    // three rather than assume — the first version of this looked for two and the account page's
-    // checkboxes silently posted an empty token.
+    // The page's token (1.71.0): window.csrfToken() in app.js, which every public page loads before this
+    // file, reads the one the layout publishes on every page. This asked for three ids a page might carry
+    // — the first version looked for two and the account page's checkboxes silently posted an empty token.
     function csrf() {
-        var i = document.getElementById('search-csrf')
-             || document.getElementById('account-csrf')
-             || document.querySelector('input[name="csrf_token"]');
-        return i ? i.value : '';
+        return typeof window.csrfToken === 'function' ? window.csrfToken() : '';
     }
 
     async function get(qs) {
@@ -78,6 +74,16 @@
             if (write) listWriteDone();
         }
     }
+
+    /**
+     * A list's name or description, sent through the anti-spam layer's helper (1.71.0, assets/js/antispam.js):
+     * a CAPTCHA it asks for is solved and the same request sent again; a wait counts down on `button`, the
+     * sentence handed to `note`. `layerWaiting(button)`: is it counting — then the caller leaves it disabled.
+     */
+    function viaLayer(doPost, button, note) {
+        return window.Antispam ? window.Antispam.send(doPost, { button: button, note: note, action: 'user_lists' }) : doPost({});
+    }
+    function layerWaiting(button) { return !!(window.Antispam && window.Antispam.waiting(button)); }
 
     /* ── the shelf behind a list's window (1.67.0) ──────────────────────────────────────────────
      *
@@ -132,15 +138,19 @@
         btn.dataset.on = on ? '1' : '0';
         btn.classList.toggle('fav-on', !!on);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        btn.title = on ? t('js.fav.remove') : t('js.fav.add');
-        btn.setAttribute('aria-label', btn.title);
+        // What pressing it does, in the site's tooltip (1.71.0: data-tip, as every icon button beside it;
+        // `title` drew the browser's own box a second later) and for a screen reader.
+        btn.dataset.tip = on ? t('js.fav.remove') : t('js.fav.add');
+        btn.setAttribute('aria-label', btn.dataset.tip);
+        btn.removeAttribute('title');
         // The icon library's star, empty or filled (1.68.0 — it was two star characters, which every
         // library draws the same way). The label above is what a screen reader hears.
         btn.replaceChildren(el('i', { className: on ? 'bi bi-star-fill' : 'bi bi-star', 'aria-hidden': 'true' }));
     }
 
     function makeStar(hash, on) {
-        var b = el('button', { type: 'button', className: 'fav-star', dataset: { favHash: hash } });
+        // An icon button (1.71.0): the box of the row's other icon buttons, the star in its middle.
+        var b = el('button', { type: 'button', className: 'fav-star ic-btn', dataset: { favHash: hash } });
         paintStar(b, on);
         return b;
     }
@@ -183,17 +193,21 @@
     function addMagnetInfo(acts, r, trackers) {
         // No magnet for a banned hash: the tracker refuses to serve it, and a link that cannot work
         // is worse than saying so.
+        // Icons since 1.71.0, the search results' own: the magnet (the primary, filled box) and the "i" — named
+        // from the dictionary the search results use (js.app.magnet / js.app.info), so a translation that
+        // renames them there reaches these rows too, and explained in the site's tooltip.
         if (r.info_hash && !r.banned && trackers) {
-            // The word from the dictionary the search results' Magnet uses (js.app.magnet), not a
-            // literal: a translation that renames the button there has to reach these rows too.
-            acts.appendChild(el('a', { className: 'btn btn-small', href: magnetFor(r.info_hash, r.name, trackers), text: t('js.app.magnet') }));
+            acts.appendChild(el('a', { className: 'btn btn-small ic-btn pf-magnet', href: magnetFor(r.info_hash, r.name, trackers),
+                                       'aria-label': t('js.app.magnet'), dataset: { tip: t('js.app.magnet_title') } },
+                                el('i', { className: 'bi bi-magnet', 'aria-hidden': 'true' })));
         }
         // The same Info the search results have, opening the same panel — the markup for it is a
         // partial these pages include now. A row that names a torrent and cannot say what it IS
         // sends the reader back to the search page to type the name in again.
         if (r.info_hash && window.TorrentInfo && document.getElementById('info-overlay')) {
-            var inf = el('button', { type: 'button', className: 'btn btn-secondary btn-small pf-info',
-                                     title: t('js.app.info_title'), text: t('js.app.info') });
+            var inf = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn pf-info',
+                                     'aria-label': t('js.app.info'), dataset: { tip: t('js.app.info_title') } },
+                         el('i', { className: 'bi bi-info-circle', 'aria-hidden': 'true' }));
             inf.addEventListener('click', function () { window.TorrentInfo.open(r.info_hash, r.name || null); });
             acts.appendChild(inf);
         }
@@ -587,8 +601,10 @@
                     // endpoint sends info_hash = null for both). Without the id, a reader who may
                     // not build magnets could fill a list and never empty it.
                     if (list.own && (r.info_hash || r.id)) {
-                        var rm = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-remove',
-                                                title: t('js.lists.remove_title'), 'aria-label': t('js.lists.remove_title') },
+                        // The row's third icon button (1.71.0: the box of Magnet and Info beside it, its name in
+                        // the site's tooltip like theirs).
+                        var rm = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn list-remove',
+                                                'aria-label': t('js.lists.remove_title'), dataset: { tip: t('js.lists.remove_title') } },
                                     el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
                         rm.addEventListener('click', async function () {
                             rm.disabled = true;
@@ -763,8 +779,8 @@
         return { load: load, changed: function () {
             // Whether the search box and its options now ask what the shelf on screen was NOT asked.
             return searchKey(cfg.searchEl, options()) !== asked;
-        }, create: async function (name) {
-            var r = await post('user_lists', { op: 'create', name: name });
+        }, create: async function (name, extra) {
+            var r = await post('user_lists', Object.assign({ op: 'create', name: name }, extra || {}));
             if (r && r.success) await load();
             return r;
         }, open: function (slug) {
@@ -1039,13 +1055,17 @@
             cancel.disabled = true;
             disarm();
             say(t('js.lists.saving'));
-            var r = await post('user_lists', { op: 'edit', id: cur.list.id, name: s.name, description: s.desc, format: s.fmt });
+            // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for, the same
+            // save again; a wait counts down on Save with the sentence beside it.
+            var payload = { op: 'edit', id: cur.list.id, name: s.name, description: s.desc, format: s.fmt };
+            var r = await viaLayer(function (extra) { return post('user_lists', Object.assign({}, payload, extra || {})); },
+                                   save, function (m) { say(m || '', true); });
             saving = false;
-            save.disabled = false;
+            if (!layerWaiting(save)) save.disabled = false;
             cancel.disabled = false;
             if (!cur) return;
             if (!r || !r.success) {
-                say((r && r.message) || t(r && r.error === 'rate_limit' ? 'js.lists.rate_limited' : 'js.lists.edit_failed'), true);
+                if (!layerWaiting(save)) say((r && r.message) || t(r && r.error === 'rate_limit' ? 'js.lists.rate_limited' : 'js.lists.edit_failed'), true);
                 return;
             }
             var l = cur.list, done = cur.onSaved;
@@ -1172,13 +1192,17 @@
         var go = el('button', { type: 'button', className: 'btn btn-small', text: t('js.lists.create') });
         var msg = el('span', { className: 'text-muted list-add-msg' });
         var submit = async function () {
+            if (go.disabled) return;
             var v = input.value.trim();
             if (!v) { input.focus(); return; }
             go.disabled = true;
-            var r = await api.create(v);
+            // Through the anti-spam layer's helper (1.71.0): a wait counts down on the button.
+            var r = await viaLayer(function (extra) { return api.create(v, extra); }, go, function (m) { msg.textContent = m || ''; });
+            if (layerWaiting(go)) return;
             go.disabled = false;
             if (!r || !r.success) {
-                msg.textContent = t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
+                msg.textContent = r && (r.antispam || r.error === 'captcha_cancelled') && r.message ? r.message
+                                : t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
                 return;
             }
             form.remove();
@@ -1300,10 +1324,14 @@
 
         if (go && nameIn) {
             var mk = async function () {
+                if (go.disabled) return;
                 var v = query();
                 if (!v) { nameIn.focus(); return; }
                 go.disabled = true;
-                var r = await post('user_lists', { op: 'create', name: v });
+                // Through the anti-spam layer's helper (1.71.0): a wait counts down on the button.
+                var r = await viaLayer(function (extra) { return post('user_lists', Object.assign({ op: 'create', name: v }, extra || {})); },
+                                       go, function (m) { msg.textContent = m || ''; });
+                if (layerWaiting(go)) return;
                 if (r && r.success) {
                     // Made from a torrent's panel, so the torrent goes into it: that is what the
                     // reader was doing when they typed the name.
@@ -1318,7 +1346,8 @@
                     await load();
                     return;
                 }
-                msg.textContent = t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
+                msg.textContent = r && (r.antispam || r.error === 'captcha_cancelled') && r.message ? r.message
+                                : t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
                 go.disabled = false;
             };
             go.addEventListener('click', mk);
@@ -1345,7 +1374,8 @@
     function makeListButton(hash, name) {
         var o = document.getElementById('info-overlay');
         if (!o || o.dataset.lists !== '1' || typeof window.openListPicker !== 'function') return null;
-        var b = el('button', { type: 'button', className: 'search-share lp-open', title: t('js.lists.pick_title'), 'aria-label': t('js.lists.pick_title') },
+        // One of the head's icon buttons (1.71.0): its name in the site's tooltip, like its neighbours'.
+        var b = el('button', { type: 'button', className: 'search-share lp-open ic-btn', 'aria-label': t('js.lists.pick_title'), dataset: { tip: t('js.lists.pick_title') } },
                    el('i', { className: 'bi bi-plus-lg', 'aria-hidden': 'true' }));
         b.addEventListener('click', function () { window.openListPicker(hash, name); });
         return b;
@@ -1960,6 +1990,14 @@
         // A live language switch: the server's words (the headings, the placeholders, the line under them) are
         // swapped by id; the ones written here are written again from what each section holds.
         document.addEventListener('langswap', function () { secs.forEach(draw); });
+        // A vote cast or taken back in the Info panel under the overlay (1.71.0, castVote() in app.js): while it
+        // is open on that torrent its likes are asked for again, so a vote taken back leaves the names at once.
+        // Every opening asks afresh anyway.
+        document.addEventListener('rating:changed', function (e) {
+            var d = e && e.detail;
+            if (box.hidden || !d || d.hash !== hash) return;
+            secs.forEach(function (s) { if (s.name === 'votes' && s.state !== 'gone') load(s, false); });
+        });
 
         window.openWhoFavourited = function (h) {
             hash = h;

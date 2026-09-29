@@ -41,7 +41,7 @@ if (!rateLimitAllow('shoutedit', ipBucket(getClientIp($cfg)), 120, 60)) {
 
 $id = max(0, (int)($isPost ? ($input['id'] ?? 0) : ($_GET['id'] ?? 0)));
 $r = $isPost
-    ? shoutEdit($db, $cfg, $me, $id, (string)($input['body'] ?? ''))
+    ? shoutEdit($db, $cfg, $me, $id, (string)($input['body'] ?? ''), getClientIp($cfg))
     : shoutEditSource($db, $cfg, $me, $id);
 
 if (!empty($r['ok'])) {
@@ -67,6 +67,13 @@ switch ((string)$r['error']) {
     case 'not_found':
         jsonResponse(['error' => 'not_found'], 404);
     case 'flood':
+    case 'antispam':
+        // The anti-spam layer's answer for a correction (1.71.0, includes/antispam.php): how long until the next.
+        if (!empty($r['antispam']['body'])) {
+            $b = $r['antispam']['body'];
+            if ($r['error'] === 'flood') $b['error'] = 'flood';
+            jsonResponse($b, (int)$r['antispam']['status']);
+        }
         jsonResponse(['error' => 'flood', 'retry_after' => (int)$r['retry_after'],
                       'message' => __('api.shout.flood', ['seconds' => (int)$r['retry_after']])], 429);
     case 'too_long':

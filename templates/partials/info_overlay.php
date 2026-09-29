@@ -41,10 +41,12 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             <h3 id="info-title"><?= _h('search.details') ?></h3>
             <span class="info-acts" id="info-acts"></span>
 <?php if ($ioShare): ?>
-            <button type="button" class="search-share share-btn info-share" id="info-share"
-                    title="<?= _h('search.share_one_title') ?>"><?= _h('search.share') ?></button>
+            <?php /* An icon (1.71.0), as the rest of the head is: its name for a screen reader, what it does in
+                     the site's tooltip (data-tip, assets/js/app.js). */ ?>
+            <button type="button" class="search-share share-btn info-share ic-btn" id="info-share"
+                    aria-label="<?= _h('search.share') ?>" data-tip="<?= _h('search.share_one_title') ?>"><i class="bi bi-share" aria-hidden="true"></i></button>
 <?php endif; ?>
-            <button type="button" class="files-close" id="info-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+            <button type="button" class="files-close ic-btn" id="info-close" aria-label="<?= _h('common.close') ?>" data-tip="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
         </div>
         <div class="files-body" id="info-body"></div>
     </div>

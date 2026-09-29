@@ -54,9 +54,12 @@ $src = fn(string $f): string => (string)@file_get_contents($root . '/' . $f);
 $db = getDb(); $cfg = getSettings($db); ensureSchema($db, $cfg);
 $GLOBALS['db'] = $db;
 langInit([], 'en');
+// The anti-spam layer (1.71.0) is OFF here, explicitly: this file saves twenty times in a second from fresh accounts
+// (whose links the layer would draw as text) — the layer, and the bio's place in it, are tests/antispam_test.php's.
 $cfgOn = array_merge($cfg, [
     'users_enabled' => '1', 'users_require_email_verify' => '1', 'profiles_enabled' => '1',
     'profile_bio_enabled' => '1', 'profile_bio_max' => '300', 'link_trusted_domains' => 'example.org',
+    'antispam_enabled' => '0',
 ]);
 $GLOBALS['cfg'] = $cfgOn;
 
@@ -425,7 +428,7 @@ $run = function (string $endpoint, string $file, array $post, array $session, ar
 $GLOBALS['runner'] = $runner;
 $httpId = pbUser($db, $cfgOn, 'pbtest_http');
 $sessFor = fn(int $uid) => ['user_id' => $uid, 'user_login_time' => time(), 'csrf_token' => 'pb-child-token'];
-$bioCfg = ['users_enabled' => '1', 'profiles_enabled' => '1', 'profile_bio_enabled' => '1', 'profile_bio_max' => '300'];
+$bioCfg = ['users_enabled' => '1', 'profiles_enabled' => '1', 'profile_bio_enabled' => '1', 'profile_bio_max' => '300', 'antispam_enabled' => '0'];
 $j = $run('profile_bio', 'api/profile_bio.php', ['csrf_token' => 'pb-child-token', 'bio' => '[i]from the endpoint[/i] [img]x[/img]'], $sessFor($httpId), $bioCfg);
 check('the endpoint file, as a request: signed in by the session, saved, and answered with the server\'s HTML',
       !empty($j['success']) && ($j['html'] ?? '') === '<em>from the endpoint</em> [img]x[/img]' && (string)$row($httpId)['bio'] === '[i]from the endpoint[/i] [img]x[/img]',
@@ -566,9 +569,10 @@ try {
     }
     check('read through a DOM: the five tags, and only the picker\'s pictures added — rt-emote, the room\'s endpoint, nothing else',
           $badT === [], implode(', ', array_unique($badT)));
+    // 1.71.0: both also say whether the links are words (written while the account was new — includes/antispam.php).
     check('the page and the endpoint draw it with the database (profileBioFor(), the save\'s answer)',
-          str_contains($src('includes/profilebio.php'), 'return profileBioRender($src, $cfg, $db);')
-          && str_contains($src('includes/profilebio.php'), "'html'    => \$clearing ? '' : profileBioRender(\$clean, \$cfg, \$db),"));
+          str_contains($src('includes/profilebio.php'), 'return profileBioRender($src, $cfg, $db, $linksText);')
+          && str_contains($src('includes/profilebio.php'), "'html'    => \$clearing ? '' : profileBioRender(\$clean, \$cfg, \$db, antispamLinksTextNow(\$db, \$cfg, \$me)),"));
     check('the editor has the picker: its button is the sixth, and the page tells it what this reader may use (no stickers)',
           str_contains($src('assets/js/profile-bio.js'), "window.EmojiPicker.attach({ textarea: ta, button: emojiBtn, data: root.dataset })")
           && str_contains($src('templates/pages/profile.php'), "emojiPickerAttrs(emojiPickerData(\$db, \$cfg, \$baseUrl, 'bio'))")

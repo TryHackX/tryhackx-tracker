@@ -64,16 +64,25 @@ function settingsCatalogGroups(): array {
          'keywords' => 'database mariadb mysql memory ram buffer pool innodb firewall nftables rate limit throttle udp packets pps traffic flood inbound outbound egress budget trusted exempt kernel buffers rmem wmem sysctl backlog stability probe tuner address lists allow block countries zone ipdeny'],
         ['id' => 'stats',        'title' => 'Statistics',         'icon' => 'bi-graph-up',
          'keywords' => 'statistics stats numbers chart graph timeline history samples roll-up retention peers seeds leechers uptime live refresh ranges'],
-        // What members add to a torrent: a description and a source link (and who reviews them), and a
-        // rating. "Descriptions & review" until 1.69.0 — the ratings were in it and its name hid them.
-        ['id' => 'content',      'title' => 'Descriptions & ratings', 'icon' => 'bi-card-text',
-         'keywords' => 'description source link bbcode markdown review moderation queue rewrite proposal images links preview submitter words text ratings rating votes vote thumbs stars reputation likes score'],
+        // What members add to a torrent: a description and a source link (and who reviews them), comments
+        // (1.71.0), and a rating. "Descriptions & review" until 1.69.0 — the ratings were in it and its name
+        // hid them — and "Descriptions & ratings" until 1.71.0, for the same reason once there were comments.
+        ['id' => 'content',      'title' => 'Descriptions, comments & ratings', 'icon' => 'bi-card-text',
+         'keywords' => 'description source link bbcode markdown review moderation queue rewrite proposal images links preview submitter words text comments comment thread discussion guest komentarze ratings rating votes vote thumbs stars reputation likes score'],
         // The shoutbox and the sounds were a section each inside "Descriptions & review" and "User
         // accounts", which is where they landed rather than where anybody would look for them: one
         // is a room people talk in and the other is what the whole site plays. Two chips of their
         // own, and the sections keep their ids so every bookmark into them still opens.
+        // Since 1.71.0 the room alone: its emoji picker and its emotes went to a chip of their own (below).
         ['id' => 'shoutbox',     'title' => 'Shoutbox',           'icon' => 'bi-chat-left-dots',
-         'keywords' => 'shoutbox shout chat chatbox room talk tagboard cbox czat emotes stickers emoji rules flood retention pinned announcement'],
+         'keywords' => 'shoutbox shout chat chatbox room talk tagboard cbox czat rules flood retention pinned announcement'],
+        // The emoji picker, Font Awesome's icons in it, and the emotes and stickers (1.71.0). They grew up as
+        // two blocks of Shoutbox — the picker and the pictures were the room's — but from 1.70.0 every text
+        // with the picker takes them (a message, a description and its proposed rewrite, a list's, the
+        // profile's), and they had become most of that card: somebody looking for "emotes in messages" would
+        // not open a chip called Shoutbox. Two sections, the picker and the pictures; the keys did not move.
+        ['id' => 'emoji',        'title' => 'Emoji & emotes',     'icon' => 'bi-emoji-smile',
+         'keywords' => 'emoji emoticons smileys faces picker font awesome fontawesome icons categories emotes custom pictures images stickers upload approve approval queue waiting everywhere messages descriptions lists profile emotki naklejki buzki ikony wybierak'],
         ['id' => 'sounds',       'title' => 'Sounds',             'icon' => 'bi-volume-up',
          'keywords' => 'sound sounds audio chime notification alert ping mute volume upload library dzwieki'],
         ['id' => 'index',        'title' => 'Index',              'icon' => 'bi-collection',
@@ -182,6 +191,47 @@ function settingsCatalogKeywords(): array {
         'delete_captcha_attempts'   => 'report deletion password mistakes before captcha protection',
         'delete_lockout_attempts'   => 'report deletion password mistakes before lockout protection',
         'delete_lockout_minutes'    => 'report deletion lockout duration cooldown minutes',
+        // #section-antispam (1.71.0, includes/antispam.php)
+        'antispam_enabled'          => 'anti-spam antispam spam flood protection master switch pace pacing slow down ladder writing antyspam ochrona przed spamem',
+        'antispam_captcha_after'    => 'anti-spam captcha escalation top of the ladder hits human check bot eskalacja',
+        'antispam_guest_captcha'    => 'anti-spam guests anonymous captcha every time comment description gosc goscie',
+        'antispam_staff_exempt'     => 'anti-spam staff moderators admins exempt exemption panel access zwolnieni obsluga',
+        'antispam_new_days'         => 'anti-spam new accounts trust period days fresh registration nowe konta zaufanie',
+        'antispam_new_factor'       => 'anti-spam new accounts stricter slower multiplier factor longer pauses nowe konta',
+        'antispam_new_links'        => 'anti-spam new accounts links as text no links url spam linki jako tekst',
+        'antispam_dup_seconds'      => 'anti-spam duplicate same text again repeated window minutes duplikat powtorzenie',
+        'antispam_pm_new_hour'      => 'anti-spam messages new conversations per hour recipients people limit wiadomosci rozmowy',
+        'antispam_pm_new_day'       => 'anti-spam messages new conversations per day recipients people limit wiadomosci rozmowy',
+        'antispam_pm_new_hour_new'  => 'anti-spam messages new accounts new conversations per hour limit nowe konta',
+        'antispam_pm_new_day_new'   => 'anti-spam messages new accounts new conversations per day limit nowe konta',
+        'antispam_pm_spread'        => 'anti-spam messages same text several people recipients spread broadcast spam rozsylanie',
+        'antispam_shout_burst'      => 'anti-spam shoutbox room chat burst free lines first shout pokoj',
+        'antispam_shout_steps'      => 'anti-spam shoutbox room chat pauses ladder seconds interval shout pokoj',
+        'antispam_shout_reset'      => 'anti-spam shoutbox room chat reset quiet expire shout pokoj',
+        'antispam_message_burst'    => 'anti-spam messages new conversations burst free wiadomosci',
+        'antispam_message_steps'    => 'anti-spam messages new conversations pauses ladder seconds wiadomosci',
+        'antispam_message_reset'    => 'anti-spam messages new conversations reset quiet expire wiadomosci',
+        'antispam_comment_burst'    => 'anti-spam comments burst free komentarze',
+        'antispam_comment_steps'    => 'anti-spam comments pauses ladder seconds komentarze',
+        'antispam_comment_reset'    => 'anti-spam comments reset quiet expire komentarze',
+        'antispam_description_burst' => 'anti-spam descriptions proposals torrent burst free opisy',
+        'antispam_description_steps' => 'anti-spam descriptions proposals torrent pauses ladder seconds opisy',
+        'antispam_description_reset' => 'anti-spam descriptions proposals torrent reset quiet expire opisy',
+        'antispam_report_burst'     => 'anti-spam reports flag burst free zgloszenia',
+        'antispam_report_steps'     => 'anti-spam reports flag pauses ladder seconds zgloszenia',
+        'antispam_report_reset'     => 'anti-spam reports flag reset quiet expire zgloszenia',
+        'antispam_list_burst'       => 'anti-spam lists list names descriptions burst free listy',
+        'antispam_list_steps'       => 'anti-spam lists list names descriptions pauses ladder seconds listy',
+        'antispam_list_reset'       => 'anti-spam lists list names descriptions reset quiet expire listy',
+        'antispam_bio_burst'        => 'anti-spam profile description bio about me burst free opis profilu',
+        'antispam_bio_steps'        => 'anti-spam profile description bio about me pauses ladder seconds opis profilu',
+        'antispam_bio_reset'        => 'anti-spam profile description bio about me reset quiet expire opis profilu',
+        'antispam_emote_burst'      => 'anti-spam emotes stickers upload burst free emotki',
+        'antispam_emote_steps'      => 'anti-spam emotes stickers upload pauses ladder seconds emotki',
+        'antispam_emote_reset'      => 'anti-spam emotes stickers upload reset quiet expire emotki',
+        'antispam_vote_burst'       => 'anti-spam votes ratings thumbs stars burst free glosy oceny',
+        'antispam_vote_steps'       => 'anti-spam votes ratings thumbs stars pauses ladder seconds glosy oceny',
+        'antispam_vote_reset'       => 'anti-spam votes ratings thumbs stars reset quiet expire glosy oceny',
         // #section-limits
         'rate_limit'                => 'reports per hour ip flood throttle limit abuse',
         'rate_limit_status'         => 'status checks per hour ip throttle limit',
@@ -244,6 +294,7 @@ function settingsCatalogKeywords(): array {
         'pm_enabled'                => 'private messages pm inbox conversations members write dm',
         'pm_who'                    => 'private messages who can write default friends everybody nobody',
         'pm_max_per_day'            => 'private messages limit per day spam flood cap',
+        'rate_limit_pm'             => 'private messages per hour address ip network script ceiling flood rate limit wiadomosci na godzine adres',
         'pm_max_chars'              => 'private message length limit characters maximum',
         'pm_live_seconds'           => 'messages live refresh poll seconds chat realtime conversation updates',
         'site_live_seconds'         => 'navigation badge unread count refresh pulse poll seconds notifications live site wide',
@@ -411,7 +462,7 @@ function settingsCatalogKeywords(): array {
         'stats_timeline_ranges'     => 'range buttons 24h 7d 2w 1m 3m all which buttons offered zoom periods',
         'stats_timeline_custom_range' => 'custom span slider free range arbitrary period continuous',
 
-        // ── Descriptions & ratings ──
+        // ── Descriptions, comments & ratings ──
         // #section-content
         'wl_allow_source_url'       => 'whitelist submit source link url page where torrent came from',
         'wl_allow_description'      => 'whitelist submit description text markdown bbcode about torrent',
@@ -426,6 +477,16 @@ function settingsCatalogKeywords(): array {
         'desc_max_links'            => 'description links limit how many url maximum',
         'search_allow_sl_refresh'   => 'public search info modal refresh seeders leechers scrape on demand',
         'search_sl_refresh_seconds' => 'public search refresh seeders cooldown rate limit seconds',
+        // #section-comments (1.71.0, includes/comments.php)
+        'comments_enabled'          => 'comments comment thread discussion talk reply under torrent info panel komentarze komentarz dyskusja master switch',
+        'comment_max_chars'         => 'comment length limit characters maximum how long visible komentarz dlugosc znaki',
+        'comment_links'             => 'comment links url allowed hyperlink address leaving warning spam komentarz linki odnosniki',
+        'comment_edit_minutes'      => 'comment edit correct fix typo own window minutes how long change komentarz edycja poprawka',
+        'comment_delete_own_minutes' => 'comment delete remove take back own window minutes how long komentarz usun wycofaj',
+        'comments_per_page'         => 'comments page size how many shown load earlier more pagination komentarze strona',
+        'comment_rate_per_hour'     => 'comment rate limit per hour flood spam throttle account guest address komentarze limit godzina',
+        'captcha_pts_comment'       => 'captcha points added by a comment smart captcha spam bot komentarz punkty',
+        'comments_guest_review'     => 'guest anonymous visitor comment review approval hold queue moderator gosc anonim komentarz zatwierdzanie kolejka',
         // #section-reputation
         'rep_enabled'               => 'reputation rating vote up down score percent thumbs',
         'rep_mode'                  => 'rating mode stars thumbs up down five star half star ten point',
@@ -456,16 +517,20 @@ function settingsCatalogKeywords(): array {
         'shout_live_seconds_guest'  => 'shoutbox guest visitor anonymous refresh poll seconds cadence not logged in cheaper',
         'shout_system_lines'        => 'shoutbox system lines announcements automatic site says registered torrent whitelist bot notices',
         'shout_page_action'         => 'shoutbox address action name url link route chat czat adres nazwa strony rename where it lives',
-        'shout_emotes_enabled'      => 'shoutbox emotes emoticons smileys custom images pictures svg png gif webp emotki obrazki master switch',
-        'shout_stickers_enabled'    => 'shoutbox stickers big emote whole message naklejki large image sticker',
+
+        // ── Emoji & emotes (1.71.0; the keys are the room's names, where they were born) ──
+        // #section-emoji
+        'shout_emoji_fa'            => 'emoji picker font awesome pro faces smileys icons mixed instead of ordinary shoutbox messages descriptions everywhere emotikony buzki twarze mieszane wybierak',
+        'shout_emoji_fa_style'      => 'emoji font awesome faces icons style family duotone sharp light thin solid default styl rodzina',
+        'shout_emoji_fa_scope'      => 'emoji picker font awesome every any icon icons all categories category chips search find catalogue pro wszystkie ikony kategorie wyszukiwarka zakres',
+        // #section-emotes
+        'shout_emotes_enabled'      => 'emotes emoticons smileys custom images pictures svg png gif webp shoutbox emotki obrazki master switch',
         'emotes_everywhere'         => 'emotes stickers everywhere outside the shoutbox private messages descriptions proposals lists profile bio emotki naklejki wiadomosci opisy listy profil wszedzie poza shoutboxem',
-        'shout_emoji_fa'            => 'shoutbox emoji picker font awesome pro faces smileys icons mixed instead of ordinary emotikony buzki twarze mieszane',
-        'shout_emoji_fa_style'      => 'shoutbox emoji font awesome faces style family duotone sharp light thin solid default styl rodzina',
-        'shout_emoji_fa_scope'      => 'shoutbox emoji picker font awesome every any icon icons all categories category search find catalogue pro wszystkie ikony kategorie wyszukiwarka zakres',
-        'shout_emote_approval'      => 'shoutbox emote approval approve waiting queue moderation review member upload hold pending zatwierdzanie kolejka',
-        'shout_emote_max_kb'        => 'shoutbox emote size limit kilobytes kb upload maximum picture file',
-        'shout_emote_max_px'        => 'shoutbox emote pixels width height dimensions limit maximum picture size',
-        'shout_emote_per_user'      => 'shoutbox emote per user cap how many uploads each member limit',
+        'shout_stickers_enabled'    => 'stickers big emote whole message naklejki large image sticker shoutbox',
+        'shout_emote_approval'      => 'emote approval approve waiting queue moderation review member upload hold pending zatwierdzanie kolejka',
+        'shout_emote_max_kb'        => 'emote size limit kilobytes kb upload maximum picture file',
+        'shout_emote_max_px'        => 'emote pixels width height dimensions limit maximum picture size',
+        'shout_emote_per_user'      => 'emote per user cap how many uploads each member limit',
 
         // ── Sounds ──
         // #section-sounds
@@ -476,6 +541,8 @@ function settingsCatalogKeywords(): array {
         'sound_default_shout_friend' => 'sound default shout shoutbox friend chime audio play',
         'sound_default_shout'       => 'sound default shout shoutbox chime audio play stranger',
         'sound_default_mention'     => 'sound default mention @ shoutbox chime audio play',
+        'sound_default_comment'     => 'sound default comment commented reply thread torrent chime audio play komentarz dzwiek',
+        'sound_default_comment_mention' => 'sound default comment mention @ named me chime audio play komentarz wzmianka dzwiek',
 
         // ── Index ──
         // #section-index

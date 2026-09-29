@@ -1,6 +1,6 @@
 <?php
 /**
- * GET/POST admin/shout_emotes — the emote manager (Settings → Shoutbox).
+ * GET/POST admin/shout_emotes — the emote manager (Settings → Emoji & emotes; Settings → Shoutbox until 1.71.0).
  *
  * GET   every emote, enabled or not, with who uploaded it and the limits in force.
  * POST  {"op": "list"}

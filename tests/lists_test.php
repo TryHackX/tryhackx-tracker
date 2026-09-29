@@ -548,9 +548,12 @@ require "api/" . $a["endpoint"] . ".php";
         $j['__status'] = preg_match('/STATUS:(\d+)/', $errOut, $sm) ? (int)$sm[1] : 0;
         return $j;
     };
+    // The anti-spam layer (1.71.0) is OFF here, explicitly: these requests come faster than a person writes and their
+    // owner is a fresh account, whose links the layer would draw as text — the layer is tests/antispam_test.php's.
     $cfgHttp = ['users_enabled' => '1', 'lists_enabled' => '1', 'lists_public_enabled' => '1', 'profiles_enabled' => '1', 'lists_desc_max' => '1000',
                 'desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1', 'desc_max_links' => '10', 'rate_limit_favourites' => '1000',
-                'shout_enabled' => '1', 'shout_emotes_enabled' => '1', 'emotes_everywhere' => '1', 'user_require_email_verify' => '0'];
+                'shout_enabled' => '1', 'shout_emotes_enabled' => '1', 'emotes_everywhere' => '1', 'user_require_email_verify' => '0',
+                'antispam_enabled' => '0'];
     $sess = static fn(int $uid): array => ['user_id' => $uid, 'user_login_time' => time() + 60, 'csrf_token' => 'lstd-token'];
     $ip = '203.0.113.' . random_int(10, 250);
     $body = ['op' => 'edit', 'id' => $fxLists['pub'], 'name' => 'Desc pack', 'description' => "[b]Bold[/b] and a [url=https://example.org]link[/url] :flame:", 'format' => 'bbcode'];

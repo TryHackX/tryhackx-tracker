@@ -28,7 +28,9 @@
         });
         return n;
     }
-    function csrf() { var i = document.getElementById('account-csrf'); return i ? i.value : ''; }
+    // The page's token (1.71.0): window.csrfToken() in app.js, loaded before this file. It read
+    // #account-csrf alone — safe only while this block was drawn nowhere but the account page.
+    function csrf() { return typeof window.csrfToken === 'function' ? window.csrfToken() : ''; }
     async function get(qs) {
         try {
             var r = await fetch(API + qs, { credentials: 'same-origin', headers: { Accept: 'application/json' } });

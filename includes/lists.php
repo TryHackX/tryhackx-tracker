@@ -27,6 +27,9 @@
 // The lists a hash is on — "who has this" (1.70.0) — are asked there, one query for the overlay and for
 // listsContainingHash() below.
 require_once __DIR__ . '/who.php';
+// How fast a list's name and description may be written, and whether a new account's links are words (1.71.0):
+// the site's one anti-spam layer, which the lists' endpoints ask wherever they are loaded from.
+require_once __DIR__ . '/antispam.php';
 
 /** The master switch. Off, every endpoint answers 404 and no page draws anything about lists. */
 function listsEnabled(array $cfg): bool
@@ -184,12 +187,15 @@ function listDescProblem(string $clean, string $format, array $cfg): ?array
  * (typed into a database client, restored from an old backup) still shows none. The emotes are
  * `rt-emote` / `rt-sticker` and stay. The format as stored: a description written as Markdown stays
  * Markdown after the operator allows BBCode only, as a torrent's does.
+ *
+ * `$linksText` (1.71.0, includes/antispam.php): written while its owner's account was new — every link is
+ * drawn as its words (antispamWrittenNew(), asked by the caller from when the list was last written).
  */
-function listDescRender(?PDO $db, array $cfg, ?string $text, $format): string
+function listDescRender(?PDO $db, array $cfg, ?string $text, $format, bool $linksText = false): string
 {
     $text = (string)$text;
     if (trim($text) === '') return '';
-    $html = richtextRenderIn('list', $db, $text, listDescFormatOf($format), $cfg,
+    $html = richtextRenderIn('list', $db, $text, listDescFormatOf($format), $linksText ? ['rt_links_text' => '1'] + $cfg : $cfg,
                              function_exists('richtextViewerSignedIn') ? richtextViewerSignedIn($db) : false);
     $html = preg_replace('#<img class="rt-img"[^>]*>#', '', $html) ?? $html;
     return preg_replace('#<p>\s*</p>#', '', $html) ?? $html;
