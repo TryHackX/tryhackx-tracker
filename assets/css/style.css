@@ -1854,7 +1854,12 @@ footer p { margin: 0.25rem 0; }
    (.acc-wide), where it can make neither column longer. */
 .acc-flow { columns: 2 20rem; column-gap: 1rem; margin: 1.25rem 0 0; }
 .acc-flow > .account-card { break-inside: avoid; margin: 0 0 1rem; }
-.account-card.acc-wide { margin: 0 0 1.25rem; }
+/* The card under the columns stands 1.25rem below them, as the columns stand below the tabs (1.72.0 — the
+   owner's rule: it touched the cards above it). Measured, it touched them only in two columns: the flow drops
+   its last card's margin at the end of a column and keeps it in one column (a phone), where the card stood
+   16px below. So the flow's last card has none, and the card's own margin is the one gap on every width. */
+.acc-flow > .account-card:last-child { margin-bottom: 0; }
+.account-card.acc-wide { margin: 1.25rem 0 1.25rem; }
 .account-card { background: var(--bg-code); border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.25rem; }
 .account-card h2 { margin-top: 0; font-size: 1.05rem; }
 /* Each card's heading, and the line under it that says what the card is for. */
@@ -2031,10 +2036,7 @@ body.page-search .container { max-width: 86em; }
 /* Only drawn when ratings are shown in results — the colgroup asks the same question the <thead>
    does, from the same variable. */
 .search-c-rep { width: 5.5em; }
-/* Three buttons AND the star at their real rendered widths plus the cell padding. Measured, not
-   eyeballed: 204px in English, 211px with the Polish "Kopiuj", and the cell spends 24px of its own
-   on padding. 13.5em left 192px, which is why the star spent three releases on a second line. */
-.search-c-actions { width: 15em; }
+/* The actions column's width is with the icon buttons', below (1.71.0 — exactly its icons since 1.72.0). */
 .search-name { word-break: break-word; }
 .search-name > span:first-child { margin-right: 0.15rem; }
 .search-num { white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -2060,14 +2062,13 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
    height, so as soon as a long name wrapped to a second line the buttons stayed at their own height
    and sat across the row's divider. The cell stays a cell; the div inside it does the laying out. */
 .search-c-actions-cell { vertical-align: middle; }
-/* nowrap, because the star belongs beside Info and not under it. The column above is wide enough
-   for the whole set in both languages; wrapping comes back at phone widths, where the table scrolls
-   sideways and a second line inside the column beats a star pushed off the screen. */
+/* nowrap, because the star belongs beside Info and not under it — on a phone too (1.72.0): the column is
+   exactly the icons' width (below), so the set is one line at every width, and a wrap allowed there would
+   only turn a rounding of a hundredth of a pixel into a star on a second line. */
 .search-c-actions-inner { display: flex; flex-wrap: nowrap; gap: 0.35rem; }
 /* Centred, not top-aligned. A wrapped name makes the row taller and the numbers beside it read
    better in the middle of that height than pinned to its first line. */
 .search-table td { vertical-align: middle; }
-.search-act-btn { min-width: 4.2em; text-align: center; padding: 0.25rem 0.4rem; }
 .search-act-btn.copied { color: var(--success); border-color: var(--success); }
 .search-note { margin-top: 0.5rem; }
 /* pagination in the admin style (First/Prev/page box/Next/Last) */
@@ -2160,11 +2161,8 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
     .code-block code { word-break: break-all; }
 }
 @media (max-width: 480px) {
-    .search-act-btn { min-width: 3.4em; padding: 0.25rem 0.3rem; }
     .search-c-name { width: 13em; }
     .search-c-seen { width: 7.5em; }
-    .search-c-actions { width: 10.5em; }
-    .search-c-actions-inner { flex-wrap: wrap; }
     .account-kv td:first-child { width: auto; white-space: normal; }
     .home-stats-widget { margin-left: 0; margin-right: 0; }
 }
@@ -2746,21 +2744,32 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    swarm is always drawn, even when the number is unknown: a missing cell would slide the hash into
    the column beside it. */
 /* The third column is the hash chip's (1.62.0): twelve monospace characters, the ellipsis and the
-   pill's own padding and edge, which 8em no longer held. */
+   pill's own padding and edge, which 8em no longer held. Sixteen from 600px (1.72.0): part of the room the
+   actions gave back (below) — the chip's four more characters (.pf-hash-more) and a column 1.5em wider.
+   Under 600px the facts have a line of their own, 336px wide on a 390px phone, and 16 would not fit it. Not
+   in an upload's row: its actions are words (the switch below) and gave nothing back — the name would pay. */
 .pf-meta { display: grid; grid-template-columns: 6em 7.5em 9.5em; gap: 0.8rem;
     color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;
     text-align: right; font-variant-numeric: tabular-nums; }
+.pf-hash-more { display: none; }
+@media (min-width: 600px) {
+    .pf-row:not(:has(.pf-vis-row)) .pf-meta { grid-template-columns: 6em 7.5em 11em; }
+    .pf-row:not(:has(.pf-vis-row)) .pf-hash-more { display: inline; }
+}
 /* The site's own font (1.64.0). This said `var(--mono, monospace)` and `--mono` is defined nowhere
    in this stylesheet, so every one of these chips was drawn in whatever the browser calls monospace
    — a second typeface on the page, chosen by the machine rather than by the site. Twelve characters
    and an ellipsis do not need a fixed pitch; they need to look like the rest of the row. */
 .pf-hash { font-family: inherit; }
-/* min-width, not width: the favourites list carries Magnet and a star, the uploads list carries
-   Magnet and the visibility toggle, and only the first two have to line up with each other. */
+/* As wide as its icon buttons (1.72.0). 12.5em was what the words Magnet and Info needed beside the
+   star; since 1.71.0 the three icons take 89px of those 200 and the rest stood empty at the row's end
+   (80px of 170 in a list's window) — room the torrent's name wants, and the hash chip above. A min-width
+   still, of the three buttons every favourites and list row has, so a row that lacks one (a banned
+   torrent has no Magnet) keeps its columns where the other rows have theirs; the uploads' switch keeps
+   its longer word's width (.pf-vis-row), so every upload row is one width too. In rem, as the buttons are:
+   a list's window draws its rows a size smaller, and its box was 170px where the page's is 200. */
 .pf-acts { display: flex; gap: 0.35rem; align-items: center; margin-left: auto;
-    min-width: 12.5em; justify-content: flex-end; }
-/* Same width as the search results' own Info, so the two lists read as one thing. */
-.pf-info { min-width: 4.2em; text-align: center; padding: 0.25rem 0.4rem; }
+    min-width: calc(3 * 1.625rem + 2 * 0.35rem); justify-content: flex-end; }
 .pf-badge { font-size: 0.7rem; padding: 0.05rem 0.35rem; border-radius: 3px; border: 1px solid var(--border);
     color: var(--text-muted); white-space: nowrap; }
 .pf-badge-bad { color: #ff6b6b; border-color: #6b2a2a; }
@@ -2774,6 +2783,13 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pf-vis { background: none; border: 1px solid var(--border); color: var(--text-muted); font: inherit;
     font-size: 0.8rem; line-height: 1.25; padding: 0.25rem 0.5rem; border-radius: 4px; cursor: pointer; white-space: nowrap; }
 .pf-vis-on { color: #4caf50; border-color: #2e5c30; }
+/* An upload row's switch holds BOTH its words, one cell of a grid, and shows the one that is true (1.72.0):
+   the button is as wide as the longer word whichever it says, so a row that is shown on the profile and a
+   row that is not are one width — "Shown on your profile" and "Not on your profile" made two rows of one
+   list 15px apart (54px in Polish), and every column of the row after them with it. */
+.pf-vis-row { display: inline-grid; }
+.pf-vis-row > .pf-vis-t { grid-area: 1 / 1; justify-self: center; }
+.pf-vis-row:not(.pf-vis-on) > .pf-vis-t-on, .pf-vis-row.pf-vis-on > .pf-vis-t-off { visibility: hidden; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
 
 /* ── likes / ratings (1.69.0): the table on the account tab and the profile section ────────────────
@@ -2804,7 +2820,11 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pv-c-score { width: 6em; }
 .pv-c-votes { width: 5em; }
 .pv-c-date  { width: 7em; }
-.pv-c-acts  { width: 9.5em; }
+/* Magnet and Info, exactly (1.72.0): two icon buttons, the gap between them and the cell's 0.5rem each side,
+   at the cell's right edge (`.pv-table .pf-acts` below). 9.5em was what the two words needed, and since
+   1.71.0 it left 78px empty at the table's right edge — the owner's screenshot — while the name beside it
+   broke onto a second line in 216px. The name has them now. The descriptions table's is the same (.pd-c-acts). */
+.pv-c-acts  { width: calc(2 * 1.625rem + 0.35rem + 1rem); }
 /* The header's words are buttons (the keyboard reaches them), dressed as the words they were.
    `overflow-wrap: anywhere` (1.70.0) is the floor under the widths above: the columns are fixed, and a
    header that does not fit its column — text drawn larger or wider than it is here (a browser's
@@ -2834,7 +2854,7 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pv-thumb-up { color: #6fce8b; }
 .pv-thumb-down { color: #ff8a8a; }
 .pv-table .pv-score .bi { font-size: 0.8em; }
-.pv-table .pf-acts { min-width: 0; margin-left: 0; justify-content: flex-start; flex-wrap: nowrap; }
+.pv-table .pf-acts { min-width: 0; margin-left: 0; justify-content: flex-end; flex-wrap: nowrap; }
 @media (max-width: 959px) {
     .pv-table, .pv-table thead, .pv-table tbody, .pv-table tr, .pv-table th, .pv-table td { display: block; }
     .pv-table colgroup { display: none; }
@@ -2865,7 +2885,7 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    "Współautor, 100%" in Polish), the date, and Magnet / Info. On a phone it is the likes table's card. */
 .pd-c-role { width: 10.5em; }
 .pd-c-date { width: 7em; }
-.pd-c-acts { width: 9.5em; }
+.pd-c-acts { width: calc(2 * 1.625rem + 0.35rem + 1rem); }
 .pd-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.4rem; }
 .pd-head .pf-badge { margin-left: 0; }
 .pd-excerpt { font-size: 0.8rem; margin-top: 0.15rem; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical;
@@ -3031,12 +3051,12 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .acc-sessions-act .profile-search { flex: 0 0 auto; }
 .acc-sessions-act .text-muted { text-align: center; }
 
-/* A value with a Copy beside it, in the Info panel: the hash, the magnet. The magnet is one long
-   token and breaks anywhere rather than pushing the panel wider than the screen. */
+/* A value with a Copy, in the Info panel: the hash, the magnet — the Copy on the label's line since 1.72.0
+   (.info-kv-head, assets/css/detail-panel.css). The magnet is one long token and breaks anywhere rather than
+   pushing the panel wider than the screen. */
 .info-copyable { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; max-width: 100%; }
 .info-copyable .info-hash, .info-copyable .info-magnet { min-width: 0; overflow-wrap: anywhere; word-break: break-all; }
 .info-copyable .info-magnet { font-family: var(--mono, monospace); font-size: 0.82rem; }
-.info-copyable .share-url { flex: 1 1 100%; }
 /* The report button: a flag, at message size, that stops disappearing when the eye is looking for
    it. Still quiet — it sits under somebody else's words and is pressed once in a hundred reads. */
 .pm-report { color: var(--text-muted); border: 1px solid transparent; border-radius: 4px; padding: 0 0.3rem; }
@@ -3100,7 +3120,6 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
     background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 0.7rem 0.8rem; display: flex; flex-direction: column; gap: 0.4rem;
 }
-.list-card-public { border-color: #2e5c30; }
 .list-card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
 .list-name {
     background: none; border: 0; padding: 0; cursor: pointer;
@@ -3108,7 +3127,36 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 }
 .list-name:hover { text-decoration: underline; }
 .list-count { font-size: 0.8rem; }
-.list-badge-public { color: #4caf50; border-color: #2e5c30; }
+/* Who sees a list (1.72.0) — its OWNER's chip: the icon and the answer's word, on the owner's own cards (a
+   button there: it opens Edit on the question) and in the list's window. Nobody else's card is tinted or
+   badged: a visitor only ever sees the lists they may see. The icon and its word are a row the way a
+   button's are (the icon block at the top of this file): baseline-aligned, one gap that no space in the
+   markup decides, less the room a Font Awesome glyph leaves on the words' side (--bi-sb, icons.js). Each
+   answer its colour: private the page's quiet grey, friends the accent's blue, public the green the old
+   badge had. At a small button's size (0.8rem, as the list's count beside it): at 0.75rem Bootstrap's
+   glyphs stood 1.05px under their words' cap middle (measured, icons_align_check), at 0.8rem 0.55px, as the
+   buttons do. */
+.list-vis {
+    display: inline-flex; align-items: baseline; column-gap: max(0px, var(--bi-gap, 0.4em) - var(--bi-sb));
+    font: inherit; font-size: 0.8rem; line-height: 1.25; padding: 0.1rem 0.45rem; border-radius: 3px;
+    border: 1px solid var(--control-border); background: none; color: var(--text-muted); white-space: nowrap;
+}
+.list-vis > .bi { margin-inline: 0; }
+.list-vis-friends { color: #7ab8ff; border-color: #25486e; }
+.list-vis-public { color: #4caf50; border-color: #2e5c30; }
+button.list-vis { cursor: pointer; }
+button.list-vis:hover { border-color: var(--accent); background: rgba(74, 158, 255, 0.10); }
+button.list-vis:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+/* The Edit window's three-way choice: three buttons side by side, the chosen one lit in its answer's colour
+   — apart, not joined into one bar: on a phone the Polish words ("Dla znajomych") take the row, and a joined
+   bar broken over two lines is no control at all. An answer this reader may not give is drawn disabled (the
+   line under it says why). */
+.le-vis-label { display: block; margin-bottom: 0.35rem; }
+.vis-seg { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.vis-opt[aria-checked="true"] { border-color: var(--accent); background: rgba(74, 158, 255, 0.16); }
+.vis-opt-friends[aria-checked="true"] { color: #7ab8ff; }
+.vis-opt-public[aria-checked="true"] { color: #4caf50; border-color: #2e5c30; background: rgba(76, 175, 80, 0.12); }
+.le-vis-hidden { color: var(--warning); }
 /* A list's description (1.70.0). On the card, the first line or two of what a reader sees — folded here,
    so a long one never makes one card taller than the rest of its row; in the list's window, all of it,
    drawn, under the name — the rows' own top border is the line between the two. */
@@ -3141,7 +3189,6 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .list-add-msg { font-size: 0.8rem; }
 .list-items { border-top: 1px solid var(--border); margin-top: 0.5rem; padding-top: 0.6rem; }
 .list-items-tools { margin-bottom: 0.4rem; }
-.list-remove { min-width: 2em; }
 /* one list, in a window of its own */
 .lo-box { max-width: 60em; }
 #lo-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
@@ -3383,11 +3430,15 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    the cross in the round 24px target it always had. */
 .search-box-icon { font-size: 0.875rem; }
 .search-clear.ic-btn { --ic-box: 1.5rem; font-size: 0.75rem; }
-/* The search results' actions: three icons and the star, 26px each, their gaps and the cell's 24px of
-   padding (145px) — the column the three words needed (15em, 213px) is a quarter narrower. On a phone,
-   where the words wrapped inside 10.5em, it is about as wide as it was (the phone rule above loses to
-   this one) and holds all four on one line. */
-.search-c-actions { width: 9.75rem; }
+/* The search results' actions (1.72.0): EXACTLY their icons — Magnet, Copy, Info and, for a reader who keeps
+   favourites, the star: 1.625rem each, 0.35rem between, and the cell's own 0.75rem each side (145px with the
+   star, 113px without) — at the cell's right edge. 1.71.0's 9.75rem left 11px empty right of the star (the
+   owner's screenshot), and 43px where there is no star; the name has it now. The <col> says whether the star
+   is drawn (templates/pages/search.php, from the question the rows ask). A phone's table scrolls sideways
+   and has the same column: the four are one line at every width. */
+.search-c-actions { width: calc(3 * 1.625rem + 2 * 0.35rem + 1.5rem); }
+.search-c-actions.search-c-actions-fav { width: calc(4 * 1.625rem + 3 * 0.35rem + 1.5rem); }
+.search-c-actions-inner { justify-content: flex-end; }
 /* The whitelist form's result rows stack on a phone; the copy button keeps its square, at the end. */
 @media (max-width: 600px) { .wl-magnet > .wl-copy.ic-btn { align-self: flex-end; } }
 
@@ -3402,7 +3453,8 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .cm-section-body { padding: 0 0.8rem 0.8rem; }
 .cm-list { display: flex; flex-direction: column; gap: 0.6rem; }
 .cm-row { border-top: 1px solid var(--border); padding-top: 0.6rem; scroll-margin: 2rem; min-width: 0; }
-.cm-list > .cm-row:first-child { border-top: 0; padding-top: 0; }
+/* Each top-level comment is a thread since 1.72.0 (below): the first thread's comment has no line above it. */
+.cm-list > .cm-row:first-child, .cm-list > .cm-thread:first-child > .cm-row { border-top: 0; padding-top: 0; }
 .cm-row.cm-held { border-left: 3px solid var(--warning); padding-left: 0.6rem; }
 .cm-row.cm-target { background: rgba(74, 158, 255, 0.10); border-radius: 6px; }
 .cm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.55rem; font-size: 0.85rem; min-height: 1.625rem; }
@@ -3448,6 +3500,42 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
     /* On a phone the actions take a line of their own under the name and the time, at its end. */
     .cm-acts { flex-basis: 100%; justify-content: flex-end; }
     .cm-section-body { padding: 0 0.55rem 0.6rem; }
+}
+
+/* ── Replies (1.72.0, assets/js/comments.js) ─────────────────────────────────────────────────────────
+   A top-level comment is a thread: the comment, its fold, its replies one step in per level with a thin rule down
+   their left edge (Reddit's), and "Show N more replies" at its end. The steps are narrower on a phone — 0.2rem +
+   0.5rem + the 2px rule, 13px a level — so the deepest level shipped (3) keeps all but 40px of a 360px screen. A
+   reply drawn beside what it answers (the depth was lowered) says whom it answers; a comment that went while replies
+   hang from it is its tombstone, words in the muted italic of "a deleted account". The composer under a comment is
+   the foot's composer, smaller: the @ list hangs from it, so it is the positioned box. */
+.cm-node, .cm-thread { min-width: 0; }
+.cm-kids { display: flex; flex-direction: column; min-width: 0; margin-left: 0.5rem; padding-left: 0.75rem; border-left: 2px solid var(--border); }
+.cm-kids:empty, .cm-kids[hidden] { display: none; }
+.cm-kids.cm-kids-flat { margin-left: 0; padding-left: 0; border-left: 0; }
+.cm-kids .cm-row { border-top: 0; padding-top: 0.5rem; }
+.cm-thread-bar { margin-top: 0.3rem; }
+.cm-thread-bar[hidden] { display: none; }
+/* The fold keeps .btn-small's size (0.8rem): measured at 0.78rem its chevron stood 0.81px under its words' middle with
+   Bootstrap Icons (the page rounds an icon's place to a whole pixel) — within the pixel, and nearest the edge. */
+.cm-fold.btn { padding: 0.1rem 0.5rem; color: var(--text-muted); background: transparent; border-color: transparent; }
+.cm-fold.btn:hover { color: var(--text); border-color: var(--border); background: transparent; }
+.cm-more { margin: 0.4rem 0 0 calc(0.5rem + 0.75rem + 2px); align-self: flex-start; }
+.cm-more[hidden] { display: none; }
+.cm-thread.cm-folded > .cm-kids, .cm-thread.cm-folded > .cm-more { display: none; }
+.cm-tomb .cm-tomb-text { display: block; min-height: 1.4rem; font-size: 0.85rem; font-style: italic; color: var(--text-muted); }
+.cm-reply-to { font-size: 0.78rem; font-style: italic; color: var(--text-muted); overflow-wrap: anywhere; }
+.cm-reply-box { position: relative; margin: 0.45rem 0 0.15rem; }
+.cm-reply-box[hidden] { display: none; }
+.cm-reply-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.35rem; font-size: 0.82rem; color: var(--text-muted); min-width: 0; }
+.cm-reply-to-label { min-width: 0; overflow-wrap: anywhere; }
+.cm-reply-box .cm-editor textarea { min-height: 3.6rem; }
+.cm-reply-box .cm-editor .rt-preview { min-height: 3.6rem; }
+.cm-reply-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.45rem; }
+.cm-reply-msg { font-size: 0.82rem; }
+@media (max-width: 600px) {
+    .cm-kids { margin-left: 0.2rem; padding-left: 0.5rem; }
+    .cm-more { margin-left: calc(0.2rem + 0.5rem + 2px); }
 }
 
 /* ── Reporting a comment, a description or a shout (1.71.0, assets/js/reports.js) ─────────────────

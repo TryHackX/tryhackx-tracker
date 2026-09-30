@@ -102,16 +102,19 @@ class Client:
 
 
 USER, PASS = "snduser", "SmokePass123!"
-COMMENT_EV = {"comment": None, "comment_mention": None}   # the two comment events, left on the site default
+COMMENT_EV = {"comment": None, "comment_mention": None, "comment_reply": None}   # the comment events, left on the site default
 clear_throttles()
 # 1.71.0: with comments on (as shipped) two more events exist — a comment, and a comment that mentions me — and
-# their site defaults are stated here too, so the lists below do not depend on what another suite left.
+# their site defaults are stated here too, so the lists below do not depend on what another suite left. 1.72.0: and
+# a third, a reply to one of my comments.
 was = {k: php("echo $cfg['" + k + "'] ?? '';") for k in ("users_enabled", "sounds_enabled", "sound_default_notification", "sound_default_message",
-                                                        "comments_enabled", "sound_default_comment", "sound_default_comment_mention")}
+                                                        "comments_enabled", "sound_default_comment", "sound_default_comment_mention",
+                                                        "sound_default_comment_reply")}
 member_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\"); echo $st->fetchColumn();")
 php("setSetting($db, 'users_enabled', '1'); setSetting($db, 'sounds_enabled', '1');"
     "setSetting($db, 'sound_default_notification', 'b:ding'); setSetting($db, 'sound_default_message', '');"
     "setSetting($db, 'comments_enabled', '1'); setSetting($db, 'sound_default_comment', ''); setSetting($db, 'sound_default_comment_mention', '');"
+    "setSetting($db, 'sound_default_comment_reply', '');"
     "$db->exec(\"UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, '{\\\"sounds.use\\\":true}') WHERE slug = 'member'\");"
     "$db->prepare('DELETE FROM users WHERE username = ?')->execute(['" + USER + "']);"
     "$db->exec(\"DELETE FROM sounds WHERE name LIKE 'Py test%'\");"
@@ -149,8 +152,8 @@ try:
     check("a member gets the library, muted preferences and the site defaults",
           s == 200 and j.get("success") and len(lib) >= 10 and "b:ding" in lib
           and j.get("prefs", {}).get("on") == 0 and j["prefs"]["ev"] == {"notification": None, "message_friend": None, "message": None, **COMMENT_EV}
-          and j.get("defaults") == {"notification": "b:ding", "message_friend": "", "message": "", "comment": "", "comment_mention": ""}
-          and j.get("kinds") == ["notification", "message_friend", "message", "comment", "comment_mention"], (s, str(j)[:300]))
+          and j.get("defaults") == {"notification": "b:ding", "message_friend": "", "message": "", "comment": "", "comment_mention": "", "comment_reply": ""}
+          and j.get("kinds") == ["notification", "message_friend", "message", "comment", "comment_mention", "comment_reply"], (s, str(j)[:300]))
     check("the shipped files are served as static files", lib["b:ding"]["url"].endswith("assets/sounds/ding.mp3"), lib["b:ding"])
     s, html = me.page("account")
     check("the account page has the tab and the pane with its data block",

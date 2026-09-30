@@ -341,11 +341,11 @@ function settingsCatalogKeywords(): array {
         'profile_descriptions_enabled' => 'profile descriptions written wrote author co-author edits credits list tab section public privacy opisy autor wspolautor edycje profil',
         // #section-lists
         'lists_enabled'             => 'lists collections packs playlist folders bundle own list member',
-        'lists_public_enabled'      => 'lists public share profile visible privacy collection',
+        'lists_public_enabled'      => 'lists public share profile visible privacy collection friends only shared udostepnianie znajomi',
         'lists_max_per_user'        => 'lists limit maximum how many collections per user cap',
         'lists_max_items'           => 'list items limit maximum hashes in one list cap size',
         'lists_desc_max'            => 'list description length limit maximum characters letters text bbcode markdown emotes opis listy dlugosc znaki limit',
-        'who_lists_enabled'         => 'who has this lists public collections packs overlay torrent info panel owners kto ma to listy publiczne',
+        'who_lists_enabled'         => 'who has this lists public collections packs overlay torrent info panel owners friends kto ma to listy publiczne znajomi',
 
         // ── Tracker & whitelist ──
         // #section-whitelist
@@ -487,6 +487,11 @@ function settingsCatalogKeywords(): array {
         'comment_rate_per_hour'     => 'comment rate limit per hour flood spam throttle account guest address komentarze limit godzina',
         'captcha_pts_comment'       => 'captcha points added by a comment smart captcha spam bot komentarz punkty',
         'comments_guest_review'     => 'guest anonymous visitor comment review approval hold queue moderator gosc anonim komentarz zatwierdzanie kolejka',
+        // 1.72.0: where the Info panel's section stands, and how it opens
+        'comments_position'         => 'comments where position place location order bottom end last after rating before after files info panel section komentarze gdzie miejsce polozenie kolejnosc dol koniec pliki',
+        'comments_expanded'         => 'comments folded unfolded collapsed expanded open closed shut start info panel section komentarze zwiniete rozwiniete otwarte zamkniete',
+        // 1.72.0: how deep a thread of replies may go
+        'comments_reply_depth'      => 'comments replies reply answer thread tree depth deep levels nested nesting reddit off flat komentarze odpowiedzi odpowiedz watek drzewko glebokosc poziomy zagniezdzenie',
         // #section-reputation
         'rep_enabled'               => 'reputation rating vote up down score percent thumbs',
         'rep_mode'                  => 'rating mode stars thumbs up down five star half star ten point',
@@ -543,6 +548,7 @@ function settingsCatalogKeywords(): array {
         'sound_default_mention'     => 'sound default mention @ shoutbox chime audio play',
         'sound_default_comment'     => 'sound default comment commented reply thread torrent chime audio play komentarz dzwiek',
         'sound_default_comment_mention' => 'sound default comment mention @ named me chime audio play komentarz wzmianka dzwiek',
+        'sound_default_comment_reply' => 'sound default comment reply answered my comment chime audio play komentarz odpowiedz dzwiek',
 
         // ── Index ──
         // #section-index
@@ -551,7 +557,7 @@ function settingsCatalogKeywords(): array {
         'index_poll_minutes'        => 'poll interval minutes full scrape frequency janitor',
         'index_min_seeders'         => 'minimum seeders keep threshold prune noise',
         'index_max_rows'            => 'maximum rows cap size database growth limit',
-        'index_poll_budget'         => 'seconds per poll run time budget truncated resume',
+        'index_poll_budget'         => 'seconds per poll run time budget 300 cut continues resume cursor pass whole scrape walk how many polls estimate truncated',
         'index_grace_days'          => 'grace days before pruning unseen hashes',
         'index_protect_days'        => 'protect new rows days from pruning',
         'index_keep_saved'          => 'keep favourites lists protect prune janitor never delete saved starred',

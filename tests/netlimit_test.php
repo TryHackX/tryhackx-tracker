@@ -18,6 +18,13 @@ $root = dirname(__DIR__);
 require_once $root . '/includes/functions.php';
 require_once $root . '/includes/netlimit.php';
 
+// config/net_state.json exactly as it was, put back at the very end. The helper's half below isolates its
+// own files in a temporary directory, but the state checks in it write the checkout's real state file
+// (netlimitStateUpdate() has no other), and until 1.72.0 nothing put it back: every run cleared the
+// panel's last error and its last clean answer. Section 8 keeps its own copy too — taken after that.
+$stateFileAtStart = netlimitStateFile();
+$stateAtStart = is_file($stateFileAtStart) ? file_get_contents($stateFileAtStart) : null;
+
 $fails = 0; $n = 0; $skips = 0;
 function check(string $name, bool $ok, string $info = ''): void {
     global $fails, $n;
@@ -157,6 +164,139 @@ check('flood mode quotes what is getting through', str_contains($floodP, '39,800
 check('flood mode names it as the number to choose from', str_contains($floodP, 'the number to pick from'), $floodP);
 check('flood mode without a live rate still gives direction',
       !str_contains($flood, 'the number to pick from') && str_contains($flood, 'not one taken from the arrivals'), $flood);
+
+// ── 4b. a burst too small for the limit (1.72.0) ─────────────────────────────
+// Production 2026-09-29: a limit of 90 000 with a burst of 100 passed ~80 000 on average while a third of
+// the arrivals was dropped. ≈ 22 ms of the limit is the suggested bucket: 2 000 at 90 000.
+check('burst: the suggestion for 90 000 pps is 2 000 (≈ 22 ms)', netlimitBurstSuggest(90000) === 2000, (string)netlimitBurstSuggest(90000));
+check('burst: rounded to 100s from 1 000, to 10s from 100, to 1 below',
+      netlimitBurstSuggest(120000) === 2600 && netlimitBurstSuggest(30000) === 660 && netlimitBurstSuggest(45000) === 990 && netlimitBurstSuggest(1000) === 22,
+      json_encode([netlimitBurstSuggest(120000), netlimitBurstSuggest(30000), netlimitBurstSuggest(45000), netlimitBurstSuggest(1000)]));
+check('burst: never outside what the helper accepts', netlimitBurstSuggest(5000000) === NET_BURST_MAX && netlimitBurstSuggest(0) === NET_BURST_MIN
+      && netlimitBurstSuggest(10) === NET_BURST_MIN);
+$hr = static fn(int $n, int $total, int $passed, int $capped, int $limit) => array_fill(0, $n, ['pps_total' => $total, 'pps_passed' => $passed, 'pps_capped' => $capped, 'limit_pps' => $limit]);
+$bh = netlimitBurstHintFrom($hr(60, 121000, 80000, 41000, 90000), 100, true);
+check('burst hint: production\'s hour — 80 000 of 90 000 (88.9 %) through, 33.9 % dropped, burst 100 → suggest 2 000',
+      $bh !== null && $bh['limit'] === 90000 && $bh['served'] === 80000 && $bh['served_pct'] == 88.9 && $bh['dropped_pct'] == 33.9
+      && $bh['burst'] === 100 && $bh['suggested'] === 2000 && $bh['ms'] === 22 && $bh['samples'] === 60, json_encode($bh));
+check('burst hint: nothing while the limit is off', netlimitBurstHintFrom($hr(60, 121000, 80000, 41000, 90000), 100, false) === null);
+// served just under 95 % with just over 5 % dropped is said; at either threshold it is not
+check('burst hint: 94.9 % through and 5.1 % dropped is said', netlimitBurstHintFrom($hr(60, 100000, 85410, 5100, 90000), 100, true) !== null);
+check('burst hint: 95 % through is not (the limit is full)', netlimitBurstHintFrom($hr(60, 100000, 85500, 14500, 90000), 100, true) === null);
+check('burst hint: 5 % dropped or less is not (nothing to recover)', netlimitBurstHintFrom($hr(60, 84000, 79800, 4200, 90000), 100, true) === null);
+check('burst hint: a burst already at the suggestion says nothing', netlimitBurstHintFrom($hr(60, 121000, 80000, 41000, 90000), 2000, true) === null
+      && netlimitBurstHintFrom($hr(60, 121000, 80000, 41000, 90000), 1999, true) !== null);
+check('burst hint: fewer than ' . NET_BURST_HINT_MIN_SAMPLES . ' samples say nothing',
+      netlimitBurstHintFrom($hr(NET_BURST_HINT_MIN_SAMPLES - 1, 121000, 80000, 41000, 90000), 100, true) === null
+      && netlimitBurstHintFrom($hr(NET_BURST_HINT_MIN_SAMPLES, 121000, 80000, 41000, 90000), 100, true) !== null);
+// samples taken while only counting (no limit loaded: limit_pps 0) are not the limit's
+$mixed = array_merge($hr(50, 121000, 121000, 0, 0), $hr(4, 121000, 80000, 41000, 90000));
+check('burst hint: counting-only samples do not count (4 limited ones are too few)', netlimitBurstHintFrom($mixed, 100, true) === null);
+check('burst hint: the thresholds are the brief\'s', NET_BURST_HINT_SERVED === 0.95 && NET_BURST_HINT_DROPPED === 0.05 && NET_BURST_HINT_FACTOR === 0.022 && NET_BURST_HINT_WINDOW === 3600);
+// the words carry the numbers and the way there — Settings → Inbound limit → Burst, then Traffic → Apply limit
+$enL = langLoad('en'); $plL = langLoad('pl');
+check('burst hint: the words name the path in Settings and on Traffic (EN)',
+      str_contains($enL['js.net.burst_hint'] ?? '', 'Settings → Inbound limit → Burst, then Traffic → Apply limit'), $enL['js.net.burst_hint'] ?? 'missing');
+check('burst hint: … and in Polish, with the labels the pages carry',
+      str_contains($plL['js.net.burst_hint'] ?? '', $plL['a.head.settings'] . ' → ' . $plL['settings.net_throttle_heading'] . ' → ' . $plL['settings.net_burst_label'])
+      && str_contains($plL['js.net.burst_hint'] ?? '', $plL['a.traffic.title'] . ' → ' . $plL['a.traffic.apply_limit']), $plL['js.net.burst_hint'] ?? 'missing');
+check('burst hint: the English path is the pages\' own labels too',
+      $enL['a.head.settings'] === 'Settings' && $enL['settings.net_throttle_heading'] === 'Inbound limit' && $enL['settings.net_burst_label'] === 'Burst'
+      && $enL['a.traffic.title'] === 'Traffic' && $enL['a.traffic.apply_limit'] === 'Apply limit');
+foreach (['served', 'limit', 'served_pct', 'dropped_pct', 'burst', 'suggested', 'ms'] as $ph) {
+    check("burst hint: the words carry :$ph", str_contains($enL['js.net.burst_hint'] ?? '', ':' . $ph));
+}
+
+// ── 4c. who loaded the limit, in words (1.72.0) ──────────────────────────────
+// Every source the code passes is found by READING the calls — netlimitApply(…, $source) (default
+// 'admin'), netlimitApplyMonitor(…, $source) + ':count', netlimitOff(…, $source) + ':off' — so a source a
+// later release adds without words fails here, not on the owner's screen.
+$callSources = [];
+$srcFiles = array_merge(glob($root . '/api/*.php'), glob($root . '/api/admin/*.php'), glob($root . '/includes/*.php'), glob($root . '/tools/*.php'));
+$funcs = ['netlimitApply' => [5, ''], 'netlimitApplyMonitor' => [3, ':count'], 'netlimitOff' => [2, ':off']];
+foreach ($srcFiles as $file) {
+    $tok = token_get_all((string)file_get_contents($file));
+    $cnt = count($tok);
+    for ($i = 0; $i < $cnt; $i++) {
+        if (!is_array($tok[$i]) || $tok[$i][0] !== T_STRING || !isset($funcs[$tok[$i][1]])) continue;
+        // not the definition itself
+        $j = $i - 1; while ($j >= 0 && is_array($tok[$j]) && $tok[$j][0] === T_WHITESPACE) $j--;
+        if ($j >= 0 && is_array($tok[$j]) && $tok[$j][0] === T_FUNCTION) continue;
+        $k = $i + 1; while ($k < $cnt && is_array($tok[$k]) && $tok[$k][0] === T_WHITESPACE) $k++;
+        if (($tok[$k] ?? null) !== '(') continue;
+        [$pos, $suffix] = $funcs[$tok[$i][1]];
+        $depth = 0; $args = [[]];
+        for ($k++; $k < $cnt; $k++) {
+            $t = $tok[$k];
+            if ($t === '(' || $t === '[') $depth++;
+            if ($t === ')' || $t === ']') { if ($depth === 0) break; $depth--; }
+            if ($t === ',' && $depth === 0) { $args[] = []; continue; }
+            if (!is_array($t) || !in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) $args[count($args) - 1][] = $t;
+        }
+        $arg = $args[$pos] ?? null;
+        if ($arg === null) { $code = 'admin'; }
+        elseif (count($arg) === 1 && is_array($arg[0]) && $arg[0][0] === T_CONSTANT_ENCAPSED_STRING) { $code = trim($arg[0][1], "'\""); }
+        else { $code = null; }   // a variable: said below
+        $callSources[] = ['file' => basename($file), 'fn' => $tok[$i][1], 'code' => $code === null ? null : $code . $suffix];
+    }
+}
+$codes = array_values(array_unique(array_filter(array_column($callSources, 'code'), static fn($c) => $c !== null)));
+sort($codes);
+check('sources: the calls were found (every apply, counting and off in api/, includes/, tools/)', count($callSources) >= 12, (string)count($callSources));
+check('sources: each passes a literal — no source the card cannot know',
+      !array_filter($callSources, static fn($c) => $c['code'] === null),
+      json_encode(array_values(array_filter($callSources, static fn($c) => $c['code'] === null))));
+check('sources: the ones the brief named are among them (admin, auto, panic, lists, lists-off, the :count / :off suffixes)',
+      !array_diff(['admin', 'admin:count', 'admin:off', 'auto', 'panic', 'panic-restore', 'panic-restore:off', 'lists', 'lists-off', 'probe'], $codes),
+      implode(', ', $codes));
+foreach ($codes as $code) {
+    $key = 'api.net.src.' . str_replace(['-', ':'], ['_', '.'], $code);
+    check("sources: \"$code\" has words in both languages", isset($enL[$key], $plL[$key]) && $enL[$key] !== $plL[$key], $key);
+    check("sources: \"$code\" prints as its words, not as itself", netlimitSourceWords($code) === $enL[$key] && netlimitSourceWords($code) !== $code, netlimitSourceWords($code));
+}
+check('sources: "lists-off" is the janitor re-loading the same limit when the lists were switched off',
+      str_contains(netlimitSourceWords('lists-off'), 'switched off') && str_contains(netlimitSourceWords('lists-off'), 'same limit'), netlimitSourceWords('lists-off'));
+check('sources: the stability probe\'s apply says so (api/admin/tuner.php passes "probe")', in_array('probe', $codes, true));
+check('sources: an unknown code prints as itself, never blank', netlimitSourceWords('schedule') === 'schedule'
+      && netlimitSourceWords('auto:count') === 'auto:count' && netlimitSourceWords('x; rm -rf /') === 'x; rm -rf /' && netlimitSourceWords('Admin') === 'Admin');
+check('sources: no source recorded (an old state file) stays empty — the card says nothing then', netlimitSourceWords('') === '' && netlimitSourceWords('  ') === '');
+check('sources: "lists-off" and a "lists:off" could never share words', 'api.net.src.' . str_replace(['-', ':'], ['_', '.'], 'lists-off') !== 'api.net.src.' . str_replace(['-', ':'], ['_', '.'], 'lists:off'));
+// in Polish, through the same function
+$langWas = $GLOBALS['__lang'];
+$GLOBALS['__lang']['strings'] = $plL; $GLOBALS['__lang']['current'] = 'pl';
+check('sources: … and the function speaks the page\'s language', netlimitSourceWords('lists-off') === $plL['api.net.src.lists_off'] && str_contains(netlimitSourceWords('lists-off'), 'list IP'));
+$GLOBALS['__lang'] = $langWas;
+$ns = (string)file_get_contents($root . '/api/admin/net_status.php');
+$nj = (string)file_get_contents($root . '/assets/js/admin-netlimit.js');
+check('sources: net_status sends the words beside the code', str_contains($ns, "'words' => netlimitSourceWords(\$src)") && str_contains($ns, "'source' => \$src"));
+check('sources: the card prints the words (and the code only when there are none)', str_contains($nj, 'la.words || la.source') && str_contains($nj, "t('js.net.set_by', {src: src"));
+
+// ── 4d. handshakes per announce (1.72.0) ─────────────────────────────────────
+$hrs = static function (int $n, int $t0, float $cps, float $aps, int $uptime0 = 100000): array {
+    $out = [];
+    for ($i = 0; $i < $n; $i++) $out[] = ['ts' => $t0 + $i * 3600, 'connects' => (int)(5e9 + $i * 3600 * $cps), 'udp_announces' => (int)(3e9 + $i * 3600 * $aps), 'uptime' => $uptime0 + $i * 3600];
+    return $out;
+};
+$day = $hrs(25, 1800000000, 48000, 32000);
+$hs = netlimitHandshakesFrom($day, 86400);
+check('handshakes: 48 000 connects a second against 32 000 announces = 1.50 over the day', $hs !== null && $hs['ratio'] == 1.5 && $hs['announces'] === 24 * 3600 * 32000, json_encode($hs));
+check('handshakes: the last hour alone', netlimitHandshakesFrom(array_slice($day, -2), 3600)['ratio'] == 1.5);
+check('handshakes: the congested state reads 2.5', netlimitHandshakesFrom($hrs(2, 1800000000, 60000, 24000), 3600)['ratio'] == 2.5);
+// a restart inside the window: the counters and the uptime start again — the window says nothing
+$restart = $day; for ($i = 10; $i < 25; $i++) { $restart[$i]['uptime'] = ($i - 10) * 3600 + 60; $restart[$i]['connects'] = (int)(($i - 9) * 3600 * 48000); $restart[$i]['udp_announces'] = (int)(($i - 9) * 3600 * 32000); }
+check('handshakes: a restart inside the day hides the day', netlimitHandshakesFrom($restart, 86400) === null);
+check('handshakes: … and not an hour after it', netlimitHandshakesFrom(array_slice($restart, -2), 3600) !== null);
+$upOnly = $day; $upOnly[12]['uptime'] = 5;
+check('handshakes: the uptime going back alone is a restart too', netlimitHandshakesFrom($upOnly, 86400) === null);
+check('handshakes: too little history for a window says nothing (17 h is not a day)', netlimitHandshakesFrom(array_slice($day, 0, 18), 86400) === null
+      && netlimitHandshakesFrom(array_slice($day, 0, 19), 86400) !== null);
+check('handshakes: one row, or no announces, say nothing', netlimitHandshakesFrom(array_slice($day, 0, 1), 3600) === null
+      && netlimitHandshakesFrom($hrs(2, 1800000000, 100, 0), 3600) === null);
+check('handshakes: the card shows them with one sentence on what a high value means',
+      str_contains($nj, "t('js.net.handshakes_note')") && str_contains($enL['js.net.handshakes_note'] ?? '', 'repeating the handshake')
+      && str_contains($enL['js.net.handshakes_note'] ?? '', 'dropped') && str_contains($ns, 'netlimitHandshakes($db, $cfg, $now)'));
+check('handshakes: … and the burst hint travels in the recommendation', str_contains($ns, "\$rec['burst_hint'] = netlimitBurstHint(\$db, \$cfg, \$now,")
+      && str_contains($nj, 'const bh = r.burst_hint;') && str_contains($nj, "t('js.net.burst_hint'"));
 
 // ── 5. bucketing ─────────────────────────────────────────────────────────────
 check('bucket: 24 h of 60 s samples stays raw', netlimitBucketFor(86400, 60) === 0);
@@ -948,10 +1088,60 @@ if ($db !== null) {
           $tick['persisted'] === false && $tick['error'] !== null, json_encode($tick));
     netlimitStateUpdate(function (array &$s) { $s['persist_deferred'] = false; $s['last_error'] = null; return true; });
 
+    // ── the burst hint over the stored samples (1.72.0) ──────────────────────
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $tH = 1800000000;
+    $insH = $db->prepare('INSERT INTO `' . NET_SAMPLE_TABLE . '` (ts, span, pps_total, pps_passed, pps_capped, limit_pps) VALUES (?,60,?,?,?,?)');
+    for ($i = 0; $i < 60; $i++) $insH->execute([$tH - 3600 + 60 * ($i + 1), 121000, 80000, 41000, 90000]);
+    $insH->execute([$tH - 7200, 121000, 10000, 111000, 90000]);        // older than the hour: not read
+    $cfgOn = ['net_limit_enabled' => '1', 'net_limit_burst' => '100', 'net_limit_pps' => '90000'];
+    $bh = netlimitBurstHint($db, $cfgOn, $tH);
+    check('burst hint: the last hour of net_samples, the burst from Settings', $bh !== null && $bh['samples'] === 60 && $bh['served'] === 80000 && $bh['burst'] === 100 && $bh['suggested'] === 2000,
+          json_encode($bh));
+    check('burst hint: the burst the firewall reports wins over Settings (2 000 loaded: nothing to say)', netlimitBurstHint($db, $cfgOn, $tH, 2000) === null
+          && netlimitBurstHint($db, ['net_limit_burst' => '2000'] + $cfgOn, $tH, 100) !== null);
+    check('burst hint: the limit off in Settings says nothing', netlimitBurstHint($db, ['net_limit_enabled' => '0'] + $cfgOn, $tH) === null);
+    check('burst hint: an hour later the samples are gone from its window', netlimitBurstHint($db, $cfgOn, $tH + 3601) === null);
+
+    // ── handshakes over the timeline's hourly rows (1.72.0) ──────────────────
+    // Fixture rows far from anything real (2033), deleted exactly; the table is otherwise left alone.
+    require_once $root . '/includes/stats_timeline.php';
+    $tT = intdiv(2000000000, 3600) * 3600;
+    $tsT = [];
+    $clashT = (int)$db->query('SELECT COUNT(*) FROM `stats_samples_1h` WHERE ts >= ' . ($tT - 200000))->fetchColumn();
+    check('handshakes (db): nothing of the timeline sits in the fixtures\' time', $clashT === 0, (string)$clashT);
+    $before1h = $db->query('SELECT COUNT(*), COALESCE(SUM(ts), 0) FROM `stats_samples_1h`')->fetch(PDO::FETCH_NUM);
+    if ($clashT === 0) {
+        try {
+            $insT = $db->prepare('INSERT INTO `stats_samples_1h` (ts, samples, connects, udp_announces, uptime) VALUES (?,60,?,?,?)');
+            foreach ($hrs(26, $tT - 25 * 3600, 48000, 32000) as $r) { $insT->execute([$r['ts'], $r['connects'], $r['udp_announces'], $r['uptime']]); $tsT[] = $r['ts']; }
+            $cfgT = ['stats_timeline_enabled' => '1'];
+            $hs = netlimitHandshakes($db, $cfgT, $tT + 1800);
+            check('handshakes (db): the last hour and the last day, 1.50 each', $hs !== null && $hs['hour']['ratio'] == 1.5 && $hs['day']['ratio'] == 1.5
+                  && $hs['hour']['to'] === $tT && $hs['day']['from'] === $tT - 86400, json_encode($hs));
+            check('handshakes (db): hidden while the timeline is off', netlimitHandshakes($db, ['stats_timeline_enabled' => '0'], $tT + 1800) === null);
+            check('handshakes (db): hidden when the newest hour is three hours old (the timeline stopped)', netlimitHandshakes($db, $cfgT, $tT + 3 * 3600 + 1) === null);
+            // a restart six hours ago: the day says nothing, the last hour still does
+            $db->exec('UPDATE `stats_samples_1h` SET uptime = uptime - 90000, connects = connects - 4000000000, udp_announces = udp_announces - 2900000000 WHERE ts >= ' . ($tT - 6 * 3600)
+                      . ' AND ts <= ' . $tT);
+            $hs = netlimitHandshakes($db, $cfgT, $tT + 1800);
+            check('handshakes (db): a restart inside the day hides the day and keeps the hour', $hs !== null && $hs['day'] === null && $hs['hour']['ratio'] == 1.5, json_encode($hs));
+        } finally {
+            if ($tsT) $db->exec('DELETE FROM `stats_samples_1h` WHERE ts IN (' . implode(',', $tsT) . ')');
+            $after1h = $db->query('SELECT COUNT(*), COALESCE(SUM(ts), 0) FROM `stats_samples_1h`')->fetch(PDO::FETCH_NUM);
+            check('handshakes (db): the timeline table is exactly as it was', $after1h == $before1h, json_encode([$before1h, $after1h]));
+        }
+    }
+
     $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
     @unlink($stateFile);
     if ($stateBackup !== null) file_put_contents($stateFile, $stateBackup);
 }
+
+@unlink($stateFileAtStart);
+if ($stateAtStart !== null) file_put_contents($stateFileAtStart, $stateAtStart);
+check('the state file is exactly as the run found it', $stateAtStart === null ? !is_file($stateFileAtStart)
+      : (string)@file_get_contents($stateFileAtStart) === $stateAtStart);
 
 echo "\n$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "\n";
 exit($fails ? 1 : 0);

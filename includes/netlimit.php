@@ -1168,3 +1168,148 @@ function netlimitRecommendText(array $rec, bool $flood = false, int $passed = 0)
         number_format($rec['suggested']), number_format($rec['floor']));
     return $s;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What the card says about the limit in force (1.72.0)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Who loaded the limit, in words — `last_apply_source` as the owner reads it.
+ *
+ * The card printed the raw code: "set by lists-off 24 d 11 h ago", which meant that the janitor loaded
+ * the SAME limit again when the IP lists were switched off (tools/janitor.php → netlimitApply(…,
+ * 'lists-off')) — and read like somebody had set a limit called lists-off. Every source the code passes
+ * to netlimitApply(), netlimitApplyMonitor() (which adds ':count') and netlimitOff() (':off') has words
+ * of its own under api.net.src.* (tests/netlimit_test.php finds them by reading the calls); a code
+ * without words prints as itself, never as nothing. '' (a state file from before the source was kept)
+ * stays '' and the card says nothing about it.
+ */
+function netlimitSourceWords(string $code): string {
+    $code = trim($code);
+    if ($code === '') return '';
+    // 'panic-restore:off' → api.net.src.panic_restore.off — the suffix a key of its own, so 'lists-off'
+    // (the lists switched off) and a 'lists:off' (a limit removed by the lists) could never share words
+    if (preg_match('/^[a-z]+(?:-[a-z]+)*(?::[a-z]+)?$/', $code) === 1 && function_exists('langHas')) {
+        $key = 'api.net.src.' . str_replace(['-', ':'], ['_', '.'], $code);
+        if (langHas($key)) return __($key);
+    }
+    return $code;
+}
+
+/**
+ * A burst too small for the limit — the hint's thresholds.
+ *
+ * nftables' `limit rate over N/second burst B packets` is a token bucket B packets deep, refilled at N a
+ * second. Packets do not arrive one every 1/N s: the network card hands them over in bursts (interrupt
+ * coalescing, GRO), and a bucket of 100 at 90 000 pps holds 1.1 ms of the limit — every burst larger than
+ * that is dropped although the SECOND it arrived in was under the limit. Production, 2026-09-29: a limit
+ * of 90 000 passed ~80 000 on average while a third of the arrivals was dropped. A bucket of ~22 ms of the
+ * limit (≈ 2 000 packets at 90 000) absorbs those bursts and lets the whole limit through, without
+ * raising it: the rate over a second is still N.
+ *
+ * Said only when the limit is on and, over the last hour, what got through stayed under 95 % of the limit
+ * while more than 5 % of what arrived was dropped — and only when the burst in force is below the one
+ * suggested (a large bucket that still passes less is some other story).
+ */
+const NET_BURST_HINT_SERVED   = 0.95;
+const NET_BURST_HINT_DROPPED  = 0.05;
+const NET_BURST_HINT_FACTOR   = 0.022;
+const NET_BURST_HINT_WINDOW   = 3600;
+const NET_BURST_HINT_MIN_SAMPLES = 5;
+
+/** ≈ 22 ms of the limit, rounded to a readable number (100s from 1 000, 10s from 100), within the helper's range. */
+function netlimitBurstSuggest(int $pps): int {
+    $raw = max(0, $pps) * NET_BURST_HINT_FACTOR;
+    $step = $raw >= 1000 ? 100 : ($raw >= 100 ? 10 : 1);
+    return max(NET_BURST_MIN, min(NET_BURST_MAX, (int)(round($raw / $step) * $step)));
+}
+
+/**
+ * Pure: the samples of the last hour (pps_total / pps_passed / pps_capped / limit_pps) and the burst in
+ * force → the hint's numbers, or null when there is nothing to say. Samples taken while no limit was
+ * loaded (limit_pps 0: counting only) do not count, and fewer than NET_BURST_HINT_MIN_SAMPLES say nothing.
+ */
+function netlimitBurstHintFrom(array $rows, int $burst, bool $limitOn): ?array {
+    if (!$limitOn) return null;
+    $rows = array_values(array_filter($rows, static fn($r) => (int)($r['limit_pps'] ?? 0) > 0));
+    $n = count($rows);
+    if ($n < NET_BURST_HINT_MIN_SAMPLES) return null;
+    $limit = (int)round(array_sum(array_map(static fn($r) => (int)$r['limit_pps'], $rows)) / $n);
+    $served = (int)round(array_sum(array_map(static fn($r) => (int)$r['pps_passed'], $rows)) / $n);
+    $arrived = array_sum(array_map(static fn($r) => (int)$r['pps_total'], $rows));
+    $dropped = array_sum(array_map(static fn($r) => (int)$r['pps_capped'], $rows));
+    if ($limit <= 0 || $arrived <= 0) return null;
+    $servedShare = $served / $limit;
+    $droppedShare = $dropped / $arrived;
+    $suggested = netlimitBurstSuggest($limit);
+    if ($servedShare >= NET_BURST_HINT_SERVED || $droppedShare <= NET_BURST_HINT_DROPPED || $burst >= $suggested) return null;
+    return ['limit' => $limit, 'served' => $served, 'served_pct' => round(100 * $servedShare, 1),
+            'dropped_pct' => round(100 * $droppedShare, 1), 'burst' => $burst, 'suggested' => $suggested,
+            'ms' => (int)round(1000 * $suggested / $limit), 'samples' => $n];
+}
+
+/**
+ * The hint for the card: the last hour of net_samples, against the burst the firewall reports
+ * ($burstInForce, from the helper's status) or, when it has not answered, the one in Settings.
+ */
+function netlimitBurstHint(PDO $db, array $cfg, ?int $now = null, ?int $burstInForce = null): ?array {
+    if (!netlimitEnabled($cfg)) return null;
+    $now = $now ?? time();
+    $st = $db->prepare("SELECT pps_total, pps_passed, pps_capped, limit_pps FROM `" . NET_SAMPLE_TABLE . "` WHERE ts > ? AND ts <= ?");
+    $st->execute([$now - NET_BURST_HINT_WINDOW, $now]);
+    return netlimitBurstHintFrom($st->fetchAll(PDO::FETCH_ASSOC) ?: [],
+        $burstInForce !== null && $burstInForce > 0 ? $burstInForce : netlimitBurst($cfg), true);
+}
+
+/**
+ * Handshakes per announce — how many UDP connects the tracker answered for each announce, from the
+ * statistics timeline's hourly rows (stats_samples_1h: cumulative counters, the last value of each hour).
+ *
+ * A BitTorrent client asks for a connection id (a "connect") before it announces, so about one per
+ * announce is the floor. Every packet the limiter drops — the connect, the announce or either reply — makes
+ * a client start over, so the ratio climbs with the drops: production swung between ~1.5 (announces
+ * 32 000/s) and 2.4–2.8 (22 000/s) at the same limit. Arrivals that fell were fewer repeats, not fewer
+ * users.
+ *
+ * Pure: $rows oldest first. Null when the window is too short (under three quarters of it), when the
+ * counters went backwards anywhere inside it (a restart: uptime or a counter lower than the hour before),
+ * or when nothing was announced. A restart inside the newest hour cannot be seen from hourly maxima; the
+ * hour after it shows it.
+ */
+function netlimitHandshakesFrom(array $rows, int $window): ?array {
+    $rows = array_values($rows);
+    $n = count($rows);
+    if ($n < 2) return null;
+    $first = $rows[0]; $last = $rows[$n - 1];
+    $span = (int)$last['ts'] - (int)$first['ts'];
+    if ($span < $window * 0.75) return null;
+    for ($i = 1; $i < $n; $i++) {
+        foreach (['uptime', 'connects', 'udp_announces'] as $c) {
+            if ((int)$rows[$i][$c] < (int)$rows[$i - 1][$c]) return null;
+        }
+    }
+    $connects = (int)$last['connects'] - (int)$first['connects'];
+    $announces = (int)$last['udp_announces'] - (int)$first['udp_announces'];
+    if ($announces <= 0) return null;
+    return ['ratio' => round($connects / $announces, 2), 'connects' => $connects, 'announces' => $announces,
+            'from' => (int)$first['ts'], 'to' => (int)$last['ts']];
+}
+
+/**
+ * The card's line: the newest hour and the last 24 hours. Null when the timeline is off, when its newest
+ * hour is older than three hours (it stopped sampling — the numbers would describe another day), or
+ * when neither window has an answer.
+ */
+function netlimitHandshakes(PDO $db, array $cfg, ?int $now = null): ?array {
+    if (!function_exists('statsTimelineEnabled') || !statsTimelineEnabled($cfg)) return null;
+    $now = $now ?? time();
+    $newest = $db->query("SELECT MAX(ts) FROM `stats_samples_1h`")->fetchColumn();
+    if ($newest === null || $newest === false || (int)$newest < $now - 3 * 3600) return null;
+    $newest = (int)$newest;
+    $st = $db->prepare("SELECT ts, connects, udp_announces, uptime FROM `stats_samples_1h` WHERE ts >= ? AND ts <= ? ORDER BY ts");
+    $st->execute([$newest - 86400, $newest]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $hour = netlimitHandshakesFrom(array_filter($rows, static fn($r) => (int)$r['ts'] >= $newest - 3600), 3600);
+    $day = netlimitHandshakesFrom($rows, 86400);
+    return ($hour === null && $day === null) ? null : ['hour' => $hour, 'day' => $day];
+}

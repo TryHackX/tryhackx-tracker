@@ -45,11 +45,13 @@ if ($shout !== null) {
     $out['unread_shout_friend'] = $shout['shout_friend'];
     $out['unread_shout_mention'] = $shout['mention'];
 }
-// The comments' two counts (1.71.0), for the same reason as the pulse carries them: the account page's first
-// look is the sounds' baseline, and a baseline without them would count a comment as a plain notification.
+// The comments' counts (1.71.0; the replies' third since 1.72.0), for the same reason as the pulse carries them:
+// the account page's first look is the sounds' baseline, and a baseline without them would count a comment as a
+// plain notification.
 if (function_exists('commentsEnabled') && commentsEnabled($cfg)) {
     $cc = commentUnreadCounts($db, (int)$u['id']);
     $out['unread_comment'] = $cc['comment'];
     $out['unread_comment_mention'] = $cc['comment_mention'];
+    $out['unread_comment_reply'] = $cc['comment_reply'];
 }
 jsonResponse($out);

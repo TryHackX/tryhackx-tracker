@@ -66,6 +66,9 @@
         state.groups = r.groups || [];
         state.permList = r.permission_list || {};
         state.presets = r.presets || {};
+        // 1.72.0: the consent ids (userConsentPermissions()) — marked in the editor and the matrix, and on the Admin
+        // group the only boxes that are a choice: every other one is held by its blanket.
+        state.consent = new Set(r.consent || []);
         // group filter select
         const sel = $('us-filter-group');
         const cur = sel.value;
@@ -542,11 +545,27 @@
             tr.appendChild(el('td', {}, g.is_default ? badge(t('js.users.default_badge'), 'wl-b-ok') : el('span', { className: 'text-muted', text: '—' })));
             tr.appendChild(el('td', { text: String(g.members) }));
             const permKeys = Object.keys(g.permissions || {});
-            tr.appendChild(el('td', { className: 'wl-small text-muted', text: permKeys.length ? permKeys.join(', ') : t('js.users.none') }));
+            // The Admin group holds every capability by its blanket (and, since 1.72.0, stores them too): seventy ids
+            // in a row say nothing a person can read, so its cell says what is true and names its consent, the one
+            // part of it that is a choice.
+            let permText = permKeys.length ? permKeys.join(', ') : t('js.users.none');
+            if (g.slug === 'admin') {
+                const given = permKeys.filter(k => state.consent.has(k));
+                permText = given.length ? t('js.users.perms_admin', { list: given.join(', ') }) : t('js.users.perms_admin_none');
+            }
+            tr.appendChild(el('td', { className: 'wl-small text-muted', text: permText }));
             const act = el('td', { className: 'th-actions' });
             const edit = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', title: t('js.users.edit') }, el('i', { className: 'bi bi-pencil' }));
             edit.addEventListener('click', () => openGroupEditor(g));
             act.appendChild(edit);
+            // A seeded group's recommended set (1.72.0): what is missing, what a reset would take away.
+            if (g.recommended) {
+                const rec = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success wl-act gr-rec-btn',
+                                           title: t('js.users.rec_btn'), 'aria-label': t('js.users.rec_btn'), dataset: { slug: g.slug } },
+                               el('i', { className: 'bi bi-magic', 'aria-hidden': 'true' }));
+                rec.addEventListener('click', () => openRecommended(g));
+                act.appendChild(rec);
+            }
             if (!g.is_system) {
                 const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger wl-act', title: t('js.users.delete') }, el('i', { className: 'bi bi-trash' }));
                 del.addEventListener('click', async () => {
@@ -587,10 +606,19 @@
                 section = sec;
                 tbody.appendChild(el('tr', { className: 'gr-matrix-sec' }, [el('td', { colspan: String(groups.length + 1), text: sec === 'PANEL' ? t('js.users.matrix_panel') : t('js.users.matrix_site') })]));
             }
-            const tr = el('tr', {}, [el('td', { title: state.permList[key] || '' }, [el('code', { text: key })])]);
+            const consent = state.consent.has(key);
+            const tr = el('tr', { className: consent ? 'gr-matrix-consent' : null, dataset: { perm: key } }, [el('td', { title: state.permList[key] || '' }, [el('code', { text: key }),
+                consent ? el('span', { className: 'gr-consent-badge', title: t('js.users.consent_title') }, t('js.users.consent_badge')) : null])]);
             groups.forEach(g => {
                 const on = !!(g.permissions && g.permissions[key]);
-                tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
+                // The Admin group passes every capability check by its blanket, whatever is stored: that is a tick of its
+                // own kind. Its consent is a grant like anybody's and shows what is stored (1.72.0).
+                if (g.slug === 'admin' && !consent) {
+                    tr.appendChild(el('td', { className: 'gr-matrix-c on blanket', dataset: { slug: g.slug } }, [
+                        el('i', { className: 'bi bi-check-lg', title: t('js.users.blanket_cell', { group: g.name, key: key }) })]));
+                    return;
+                }
+                tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : ''), dataset: { slug: g.slug } }, [
                     on ? el('i', { className: 'bi bi-check-lg', title: t('js.users.matrix_has', { group: g.name, key: key }) }) : el('i', { className: 'bi bi-dot gr-matrix-off', 'aria-hidden': 'true' })]));
             });
             tbody.appendChild(tr);
@@ -614,27 +642,43 @@
         if (pre) {
             pre.textContent = '';
             pre.appendChild(el('span', { className: 'wl-small text-muted me-1', text: t('js.users.presets_start_from') }));
+            // A preset never touches a box that is not a choice (the Admin group's capabilities, 1.72.0).
             Object.entries(state.presets || {}).forEach(([key, p]) => {
                 const b = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: p.about || '' }, [p.label || key]);
                 b.addEventListener('click', () => {
                     const set = new Set(p.perms || []);
-                    $('ge-perms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = set.has(cb.dataset.perm); });
+                    $('ge-perms').querySelectorAll('input[data-perm]:not(:disabled)').forEach(cb => { cb.checked = set.has(cb.dataset.perm); });
                 });
                 pre.appendChild(b);
             });
             const none = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: t('js.users.presets_untick') }, [t('js.users.presets_none')]);
-            none.addEventListener('click', () => $('ge-perms').querySelectorAll('input[data-perm]').forEach(cb => { cb.checked = false; }));
+            none.addEventListener('click', () => $('ge-perms').querySelectorAll('input[data-perm]:not(:disabled)').forEach(cb => { cb.checked = false; }));
             pre.appendChild(none);
         }
         const box = $('ge-perms');
         box.textContent = '';
+        // The Admin group (1.72.0): every capability is its blanket's — its members pass that check whatever is ticked —
+        // so those boxes are drawn ticked and cannot be cleared (the save keeps them either way, api/admin/group_save.php);
+        // its consent boxes are real choices, and one line above the list says which is which.
+        const isAdmin = !!(g && g.slug === 'admin');
+        let note = $('ge-admin-note');
+        if (!note) {
+            note = el('p', { id: 'ge-admin-note', className: 'ge-admin-note wl-small' });
+            box.parentNode.insertBefore(note, box);
+        }
+        note.textContent = isAdmin ? t('js.users.consent_admin_line') : '';
+        note.hidden = !isAdmin;
         Object.entries(state.permList).forEach(([key, desc]) => {
             const id = 'gp-' + key.replace(/\./g, '-');
-            const wrap = el('div', { className: 'form-check' }, [
-                el('input', { className: 'form-check-input', type: 'checkbox', id, dataset: { perm: key } }),
-                el('label', { className: 'form-check-label', for: id }, [el('code', { text: key }), ' — ' + desc]),
+            const consent = state.consent.has(key);
+            const blanket = isAdmin && !consent;
+            const wrap = el('div', { className: 'form-check' + (blanket ? ' ge-blanket' : '') + (consent ? ' ge-consent' : ''),
+                                     title: blanket ? t('js.users.blanket_box') : (consent ? t('js.users.consent_title') : null) }, [
+                el('input', { className: 'form-check-input', type: 'checkbox', id, dataset: { perm: key }, disabled: blanket }),
+                el('label', { className: 'form-check-label', for: id }, [el('code', { text: key }),
+                    consent ? el('span', { className: 'gr-consent-badge' }, t('js.users.consent_badge')) : null, ' — ' + desc]),
             ]);
-            wrap.querySelector('input').checked = !!(g && g.permissions && g.permissions[key]);
+            wrap.querySelector('input').checked = blanket || !!(g && g.permissions && g.permissions[key]);
             box.appendChild(wrap);
         });
         bootstrap.Modal.getOrCreateInstance($('grEditModal')).show();
@@ -658,6 +702,117 @@
             $('ge-alert').textContent = '';
             $('ge-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mt-2', text: r.error || t('js.users.save_failed') }));
         }
+    }
+
+    // ── a seeded group's recommended set (1.72.0) ───────────────────────────
+    //
+    // The window shows exactly what the server's plan is (api/admin/group_recommended, GET): what "Add what is
+    // missing" writes, what a reset would also take away — and on the Admin group the consent it can give, a tick of
+    // its own that asks the plan again. Applying sends that plan back as `expect`: a group that changed since it was
+    // shown is not touched, and the window redraws with the difference as it is now (the server does exactly what the
+    // screen showed, never what a stale one would imply). A reset that takes anything away asks a second time.
+    let recGroup = null, recPreview = null, recSeq = 0;
+    function recIds(ids) {
+        const wrap = el('div', { className: 'gr-rec-ids' });
+        if (!ids.length) { wrap.appendChild(el('span', { className: 'text-muted wl-small', text: t('js.users.rec_none') })); return wrap; }
+        ids.forEach(k => {
+            const consent = state.consent.has(k);
+            wrap.appendChild(el('code', { className: 'gr-rec-id' + (consent ? ' is-consent' : ''), dataset: { perm: k },
+                                          title: (state.permList[k] || '') + (consent ? ' — ' + t('js.users.consent_title') : '') },
+                                [k, consent ? el('span', { className: 'gr-consent-badge' }, t('js.users.consent_badge')) : null]));
+        });
+        return wrap;
+    }
+    function setRecButtons(p) {
+        $('gr-rec-add').disabled = !p || !p.add.length;
+        // A reset is more than "add" only when it takes something away; otherwise it is the same request twice.
+        $('gr-rec-reset').disabled = !p || !p.remove.length;
+    }
+    function recAlert(text, kind) {
+        const box = $('gr-rec-alert');
+        box.textContent = '';
+        if (text) box.appendChild(el('div', { className: 'alert alert-' + (kind || 'danger') + ' py-2 wl-small mt-2', text }));
+    }
+    function renderRecPreview(p) {
+        recPreview = p;
+        const body = $('gr-rec-body');
+        body.textContent = '';
+        body.appendChild(el('p', { className: 'gr-rec-set mb-1' }, [t('js.users.rec_set', { label: p.recommended.label, n: p.recommended.ids.length })]));
+        if (p.recommended.about) body.appendChild(el('p', { className: 'gr-rec-about wl-small text-muted mb-2', text: p.recommended.about }));
+        if (p.blanket) body.appendChild(el('p', { className: 'gr-rec-blanket wl-small mb-2' }, [el('i', { className: 'bi bi-shield-check', 'aria-hidden': 'true' }), ' ', t('js.users.rec_blanket')]));
+        if (!p.add.length && !p.remove.length && !(p.consent && p.consent.add.length)) {
+            body.appendChild(el('p', { className: 'gr-rec-exact mb-2' }, [el('i', { className: 'bi bi-check-circle', 'aria-hidden': 'true' }), ' ', t('js.users.rec_exact')]));
+        }
+        body.appendChild(el('div', { className: 'gr-rec-sec', id: 'gr-rec-add-sec' }, [
+            el('h6', { className: 'gr-rec-head', text: t('js.users.rec_add_head', { n: p.add.length }) }), recIds(p.add)]));
+        body.appendChild(el('div', { className: 'gr-rec-sec', id: 'gr-rec-remove-sec' }, [
+            el('h6', { className: 'gr-rec-head', text: t('js.users.rec_remove_head', { n: p.remove.length }) }), recIds(p.remove)]));
+        if (p.consent) {
+            const pending = p.consent.add || [];
+            const given = (p.consent.ids || []).filter(k => (p.held || []).includes(k));
+            const box = el('div', { className: 'gr-rec-consent' });
+            if (pending.length) {
+                const cb = el('input', { className: 'form-check-input', type: 'checkbox', id: 'gr-rec-consent' });
+                cb.checked = !!p.consent.applied;
+                cb.addEventListener('change', () => loadRecPreview(cb.checked));
+                box.appendChild(el('div', { className: 'form-check' }, [cb,
+                    el('label', { className: 'form-check-label', for: 'gr-rec-consent', text: t('js.users.rec_consent_label', { ids: pending.join(', ') }) })]));
+            }
+            if (given.length) box.appendChild(el('p', { className: 'wl-small text-muted mb-1', text: t('js.users.rec_consent_held', { ids: given.join(', ') }) }));
+            box.appendChild(el('p', { className: 'gr-rec-consent-why wl-small text-muted mb-0', text: t('js.users.rec_consent_why') }));
+            body.appendChild(box);
+        }
+        setRecButtons(p);
+    }
+    async function loadRecPreview(consent) {
+        if (!recGroup) return;
+        const my = ++recSeq;
+        setRecButtons(null);
+        const r = await apiCall('admin/group_recommended&id=' + encodeURIComponent(recGroup.id) + (consent ? '&consent=1' : ''));
+        if (my !== recSeq) return;   // a newer question was asked meanwhile (the consent tick pressed twice)
+        if (r.error) { recAlert(r.error); return; }
+        recAlert('');
+        renderRecPreview(r);
+    }
+    function openRecommended(g) {
+        recGroup = g; recPreview = null;
+        $('gr-rec-title').textContent = t('js.users.rec_title', { name: g.name });
+        $('gr-rec-body').textContent = t('js.common.loading');
+        recAlert('');
+        setRecButtons(null);
+        bootstrap.Modal.getOrCreateInstance($('grRecModal')).show();
+        loadRecPreview(false);
+    }
+    async function applyRecommended(mode) {
+        const p = recPreview;
+        if (!p) return;
+        if (mode === 'reset') {
+            // The second question: what goes, by name, and who loses it.
+            const yes = await confirmAction(t('js.users.rec_confirm_title'), t('js.users.rec_confirm_body', { n: p.remove.length, name: p.group.name }),
+                { danger: true, okLabel: t('js.users.rec_confirm_ok'), code: p.remove.join(' '),
+                  after: t('js.users.rec_confirm_after', { m: p.group.members, missing: p.add.length ? p.add.join(', ') : t('js.users.rec_none') }) });
+            if (!yes) return;
+        }
+        const consent = !!(p.consent && p.consent.applied);
+        setRecButtons(null);
+        const r = await apiCall('admin/group_recommended', 'POST', { id: p.group.id, mode, consent, expect: { add: p.add, remove: p.remove } });
+        if (r.success) {
+            const name = p.group.name;
+            showToast(!r.changed ? t('js.users.rec_nothing', { name })
+                : (mode === 'reset' ? t('js.users.rec_reset_done', { name, added: r.added.length, removed: r.removed.length })
+                                    : t('js.users.rec_added', { name, n: r.added.length })));
+            bootstrap.Modal.getOrCreateInstance($('grRecModal')).hide();
+            loadGroups();
+            return;
+        }
+        if (r.code === 'changed' && r.preview) {
+            renderRecPreview(r.preview);
+            recAlert(t('js.users.rec_changed'), 'warning');
+            loadGroups();
+            return;
+        }
+        recAlert(t('js.users.rec_failed', { error: r.error || ('HTTP ' + r.__status) }));
+        setRecButtons(p);
     }
 
 
@@ -998,6 +1153,8 @@
         $('bm-test').addEventListener('click', sendTest);
         $('bm-send').addEventListener('click', sendWrite);
         $('ge-save').addEventListener('click', saveGroup);
+        $('gr-rec-add').addEventListener('click', () => applyRecommended('add'));
+        $('gr-rec-reset').addEventListener('click', () => applyRecommended('reset'));
         const logout = $('btn-logout');
         if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
         const addBtn = $('us-add-btn');

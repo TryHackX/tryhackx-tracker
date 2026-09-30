@@ -172,7 +172,12 @@ $css = (string)@file_get_contents($root . '/assets/css/style.css');
 check('.share-url spells out its [hidden] rule, like every other class here that sets a display',
     (bool)preg_match('/\.share-url\[hidden\]\s*\{\s*display:\s*none/', $css));
 
+// Its file rows first: whitelist_files has no cascade, so deleting the row alone left the two fixture files
+// behind on every run, pointing at an id that no longer exists (found in 1.72.0).
+$db->prepare('DELETE FROM whitelist_files WHERE whitelist_id = ?')->execute([$wlId]);
 $db->prepare('DELETE FROM whitelist WHERE info_hash = ?')->execute([$HASH]);
+check('the fixture leaves nothing behind: its row and its two files are gone',
+    (int)$db->query('SELECT COUNT(*) FROM whitelist_files WHERE whitelist_id = ' . (int)$wlId)->fetchColumn() === 0);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

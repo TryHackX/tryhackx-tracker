@@ -4,7 +4,8 @@
  *
  *   fav_public   — may a stranger read my favourites on my profile?
  *   fav_listed   — may my name appear on somebody else's "who has this in favourites"?
- *   lists_public — may a stranger see that I have lists at all? (each list still carries its own)
+ *   lists_public — may anybody else — a stranger, or (1.72.0) a friend — see that I have lists at all?
+ *                  (each list still carries its own answer: private, friends or public)
  *   votes_public — may a stranger see what I liked or rated, thumbs down and low stars included?
  *                  (1.69.0, includes/profilevotes.php; the group still needs rating.public)
  *   content_credit_public — is my name shown on the descriptions I write and edit? (1.70.0, ON unless
@@ -76,7 +77,9 @@ jsonResponse([
     // "you may publish" drawn from the administrator's blanket is a promise nothing keeps.
     'may_publish' => favPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$u['id'], 'favourites.public'),
     'who_enabled' => favWhoEnabled($cfg),
-    'lists_may_publish' => listsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$u['id'], 'lists.public'),
+    'lists_may_publish' => listsMayPublish($db, $cfg, (int)$u['id']),
+    // …and share a list with my friends (1.72.0): the site, the friends feature, my account's friends.use.
+    'lists_may_friends' => listsMayShareFriends($db, $cfg, (int)$u['id']),
     // Likes or ratings (1.69.0): the flag, and whether anything would show it — the same grant the
     // profile asks, never the administrator's blanket.
     'votes_public' => (int)($u['votes_public'] ?? 0) === 1,

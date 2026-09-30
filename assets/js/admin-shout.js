@@ -448,7 +448,7 @@
           ids: ['shout.view', 'shout.post', 'shout.edit_own', 'shout.delete_own', 'shout.edit_any', 'shout.moderate'] },
         { wrap: 'emote-matrix-wrap', table: 'emote-matrix', ids: ['shout.upload_emote', 'shout.emote_auto'] },
         { wrap: 'comment-matrix-wrap', table: 'comment-matrix',
-          ids: ['comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.moderate'] },
+          ids: ['comment.view', 'comment.post', 'comment.reply', 'comment.edit_own', 'comment.delete_own', 'comment.moderate'] },
     ];
     // The one request, shared; a failure is forgotten, so closing a fold and opening it again retries.
     let groupsAsked = null;

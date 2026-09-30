@@ -33,10 +33,11 @@
     // events: the callers hand over the total and the friends' share, and the difference is the rest.
     // The comments' two (1.71.0): a comment where the reader is told of one, and a comment that names them —
     // counted from the notifications they leave (api/user_pulse.php: unread_comment, of which
-    // unread_comment_mention), so observe() takes them OUT of `unread` below: one comment, one sound.
+    // unread_comment_mention), so observe() takes them OUT of `unread` below: one comment, one sound. And the
+    // third (1.72.0): a reply to one of the reader's comments (unread_comment_reply, also of unread_comment).
     const KEYS = { unread: 'notification', unread_pm_friend: 'message_friend', unread_pm_other: 'message',
                    unread_shout_friend: 'shout_friend', unread_shout_other: 'shout', unread_shout_mention: 'mention',
-                   unread_comment_other: 'comment', unread_comment_mention: 'comment_mention' };
+                   unread_comment_other: 'comment', unread_comment_mention: 'comment_mention', unread_comment_reply: 'comment_reply' };
     // The three of those that the room can ALSO announce by itself (1.61.0, `shout:new`). One batch
     // of lines can reach this file down either road, and it has to be heard once.
     const SHOUT_KEYS = { unread_shout_friend: 1, unread_shout_other: 1, unread_shout_mention: 1 };
@@ -151,7 +152,12 @@
         if (c.unread_comment !== undefined && c.unread_comment !== null) {
             const total = Math.max(0, Number(c.unread_comment) || 0);
             const named = Math.max(0, Number(c.unread_comment_mention) || 0);
-            c.unread_comment_other = Math.max(0, total - named);
+            // 1.72.0: the replies to the reader's comments — a kind of their own. An older answer without the number
+            // counts none, and leaves their baseline alone.
+            const answered = Math.max(0, Number(c.unread_comment_reply) || 0);
+            if (c.unread_comment_reply === undefined || c.unread_comment_reply === null) delete c.unread_comment_reply;
+            else c.unread_comment_reply = answered;
+            c.unread_comment_other = Math.max(0, total - named - answered);
             c.unread_comment_mention = named;
             if (c.unread !== undefined && c.unread !== null) c.unread = Math.max(0, (Number(c.unread) || 0) - total);
         }

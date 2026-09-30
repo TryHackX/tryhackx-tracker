@@ -88,21 +88,25 @@ $MEMBER = array_merge($GUEST, [
     'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own',
     // v84 (1.71.0): report a comment, a description or a shout to the moderators.
     'content.report',
+    // v88 (1.72.0): reply to a comment.
+    'comment.reply',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
 $PREMIUM = ['profile.cover', 'shout.upload_emote'];
-// The v25 seed, plus what v63 and v71 added. favourites/uploads are in it because they have been
-// since v25 — this release adds to groups, and removes exactly one thing from exactly one group.
+// The v25 seed, plus what v63 and v71 added. (Until 1.72.0 this row also carried index.files_all and the four
+// favourites / uploads ids, with the claim that they "have been in it since v25". They had not: the seed's TEXT gained
+// them at v42 and v47, which reaches only a NEW install, and those releases granted them to member alone — so no
+// upgraded install's moderator ever had them, the owner's included. The row is the moderator every install has now;
+// a moderator is a member too, which is where the five come from.)
 $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'panel.reports.block',
               'panel.reports.email', 'panel.reports.archive', 'panel.appeals.resolve',
               'panel.whitelist.view', 'panel.whitelist.add', 'panel.whitelist.ban',
               'panel.whitelist.meta', 'panel.whitelist.content',
               'panel.users.view', 'panel.users.notify',
-              'index.view', 'index.files', 'index.files_all', 'index.magnet',
+              'index.view', 'index.files', 'index.magnet',
               'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
               'rating.vote', 'content.submit', 'content.propose', 'content.view',
-              'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
               'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate',
               // v72 (1.66.0): editing anybody's line, to this group ONLY and never with shout.moderate.
               'shout.edit_any',
@@ -114,7 +118,9 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               // message queue (panel.messages.*), which stays with nobody.
               'panel.reports.comments.view', 'panel.reports.comments.handle',
               'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
-              'panel.reports.shouts.view', 'panel.reports.shouts.handle'];
+              'panel.reports.shouts.view', 'panel.reports.shouts.handle',
+              // v88 (1.72.0): reply to a comment.
+              'comment.reply'];
 
 /* ══ 1. the presets ════════════════════════════════════════════════════════ */
 // includes/users.php has claimed since 1.21.0 that "users_test.php checks every id here is real".
@@ -179,7 +185,8 @@ $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                         ['comment.view', 'comment.post', 'comment.moderate'],
                                         ['panel.reports.comments.view', 'panel.reports.comments.handle',
                                          'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
-                                         'panel.reports.shouts.view', 'panel.reports.shouts.handle']));
+                                         'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
+                                        ['comment.reply']));
 check('the moderator preset and the moderator seed agree',
       array_values(array_diff($modSeedPlus, $presets['moderator']['perms'])) === []
       && array_values(array_diff($presets['moderator']['perms'], $modSeedPlus)) === [],
@@ -226,6 +233,16 @@ try {
               array_values(array_diff($want, $have)) === [] && array_values(array_diff($have, $want)) === [],
               setDiff($want, $have));
     }
+    // 1.72.0: the Admin group's STORED list is every capability and no consent id (schemaAdminGrant(), the v89 step):
+    // the matrix draws what is true, and what others may see of an administrator stays a grant somebody gives.
+    $caps = userCapabilityPermissions();
+    sort($caps);
+    $freshAdmin = $perms($sdb, 'admin');
+    check("a new install's admin group stores every capability and no consent id",
+          $freshAdmin === $caps, setDiff($caps, $freshAdmin));
+    // What a new install ships, kept for §8: every recommended set must be contained in it.
+    $freshHas = [];
+    foreach (USER_RECOMMENDED_SLUGS as $slug) $freshHas[$slug] = $perms($sdb, $slug);
     $prem = $sdb->query("SELECT * FROM user_groups WHERE slug = 'premium'")->fetch(PDO::FETCH_ASSOC);
     check('premium is a system group, is never the default, and sits between member and moderator',
           $prem && (int)$prem['is_system'] === 1 && (int)$prem['is_default'] === 0
@@ -259,8 +276,18 @@ try {
     $sdb->exec("DELETE FROM user_groups WHERE slug = 'premium'");
     // …and from before 1.66.0 as well: the v72 grant (shout.edit_own) has not happened on it yet, and
     // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public) nor 1.70.0's v81 one
-    // (content.delete_own, content.public) nor 1.71.0's v83 one (the comments) and v84 one (reporting).
-    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports')");
+    // (content.delete_own, content.public) nor 1.71.0's v83 one (the comments) and v84 one (reporting), nor 1.72.0's
+    // v88 one (replying).
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports', 'schema_grant_v88_replies')");
+    // 1.72.0: the owner's Admin group, imitated — what production's held before this release (read 2026-09-29): every id
+    // but the fifteen registered since v81 and v88's comment.reply, four of the five consent ids among them (the owner had
+    // ticked them himself; content.public came later and he never had it).
+    $prodAdminLacks = ['content.delete_own', 'content.delete_any', 'content.public', 'comment.view', 'comment.post',
+                       'comment.edit_own', 'comment.delete_own', 'comment.moderate', 'content.report',
+                       'panel.reports.comments.view', 'panel.reports.comments.handle', 'panel.reports.descriptions.view',
+                       'panel.reports.descriptions.handle', 'panel.reports.shouts.view', 'panel.reports.shouts.handle', 'comment.reply'];
+    $prodAdmin = array_values(array_diff(array_keys(userPermissionList()), $prodAdminLacks));
+    $sdb->exec("UPDATE user_groups SET permissions = " . $sdb->quote(json_encode(array_fill_keys($prodAdmin, true))) . " WHERE slug = 'admin'");
     trackerSchemaDataMigrations($sdb, $scfg);
     $after = $perms($sdb, 'member');
     check('the migration puts the missing matrix ids on an existing member group',
@@ -271,6 +298,14 @@ try {
           in_array('shout.moderate', $after, true), implode(',', $after));
     check('… creating the premium group if it is not there', $perms($sdb, 'premium') === ['profile.cover', 'shout.upload_emote'],
           implode(',', $perms($sdb, 'premium')));
+    $adminAfter = $perms($sdb, 'admin');
+    $prodConsent = array_values(array_intersect($prodAdmin, userConsentPermissions()));
+    $wantAdmin = array_values(array_unique(array_merge(userCapabilityPermissions(), $prodConsent)));
+    sort($wantAdmin);
+    check('the migration gives the owner\'s admin group every capability it lacked (the matrix\'s empty boxes), and keeps what it had',
+          $adminAfter === $wantAdmin, setDiff($wantAdmin, $adminAfter));
+    check('… but NOT the consent it never gave (content.public): what others may see of an administrator is a grant somebody gives',
+          !in_array('content.public', $adminAfter, true) && count($prodConsent) === 4);
     // Twice is the same as once: the local bootstrap wipes schema_once_* markers, so this step meets
     // the same database again on every release and must not undo anything on the second pass.
     $sdb->exec("DELETE FROM settings WHERE `key` = 'schema_once_v71_group_matrix'");
@@ -282,6 +317,24 @@ try {
     trackerSchemaDataMigrations($sdb, $scfg);
     check('a permission the operator removes afterwards is not resurrected',
           !in_array('index.magnet', $perms($sdb, 'member'), true));
+    // The one exception to "once", and the reason for it (schemaAdminGrant()): on the Admin group a capability is never
+    // a choice — the blanket holds it whatever is stored — so a capability missing from its stored list comes back at
+    // the next pass, and an id a later release registers and grants to nobody reaches it too. Its consent is a choice,
+    // and is never written back.
+    $sdb->exec("UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\"panel.audit.view\"', '$.\"shout.emote_auto\"', '$.\"favourites.public\"') WHERE slug = 'admin'");
+    trackerSchemaDataMigrations($sdb, $scfg);
+    $again = $perms($sdb, 'admin');
+    check('a capability missing from the admin group\'s stored list comes back at the next pass (an id granted to nobody included)',
+          in_array('panel.audit.view', $again, true) && in_array('shout.emote_auto', $again, true), implode(',', $again));
+    check('… and a consent id taken off it is not given back', !in_array('favourites.public', $again, true));
+    // Every grant a migration makes is the Admin group's too — its capabilities, never its consent — and the answer
+    // still counts the groups the call NAMES (tests/users_test.php holds the grant probe to 1).
+    $sdb->exec("UPDATE user_groups SET permissions = '{}' WHERE slug = 'admin'");
+    $sdb->exec("UPDATE user_groups SET permissions = '{}' WHERE slug = 'premium'");
+    $named = schemaGrantOnce($sdb, 'gm_admin_copy_probe', ['premium' => ['shout.emote_auto', 'lists.public']]);
+    check('a grant gives the admin group the capability it grants, never the consent id beside it, and counts only the group it names',
+          $named === 1 && $perms($sdb, 'admin') === ['shout.emote_auto'] && $perms($sdb, 'premium') === ['lists.public', 'shout.emote_auto'],
+          $named . ' | admin ' . implode(',', $perms($sdb, 'admin')) . ' | premium ' . implode(',', $perms($sdb, 'premium')));
 } finally {
     try { $adm->exec("DROP DATABASE IF EXISTS `$scratch`"); } catch (\Throwable $e) { /* leave it for a person */ }
 }
@@ -337,18 +390,28 @@ check('… with the row still saying exactly what it said before any of this',
 check('a row with no account id is drawn as before',
       is_array(userCoverFor(['username' => 'x', 'cover_sha' => $coverSha], '/', $cfgOn, $db)));
 // The owner's own profile, imitated: an account in the ADMIN group and nothing else. That group
-// stores no `profile.cover` — it passes every check by its blanket — so a display rule asking for a
-// STORED grant instead of the effective permission would blank the owner's cover the moment this
-// release reached the live site, where the owner is exactly this account. Pin it.
+// passes every check by its blanket, and until 1.72.0 stored no `profile.cover` — so a display rule
+// asking for a STORED grant instead of the effective permission would blank the owner's cover the
+// moment it reached the live site, where the owner is exactly this account. Since 1.72.0 the group
+// STORES every capability (schemaAdminGrant()), which would let such a rule pass by accident; so the
+// check takes the id off the stored list for its own moment, and puts the list back exactly.
 $gmAdmin = $gmUser('gmtest_admincover');
 $adminGid = (int)$db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn();
 $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$gmAdmin]);
 userGrantGroup($db, $gmAdmin, $adminGid, null, 'test', 'groups_matrix', false);
 $db->prepare("UPDATE users SET cover_sha = ? WHERE id = ?")->execute([$coverSha, $gmAdmin]);
 $adminRow = $db->query("SELECT * FROM users WHERE id = " . (int)$gmAdmin)->fetch(PDO::FETCH_ASSOC);
-$adminStored = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'admin'")->fetchColumn(), true) ?: [];
-check('an account only in the admin group keeps its cover painted, though that group stores no profile.cover',
-      $adminGid > 0 && empty($adminStored['profile.cover']) && is_array(userCoverFor($adminRow, '/', $cfgOn, $db)));
+$adminJsonWas = $db->query("SELECT permissions FROM user_groups WHERE slug = 'admin'")->fetchColumn();
+try {
+    $db->exec("UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\"profile.cover\"') WHERE slug = 'admin'");
+    userPermissionsForget();
+    $adminStored = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'admin'")->fetchColumn(), true) ?: [];
+    check('an account only in the admin group keeps its cover painted, even while that group stores no profile.cover',
+          $adminGid > 0 && empty($adminStored['profile.cover']) && is_array(userCoverFor($adminRow, '/', $cfgOn, $db)));
+} finally {
+    $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'admin'")->execute([$adminJsonWas]);
+    userPermissionsForget();
+}
 userDeleteCascade($db, $gmAdmin);
 // …and a member without it is told where a cover comes from, not warned about a missing grant.
 $acctSrc = (string)file_get_contents($root . '/templates/pages/account.php');
@@ -439,6 +502,176 @@ $db->prepare("UPDATE users SET status = 'active' WHERE id = ?")->execute([$gmUid
 // With verification NOT required the address stops being a reason at all.
 check('… and with the verification gate off, an unconfirmed address is not a reason',
       userGrantEffective($db, array_merge($cfgOn, ['users_require_email_verify' => '0']), userFindById($db, $unverUid))['effective'] === true);
+
+/* ══ 8. the recommended sets, consent and the Admin row (1.72.0) ═══════════ */
+// The owner: "prepare a basic default set of permissions, and set it on my server too — there are new ones and the
+// admin still does not have everything". One definition per seeded group, beside the presets (includes/users.php).
+$registry = array_keys(userPermissionList());
+$sorted = function (array $a): array { $a = array_values(array_unique($a)); sort($a); return $a; };
+foreach (USER_RECOMMENDED_SLUGS as $slug) {
+    $rec = userGroupRecommended($slug);
+    check("`$slug` has a recommended set, and every id in it is registered",
+          is_array($rec) && $rec !== [] && array_values(array_diff($rec, $registry)) === [], json_encode($rec));
+}
+check('the admin group\'s recommended set is every registered id — computed from the registry, in its order',
+      userGroupRecommended('admin') === $registry, count(userGroupRecommended('admin') ?? []) . ' of ' . count($registry));
+$usersSrc = (string)file_get_contents($root . '/includes/users.php');
+check('… never typed out (the function asks userPermissionList())',
+      (bool)preg_match("/if \(\\\$slug === 'admin'\) return array_keys\(userPermissionList\(\)\);/", $usersSrc));
+foreach (['guest', 'member', 'premium', 'moderator'] as $slug) {
+    check("`$slug`'s recommended set IS its preset, so the editor's \"Start from\" and \"Recommended\" cannot say two things",
+          $sorted(userGroupRecommended($slug) ?? []) === $sorted($presets[$slug]['perms'] ?? ['?']),
+          setDiff($presets[$slug]['perms'] ?? [], userGroupRecommended($slug) ?? []));
+}
+// The window names each set in the reader's language (a.users.rec_name_* / rec_about_*); its English is the preset's
+// own label and line, word for word, so the two cannot drift (the editor's "Start from" shows the preset's).
+$enDict = include $root . '/lang/en.php';
+$plDict = include $root . '/lang/pl.php';
+$labelDrift = [];
+foreach (USER_RECOMMENDED_SLUGS as $slug) {
+    $l = userGroupRecommendedLabel($slug);
+    if (($enDict['a.users.rec_name_' . $slug] ?? null) !== $l['label'] || ($enDict['a.users.rec_about_' . $slug] ?? null) !== $l['about']
+        || trim((string)($plDict['a.users.rec_name_' . $slug] ?? '')) === '' || trim((string)($plDict['a.users.rec_about_' . $slug] ?? '')) === '') {
+        $labelDrift[] = $slug;
+    }
+}
+check('every recommended set has its name and line in both languages, the English word for word the preset\'s', $labelDrift === [], implode(',', $labelDrift));
+check('a group without a seed has no recommended set (a group the operator made has nothing to go back to)',
+      userGroupRecommended('vip') === null && userGroupRecommended('grantprobe') === null && userGroupRecommended('') === null);
+check('the guest\'s set is the public statistics and nothing else (whitelist page, search, descriptions, comments, writing: the operator\'s to open)',
+      $sorted(userGroupRecommended('guest') ?? []) === $sorted(['stats.view', 'stats.timeline', 'home.stats']),
+      implode(',', userGroupRecommended('guest') ?? []));
+check('the member\'s is the member row of the matrix, the premium\'s the two extras, the moderator\'s the moderator every install has',
+      $sorted(userGroupRecommended('member') ?? []) === $sorted($MEMBER) && $sorted(userGroupRecommended('premium') ?? []) === $sorted($PREMIUM)
+      && $sorted(userGroupRecommended('moderator') ?? []) === $sorted($MODERATOR),
+      setDiff($MODERATOR, userGroupRecommended('moderator') ?? []));
+// Every set is contained in what a new install ships (§2), so "add what is missing" changes nothing on one — the
+// Admin group's consent aside, which only a deliberate tick (or --consent) writes.
+$exceed = [];
+foreach (USER_RECOMMENDED_SLUGS as $slug) {
+    $want = $slug === 'admin' ? userCapabilityPermissions() : (userGroupRecommended($slug) ?? []);
+    $over = array_values(array_diff($want, $freshHas[$slug] ?? []));
+    if ($over) $exceed[] = $slug . ': ' . implode(',', $over);
+}
+check('every recommended set is contained in what a new install ships ("add" changes nothing there)', isset($freshHas) && $exceed === [],
+      implode(' | ', $exceed));
+
+// Consent and capabilities: two kinds, every registered id exactly one of them.
+$consentIds = userConsentPermissions();
+check('the consent ids are content.public, favourites.public, lists.public, rating.public and uploads.public',
+      $sorted($consentIds) === ['content.public', 'favourites.public', 'lists.public', 'rating.public', 'uploads.public'], implode(',', $consentIds));
+check('… every one registered, and consent + capabilities = the registry, with nothing in both',
+      array_values(array_diff($consentIds, $registry)) === [] && array_intersect($consentIds, userCapabilityPermissions()) === []
+      && $sorted(array_merge($consentIds, userCapabilityPermissions())) === $sorted($registry));
+// …and the list is the CODE's: every id read through the consent check — userIdHasGrantedPermission(), and
+// userGroupIdsWithPermission() where a group's grant is turned into SQL — and nothing else. Read from the code with
+// its comments taken out by the tokeniser (a word in a comment is not a read), so a new consent read that is not in
+// the list, or an id in the list that nothing reads that way any more, fails here.
+$codeFiles = [];
+foreach (['includes', 'api', 'templates', 'tools'] as $dir) {
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $dir, FilesystemIterator::SKIP_DOTS)) as $f) {
+        if ($f->isFile() && $f->getExtension() === 'php') $codeFiles[] = $f->getPathname();
+    }
+}
+foreach (['index.php', 'api.php'] as $f) $codeFiles[] = $root . '/' . $f;
+$noComments = function (string $src): string {
+    $o = '';
+    foreach (token_get_all($src) as $tk) {
+        if (is_array($tk) && in_array($tk[0], [T_COMMENT, T_DOC_COMMENT], true)) continue;
+        $o .= is_array($tk) ? $tk[1] : $tk;
+    }
+    return $o;
+};
+$grantReads = []; $groupReads = []; $powerReads = []; $readFiles = [];
+foreach ($codeFiles as $path) {
+    $s = $noComments((string)file_get_contents($path));
+    $rel = str_replace('\\', '/', substr($path, strlen($root) + 1));
+    if (preg_match_all("/userIdHasGrantedPermission\s*\([^;]*?'([a-z_]+\.[a-z_.]+)'/", $s, $m)) {
+        foreach ($m[1] as $id) { $grantReads[$id][] = $rel; $readFiles[$rel] = true; }
+    }
+    if (preg_match_all("/userGroupIdsWithPermission\s*\(\s*\\\$db\s*,\s*'([a-z_]+\.[a-z_.]+)'/", $s, $m)) {
+        foreach ($m[1] as $id) { $groupReads[$id][] = $rel; $readFiles[$rel] = true; }
+    }
+    if (preg_match_all("/whoPermittedSql\s*\(\s*\\\$db\s*,\s*'([a-z_]+\.[a-z_.]+)'/", $s, $m)) {
+        foreach ($m[1] as $id) $powerReads[$id][] = $rel;
+    }
+}
+// who.php turns a section into its grant through a map, and asks userGroupIdsWithPermission() with the variable.
+$whoSrc = $noComments((string)file_get_contents($root . '/includes/who.php'));
+$whoMap = preg_match("/\\\$perm\s*=\s*\[\s*'fav'\s*=>\s*'([a-z_.]+)'\s*,\s*'votes'\s*=>\s*'([a-z_.]+)'\s*,\s*'lists'\s*=>\s*'([a-z_.]+)'\s*\]/", $whoSrc, $wm)
+    && str_contains($whoSrc, 'userGroupIdsWithPermission($db, $perm)') ? [$wm[1], $wm[2], $wm[3]] : [];
+foreach ($whoMap as $id) $groupReads[$id][] = 'includes/who.php (the sections\' map)';
+check('the consent reads were found at all (not an empty haystack)', count($readFiles) >= 6 && count($whoMap) === 3,
+      count($readFiles) . ' files; who.php map ' . json_encode($whoMap));
+check('every id the code reads through userIdHasGrantedPermission() is a consent id, and every consent id is read that way',
+      $sorted(array_keys($grantReads)) === $sorted($consentIds),
+      'read: ' . implode(',', array_keys($grantReads)) . ' | list: ' . implode(',', $consentIds));
+// profile.cover is the one other id asked of the stored grants — "which groups give a cover" (1.65.0) — and it is a paid
+// extra, not consent: named here, read in the one place, with the admin and guest groups left out by name.
+$acctSrc = (string)file_get_contents($root . '/templates/pages/account.php');
+$otherGroupReads = array_values(array_diff(array_keys($groupReads), $consentIds));
+check('every other id turned into SQL from the stored grants is profile.cover alone — "which groups give a cover", not consent',
+      $otherGroupReads === ['profile.cover'] && ($groupReads['profile.cover'] ?? []) === ['templates/pages/account.php']
+      && str_contains($acctSrc, "!in_array((string)\$accG['slug'], ['admin', 'guest'], true)"),
+      json_encode($groupReads));
+check('… and the who-has-this sections ask a consent grant each (favourites.public, rating.public, lists.public)',
+      array_values(array_diff($whoMap, $consentIds)) === [] && $sorted($whoMap) === ['favourites.public', 'lists.public', 'rating.public'],
+      implode(',', $whoMap));
+check('the one power read that also counts the admin group (whoPermittedSql()) is never asked a consent id',
+      $powerReads !== [] && array_intersect(array_keys($powerReads), $consentIds) === [], json_encode($powerReads));
+
+// The plans, on rows as the database holds them (no database needed).
+$row = fn(string $slug, array $ids, array $extra = []) => ['id' => 0, 'slug' => $slug, 'permissions' => json_encode(array_fill_keys($ids, true) + $extra)];
+$pm = userGroupRecommendedPlan($row('member', array_merge(array_diff($MEMBER, ['comment.reply', 'content.report']), ['shout.moderate']), ['no.such.id' => true, 'index.view' => false]));
+check('a member group two ids short with one extra: add = the two, a reset would remove the extra — an unregistered key is nobody\'s and is left alone',
+      $pm['add'] === userPermissionsOrdered(['comment.reply', 'content.report']) && $pm['remove'] === ['shout.moderate'],
+      json_encode(['add' => $pm['add'], 'remove' => $pm['remove']]));
+$pmIdx = userGroupRecommendedPlan($row('member', array_diff($MEMBER, ['index.view']), ['index.view' => false]));
+check('… a key stored as false is not held, so it is added', $pmIdx['add'] === ['index.view'], json_encode($pmIdx['add']));
+$pg = userGroupRecommendedPlan($row('guest', ['stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose']));
+check('the owner\'s guest group (the legacy v24 grants): nothing to add; a reset would remove the three writing ids — "add" keeps them',
+      $pg['add'] === [] && $sorted($pg['remove']) === $sorted(['rating.vote', 'content.submit', 'content.propose']), json_encode($pg));
+$pmod = userGroupRecommendedPlan($row('moderator', $MODERATOR));
+$pmodFresh = userGroupRecommendedPlan($row('moderator', array_merge($MODERATOR, ['index.files_all', 'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'])));
+check('the moderator every install has: nothing either way; one a pre-1.72.0 NEW install made: "add" leaves its five, a reset would take them',
+      $pmod['add'] === [] && $pmod['remove'] === [] && $pmodFresh['add'] === []
+      && $sorted($pmodFresh['remove']) === $sorted(['index.files_all', 'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public']));
+$pa = userGroupRecommendedPlan($row('admin', $prodAdmin ?? []));
+$pac = userGroupRecommendedPlan($row('admin', $prodAdmin ?? []), true);
+check('the owner\'s admin group: add = the capabilities it lacks — its missing consent listed apart, and added only with $consent',
+      $sorted($pa['add']) === $sorted(array_diff($prodAdminLacks ?? ['?'], ['content.public'])) && $pa['consent_add'] === ['content.public']
+      && $sorted($pac['add']) === $sorted($prodAdminLacks ?? ['?']) && $pac['consent'] === true && $pa['consent'] === false,
+      json_encode(['add' => $pa['add'], 'consent_add' => $pa['consent_add']]));
+check('… and a reset of the admin group would remove nothing: its set is every id, and never a capability',
+      $pa['remove'] === [] && $pac['remove'] === []);
+check('a group without a recommended set has no plan', userGroupRecommendedPlan($row('vip', ['index.view'])) === null);
+
+// The audit line is one shape for the panel and the shell.
+$au = userGroupRecommendedAudit(['id' => 7, 'slug' => 'member'], 'reset', false, ['comment.reply'], ['shout.moderate']);
+check('the audit line: group.recommend under Users, the group as its target, what was added and removed',
+      $au['action'] === 'group.recommend' && $au['target_type'] === 'group' && $au['target_id'] === 'member'
+      && $au['detail'] === ['group' => 'member', 'id' => 7, 'mode' => 'reset', 'consent' => false, 'added' => ['comment.reply'], 'removed' => ['shout.moderate']]
+      && auditGroupOf('group.recommend') === 'users' && auditEndpointAction('admin/group_recommended') === 'group.recommend', json_encode($au));
+
+// The code the release rests on, by its shape.
+$schemaSrc2 = (string)file_get_contents($root . '/includes/schema.php');
+check('schemaGrantOnce() gives the admin group the capabilities each grant introduces (schemaAdminGrant())',
+      (bool)preg_match('/function schemaGrantOnce\(.*?schemaAdminGrant\(\$db, array_merge\(.*?return \$changed;/s', $schemaSrc2));
+check('… and every data-migration pass writes the whole registry\'s capabilities into it (not behind a once-marker)',
+      (bool)preg_match("/schemaGrantOnce\(\\\$db, 'v24_content_rating'.*?try \{\s*schemaAdminGrant\(\\\$db\);/s", $schemaSrc2)
+      && !preg_match("/schemaOnce\(\\\$db, 'v89/", $schemaSrc2));
+$agFrom = (int)strpos($schemaSrc2, 'function schemaAdminGrant(');
+$agBody = $agFrom > 0 ? substr($schemaSrc2, $agFrom, max(0, (int)strpos($schemaSrc2, 'function trackerSchemaDataMigrations(') - $agFrom)) : '';
+check('schemaAdminGrant() adds capabilities and only those: never a consent id, never a removal',
+      (bool)preg_match('/\$caps = userCapabilityPermissions\(\);.*?if \(empty\(\$cur\[\$p\]\)\) \{ \$cur\[\$p\] = true;/s', $agBody)
+      && strlen($agBody) > 300 && !str_contains($agBody, 'unset('));
+$saveSrc = (string)file_get_contents($root . '/api/admin/group_save.php');
+check('the group editor\'s save keeps every capability on the admin group (its boxes are drawn ticked and disabled)',
+      str_contains($saveSrc, "if (\$slug !== 'admin') return \$perms;") && str_contains($saveSrc, 'foreach (userCapabilityPermissions() as $p) $perms[$p] = true;'));
+$apiSrc = (string)file_get_contents($root . '/api.php');
+check('the Recommended endpoint is routed and, like group editing, owner-only (absent from the endpoint map)',
+      (bool)preg_match("/'admin\/group_recommended'\s*=>\s*'api\/admin\/group_recommended\.php'/", $apiSrc)
+      && !preg_match("/'admin\/group_recommended'\s*=>\s*'panel\./", $apiSrc));
 
 /* ── put the database back ─────────────────────────────────────────────── */
 // By LABEL, not only by the id this run made: a run that died half way through (this file has an

@@ -17,8 +17,28 @@
  *
  * Included where the reader's own cards are: the account page's Lists tab and the reader's own profile.
  * Expects $db, $cfg, $baseUrl.
+ *
+ * WHO SEES IT (1.72.0): the window's third question, under the name — private, friends, public — a group of
+ * three buttons that behave as radio buttons (an icon and a word each; arrows move the choice), saved with the
+ * name and the description. What THIS reader may choose is the server's answer (listsContext(): the same
+ * functions the save and every reader ask), so an answer they may not give is drawn disabled, with the line
+ * that says why; a list that already has it keeps it until its owner chooses another.
  */
 $leFormats = function_exists('richtextFormats') ? richtextFormats($cfg) : ['bbcode'];
+$leCtx = listsContext($db, $cfg, currentUser($db));
+$leVis = [
+    'private' => ['icon' => 'bi-lock', 'ok' => true],
+    'friends' => ['icon' => 'bi-people', 'ok' => !empty($leCtx['may_friends'])],
+    'public'  => ['icon' => 'bi-globe2', 'ok' => !empty($leCtx['may_publish'])],
+];
+// Why an answer is not theirs: one line for the site keeping every list private, else one per answer.
+$leWhy = [];
+if (($leCtx['public_why'] ?? '') === 'sharing_off') {
+    $leWhy['sharing'] = __('lists.vis_why_sharing_off');
+} else {
+    if (($leCtx['friends_why'] ?? '') !== '') $leWhy['friends'] = __('lists.vis_why_' . $leCtx['friends_why']);
+    if (($leCtx['public_why'] ?? '') !== '') $leWhy['public'] = __('lists.vis_why_' . $leCtx['public_why'], ['perm' => 'lists.public']);
+}
 ?>
 <div class="files-overlay" id="le-overlay" hidden data-desc-max="<?= (int)listsDescMax($cfg) ?>">
     <div class="files-box le-box" id="le-box" role="dialog" aria-modal="true" aria-labelledby="le-title">
@@ -33,6 +53,26 @@ $leFormats = function_exists('richtextFormats') ? richtextFormats($cfg) : ['bbco
                 <label for="le-name" id="le-name-label"><?= _h('lists.edit_name') ?></label>
                 <input type="text" id="le-name" maxlength="<?= (int)LIST_NAME_MAX ?>" autocomplete="off" aria-describedby="le-name-hint">
                 <p class="form-hint" id="le-name-hint"><?= _h('lists.edit_name_hint') ?></p>
+            </div>
+            <div class="form-group" id="le-vis-group">
+                <span class="le-vis-label" id="le-vis-label"><?= _h('lists.vis_label') ?></span>
+                <div class="vis-seg" id="le-vis" role="radiogroup" aria-labelledby="le-vis-label">
+                    <?php foreach ($leVis as $v => $o): ?>
+                    <button type="button" class="btn btn-secondary btn-small vis-opt vis-opt-<?= $v ?>" id="le-vis-<?= $v ?>" role="radio"
+                            aria-checked="false" tabindex="-1" data-vis="<?= $v ?>"<?= $o['ok'] ? '' : ' data-off="1" disabled' ?>><i class="bi <?= $o['icon'] ?>" aria-hidden="true"></i><span id="le-vis-<?= $v ?>-t"><?= _h('lists.vis_' . $v) ?></span></button>
+                    <?php endforeach; ?>
+                </div>
+                <?php /* What the chosen answer means — the one shown is the checked one's (the script) — and why an
+                         answer is not this reader's to give. */ ?>
+                <?php foreach (array_keys($leVis) as $v): ?>
+                <p class="form-hint le-vis-means" id="le-vis-means-<?= $v ?>" data-vis="<?= $v ?>" hidden><?= _h('lists.vis_' . $v . '_hint') ?></p>
+                <?php endforeach; ?>
+                <?php foreach ($leWhy as $k => $line): ?>
+                <p class="form-hint le-vis-why" id="le-vis-why-<?= $k ?>"><?= $line ?></p>
+                <?php endforeach; ?>
+                <?php /* The owner's "Show my lists on my profile" off: shared or not, nobody else sees any of them —
+                         shown by the script, from the shelf's answer (section_shown), for a list chosen to be shared. */ ?>
+                <p class="form-hint le-vis-hidden" id="le-vis-hidden" hidden><?= _h('lists.vis_section_hidden') ?></p>
             </div>
             <div class="form-group" id="le-desc-group">
                 <label for="le-desc" id="le-desc-label"><?= _h('lists.edit_desc') ?></label>

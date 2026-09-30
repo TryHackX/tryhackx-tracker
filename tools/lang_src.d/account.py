@@ -107,8 +107,8 @@ add('account', {
 # back here, where the generator reads from. tests/lang_test.php now checks that the generated files
 # match the sources, so a string added to the generated file alone fails the battery on the spot.
 add('', {
-    'account.lists_public_hint': ('Each list still carries its own switch — this one decides whether the section exists for a stranger at all. Off, nobody sees that you have lists.',
-        'Każda lista ma nadal własny przełącznik — ten decyduje, czy sekcja w ogóle istnieje dla obcej osoby. Wyłączone — nikt nie widzi, że masz listy.'),
+    'account.lists_public_hint': ('Each list still carries its own answer — private, for friends or public — and this one decides whether the section exists for anybody else at all, your friends included. Off, nobody sees that you have lists.',
+        'Każda lista ma nadal własną odpowiedź — prywatna, dla znajomych albo publiczna — a ten przełącznik decyduje, czy sekcja w ogóle istnieje dla kogokolwiek innego, także dla twoich znajomych. Wyłączone — nikt nie widzi, że masz listy.'),
     'account.lists_public_label': ('Show my lists on my profile',
         'Pokazuj moje listy na moim profilu'),
     'account.needs_grant': ('This switch is saved, but nothing acts on it yet: none of your groups grants <code>:perm</code>, and that permission is what every page checks before showing this to anybody else. An administrator grants it in the panel, under Users → Groups.',

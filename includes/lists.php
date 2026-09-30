@@ -9,24 +9,53 @@
  * of its own rather than a column on `user_favourites`: un-starring a torrent must never silently
  * empty somebody's pack, and a pack must be able to hold a hash its owner has not starred.
  *
- * ── the three switches, and which one wins ────────────────────────────────────────────────────
+ * ── the switches, and which one wins ──────────────────────────────────────────────────────────
  *
  * A list is visible to a stranger only when EVERY one of these says yes:
- *   1. `lists_enabled`         — the operator switched the feature on at all
- *   2. `lists_public_enabled`  — the operator allows any list to be public
- *   3. `lists.public`          — the owner's group is allowed to publish
- *   4. `users.lists_public`    — the owner shows the section on their profile
- *   5. `user_lists.is_public`  — the owner published THIS list
+ *   1. `lists_enabled`          — the operator switched the feature on at all
+ *   2. `lists_public_enabled`   — the operator allows any list to be shared at all
+ *   3. `lists.public`           — the owner's group is allowed to publish (the GRANT)
+ *   4. `users.lists_public`     — the owner shows the section on their profile
+ *   5. `user_lists.visibility`  — the owner published THIS list ('public')
  *
  * The site-wide switch (2) can only ever narrow. Turning it off takes every list back off the
- * public side without editing anybody's row, and their own choice is remembered — it takes effect
+ * shared side without editing anybody's row, and their own choice is remembered — it takes effect
  * again when the operator turns it back on. That is the same rule favourites already follow, and
- * the reason the per-list flag is never rewritten by a settings change.
+ * the reason the per-list answer is never rewritten by a settings change.
+ *
+ * ── friends only (1.72.0, schema 87) ──────────────────────────────────────────────────────────
+ *
+ * The per-list answer is a VISIBILITY — private, friends, public (a boolean `is_public` until v87). A
+ * list shared with 'friends' is seen by its owner and by the members they are friends with, and nobody
+ * else, when every one of these says yes:
+ *   1, 2 and 4 above — the feature, the site's "lists may be shared" (off, EVERY list is private, a
+ *                       friends list too) and the owner's section;
+ *   6. `friends_enabled`        — the operator runs the friends feature at all (includes/people.php);
+ *   7. `friends.use`            — the owner's account may use it: a feature, not consent, so asked as
+ *                                 every feature is (userIdHasPermission() — the administrator's blanket
+ *                                 counts, as it does for the friends page itself), of the named account;
+ *   8. an ACCEPTED friendship between the owner and the reader, either way round (areFriends()), and no
+ *      block between them in either direction: blocking somebody ends the friendship already
+ *      (api/user_people.php), and a friendship row that outlived a block is still no friendship.
+ * No new permission: a friend is somebody the owner chose, and sharing with them is the narrower share —
+ * `lists.public` is consent to be seen by STRANGERS, which a friends list is not. The option is offered
+ * exactly when 6 and 7 hold (and 1, 2), so a choice is never saved that nothing acts on; losing one of them
+ * later makes the list private in effect, the choice remembered — the grant's rule. Nothing about it is
+ * cached: every read asks the friendship table, so an unfriending takes the access away on the next request.
+ *
+ * ── whose business the state is ──────────────────────────────────────────────────────────────
+ *
+ * The answer (private / friends / public) is told to its OWNER only. A reader only ever gets the lists they
+ * may see, so a badge would tell them nothing — except, between a friend's view and a stranger's, which of
+ * the owner's lists are shared with whom. The endpoints leave it out of every answer but the owner's.
  */
 
 // The lists a hash is on — "who has this" (1.70.0) — are asked there, one query for the overlay and for
 // listsContainingHash() below.
 require_once __DIR__ . '/who.php';
+// Who is a friend, and who has blocked whom (1.72.0): a list shared with friends asks the friends feature's
+// own answers (friendsEnabled(), areFriends(), blockRow()), wherever lists are loaded from.
+require_once __DIR__ . '/people.php';
 // How fast a list's name and description may be written, and whether a new account's links are words (1.71.0):
 // the site's one anti-spam layer, which the lists' endpoints ask wherever they are loaded from.
 require_once __DIR__ . '/antispam.php';
@@ -253,6 +282,11 @@ function listDescForClient(array $row, array $cfg): array
  * then) a moderator's mute and the description's own rules. What is not changed is not judged again: a
  * rename of a list whose description was written under a longer limit, or in a syntax Settings has since
  * switched off, is still a rename. The slug is never rebuilt — a link somebody was sent keeps working.
+ *
+ * `visibility` (1.72.0): who sees it — 'private' | 'friends' | 'public' — saved in the same request, the Edit
+ * window's third question. Absent is "as it is". An answer this account may not give (listVisibilityAllowed())
+ * is refused, 403 no_permission, nothing written — unless it is the one the list already has: the same "not
+ * changed, not judged again", so a list published before its owner's group lost the grant can still be renamed.
  */
 function listEditRequest(PDO $db, array $cfg, array $me, array $own, array $input, bool $withName = true): array
 {
@@ -293,19 +327,52 @@ function listEditRequest(PDO $db, array $cfg, array $me, array $own, array $inpu
         if ($bad !== null) return $fail(400, $bad['code'], $bad['vars']);
     }
     $fmt = listDescFormatOf($fmt);
-    $db->prepare("UPDATE user_lists SET name = ?, description = ?, description_format = ? WHERE id = ? AND user_id = ?")
-       ->execute([$name, $desc, $fmt, (int)$own['id'], (int)$me['id']]);
+    $wasVis = listVisibilityOf($own['visibility'] ?? null);
+    $vis = $wasVis;
+    if (($input['visibility'] ?? null) !== null) {
+        $vis = listVisibilityFromInput($input['visibility']);
+        if ($vis === null) return $fail(400, 'bad_visibility');
+        if ($vis !== $wasVis && !listVisibilityAllowed($db, $cfg, (int)$me['id'], $vis)) return $fail(403, 'no_permission');
+    }
+    $db->prepare("UPDATE user_lists SET name = ?, description = ?, description_format = ?, visibility = ? WHERE id = ? AND user_id = ?")
+       ->execute([$name, $desc, $fmt, $vis, (int)$own['id'], (int)$me['id']]);
     return ['status' => 200, 'body' => [
         'success'            => true,
         'name'               => $name,
         'slug'               => (string)$own['slug'],
         'description'        => $desc,
         'description_format' => $fmt,
+        'visibility'         => $vis,
         'excerpt'            => listDescExcerpt($desc, $fmt, $cfg),
         'chars'              => $desc === '' ? 0 : listDescVisible($desc, $fmt),
         'max'                => listsDescMax($cfg),
         'message'            => __('api.lists.saved'),
     ]];
+}
+
+/**
+ * Does an `edit` / `describe` request change what people READ — the name, the description or its syntax —
+ * or only who sees the list (1.72.0)? Asked by the endpoint before the anti-spam layer: showing, hiding and
+ * deleting your own list is not writing, and the Edit window, where the visibility is chosen now, sends all of
+ * it in one request. The same normalisation listEditRequest() applies; anything it would refuse counts as
+ * words (the layer is asked, and hands the reservation back when the request fails).
+ */
+function listEditChangesWords(array $own, array $input, bool $withName = true): bool
+{
+    if ($withName) {
+        $n = $input['name'] ?? '';
+        if (!is_string($n) || trim($n) !== (string)$own['name']) return true;
+    }
+    $wasText = (string)($own['description'] ?? '');
+    $wasFmt = listDescFormatOf($own['description_format'] ?? null);
+    $raw = $input['description'] ?? ($withName ? null : ($input['value'] ?? null)) ?? $wasText;
+    if (!is_string($raw) || strlen($raw) > LIST_DESC_RAW_BYTES || !mb_check_encoding($raw, 'UTF-8')) return true;
+    $desc = listDescClean($raw);
+    if ($desc !== $wasText) return true;
+    $fmtIn = $input['format'] ?? null;
+    if ($fmtIn !== null && !is_string($fmtIn)) return true;
+    $fmt = $fmtIn === null || $fmtIn === '' ? $wasFmt : $fmtIn;
+    return $desc !== '' && $fmt !== $wasFmt;
 }
 
 /**
@@ -348,6 +415,111 @@ function listUniqueSlug(PDO $db, int $userId, string $name, int $exceptId = 0): 
     return $base . '-' . bin2hex(random_bytes(3));
 }
 
+/* ── who sees a list (1.72.0, schema 87) ──────────────────────────────────────────────────────────
+ *
+ * The three answers a list can give, and what each needs — the top of this file says it at length. One
+ * place, asked by every path that serves a list or its rows: the owner's shelf and the Edit window (what
+ * may be CHOSEN), the profile, the list endpoints and "who has this" (what may be READ) — so the option
+ * offered and the readers can never disagree.
+ */
+const LIST_VISIBILITIES = ['private', 'friends', 'public'];
+
+/** A stored visibility as the code takes it: one of the three; private for anything else (NULL mid-migration). */
+function listVisibilityOf($v): string
+{
+    return is_string($v) && in_array($v, LIST_VISIBILITIES, true) ? $v : 'private';
+}
+
+/**
+ * What a request asked for, or null when it is none of the answers: 'private' | 'friends' | 'public' — and,
+ * for a client of the 1.44.0 op, the boolean it sent (1 / true = public, 0 / false = private).
+ */
+function listVisibilityFromInput($v): ?string
+{
+    if (is_string($v) && in_array($v, LIST_VISIBILITIES, true)) return $v;
+    if ($v === true || $v === 1 || $v === '1' || $v === 'true') return 'public';
+    if ($v === false || $v === 0 || $v === '0' || $v === 'false' || $v === '') return 'private';
+    return null;
+}
+
+/** May a list be shared with friends on this site at all: lists may be shared, and the friends feature runs. */
+function listsFriendsEnabled(array $cfg): bool
+{
+    return listsPublicEnabled($cfg) && function_exists('friendsEnabled') && friendsEnabled($cfg);
+}
+
+/**
+ * May this ACCOUNT make a list public: the site switch and its group's GRANT, for the reason favContext()
+ * gives — publishing is consent, and every page that reads a published list asks the grant. A control that
+ * asks a different question is a control that saves an answer nothing acts on.
+ */
+function listsMayPublish(PDO $db, array $cfg, int $userId): bool
+{
+    return $userId > 0 && listsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, $userId, 'lists.public');
+}
+
+/**
+ * May this ACCOUNT share a list with its friends: the site (listsFriendsEnabled()) and the account's own
+ * `friends.use`. A feature, not consent — asked as the friends page asks it, the administrator's blanket
+ * included — and of the named account, never of whoever holds the session (a panel session answers yes to
+ * everything, and a reader's permission is not the owner's).
+ */
+function listsMayShareFriends(PDO $db, array $cfg, int $userId): bool
+{
+    return $userId > 0 && listsFriendsEnabled($cfg) && userIdHasPermission($db, $cfg, $userId, 'friends.use');
+}
+
+/** May this account choose this answer for its own list? Private always: taking a list back never waits for anybody. */
+function listVisibilityAllowed(PDO $db, array $cfg, int $userId, string $vis): bool
+{
+    if ($vis === 'public') return listsMayPublish($db, $cfg, $userId);
+    if ($vis === 'friends') return listsMayShareFriends($db, $cfg, $userId);
+    return $vis === 'private';
+}
+
+/**
+ * Are these two friends, as far as a list is concerned: an ACCEPTED friendship, either way round, and no block
+ * between them in either direction. Blocking somebody ends the friendship (api/user_people.php); a friendship
+ * row that outlived a block — a restored backup, a request answered in the same moment — is still none.
+ */
+function listsFriendOf(PDO $db, int $ownerId, int $viewerId): bool
+{
+    if ($ownerId <= 0 || $viewerId <= 0 || $ownerId === $viewerId || !function_exists('areFriends')) return false;
+    return areFriends($db, $ownerId, $viewerId)
+        && blockRow($db, $ownerId, $viewerId) === null && blockRow($db, $viewerId, $ownerId) === null;
+}
+
+/**
+ * Which of an owner's lists a reader who is NOT the owner may see: [] (none — and then not the section
+ * either), or the answers they may, of 'public' and 'friends'. `$owner` is the account's row (id,
+ * lists_public); `$viewerId` the reader's account (0: nobody — then the public side alone, which is what the
+ * 1.44.0 callers asked).
+ *
+ * The caller has asked what every read of somebody else asks first — somebody signed in, profiles on,
+ * `favourites.view_others`, the account active, no `hide_profile` block. This asks the rest: the site's
+ * switch and the owner's section, then each answer's own — the GRANT of `lists.public` for the public
+ * side (consent, never the administrator's blanket: includes/favourites.php has the whole argument), the
+ * friends feature, the owner's `friends.use` and a friendship with THIS reader for the friends side.
+ */
+function listsVisibilitiesFor(PDO $db, array $cfg, array $owner, int $viewerId = 0): array
+{
+    $oid = (int)($owner['id'] ?? 0);
+    if ($oid <= 0 || !listsPublicEnabled($cfg) || (int)($owner['lists_public'] ?? 0) !== 1) return [];
+    $out = [];
+    if (userIdHasGrantedPermission($db, $cfg, $oid, 'lists.public')) $out[] = 'public';
+    if ($viewerId > 0 && $viewerId !== $oid && listsMayShareFriends($db, $cfg, $oid) && listsFriendOf($db, $oid, $viewerId)) $out[] = 'friends';
+    return $out;
+}
+
+/**
+ * Are somebody ELSE's lists visible on their profile — to this reader ($viewerId), or, without one, to a
+ * stranger? The section exists for a reader who may see at least one kind of the owner's lists.
+ */
+function listsVisibleFor(PDO $db, array $cfg, array $owner, int $viewerId = 0): bool
+{
+    return listsVisibilitiesFor($db, $cfg, $owner, $viewerId) !== [];
+}
+
 /**
  * Everything a page needs to know about one reader and the lists feature, in one call.
  *
@@ -359,10 +531,8 @@ function listsContext(PDO $db, array $cfg, ?array $viewer): array
     $on = listsEnabled($cfg);
     $mayUse = $on && $viewer !== null && userCan($db, $cfg, 'lists.use');
     $uid = $viewer !== null ? (int)$viewer['id'] : 0;
-    // The GRANT, for the reason favContext() gives: publishing is consent, and every page that reads
-    // a published list asks the grant. A control that asks a different question is a control that
-    // saves an answer nothing acts on.
     $grant = $uid > 0 && userIdHasGrantedPermission($db, $cfg, $uid, 'lists.public');
+    $friends = $mayUse && listsMayShareFriends($db, $cfg, $uid);
     return [
         'enabled'     => $on,
         'public_ok'   => listsPublicEnabled($cfg),
@@ -370,26 +540,20 @@ function listsContext(PDO $db, array $cfg, ?array $viewer): array
         // May THIS reader mark a list public — the site switch and their group's grant.
         'may_publish' => $mayUse && listsPublicEnabled($cfg) && $grant,
         'publish_blocked' => $mayUse && listsPublicEnabled($cfg) && !$grant,
+        // …and share one with their friends (1.72.0): the site, the friends feature and their friends.use.
+        'may_friends' => $friends,
+        // Why a choice the Edit window draws is not theirs to make — '' when it is: the site keeps every list
+        // private ('sharing_off'), the friends feature is off ('friends_off'), their groups do not give them
+        // friends.use ('no_friends') or do not grant lists.public ('no_grant').
+        'public_why'  => !$mayUse ? '' : (!listsPublicEnabled($cfg) ? 'sharing_off' : ($grant ? '' : 'no_grant')),
+        'friends_why' => !$mayUse || $friends ? '' : (!listsPublicEnabled($cfg) ? 'sharing_off'
+                         : (!listsFriendsEnabled($cfg) ? 'friends_off' : 'no_friends')),
         // May they read somebody else's? The same permission that opens profiles and favourites:
         // one decision about whether this install shows people to each other at all.
         'may_view'    => $on && $viewer !== null && userCan($db, $cfg, 'favourites.view_others'),
         'max_lists'   => listsMaxPerUser($cfg),
         'max_items'   => listsMaxItems($cfg),
     ];
-}
-
-/**
- * Are somebody ELSE's lists visible on their profile?
- *
- * userIdHasGrantedPermission(), not userIdHasPermission(): showing a collection to strangers is
- * consent, and the administrator's blanket is authority — see includes/favourites.php for the whole
- * argument. This is the same rule, applied to the same kind of question.
- */
-function listsVisibleFor(PDO $db, array $cfg, array $owner): bool
-{
-    return listsPublicEnabled($cfg)
-        && (int)($owner['lists_public'] ?? 0) === 1
-        && userIdHasGrantedPermission($db, $cfg, (int)$owner['id'], 'lists.public');
 }
 
 /**
@@ -490,7 +654,8 @@ function listItemsWithMeta(PDO $db, array $rows, bool $canWl = true, bool $isOwn
 }
 
 /**
- * The PUBLIC lists a hash appears on — "who has this", for collections: the first $limit of them.
+ * The lists a hash appears on that $viewerId may see — the public ones, and (1.72.0) those shared with
+ * friends when the reader is one of the owner's — "who has this", for collections: the first $limit of them.
  *
  * Since 1.70.0 the query is the "who has this" overlay's Lists section (whoListsPage(), includes/who.php),
  * which pages and searches; this is its first page, as the 1.69.0 overlay asked for it. Every gate the
@@ -498,7 +663,7 @@ function listItemsWithMeta(PDO $db, array $rows, bool $canWl = true, bool $isOwn
  * filtering after the LIMIT makes the total a lie. A list whose owner has since taken their section down,
  * or whose group lost the permission, is not there — nor one whose owner has hidden their profile from
  * $viewerId (`hide_profile`): a chip on a torrent's page that links straight into it would be the profile
- * answering after all.
+ * answering after all. A friends list counts only for a friend, and not after an unfriending or a block.
  *
  * Who calls it: since 1.70.0 nothing on the site — the overlay asks api/hash_who.php, and
  * api/hash_favourites.php (the 1.69.0 answer, kept) calls whoListsPage() itself. The TESTS do, and it

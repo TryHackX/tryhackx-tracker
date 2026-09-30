@@ -197,7 +197,7 @@ try:
         " $db->prepare(\"INSERT INTO index_hashes (info_hash, name, first_seen, last_seen, seen_count) VALUES (?, ?, NOW(), NOW(), 3)\")->execute([$h, $nm]);"
         "foreach ([" + ",".join(str(x) for x in (A, B, C, D)) + "] as $u) $db->prepare('INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)')->execute([$u, '" + H1 + "']);"
         "foreach ([" + str(A) + " => 'avt-pack', " + str(D) + " => 'avt-hidden'] as $u => $slug) {"
-        " $db->prepare(\"INSERT INTO user_lists (user_id, name, slug, is_public) VALUES (?, ?, ?, 1)\")->execute([$u, 'List ' . $slug, $slug]);"
+        " $db->prepare(\"INSERT INTO user_lists (user_id, name, slug, visibility) VALUES (?, ?, ?, 'public')\")->execute([$u, 'List ' . $slug, $slug]);"
         " $db->prepare('INSERT INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, ?)')->execute([(int)$db->lastInsertId(), '" + H1 + "', 'avt']); }"
         "$db->prepare(\"INSERT INTO hash_content (info_hash, description, description_format, content_status, content_user_id) VALUES (?, 'avt words', 'bbcode', 'approved', ?)\")->execute(['" + H1 + "', " + str(A) + "]);"
         "$hc = (int)$db->lastInsertId();"

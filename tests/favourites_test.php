@@ -206,7 +206,9 @@ if (is_array($guestPerms) && empty($guestPerms['favourites.public'])) {
         !in_array((int)$guestGrp['id'], array_map('intval', userGroupIdsWithPermission($db, 'favourites.public')), true));
 }
 $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")->execute([$savedPerms, $adminId]);
-$db->prepare("DELETE FROM users WHERE id = ?")->execute([$favUid]);
+// The whole account, memberships included (1.72.0: a bare DELETE FROM users left this account's ADMIN membership
+// behind on every run — a row that hands the admin group to whichever account is given the id next).
+userDeleteCascade($db, $favUid);
 
 /* ── 8. the display status, in the order it must resolve ──────────────────── */
 check('banned wins over everything', whitelistDisplayStatus(['banned' => 1, 'probe_status' => 'probing'], $cfg) === 'blocked');
@@ -247,10 +249,14 @@ $preset = userGroupPresets()['member']['perms'] ?? [];
 foreach (['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'] as $p) {
     check("the member preset offers $p", in_array($p, $preset, true));
 }
-// The moderator group computes every public permission; without this it would silently hold fewer
-// than an ordinary member, which is the exact mistake the v24 comment records.
-check('the seeded moderator group holds them too', str_contains($schemaSrc, '\\"favourites.use\\":true')
-    && str_contains($schemaSrc, '\\"uploads.public\\":true'));
+// Until 1.72.0 this said "the seeded moderator group holds them too" — and a NEW install's did, through the seed's
+// text, while no upgraded install's moderator ever had them (v47 granted them to member alone). A moderator is a
+// member too, through the default group, and that is where they come from: the moderator's seed and its recommended
+// set (userGroupRecommended()) hold none of the four, and two of them are consent (userConsentPermissions()).
+$modSeedStmt = preg_match("/\('moderator', 'Moderator'.*?\}'\)\"\);/s", $schemaSrc, $mm) ? $mm[0] : '';
+check('the seeded moderator group holds none of them — they come with membership', $modSeedStmt !== ''
+    && !str_contains($modSeedStmt, 'favourites.') && !str_contains($modSeedStmt, 'uploads.public')
+    && array_intersect(['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'], userGroupRecommended('moderator') ?? ['favourites.use']) === []);
 
 /* ── 11. the six settings, in all four places ─────────────────────────────── */
 $catalogSrc = (string)@file_get_contents($root . '/includes/settings_catalog.php');
@@ -311,7 +317,7 @@ $wlIns = $db->prepare("INSERT INTO whitelist (info_hash, name, source, created_a
 $wlIns->execute([$fpHashLive, 'favprobe alpha', $fpOwner, 0]);
 $wlIns->execute([$fpHashBan, 'favprobe beta', $fpOwner, 1]);
 foreach ([$fpHashLive, $fpHashBan] as $h) $db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$fpOwner, $h]);
-$db->prepare("INSERT INTO user_lists (user_id, name, slug, is_public) VALUES (?, 'probe list', 'probe-list', 1)")->execute([$fpOwner]);
+$db->prepare("INSERT INTO user_lists (user_id, name, slug, visibility) VALUES (?, 'probe list', 'probe-list', 'public')")->execute([$fpOwner]);
 $fpList = (int)$db->lastInsertId();
 foreach ([$fpHashLive, $fpHashBan] as $h) $db->prepare("INSERT INTO user_list_items (list_id, info_hash) VALUES (?, ?)")->execute([$fpList, $h]);
 

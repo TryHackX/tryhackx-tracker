@@ -164,7 +164,7 @@ try {
     $db->prepare("INSERT INTO whitelist (info_hash, name, source, created_at, banned) VALUES (?, 'Audit fixture BANNED', 'web', NOW(), 1)")->execute([$WL_BAN]);
 
     // One public list with both rows in it.
-    $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, is_public) VALUES (?, 'Audit pack', 'audit-pack', '', 1)")
+    $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, visibility) VALUES (?, 'Audit pack', 'audit-pack', '', 'public')")
        ->execute([$uids['auditowner']]);
     $listId = (int)$db->lastInsertId();
     $db->prepare("INSERT INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, 'Audit fixture OK')")->execute([$listId, $WL_OK]);
@@ -208,14 +208,16 @@ try {
     check('… so their list would not be visible on their profile either',
         !listsVisibleFor($db, $cfg, $adminRow));
 
-    $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, is_public) VALUES (?, 'Blanket pack', 'blanket-pack', '', 0)")
+    $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, visibility) VALUES (?, 'Blanket pack', 'blanket-pack', '', 'private')")
        ->execute([$uids['auditadmin']]);
     $adminList = (int)$db->lastInsertId();
     $j = endpoint('user_lists', $uids['auditadmin'], [], ['op' => 'visibility', 'id' => $adminList, 'value' => 1], 'POST');
     check('publishing a list on the blanket alone is refused', ($j['error'] ?? '') === 'no_permission', json_encode($j));
-    $st = $db->prepare("SELECT is_public FROM user_lists WHERE id = ?");
+    $j2 = endpoint('user_lists', $uids['auditadmin'], [], ['op' => 'visibility', 'id' => $adminList, 'value' => 'public'], 'POST');
+    check('… by its 1.72.0 name as well (value "public")', ($j2['error'] ?? '') === 'no_permission', json_encode($j2));
+    $st = $db->prepare("SELECT visibility FROM user_lists WHERE id = ?");
     $st->execute([$adminList]);
-    check('… and nothing was written', (int)$st->fetchColumn() === 0);
+    check('… and nothing was written', (string)$st->fetchColumn() === 'private');
     $j = endpoint('user_lists', $uids['auditadmin']);
     check('… and the shelf does not offer the control', ($j['may_publish'] ?? null) === false, json_encode($j['may_publish'] ?? null));
     $j = endpoint('user_privacy', $uids['auditadmin']);

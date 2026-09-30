@@ -37,12 +37,13 @@ if (function_exists('shoutEnabled') && shoutEnabled($cfg) && userCan($db, $cfg, 
     $out['unread_shout_mention'] = $sc['mention'];
 }
 // Comments (1.71.0): of the notifications waiting, how many are about a comment and how many of THOSE name
-// this reader — the two sounds of their own. Both are already inside `unread` (the badge's one number);
-// assets/js/sounds.js takes them out of the notification chime, so one comment is one sound. Absent while
-// comments are off, like the room's.
+// this reader — the two sounds of their own — and (1.72.0) how many of them answer one of the reader's comments,
+// the third. All are already inside `unread` (the badge's one number); assets/js/sounds.js takes them out of the
+// notification chime, so one comment is one sound. Absent while comments are off, like the room's.
 if (function_exists('commentsEnabled') && commentsEnabled($cfg)) {
     $cc = commentUnreadCounts($db, (int)$u['id']);
     $out['unread_comment'] = $cc['comment'];
     $out['unread_comment_mention'] = $cc['comment_mention'];
+    $out['unread_comment_reply'] = $cc['comment_reply'];
 }
 jsonResponse($out);

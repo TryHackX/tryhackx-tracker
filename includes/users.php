@@ -110,6 +110,8 @@ function userPermissionList(): array {
         // Two ids again, for the same reason: making a collection and publishing one are separate
         // decisions. `lists.public` is what a group needs before any single list of theirs can be
         // marked public — the site-wide switch and their own per-list choice are the other two.
+        // (1.72.0: a list shared with FRIENDS needs no grant of consent — `friends.use` below and the
+        // friends feature: includes/lists.php.)
         'lists.use'    => 'Make lists of torrents and keep them',
         'lists.public' => 'Let their lists be shown on their public profile',
         // ── people reaching each other (v52) ──
@@ -118,7 +120,7 @@ function userPermissionList(): array {
         // moderator, and an operator may want to withdraw one without the other.
         'pm.send'        => 'Send private messages to other members',
         'pm.report'      => 'Report a message to the moderators',
-        'friends.use'    => 'Follow other members and accept friend requests',
+        'friends.use'    => 'Follow other members, accept friend requests and share lists with friends',
         'directory.view' => 'Browse the member directory',
         // ── the shoutbox (v63, includes/shout.php) ──
         // Reading is its own id and is NOT given to guests by the migration: the operator's answer to
@@ -184,6 +186,10 @@ function userPermissionList(): array {
         // is shown. None of them exists with accounts off (userLegacyDefault()).
         'comment.view'       => 'Read the comments under a torrent',
         'comment.post'       => 'Write comments under a torrent (a guest group holding this comments as "Guest", with a CAPTCHA every time)',
+        // v88 (1.72.0): answering a comment, as a reply under it — a thread as deep as comments_reply_depth says.
+        // Writing comments at all (comment.post, and everything that asks) comes first; a guest group holding this
+        // replies under every guest rule. NO with accounts off, like every comment.* id (userLegacyDefault()).
+        'comment.reply'      => 'Reply to a comment (as deep as the thread may go — comments_reply_depth)',
         'comment.edit_own'   => 'Correct their own comments for a while (comment_edit_minutes)',
         'comment.delete_own' => 'Delete their own comments for a while (comment_delete_own_minutes)',
         'comment.moderate'   => 'Delete or edit anybody\'s comment with a reason, and release a guest\'s held comment',
@@ -266,36 +272,51 @@ function userPermissionList(): array {
  * moderator's two lists disagreed from v25 to 1.64.0 — the preset had `panel.whitelist.delete` and
  * no `panel.users.*`, the seed the exact reverse — so "apply the moderator preset" quietly rewrote a
  * seeded moderator into a different job. The seed wins, because it is what every install already has.
+ *
+ * 1.72.0: they disagreed AGAIN, and this time the seed disagreed with itself. The moderator's INSERT text
+ * gained `index.files_all` at v42 and `favourites.use/.public/.view_others` + `uploads.public` at v47 —
+ * but an INSERT IGNORE only ever reaches a NEW install, and the grants of v42 and v47 went to member
+ * alone, so every install that already had a moderator (the owner's server among them) never got the
+ * five. "What every install already has" is the moderator WITHOUT them, and that is what the preset and
+ * the fresh seed say now: a moderator is a member as well (the default group every account gets), which
+ * is where the five come from, and two of them are consent (userConsentPermissions()), which a job does
+ * not give.
+ *
+ * The preset of a seeded group is also its RECOMMENDED set (userGroupRecommended() below): the panel's
+ * "Recommended" and tools/groups.php read these very lists, so a starting point and a recommendation can
+ * never say two things.
  */
 function userGroupPresets(): array {
     return [
         'moderator' => [
             'label' => 'Moderator',
             'about' => 'Works the report queue and the whitelist. No settings, no backups, no log, no message queue.',
-            // EXACTLY the v25 seed plus what v63, v71 and v72 added to it — see trackerSchemaDataMigrations().
-            // Deleting whitelist rows is not here and neither is panel.users.edit / .groups: those are
-            // boxes the operator ticks on purpose. panel.messages.* stays out as well (a reported
-            // private message is a different kind of access; tests/people_test.php holds that line).
+            // EXACTLY the v25 seed plus what v63, v71, v72, v81, v83, v84 and v88 added to it — see
+            // trackerSchemaDataMigrations(); what every install's moderator holds (1.72.0: without the five
+            // membership ids the fresh seed alone had — see above). Deleting whitelist rows is not here and
+            // neither is panel.users.edit / .groups: those are boxes the operator ticks on purpose.
+            // panel.messages.* stays out as well (a reported private message is a different kind of access;
+            // tests/people_test.php holds that line).
             'perms' => ['panel.access', 'panel.reports.view', 'panel.reports.status', 'panel.reports.block',
                         'panel.reports.email', 'panel.reports.archive', 'panel.appeals.resolve',
                         'panel.whitelist.view', 'panel.whitelist.add',
                         'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content',
                         'panel.users.view', 'panel.users.notify',
-                        'index.view', 'index.files', 'index.files_all', 'index.magnet',
+                        'index.view', 'index.files', 'index.magnet',
                         'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
                         'rating.vote', 'content.submit', 'content.propose',
                         // Approving a description you are not allowed to READ is not a job (v71).
                         'content.view',
                         // v81: taking down anybody's published description from the Info panel.
                         'content.delete_any',
-                        'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         // The room is moderated from the room, not from a panel page (1.58.0), so the
                         // reading ids come with it — see the v63 grant in includes/schema.php. Editing
                         // anybody's line is the v72 grant, to this group alone.
                         'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.edit_any',
                         // v83: comments — read, write, and take down or edit anybody's (with a reason) from
                         // the Info panel, where the thread is; a guest's held comment is let through here too.
-                        'comment.view', 'comment.post', 'comment.moderate',
+                        // v88: and answer one, as a reply under it.
+                        'comment.view', 'comment.post', 'comment.moderate', 'comment.reply',
                         // v84: the Reports page's queues of reported comments, descriptions and shouts — read
                         // and act on each (never the message queue: panel.messages.* stays out, see above).
                         'panel.reports.comments.view', 'panel.reports.comments.handle',
@@ -319,6 +340,18 @@ function userGroupPresets(): array {
             'perms' => ['panel.access', 'panel.reports.view', 'panel.whitelist.view', 'panel.users.view',
                         'panel.backups.view', 'panel.traffic.view', 'panel.audit.view'],
         ],
+        // 1.72.0: the anonymous visitor's minimum — the recommended set of the seeded `guest` group, and a
+        // starting point for any group that should see as little. Reading the public statistics, and nothing
+        // else: the whitelist page and the search are the operator's catalogue to open (a fresh install's seed
+        // opens the whitelist page, and the owner's own server does not); the descriptions and the comments
+        // are the members' words, opened to passers-by on purpose if at all (v58, v83); and anything that
+        // WRITES — a vote, a description, a rewrite (the v24 grants, which kept 1.18's behaviour on upgrade) —
+        // needs an account. "Add what is missing" never takes those away where a guest group has them.
+        'guest' => [
+            'label' => 'Guest (anonymous visitors)',
+            'about' => 'Reads the public statistics. The whitelist page, the search, the descriptions, the comments and anything that writes are the operator\'s to open.',
+            'perms' => ['stats.view', 'stats.timeline', 'home.stats'],
+        ],
         'member' => [
             'label' => 'Site member',
             'about' => 'The public-site features, no panel at all.',
@@ -335,8 +368,8 @@ function userGroupPresets(): array {
                         'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar', 'profile.bio',
                         'rating.public', 'content.delete_own', 'content.public',
                         // v83: comments on a torrent — read, write, and their own corrected or taken back
-                        // for as long as the two windows say.
-                        'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own',
+                        // for as long as the two windows say; v88: a reply to one.
+                        'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
                         // v84: report a comment, a description or a shout to the moderators.
                         'content.report'],
         ],
@@ -353,6 +386,184 @@ function userGroupPresets(): array {
             'about' => 'The paid extras on top of an ordinary membership: a profile cover and emotes of their own.',
             'perms' => ['profile.cover', 'shout.upload_emote'],
         ],
+    ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1.72.0 — consent, capabilities, and the recommended set of every seeded group
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The CONSENT ids: permissions about what OTHER people may see of an account, not about what it may do. Each is
+ * one half of a yes whose other half is the member's own switch (fav_public, lists_public, votes_public,
+ * descriptions_public, the uploads' flag), and the code reads them with userIdHasGrantedPermission() and
+ * userGroupIdsWithPermission() (includes/favourites.php says why), where the Admin group's blanket does NOT count:
+ * an administrator appears on a public list only when their group GRANTS the id, like anybody else.
+ *
+ * ONE list, read by the group editor and the matrix (a consent box is a real choice, on the Admin group too), by
+ * the recommended sets (the Admin group's consent is written only on purpose — the panel's tick, tools/groups.php
+ * --consent), by schemaAdminGrant() (which never writes one) and by tests/groups_matrix_test.php, which holds it
+ * against every consent read in the code. `profile.cover` is read through userGroupIdsWithPermission() as well —
+ * "which groups give a cover" (templates/pages/account.php) — but it is a paid extra, not consent, and is not here.
+ */
+function userConsentPermissions(): array {
+    return ['content.public', 'favourites.public', 'lists.public', 'rating.public', 'uploads.public'];
+}
+
+function userIsConsentPermission(string $perm): bool { return in_array($perm, userConsentPermissions(), true); }
+
+/** Every registered CAPABILITY — the registry without the consent ids, in its order: what the Admin blanket holds. */
+function userCapabilityPermissions(): array {
+    return array_values(array_filter(array_keys(userPermissionList()), fn($p) => !userIsConsentPermission($p)));
+}
+
+/** Ids in the registry's order, each once, an unregistered one dropped: one order for every list a person reads. */
+function userPermissionsOrdered(array $ids): array {
+    $want = array_flip(array_map('strval', $ids));
+    return array_values(array_filter(array_keys(userPermissionList()), fn($k) => isset($want[$k])));
+}
+
+/** The seeded groups that have a recommended set, in the order the panel and tools/groups.php show them. */
+const USER_RECOMMENDED_SLUGS = ['guest', 'member', 'premium', 'moderator', 'admin'];
+
+/**
+ * The RECOMMENDED permission set of a seeded group — the owner's "basic default set" — or null for any other slug
+ * (a group an operator made has nothing to go back to).
+ *
+ * Not a second registry. For guest, member, premium and moderator it IS the group's preset above, so the editor's
+ * "Start from" and the panel's "Recommended" can never say two different things. For admin it is every registered
+ * id, computed, never typed out: the capabilities its members pass by the blanket anyway, and the consent ids,
+ * which are only ever written on purpose (userGroupRecommendedPlan()'s $consent).
+ *
+ * Every set is contained in what a FRESH install ships (tests/groups_matrix_test.php), so "add what is missing"
+ * changes nothing on a new install — the Admin group's consent aside, which only a deliberate choice writes. The
+ * guest's is smaller than a fresh install's guest (see its preset): a reset is where that difference shows.
+ */
+function userGroupRecommended(string $slug): ?array {
+    if (!in_array($slug, USER_RECOMMENDED_SLUGS, true)) return null;
+    if ($slug === 'admin') return array_keys(userPermissionList());
+    $p = userGroupPresets()[$slug]['perms'] ?? null;
+    return is_array($p) ? userPermissionsOrdered($p) : null;
+}
+
+/**
+ * What a person is told the set is called: the preset's label and line, or the Admin group's own — in English, as the
+ * shell prints them. The panel's window names it in the reader's language (a.users.rec_name_* / rec_about_*, whose
+ * English tests/groups_matrix_test.php holds to these words; api/admin/group_recommended.php).
+ */
+function userGroupRecommendedLabel(string $slug): array {
+    if ($slug === 'admin') {
+        return ['label' => 'Every registered permission',
+                'about' => 'Every capability, which the Admin group holds by its blanket anyway, and the consent a person has to give.'];
+    }
+    $p = userGroupPresets()[$slug] ?? [];
+    return ['label' => (string)($p['label'] ?? $slug), 'about' => (string)($p['about'] ?? '')];
+}
+
+/**
+ * What applying the recommended set would do to ONE group row (slug, permissions), without doing it: the panel's
+ * preview, `tools/groups.php diff`, and the plan userGroupApplyRecommended() writes. Null for a group without a set.
+ *   add         — recommended ids the group does not hold: exactly what "Add what is missing" writes. On the Admin
+ *                 group the consent ids are in it only when $consent says so; they are listed in `consent_add`
+ *                 either way, so a person sees what the tick would add;
+ *   remove      — ids it holds that are not recommended: what a RESET also takes away. Never a capability of the
+ *                 Admin group — its set is every id, so there is none, and userGroupApplyRecommended() refuses one
+ *                 regardless of what a plan says;
+ *   held, recommended — the registry's ids either way (userGroupPermissions()): a stored key the registry does not
+ *                 know is nobody's permission, and is neither added nor removed.
+ */
+function userGroupRecommendedPlan(array $group, bool $consent = false): ?array {
+    $slug = (string)($group['slug'] ?? '');
+    $rec = userGroupRecommended($slug);
+    if ($rec === null) return null;
+    $held = userPermissionsOrdered(array_keys(userGroupPermissions($group['permissions'] ?? null)));
+    $isAdmin = $slug === 'admin';
+    $missing = array_values(array_diff($rec, $held));
+    $consentAdd = $isAdmin ? array_values(array_filter($missing, 'userIsConsentPermission')) : [];
+    $add = ($isAdmin && !$consent) ? array_values(array_diff($missing, $consentAdd)) : $missing;
+    $remove = array_values(array_diff($held, $rec));
+    if ($isAdmin) $remove = array_values(array_filter($remove, 'userIsConsentPermission'));
+    return ['slug' => $slug, 'recommended' => $rec, 'held' => $held, 'add' => $add, 'remove' => $remove,
+            'consent_add' => $consentAdd, 'consent' => $isAdmin && $consent];
+}
+
+/**
+ * Apply the recommended set to one group: mode 'add' writes what is missing and never removes anything; 'reset'
+ * also takes away what is not recommended. The panel (api/admin/group_recommended.php) and tools/groups.php both
+ * come here, and neither writes the recommendation any other way.
+ *
+ *   * EXACTLY WHAT WAS SHOWN: with $expect — the preview's `add`, and for a reset its `remove` — a group that changed
+ *     since the preview is not touched; the answer is 'changed' with the plan as it is now. The server does exactly
+ *     what it was asked, never what a stale screen would imply (the 1.67.0 lesson);
+ *   * the write is ONE UPDATE guarded by the JSON it read, so an edit made in between is never overwritten
+ *     ('changed' again);
+ *   * idempotent: a group that already holds the set answers 'changed' => false and nothing is written;
+ *   * the Admin group never loses a capability, whatever a plan says ('admin_capability');
+ *   * the permission memo is forgotten for every account (userPermissionsForget()), so whatever follows in the same
+ *     request — a page drawn, the next group of `--all` — sees the new set.
+ * Returns ['changed' => bool, 'added' => [...], 'removed' => [...], 'plan' => the plan after, 'group' => the row
+ * after], or ['error' => 'bad_mode' | 'not_found' | 'no_recommended' | 'changed' | 'admin_capability', 'plan' => …].
+ * The audit line is the caller's (userGroupRecommendedAudit()): its actor is a panel session or the shell's user.
+ */
+function userGroupApplyRecommended(PDO $db, int $groupId, string $mode, bool $consent = false, ?array $expect = null): array {
+    if (!in_array($mode, ['add', 'reset'], true)) return ['error' => 'bad_mode'];
+    $st = $db->prepare("SELECT * FROM user_groups WHERE id = ?");
+    $st->execute([$groupId]);
+    $g = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$g) return ['error' => 'not_found'];
+    $plan = userGroupRecommendedPlan($g, $consent);
+    if ($plan === null) return ['error' => 'no_recommended'];
+    $add = $plan['add'];
+    $remove = $mode === 'reset' ? $plan['remove'] : [];
+    if ($expect !== null) {
+        $norm = function ($ids): array {
+            $ids = array_values(array_unique(array_filter(is_array($ids) ? $ids : [], 'is_string')));
+            sort($ids);
+            return $ids;
+        };
+        $sameAdd = $norm($expect['add'] ?? []) === $norm($add);
+        $sameRemove = $mode !== 'reset' || $norm($expect['remove'] ?? []) === $norm($remove);
+        if (!$sameAdd || !$sameRemove) return ['error' => 'changed', 'plan' => $plan];
+    }
+    if (!$add && !$remove) return ['changed' => false, 'added' => [], 'removed' => [], 'plan' => $plan, 'group' => $g];
+    if ((string)$g['slug'] === 'admin') {
+        foreach ($remove as $p) if (!userIsConsentPermission($p)) return ['error' => 'admin_capability', 'plan' => $plan];
+    }
+    $cur = json_decode((string)$g['permissions'], true);
+    if (!is_array($cur)) $cur = [];
+    foreach ($add as $p) $cur[$p] = true;
+    foreach ($remove as $p) unset($cur[$p]);
+    $json = $cur ? json_encode($cur, JSON_UNESCAPED_SLASHES) : '{}';
+    $up = $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ? AND permissions <=> ?");
+    $up->execute([$json, $groupId, $g['permissions']]);
+    if ($up->rowCount() !== 1) {
+        $st->execute([$groupId]);
+        $now = $st->fetch(PDO::FETCH_ASSOC);
+        return ['error' => 'changed', 'plan' => $now ? userGroupRecommendedPlan($now, $consent) : null];
+    }
+    userPermissionsForget();
+    $g['permissions'] = $json;
+    return ['changed' => true, 'added' => $add, 'removed' => $remove, 'plan' => userGroupRecommendedPlan($g, $consent), 'group' => $g];
+}
+
+/**
+ * The audit line of an applied recommended set — ONE shape for the panel and the shell, so the log reads the same
+ * whoever did it: `group.recommend` (filed under Users), the group as its target, what was added and removed. The
+ * shell appends ", from the shell" to the summary and names itself as the actor (tools/groups.php).
+ */
+function userGroupRecommendedAudit(array $group, string $mode, bool $consent, array $added, array $removed): array {
+    $slug = (string)($group['slug'] ?? '');
+    $summary = ($mode === 'reset' ? 'reset group ' . $slug . ' to its recommended set'
+                                  : 'added to group ' . $slug . ' what it was missing of its recommended set')
+             . ': +' . count($added) . ($mode === 'reset' ? ', -' . count($removed) : '')
+             . ($consent ? ' (the consent ids included)' : '');
+    return [
+        'action'      => 'group.recommend',
+        'target_type' => 'group',
+        'target_id'   => $slug,
+        'summary'     => $summary,
+        'detail'      => ['group' => $slug, 'id' => (int)($group['id'] ?? 0), 'mode' => $mode, 'consent' => $consent,
+                          'added' => array_values($added), 'removed' => array_values($removed)],
     ];
 }
 
@@ -400,7 +611,7 @@ function userLegacyDefault(string $perm): bool {
     // hang one on.
     // comment.* (v83) for the shoutbox's reason: a comment is signed with an account (or, where the
     // operator allows it, as a guest of a site that HAS accounts), and "accounts off" is "no comments at
-    // all" — commentsEnabled() says the same, this is the second wall.
+    // all" — commentsEnabled() says the same, this is the second wall. comment.reply (v88) is one of them.
     if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
         || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')
         || str_starts_with($perm, 'shout.') || str_starts_with($perm, 'profile.')
@@ -1007,7 +1218,9 @@ function userDeleteCascade(PDO $db, int $userId): array {
     }
     // Comments (v83) ARE deleted — the person's own words in a conversation, like their shouts and
     // messages, not the torrent's the way a description is — and every moderation stamp that names the
-    // account (a comment it edited, took down or let through) forgets it (includes/comments.php).
+    // account (a comment it edited, took down or let through) forgets it (includes/comments.php). Since
+    // v88 a comment of theirs that OTHER people replied to stays as a tombstone instead — "[deleted]", no
+    // author, no words — so the replies under it keep their place and their sense.
     if (function_exists('commentForgetAccount')) {
         foreach (commentForgetAccount($db, $userId) as $label => $n) if ($n > 0) $gone[$label] = $n;
     }

@@ -70,7 +70,9 @@ if ($op === 'apply') {
             ? __('api.tuner.reply_budget_set', ['pps' => number_format($pps)])
             : ($r['error'] ?? __('api.tuner.helper_refused'))] + tunerStatus($cfg));
     }
-    $r = netlimitApply($cfg, $pps, netlimitBurst($cfg), netlimitPort($cfg));
+    // 'probe', not the default 'admin': the Traffic card says who loaded the limit in force
+    // (netlimitSourceWords()), and "a step of the stability probe" is the truer answer.
+    $r = netlimitApply($cfg, $pps, netlimitBurst($cfg), netlimitPort($cfg), false, 'probe');
     auditNote(['target_id' => (string)$pps, 'summary' => 'applied ' . $pps . ' pps from a stability probe']);
     jsonResponse(['success' => !empty($r['ok']), 'message' => !empty($r['ok'])
         ? __('api.tuner.inbound_set', ['pps' => number_format($pps)])

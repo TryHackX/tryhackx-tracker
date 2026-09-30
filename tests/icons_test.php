@@ -177,7 +177,9 @@ foreach ($entries as $bi => $e) {
     if (!preg_match($nameRe, (string)($e[0] ?? '')) || !in_array($e[1] ?? '', ['s', 'r', 'f', 'b'], true)) $badE[] = "$bi: shape";
     foreach (['v7', 'pro', 'pro6', 'pro7'] as $k) if (isset($e[$k]) && !preg_match($nameRe, (string)$e[$k])) $badE[] = "$bi: $k";
     if (isset($e['prorole']) && !in_array($e['prorole'], ['s', 'r', 'f'], true)) $badE[] = "$bi: prorole";
-    foreach (array_keys($e) as $k) if (!in_array($k, [0, 1, 'approx', 'v7', 'pro', 'pro6', 'pro7', 'prorole', 'proapprox'], true)) $badE[] = "$bi: key $k";
+    // 1.72.0: an entry's own Pro style — a chain of style keys, each well formed (the magnet's duotone).
+    if (isset($e['prostyle']) && (!is_array($e['prostyle']) || !$e['prostyle'] || array_filter($e['prostyle'], fn($s) => !preg_match($nameRe, (string)$s)))) $badE[] = "$bi: prostyle";
+    foreach (array_keys($e) as $k) if (!in_array($k, [0, 1, 'approx', 'v7', 'pro', 'pro6', 'pro7', 'prorole', 'proapprox', 'prostyle'], true)) $badE[] = "$bi: key $k";
     // A Pro choice marked as still approximate is a Pro choice of an approximation (1.69.0).
     if (!empty($e['proapprox']) && (empty($e['approx']) || !isset($e['pro']))) $badE[] = "$bi: proapprox without approx and pro";
     // A -fill half is FILLED whichever style is chosen, or a pair stops being a pair.
@@ -658,6 +660,41 @@ check('1.71.0: an icon button is one box with the glyph in its middle in either 
 check('… and a Font Awesome glyph of an icon button is measured in its own face for that middle, as a glyph beside words is (the observer)',
       str_contains($ojs2, 'else if (solo(el)) fit(el, null);') && str_contains($ojs2, "p.classList.contains('ic-btn')")
       && str_contains($ojs2, "if (wordsBefore !== null && p && p.style) p.style.setProperty('--bi-sb'"));
+
+// ── 8. the Magnet in duotone with Pro (1.72.0) ──────────────────────────────
+// The owner: with Pro on, the Magnet buttons draw `fad fa-magnet`. Through the map, not the markup: the entry names
+// its own Pro style chain (`prostyle`), the first that LOADS and has the glyph draws it, and with none loaded the role
+// decides, as before. Resolved here on setups of the shape iconSetup() returns — a Pro edition whose styles are
+// given — without a package on disk (the Free name list answers for the names; tests/iconpack_test.php and the
+// browser checks draw the owner's real packages).
+$e72 = iconFaEntries();
+check('1.72.0: the magnet\'s entry: Free\'s solid, Pro\'s outline (1.71.0) — and its own Pro style, duotone, solid weight first',
+      ($e72['magnet'] ?? null) === ['magnet', 's', 'prorole' => 'r', 'prostyle' => ['duotone', 'duotone-regular', 'duotone-light', 'duotone-thin']]
+      && count(array_filter($e72, fn($e) => isset($e['prostyle']))) === 1, json_encode($e72['magnet'] ?? null));
+$st72 = fn(string $key, string $family, string $style, int $w, string $classes): array => [$key => ['key' => $key, 'label' => $key, 'family' => $family,
+    'style' => $style, 'weight' => $w, 'font_family' => 'Font Awesome 7 Pro', 'classes' => $classes, 'in_all' => false, 'layers' => $family === 'duotone' ? 2 : 1]];
+$base72 = $st72('solid', 'classic', 'solid', 900, 'fa-solid') + $st72('regular', 'classic', 'regular', 400, 'fa-regular') + $st72('brands', 'brands', 'regular', 400, 'fa-brands');
+$pro72 = fn(array $styles, string $style = 'solid'): array => ['library' => 'fontawesome', 'source' => 'cdn7', 'fallback' => null, 'pack' => null, 'id' => null,
+    'major' => 7, 'edition' => 'pro', 'version' => '7.3.1', 'styles' => $styles, 'style' => $style, 'css' => []];
+$mNone = iconFaMap($pro72($base72));
+$mDuo = iconFaMap($pro72($base72 + $st72('duotone', 'duotone', 'solid', 900, 'fa-duotone fa-solid')), true);
+$mDuoLight = iconFaMap($pro72($base72 + $st72('duotone-light', 'duotone', 'light', 300, 'fa-duotone fa-light')));
+$mLight = iconFaMap($pro72($base72 + $st72('light', 'classic', 'light', 300, 'fa-light'), 'light'));
+check('… Pro with the duotone style loaded: `fa-duotone fa-solid fa-magnet` (6.x\'s `fad`); with only a lighter duotone file, that one; with none, Pro\'s outline as before; Free\'s solid untouched',
+      $mDuo['map']['magnet'] === 'fa-duotone fa-solid fa-magnet' && $mDuoLight['magnet'] === 'fa-duotone fa-light fa-magnet'
+      && $mNone['magnet'] === 'fa-regular fa-magnet' && $mLight['magnet'] === 'fa-light fa-magnet' && $map['magnet'] === 'fa-solid fa-magnet'
+      && iconFaMap(iconSetup(['icon_library' => 'fontawesome', 'fa_source' => 'cdn7']))['magnet'] === 'fa-solid fa-magnet',
+      json_encode([$mDuo['map']['magnet'], $mDuoLight['magnet'], $mNone['magnet'], $mLight['magnet'], $map['magnet']]));
+check('… the magnet alone: every other entry drawn exactly as without the duotone style; the magnet counted its own style\'s, never a fallback',
+      array_diff_assoc($mDuo['map'], $mNone) === ['magnet' => 'fa-duotone fa-solid fa-magnet']
+      && ($mDuo['why']['magnet']['own'] ?? null) === true && array_key_exists('note', $mDuo['why']['magnet'] ?? []) && $mDuo['why']['magnet']['note'] === null
+      && ($mDuo['why']['magnet']['style'] ?? '') === 'duotone'
+      && !array_filter($mDuo['why'], fn($w, $bi) => $bi !== 'magnet' && !empty($w['own']), ARRAY_FILTER_USE_BOTH));
+$ojs72 = (string)file_get_contents($root . '/assets/js/icons.js');
+check('… and a duotone glyph in its button is measured as both layers are drawn: the classic glyph at its weight (canvas cannot draw the second layer), once that face has loaded',
+      str_contains($ojs72, "if ((el.classList.contains('fa-duotone') || el.classList.contains('fa-sharp-duotone')) && glyphOf(getComputedStyle(el, '::after').content)) {")
+      && str_contains($ojs72, "font = cs.fontStyle + ' ' + cs.fontWeight + ' 100px ' + fams[fams.length - 1].trim();")
+      && str_contains($ojs72, 'document.fonts.load(font, ch).catch('));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

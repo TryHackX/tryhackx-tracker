@@ -146,11 +146,15 @@ if ($isOwn) {
     // because a list of somebody else's is read on their profile and with profiles off there is no
     // page for it to be on.
     if (!$me || !profilesEnabled($cfg) || !userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
-    if ((int)$list['is_public'] !== 1) jsonResponse(['error' => 'not_found'], 404);
+    // A private list — and the not-yet-converted NULL of a migration in progress — is nobody else's.
+    $vis = listVisibilityOf($list['visibility'] ?? null);
+    if ($vis === 'private') jsonResponse(['error' => 'not_found'], 404);
     // A `hide_profile` block closes the page; the rows behind it answer the same 404.
     if (profileHiddenFrom($db, (int)$list['user_id'], (int)$me['id'])) jsonResponse(['error' => 'not_found'], 404);
+    // Public for a reader the owner's public side is open to; friends (1.72.0) for a reader who is the owner's
+    // friend — asked now, of the friendship table: an unfriending takes the rows away with the next request.
     $ownerRow = ['id' => (int)$list['user_id'], 'lists_public' => (int)$list['lists_public']];
-    if (!listsVisibleFor($db, $cfg, $ownerRow)) jsonResponse(['error' => 'not_found'], 404);
+    if (!in_array($vis, listsVisibilitiesFor($db, $cfg, $ownerRow, (int)$me['id']), true)) jsonResponse(['error' => 'not_found'], 404);
 }
 
 // What this reader may be shown of each row: whitelist rows at all, and the hash itself. Asked
@@ -235,13 +239,14 @@ jsonResponse([
     // The description drawn (1.70.0): the server's own HTML — the description renderer, the room's emotes,
     // no picture from elsewhere (listDescRender()) — which the list's window puts under the name as it is.
     // Behind every gate above: a reader who gets the rows gets the words, and nobody else gets either.
+    // Who sees it (1.72.0) is told to its owner only — the state is the owner's business.
     'list'     => ['id' => (int)$list['id'], 'name' => (string)$list['name'], 'slug' => (string)$list['slug'],
                    'description' => (string)($list['description'] ?? ''),
                    'description_format' => listDescFormatOf($list['description_format'] ?? null),
                    'description_html' => listDescRender($db, $cfg, $list['description'] ?? '', $list['description_format'] ?? null,
                                                         antispamWrittenNew($db, $cfg, (int)$list['user_id'], $list['author_age_s'] ?? null)),
-                   'is_public' => (int)$list['is_public'] === 1,
-                   'owner' => (string)$list['username'], 'own' => $isOwn],
+                   'owner' => (string)$list['username'], 'own' => $isOwn]
+                  + ($isOwn ? ['visibility' => listVisibilityOf($list['visibility'] ?? null)] : []),
     'rows'     => $slice,
     'total'    => $total,
     'page'     => $page,

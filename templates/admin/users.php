@@ -195,6 +195,8 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-dark table-hover dash-table wl-table" id="gr-table">
+                    <?php // 1.72.0: pinned columns (admin.css .gr-c-*), so the actions — Edit, Recommended, Delete — are on screen. ?>
+                    <colgroup><col class="gr-c-name"><col class="gr-c-slug"><col class="gr-c-prio"><col class="gr-c-default"><col class="gr-c-members"><col class="gr-c-perms"><col class="gr-c-actions"></colgroup>
                     <thead><tr>
                         <th><?= _h('a.users.name') ?></th><th><?= _h('a.users.slug') ?></th><th><?= _h('a.users.priority') ?></th><th><?= _h('a.users.default') ?></th><th><?= _h('a.users.members') ?></th><th><?= _h('a.users.permissions') ?></th><th class="th-actions"><?= _h('a.users.actions') ?></th>
                     </tr></thead>
@@ -206,6 +208,12 @@
             <details class="gr-matrix-wrap mt-2">
                 <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('a.users.matrix_title') ?></summary>
                 <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="gr-matrix"></table></div>
+                <?php // 1.72.0: what the three marks mean — a grant, the Admin group's blanket, and consent (userConsentPermissions()). ?>
+                <p class="gr-legend wl-small text-muted" id="gr-legend">
+                    <span class="gr-legend-item"><i class="bi bi-check-lg gr-legend-on" aria-hidden="true"></i> <?= _h('a.users.legend_granted') ?></span>
+                    <span class="gr-legend-item"><i class="bi bi-check-lg gr-legend-blanket" aria-hidden="true"></i> <?= _h('a.users.legend_blanket') ?></span>
+                    <span class="gr-legend-item"><span class="gr-consent-badge"><?= _h('js.users.consent_badge') ?></span> <?= _h('a.users.legend_consent') ?></span>
+                </p>
             </details>
         </div>
     </div>
@@ -465,6 +473,27 @@
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
                         <button type="button" class="btn btn-sm btn-primary" id="ge-save"><i class="bi bi-check-lg"></i> <?= _h('a.users.save_group') ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- A seeded group's recommended set (1.72.0): what is missing, what a reset would take away, and the two ways to
+         apply it. The body is drawn by assets/js/admin-users.js from api/admin/group_recommended. -->
+    <div class="modal fade" id="grRecModal" tabindex="-1" aria-labelledby="gr-rec-title">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-magic" aria-hidden="true"></i> <span id="gr-rec-title"><?= _h('a.users.rec_title') ?></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="gr-rec-body" class="gr-rec-body"></div>
+                    <div id="gr-rec-alert"></div>
+                    <div class="gr-rec-acts d-flex justify-content-end flex-wrap gap-2 mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="gr-rec-reset" disabled><i class="bi bi-arrow-counterclockwise"></i> <?= _h('a.users.rec_reset') ?></button>
+                        <button type="button" class="btn btn-sm btn-primary" id="gr-rec-add" disabled><i class="bi bi-plus-circle"></i> <?= _h('a.users.rec_add') ?></button>
                     </div>
                 </div>
             </div>

@@ -67,9 +67,13 @@ function soundEventKinds(?array $cfg = null): array
     // The comments' two (1.71.0, includes/comments.php): somebody commented where I am told of it (my torrent,
     // my description, a thread I wrote in), and a comment named me — the owner's "a new sound for somebody
     // having commented", with the mention as its own event the way the room has one. Only while comments are.
+    // And the third (1.72.0): somebody REPLIED to one of my comments — a notification of its own type, counted
+    // apart by the pulse, so a kind of its own rather than the mention's: a member who chose a sound (or silence)
+    // for being named would otherwise get that for every answer too, with no way to tell the two apart.
     if ($cfg !== null && function_exists('commentsEnabled') && commentsEnabled($cfg)) {
         $kinds[] = 'comment';
         $kinds[] = 'comment_mention';
+        $kinds[] = 'comment_reply';
     }
     return $kinds;
 }

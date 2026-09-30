@@ -5,10 +5,15 @@
  *   GET  user_lists[&user=<name>][&search=][&hash=<40 hex>]
  *   POST user_lists {op:'create'|'rename'|'edit'|'describe'|'visibility'|'delete', id, name, value, csrf_token}
  *
- * `edit` (1.70.0) is the Edit window's one request: {id, name, description, format} — the name (the slug
- * is never rebuilt) and the description, rich text in one of the site's syntaxes, judged by
- * listEditRequest() in includes/lists.php. `describe` is the same without the name, so no second path
- * writes a description; `rename` is the name alone, as it always was.
+ * `edit` (1.70.0) is the Edit window's one request: {id, name, description, format[, visibility]} — the name
+ * (the slug is never rebuilt), the description, rich text in one of the site's syntaxes, and (1.72.0) who sees
+ * it, judged by listEditRequest() in includes/lists.php. `describe` is the same without the name, so no second
+ * path writes a description; `rename` is the name alone, as it always was.
+ *
+ * `visibility` (1.72.0): {id, value: 'private' | 'friends' | 'public'} — a list's third answer, "friends", beside
+ * the two it had (1 / 0, what a 1.44.0 page sends, still mean public / private). includes/lists.php says what
+ * each needs. The answer is told to the OWNER only: somebody else's shelf carries the lists they may see and
+ * nothing about which of them are shared with whom.
  *
  * With `hash=`, a signed-in reader's OWN lists come back each carrying `has` — which of them the
  * torrent is already in. That is what the "add to a list" picker needs, and it is one query rather
@@ -53,10 +58,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // How fast (1.71.0): a list's name and its description are words other people can read, and they pass the
     // site's one anti-spam layer (includes/antispam.php, context `list`: a few free, then growing pauses).
-    // Showing, hiding and deleting your own list is not writing. `$listAnswer` answers every write below and
+    // Showing, hiding and deleting your own list is not writing — nor is an Edit window's Save that changes
+    // only who sees the list (1.72.0, listEditChangesWords()). `$listAnswer` answers every write below and
     // tells the layer whether the write happened (antispamRecord) or not (antispamRelease).
     $lticket = null;
-    if (in_array($op, ['create', 'rename', 'edit', 'describe'], true)) {
+    $writes = in_array($op, ['create', 'rename'], true)
+           || (in_array($op, ['edit', 'describe'], true) && listEditChangesWords($own, $input, $op === 'edit'));
+    if ($writes) {
         $as = antispamCheck($db, $cfg, 'list', antispamSubject($me, getClientIp($cfg)), null, ['input' => $input]);
         if (!$as['ok']) jsonResponse($as['body'], (int)$as['status']);
         $lticket = $as['ticket'];
@@ -88,7 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $listAnswer(['error' => 'too_many_lists', 'limit' => $max], 409);
             }
             $slug = listUniqueSlug($db, $uid, $name);
-            $db->prepare("INSERT INTO user_lists (user_id, name, slug, description) VALUES (?, ?, ?, '')")
+            // Private, said rather than left to the column's default (1.72.0): while the v87 migration runs the
+            // column has no default yet, and a list nobody chose to share is private.
+            $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, visibility) VALUES (?, ?, ?, '', 'private')")
                ->execute([$uid, $name, $slug]);
             $newId = (int)$db->lastInsertId();
             $db->commit();
@@ -100,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ((string)$e->getCode() === '23000') $listAnswer(['error' => 'duplicate_name'], 409);
             throw $e;
         }
-        $listAnswer(['success' => true, 'id' => $newId, 'name' => $name, 'slug' => $slug, 'is_public' => false, 'items' => 0], 200);
+        $listAnswer(['success' => true, 'id' => $newId, 'name' => $name, 'slug' => $slug, 'visibility' => 'private', 'items' => 0], 200);
     }
 
     if ($op === 'rename') {
@@ -120,17 +130,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($op === 'visibility') {
-        $want = !empty($input['value']) && $input['value'] !== '0' && $input['value'] !== 'false';
-        // Publishing needs the site switch AND the group. Turning it OFF never does: somebody must
+        $want = listVisibilityFromInput($input['value'] ?? null);
+        if ($want === null) jsonResponse(['error' => 'bad_visibility', 'message' => __('api.lists.bad_visibility')], 400);
+        // Publishing needs the site switch AND the group; sharing with friends the site, the friends feature and
+        // this account's friends.use (listVisibilityAllowed()). Private never needs anything: somebody must
         // always be able to take their own list back, whatever the operator has since changed.
-        // The GRANT, not userCan(): listsVisibleFor() decides what every reader sees and it asks the
+        // The GRANT for public, not userCan(): listsVisibleFor() decides what every reader sees and it asks the
         // grant, so asking the blanket here would let an administrator publish a list that their own
-        // profile then refuses to show — the switch saves and nothing acts on it.
-        if ($want && !(listsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, $uid, 'lists.public'))) {
-            jsonResponse(['error' => 'no_permission'], 403);
+        // profile then refuses to show — the switch saves and nothing acts on it. The same function answers
+        // the readers, so a choice this accepts is one they honour.
+        if (!listVisibilityAllowed($db, $cfg, $uid, $want)) {
+            jsonResponse(['error' => 'no_permission', 'message' => __('api.lists.no_permission')], 403);
         }
-        $db->prepare("UPDATE user_lists SET is_public = ? WHERE id = ? AND user_id = ?")->execute([$want ? 1 : 0, $id, $uid]);
-        jsonResponse(['success' => true, 'is_public' => $want]);
+        $db->prepare("UPDATE user_lists SET visibility = ? WHERE id = ? AND user_id = ?")->execute([$want, $id, $uid]);
+        jsonResponse(['success' => true, 'visibility' => $want]);
     }
 
     if ($op === 'delete') {
@@ -149,6 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $who   = trim((string)($_GET['user'] ?? ''));
 $owner = null;
 $isOwn = false;
+$shown = [];      // somebody else's shelf: which of the owner's answers this reader may see (listsVisibilitiesFor())
 
 if ($who === '') {
     if (!$me) jsonResponse(['error' => 'login_required'], 401);
@@ -166,7 +180,12 @@ if ($who === '') {
     $isOwn = (int)$cand['id'] === (int)$me['id'];
     // A `hide_profile` block closes the page; it closes what the page reads, too.
     if (!$isOwn && profileHiddenFrom($db, (int)$cand['id'], (int)$me['id'])) jsonResponse(['error' => 'not_found'], 404);
-    if (!$isOwn && !listsVisibleFor($db, $cfg, $cand)) jsonResponse(['error' => 'not_found'], 404);
+    // What this reader may see of the owner's lists (1.72.0): the public ones, those shared with friends when
+    // they are one — and nothing at all, with the same 404, when neither: a friends list is never a hint.
+    if (!$isOwn) {
+        $shown = listsVisibilitiesFor($db, $cfg, $cand, (int)$me['id']);
+        if (!$shown) jsonResponse(['error' => 'not_found'], 404);
+    }
     $owner = $cand;
 }
 
@@ -188,7 +207,11 @@ $wantItems = (string)($_GET['items'] ?? '') === '1';
 $wantFiles = (string)($_GET['files'] ?? '') === '1' && userCan($db, $cfg, 'index.files');
 $where  = ['l.user_id = ?'];
 $params = [(int)$owner['id']];
-if (!$isOwn) $where[] = 'l.is_public = 1';
+if (!$isOwn) {
+    // One placeholder per answer this reader may see; the answers are bound, never spliced.
+    $where[] = 'l.visibility IN (' . implode(',', array_fill(0, count($shown), '?')) . ')';
+    foreach ($shown as $v) $params[] = $v;
+}
 $deepIds = null;
 if ($search !== '') {
     $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
@@ -240,7 +263,7 @@ $w = 'WHERE ' . implode(' AND ', $where);
 
 // The count comes from a correlated subquery rather than a GROUP BY: the driving set is at most
 // lists_max_per_user rows, and a join would sort every item of every list to produce a number.
-$st = $db->prepare("SELECT l.id, l.name, l.slug, l.description, l.description_format, l.is_public, l.created_at, l.updated_at,
+$st = $db->prepare("SELECT l.id, l.name, l.slug, l.description, l.description_format, l.visibility, l.created_at, l.updated_at,
                            (SELECT COUNT(*) FROM user_list_items i WHERE i.list_id = l.id) AS items
                       FROM user_lists l $w ORDER BY l.updated_at DESC, l.id DESC LIMIT 200");
 $st->execute($params);
@@ -258,13 +281,18 @@ if ($isOwn && preg_match('/^[0-9a-f]{40}$/', $hash) && $rows) {
     foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $lid) $inLists[(int)$lid] = true;
 }
 
+// On your own shelf, what you may choose for a list (1.72.0) — the same functions the visibility op and every
+// reader ask, so a choice offered is a choice honoured — and whether your lists' section is shown at all.
+$ownId = $isOwn ? (int)$me['id'] : 0;
 jsonResponse([
     'success'   => true,
     'owner'     => (string)$owner['username'],
     'own'       => $isOwn,
     // The grant, like the visibility op above and like every reader of a published list.
-    'may_publish' => $isOwn && listsPublicEnabled($cfg)
-                     && userIdHasGrantedPermission($db, $cfg, (int)($me['id'] ?? 0), 'lists.public'),
+    'may_publish' => $isOwn && listsMayPublish($db, $cfg, $ownId),
+    'may_friends' => $isOwn && listsMayShareFriends($db, $cfg, $ownId),
+    // "Show my lists on my profile" and the site's switch: off, no list of yours is seen by anybody else.
+    'section_shown' => $isOwn && listsPublicEnabled($cfg) && (int)($owner['lists_public'] ?? 0) === 1,
     'max_lists' => listsMaxPerUser($cfg),
     'max_items' => listsMaxItems($cfg),
     // The description as typed and its format (the Edit window starts from them) and the card's plain
@@ -274,9 +302,8 @@ jsonResponse([
         'id'          => (int)$r['id'],
         'name'        => (string)$r['name'],
         'slug'        => (string)$r['slug'],
-        'is_public'   => (int)$r['is_public'] === 1,
         'items'       => (int)$r['items'],
         'updated_at'  => (string)$r['updated_at'],
         'has'         => isset($inLists[(int)$r['id']]),
-    ] + listDescForClient($r, $cfg), $rows),
+    ] + ($isOwn ? ['visibility' => listVisibilityOf($r['visibility'] ?? null)] : []) + listDescForClient($r, $cfg), $rows),
 ]);

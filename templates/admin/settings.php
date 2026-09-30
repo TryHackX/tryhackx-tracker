@@ -2881,6 +2881,32 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="comments_per_page" value="<?= sanitize((string)commentsPerPage($cfg)) ?>" min="<?= COMMENT_PAGE_MIN ?>" max="<?= COMMENT_PAGE_MAX ?>">
                         <small class="settings-hint"><?= __('settings.comments_per_page_hint') ?></small>
                     </div>
+                    <?php /* Where the section stands in the Info panel, and how it opens (1.72.0, includes/comments.php):
+                             the owner saw a long thread push the torrent's record and files down. */ ?>
+                    <div class="col-md-3" data-setting="comments_position">
+                        <label class="form-label"><?= _h('settings.comments_position') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="comments_position">
+                            <?php foreach (COMMENT_POSITIONS as $cmPos): ?>
+                            <option value="<?= $cmPos ?>" <?= commentsPosition($cfg) === $cmPos ? 'selected' : '' ?>><?= _h('settings.comments_position_' . $cmPos) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.comments_position_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comments_expanded">
+                        <label class="form-label"><?= _h('settings.comments_expanded') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="comments_expanded">
+                            <option value="0" <?= !commentsExpanded($cfg) ? 'selected' : '' ?>><?= _h('settings.comments_expanded_off') ?></option>
+                            <option value="1" <?= commentsExpanded($cfg) ? 'selected' : '' ?>><?= _h('settings.comments_expanded_on') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.comments_expanded_hint') ?></small>
+                    </div>
+                    <?php /* How deep a thread of replies may go (1.72.0, includes/comments.php commentsReplyDepth()): the
+                             deepest reply level, 0 = none; the line under it says what happens at the limit. */ ?>
+                    <div class="col-md-3" data-setting="comments_reply_depth">
+                        <label class="form-label" for="setting-comments_reply_depth"><?= _h('settings.comments_reply_depth') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="comments_reply_depth" id="setting-comments_reply_depth" value="<?= sanitize((string)commentsReplyDepth($cfg)) ?>" min="0" max="<?= COMMENT_REPLY_DEPTH_MAX ?>">
+                        <small class="settings-hint"><?= __('settings.comments_reply_depth_hint', ['max' => COMMENT_REPLY_DEPTH_MAX]) ?></small>
+                    </div>
                     <div class="col-md-3" data-setting="comment_edit_minutes">
                         <label class="form-label"><?= _h('settings.comment_edit_minutes') ?></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="comment_edit_minutes" value="<?= sanitize((string)commentEditMinutes($cfg)) ?>" min="0" max="1440">
@@ -3483,6 +3509,17 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         </div>
                         <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
                     </div>
+                    <?php /* The replies' (1.72.0): somebody answered one of the member's comments — a kind of its own. */ ?>
+                    <div class="col-md-3" data-setting="sound_default_comment_reply">
+                        <label class="form-label" for="setting-sound_default_comment_reply"><?= _h('settings.sounds_default_comment_reply') ?></label>
+                        <div class="d-flex gap-1">
+                            <select class="form-select bg-dark text-light border-secondary js-sound-select" name="sound_default_comment_reply" id="setting-sound_default_comment_reply" data-snd-label="<?= _h('settings.sounds_ev_comment_reply') ?>">
+                                <?= $sndOptions((string)($cfg['sound_default_comment_reply'] ?? '')) ?>
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary js-sound-preview" data-target="setting-sound_default_comment_reply" title="<?= _h('settings.sounds_preview') ?>"><i class="bi bi-play-fill"></i></button>
+                        </div>
+                        <small class="settings-hint"><?= __('settings.sounds_default_hint') ?></small>
+                    </div>
                     <?php endif; ?>
                 </div>
                 <?php /* The uploads: drawn and driven by assets/js/admin-sounds.js. The file input has no name on
@@ -3553,8 +3590,25 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.index_poll_budget') ?></label>
-                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_poll_budget" value="<?= sanitize($cfg['index_poll_budget'] ?? '45') ?>" min="5" max="120">
-                        <small class="settings-hint"><?= _h('settings.index_poll_budget_hint') ?></small>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="index_poll_budget" value="<?= sanitize($cfg['index_poll_budget'] ?? '45') ?>" min="<?= IDX_POLL_BUDGET_MIN ?>" max="<?= IDX_POLL_BUDGET_MAX ?>">
+                        <small class="settings-hint"><?= _h('settings.index_poll_budget_hint', ['min' => IDX_POLL_BUDGET_MIN, 'max' => IDX_POLL_BUDGET_MAX]) ?></small>
+<?php
+    // What the budget means for THIS scrape, measured: the newest complete pass's pace against the
+    // tracker's current count (includes/index.php indexPollEstimate()). admin-settings.js redoes the
+    // last clause as the field changes, from the numbers on the element — the pace does not move
+    // with the budget, only how many polls a pass takes.
+    $pollEst = function_exists('indexPollEstimateNow') ? indexPollEstimateNow($db, $cfg) : null;
+    $pollNum = static fn(int $n): string => number_format($n, 0, '.', langCurrent() === 'pl' ? "\u{00A0}" : ',');
+?>
+                        <?php if ($pollEst): ?>
+                        <small class="settings-hint d-block mt-1" id="idx-budget-estimate" data-needs="<?= (int)$pollEst['needs'] ?>"
+                               data-rate="<?= sanitize($pollNum($pollEst['rate'])) ?>" data-scrape="<?= sanitize($pollNum($pollEst['scrape'])) ?>"
+                               data-needs-text="<?= sanitize($pollNum($pollEst['needs'])) ?>"><?= _h($pollEst['polls'] > 1 ? 'settings.index_poll_estimate_many' : 'settings.index_poll_estimate_one', [
+                            'rate' => $pollNum($pollEst['rate']), 'scrape' => $pollNum($pollEst['scrape']), 'needs' => $pollNum($pollEst['needs']),
+                            'budget' => (int)$pollEst['budget'], 'polls' => (int)$pollEst['polls']]) ?></small>
+                        <?php else: ?>
+                        <small class="settings-hint d-block mt-1" id="idx-budget-estimate"><?= _h('settings.index_poll_estimate_none') ?></small>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.index_grace') ?></label>

@@ -1,9 +1,11 @@
 <?php
 /**
- * GET comment_list&hash=H[&before=ID] — a page of a torrent's comments and what this reader may do in the
- * thread (1.71.0, includes/comments.php).
+ * GET comment_list&hash=H[&before=ID][&find=ID] — a page of a torrent's comments and what this reader may do in
+ * the thread (1.71.0, includes/comments.php); since 1.72.0 each top-level comment carries its first replies
+ * (`thread`), and GET comment_list&hash=H&thread=R&after=ID brings a thread's next ones ("Show N more replies").
  *
- *   → 200 {success, hash, rows[] (oldest first), earlier, count, pending, per_page, me}
+ *   → 200 {success, hash, rows[] (oldest first), earlier, count, pending, per_page, reply_depth, me}
+ *   → 200 {success, hash, thread, rows[], last, more, count, reply_depth}          (thread=R)
  *   → 4xx {success: false, error: <code>, message: <in the reader's language>}
  *
  * The whole answer is commentListRequest(): the torrent exactly as visible as its Info panel, comment.view,

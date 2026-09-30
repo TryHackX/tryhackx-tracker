@@ -385,6 +385,9 @@ $apiRoutes = [
     'admin/fetch_groups'         => 'api/admin/fetch_groups.php',
     'admin/group_save'           => 'api/admin/group_save.php',
     'admin/group_delete'         => 'api/admin/group_delete.php',
+    // 1.72.0: a seeded group's recommended set — preview (GET), add what is missing / reset (POST). Owner-only, as
+    // group editing is: deliberately absent from adminEndpointPermission() below.
+    'admin/group_recommended'    => 'api/admin/group_recommended.php',
     // ── Federation peers (admin; includes/federation.php) ──
     'admin/fetch_fed_peers'      => 'api/admin/fetch_fed_peers.php',
     'admin/fed_peer_save'        => 'api/admin/fed_peer_save.php',

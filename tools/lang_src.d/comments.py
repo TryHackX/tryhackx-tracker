@@ -191,24 +191,26 @@ add('settings', {
                                 'Font Awesome\'s icons and the site\'s emotes (drawn at the size of the words), and a short list of '
                                 'BBCode: <code>[b] [i] [u] [s] [quote] [spoiler] [code]</code> and, while links are allowed, '
                                 '<code>[url]</code>. Nothing else: no pictures, no tables, no sizes or colours — any other tag is '
-                                'shown as it was typed. Who may read, write, correct and moderate is the permissions '
-                                '(<code>comment.view</code>, <code>comment.post</code>, <code>comment.edit_own</code>, '
-                                '<code>comment.delete_own</code>, <code>comment.moderate</code>): members hold all but the last, '
-                                'moderators read, write and moderate — taking down or editing anybody\'s comment with a reason its '
-                                'author is shown. A new comment tells the member who registered the torrent, the author of its '
-                                'description, the members who commented before and anybody it @-mentions — each can switch any of '
-                                'these off on their account page — with a sound of its own (Sounds).',
+                                'shown as it was typed. Who may read, write, reply, correct and moderate is the permissions '
+                                '(<code>comment.view</code>, <code>comment.post</code>, <code>comment.reply</code>, '
+                                '<code>comment.edit_own</code>, <code>comment.delete_own</code>, <code>comment.moderate</code>): '
+                                'members hold all but the last, moderators read, write, reply and moderate — taking down or editing '
+                                'anybody\'s comment with a reason its author is shown. A new comment tells the author of the comment '
+                                'it replies to, the member who registered the torrent, the author of its description, the members '
+                                'who commented before and anybody it @-mentions — each can switch any of these off on their account '
+                                'page — with a sound of its own (Sounds).',
                                 'To, co członkowie piszą pod torrentem, w jego panelu Info — bezpieczne z założenia: słowa, emotki, '
                                 'ikony Font Awesome i emote strony (w rozmiarze tekstu) oraz krótka lista BBCode: '
                                 '<code>[b] [i] [u] [s] [quote] [spoiler] [code]</code> i, gdy linki są dozwolone, <code>[url]</code>. '
                                 'Nic więcej: bez obrazków, tabel, rozmiarów i kolorów — każdy inny znacznik jest pokazywany tak, jak '
-                                'go wpisano. Kto może czytać, pisać, poprawiać i moderować, decydują uprawnienia '
-                                '(<code>comment.view</code>, <code>comment.post</code>, <code>comment.edit_own</code>, '
-                                '<code>comment.delete_own</code>, <code>comment.moderate</code>): członkowie mają wszystkie poza '
-                                'ostatnim, moderatorzy czytają, piszą i moderują — usuwają lub edytują każdy komentarz z powodem, '
-                                'który zobaczy autor. Nowy komentarz powiadamia członka, który zarejestrował torrent, autora jego '
-                                'opisu, członków, którzy komentowali wcześniej, i każdego, o kim wspomina przez @ — każdy może to '
-                                'wyłączyć na stronie konta — z własnym dźwiękiem (Dźwięki).'),
+                                'go wpisano. Kto może czytać, pisać, odpowiadać, poprawiać i moderować, decydują uprawnienia '
+                                '(<code>comment.view</code>, <code>comment.post</code>, <code>comment.reply</code>, '
+                                '<code>comment.edit_own</code>, <code>comment.delete_own</code>, <code>comment.moderate</code>): '
+                                'członkowie mają wszystkie poza ostatnim, moderatorzy czytają, piszą, odpowiadają i moderują — '
+                                'usuwają lub edytują każdy komentarz z powodem, który zobaczy autor. Nowy komentarz powiadamia autora '
+                                'komentarza, na który odpowiada, członka, który zarejestrował torrent, autora jego opisu, członków, '
+                                'którzy komentowali wcześniej, i każdego, o kim wspomina przez @ — każdy może to wyłączyć na stronie '
+                                'konta — z własnym dźwiękiem (Dźwięki).'),
     'comments_guests_intro':   ('<strong>Guests</strong> can comment only if you grant <code>comment.view</code> and '
                                 '<code>comment.post</code> to the Guest group (Users → Groups; nothing is granted to guests by '
                                 'default). A guest\'s comment is signed <em>Guest #4f2a</em> — a tag that tells two guests apart on '
@@ -251,6 +253,26 @@ add('settings', {
     'comments_per_page':       ('Comments on a page', 'Komentarzy na stronie'),
     'comments_per_page_hint':  ('The newest page opens first, and "Show earlier comments" loads the one before it.',
                                 'Najpierw otwiera się najnowsza strona, a „Pokaż wcześniejsze komentarze” wczytuje poprzednią.'),
+    # 1.72.0: where the Info panel's section stands, and how it opens
+    'comments_position':       ('Where the comments stand', 'Miejsce komentarzy'),
+    'comments_position_after_rating': ('After the rating', 'Po ocenie'),
+    'comments_position_before_files': ('Before the files', 'Przed plikami'),
+    'comments_position_after_files':  ('After the files (the end)', 'Po plikach (na końcu)'),
+    'comments_position_hint':  ('Where the Info panel draws its Comments section. At the very end as shipped: a long thread '
+                                'no longer pushes the torrent\'s own record (its hash, its magnet link) and its files down. '
+                                '"After the rating" is where 1.71.0 put it.',
+                                'Gdzie panel Info rysuje sekcję Komentarze. Domyślnie na samym końcu: długi wątek nie spycha już '
+                                'w dół danych samego torrenta (hasha, linku magnet) ani jego plików. „Po ocenie” to miejsce '
+                                'z wersji 1.71.0.'),
+    'comments_expanded':       ('Comments when the panel opens', 'Komentarze po otwarciu panelu'),
+    'comments_expanded_off':   ('Folded', 'Zwinięte'),
+    'comments_expanded_on':    ('Unfolded', 'Rozwinięte'),
+    'comments_expanded_hint':  ('Folded: the section shows its heading and how many comments there are, and a click opens '
+                                'it — the thread is loaded then. Unfolded: open at once, the thread loaded with the panel. '
+                                'A notification\'s "Show" opens it either way.',
+                                'Zwinięte: sekcja pokazuje nagłówek i liczbę komentarzy, a kliknięcie ją otwiera — dopiero '
+                                'wtedy wczytuje się wątek. Rozwinięte: otwarta od razu, a wątek wczytuje się razem z panelem. '
+                                'Przycisk „Pokaż” w powiadomieniu otwiera ją w obu przypadkach.'),
     'comment_edit_minutes':    ('Correcting one\'s own', 'Poprawianie własnego'),
     'comment_edit_minutes_hint': ('Minutes after writing it that a member may correct their comment '
                                   '(<code>comment.edit_own</code>); 0 = never. A moderator is held by no window. An edit is marked '

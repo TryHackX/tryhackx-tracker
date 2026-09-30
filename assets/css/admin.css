@@ -2430,9 +2430,41 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 
 
 /* Scrape coverage chart (Index page). Height is fixed so the card does not jump as the series
-   loads; uPlot is told the width by the JS on resize. */
-.idx-cov-chart { min-height: 240px; margin-top: 0.4rem; }
-.idx-cov-chart .u-legend { font-size: 0.76rem; }
+   loads. Since 1.72.0 it is SVG drawn by admin-index-coverage.js: one bar per PASS, its polls
+   stacked in it — from the start (blue), continued from the cursor (light blue), a download that
+   ended early (amber), a failed poll (red); the darker part of each is what it kept, the dashed line
+   the tracker's own count, and a pass still in progress is dimmed with what is left outlined. */
+.idx-cov-chart { position: relative; min-height: 240px; margin-top: 0.4rem; }
+.idx-cov-svg { display: block; max-width: 100%; overflow: visible; touch-action: manipulation; }
+.idx-cov-axis text { fill: #8a94a2; font-size: 10.5px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.idx-cov-grid, .idx-cov-tick { stroke: #22303f; stroke-width: 1; }
+.idx-cov-seg { stroke: #0d1117; stroke-width: 1; cursor: pointer; }
+.idx-cov-k-start { fill: #4d9fd6; }
+.idx-cov-k-resume { fill: #9ecbea; }
+.idx-cov-k-short { fill: #e0b96c; }
+.idx-cov-k-error { fill: #e06c75; }
+.idx-cov-seg:hover, .idx-cov-seg.is-on { filter: brightness(1.25); }
+.idx-cov-kept { fill: rgba(13, 17, 23, 0.34); pointer-events: none; }
+.idx-cov-open .idx-cov-seg { opacity: 0.6; }
+.idx-cov-rest { fill: none; stroke: #9ecbea; stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
+.idx-cov-tracker { fill: none; stroke: #c3ccd8; stroke-width: 1.2; stroke-dasharray: 4 3; pointer-events: none; }
+.idx-cov-tip {
+    position: absolute; z-index: 5; max-width: min(320px, calc(100% - 4px));
+    padding: 0.4rem 0.55rem; background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    color: #c3ccd8; font-size: 0.76rem; line-height: 1.35; pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.idx-cov-tip-head { color: #e6edf3; font-weight: 600; margin-bottom: 0.15rem; }
+.idx-cov-legend { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; margin: 0.35rem 0 0.25rem; color: #8a94a2; font-size: 0.74rem; }
+.idx-cov-leg { display: inline-flex; align-items: center; gap: 0.35rem; }
+.idx-cov-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.idx-cov-sw-start { background: #4d9fd6; }
+.idx-cov-sw-resume { background: #9ecbea; }
+.idx-cov-sw-short { background: #e0b96c; }
+.idx-cov-sw-error { background: #e06c75; }
+.idx-cov-sw-kept { background: linear-gradient(to top, rgba(13, 17, 23, 0.34) 50%, transparent 50%), #4d9fd6; }
+.idx-cov-sw-tracker { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed #c3ccd8; }
+.idx-cov-sw-rest { background: transparent; border: 1px dashed #9ecbea; }
 .idx-cov-empty { padding: 2rem 1rem; text-align: center; color: #8a94a2; font-size: 0.84rem; }
 
 
@@ -2752,6 +2784,41 @@ textarea.pc-text {
 .gr-matrix-c { text-align: center; color: #3a4552; }
 .gr-matrix-c.on { color: #6cc38a; }
 .gr-matrix code { color: #b9c3cf; background: transparent; padding: 0; font-size: 0.78rem; }
+/* 1.72.0 — the Admin group's blanket and the consent ids (includes/users.php, userConsentPermissions()): in the matrix
+   a capability of the Admin group is a tick of its own colour (held whatever is stored); a consent id carries a small
+   amber tag wherever it is listed — the matrix, the group editor, the Recommended window — because on the Admin group
+   it is the one kind of box that is a choice. */
+.gr-matrix-c.on.blanket { color: #6aa9ff; }
+.gr-consent-badge { display: inline-block; margin-left: 0.35rem; padding: 0 0.3rem; border: 1px solid #5c4a1c; border-radius: 3px;
+    color: #e3b341; font-family: inherit; font-size: 0.68rem; line-height: 1.35; letter-spacing: 0.02em; }
+.gr-legend { display: flex; flex-wrap: wrap; gap: 0.35rem 1.25rem; margin: 0.4rem 0 0; }
+.gr-legend-on { color: #6cc38a; }
+.gr-legend-blanket { color: #6aa9ff; }
+.gr-legend .gr-consent-badge { margin-left: 0; }
+/* The group editor on the Admin group: one line on which boxes are a choice; the blanket's boxes read as held. */
+.ge-admin-note { color: #9fb3c8; margin: 0 0 0.5rem; }
+.ge-perms .ge-blanket .form-check-input:disabled { opacity: 0.7; }
+.ge-perms .ge-blanket .form-check-input:disabled ~ .form-check-label { opacity: 0.75; }
+/* The Groups table: pinned columns, the name and the permission list taking the rest, and a floor under the page's
+   width. It had none of its own and borrowed the shared 1180px one, seven equal columns in a 1062px page at 1280 (1114
+   at 1440) — so its actions column stood half behind the table's sideways scroll, and the Recommended button beside
+   Edit (1.72.0) went out of view altogether. Each pinned width holds its header's longest word in either language
+   ("CZŁONKOWIE", "PRIORYTET") and the actions hold their two buttons on one line in either icon library. */
+.admin-wide #gr-table { min-width: 860px; }
+.gr-c-slug     { width: 124px; }
+.gr-c-prio     { width: 104px; }
+.gr-c-default  { width: 112px; }
+.gr-c-members  { width: 124px; }
+.gr-c-actions  { width: 104px; }
+/* The Recommended window. */
+.gr-rec-body { font-size: 0.9rem; }
+.gr-rec-head { font-size: 0.75rem; color: #8a94a2; text-transform: uppercase; letter-spacing: 0.05em; margin: 0.8rem 0 0.35rem; }
+.gr-rec-ids { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.gr-rec-id { background: #10161d; border: 1px solid #232c37; border-radius: 4px; padding: 0.1rem 0.4rem; color: #b9c3cf; font-size: 0.78rem; }
+.gr-rec-id.is-consent { border-color: #5c4a1c; }
+.gr-rec-blanket { color: #9ecbff; }
+.gr-rec-exact { color: #6cc38a; }
+.gr-rec-consent { margin-top: 0.9rem; padding: 0.55rem 0.7rem; border: 1px solid #232c37; border-radius: 6px; background: #0f151c; }
 
 /* ── Home sections: own text, placeholders ───────────────────────────────── */
 .pc-placeholders { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: -0.2rem 0 0.6rem; }

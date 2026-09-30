@@ -1,7 +1,7 @@
 <?php
 /**
- * POST comment_post {csrf_token, hash, body[, captcha_token]} — a comment under a torrent (1.71.0,
- * includes/comments.php).
+ * POST comment_post {csrf_token, hash, body[, parent][, captcha_token]} — a comment under a torrent (1.71.0,
+ * includes/comments.php); with `parent` (1.72.0) a reply to that comment, as deep as comments_reply_depth allows.
  *
  *   → 200 {success, comment, pending, count, message}
  *   → 428 {error: captcha_required, captcha_required: true} — the page solves one and sends the same again

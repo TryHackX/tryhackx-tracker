@@ -681,3 +681,29 @@
     showMix();
     paint();
 })();
+
+/* ── the poll's time budget, and how many polls a pass takes at it ────────────
+ *
+ * The line under Index → Poll time budget is measured on the server (includes/index.php
+ * indexPollEstimate(): the newest complete pass's pace against the tracker's current count). The pace
+ * does not move with the budget — only how many polls walking the scrape takes — so this redoes that
+ * last clause as the operator types, from the numbers the server left on the element, with the same
+ * clamp the save applies (the field's min / max).
+ */
+(function () {
+    const line = document.getElementById('idx-budget-estimate');
+    const field = document.querySelector('input[name="index_poll_budget"]');
+    if (!line || !field || !line.dataset.needs) return;
+    const needs = parseInt(line.dataset.needs, 10) || 0;
+    const lo = parseInt(field.min, 10) || 5, hi = parseInt(field.max, 10) || 300;
+    function paint() {
+        const raw = parseInt(field.value, 10);
+        if (!needs || isNaN(raw)) return;
+        const budget = Math.max(lo, Math.min(hi, raw));
+        const polls = Math.max(1, Math.ceil(needs / budget));
+        line.textContent = t(polls > 1 ? 'js.settings.poll_estimate_many' : 'js.settings.poll_estimate_one', {
+            rate: line.dataset.rate, scrape: line.dataset.scrape, needs: line.dataset.needsText, budget: budget, polls: polls,
+        });
+    }
+    field.addEventListener('input', paint);
+})();

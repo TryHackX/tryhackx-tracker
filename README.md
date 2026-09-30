@@ -507,8 +507,9 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
 - **Poll** — the janitor timer fetches a full scrape (`GET index_source_url`, no `info_hash` =
   full scrape; gzip) every `index_poll_minutes`. A **streaming parser** reads it in bounded memory
   (a 1.7 M-entry / 56 MB-gzip scrape parses in ~3 s using ~30 MB), keeps only
-  `complete >= index_min_seeders`, upserts in batches under `index_poll_budget` seconds (a huge scrape
-  is processed partially — it's just an observation), and drops rows that are whitelisted or banned.
+  `complete >= index_min_seeders`, upserts in batches under `index_poll_budget` seconds (5–300; a poll
+  that runs out of it is cut, and the next poll continues from the cursor — a pass walks the whole
+  scrape, in more polls), and drops rows that are whitelisted or banned.
   OpenTracker's *modest fullscrape* limit already caps full scrapes to once per 5 min per IP.
 - **Metadata** — the janitor promotes up to `index_meta_daily_budget` rows/day from *none* to *pending*
   (highest seeders first), with `meta_requested_at` spread across the next 24 h so the metadata worker's
@@ -748,6 +749,27 @@ default — with it off, everything behaves exactly like the classic single-admi
   permission registry in `includes/users.php`, so one cannot name an id the other does not have.
   Under the groups table, a collapsible **permission matrix** shows groups across and permissions
   down, panel ids and site ids in two bands, a tick where the group holds it.
+- **Recommended sets (1.72.0)**: every seeded group has one — *guest* the public statistics
+  (`stats.view`, `stats.timeline`, `home.stats`), *member* the public features (its preset, 40 ids),
+  *premium* the two paid extras, *moderator* the queue-working set every install's moderator holds
+  (42), *admin* every registered id. It is the group's preset (`userGroupRecommended()` beside
+  `userGroupPresets()` in `includes/users.php`), computed for admin, and contained in what a new
+  install ships. The groups table's **Recommended** button shows what the group is missing and what
+  a reset would take away; **Add what is missing** never removes anything, **Reset to recommended**
+  asks a second time; what the window showed is what is written (a group changed meanwhile is left
+  alone), one `group.recommend` audit line per change, owner-only like group editing. The same from
+  the shell, as the web user: `php tools/groups.php list`, `diff [--group=slug] [--consent]`,
+  `apply --group=slug|--all --mode=add|reset [--consent] [--dry-run]` and `user <id|name>` (which
+  consent ids an account holds by a grant).
+- **Capabilities and consent (1.72.0)**: five permissions say what OTHERS may see of an account —
+  `content.public`, `favourites.public`, `lists.public`, `rating.public`, `uploads.public`
+  (`userConsentPermissions()`) — and the Admin group's blanket does not count for them (an
+  administrator appears on a public list only when their group grants the id). Every other id is a
+  capability, which the Admin group passes by its blanket and — since schema 89 — also STORES, so the
+  matrix is true: its capability boxes are ticked and disabled in the editor, its consent boxes are
+  real choices, and the matrix marks the blanket's ticks and the consent rows. A migration never
+  grants consent to the Admin group; `tools/groups.php apply --group=admin --mode=add --consent` (or
+  the Recommended window's tick) does.
 - **Timed access**: grant a group permanently or for **1 d / 1 w / 2 w / 1 m / 3 m / 6 m / 1 y**, or
   a custom **from–to** window. Duration grants *extend* an existing membership (repeat purchases
   stack). The janitor expires memberships, warns `users_notify_expiry_days` days before the end and
@@ -804,7 +826,13 @@ default — with it off, everything behaves exactly like the classic single-admi
   working magnet, so it can still be collected. A list is visible to a stranger only when **five**
   answers agree: `lists_enabled`, `lists_public_enabled`, the owner's group holding `lists.public`,
   the owner's own “show my lists” flag and the list's own. `tests/lists_test.php` walks that table
-  one flag at a time against the real query. **A description** (1.70.0): a card's **Edit** opens a window
+  one flag at a time against the real query. **Who sees it** (1.72.0, schema 87): each list is
+  **private**, **friends** or **public** — a friends list is seen by its owner and the members they are
+  friends with (an accepted friendship, no block either way; the friends feature on and the owner's
+  `friends.use` — no new permission) and by nobody else, on the profile, through its link, in its
+  window and in “Who has this”; an unfriending takes it away on the next request. The state is the
+  owner's business: their own cards show it (a lock, people, a globe), nobody else's page does, and
+  the endpoints tell it to the owner alone. **A description** (1.70.0): a card's **Edit** opens a window
   with the name and the description — BBCode or Markdown in the site's editor, with the emoji picker's
   emoji, emotes and stickers — saved in one request; the card shows a line or two of it as plain text,
   and the list's window draws it under the name. Its limit (`lists_desc_max`, 1000) counts what a
@@ -1173,8 +1201,10 @@ told when their words are published, turned down, or replaced. Reading descripti
 
 ### Comments on a torrent (1.71.0)
 
-The Info panel has a **Comments (N)** section after the rating: the thread reads oldest to newest and opens
-on its newest page (*Show earlier comments* above it), loaded when the section comes into view. Each comment
+The Info panel has a **Comments (N)** section — since 1.72.0 at the panel's very end, after the files, and
+folded until it is opened (Settings says where it stands and whether it opens unfolded). The thread is asked
+for when the section is open; it reads oldest to newest and opens on its newest page, `comments_per_page` to a
+page (*Show earlier comments* above it, a button, loads the page before). Each comment
 shows its author's picture and name (a link to the profile), the time in the reader's zone, "edited" — "by a
 moderator" when it was one —, and the author's **Edit** and **Delete** as icon buttons. The composer is the
 site's editor with a comment's toolbar — **[b] [i] [u] [s]**, **[url]** while links are allowed, **[quote]**
@@ -1185,16 +1215,17 @@ allow-list (`includes/comments.php`), everything else stays the text that was ty
 `rel="nofollow noopener noreferrer ugc"` and asks before leaving the site. A comment by somebody you blocked
 is folded away until you open it; an account silenced by a moderator reads but does not write.
 
-- **Who** (Users → Groups): `comment.view`, `comment.post`, `comment.edit_own`, `comment.delete_own` (members
-  as shipped) and `comment.moderate` (moderators: edit anybody's — marked, audited, the author told — and
-  remove it with a reason the author is shown, one `comment.delete` audit line). Asked of the account, never
-  of a panel session. With accounts off there are no comments.
+- **Who** (Users → Groups): `comment.view`, `comment.post`, `comment.reply` (1.72.0), `comment.edit_own`,
+  `comment.delete_own` (members as shipped) and `comment.moderate` (moderators: edit anybody's — marked,
+  audited, the author told — and remove it with a reason the author is shown, one `comment.delete` audit
+  line). Asked of the account, never of a panel session. With accounts off there are no comments.
 - **Told**: the member who registered the torrent, the author of its description, the members who commented
-  before, and whoever a comment @-mentions — once each, in their own language, never the author, never across
-  a block, and only for the kinds they left on (account page, under the notifications: four switches). A
-  notification has a **Show** button that lands on the comment. Two sounds of their own — *a comment where I
-  am told of one* and *a comment that mentions me* — with site defaults in Settings → Sounds and a choice on
-  the account's Sounds tab; a comment plays its sound, not the notification's as well.
+  before, whoever a comment @-mentions and (1.72.0) the author of the comment a reply answers — once each, in
+  their own language, never the author, never across a block, and only for the kinds they left on (account
+  page, under the notifications: five switches). A notification has a **Show** button that lands on the
+  comment. Sounds of their own — *a comment where I am told of one*, *a comment that mentions me* and
+  (1.72.0) *a reply to my comment* — with site defaults in Settings → Sounds and a choice on the account's
+  Sounds tab; a comment plays its sound, not the notification's as well.
 - **Guests**, only if you grant the guest group `comment.post` (off as shipped): signed "Guest #4f2a" — a keyed
   hash of the day and the address group, never the address — a CAPTCHA every time (no provider set up, no
   guest comments), no links, and held for a moderator's *Let it through* while `comments_guest_review` is on
@@ -1202,13 +1233,31 @@ is folded away until you open it; an account silenced by a moderator reads but d
 - **Settings → Descriptions, comments & ratings → Comments**: on/off (`comments_enabled`, on), the length in
   visible characters (`comment_max_chars`, 500; 20–5000 — the text with its tags may be four times that),
   links (`comment_links`, on), how long a member may correct (`comment_edit_minutes`, 15) or delete
-  (`comment_delete_own_minutes`, 60; 0 = no limit) their own, comments to a page (20), comments an hour per
+  (`comment_delete_own_minutes`, 60; 0 = no limit) their own, comments to a page (20), where the section
+  stands (`comments_position`: after the files — the default —, before them, or after the rating; 1.72.0),
+  whether it opens unfolded (`comments_expanded`, off; 1.72.0), how deep replies may go
+  (`comments_reply_depth`, 3; 0 = no replies; 1.72.0), comments an hour per
   account (`comment_rate_per_hour`, 30), smart-CAPTCHA points per comment (`captcha_pts_comment`, 1), the
   guests' review; and every group's comment permissions, read-only. Every comment write passes one function,
   `commentFloodCheck()`, which asks the site's anti-spam layer (below) before the hourly limit.
 - **Data**: `hash_comments` (schema 83; soft-deleted rows keep who removed them and why), `users.comment_notify`
-  and `user_notifications.link`. Deleting an account deletes its comments. Endpoints: `comment_list`,
-  `comment_post`, `comment_edit`, `comment_delete`, `comment_approve`, `comment_prefs`.
+  and `user_notifications.link`. Deleting an account deletes its comments (1.72.0: one that others answered
+  stays as a "[deleted]" tombstone, below). Endpoints: `comment_list`, `comment_post`, `comment_edit`,
+  `comment_delete`, `comment_approve`, `comment_prefs`.
+
+**Replies (1.72.0).** A comment can be answered in place — the **Reply** icon button, first among a comment's
+actions, opens the composer under it ("Replying to @name", the same editor, an x or Esc to put it away, its words
+kept) — and the answers answered, each level a step further in with a rule down its left edge, one **Hide replies**
+fold per thread. **Reply depth** (`comments_reply_depth`, 3; 0–8) is the deepest reply level: 3 is a comment, a reply,
+a reply to it and a reply to that; 0 is no replies. The server refuses a reply past it; lowered later, the deeper
+replies already written stay, drawn at the deepest level allowed and saying whom they answer, and only new ones are
+refused. Who may reply is `comment.reply` (members and moderators as shipped; a guest group granted it replies
+under every guest rule). Each top-level comment brings its first ten replies, **Show N more replies** 25 more; a
+comment that goes while it is answered stays as "[deleted]" / "[removed by a moderator]" (no author, no words) —
+so does one of a deleted account's that others answered. The comment a reply answers tells its author (a fifth
+switch, *…that replies to one of my comments*; never across a block) with a sound of its own, `comment_reply`
+(no site default until you pick one). Data: `hash_comments.parent_id` / `root_id` / `depth` and
+`idx_hc_thread` (schema 88).
 
 ### Reporting comments, descriptions and shouts; warnings (1.71.0)
 
@@ -1684,6 +1733,18 @@ the tracker's own torrent count, over six hours to a month.
 earlier pass already handled and counts all of it, so raw entries would show a resumed poll as a
 triumph and the fresh one after it as a collapse. Delivered is entries past the cursor. Where the
 tracker's own count was unavailable the coverage line has a gap, not a zero.
+
+**Coverage is counted per pass (1.72.0).** When the scrape takes longer to walk than
+`index_poll_budget` allows, a poll is *cut* at the budget and the next one continues from the cursor —
+the two together are the whole scrape. A **pass** is a poll that starts at the first entry (or a
+download that ended early, which is always read from the start) plus the polls that continue it,
+until one ends un-cut; a failed poll ends it; a pass whose newest poll was cut is *in progress* and is
+never a number in the summary. The average and the worst are per pass, a cut is called a cut and a
+short download keeps its own words, and the chart draws one bar per pass with its polls stacked in it
+— every part says on hover or tap what it did ("continues the previous poll from entry 1 586 043 —
+together 100 %"). **Settings → Index → Poll time budget** (5–300 s, 45 by default) shows under the
+field what the budget means for this scrape: the newest complete pass's pace, the current tracker
+count, and how many polls a pass takes at the budget typed.
 
 ### The metadata worker's CPU (1.29.0)
 
@@ -2235,6 +2296,17 @@ nothing. **"Throttle hard"** clamps the port to 10 000 pps for 15 minutes and th
 previous setting automatically (including switching the limit back *off* if it was off), so the panic
 button cannot be left on by accident.
 
+**What the card says about the limit in force (1.72.0).** *Who loaded it*, in words — "set 24 d 11 h ago,
+when the IP lists were switched off — the janitor loaded the same limit without them" rather than the
+code `lists-off` (every source has words; one without prints as itself). *A burst too small for the
+limit*: `burst` is the depth of the rule's token bucket, and the network card hands packets over in
+bursts — when, over the last hour, under 95 % of the limit got through while more than 5 % was dropped,
+the card says so and suggests about 22 ms of the limit (2 000 at 90 000 pps), set in **Settings →
+Inbound limit → Burst** and loaded with **Traffic → Apply limit**; the limit itself stays where it is.
+*Handshakes per announce* (with the statistics timeline on): UDP connects against announces over the
+last hour and the last day — about one is normal, well above one is clients repeating the handshake
+because their packets or the replies were dropped.
+
 Applying, removing, throttling hard and restoring all require the **admin password**;
 **Preview ruleset** does not, because it only renders and `nft -c`-checks the file without loading it.
 The **Test** button in Settings is read-only too: it checks `exec()`, the sudoers rule (`sudo -n -l`,
@@ -2733,7 +2805,7 @@ tracker/
 │       ├── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
 │       ├── net_status.php     # GET — firewall state + live packets/second + measured suggestion
 │       ├── net_samples.php    # GET — the packets/second series behind the UDP traffic chart
-│       ├── index_polls.php    # GET — one row per scrape poll, behind the coverage chart
+│       ├── index_polls.php    # GET — the scrape polls read as passes, behind the coverage chart
 │       ├── ip_lists.php       # GET — the address lists and what the firewall is carrying
 │       ├── ip_list_action.php # POST — create / import / refresh / enable / delete / push (owner only)
 │       ├── net_apply.php      # POST — load/remove/throttle-hard/restore the inbound limit (password)
@@ -2753,7 +2825,7 @@ tracker/
 │   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
 │   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
 │   │   ├── admin-iplists.js   # Address lists card: import, enable/disable, push to the firewall
-│   │   ├── admin-index-coverage.js  # Scrape coverage chart: what each poll delivered vs the tracker's count
+│   │   ├── admin-index-coverage.js  # Scrape coverage card: each pass (its polls stacked) vs the tracker's count
 │   │   ├── admin-backups.js   # Backups page: run/verify/restore/download, live progress
 │   │   ├── admin-traffic.js   # Traffic page (?action=admin-traffic) — page furniture only
 │   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
@@ -2832,7 +2904,7 @@ The installer creates the following tables:
 | `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`, `meta_origin_at`) — schema v6/v7/v15 |
 | `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
 | `users` | User accounts (username, optional email, password hash, status) — schema v7 |
-| `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `premium` = the paid extras (`profile.cover`, `shout.upload_emote`) granted by hand or bought, `moderator`, `admin` = passes every check) — schema v8 semantics, matrix v71 |
+| `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `premium` = the paid extras (`profile.cover`, `shout.upload_emote`) granted by hand or bought, `moderator`, `admin` = passes every check, and since v89 stores every capability too — never a consent id unless somebody gives it) — schema v8 semantics, matrix v71, recommended sets 1.72.0 |
 | `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
 | `user_group_orders` | What a shop asked for: `UNIQUE(client_id, order_id)` is what makes a retried purchase webhook grant one month instead of two, and what a refund of one order is recomputed from — schema v71 |
 | `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
@@ -2863,7 +2935,7 @@ instead of within the minute.
 - **Database:** MySQL/MariaDB with PDO (prepared statements, FETCH_ASSOC mode)
 - **Frontend:** Vanilla JavaScript (no build step), Bootstrap 5 (CDN) for admin panel, custom dark theme CSS for public pages
 - **Email:** PHP `mail()` with multipart MIME (HTML + plain text), dark-themed templates
-- **Icons:** Bootstrap Icons 1.11.3 or Font Awesome — Free 6.7.2 / 7.3.1 from the CDN, or a package uploaded in Settings → Site or imported with `tools/iconpack.php`, Pro included (1.69.0) — chosen for the whole site in Settings → Site (`icon_library`); every icon is written in Bootstrap's markup and Font Awesome is mapped over it (`includes/icons.php`, `assets/js/icons.js`)
+- **Icons:** Bootstrap Icons 1.11.3 or Font Awesome — Free 6.7.2 / 7.3.1 from the CDN, or a package uploaded in Settings → Site or imported with `tools/iconpack.php`, Pro included (1.69.0) — chosen for the whole site in Settings → Site (`icon_library`); every icon is written in Bootstrap's markup and Font Awesome is mapped over it (`includes/icons.php`, `assets/js/icons.js`); with a Pro package whose duotone style is loaded the Magnet is Pro's duotone magnet (1.72.0)
 - **Emoji:** Unicode's own, drawn by the reader's device, from `assets/emoji/` (generated from emojibase-data / CLDR by `tools/emoji_data.php`, see [License](#license)); with a Font Awesome Pro package, its faces too (1.69.0)
 - **CAPTCHA:** Google reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha (explicit render mode, one shared modal — `assets/js/captcha.js`; every provider host must stay allow-listed in the CSP in `.htaccess`)
 - **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
@@ -2948,6 +3020,7 @@ All require active admin session. Prefix: `admin/`
 | `admin/fetch_api_bans` / `api_ban_lift` / `api_ban_add` | GET / POST | API bans (`&id=` returns the request snapshot) |
 | `admin/fetch_users` / `user_update` / `user_delete` / `user_grant` / `user_revoke` / `user_notify` | GET / POST | User browser + edits, timed group grants, custom notifications (1.6.0) |
 | `admin/fetch_groups` / `group_save` / `group_delete` | GET / POST | Group CRUD with the permission matrix |
+| `admin/group_recommended` | GET / POST | A seeded group's recommended set: `?id=` previews what is missing and what a reset would remove; POST `{id, mode: add\|reset, consent, expect}` applies exactly the preview shown (409 when the group changed since) — owner-only (1.72.0) |
 | `admin/fetch_fed_peers` / `fed_peer_save` / `fed_peer_delete` / `fed_peer_test` | GET / POST | Federation peers (inbound bearer shown once; test = outbound ping) |
 
 ---

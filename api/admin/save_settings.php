@@ -52,11 +52,15 @@ $allowed = [
     'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
     'sounds_enabled', 'sound_default_notification', 'sound_default_message_friend', 'sound_default_message',
     'sound_default_shout_friend', 'sound_default_shout', 'sound_default_mention',
-    // the comments' two sounds (1.71.0, includes/comments.php)
-    'sound_default_comment', 'sound_default_comment_mention',
+    // the comments' two sounds (1.71.0, includes/comments.php), and the replies' (1.72.0)
+    'sound_default_comment', 'sound_default_comment_mention', 'sound_default_comment_reply',
     // comments on a torrent (1.71.0, includes/comments.php)
     'comments_enabled', 'comment_max_chars', 'comment_links', 'comment_edit_minutes', 'comment_delete_own_minutes',
     'comments_per_page', 'comment_rate_per_hour', 'captcha_pts_comment', 'comments_guest_review',
+    // where the Info panel's comments stand and whether they open unfolded (1.72.0)
+    'comments_position', 'comments_expanded',
+    // how deep a thread of replies may go (1.72.0)
+    'comments_reply_depth',
     // one anti-spam layer for everything people write (1.71.0, includes/antispam.php) — the switches, the new
     // account's rules, the messages' conversation limits, the duplicate window, and a ladder per context
     'antispam_enabled', 'antispam_captcha_after', 'antispam_guest_captcha', 'antispam_staff_exempt',
@@ -359,7 +363,7 @@ $intClamp = [
     'stats_timeline_keep_days' => [7, 3650, 60],
     'index_poll_minutes' => [5, 1440, 30], 'index_min_seeders' => [0, 100000, 1], 'index_max_rows' => [1000, 5000000, 200000],
     'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
-    'index_poll_budget' => [5, 120, 45],
+    'index_poll_budget' => [IDX_POLL_BUDGET_MIN, IDX_POLL_BUDGET_MAX, 45],
     // The ceilings are read from includes/index.php, never retyped: the same numbers bound the
     // endpoint, the clamp-on-read helpers and the fields' max= attributes. A max BELOW its own batch
     // is legal here and repaired on read (indexFilesMax() floors it at one batch) rather than
@@ -432,6 +436,8 @@ $intClamp = [
     'comment_edit_minutes' => [0, 1440, 15], 'comment_delete_own_minutes' => [0, 1440, 60],
     'comments_per_page' => [COMMENT_PAGE_MIN, COMMENT_PAGE_MAX, COMMENT_PAGE_DEFAULT],
     'comment_rate_per_hour' => [1, 1000, 30], 'captcha_pts_comment' => [0, 100, 1],
+    // The deepest reply level (1.72.0): 0 is a real answer — no replies at all — and 8 the ceiling.
+    'comments_reply_depth' => [0, COMMENT_REPLY_DEPTH_MAX, COMMENT_REPLY_DEPTH_DEFAULT],
     // The anti-spam layer (1.71.0, includes/antispam.php) — the same ceilings its readers clamp to. 0 is a real
     // answer where it means "no such rule" (the escalation, the new-account period, the duplicate window, a
     // conversation limit, the spread) and where it means "no free burst"; a factor of 1 is "no stricter".
@@ -517,9 +523,14 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
           'who_votes_enabled', 'who_lists_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
-          'comments_enabled', 'comment_links', 'comments_guest_review',
+          'comments_enabled', 'comment_links', 'comments_guest_review', 'comments_expanded',
           'profile_descriptions_enabled', 'shout_nav', 'shout_system_lines', 'profile_votes_enabled', 'avatars_enabled', 'covers_enabled', 'profile_bio_enabled'] as $k) {
     if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// Where the Info panel's comments stand (1.72.0): a closed set, coerced like the others on this page — an unknown
+// value is the default, the panel's very end.
+if (isset($data['comments_position']) && !in_array($data['comments_position'], COMMENT_POSITIONS, true)) {
+    $data['comments_position'] = COMMENT_POSITION_DEFAULT;
 }
 // ── The anti-spam layer's ladders (1.71.0, includes/antispam.php) ──
 // A ladder's pauses are typed as a list ("5, 15, 30, 60"): kept as its readers parse it — whole seconds, each
@@ -600,9 +611,9 @@ if (isset($data['shout_rules'])) {
     $data['shout_rules'] = mb_substr(trim(preg_replace('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/u', ' ', $data['shout_rules']) ?? ''), 0, 500);
 }
 // A site-default sound must be one the library has; anything else is "nothing" (includes/sounds.php). The
-// comments' two are judged whether or not comments are on right now (1.71.0): the select is only drawn while
-// they are, but a key that can be saved is a key that is checked.
-foreach (array_unique(array_merge(soundEventKinds(), ['comment', 'comment_mention'])) as $k) {
+// comments' kinds are judged whether or not comments are on right now (1.71.0; the reply's, 1.72.0): the select
+// is only drawn while they are, but a key that can be saved is a key that is checked.
+foreach (array_unique(array_merge(soundEventKinds(), ['comment', 'comment_mention', 'comment_reply'])) as $k) {
     $key = 'sound_default_' . $k;
     if (isset($data[$key]) && (string)$data[$key] !== '' && !isset(soundLibrary($db)[(string)$data[$key]])) $data[$key] = '';
 }

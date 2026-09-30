@@ -131,6 +131,11 @@ function iconFreeRegular(): array {
  * proapprox: the Pro choice is CLOSER than Free's and still not the very icon (1.69.0, searched in the
  *      owner's Pro 6 and 7 indexes and drawn beside Bootstrap's glyph: the All settings chip's grid
  *      without its tick, the home layout's tiles mirrored) — drawn, and still counted an approximation.
+ * prostyle: the entry's OWN Pro style, a chain of style keys (1.72.0): with a Pro package the first of them
+ *      that loads and has the glyph draws the icon, whatever style the site's icons use; when none does —
+ *      Free, or a package whose style was not ticked — the role decides, as for every other entry. The
+ *      magnet is the owner's `fad fa-magnet`: duotone, the solid weight first, then the duotone family's
+ *      lighter weights, so any duotone file that is loaded draws it.
  *
  * Every `bi-*` name used anywhere on the site has an entry: tests/icons_test.php reads every template,
  * include, script and dictionary source and fails on a name that is missing, because a missing name is
@@ -261,7 +266,9 @@ function iconFaEntries(): array {
         'lock'                       => ['lock', 's'],
         'lock-fill'                  => ['lock', 'f'],
         'magic'                      => ['wand-magic-sparkles', 's'],
-        'magnet'                     => ['magnet', 's', 'prorole' => 'r'],
+        // The Magnet buttons (1.72.0): Pro's duotone magnet — the owner's `fad fa-magnet` — wherever a duotone
+        // style is loaded; otherwise Pro's outline (prorole, 1.71.0), and Free's solid.
+        'magnet'                     => ['magnet', 's', 'prorole' => 'r', 'prostyle' => ['duotone', 'duotone-regular', 'duotone-light', 'duotone-thin']],
         'megaphone'                  => ['bullhorn', 's', 'pro' => 'megaphone', 'prorole' => 'r'],   // the Appeals tab: Pro has Bootstrap's cone, in outline
         'palette'                    => ['palette', 's'],
         // ~ Free has no badge with a tick (badge-check is Pro's): the tick in a circle, which reads as
@@ -532,11 +539,17 @@ function iconFaMap(?array $setup = null, bool $explain = false): array {
             $role = $e['prorole'];
         }
         if (!iconSetupHas($setup, $name)) $note = ['why' => 'name_missing', 'wanted' => $name];
+        $own = false;
         if ($role === 'b') { $cls = 'fa-brands'; $drawn = 'brands'; }
         else {
             $cands = iconRoleCandidates($role, $chosen);
             $drawn = null;
-            foreach ($cands as $c) {
+            // The entry's own Pro style first (1.72.0, `prostyle`): the first of its chain that loads and has the
+            // glyph. None does, and it is the role's, below — nothing to note: the entry is drawn as it always was.
+            if ($pro) foreach ((array)($e['prostyle'] ?? []) as $c) {
+                if (isset($setup['styles'][$c]) && iconStyleHas($setup, $c, $name)) { $drawn = $c; $own = true; break; }
+            }
+            if (!$own) foreach ($cands as $c) {
                 if (isset($setup['styles'][$c]) && iconStyleHas($setup, $c, $name)) { $drawn = $c; break; }
             }
             $drawn ??= 'solid';
@@ -544,7 +557,7 @@ function iconFaMap(?array $setup = null, bool $explain = false): array {
             // (Free regular has 40 of the map's names), or an outline / a filled half whose own
             // family's style is in the package but not ticked. An outline drawn in regular while solid
             // is chosen, or in classic regular because the family has no regular at all, is the design.
-            if ($note === null && $drawn !== $cands[0]) {
+            if ($note === null && !$own && $drawn !== $cands[0]) {
                 if ($role === 's') {
                     $note = ['why' => 'style_lacks', 'wanted' => $cands[0], 'drawn' => $drawn];
                 } elseif (!isset($setup['styles'][$cands[0]]) && $setup['pack'] !== null
@@ -558,7 +571,8 @@ function iconFaMap(?array $setup = null, bool $explain = false): array {
             $cls = (string)($setup['styles'][$drawn]['classes'] ?? 'fa-solid');
         }
         $out[$bi] = $cls . ' fa-' . $name;
-        if ($explain) $why[$bi] = ['name' => $name, 'free' => $free, 'kind' => $kind, 'role' => $role, 'style' => $drawn, 'note' => $note];
+        // `own`: drawn in the entry's own Pro style (prostyle) rather than by its role.
+        if ($explain) $why[$bi] = ['name' => $name, 'free' => $free, 'kind' => $kind, 'role' => $role, 'style' => $drawn, 'own' => $own, 'note' => $note];
     }
     return $explain ? ['map' => $out, 'why' => $why] : $out;
 }

@@ -24,9 +24,12 @@
  *                stars for stars (a switch of mode clears nothing, includes/profilevotes.php says why; 1 is in
  *                both). No score is made of them: each is its owner's vote, shown as their profile shows it;
  *   lists      — public lists on at all (listsPublicEnabled()) and this section (`who_lists_enabled`,
- *                Settings → Profiles → Lists); then the gates a public list has everywhere else (the five of
- *                tests/lists_test.php): the grant of `lists.public`, the owner's lists_public, the list's own
- *                is_public.
+ *                Settings → Profiles → Lists); then the gates a list has everywhere else (the five of
+ *                tests/lists_test.php): the owner's lists_public, and the list's own visibility — 'public'
+ *                with the grant of `lists.public`, or (1.72.0) 'friends' when the friends feature runs, the
+ *                owner's account may use it (`friends.use`: a feature, so the administrator's blanket counts —
+ *                whoPermittedSql()) and THIS reader is the owner's friend, with no block either way
+ *                (includes/lists.php says why). A friends list is counted for a friend only.
  * The READER, for every section: signed in, and their ACCOUNT holds `index.view` (a hash they cannot find is
  * a hash they cannot ask about) and `favourites.view_others` (the permission that shows people to each other
  * at all) — asked of the account, as profileVotesShownTo() asks it: a panel session in the same browser is
@@ -54,7 +57,7 @@ function whoVotesEnabled(array $cfg): bool
         && (($cfg['who_votes_enabled'] ?? '1') === '1');
 }
 
-/** The lists section: public lists at all, and its own switch (default on). */
+/** The lists section: shared lists at all (public, and friends ones for a friend), and its own switch (default on). */
 function whoListsEnabled(array $cfg): bool
 {
     return function_exists('listsPublicEnabled') && listsPublicEnabled($cfg)
@@ -120,6 +123,39 @@ function whoGrantedSql(array $groupIds, string $userCol): string
 }
 
 /**
+ * "The account may use this feature", as SQL over `$userCol` — a permission of POWER, which the administrator's
+ * blanket gives (userEffectivePermissions()): a membership in force in a group whose JSON grants it, or in the
+ * system `admin` group. Null when no group can give it at all: nobody has it, nothing to ask the table.
+ * (1.72.0: an owner's `friends.use`, for a list shared with friends.)
+ */
+function whoPermittedSql(PDO $db, string $perm, string $userCol): ?string
+{
+    $ids = userGroupIdsWithPermission($db, $perm);
+    try {
+        foreach ($db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchAll(PDO::FETCH_COLUMN) as $a) $ids[] = (int)$a;
+    } catch (\Throwable $e) { /* no groups table: nobody */ }
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    return $ids ? whoGrantedSql($ids, $userCol) : null;
+}
+
+/**
+ * "This reader is the owner's friend", as SQL over the account table `u` (1.72.0) — [sql, args]: an ACCEPTED
+ * friendship either way round, and no block between the two in either direction (listsFriendOf()'s rule, the
+ * same question in the other language). One lookup per direction, each on a key of its table — the pair keys
+ * (uq_friend_once, uq_block_once) or, from the other side, idx_friend_of / idx_block_target (measured: the
+ * planner reads each once for the reader) — where an OR inside one subquery could use none and read the table.
+ * The reader's id is bound, four times.
+ */
+function whoFriendOfSql(int $viewerId): array
+{
+    $sql = "(EXISTS (SELECT 1 FROM user_friends f1 WHERE f1.user_id = u.id AND f1.friend_id = ? AND f1.status = 'accepted')"
+         . " OR EXISTS (SELECT 1 FROM user_friends f2 WHERE f2.user_id = ? AND f2.friend_id = u.id AND f2.status = 'accepted'))"
+         . " AND NOT EXISTS (SELECT 1 FROM user_blocks b1 WHERE b1.user_id = u.id AND b1.blocked_id = ?)"
+         . " AND NOT EXISTS (SELECT 1 FROM user_blocks b2 WHERE b2.user_id = ? AND b2.blocked_id = u.id)";
+    return [$sql, [$viewerId, $viewerId, $viewerId, $viewerId]];
+}
+
+/**
  * The gates every person on these lists passes besides their own switches and their group's grant: active,
  * verified where the site demands it (an unverified account runs at guest level, so its membership counts for
  * nothing), and not hiding their profile from this reader — the directory's clause. Returns [sql, args];
@@ -172,14 +208,16 @@ function whoAvatar(array $row, array $cfg): string
 
 /**
  * The statement a section runs, in pieces — ['sql' => "FROM … WHERE …", 'args', 'cols', 'order'] — or null when
- * nobody can be in it (no group grants the permission; public lists off). Built here once, so the count and the
- * page cannot disagree and tests/who_test.php can EXPLAIN exactly what runs. Every piece is literal SQL chosen
- * by the code; every value the request carries is in `args`.
+ * nobody can be in it (no group grants the permission — for lists, no group grants lists.public and no friends
+ * list can count either; public lists off). Built here once, so the count and the page cannot disagree and
+ * tests/who_test.php can EXPLAIN exactly what runs. Every piece is literal SQL chosen by the code; every value the
+ * request carries is in `args`.
  *
  *   fav   — user_favourites by its hash (idx_fav_hash), the account by its key;
  *   votes — hash_votes by its hash (uq_vote_once: info_hash, voter_type, voter_key), the account by its key —
  *           voter_key is the account's id as a string (repVoterKey()), read back as a number;
- *   lists — user_list_items by its hash (idx_item_hash), the list and its owner by their keys.
+ *   lists — user_list_items by its hash (idx_item_hash), the list and its owner by their keys; a friends list's
+ *           friendship and blocks by their keys, both ways round (whoFriendOfSql()).
  */
 function whoSql(PDO $db, array $cfg, string $section, string $hash, int $viewerId, string $search = ''): ?array
 {
@@ -187,25 +225,44 @@ function whoSql(PDO $db, array $cfg, string $section, string $hash, int $viewerI
     if ($perm === null) return null;
     if ($section === 'lists' && !(function_exists('listsPublicEnabled') && listsPublicEnabled($cfg))) return null;
     $groupIds = userGroupIdsWithPermission($db, $perm);
-    if (!$groupIds) return null;
     [$person, $personArgs] = whoPersonSql($cfg, $viewerId);
+    $like = $search !== '' ? whoLikeArg($search) : null;
+    if ($section === 'lists') {
+        // Which lists: the public ones of an owner whose group GRANTS lists.public, and (1.72.0) those shared
+        // with friends, for a reader who is the owner's friend, of an owner whose account may use the friends
+        // feature — the two arms of one OR, so the count and the page stay one statement. An arm nobody can
+        // pass is left out; with neither, nobody is in the section.
+        $arms = [];
+        $armArgs = [];
+        if ($groupIds) $arms[] = "(l.visibility = 'public' AND " . whoGrantedSql($groupIds, 'u.id') . ")";
+        $mayFriends = $viewerId > 0 && function_exists('listsFriendsEnabled') && listsFriendsEnabled($cfg) ? whoPermittedSql($db, 'friends.use', 'u.id') : null;
+        if ($mayFriends !== null) {
+            [$friendOf, $friendArgs] = whoFriendOfSql($viewerId);
+            $arms[] = "(l.visibility = 'friends' AND $mayFriends AND $friendOf)";
+            $armArgs = $friendArgs;
+        }
+        if (!$arms) return null;
+        $where = "i.info_hash = ? AND u.lists_public = 1 AND (" . implode(' OR ', $arms) . ") AND $person";
+        $args = array_merge([strtolower($hash)], $armArgs, $personArgs);
+        if ($like !== null) { $where .= " AND (l.name LIKE ? OR u.username LIKE ?)"; array_push($args, $like, $like); }
+        // STRAIGHT_JOIN: the hash's own items first (idx_item_hash), then each list and its owner by their keys —
+        // the driving set this file's header promises. Under the OR of the two arms the optimiser can no longer
+        // fold the group check into the join, and on a small table it started from EVERY list instead (measured,
+        // tests/who_test.php §8); the order is not a question of statistics here, so it is written down.
+        return ['sql' => "FROM user_list_items i STRAIGHT_JOIN user_lists l ON l.id = i.list_id STRAIGHT_JOIN users u ON u.id = l.user_id WHERE $where",
+                'args' => $args,
+                'cols' => 'l.name, l.slug, u.username, u.avatar_sha, (SELECT COUNT(*) FROM user_list_items x WHERE x.list_id = l.id) AS items',
+                'order' => 'l.updated_at DESC, l.id DESC'];
+    }
+    if (!$groupIds) return null;
     $granted = whoGrantedSql($groupIds, 'u.id');
     $args = array_merge([strtolower($hash)], $personArgs);
-    $like = $search !== '' ? whoLikeArg($search) : null;
     if ($section === 'votes') {
         $where = "v.info_hash = ? AND v.voter_type = 'user' AND " . profileVotesModeSql($cfg)
                . " AND u.votes_public = 1 AND u.votes_listed = 1 AND $granted AND $person";
         if ($like !== null) { $where .= " AND u.username LIKE ?"; $args[] = $like; }
         return ['sql' => "FROM hash_votes v JOIN users u ON u.id = CAST(v.voter_key AS UNSIGNED) WHERE $where", 'args' => $args,
                 'cols' => 'u.username, u.avatar_sha, v.vote', 'order' => 'v.vote DESC, u.username ASC'];
-    }
-    if ($section === 'lists') {
-        $where = "i.info_hash = ? AND l.is_public = 1 AND u.lists_public = 1 AND $granted AND $person";
-        if ($like !== null) { $where .= " AND (l.name LIKE ? OR u.username LIKE ?)"; array_push($args, $like, $like); }
-        return ['sql' => "FROM user_list_items i JOIN user_lists l ON l.id = i.list_id JOIN users u ON u.id = l.user_id WHERE $where",
-                'args' => $args,
-                'cols' => 'l.name, l.slug, u.username, u.avatar_sha, (SELECT COUNT(*) FROM user_list_items x WHERE x.list_id = l.id) AS items',
-                'order' => 'l.updated_at DESC, l.id DESC'];
     }
     $where = "f.info_hash = ? AND u.fav_public = 1 AND u.fav_listed = 1 AND $granted AND $person";
     if ($like !== null) { $where .= " AND u.username LIKE ?"; $args[] = $like; }

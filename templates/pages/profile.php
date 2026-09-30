@@ -62,7 +62,9 @@ $showUploads = uploadsPossible($cfg) && uploadsPublicEnabled($cfg)
     && ($isSelf || userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 // Lists, the same shape of decision one line lower: the site switch, their group's grant, their own
-// section flag — and then each list's own is_public, which the endpoint applies.
+// section flag — and then each list's own visibility, which the endpoint applies (1.72.0: a list shared
+// with friends is shown to a reader who is one, so the section is there for a friend whose owner shares
+// nothing publicly — and, for everybody else, exactly as it was).
 $profLists = listsContext($db, $cfg, $viewer);
 $profPeople = peopleContext($db, $cfg, $viewer);
 // The READER's own answers about the favourites feature. Only one of them is used here: whether
@@ -86,7 +88,7 @@ if (!$isSelf && profileHiddenFrom($db, (int)$profile['id'], (int)$viewer['id']))
 }
 $profState   = $profPeople['may_friend'] && !$isSelf ? friendState($db, (int)$viewer['id'], (int)$profile['id']) : 'none';
 $profBlocked = !$isSelf && blockRow($db, (int)$viewer['id'], (int)$profile['id']) !== null;
-$showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profLists['may_view'] && listsVisibleFor($db, $cfg, $profile)));
+$showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profLists['may_view'] && listsVisibleFor($db, $cfg, $profile, (int)$viewer['id'])));
 // The description (1.69.0, includes/profilebio.php): what the page SHOWS is asked of the account the
 // words belong to (hidden, never deleted, while its groups do not grant profile.bio), and the editor is
 // drawn only on your own profile while you may write one. Another member's empty description draws
@@ -267,8 +269,10 @@ if ($profCover !== null) {
     <?php endif; ?>
 
     <?php if ($showLists): ?>
-    <?php /* Their PUBLIC lists only — the endpoint decides that, not this page. A card each, the
-             same shape the owner sees on their account page, and opening one shows what is in it. */ ?>
+    <?php /* The lists this reader may see — the endpoint decides that, not this page: the public ones, and
+             those shared with friends when they are one (1.72.0). A card each, the shape the owner sees on
+             their account page, and opening one shows what is in it; which of them is shared how is the
+             owner's business and is shown on the owner's own cards only. */ ?>
     <section class="profile-section" id="profile-lists">
         <h2><?= _h('profile.lists') ?></h2>
         <div class="profile-toolbar">

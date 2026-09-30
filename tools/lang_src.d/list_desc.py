@@ -44,8 +44,8 @@ add('lists', {
     'edit_title': ('Edit list', 'Edytuj listę'),
     'edit_name': ('Name', 'Nazwa'),
     'edit_name_hint': (
-        'Renaming keeps a public list\'s address: a link you have handed out still opens it.',
-        'Zmiana nazwy nie zmienia adresu publicznej listy: link, który komuś dałeś, dalej ją otwiera.'),
+        'Renaming keeps a shared list\'s address: a link you have handed out still opens it.',
+        'Zmiana nazwy nie zmienia adresu udostępnionej listy: link, który komuś dałeś, dalej ją otwiera.'),
     'edit_desc': ('Description', 'Opis'),
     'edit_desc_ph': ('What is on this list, and who it is for…', 'Co jest na tej liście i dla kogo…'),
     'edit_desc_note': (

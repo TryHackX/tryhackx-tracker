@@ -4,6 +4,683 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.72.0] — 2026-09-30
+
+The owner's next list, as one release. It opens with eight corrections to how things look, each from his own
+screenshots: the icon buttons of 1.71.0 left behind the room the words they replaced had needed, so every
+row and table that names a torrent — the search results, the favourites, uploads and list rows, the likes and
+descriptions tables — gives that room back to the torrent's name (and the rows a longer piece of the hash),
+its icons at its right edge; with a Font Awesome Pro package the Magnet is Pro's duotone magnet; the Info
+panel's Copy buttons stand on the line of what they copy, at its right; the comments move to the end of the
+Info panel and open folded, and Settings says where they stand and whether they open; and the account page's
+security card no longer touches the cards above it (1.25rem, on every width). Schema 86: the two comment
+settings.
+
+Then lists. On somebody else's profile a public list stood out — a green edge and the word "public" — which told
+a visitor nothing (a visitor only ever sees the lists they may see) and made the page a traffic light. A list's
+state is its owner's business now: the owner's own cards say it, with a lock, people or a globe, and nobody else's
+page says anything about it. And a list has a third answer beside private and public — **friends**: its owner and
+the members they are friends with see it, on the profile, through its link, in its window and in a torrent's "Who
+has this", and nobody else learns that it exists; an unfriending or a block takes it away on the very next request.
+The Edit window asks it as its third question. Schema 87: the boolean `is_public` becomes `visibility`.
+
+Then replies. The owner asked for a permission to reply to comments and a setting for how deep the tree of replies
+may go — "Reddit-like, three rows". A comment can be answered in place now, and the answers answered, each a step
+further in, as deep as **Reply depth** says (three levels of replies as shipped; 0 is no replies at all, the flat
+thread of 1.71.0); the server refuses anything deeper. A comment that goes while it is answered keeps its place as
+"[deleted]", the one a reply answers is told of it (a switch of its own, and a sound of its own), and a page stays as
+short as it was however long a thread grows. Schema 88: where a reply stands, the permission, the fifth switch.
+
+Then the groups. The owner: "prepare a basic default set of permissions, and set it on my server too — there are new
+ones, and the admin still does not have everything". Every seeded group has one **recommended set** now — guest, member,
+premium, moderator and admin — shown on the Users page beside the group (what is missing, what a reset would take away)
+and applied from there or from the shell (`tools/groups.php`): "Add what is missing" never removes anything; "Reset to
+recommended" asks a second time. The Admin group's matrix stops showing empty boxes for permissions its members hold by
+the blanket anyway: a migration writes every capability into its stored list (schema 89), and says so for every one
+registered after it. What others may see of an administrator — the five consent permissions — stays a choice somebody
+makes, and on the owner's server it is made by one command with `--consent`.
+
+Then the traffic cards. The owner: "look at my server's traffic, something odd is happening again". Measured on the
+server, read-only: nothing broke — the cards said it wrong. The full scrape grew to 1.95 M torrents and one poll no longer
+walks it inside the time budget, so since 2026-09-28 every other poll is cut at the budget and the next one finishes the
+rest: together they are the whole scrape, and not one download arrived short. The card judged each poll alone — "worst
+poll 0.1 %" was the 1 453-entry tail of a pass that had walked everything, "21 arrived truncated" were those cuts.
+Coverage is counted per **pass** now (a poll that starts at the beginning and the polls that continue it), a cut is
+called a cut, the budget goes to 300 s with an estimate under it of what it means for this scrape, and the inbound
+limiter says who loaded it in words, when its burst is too small for its limit, and how many handshakes each announce
+costs — the repeats a dropped packet causes, which is why "arriving fell" meant fewer repeats, not fewer users.
+
+### Changed — the room the icon buttons left behind goes to the torrent's name
+
+* **The owner's screenshots**: the search results' actions stood in a column with empty space at the table's
+  right edge, and so did the likes and the descriptions tables' on the account page and a profile; and the
+  favourites rows (Favourites, Uploads, a list's window, on the profile and the account page) kept the width
+  their Magnet and Info had needed as words. 1.71.0 made those words icons and left the columns as they were.
+* **Every action column is exactly its icons now**, the icons at its right edge — the icons' 26px, the gaps
+  between them and the cell's own padding, written as that sum (`calc()`), so a column cannot drift from its
+  buttons again: the search results 145px with the star (156 before, 11px empty right of it) and 113px for a
+  reader without favourites (43px empty before), the `<col>` told which (`search-c-actions-fav`, from the
+  question the rows ask before they draw a star); the likes and the descriptions tables 74px where they were
+  152 — 78px empty right of Magnet and Info — which the name column has now (216px at 1280, where names broke
+  onto a second line, 294 now). On a phone the search's table scrolls and has the same column, the four icons
+  on one line at every width (the phone rule that let them wrap is gone, with the three rules that sized the
+  old word buttons and no longer applied to anything: `.search-act-btn`'s and `.pf-info`'s minimum widths,
+  `.list-remove`'s).
+* **A torrent row's actions** (`.pf-acts`) are as wide as their three icons (89px; 200 before, 170 in a list's
+  window) — still a minimum, so a row without one of them (a banned torrent has no Magnet) keeps its columns
+  under the other rows'. The name has most of the room — and the account's favourites stay one line a row down
+  to an 805px window (895 before; measured) — and the hash chip a little of it: sixteen characters of the hash
+  from 600px wide, twelve on a phone, where the facts have a line of their own and sixteen would not fit it.
+* **Uploads**: the rows' switch said "Shown on your profile" or "Not on your profile", and the two made two
+  rows of one list 15px apart (54px in Polish, "Pokazywane na twoim profilu") — every column after it with
+  them. Its button holds both words now, one showing, so every upload row is one width; the uploads keep
+  twelve characters of the hash (their words gave nothing back, the name would have paid for four more).
+
+### Changed — Font Awesome Pro draws the Magnet in duotone
+
+* With a Pro package whose duotone style is loaded, the Magnet buttons — the search results, the favourites,
+  uploads and list rows, the likes and the descriptions tables, and the panel's Whitelist and Index — are
+  Pro's duotone magnet, the owner's `fad fa-magnet` (`fa-duotone fa-solid fa-magnet`). Through the map, not the
+  markup: an entry may name its own Pro style (`prostyle`, `includes/icons.php`), a chain tried in order — the
+  duotone solid weight first, then the family's lighter files — and the first that loads and has the glyph
+  draws it; with no duotone file loaded (Free, or a package where it was not ticked) the role decides, as
+  before: Pro's outline, Free's solid. Only the magnet has one.
+* **Its middle.** A duotone glyph is drawn twice, and the observer (`assets/js/icons.js`) measured only the
+  first layer to put the glyph in the middle of its button: the duotone magnet's body without its caps, which
+  stood it 2.2px high in every button (measured). A canvas cannot draw the second layer (Font Awesome 7 asks for
+  it with a font feature), so a duotone glyph — of the duotone and the sharp duotone families, which split the
+  classic drawings — is measured as what its layers split between them: the same name in the classic family at
+  the same weight, 0.07–0.82em for 6's magnet, which is its two layers' own extent to the hundredth (6's second
+  layer can be drawn, through its ligature). Now within a pixel of its button's middle, like every icon button
+  (−0.33 to +0.65px, Pro 6 and 7, desktop and phone), and 26px square like the others.
+
+### Changed — the Info panel's Copy buttons on the lines of what they copy
+
+* **Info hash** and **Magnet link**: each Copy stands on its label's line, at the right (`.info-kv-head` — the
+  owner's markup, `display: flex; justify-content: space-between`, as a class), the value under both, in both
+  languages and on a phone. The hash's Copy stood after its forty characters, the magnet's under its three
+  lines, where it was the last thing found. On plain HTTP the box the Copy opens takes a line of its own under
+  the label.
+
+### Changed — comments at the end of the Info panel, folded; Settings says where, and how they open
+
+* **The owner**: with many comments the thread pushed the torrent's own facts down. The **Comments** section
+  stands at the panel's very end now — after the files — and opens **folded**: its heading and its count,
+  and a click opens it and asks for the thread. Two settings in Settings → Descriptions, comments & ratings →
+  Comments (schema 86): **Where the comments stand** (`comments_position`: after the files — the default —,
+  before them, or after the rating, where 1.71.0 put it) and **Comments when the panel opens**
+  (`comments_expanded`: folded — the default — or unfolded). 1.71.0's section opened unfolded; the first setting's third answer and
+  the second's "Unfolded" are exactly 1.71.0's panel. After the files, a torrent's comments are below its file
+  list, which folds away by its own heading; "Before the files" keeps them above it. A notification's **Show** opens the section wherever it
+  stands, and a panel drawn again for the same torrent — the live language switch — keeps it open if the reader
+  had opened it.
+* **How a thread loads** (the owner asked): the Info panel's own answer carries only the count; the thread is
+  asked for when the section is open — a click, or at once when it opens unfolded. It comes a page at a time,
+  `comments_per_page` to a page (20 as shipped, 5–100), the NEWEST page first, read oldest to newest, with
+  **Show earlier comments** above it — a button, not a scroll that loads by itself — for the page before; a new
+  comment lands at the end, beside the composer. A notification's link loads up to ten earlier pages to find its
+  comment. Measured with 25 comments: folded, no request even in view; the click, one — the newest 20; the
+  button, one more — the other 5; unfolded, the first request at once, the section still out of view.
+
+### Fixed — the account page's security card touched the cards above it
+
+* The owner's rule: the security card has `margin: 1.25rem 0 1.25rem` (it was `0 0 1.25rem`). Measured, it
+  touched the columns above it on a desktop (0px — the columns drop their last card's margin at a column's end)
+  and stood 16px below them on a phone (one column keeps it); the columns' last card now has none, so the card
+  stands 1.25rem below them on every width.
+
+### Changed — a list's state is its owner's business
+
+* **The owner**: on somebody else's profile the public lists were tinted green and carried the word "public" —
+  which belongs on your own lists only, when you look at them yourself. A visitor only ever gets the lists they
+  may see, so the badge said nothing to them; between a friend's view and a stranger's it would even say which
+  lists the owner shares with whom. So **nobody else's page says anything about who sees a list**: no tint (the
+  green edge is gone from the stylesheet), no badge, no word — on a profile, in a list's window, in "Who has this",
+  behind a share link. The endpoints leave the state out of every answer but the owner's (`visibility`, below).
+* **The owner** sees each list's state on their own cards — the account page's Lists tab and their own profile —
+  and in a list's window: **a lock "Private", people "Friends", a globe "Public"** (`bi-lock`, `bi-people`,
+  `bi-globe2`, through the site's icon map: Font Awesome's and Pro's twins where the site draws with them; laid out
+  as a button's icon and words are, one gap, level with the words). On the card it is a button — named "Who can see
+  it: …" — that opens the Edit window on that question. The card's Public / Private switch is gone: the choice lives
+  in the Edit window now, with the rest of what a list is.
+* **Share** stands on the owner's public and friends lists (their address opens for whoever may see them), never on
+  a private one — and, on somebody else's shelf, on every list the reader sees: a button on the public ones only
+  would have told a friend which lists are theirs alone.
+* The panel shows no member's lists anywhere (its Users view carries their groups, their picture and their
+  description), so there was nothing there to change; a panel session reading the site is the account it is signed
+  in with — every `userCan()` says yes to it, and none of that is a friendship.
+
+### Added — lists for friends only
+
+* **A third answer**, beside private and public: **friends** — the list is seen by its owner and by the members
+  they are friends with (an accepted friendship, either way round, the friends feature's own), and by nobody else.
+* **What it needs** (decided from the code, in one place — `includes/lists.php`, asked by the Edit window, the save
+  and every reader alike, so a choice offered is a choice honoured): no new permission — a friend is somebody the
+  owner chose, and `lists.public` is consent to be seen by *strangers*, which a friends list is not. It needs lists
+  and the site's **Public lists** switch (`lists_public_enabled` — "may a list be shared at all": off, every list is
+  private, a friends list too, as its hint always said), **Friends and following** on (`friends_enabled`), and the
+  owner's account holding **`friends.use`** — a feature, not consent, so asked as the friends page asks it (the
+  administrator's blanket counts, of the named account, never of whoever holds the session). And, like a public
+  list, the owner's **Show my lists on my profile** (that switch now says it covers friends too). Losing one of them
+  later makes the list private in effect, the choice remembered — the grant's rule. The panel's list of permissions
+  says it: `friends.use` — "Follow other members, accept friend requests and share lists with friends".
+* **Who is a friend**: the accepted friendship, and **no block between the two in either direction** — blocking
+  somebody ends the friendship already, and a friendship row that outlived a block (a restored backup, a request
+  answered in the same moment) is still none. The reader's own `friends.use` is not asked (the messages' "friends
+  only" is the friendship alone). Nothing is cached: every read asks the friendship table, so an **unfriending or a
+  block takes the list away on the very next request** — the page, the list's rows, "Who has this".
+* **Every path**: the profile's Lists section (there for a friend even when the owner shares nothing publicly,
+  and for everybody else exactly as before), the share link (`?action=u&name=…#list:<slug>` — for anybody else it
+  does exactly what a private list's link does: nothing, the same page, and the list's rows by id are the very same
+  404), the list endpoints, and **"Who has this"**: a friends list counts in the Lists section — its rows and its
+  count — for a friend of its owner only (never for the owner themselves, as their private lists never did). No
+  e-mail and no notification speaks of lists, and no `api/v1` endpoint serves them.
+* **The Edit window's third question, "Who can see it"**: three buttons that behave as radio buttons — a lock
+  Private, people Friends, a globe Public, an icon and a word each, in both languages ("Prywatna", "Dla znajomych",
+  "Publiczna") — a click or an arrow key chooses, one Tab stop; under them what the chosen answer means. An answer
+  the owner may not give is drawn disabled with the line that says why (the site keeps every list private; the
+  friends feature is off; no `friends.use`; no `lists.public`); a list that already has it keeps it until its owner
+  chooses another, and is not judged again when only its name or description changes. With "Show my lists on my
+  profile" off, a shared answer says that nobody else sees any of the owner's lists. Saved with the name and the
+  description in the window's one request — and a Save that changes only who sees the list is not writing: the
+  anti-spam layer is asked only when the name or the description changes (showing and hiding a list never was).
+* **The account's privacy card**: without `lists.public` in their groups, "Show my lists on my profile" said that
+  nothing acts on it — true until now; for a member who may share with friends it now says what it does: it shows the
+  lists shared with friends to their friends, and no list of theirs is public. Its hint names the three answers.
+* **The endpoints**: `user_lists` `op: 'visibility'` takes `private` | `friends` | `public` (a 1.44.0 page's 1 / 0
+  still mean public / private; anything else is 400 `bad_visibility`, an answer the owner may not give 403
+  `no_permission`); `op: 'edit'` takes `visibility` beside the words; a new list answers `visibility: 'private'`
+  (`is_public` is gone from every answer). The owner's shelf carries each list's `visibility`, `may_friends` beside
+  `may_publish`, and `section_shown`; `user_privacy` answers `lists_may_friends` beside `lists_may_publish`.
+* **Schema 87**: `user_lists.visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private' in place of
+  the boolean `is_public`, and its key in place of `idx_list_public`. A public list stays public, every other one is
+  private; `updated_at` held, so no list moves on anybody's shelf. Guarded on the old column's presence, never on a
+  marker (`schemaListVisibilityMigration()`, the pattern of 1.70.0's description migration): the column arrives
+  NULLABLE (NULL — "not converted yet" — reads as private everywhere, for the moment the migration takes), the rows
+  still NULL take their old answer (only those: a choice made meanwhile is never taken back), then one ALTER finishes
+  it. A run stopped anywhere does the rest again.
+* **"Who has this", measured**: under the OR of its public and friends arms the planner stopped folding the group
+  check into the join and began from EVERY list (a scan of `user_lists`, tests/who_test.php §8), and one subquery
+  asking the friendship both ways round could use no key. The friendship and the blocks are now one keyed lookup per
+  direction (`uq_friend_once` / `idx_friend_of`, `uq_block_once` / `idx_block_target`), and the section's FROM is
+  written as the hash's own items, then the list, then its owner (`STRAIGHT_JOIN`) — the driving set the file
+  always promised.
+
+### Added — replies to comments, as a tree with a depth the operator sets
+
+* **The owner**: "a permission to reply to comments … and a setting for how deep the tree of replies may be —
+  Reddit-like, e.g. three rows". Both are here.
+* **Who may reply**: `comment.reply`, "Reply to a comment", granted once by the migration (v88_replies) to the member
+  and the moderator groups; the guest group nothing — an operator who grants it there (with `comment.view` and
+  `comment.post`) gets a guest's reply held to every guest rule: "Guest #tag", a CAPTCHA every time, no link, held
+  for a moderator until let through. The administrators' blanket passes it as every check; with accounts off it is
+  no, as every comment id. Replying needs everything writing a comment needs first — comments on, the torrent there
+  for this reader, not silenced, the anti-spam layer (the same one call, the same `comment` ladder).
+* **How deep — Reply depth** (`comments_reply_depth`, Settings → Descriptions, comments & ratings → Comments; 0–8):
+  the deepest REPLY level. 1 is a reply to a comment, 2 a reply to that too, **3 as shipped** — a comment, a reply, a
+  reply to it and a reply to THAT: three rows of the reply tree, the owner's words (a count that took the comment for
+  its first row would make 0 and 1 the same — both no replies —, where this way every number means something of its
+  own). 0 is no replies at all. **The server
+  refuses** a reply past it (409 `too_deep`, saying the limit) — the Reply button's absence at the limit is a courtesy,
+  not the gate — and the line under the field says what happens there: the deepest replies have no Reply button, and
+  the conversation goes on under the comment above them.
+* **Lowered later**, the setting refuses only NEW replies: the ones written deeper stay, and are drawn at the deepest
+  level allowed — after what they answer, each saying "in reply to @name" (or "…to a comment that is gone") — the way
+  Reddit's "continue this thread" flattens a long branch, without leaving the page; nothing past the limit can be
+  answered. At 0 the whole thread is drawn flat under its comment, every reply saying whom it answers, and nothing
+  has Reply. Raised again, the tree is drawn as it was written.
+* **Where a reply stands** (schema 88): `hash_comments.parent_id` (the comment it answers; NULL at the top level),
+  `root_id` (the thread's top-level comment) and `depth` (0 for the top level, a reply its parent's + 1), and one
+  key, `idx_hc_thread` (info_hash, root_id, id, status), that answers both of a page's questions — its top-level
+  comments in order, and one thread's replies in order — each one keyed range, the status and the counts read from
+  the key itself (EXPLAIN: `ref` / `range`, "Using index", no sort). A thread by its top-level id rather than by
+  parent: MySQL 5.7 has no recursive query, and one keyed query per thread beats one per level. The comments written
+  before 1.72.0 are what the empty columns say of a row: top level. Nothing was rewritten.
+* **A page stays bounded**, however long a thread is: the top-level comments are paged exactly as before
+  (`comments_per_page`, the newest page first, "Show earlier comments"); each brings its **first ten replies**, oldest
+  first across all its levels — a reply is always younger than what it answers, so any such prefix is a whole tree —
+  and **"Show N more replies"** at the thread's end brings 25 more at a time. A page is at most `comments_per_page` ×
+  11 comments (220 as shipped), and a thread of any size costs it one index-only count, one query for all the small
+  threads together and two per long one (its first ten, and a count of what is left). Inside a thread: a comment, then
+  its replies oldest first, each followed by its own. A notification's link into a long thread brings that thread as
+  far as its reply (at most 200 in one go). **The count** in the section's heading is every visible comment, replies
+  included.
+* **In the Info panel**: every comment the reader may answer has a **Reply** icon button, first among its actions
+  (the map's `bi-reply` — Font Awesome's `reply` where the site draws with it —, "Reply" for a screen reader, "Reply to
+  this comment" in the site's tooltip); pressed, the composer opens **under the comment** — "Replying to @name" and an x
+  to cancel, over the very editor of the foot's composer: its toolbar, the picker for the comment context, the
+  counter, the @ list, the anti-spam layer's countdown on its button, a guest's CAPTCHA and a guest's line. One is
+  open at a time; putting it away (the x, or Esc) keeps its words for when Reply is pressed again, and a live language
+  switch keeps it open with them. Sent, the reply lands in its place, lit for a moment. Each level stands a step
+  further in with a thin rule down its left edge (22px a level on a desktop, 13 on a phone, so the third level keeps
+  248px of a 360px screen's words — measured); each thread has one fold, **Hide replies** / **Show N replies**,
+  between the comment and its replies. Every comment, container and composer has an id of its own (`comment-N`,
+  `cm-kids-N`, `cm-thread-N`, `cm-rp-N`…), which is what the live language switch and the place-keeper pair by.
+* **Esc, one layer at a time**: the @ list, then the composer under a comment, then the Info panel. An Info panel may
+  hold layers of its own now (`escLayer()`, `assets/js/app.js`: an element marked `data-esc-layer` inside the window
+  is closed first; a window opened over the panel still closes before either) — and a comment's correction in place
+  is one too: Esc there closed the whole panel until now.
+* **A comment that goes while it is answered keeps its place**: taken back by its author — or its author's account
+  deleted — it is **"[deleted]"**; taken down by a moderator, **"[removed by a moderator]"**. No author, no words, no
+  time, nothing to do: its place in the tree, so the replies under it keep their sense. It stays for as long as
+  something under it is shown to that reader (a held guest reply counts for a moderator), and goes with the last
+  reply under it; without replies a comment goes exactly as before. It is not counted, and cannot be answered. (What
+  tells the two apart is the reason a moderator must give: an author's own deletion now keeps none, even one an API
+  caller sent.) A guest's comment held for a moderator cannot be answered until it is let through.
+* **An account deleted** (`userDeleteCascade()`): its comments go with it as before — except where OTHER people
+  replied under one, which stays as a "[deleted]" tombstone, its words, author, guest tag, address group and edit
+  stamps gone. Their own replies under it go too, unless somebody else's hangs below those.
+* **Who is told**: the author of the comment a reply answers — "@name replied to your comment on …", the reply's
+  words, **Show** landing on the reply in the Info panel, lit. It is the strongest reason there is: a reply that also
+  names its parent's author is one notification, the reply's; and like a mention it is always news (the "one per
+  unread thread" rule is for the thread's other readers). Never the replier themselves, never across a block either
+  way — a reply from somebody a member blocked, or who blocked them, tells that member nothing at all — and a guest's
+  reply only once it is let through. A fifth switch on the account page, **"…that replies to one of my comments"**
+  (`users.comment_notify` bit 16), on for every account: the migration handed it out once, guarded on the column's
+  own default (15 → 31), never on a marker.
+* **A sound of its own**, `comment_reply` ("Somebody replies to my comment"; the site default **none**, the project's
+  rule — Settings → Sounds has its select, the account's Sounds tab its choice). Decided by how the two work: the
+  pulse counts unread notifications per TYPE (`unread_comment_reply`, one more sum in the same query) and
+  `assets/js/sounds.js` plays each kind whose count rose, taking the specific kinds out of the general one — so a
+  reply is one sound, its own; `soundEventKinds()` is the list the Sounds tab, the resolver and Settings all read, so a
+  new kind appears in all three. Folding replies into the mention's slot would have counted two notification types
+  under one number: a member who chose a sound — or silence — for being named would have got it for every answer
+  too, with no way to tell the two apart or part them.
+* **Reports** (1.71.0) work on replies unchanged — a reply is a comment: the flag, the Reports page, removing it.
+* **The endpoints**: `comment_post` takes `parent` (403 `replies_off` / `no_reply`, 404 / 409 `parent_gone`, 409
+  `parent_pending`, 409 `too_deep`); `comment_list` answers each top-level comment with its `thread` {rows, last,
+  more} and the site's `reply_depth`, takes `find` (a notification's link) and answers `thread=R&after=ID` with a
+  thread's next replies; every row carries `parent`, `root`, `depth`, `can_reply` and `tomb`; `comment_delete`
+  answers `tomb`; `comment_prefs` takes `reply`; the pulse and `user_me` carry `unread_comment_reply`.
+
+### Fixed — a comment's emoji picker asked for the room's emotes
+
+* The Info panel's comment composer opened its picker as the SHOUTBOX's: the picker's script did not list the
+  comment context the server has had since 1.71.0 (`EMOJI_PICKER_CONTEXTS`), so it asked for the room's emotes —
+  behind `shout.view`, the room's own permission — instead of the comment's. It asks as a comment now
+  (`for=comment`, the same for a reply's composer).
+
+### Added — a recommended permission set for every seeded group, and one way to apply it
+
+* **One definition, beside the presets** (`includes/users.php`): `userGroupRecommended(slug)` is the group's PRESET for
+  guest, member, premium and moderator — the editor's "Start from" and the panel's "Recommended" can never say two
+  things — and for admin **every registered id**, computed from the registry, never typed out. A group an operator made
+  has none. Every set is contained in what a new install ships, so "add" changes nothing on one.
+* **What each is**: *guest* — the public statistics (`stats.view`, `stats.timeline`, `home.stats`) and nothing else: the
+  whitelist page and the search are the operator's catalogue to open (a new install's guest has the whitelist page, the
+  owner's server does not — "add" must not open it again behind his back), the descriptions and the comments are the
+  members' words (`content.view`, `comment.view`: opened to passers-by on purpose, if at all, v58 and v83), and anything
+  that WRITES — `rating.vote`, `content.submit`, `content.propose`, the v24 grants that kept 1.18's behaviour on upgrade
+  — needs an account (the anti-spam layer puts a guest behind a CAPTCHA every time anyway, and `rating.vote` does nothing
+  for guests while `rep_who_can_vote` is "users"). A guest group that has them keeps them: only a reset takes them.
+  *member* — its 40 (1.71.0's matrix and v88's `comment.reply`); *premium* — the two paid extras; *moderator* — the 42
+  every install's moderator holds (below); *admin* — all 75.
+* **Consent and capabilities**, one list: `userConsentPermissions()` — `content.public`, `favourites.public`,
+  `lists.public`, `rating.public`, `uploads.public`, the ids that say what OTHERS may see of an account and that the code
+  reads through the consent check, where the Admin group's blanket does not count (`userIdHasGrantedPermission()`,
+  includes/favourites.php says why). Every other registered id is a capability (`userCapabilityPermissions()`).
+  `profile.cover` is read from the stored grants too ("which groups give a cover") and is a paid extra, not consent.
+* **Users → Groups**: a **Recommended** button (a magic wand) on every seeded group's row. Its window shows exactly the
+  server's plan — the set's name and line in the reader's language, **"Add what is missing (N)"**, **"A reset would also
+  remove (M)"**, each id with its description on hover — and two ways to apply it: *Add what is missing* (never
+  removes), and *Reset to recommended* (only when something would go; it asks a second time, naming the ids and how many
+  members lose them). What was shown is sent back and has to still be true: a group changed since the window opened is
+  not touched — the window says so and shows the difference as it is now (409, nothing written). One audit line per
+  change, `group.recommend` under Users (what was added and removed); none when nothing changed; a refused request is
+  recorded as refused, as every panel write is. Owner-only, as group editing is (`admin/group_recommended` is absent from
+  the endpoint map on purpose).
+* **The Admin group, shown as it is**: in the matrix every capability of the Admin column is the blanket's tick (a colour
+  of its own, "held by the blanket" on hover), consent rows carry an amber *consent* tag, and a legend under the matrix
+  says what the three marks mean; in the group editor its 70 capability boxes are ticked and disabled (the reason on
+  hover), the five consent boxes are live, and one line above the list says which is which — a preset never touches a
+  disabled box, and a save that arrives without a capability keeps it on the server (`api/admin/group_save.php`). The
+  groups table's cell for it reads "every capability (the blanket) · consent: …" instead of seventy ids. In the
+  Recommended window the Admin group's consent is a tick of its own, off, with its reason; ticking it asks the plan again.
+* **The groups table fits its page**: it borrowed the panel's shared 1180px floor — seven equal columns in a 1062px page
+  at 1280, 1114 at 1440 — so its actions stood behind a sideways scroll (Edit included, at 1280), and the new button
+  beside Edit went out of view altogether. Pinned columns now (`.gr-c-*`), the name and the permission list taking the
+  rest: no sideways scroll at 1280, 1440 or 1920, every header whole in both languages ("CZŁONKOWIE", "PRIORYTET"), the
+  row's buttons on one line in both icon libraries (measured).
+* **From the shell** — `tools/groups.php` (the same functions, the same audit line, attributed to `cli:<user>`):
+  `list` (every group, what it holds, and whether the Admin group stores every registered id), `diff [--group=slug]
+  [--consent]`, `apply --group=slug|--all --mode=add|reset [--consent] [--dry-run]` — idempotent, prints exactly what it
+  changed, forgets the permission memo — and `user <id|name>` (read-only: an account's groups, and each consent id it
+  holds BY A GRANT). `--consent` also gives the Admin group the consent ids: the owner's server's case, "everything".
+  Refuses to run anywhere but the command line; exit 0 done, 1 refused, 2 usage.
+
+### Changed — the Admin group's stored list says what its blanket holds; the moderator's seed is every install's
+
+* **Schema 89**: `schemaAdminGrant()` writes every registered CAPABILITY into the Admin group's permissions — on every
+  data-migration pass (idempotent, a documented exception to "once": on the Admin group a capability is never a choice,
+  so writing it again restores nothing anybody decided) and for every id a `schemaGrantOnce()` introduces — never a
+  consent id, never a removal. An id a later release registers and grants to nobody (as `shout.emote_auto` and
+  `panel.messages.*` are) reaches the stored list at the next migration too. Nothing anybody may do changes: its members
+  pass every check by the blanket. On the owner's server it fills the fifteen empty boxes the matrix showed (the ids
+  registered since v81, and v88's `comment.reply`).
+* **The moderator**: its preset and its seed disagreed again — and this time the seed disagreed with itself. The seed's
+  TEXT gained `index.files_all` at v42 and `favourites.use`, `favourites.public`, `favourites.view_others` and
+  `uploads.public` at v47, but an `INSERT IGNORE` reaches only a NEW install, and those releases granted the five to
+  member alone: no install that already had a moderator — the owner's included — ever got them. The recommended
+  moderator is the one every install has (42), so the preset and the new-install seed lose the five. They are
+  membership's — a moderator is a member as well, through the default group — and two of them are consent, which a job
+  does not give. A group that has them keeps them ("add" never removes); a reset would take them.
+* **Found on the way**: `tests/favourites_test.php` deleted the account it makes for the consent checks with a bare
+  `DELETE FROM users`, leaving that account's ADMIN membership behind on every run — a row that would hand the Admin
+  group to whichever account is given the id next. It deletes the whole account now (`userDeleteCascade()`).
+
+### Changed — scrape coverage is counted per pass, and a poll the budget cut is called cut
+
+* **What the server showed**: since 2026-09-28 13:54 the polls alternate — one cut at the budget (~126 s, e.g. 1 586 043
+  entries walked), the next resuming at the cursor and finishing the rest in 10–40 s (82 062) — with `partial` NULL on
+  every row. The card divided each poll's delivery by the tracker's count (`coverage = delivered / rows_total` per poll),
+  so the resuming half read 4–20 % and the smallest tail 0.1 %, and it counted the cuts as "arrived truncated".
+* **A pass** (`indexPollPasses()` in `includes/index.php`): a poll that starts at the first entry — `skip_from` 0, or a
+  download that ended early, which is always read from 0 — plus the polls that continue it from the cursor, until one
+  ends un-cut. A failed poll ends its pass (the cursor is reset); a fresh start while a pass was open leaves it
+  "stopped"; a short download while a pass is open belongs to it (the cursor stays where the pass had got). A pass whose
+  newest poll was cut is **in progress** — never a number in the worst or the average. A window's first poll that
+  continues a pass begun before it reads that pass's earlier polls back (up to 200 rows, `lead` in the reply: drawn,
+  never counted); a continuation whose start is gone is flagged and not counted. Per pass: polls, walked (the furthest
+  entry reached), delivered, coverage against the last poll's tracker count, duration (first start → last end).
+* **The card**: average and worst **per pass**, passes from how many polls, **Cut by the time budget** (muted — the
+  budget doing its job — "the next poll continued where each one stopped"), **Download ended early** only when one did,
+  failed polls, and the last pass ("1 421 325 so far — in progress, the next poll continues from entry 1 421 325").
+  When every finished pass took more than one poll the card says so — nothing is lost, coverage is per pass — with the
+  measured estimate: "with the budget at 120 s it takes 2 polls. At 300 s one poll would walk it."
+* **The chart**: one bar per pass, its polls stacked in it bottom-up — from the start, continued, a download that ended
+  early, a failed poll, each its colour — the darker part what each kept, the tracker's count as a dashed line, a pass
+  in progress dimmed with what is left outlined. Every part says what it did on hover or tap: "continues the previous
+  poll from entry 1 586 043 — together 100 %"; a tap keeps the words open, across the minute's reload too. Drawn as
+  SVG, so the Index page no longer loads uPlot; readable on a 360px phone.
+* **The words**: `all_truncated_alert`, `one_poll_truncated`, the tiles, the intro and their friends say *cut by the
+  time budget — the next poll continues where this one stopped*; a real short download keeps its own words (*the
+  download ended early*) — in the chart, the Index status card's badge and "Poll now"'s toast (`index_poll_now` now
+  answers `partial` beside `truncated`). Polish says *przycięte* and *przebieg*, never *obcięte*.
+* **An old rule, kept and corrected**: a cursor above the entries walked was read as a restart (1.29.1). That is what
+  1.29.0's rows need — a short download recorded the stored cursor while it read from 0 — but a poll that resumed on a
+  scrape which had SHRUNK below the cursor has the same shape and delivered nothing; it was credited with the whole
+  file. `partial` tells them apart: every short download reads from 0, and nothing else restarts.
+* **Found on the way**: the card's first load and a click on another range raced, and whichever answered last was drawn
+  — the chart could show a day under the "6h" button and redraw under the reader's pointer. Only the newest request
+  paints now, as the traffic chart's has since it met the same race.
+
+### Changed — the poll's time budget goes to 300 s, and says what it means for this scrape
+
+* **120 → 300**: `IDX_POLL_BUDGET_MIN` / `IDX_POLL_BUDGET_MAX` in `includes/index.php` are the clamp, the save's clamp
+  and the field's `min=` / `max=` — one number, never retyped — and the search finds it by *300*, *cut*, *continues*,
+  *pass*. The default stays 45; the download keeps its own `min(90, …)`. The poll runs in its own unit
+  (`tracker-janitor-heavy`), so a longer budget holds up nothing else. "Poll now" waits as long as the budget allows, as
+  before — with a budget above a few minutes a web server whose own timeout is shorter may answer the button with an
+  error while the poll finishes behind it.
+* **Under the field**, measured: "The last full pass walked 12 873 entries/s; the current scrape (1 789 254 torrents)
+  needs about 139 s — with the budget at 120 s it takes 2 polls." — the newest complete pass's pace against the newest
+  tracker count (`indexPollEstimate()`), the last clause redone as the field changes. On the owner's server (1.95 M
+  torrents at ~12 800 a second): about 153 s — two polls at 120, one at 300. The hint says what a cut means.
+
+### Added — the inbound limiter says who loaded it, when its burst is too small, and what the drops cost
+
+* **Who loaded the limit, in words**: "set by lists-off 24 d 11 h ago" read like a limit somebody had named; it meant
+  the janitor loaded the same limit again when the IP lists were switched off. The card now says "set 24 d 11 h ago,
+  when the IP lists were switched off — the janitor loaded the same limit without them", in both languages, for every
+  source the code passes (`netlimitSourceWords()`: admin, its counting-only and removal, auto, the emergency throttle
+  and its end either way, the lists changing or switched off, a stability-probe step, a preview); a code without words
+  prints as itself. The stability probe's Apply records `probe` now — it recorded `admin`.
+* **A burst too small for the limit**: `limit rate over N/second burst B packets` is a bucket B packets deep, and the
+  network card hands packets over in bursts — at 90 000 pps a bucket of 100 holds 1.1 ms, so bursts are dropped inside
+  seconds that were under the limit. On the owner's server the limit of 90 000 passed ~80 000 on average while a third
+  was dropped. When the limit is on and over the last hour what got through stayed under 95 % of it while more than 5 %
+  was dropped, and the burst in force (the firewall's, else Settings') is below the suggestion, the card says so with
+  the numbers and suggests ≈ 22 ms of the limit (`netlimitBurstSuggest()`: 2 000 at 90 000, rounded, within 1–65 535):
+  "… would let the full limit through without raising it — Settings → Inbound limit → Burst, then Traffic → Apply
+  limit", with a link to that section. The limit itself is not touched.
+* **Handshakes per announce**, from the statistics timeline's hourly rows: UDP connects against announces over the last
+  hour and over 24 h (`netlimitHandshakes()`), with one sentence — about one per announce is normal, well above one is
+  clients repeating the handshake because their packets or the replies were dropped. On the owner's server ~1.5 in the
+  efficient state and 2.2–2.8 in the congested one, at the same limit. Hidden while the timeline is off or stopped, and
+  a window with a tracker restart inside it says nothing.
+* **Found on the way**: `tests/netlimit_test.php`'s helper half isolates its own files in a temporary directory, but its
+  state checks wrote the checkout's real `config/net_state.json` and nothing put it back — every run cleared the
+  panel's last error and last clean answer. It keeps the file from the start and puts it back byte for byte.
+
+### Production note — the inbound limiter's burst, 100 → 2 000 (the limit stays 90 000 pps)
+
+Written down at the owner's request, so that if the server ever behaves oddly afterwards, this change is the first
+place to look.
+
+* **What the burst is**: the limiter (`limit rate over 90000/second burst N packets`) lets 90 000 packets a second
+  through on average; the burst is how many of them may pass AT ONCE, out of one bunch the network card hands over.
+  Packets arrive in bunches of a few hundred, so with a burst of 100 a bunch of 300 loses 200 inside a second that
+  stayed under the limit. That is why production served about 80 000 of the 90 000 it allows while dropping a third —
+  measured 2026-09-30 ~15:05 over 60 s: 120 771 packets arriving, 80 051 served, 40 720 dropped (33.7 %).
+* **The change**: burst 100 → 2 000 packets (≈ 22 ms of the limit), recommended after the traffic analysis above and
+  agreed by the owner on 2026-09-30. The limit itself does not move: no second can pass more than 90 000 on average.
+  Expected: served close to 90 000, fewer drops, fewer repeated handshakes. Why it cannot overload the machine: 2 000
+  packets is what the server receives every ~1/60 s anyway, the tracker's socket buffer holds tens of thousands, and
+  on the day opentracker used ~27 % CPU per worker thread with a load of ~0.5 per core; the stability probe's safe level
+  on this machine was 293 000 pps.
+* **How it is applied** (the panel, with the owner's password): Settings → Inbound limit → Burst **2000** → Save, then
+  Traffic → Apply limit. The audit log records it as `netlimit.apply`. The release itself changes nothing on the
+  firewall: at release time production still ran burst 100.
+* **How to undo it**: the same two steps with Burst **100**. It is in force at once — the helper swaps the one rule in
+  place, and the counters keep running.
+
+### Tests
+
+* `tests/icons_test.php` — the magnet's entry and its `prostyle` chain (a well-formed key of an entry); on Pro
+  setups built as `iconSetup()` returns them: duotone loaded → `fa-duotone fa-solid fa-magnet`, only a lighter
+  duotone file → that one, none → Pro's outline, a light site → light, Free untouched; every other entry drawn
+  exactly as without the duotone style, the magnet counted its own style's and never a fallback; the observer
+  measuring a duotone glyph as the classic glyph at its weight. 134 checks.
+* `tests/comments_test.php` — the two settings in their four places (default, the save's allow-list and its
+  coercion, the search catalogue, the Settings page), their readers (`commentsPosition()` / `commentsExpanded()`:
+  the closed set, the default for anything else), the Info panel's answer carrying them, the schema line for 86.
+  148 checks.
+* Browser checks: `comments_check.js` walks the thread as shipped — at the panel's end after the files, folded,
+  no thread asked for until a click opens it — and Settings' five combinations of place and opening (folded asks
+  for nothing, unfolded opens and loads), a notification's Show landing through a folded section, the live
+  language switch keeping it open; `fav_check.js` — the search's actions column exactly its icons (no room right
+  of the star or left of Magnet), a favourites row's actions exactly its three icons and its chip sixteen
+  characters; `profile_votes_check.js` and `descriptions_check.js` — the actions cell exactly Magnet and Info at
+  its right edge (both rating modes, both languages, Font Awesome; the first now switches the anti-spam layer off
+  for its votes); `account_width_check.js` — the security card 1.25rem below the columns at 1280, 1440, 1920 and
+  on five phone widths; `polish_check.js` — each Copy on its label's line at the row's right edge, desktop and
+  phone; `settings_groups_check.js` — the two new settings found by their names in both languages;
+  `icons_check.js` and `icons_align_check.js` — the Pro solid modes load the duotone style, and every page of
+  them measures the duotone Magnet: `icons_check` 0 failed (1,024 passes in its seven modes, the Magnet duotone
+  in exactly Pro 6 and Pro 7 and every icon button Bootstrap's size), `icons_align_check` 0 failed in all eight
+  modes — worst per mode (offset / gap / icon button) bootstrap +0.87 / 0 / +0.59, cdn6 +0.78 / 0 / −0.84, cdn7
+  +0.71 / 0 / −0.84, pro6 +0.71 / 0 / −0.84, pro6-light +0.70 / 0 / −0.84, pro7 +0.78 / 0 / −0.84, pro7-light
+  +0.77 / 0 / −0.84, pro7-jelly +0.78 / 0 / −1.00, the same as 1.71.0's — and the 440 duotone Magnets measured
+  −0.33 to +0.65px from their buttons' middle, 26px square (2.2px high before the observer measured both layers).
+  `reports_check.js` and `antispam_check.js` open the folded section as a reader does.
+* `tests/lists_test.php` — schema 87 on both paths (the fresh CREATE and the upgrade list's copy: the ENUM, its
+  default, its key, no `is_public`; the live, upgraded table) and the upgrade walked on a table of 1.70.0's shape: the
+  three statements in their order, a stop after each (every row NULL — read as private — after the first; a choice
+  made meanwhile kept), public stays public and 0 or a stray 2 private, `updated_at` held, the result the same as a
+  table today's CREATE makes, column for column and key for key; the rules as functions (the three answers and the
+  1.44.0 booleans, what the friends side needs, the administrator's blanket — `friends.use` yes, `lists.public` no —,
+  a friendship either way round, which answers each reader may see, the profile's section for a friend of an owner who
+  shares nothing publicly); then every path as a request for the owner, a friend, a member who is no friend, a guest,
+  a panel session alone and one over a member's account: the shelf (what a profile section and a share link's list
+  are drawn from), a list's rows — each "no" the very same 404, a friends list never a hint —, "who has this", the
+  state told to the owner alone; the writes (`visibility` three ways and the old 1 / 0, 400 for anything else, 403
+  for an answer not the owner's to give with nothing written, the Edit window's one request, an unchanged answer not
+  judged again, the anti-spam layer asked for a rename and not for a change of who sees it); an unfriending and a
+  block through `user_people` itself, gone on the very next request, a friendship row that outlived a block still
+  none, a pending request none; the pages' markup, the icons in the map, the words in both languages and the dead
+  ones gone. 177 checks. `tests/who_test.php` §5c — a friends list in the Lists section: counted for the owner's
+  friend only (26 for him — the 25 public ones and it —, 25 for anybody else), either way round, and out of the
+  rows and the count for a pending request, the friends feature off, the owner's `friends.use` gone, the section
+  hidden, a block either way, the owner themselves; an owner in the admin group alone counted (the blanket is
+  power); the pages agreeing with the count; §8's EXPLAIN, which caught the planner reading every list, holds the
+  new plan. 120 checks.
+  `tests/audit_lists_test.php` (and `.py`, `favourites_test.php`, `avatar_names_test.py`) write the new column; the
+  blanket's publish refused by its new name too.
+* Browser checks: `lists_check.js` — a visitor's card says nothing of who sees it (no green edge — the border of any
+  card —, no badge, no chip, no word); the owner's cards: a lock "Private", people "Friends", a globe "Public", each a
+  button named "Who can see it: …", Share on the public and the friends one; the chip opens Edit on the question —
+  a radiogroup, one Tab stop, arrows move the choice, its meaning under it —, Save one request carrying it, the chip
+  and the list's window following; the friends answer disabled with its line while the friends feature is off, the
+  hidden section's line (following the privacy card's switch on the same page, no reload); Polish (the chips and, in
+  place, the window's words) and a phone; smokeuser's friend reading the friends list (the profile, its link, its
+  rows, "who has this") and a member who is not seeing the public one only — the friends list's link doing for him
+  exactly what a private one's does, its rows the very 404 —, and an unfriending taking it away on the next page.
+  `who_check.js` §4b — a friends list counted for smokeuser as the owner's friend (25), not before and not after (24).
+  `polish_check.js` publishes through the chip and the window; `icons_check.js` and `icons_align_check.js` open the
+  Edit window from a chip on the Lists tab (three lists of smokeuser's in the three states for the run):
+  `icons_check` 0 failed (1,044 passes in its seven modes; the chips and the window's three answers draw a real
+  glyph in each full mode); `icons_align_check` over the account page and the
+  own profile, in all eight modes, both languages, desktop and phone — which caught the chips at their first size,
+  0.75rem, standing 1.03–1.07px under their words with Bootstrap Icons (the chip is 0.8rem now) — 0 failed: the chips
+  +0.53..+0.57 (Bootstrap), +0.11..+0.16 (Free 6, Pro 6), +0.10..+0.74 (Free 7, Pro 7), the window's three answers
+  +0.54..+0.58, +0.12..+0.18 and +0.09..+0.75. Screenshots: scratchpad/shots1720/lists-*.png.
+* `tests/comments_test.php` §13, replies — schema 88 on both paths (the columns and the key in a fresh CREATE, and an
+  upgrade from 87 walked on a scratch database: one shape, the old comments top-level, every account's fifth bit on
+  — 15 → 31, 7 → 23 — and the default 31, a second run asking nothing), the grant once to member and moderator and
+  not to guest, `comments_reply_depth` in its four places and clamped (0 a real answer); then the tree to the limit:
+  a reply one level down, a reply to it, a third level, and the fourth refused by the server with nothing written;
+  the page — the top-level comment with its replies in order, parent, thread and depth each, `can_reply` false at the
+  limit only, the count every comment; who is told — the parent's author (`comment_reply`, the link to the reply),
+  never the replier, one notification for a reply that also names them, nothing across a block either way, the fifth
+  switch off falling back to the thread; the refusals in their order (another torrent's parent, none, not a number,
+  replies off, no `comment.reply` with a comment of its own still allowed, silenced); a guest's reply — no grant, then
+  a CAPTCHA every time, no link, held, not answerable while held, a moderator's thread showing it, the parent's author
+  told only when it is let through; the depth lowered to 1 and to 0 (the replies stay on the page, none answerable,
+  a new one too deep); tombstones — an author's own, a chain taken back to its last reply and gone with it, a top-level
+  comment removed by a moderator in its place with its thread, an author's deletion keeping no reason; a thread of
+  fifteen: ten on the page, "5 more", the next five, a notification's link bringing fourteen; an account leaving two
+  tombstones under other people's replies and three comments deleted; a reply through the endpoint file. Its earlier
+  pins follow the fifth switch, the third sound kind and the pulse's third number. 199 checks.
+  `tests/content_reports_test.php` §11 — a reply is reported as a comment is, its row flagged for the reporter.
+  `tests/groups_matrix_test.php` (the member and moderator rows, the moderator seed + grants, the upgrade's markers),
+  `tests/sounds_test.php` (nine sound selects), `tests/sounds_test.py` and `tests/pulse_test.py` (the third comment
+  kind; the pulse's `unread_comment_reply`) follow it.
+* Browser checks: `comments_check.js` §13 — on a torrent of their own, ccheck_member's thread and smokeuser's Reply
+  (first among the actions, the map's glyph, its tooltip on hover), the composer under the comment ("Replying to
+  @ccheck_member", the same toolbar, the picker for the comment context, the counter, the x), Esc one layer at a time
+  (the @ list, the composer — the focus back on Reply —, the panel), the x keeping the words; the reply landing nested,
+  ccheck_member's next pulse playing the REPLY sound once and nothing else, the notification's Show opening the panel
+  on the reply; nested to level 3 — each a step further in —, no Reply at the limit and a reply sent by hand refused
+  (409); the fold; smokeuser's reply taken back staying "[deleted]" over the two under it; a 360px phone (level 3's
+  words 248px wide, nothing sideways); the live switch to Polish redrawing the thread with the same ids and the open
+  composer still open with its words; the depth lowered to 1 (the deeper replies at level 1, "in reply to …", only
+  the comment answerable) and 0 (flat, nothing answerable); a long thread — ten replies and "Show 4 more replies" —
+  where a reply sent before the four are fetched lands in its place and leaves them in reach (Show brings each once,
+  in order); and Esc in a comment's correction putting it away with the panel still open. Its earlier pins follow
+  Reply among the author's actions, the five switches and the Sounds tab's third event. 99 passes, 0 failed (and
+  the long thread's check fails, as it should, with the "Show more" cursor moved past the replies still to come).
+  Screenshots: scratchpad/shots1720/replies-*.png. `icons_align_check.js` and `icons_check.js` open a thread of
+  replies to the limit in the Info panel (smokepeer's and smokeuser's in turn, made for the run) — the Reply buttons,
+  Report, Edit, Delete, the fold — and then the composer under a comment with its x: `icons_align_check` over the
+  search page and its Info panel in all eight modes, both languages, desktop and phone, 0 failed (257 passes) — which
+  caught the fold's chevron 0.81px under its words with Bootstrap Icons at the size first chosen (0.78rem; at the
+  small buttons' 0.8rem it is +0.57) —, the thread's icon buttons −0.69..+0.58px from their boxes' middle, its icons
+  beside words −0.19..+0.57; worst per mode (offset / gap / icon button) bootstrap +0.57 / 0 / +0.59, cdn6 +0.63 / 0 /
+  −0.84, cdn7 +0.63 / 0 / −0.84, pro6 +0.63 / 0 / −0.84, pro6-light +0.61 / 0 / −0.84, pro7 +0.63 / 0 / −0.84,
+  pro7-light −0.25 / 0 / −0.84, pro7-jelly −0.29 / 0 / −1.00 (the +0.6 of the Free and solid modes is the file
+  list's chevron, as before). `icons_check` 0 failed (1,113 passes in its seven modes; Reply drawn on the three
+  comments below the limit, every icon a real glyph, the thread's icon buttons Bootstrap's size in every Font Awesome
+  mode). `settings_groups_check.js` finds **Reply depth** by its name in both languages. The neighbours, on this
+  code: `reports_check`, `layers_check`, `antispam_check`, `picker_everywhere_check`, `emoji_picker_check`,
+  `sounds_check`, `pulse_check`, `langswap_check`, `people_check`, `csrf_everywhere_check`, `descriptions_check`,
+  `content_check`, `polish_check`, `settings_hit_check` 0 failed; `verify_all` 52 renders, 0 problems;
+  `tests/sounds_test.py` 45 checks and `tests/pulse_test.py` 14, 0 failed.
+* `tests/groups_matrix_test.php` — the moderator row is the moderator every install has (its comment put right: the
+  five were never "in it since v25"); a new install's Admin group stores every capability and no consent id; the
+  owner's Admin group imitated (the 59 ids it held) gains every capability it lacked and not the consent it never gave,
+  keeping the four it had; a capability missing from the Admin group's stored list comes back at the next pass (an id
+  granted to nobody included), a consent id taken off it does not; a grant gives the Admin group its capability, never
+  the consent id beside it, and still counts only the group it names; the Admin cover check takes `profile.cover` off
+  the stored list for its moment. §8, the recommended sets: each registered, the Admin group's every id computed from
+  the registry, the others their presets, none for a group the operator made, the guest's the public statistics, each
+  contained in what a new install ships; each set's name and line in both languages, the English the preset's word for
+  word; the consent list = the code's — every id read through `userIdHasGrantedPermission()`, and nothing else, the only
+  other stored-grant read `profile.cover` in the account page, the who-has-this sections' map, the power read never
+  asked a consent id — read by the tokeniser with the comments taken out (with `rating.public` taken out of the list,
+  five checks fail, three of them this one); the plans on the rows the database holds (the owner's guest: nothing to add,
+  a reset would take the legacy three; a pre-1.72.0 new install's moderator: a reset would take the five; the owner's
+  Admin group: its capabilities to add, its missing consent apart); the audit line's shape; the code the release rests on
+  by its shape. 103 checks. `tests/profile_bio_test.php` takes `profile.bio` off the Admin group's stored list for its
+  check in the same way (114); `tests/favourites_test.php` §10 — the moderator's seed and its recommended set hold none
+  of the favourites / uploads ids (108); `tests/admin_access_test.php` — `admin/group_recommended` among the owner-only
+  endpoints (312).
+* `tests/groups_cli_test.php` (new) — the tool as the operator runs it, a process of its own, on the test database:
+  `list`; the usage answers (2) and the refusals (1); a dry run that changes nothing and writes no line; `add` printing
+  exactly what it added, never removing the operator's own id, one audit line — the panel's own detail, `cli:<user>`,
+  ", from the shell" — and nothing the second time; `reset` taking exactly the extra, then nothing; the Admin group: the
+  capabilities it lacks back, its consent never taken away and never given without `--consent`, then with it every
+  registered id stored and `list` saying "yes"; `--all` = the five seeded groups; in the process itself, the permission
+  memo forgotten by an apply (an integer key too), a stale preview refused with the plan as it is now and the current
+  one accepted, a reset whose preview did not show its removal refused, the Admin group's reset changing nothing; the
+  file's guard and what it loads; over the web the file answers 404 and says nothing. 42 checks.
+* Browser checks: `groups_check.js` (new, in the sweep) — the Groups tab as the owner meets it: the Recommended button on
+  the five seeded rows only; the Admin group's cell; a member group two ids short with one extra — its window, Add (the
+  two, the extra kept, one line), Reset's second question (Cancel writes nothing), Reset (the extra only), "held
+  exactly"; a stale preview (nothing written, the window redrawn, the refusal recorded as one); the Admin group's window
+  (the blanket's line, its two missing capabilities, the consent tick asking again, Reset off); its editor (70 boxes
+  ticked and disabled with the reason, five live consent boxes, the line, a preset leaving them, a forced-open save
+  keeping the capability and the consent tick saved); the matrix (the blanket's cells, the tagged consent rows, the
+  legend); Polish; both icon libraries — the table fitting its page at 1280 and 1440 in both languages (no sideways
+  scroll, no header cut, the buttons in view on one line: it caught the table's borrowed 1180px floor) and the row
+  button's glyph where its neighbour Edit's is (0.00px); a 390px phone; no script error; every group put back byte for
+  byte. 55 passes, 0 failed. Screenshots: scratchpad/shots1720/groups-*.png. `icons_align_check.js` measures the Groups
+  tab with its matrix open and the Recommended window filled (the Admin group's and a member group's): over the Users
+  page in all eight modes, both languages, desktop and phone, 0 failed (167 passes) — the new states' icons −0.44..+0.42px
+  from their words' middle (Bootstrap −0.14..+0.42, Free 6 and Pro 6 −0.44..+0.30, Free 7 and Pro 7 −0.33..+0.33), the
+  page's worst per mode +0.85 (Bootstrap, the VIP row's hourglass), +0.78, +0.69, +0.69, +0.69, +0.78, +0.77, +0.78 —
+  its existing icons, within the pixel. The neighbours, on this code: `panel_fixes_check` and `settings_groups_check`
+  0 failed, `verify_all` 52 renders and 0 problems, `csrf_everywhere_check` 0 failed and `icons_check` 0 failed (1,113
+  passes in its seven modes) — each run once more on its own, the first time having failed only on the machine's
+  `net::ERR_NO_BUFFER_SPACE` (945 sockets waiting to close); and the PHP suites the groups touch —
+  `install_test` 36 (a new install and an upgraded one, the same groups), `version_test` 24, `profile_votes_test` 150,
+  `content_test` 199, `who_test` 120, `lists_test` 177, `audit_lists_test` 41 (the blanket still not consent),
+  `people_test` 100, `lang_test` 226, `sql_safety_test` 8, `icons_test` 134, `comments_test` 199 — 0 failed.
+* `tests/index_polls_test.php` (new) — one row read in every shape the table holds (a cut, a continuation, a short
+  download, a failed poll, 1.29.0's stored cursor above and below the entries, a continuation on a scrape that shrank,
+  an unknown count); passes on the server's own rows of 2026-09-28/29 (cut at 1 586 043 + 82 062 = one pass at 100 %,
+  the 1 453-entry tail the end of a pass at 100 %, the duration first start → last end, the newest cut in progress and
+  never counted), a short download starting a pass and in the middle of one, a failed poll ending one, a fresh start
+  leaving one stopped, a continuation without its start, the old cursor rule inside an open pass; the reply on the
+  database with rows at a moment no real row is near (2033), deleted exactly — the window's first pass read back from
+  before it, seven passes with the failed one the worst (54.88 %), cuts / short downloads / failed polls counted apart,
+  the estimate from the newest complete pass, a continuation whose start is gone flagged and not counted, a window
+  opening on a short download, the window bounded both ways; the clamp 5–300 (default 45, garbage, 0), the constants
+  in the save, the field and the search words, the download's own `min(90, …)`; the estimate (12 866 entries/s → 153 s
+  → 2 polls at 120, 1 at 300, 4 at 45; none without a complete pass); the words — cut / continues and never
+  "truncated" in both languages, the short download's own, every key the three scripts ask for. 112 checks. With every
+  poll made a pass of its own, 21 of them fail.
+* `tests/netlimit_test.php` — the burst hint: the suggestion (2 000 at 90 000, rounded, within 1–65 535), the
+  server's hour said with its numbers, the thresholds either side (94.9 % / 5.1 % said, 95 % through or 5 % dropped
+  not), a burst already at the suggestion silent (with that guard taken out, two checks fail), counting-only samples
+  not counted, the path in both languages built from the pages' own labels; the sources — every `netlimitApply()`,
+  `netlimitApplyMonitor()` and `netlimitOff()` call in `api/`, `includes/` and `tools/` found by the tokeniser, each a
+  literal with words in both languages, "lists-off" said as the lists switched off, an unknown code as itself;
+  handshakes per announce (1.50 over the day and the hour, 2.5 congested, a restart or the uptime alone going back
+  hiding the day and not the hour after it, too little history, no announces); over the database: the hint from the
+  last hour of `net_samples` against the burst the firewall reports or Settings', the timeline's hourly rows at 2033
+  (the hour and the day, off, stopped, a restart six hours back), the table exactly as found; and the state file
+  exactly as the run found it. 356 checks (the one Windows skip as before). `tests/audit_fixes_test.php` — the
+  coverage chart's pin follows it off uPlot (no instance, its window listeners bound once). 56 checks.
+* Browser checks: `traffic_cards_check.js` (new, in the sweep) — fixture rows shaped like the server's in `index_polls`,
+  `net_samples` and `stats_samples_1h` with their own times, and the Traffic card's firewall a stand-in
+  (`scratchpad/shots/fake_netlimit.php`: 90 000 pps, burst 100, counters at the server's rate; `lists-off` 24 d 11 h
+  ago in `net_state.json`): the coverage tiles per pass (93.6 % over seven, the worst the failed pass 54.9 %, eight
+  passes from thirteen polls, five cuts muted, the short download apart, the last pass "1 421 325 so far"), nothing
+  saying "truncated" or 0.1 %, one bar per pass with its polls stacked and touching, each part's words ("continues the
+  previous poll from entry 1 586 043 — together 100 %", the tail's 100 %, the short download's, the failed poll's, the
+  pass in progress dimmed and outlined), hover and click (kept open across a redraw — which caught the range race), the
+  legend, the notes (and on rows where every pass took two polls: "… it takes 2 polls. At 300 s one poll would walk
+  it."), Polish, a 360px phone; Settings' field 5–300 with the estimate redone at 300 and 45 and nothing saved;
+  Traffic's "set 24 d 11 h ago, when the IP lists were switched off — …", the handshakes line, the burst hint with its
+  numbers, path and link (landing on Inbound limit and its Burst field), a restart hiding the day, the timeline off and
+  the limit off hiding theirs, Polish, a 360px phone; no script error; every row, setting and state file put back.
+  61 passes, 0 failed. Screenshots: scratchpad/shots1720/traffic-*.png. The neighbours, on this code: `verify_all`
+  52 renders and 0 problems; `lang_test` 226, `sql_safety_test` 8, `icons_test` 134, `tuner_test` 43, `iplist_test` 110,
+  `sysctl_test` 116, `dbmem_test` 70, `cluster_test` 91, `version_test` 24, `meta_order_test` 100,
+  `homelayout_test` 92, `tests/worker_settings_test.py` 41 — 0 failed. `tests/addressable_test.php` left its fixture's two
+  `whitelist_files` rows behind on every run (it deleted the whitelist row, and the files table has no cascade): it
+  deletes them first now and checks that nothing is left. 26 checks.
+
 ## [1.71.0] — 2026-09-29
 
 The owner's next list, as one release. It opens with how a few places look and what their buttons say:

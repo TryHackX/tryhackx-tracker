@@ -1962,6 +1962,12 @@ const closeOnBackdrop = (box, close) => {
  * (1.70.0) was the first to stand aside like this, and keeps its own listener.
  *
  * escLayer(box, close) → { on(), off() }: on() as the window opens, off() as it closes.
+ *
+ * A layer INSIDE a window (1.72.0): an element in the box marked `data-esc-layer` — open (not hidden, drawn, its
+ * `data-esc-at` set) — is closed before the window: the top window's Esc goes to the one opened last (it hears
+ * `esclayer:close` and puts itself away), and the window waits for the next Esc. The Info panel's comment composers
+ * are these: a reply's under its comment, and a correction in place (assets/js/comments.js). Inside, not over: a
+ * window opened over the panel ("Who has this", a list) is still the top layer and closes first.
  */
 const escLayerZ = (n) => { const z = parseInt(getComputedStyle(n).zIndex, 10); return Number.isFinite(z) ? z : 0; };
 const escLayerTop = (box) => {
@@ -1984,6 +1990,12 @@ const escLayer = (box, close) => {
         if (e.key !== 'Escape' || e.isComposing || box.hidden || !escLayerTop(box)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
+        const inner = [...box.querySelectorAll('[data-esc-layer][data-esc-at]')].filter((n) => !n.hidden && n.getClientRects().length > 0);
+        if (inner.length) {
+            inner.sort((a, b) => (Number(b.dataset.escAt) || 0) - (Number(a.dataset.escAt) || 0));
+            inner[0].dispatchEvent(new CustomEvent('esclayer:close'));
+            return;
+        }
         close();
     };
     return {
@@ -2973,8 +2985,9 @@ window.askInPlace = askInPlace;
     // site has one clipboard routine and one fallback rather than two that drift apart.
     window.ShareLink = share;
     /**
-     * A small Copy beside a value in the Info panel. Same path, same fallback, same "Copied". An icon
-     * since 1.71.0 — the library's copy glyph, named for what it copies ("Copy the info hash").
+     * A small Copy for a value in the Info panel — on its label's line since 1.72.0 (infoRow()). Same path,
+     * same fallback, same "Copied". An icon since 1.71.0 — the library's copy glyph, named for what it copies
+     * ("Copy the info hash"). The plain-HTTP box opens after it, on a line of its own under the label.
      */
     function copyButton(text, label) {
         const b = iconButton('button', 'btn btn-secondary btn-small info-copy', 'bi-copy', label);
@@ -3004,7 +3017,12 @@ window.askInPlace = askInPlace;
         if (infoLayer) infoLayer.off();
     }
 
-    function infoRow(label, value, cls) {
+    /**
+     * One fact of the record. `action` (1.72.0): a button that acts on the value — the Info hash's and the
+     * Magnet link's Copy — stands on the LABEL's line, at its right (.info-kv-head: the owner's markup, as a
+     * class), and the value under both. It stood after the hash and under the magnet's three lines.
+     */
+    function infoRow(label, value, cls, action) {
         const d = document.createElement('div');
         d.className = 'info-kv' + (cls ? ' ' + cls : '');
         const l = document.createElement('span');
@@ -3013,7 +3031,15 @@ window.askInPlace = askInPlace;
         const v = document.createElement('span');
         v.className = 'info-kv-value';
         if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : String(value);
-        d.appendChild(l); d.appendChild(v);
+        if (action) {
+            const head = document.createElement('span');
+            head.className = 'info-kv-head';
+            head.appendChild(l); head.appendChild(action);
+            d.appendChild(head);
+        } else {
+            d.appendChild(l);
+        }
+        d.appendChild(v);
         return d;
     }
 
@@ -3227,6 +3253,10 @@ window.askInPlace = askInPlace;
     async function openInfo(hash, name) {
         if (!infoOverlay) return;
         const body = $id('info-body'), title = $id('info-title');
+        // The panel drawn again for the same torrent (the search page's live language switch) keeps its comments
+        // open if the reader had opened them (1.72.0: they open folded). Read before the body is emptied.
+        const csWas = document.getElementById('info-comments');
+        const csKeepOpen = !!(csWas && csWas.open && csWas.dataset.hash === hash && !infoOverlay.hidden);
         infoHash = hash;
         if (infoOnOpen) infoOnOpen();
         title.textContent = name || t('js.app.details');
@@ -3465,10 +3495,16 @@ window.askInPlace = askInPlace;
         }
 
         // 3b. what people say about it (1.71.0, assets/js/comments.js): the section, with the count this answer
-        //     carries; the thread itself is asked for when the section comes into view.
+        //     carries; the thread itself is asked for when the section is open (at once when it opens unfolded, on
+        //     the click that opens it when folded — comments.js). WHERE it stands is
+        //     Settings' answer since 1.72.0 (json.comments.position): here, after the rating — 1.71.0's place —, or
+        //     before the files, or after them — the panel's very end, the default: a long thread pushed the
+        //     torrent's own record and its files down.
+        let cs = null, csAt = 'after_files';
         if (json.comments && window.Comments && typeof window.Comments.section === 'function') {
-            const cs = window.Comments.section(json, hash);
-            if (cs) body.appendChild(cs);
+            cs = window.Comments.section(json, hash, { open: csKeepOpen });
+            if (['after_rating', 'before_files', 'after_files'].includes(json.comments.position)) csAt = json.comments.position;
+            if (cs && csAt === 'after_rating') body.appendChild(cs);
         }
 
         // 4. the rest: provenance and identity, under a heading so it reads as a footnote to the
@@ -3481,12 +3517,12 @@ window.askInPlace = askInPlace;
         const hashEl = document.createElement('code');
         hashEl.className = 'info-hash';
         hashEl.textContent = json.info_hash;
-        // Full width, label above value: forty characters have nowhere to go in half a grid column.
+        // Full width, label above value: forty characters have nowhere to go in half a grid column. Its Copy on the
+        // label's line, at the right (1.72.0).
         const hashWrap = document.createElement('span');
         hashWrap.className = 'info-copyable';
         hashWrap.appendChild(hashEl);
-        hashWrap.appendChild(copyButton(json.info_hash, t('js.app.copy_hash')));
-        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashWrap, 'info-kv-wide'));
+        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashWrap, 'info-kv-wide', copyButton(json.info_hash, t('js.app.copy_hash'))));
         // The magnet is built by the server out of its own announce URLs (buildMagnet() in
         // includes/whitelist.php — the same function the panel's rows use) and sent only to a reader
         // with index.magnet, the gate the search rows already obey. Nothing here assembles a URL of
@@ -3499,8 +3535,7 @@ window.askInPlace = askInPlace;
             mLink.href = json.magnet;
             mLink.textContent = json.magnet;
             mWrap.appendChild(mLink);
-            mWrap.appendChild(copyButton(json.magnet, t('js.app.copy_magnet')));
-            grid.appendChild(infoRow(t('js.app.row_magnet'), mWrap, 'info-kv-wide'));
+            grid.appendChild(infoRow(t('js.app.row_magnet'), mWrap, 'info-kv-wide', copyButton(json.magnet, t('js.app.copy_magnet'))));
         }
         const det = document.createElement('div');
         det.className = 'info-section';
@@ -3511,8 +3546,12 @@ window.askInPlace = askInPlace;
         det.appendChild(grid);
         body.appendChild(det);
 
+        // 4b. the comments before the files — or at the end where there are no files to come after (1.72.0).
+        const filesShown = !!(json.can_files && st.files_count);
+        if (cs && (csAt === 'before_files' || (csAt === 'after_files' && !filesShown))) body.appendChild(cs);
+
         // 5. the files, last, because the panel is about the torrent and this is the long part
-        if (json.can_files && st.files_count) {
+        if (filesShown) {
             const det = document.createElement('details');
             det.className = 'rt-collapse info-section';
             det.open = true;
@@ -3531,6 +3570,9 @@ window.askInPlace = askInPlace;
             holder.textContent = t('js.common.loading');
             det.appendChild(holder);
             body.appendChild(det);
+            // 6. the comments after the files — the panel's very end (1.72.0, the default): placed now, before the
+            //    first page of files is waited for, so the section is there from the start.
+            if (cs && csAt === 'after_files') body.appendChild(cs);
             // Paged: the first slice now, and the next one when the mode says so — on reaching
             // the end of the list (an IntersectionObserver on a sentinel), on the button, or
             // straight away until the server stops answering with more. The tree is rebuilt from

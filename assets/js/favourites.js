@@ -251,9 +251,13 @@
         // against the right edge of a right-aligned column — beside what was clicked rather than on
         // it. Focusable and pressable from the keyboard as well, since it is a button in all but tag.
         if (r.info_hash) {
-            var full = String(r.info_hash), short = full.slice(0, 12) + '…';
-            var hs = el('span', { className: 'pf-hash pf-hash-copy', text: short, title: t('js.fav.hash_copy_title'),
-                                  role: 'button', tabindex: '0' });
+            // Twelve characters, and four more where the row is wide enough to show them (1.72.0, .pf-hash-more:
+            // part of the room the icon buttons gave back), then the ellipsis — in ONE inline span: the chip is a
+            // flex box, and three pieces of it would be three items, read (and copied, and spoken) as three lines.
+            var full = String(r.info_hash);
+            var hs = el('span', { className: 'pf-hash pf-hash-copy', title: t('js.fav.hash_copy_title'), role: 'button', tabindex: '0' },
+                        el('span', { className: 'pf-hash-text' }, [full.slice(0, 12), el('span', { className: 'pf-hash-more', text: full.slice(12, 16) }), '…']));
+            var chip = Array.prototype.slice.call(hs.childNodes);
             var copyHash = function (e) {
                 e.preventDefault(); e.stopPropagation();
                 var done = function () {
@@ -262,7 +266,7 @@
                     if (typeof window.pubTip === 'function') { window.pubTip(hs, t('js.common.copied')); return; }
                     // A page without app.js has no tooltip to borrow: say it in the chip, as before.
                     hs.textContent = t('js.common.copied');
-                    setTimeout(function () { hs.textContent = short; }, 1500);
+                    setTimeout(function () { hs.textContent = ''; chip.forEach(function (n) { hs.appendChild(n); }); }, 1500);
                 };
                 if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(full).then(done, function () { /* refused */ });
             };
@@ -276,9 +280,12 @@
         addMagnetInfo(acts, r, opts.trackers);
         if (opts.star && r.info_hash) acts.appendChild(makeStar(r.info_hash, true));
         if (opts.visibility && r.info_hash) {
-            var v = el('button', { type: 'button', className: 'pf-vis' + (r.public ? ' pf-vis-on' : ''),
-                                   dataset: { visHash: r.info_hash },
-                                   text: r.public ? t('js.fav.public_on') : t('js.fav.public_off') });
+            // Both words, the true one shown (1.72.0, .pf-vis-row): the switch is as wide as its longer word
+            // whichever it says, so every upload row is one width and its columns stand under each other.
+            var v = el('button', { type: 'button', className: 'pf-vis pf-vis-row' + (r.public ? ' pf-vis-on' : ''),
+                                   dataset: { visHash: r.info_hash } },
+                       [el('span', { className: 'pf-vis-t pf-vis-t-on', text: t('js.fav.public_on') }),
+                        el('span', { className: 'pf-vis-t pf-vis-t-off', text: t('js.fav.public_off') })]);
             v.setAttribute('aria-pressed', r.public ? 'true' : 'false');
             acts.appendChild(v);
         }
@@ -444,7 +451,8 @@
         }
         b.setAttribute('aria-pressed', want ? 'true' : 'false');
         b.classList.toggle('pf-vis-on', want);
-        b.textContent = want ? t('js.fav.public_on') : t('js.fav.public_off');
+        // An upload row's switch carries both words and shows the true one by its class (1.72.0).
+        if (!b.classList.contains('pf-vis-row')) b.textContent = want ? t('js.fav.public_on') : t('js.fav.public_off');
     });
 
     /**
@@ -636,8 +644,27 @@
             return wrap;
         }
 
+        /**
+         * The Edit window, opened from one of this card's buttons (1.70.0's Edit, 1.72.0's state chip): `focus`
+         * 'vis' puts the reader on the window's "who can see it"; the card is drawn again from the answer and
+         * the focus goes back to the same button of the new card.
+         */
+        function openEdit(list, from, focus) {
+            listEdit.open(list, {
+                returnTo: from,
+                focus: focus || '',
+                sectionShown: state.ctx.sectionShown !== false,
+                onSaved: function () {
+                    render();
+                    var again = box.querySelector('.list-card[data-list-id="' + String(list.id) + '"] '
+                        + (focus === 'vis' ? '.list-vis' : '.list-edit'));
+                    if (again) again.focus();
+                },
+            });
+        }
+
         function card(list) {
-            var c = el('div', { className: 'list-card' + (list.is_public ? ' list-card-public' : ''), dataset: { listId: String(list.id) } });
+            var c = el('div', { className: 'list-card', dataset: { listId: String(list.id) } });
             // The whole card opens it. A name that happens to be a link is a target somebody has to
             // aim at; the card is the thing on the screen that IS the list.
             c.addEventListener('click', function (e) {
@@ -649,50 +676,37 @@
             head.appendChild(name);
             head.appendChild(el('span', { className: 'list-count text-muted',
                 text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
-            if (list.is_public) head.appendChild(el('span', { className: 'pf-badge list-badge-public', text: t('js.lists.public') }));
+            // Who sees it (1.72.0) — the OWNER's business: only the owner's own shelf carries the answer, and
+            // only there is it drawn — a lock, people or a globe with its word, the button that opens Edit on
+            // that question. Somebody else's card carries no tint and no badge: a visitor only ever sees the
+            // lists they may see, and a badge would only tell a friend which of them strangers see too.
+            if (list.own && list.visibility) {
+                var chip = visChip(list, !!listEdit);
+                if (listEdit) chip.addEventListener('click', function () { openEdit(list, chip, 'vis'); });
+                head.appendChild(chip);
+            }
             c.appendChild(head);
             // The description's first line or two (1.70.0): the server's plain excerpt of what a reader sees,
             // no markup — the whole of it, drawn, is in the list's window. The stylesheet folds it to two lines.
             if (list.excerpt) c.appendChild(el('div', { className: 'list-desc text-muted', text: String(list.excerpt) }));
 
             var acts = el('div', { className: 'list-card-acts' });
-            // A public list has an address, and the address can be handed over — with the button the
+            // A shared list has an address, and the address can be handed over — with the button the
             // rest of the site uses for that, through the same clipboard routine (window.ShareLink,
-            // assets/js/app.js). A private list has no address anybody else could open.
-            if (list.is_public && shareEnabled()) acts.appendChild(shareButton(list, state));
+            // assets/js/app.js). A private list has no address anybody else could open. On somebody else's
+            // shelf every list is one its reader may see, and each has the button (1.72.0): a button only
+            // on the public ones would tell a friend which lists are theirs alone.
+            if (shareEnabled() && (!list.own || list.visibility === 'public' || list.visibility === 'friends')) {
+                acts.appendChild(shareButton(list, state));
+            }
             if (list.own) {
-                if (state.ctx.mayPublish) {
-                    var vis = el('button', { type: 'button', className: 'pf-vis' + (list.is_public ? ' pf-vis-on' : ''),
-                                             text: t(list.is_public ? 'js.lists.vis_on' : 'js.lists.vis_off') });
-                    vis.setAttribute('aria-pressed', list.is_public ? 'true' : 'false');
-                    vis.addEventListener('click', async function () {
-                        var want = !list.is_public;
-                        vis.disabled = true;
-                        var r = await post('user_lists', { op: 'visibility', id: list.id, value: want ? 1 : 0 });
-                        vis.disabled = false;
-                        if (!r || !r.success) return;
-                        list.is_public = r.is_public;
-                        render();
-                    });
-                    acts.appendChild(vis);
-                }
                 // "Edit" (1.70.0 — it was "Rename", an inline box for the name): a window with the name and the
-                // description, saved together. Only where that window is on the page (your own cards).
+                // description — and since 1.72.0 who sees it — saved together. Only where that window is on the
+                // page (your own cards). The Public / Private switch that stood before it is the chip above now.
                 if (listEdit) {
                     var edit = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-edit',
                                               text: t('js.lists.edit'), title: t('js.lists.edit_title') });
-                    edit.addEventListener('click', function () {
-                        listEdit.open(list, {
-                            returnTo: edit,
-                            // The card says what was saved — its name, its excerpt — drawn again from the answer,
-                            // with no second request; the focus goes back to the Edit button of the new card.
-                            onSaved: function () {
-                                render();
-                                var again = box.querySelector('.list-card[data-list-id="' + String(list.id) + '"] .list-edit');
-                                if (again) again.focus();
-                            },
-                        });
-                    });
+                    edit.addEventListener('click', function () { openEdit(list, edit, ''); });
                     acts.appendChild(edit);
                 }
                 var del = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-del', text: t('js.lists.delete') });
@@ -751,7 +765,7 @@
                 box.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') }));
                 return;
             }
-            state.ctx = { mayPublish: !!j.may_publish, maxLists: j.max_lists, maxItems: j.max_items };
+            state.ctx = { mayPublish: !!j.may_publish, sectionShown: j.section_shown !== false, maxLists: j.max_lists, maxItems: j.max_items };
             state.owner = String(j.owner || '');
             state.lists = (j.lists || []).map(function (l) { return Object.assign({}, l, { own: !!j.own }); });
             state.loaded = true;
@@ -771,6 +785,10 @@
             if (!state.loaded) return;
             paintTotal();
             render();
+        });
+        // The privacy card's "Show my lists on my profile", saved on the same page (1.72.0).
+        document.addEventListener('lists:section', function (e) {
+            if (state.loaded && state.ctx && e && e.detail) state.ctx.sectionShown = !!e.detail.shown;
         });
 
         // The overlay borrows this shelf's renderer: same trackers, same permissions, same rows.
@@ -792,7 +810,32 @@
         } };
     }
 
-    /* ─────────────────── handing a public list to somebody ─────────────────── */
+    /* ─────────────────── who sees a list (1.72.0) ─────────────────── */
+
+    // The three answers and their icons — a lock, people, a globe — through the site's icon map like every icon
+    // (includes/icons.php: Font Awesome's and Pro's twins where the site draws with them).
+    var LIST_VIS_ICON = { 'private': 'bi-lock', 'friends': 'bi-people', 'public': 'bi-globe2' };
+    function listVisOf(v) { return v === 'friends' || v === 'public' ? v : 'private'; }
+    /**
+     * The owner's chip: the icon and the answer's word. A button on the owner's card (`button`: it opens Edit
+     * on "who can see it"), words only in the list's window. Named for a screen reader as the question and
+     * its answer, the word on the screen included in that name.
+     */
+    function visChip(list, button) {
+        var v = listVisOf(list.visibility), word = t('js.lists.vis_' + v);
+        var c = el(button ? 'button' : 'span', { className: 'list-vis list-vis-' + v, dataset: { vis: v } },
+                   [el('i', { className: 'bi ' + LIST_VIS_ICON[v], 'aria-hidden': 'true' }), el('span', { className: 'list-vis-t', text: word })]);
+        if (button) {
+            c.type = 'button';
+            c.setAttribute('aria-label', t('js.lists.vis_aria', { state: word }));
+            c.title = t('js.lists.vis_change');
+        } else {
+            c.title = t('js.lists.vis_aria', { state: word });
+        }
+        return c;
+    }
+
+    /* ─────────────────── handing a shared list to somebody ─────────────────── */
 
     /** Sharing is one switch for the whole site (search_share_enabled); the sections that carry lists say whether it is on. */
     function shareEnabled() {
@@ -837,8 +880,9 @@
         head.appendChild(el('span', { className: 'lo-name', text: list.name }));
         head.appendChild(el('span', { className: 'list-count text-muted',
             text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
-        if (list.is_public) head.appendChild(el('span', { className: 'pf-badge list-badge-public', text: t('js.lists.public') }));
-        if (list.is_public && shareEnabled()) head.appendChild(shareButton(list, state));
+        // Who sees it, for its owner only (1.72.0) — the card's rule; Share the card's rule too.
+        if (list.own && list.visibility) head.appendChild(visChip(list, false));
+        if (shareEnabled() && (!list.own || list.visibility === 'public' || list.visibility === 'friends')) head.appendChild(shareButton(list, state));
         body.textContent = '';
         // The description (1.70.0), under the name: the server's own drawing of it (listDescRender() —
         // the renderer, the room's emotes, no picture from elsewhere), which comes with the rows. Nothing
@@ -955,6 +999,47 @@
         var ask = $('le-ask'), discard = $('le-discard'), keep = $('le-keep'), hint = $('le-close-hint');
         var help = $('le-desc-help'), writeTab = $('le-desc-tab-write');
         if (!nameIn || !ta || !save) return null;
+        // Who sees it (1.72.0): three buttons that behave as radio buttons — a click or an arrow key chooses, one
+        // stop for Tab (the chosen one) — the meaning of the chosen one under them, and, for a list chosen to be
+        // shared while the owner's section is hidden, the line that says nobody sees it. An answer the server drew
+        // disabled is not this reader's to give (the line under it says why); a list that has it keeps it.
+        var visBox = $('le-vis');
+        var visBtns = visBox ? [].slice.call(visBox.querySelectorAll('.vis-opt')) : [];
+        var visHidden = $('le-vis-hidden');
+        var visChosen = 'private';
+        function visNow() { return visBtns.length ? visChosen : null; }
+        function paintVis() {
+            var tabbed = null;
+            visBtns.forEach(function (b) {
+                var on = b.dataset.vis === visChosen;
+                b.setAttribute('aria-checked', on ? 'true' : 'false');
+                if (on && !b.disabled) tabbed = b;
+            });
+            if (!tabbed) tabbed = visBtns.filter(function (b) { return !b.disabled; })[0] || null;
+            visBtns.forEach(function (b) { b.tabIndex = b === tabbed ? 0 : -1; });
+            [].slice.call(box.querySelectorAll('.le-vis-means')).forEach(function (p) { p.hidden = p.dataset.vis !== visChosen; });
+            if (visHidden) visHidden.hidden = !(cur && cur.sectionShown === false && visChosen !== 'private');
+        }
+        function chooseVis(b, focus) {
+            if (!b || b.disabled) return;
+            visChosen = listVisOf(b.dataset.vis);
+            paintVis();
+            if (focus) b.focus();
+        }
+        visBtns.forEach(function (b) { b.addEventListener('click', function () { chooseVis(b, false); }); });
+        if (visBox) visBox.addEventListener('keydown', function (e) {
+            var open = visBtns.filter(function (b) { return !b.disabled; });
+            if (!open.length) return;
+            var at = open.indexOf(document.activeElement);
+            var to = null;
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = open[(at + 1) % open.length];
+            else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = open[(at - 1 + open.length) % open.length];
+            else if (e.key === 'Home') to = open[0];
+            else if (e.key === 'End') to = open[open.length - 1];
+            if (!to) return;
+            e.preventDefault();
+            chooseVis(to, true);
+        });
         var max = Number(box.dataset.descMax) || 1000;
         if (window.RichText && typeof window.RichText.mount === 'function') {
             window.RichText.mount('le-desc', {
@@ -966,11 +1051,11 @@
         var saving = false, armed = 0;
 
         function fmtNow() { return fmtEl && fmtEl.value === 'markdown' ? 'markdown' : 'bbcode'; }
-        function now() { return { name: nameIn.value.trim(), desc: ta.value.trim(), fmt: fmtNow() }; }
+        function now() { return { name: nameIn.value.trim(), desc: ta.value.trim(), fmt: fmtNow(), vis: visNow() }; }
         function dirty() {
             if (!cur) return false;
             var a = cur.start, b = now();
-            return a.name !== b.name || a.desc !== b.desc || (b.desc !== '' && a.fmt !== b.fmt);
+            return a.name !== b.name || a.desc !== b.desc || (b.desc !== '' && a.fmt !== b.fmt) || a.vis !== b.vis;
         }
         function say(text, bad) {
             msg.textContent = text || '';
@@ -1057,7 +1142,10 @@
             say(t('js.lists.saving'));
             // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for, the same
             // save again; a wait counts down on Save with the sentence beside it.
+            // Who sees it rides along (1.72.0); the server judges it only when it changed, and asks the anti-spam
+            // layer only when the words did.
             var payload = { op: 'edit', id: cur.list.id, name: s.name, description: s.desc, format: s.fmt };
+            if (s.vis) payload.visibility = s.vis;
             var r = await viaLayer(function (extra) { return post('user_lists', Object.assign({}, payload, extra || {})); },
                                    save, function (m) { say(m || '', true); });
             saving = false;
@@ -1072,6 +1160,7 @@
             l.name = String(r.name || s.name);
             l.description = String(r.description || '');
             l.description_format = r.description_format === 'markdown' ? 'markdown' : 'bbcode';
+            if (r.visibility) l.visibility = listVisOf(r.visibility);
             l.excerpt = String(r.excerpt || '');
             cur.start = now();          // nothing unsaved any more: leaving asks nothing
             finish();
@@ -1082,10 +1171,13 @@
             if (!list || !list.own) return;
             if (cur) finish();
             o = o || {};
-            cur = { list: list, start: null, onSaved: o.onSaved || null, returnTo: o.returnTo || null };
+            cur = { list: list, start: null, onSaved: o.onSaved || null, returnTo: o.returnTo || null,
+                    sectionShown: o.sectionShown !== false };
             if (writeTab) writeTab.click();              // Write, whatever the last opening was left on
             nameIn.value = String(list.name || '');
             ta.value = String(list.description || '');
+            visChosen = listVisOf(list.visibility);
+            paintVis();
             if (fmtEl && fmtEl.tagName === 'SELECT') {
                 fmtEl.value = list.description_format === 'markdown' ? 'markdown' : 'bbcode';
                 fmtEl.dispatchEvent(new Event('change'));   // the rail for this syntax
@@ -1102,6 +1194,9 @@
             box.hidden = false;
             window.addEventListener('keydown', onKey, true);
             window.addEventListener('beforeunload', guard);
+            // Opened from the card's state chip: on the question it asks — the chosen answer (1.72.0).
+            var onVis = o.focus === 'vis' ? visBtns.filter(function (b) { return b.tabIndex === 0; })[0] : null;
+            if (onVis) { onVis.focus(); return; }
             nameIn.focus();
             try { nameIn.setSelectionRange(nameIn.value.length, nameIn.value.length); } catch (e) { /* not a text box */ }
         }
@@ -1131,7 +1226,8 @@
         return { open: open, close: finish, state: function () {
             // For the browser check: what the window holds and whether leaving it would ask.
             return { open: !!cur, dirty: dirty(), saving: saving, asking: !ask.hidden, armed: !!armed,
-                     name: nameIn.value, desc: ta.value, fmt: fmtNow(), visible: listDescVisible(ta.value, fmtNow()), max: max };
+                     name: nameIn.value, desc: ta.value, fmt: fmtNow(), visible: listDescVisible(ta.value, fmtNow()), max: max,
+                     vis: visNow() };
         }, visible: listDescVisible, strip: listDescStrip };
     }
 
@@ -2105,6 +2201,11 @@
                 // sentence under that switch follows the name switch as the server now holds it.
                 var hiddenNote = document.getElementById('acc-descs-name-hidden');
                 if (hiddenNote && typeof r.content_credit_public === 'boolean') hiddenNote.hidden = r.content_credit_public;
+                // "Show my lists on my profile" (1.72.0): the Lists tab's Edit window says, for a shared list, when nobody
+                // else sees any — told of the switch as the server now holds it, without a reload.
+                if (pair[1] === 'lists_public' && typeof r.lists_public === 'boolean') {
+                    document.dispatchEvent(new CustomEvent('lists:section', { detail: { shown: r.lists_public } }));
+                }
             });
         });
     }

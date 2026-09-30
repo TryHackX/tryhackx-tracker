@@ -355,7 +355,9 @@
     function mountPicker(opts) {
         var btn = opts.button;
         if (!btn) return null;
-        var CONTEXTS = ['shout', 'message', 'description', 'bio', 'list'];
+        // 'comment' (1.72.0): a comment's picker — and a reply's — asks as the comment context it is (the server's
+        // EMOJI_PICKER_CONTEXTS has had it since 1.71.0); missing here, it asked as the ROOM, behind shout.view.
+        var CONTEXTS = ['shout', 'message', 'description', 'bio', 'list', 'comment'];
         var ctx = CONTEXTS.indexOf(opts.for) >= 0 ? opts.for : 'shout';
         var forQ = ctx === 'shout' ? '' : '&for=' + ctx;
         var pid = /^[a-z][a-z0-9-]{0,48}$/.test(String(opts.id || '')) ? String(opts.id) : 'shout-picker';

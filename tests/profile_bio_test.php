@@ -454,15 +454,25 @@ check('… and back, unchanged, the moment the grant is', profileBioFor($db, $cf
 check('with the feature switched off nobody\'s is drawn and nobody may write one',
       profileBioFor($db, array_merge($cfgOn, ['profile_bio_enabled' => '0']), $alice()) === ''
       && !profileBioMayWrite($db, array_merge($cfgOn, ['profile_bio_enabled' => '0']), $alice()));
-// The owner's own account is in the admin group, which stores no profile.bio and passes by its blanket.
+// The owner's own account is in the admin group, which passes by its blanket. Since 1.72.0 that group also STORES
+// every capability (schemaAdminGrant()), which would let a rule asking for a stored grant pass by accident — so the
+// check takes profile.bio off the stored list for its own moment, and puts the list back exactly.
 $adminId = pbUser($db, $cfgOn, 'pbtest_admin');
 $adminGid = (int)$db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn();
 $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$adminId]);
 userGrantGroup($db, $adminId, $adminGid, null, 'test', 'profile_bio', false);
 $db->prepare("UPDATE users SET bio = 'the owner' WHERE id = ?")->execute([$adminId]);
-$adminStored = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'admin'")->fetchColumn(), true) ?: [];
-check('an account only in the admin group has its text drawn, though that group stores no profile.bio',
-      empty($adminStored['profile.bio']) && profileBioFor($db, $cfgOn, $row($adminId)) === 'the owner');
+$adminJsonWas = $db->query("SELECT permissions FROM user_groups WHERE slug = 'admin'")->fetchColumn();
+try {
+    $db->exec("UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\"profile.bio\"') WHERE slug = 'admin'");
+    userPermissionsForget();
+    $adminStored = json_decode((string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'admin'")->fetchColumn(), true) ?: [];
+    check('an account only in the admin group has its text drawn, even while that group stores no profile.bio',
+          empty($adminStored['profile.bio']) && profileBioFor($db, $cfgOn, $row($adminId)) === 'the owner');
+} finally {
+    $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'admin'")->execute([$adminJsonWas]);
+    userPermissionsForget();
+}
 $unverId = pbUser($db, $cfgOn, 'pbtest_unver', false);
 check('an unverified account sits at guest level: it may not write one', !profileBioMayWrite($db, $cfgOn, $row($unverId)));
 $prof = $src('templates/pages/profile.php');

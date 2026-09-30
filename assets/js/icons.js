@@ -126,12 +126,34 @@
         var m = /^"((?:[^"\\]|\\.)*)"/.exec(String(c || ''));
         return m ? m[1].replace(/\\(.)/g, '$1') : '';
     }
+    /**
+     * A DUOTONE glyph (1.72.0 — the Magnet is Pro's duotone magnet) is drawn twice, ::before over ::after, and
+     * ::before alone is only its first layer: the duotone magnet's body, 0.07–0.57em, without its caps, 0.56–0.82em.
+     * Measured so, its middle came out 0.12em low and the button drew it 2px HIGH. A canvas cannot draw the second
+     * layer (7.x asks for it with a font feature, `ss01`), so the pair is measured as what the two layers split
+     * between them: the same name in the classic family, at the same weight — the last family of the glyph's own
+     * list (0.07–0.82em for 6.x's magnet: the two layers' own extent, drawn from 6.x's second-layer ligature, to the
+     * hundredth). The duotone and sharp duotone families only, which split the classic drawings; Pro 7's other two-
+     * layer families (Jelly Duo, Slab Duo, …) are drawings of their own and keep the first layer's measure.
+     * Measured once that face has loaded (asked for here if it has not).
+     */
     function fit(el, wordsBefore) {
         if (!el.style || !document.fonts) return;
         var cs = getComputedStyle(el, '::before');
         var ch = glyphOf(cs.content);
         if (!ch) return;
         var font = cs.fontStyle + ' ' + cs.fontWeight + ' 100px ' + cs.fontFamily;
+        if ((el.classList.contains('fa-duotone') || el.classList.contains('fa-sharp-duotone')) && glyphOf(getComputedStyle(el, '::after').content)) {
+            var fams = String(cs.fontFamily || '').split(',');
+            if (fams.length > 1) {
+                font = cs.fontStyle + ' ' + cs.fontWeight + ' 100px ' + fams[fams.length - 1].trim();
+                if (!document.fonts.check(font, ch)) {
+                    document.fonts.load(font, ch).catch(function () { /* the face never comes: no --bi-mid, the em box centred */ });
+                    pending.push(el);
+                    return;
+                }
+            }
+        }
         var key = font + '\n' + ch;
         var g = metrics[key];
         if (!g) {

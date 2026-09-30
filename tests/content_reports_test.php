@@ -24,7 +24,8 @@
  *   7. warnings: counted, the latest first, on the card and in Users; the member's notification; nowhere public;
  *   8. an account going: its reports and warnings with it, a description's report kept without its author;
  *   9. the endpoint FILES, run as requests in a child process with a session and its token;
- *  10. the source: routes, the permission map, the one limit call, the page's tabs, the public script.
+ *  10. the source: routes, the permission map, the one limit call, the page's tabs, the public script;
+ *  11. (1.72.0) a reply is a comment: reported the same way, flagged the same way.
  *
  * Nobody learns who reported: checked on every notification the author gets. Every switch a check leans on is in
  * $cfgOn. Self-cleaning: its accounts (with their comments, shouts, reports, warnings, notifications, threads),
@@ -716,6 +717,20 @@ check('the public script: loaded after comments.js for a reader who may report, 
       && str_contains($src('assets/js/reports.js'), 'window.Comments.onActions('));
 check('the author\'s warning is written in THEIR language and names nobody who reported', str_contains($lib, '$lang = reportLangFor($cfg, $user);')
       && !preg_match('/userWarn\([^;]*reporter/', $lib));
+
+/* ══ 11. (1.72.0) a reply is a comment ═══════════════════════════════════ */
+$cleanRate();
+$cIns->execute([CR_H1, $dave, null, 'crtest a thread with a reply', 'visible']); $cTop = (int)$db->lastInsertId();
+$db->prepare("INSERT INTO hash_comments (info_hash, parent_id, root_id, depth, user_id, body, status) VALUES (?, ?, ?, 1, ?, ?, 'visible')")
+   ->execute([CR_H1, $cTop, $cTop, $erin, 'crtest a rude reply']);
+$cReply = (int)$db->lastInsertId();
+$r = $rq($alice, ['kind' => 'comment', 'id' => $cReply, 'reason' => 'A rude reply']);
+$rRows = $reports('comment', $cReply, CR_H1);
+$rShape = commentShape($db, $cfgOn, $me($alice), [commentRow($db, $cReply)]);
+check('1.72.0: a reply is a comment — reported the same way (the words as reported, its author), and its row says "reported" to the reporter',
+      !empty($r['body']['success']) && count($rRows) === 1 && (int)$rRows[0]['author_id'] === $erin && $rRows[0]['snapshot'] === 'crtest a rude reply'
+      && !empty($rShape[0]['reported']) && ($rShape[0]['parent'] ?? 0) === $cTop && ($rShape[0]['depth'] ?? 0) === 1,
+      json_encode([$r['body'] ?? null, $rShape[0] ?? null]));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

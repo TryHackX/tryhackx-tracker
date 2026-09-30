@@ -136,9 +136,12 @@
             grid.appendChild(kv(t('js.index.worker_files'), parts));
         }
         const lp = st.last_poll;
+        // A poll the time budget cut and one whose download ended early are both `truncated`; the
+        // second leaves `last_partial` stamped with the same moment, and each has its own words.
+        const lpShort = !!(lp && lp.truncated && st.last_partial && st.last_partial.at === lp.at);
         grid.appendChild(kv(t('js.index.poll'), [
             st.last_poll_at ? el('span', { text: fmtDate(new Date(st.last_poll_at * 1000).toISOString()) }) : badge(t('js.index.never'), 'wl-b-muted'),
-            ...(lp && lp.truncated ? [' ', badge(t('js.index.truncated_resumes'), 'wl-b-pending')] : []),
+            ...(lp && lp.truncated ? [' ', badge(lpShort ? t('js.index.ended_early_badge') : t('js.index.truncated_resumes'), 'wl-b-pending')] : []),
             el('div', { className: 'wl-small text-muted', text: (lp ? t('js.index.poll_stats', { seen: num(lp.entries), kept: num(lp.kept), s: (lp.ms / 1000).toFixed(1) }) : '') + t('js.index.every_n_min', { n: s.poll_minutes }) }),
         ]));
         grid.appendChild(kv(t('js.index.last_error'), st.last_error
@@ -633,7 +636,7 @@
         $('btn-idx-poll').addEventListener('click', async () => {
             const btn = $('btn-idx-poll'); btn.disabled = true;
             const orig = btn.innerHTML; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + esc(t('js.index.polling'));
-            try { const r = await apiCall('admin/index_poll_now', 'POST', {}); if (r.success) showToast(t('js.index.poll_result', { seen: r.entries.toLocaleString(), kept: r.kept.toLocaleString(), ms: r.ms }) + (r.truncated ? t('js.index.truncated_suffix') : '')); else showToast(r.error || t('js.index.poll_failed'), 'warning'); load(); loadStatus(); }
+            try { const r = await apiCall('admin/index_poll_now', 'POST', {}); if (r.success) showToast(t('js.index.poll_result', { seen: r.entries.toLocaleString(), kept: r.kept.toLocaleString(), ms: r.ms }) + (r.partial ? t('js.index.ended_early_suffix') : (r.truncated ? t('js.index.truncated_suffix') : ''))); else showToast(r.error || t('js.index.poll_failed'), 'warning'); load(); loadStatus(); }
             catch (e) { showToast(e.message, 'error'); }
             finally { btn.disabled = false; btn.innerHTML = orig; }
         });

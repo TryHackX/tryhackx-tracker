@@ -222,8 +222,15 @@
             const parts = [badge(t('js.net.pps_value', {n: num(fw.pps)}), 'wl-b-ok'), ' ',
                 el('span', { className: 'text-muted', text: t('js.net.burst_port', {burst: num(fw.burst), port: fw.port}) })];
             if (!fw.persistent) parts.push(persistNote(fw, j));
-            const src = j.last_apply && j.last_apply.source;
-            if (src) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.net.set_by', {src: src, ago: (j.last_apply.at ? t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - j.last_apply.at))}) : '')}) }));
+            // Who loaded it, in words (net_status: netlimitSourceWords()) — "lists-off" was a code, and
+            // read like a limit somebody had named. An unknown code arrives as itself.
+            const la = j.last_apply || null;
+            const src = la && (la.words || la.source);
+            if (src) {
+                const line = la.at ? t('js.net.set_by', {src: src, ago: t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - la.at))})})
+                                   : t('js.net.set_by_noago', {src: src});
+                parts.push(el('div', { className: 'wl-small text-muted nl-set-by', text: line }));
+            }
             grid.appendChild(kv(t('js.net.inbound_limit'), parts));
         } else {
             grid.appendChild(kv(t('js.net.inbound_limit'), [badge(t('js.net.not_loaded'), 'wl-b-muted'), ' ',
@@ -255,6 +262,25 @@
                    ? t('js.net.pct_never_reaches', {pct: Math.round((dropped / Math.max(1, pps.in_total)) * 100)})
                    : t('js.net.nothing_dropped_now') })]
             : [el('span', { className: 'text-muted', text: '—' })]));
+
+        // What the drops cost in repeats: handshakes (UDP connects) per announce, from the statistics
+        // timeline — the last hour and the last day, each absent when the tracker restarted inside it
+        // (net_status: netlimitHandshakes()). A dropped packet makes a client shake hands again, so
+        // "arriving fell" can be fewer repeats rather than fewer users.
+        const hs = j.handshakes;
+        if (hs && (hs.hour || hs.day)) {
+            const vals = [];
+            if (hs.hour) vals.push(t('js.net.handshakes_hour', {v: hs.hour.ratio.toFixed(2)}));
+            if (hs.day) vals.push(t('js.net.handshakes_day', {v: hs.day.ratio.toFixed(2)}));
+            const w = hs.hour || hs.day;
+            const tileHs = kv(t('js.net.handshakes'), [
+                el('span', { className: w.ratio >= 2 ? 'text-warning' : '', text: vals.join(' · '),
+                             title: t('js.net.handshakes_title', {c: num(w.connects), a: num(w.announces)}) }),
+                el('div', { className: 'wl-small text-muted', text: t('js.net.handshakes_note') }),
+            ]);
+            tileHs.dataset.tile = 'handshakes';
+            grid.appendChild(tileHs);
+        }
 
         // 3. the other lever, side by side (we only show it — it is installed by hand)
         const eg = fw.egress || {};
@@ -553,6 +579,17 @@
             } else if (cur > r.peak * 2 && r.peak > 0) {
                 box.appendChild(el('div', { className: 'text-muted wl-small', text: t('js.net.adv_never_trigger', {n: num(cur)}) }));
             }
+        }
+        // A bucket too small for the limit: under 95 % of it got through while over 5 % was dropped
+        // (includes/netlimit.php netlimitBurstHintFrom()). The words carry the numbers and the way there
+        // — Settings → Inbound limit → Burst, then Apply limit here — and the link opens that section.
+        const bh = r.burst_hint;
+        if (bh) {
+            box.appendChild(el('div', { className: 'nl-burst-hint wl-small text-warning', dataset: { hint: 'burst' } }, [
+                el('span', { text: t('js.net.burst_hint', {served: num(bh.served), limit: num(bh.limit), served_pct: bh.served_pct,
+                    dropped_pct: bh.dropped_pct, burst: num(bh.burst), suggested: num(bh.suggested), ms: bh.ms}) }), ' ',
+                el('a', { href: '?action=settings#section-netlimit-throttle', text: t('js.net.burst_open') }),
+            ]));
         }
     }
 

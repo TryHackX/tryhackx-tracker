@@ -47,19 +47,26 @@ add('a.index', {
     'r_2w':        ('2w', '2 tyg.'),
     'r_1m':        ('1m', '1 mies.'),
     'r_all':       ('All', 'Całość'),
-    'cov_intro':   ('What each poll actually delivered, against how many torrents the tracker said it '
-                    'had. <strong class="text-light">Delivered</strong> is entries past the resume '
-                    'cursor &mdash; a poll that resumes walks past everything an earlier one already '
-                    'handled, and counting those again would read as coverage it did not achieve. A gap '
-                    'in the coverage line means the tracker&rsquo;s own count was not available then; a '
-                    'marked point is a poll that arrived <strong class="text-light">truncated</strong>.',
-                    'Co naprawdę dostarczył każdy poll, w zestawieniu z liczbą torrentów, którą podał '
-                    'sam tracker. <strong class="text-light">Dostarczone</strong> to wpisy za kursorem '
-                    'wznowienia &mdash; poll, który wznawia pracę, przechodzi obok wszystkiego, co '
-                    'obsłużył już wcześniejszy, a liczenie tego drugi raz wyglądałoby na pokrycie, '
-                    'którego wcale nie osiągnął. Przerwa w linii pokrycia znaczy, że własna liczba '
-                    'trackera nie była wtedy dostępna; oznaczony punkt to poll, który przyszedł '
-                    '<strong class="text-light">ucięty</strong>.'),
+    # 1.72.0: counted per PASS — a poll the time budget cut is continued by the next one
+    'cov_intro':   ('What each <strong class="text-light">pass</strong> over the tracker&rsquo;s full '
+                    'scrape delivered, against how many torrents the tracker said it had. A pass starts at '
+                    'the first entry and ends when a poll reaches the last: a poll that runs out of its '
+                    'time budget is <strong class="text-light">cut</strong>, and the next poll continues '
+                    'where it stopped &mdash; its bar stands on the one it continues, and the stack is '
+                    'the pass. <strong class="text-light">Delivered</strong> is what a poll walked past '
+                    'the point it started from; the darker part of a bar is what it kept. The dashed line '
+                    'is the tracker&rsquo;s own count; a pass whose newest poll was cut is still in '
+                    'progress.',
+                    'Co dostarczył każdy <strong class="text-light">przebieg</strong> przez pełny scrape '
+                    'trackera, w zestawieniu z liczbą torrentów, którą podał sam tracker. Przebieg zaczyna '
+                    'się od pierwszego wpisu i kończy, gdy odpytanie dojdzie do ostatniego: odpytanie, '
+                    'któremu skończy się budżet czasu, zostaje <strong class="text-light">przycięte</strong>, '
+                    'a następne kontynuuje od miejsca, w którym tamto się zatrzymało &mdash; jego słupek '
+                    'stoi na słupku, który kontynuuje, a cały stos to przebieg. '
+                    '<strong class="text-light">Dostarczone</strong> to to, co odpytanie przeszło za '
+                    'punktem, od którego zaczęło; ciemniejsza część słupka to to, co zachowało. Linia '
+                    'przerywana to własna liczba trackera; przebieg, którego ostatnie odpytanie zostało '
+                    'przycięte, wciąż trwa.'),
 
     # toolbar: search and filters
     'search_ph':   ('Search hash prefix or name...', 'Szukaj prefiksu hasha lub nazwy...'),

@@ -253,10 +253,12 @@ check('the upload refuses an oversized body before reading it', str_contains($ad
 check('a rename is an op of its own, and an id nobody has is a 404 rather than a 400',
       str_contains($adm, "\$op === 'rename'") && str_contains($adm, "'api.sounds.unknown' ? 404 : 400"));
 $tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
-// Eight since 1.71.0: the comments' two (a comment, a comment that mentions me) beside the room's three.
+// Eight since 1.71.0: the comments' two (a comment, a comment that mentions me) beside the room's three; nine since
+// 1.72.0: a reply to my comment.
 check('the site-default selects are two groups, and each says which event it answers',
-      str_contains($tpl, 'data-sound-own') && substr_count($tpl, 'data-snd-label="') === 8 && str_contains($tpl, "settings.sounds_group_shipped")
-      && str_contains($tpl, 'name="sound_default_comment"') && str_contains($tpl, 'name="sound_default_comment_mention"'));
+      str_contains($tpl, 'data-sound-own') && substr_count($tpl, 'data-snd-label="') === 9 && str_contains($tpl, "settings.sounds_group_shipped")
+      && str_contains($tpl, 'name="sound_default_comment"') && str_contains($tpl, 'name="sound_default_comment_mention"')
+      && str_contains($tpl, 'name="sound_default_comment_reply"'));
 $adminJs = (string)file_get_contents($root . '/assets/js/admin-sounds.js');
 check('the panel draws a table, keeps "Used as" honest from the selects themselves, and slots an option into the right group',
       str_contains($adminJs, 'admin-sounds-table') && str_contains($adminJs, "s.addEventListener('change', paintUsed)")

@@ -105,7 +105,9 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
 <div class="transparency-table-wrap">
     <table class="transparency-table search-table" id="search-table" hidden>
         <colgroup>
-            <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><?= $repCol ? '<col class="search-c-rep">' : '' ?><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions">' : '' ?>
+            <?php /* The actions column is exactly its icons (1.72.0): the star is one more, for a reader who keeps
+                     favourites — the question app.js asks of data-fav before it draws one in a row. */ ?>
+            <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><?= $repCol ? '<col class="search-c-rep">' : '' ?><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions' . ($favCtx['may_use'] ? ' search-c-actions-fav' : '') . '">' : '' ?>
         </colgroup>
         <thead><tr>
             <th class="search-sortable" data-sort="name"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>

@@ -47,8 +47,8 @@
  * Every question is asked of the ACCOUNT (userIdHasPermission) — or, for somebody signed out, of the
  * guest group — never of a panel session's blanket: a moderator in the panel is not thereby a member
  * here, and a gate that cannot be asked about a named account is a gate a test cannot ask either.
- * comment.view / comment.post / comment.edit_own / comment.delete_own / comment.moderate; accounts off,
- * none of it exists (commentsEnabled(), and userLegacyDefault() says no to every comment.* id).
+ * comment.view / comment.post / comment.reply (1.72.0) / comment.edit_own / comment.delete_own / comment.moderate;
+ * accounts off, none of it exists (commentsEnabled(), and userLegacyDefault() says no to every comment.* id).
  *
  * A GUEST (only where the operator grants the guest group comment.post): signed "Guest #4f2a" — a keyed
  * hash of the day and the address group, which tells two guests apart on one day and says nothing about
@@ -58,13 +58,36 @@
  * corrected, taken back, told of anything or @-mentioned — there is nobody to be.
  *
  * ── what the page is told, and who is told what ───────────────────────────────────────────────
- * A new visible comment tells (commentNotifyNew()), once each, in THEIR language: the member who
+ * A new visible comment tells (commentNotifyNew()), once each, in THEIR language: the author of the comment
+ * it replies to (1.72.0), the member who
  * registered the torrent, the author of record of its published description, the members who commented
  * on it before (the most recent COMMENT_PARTICIPANTS_MAX), and the members it @-mentions — never its
  * author, never across a block either way, never somebody who may not read comments, never a kind the
  * member switched off (users.comment_notify), and a thread already unread in somebody's notifications is
  * not announced to them again. A notification carries its `link` (userNotify()), and the pulse counts
  * the unread ones (commentUnreadCounts()), which is what the two sounds of their own play from.
+ *
+ * ── replies (1.72.0) ─────────────────────────────────────────────────────────────────────────
+ * The owner: "a permission to reply to comments … and a setting for how deep the tree of replies may be —
+ * Reddit-like, e.g. three rows". A reply is a comment with a parent (hash_comments.parent_id), in the thread of
+ * a top-level comment (root_id), `depth` levels down; `comments_reply_depth` is the deepest level accepted (0 =
+ * no replies, 3 as shipped, at most 8) and the SERVER refuses a reply past it (commentReplyTarget()) — the Reply
+ * button's absence is a courtesy, not the gate. Replying needs `comment.reply` on top of everything writing a
+ * comment needs (commentMayReply()); a guest's reply is a guest's comment in every rule. Lowered later, the
+ * setting refuses only new replies: the deeper ones written before stay, and the page draws them at the deepest
+ * level allowed, each saying whom it answers.
+ *
+ * A page stays bounded (commentListRequest()): the top-level comments are paged as they always were, and each
+ * brings its first COMMENT_REPLIES_FIRST replies — oldest first across all its levels; a parent is always older
+ * than its reply, so any prefix of a thread is a whole tree — with "Show N more replies" for the rest,
+ * COMMENT_REPLIES_MORE at a time.
+ *
+ * A comment that goes while it has replies keeps its PLACE, not its words: it is drawn as a tombstone —
+ * "[deleted]", or "[removed by a moderator]" when a moderator gave a reason — with no author, no words and no
+ * time, for as long as something under it is still shown to that reader; without replies it simply goes, as
+ * before. An account's deletion leaves the same tombstone where OTHER people replied (commentForgetAccount()).
+ * A reply tells its parent's author (a fifth switch, users.comment_notify's 16), never across a block, never
+ * the replier; it sounds as a kind of its own (`comment_reply`).
  *
  * ── for the parts after this one ─────────────────────────────────────────────────────────────
  * E (reports, includes/reports.php): commentDelete() takes `$opts['notify']` — false is the silent removal —
@@ -95,15 +118,29 @@ const COMMENT_EXCERPT      = 140;      // the words a notification quotes
 const COMMENT_PAGE_MIN     = 5;
 const COMMENT_PAGE_MAX     = 100;
 const COMMENT_PAGE_DEFAULT = 20;
+// Where the Info panel's section stands (1.72.0, `comments_position`): after the rating (1.71.0's place), before the
+// files, or after them — the panel's very end, the default.
+const COMMENT_POSITIONS    = ['after_rating', 'before_files', 'after_files'];
+const COMMENT_POSITION_DEFAULT = 'after_files';
+// Replies (1.72.0): the deepest level Settings may allow and the shipped one (`comments_reply_depth`; 0 = none), and
+// how many of a thread's replies a page brings — with its top-level comment, with each "Show more", and at most to
+// reach the reply a notification's link points at.
+const COMMENT_REPLY_DEPTH_MAX     = 8;
+const COMMENT_REPLY_DEPTH_DEFAULT = 3;
+const COMMENT_REPLIES_FIRST = 10;
+const COMMENT_REPLIES_MORE  = 25;
+const COMMENT_REPLIES_SEEK  = 200;
 
-// users.comment_notify — one bit per kind of news, all four on by default.
+// users.comment_notify — one bit per kind of news, all five on by default (the fifth since 1.72.0).
 const COMMENT_NOTIFY_MINE    = 1;   // a comment on a torrent I registered
 const COMMENT_NOTIFY_DESC    = 2;   // …on a torrent whose published description I wrote
 const COMMENT_NOTIFY_THREAD  = 4;   // …in a thread I commented in
 const COMMENT_NOTIFY_MENTION = 8;   // …that @-mentions me
-const COMMENT_NOTIFY_ALL     = 15;
+const COMMENT_NOTIFY_REPLY   = 16;  // …that replies to one of my comments (1.72.0)
+const COMMENT_NOTIFY_ALL     = 31;
 const COMMENT_NOTIFY_KEYS    = ['mine' => COMMENT_NOTIFY_MINE, 'desc' => COMMENT_NOTIFY_DESC,
-                                'thread' => COMMENT_NOTIFY_THREAD, 'mention' => COMMENT_NOTIFY_MENTION];
+                                'thread' => COMMENT_NOTIFY_THREAD, 'mention' => COMMENT_NOTIFY_MENTION,
+                                'reply' => COMMENT_NOTIFY_REPLY];
 
 /* ── the switches, all clamped on read ─────────────────────────────────────────────────────────── */
 
@@ -147,6 +184,32 @@ function commentRatePerHour(array $cfg): int { return max(1, min(1000, (int)($cf
 
 /** Does a guest's comment wait for a moderator? */
 function commentGuestReview(array $cfg): bool { return ($cfg['comments_guest_review'] ?? '1') === '1'; }
+
+/**
+ * Where the Info panel's Comments section stands (1.72.0): 'after_rating' | 'before_files' | 'after_files'. The owner
+ * saw a long thread push the torrent's record and its files down: the panel is about the torrent, the thread is what
+ * people say about it, so the default is the very end. Anything else reads as the default.
+ */
+function commentsPosition(array $cfg): string
+{
+    $v = (string)($cfg['comments_position'] ?? COMMENT_POSITION_DEFAULT);
+    return in_array($v, COMMENT_POSITIONS, true) ? $v : COMMENT_POSITION_DEFAULT;
+}
+
+/** Does the section open unfolded (1.72.0)? Folded unless Settings says so: a click opens it, and loads the thread. */
+function commentsExpanded(array $cfg): bool { return ($cfg['comments_expanded'] ?? '0') === '1'; }
+
+/**
+ * How deep a thread of replies may go (1.72.0, `comments_reply_depth`): the deepest REPLY level — 1 is a reply to a
+ * comment, 2 a reply to that, 3 (as shipped) one more — and 0 is no replies at all, the flat thread of 1.71.0.
+ * Clamped 0..8; anything that is not a number reads as the shipped 3.
+ */
+function commentsReplyDepth(array $cfg): int
+{
+    $v = $cfg['comments_reply_depth'] ?? COMMENT_REPLY_DEPTH_DEFAULT;
+    if (!is_numeric($v)) return COMMENT_REPLY_DEPTH_DEFAULT;
+    return max(0, min(COMMENT_REPLY_DEPTH_MAX, (int)$v));
+}
 
 /* ── who may do what ───────────────────────────────────────────────────────────────────────────── */
 
@@ -226,6 +289,41 @@ function commentMayPost(PDO $db, array $cfg, ?array $me): array
 function commentWriterMayLink(array $cfg, ?array $me): bool
 {
     return commentLinksOn($cfg) && (int)($me['id'] ?? 0) > 0;
+}
+
+/**
+ * May this reader reply at all (1.72.0) — everything writing a comment needs first (commentMayPost(): the feature,
+ * comment.view + comment.post, a CAPTCHA provider for a guest, no mute), then replies switched on
+ * (comments_reply_depth > 0) and `comment.reply`. ['ok', 'reason' => '' | commentMayPost()'s | 'replies_off' |
+ * 'no_reply', 'until']. `$gate` is commentMayPost()'s answer when the caller has it already.
+ */
+function commentMayReply(PDO $db, array $cfg, ?array $me, ?array $gate = null): array
+{
+    $gate = $gate ?? commentMayPost($db, $cfg, $me);
+    if (!$gate['ok']) return ['ok' => false, 'reason' => (string)$gate['reason'], 'until' => $gate['until'] ?? null];
+    if (commentsReplyDepth($cfg) <= 0) return ['ok' => false, 'reason' => 'replies_off', 'until' => null];
+    if (!commentCan($db, $cfg, $me, 'comment.reply')) return ['ok' => false, 'reason' => 'no_reply', 'until' => null];
+    return ['ok' => true, 'reason' => '', 'until' => null];
+}
+
+/**
+ * The comment a reply answers, if this reader may answer it here and now (1.72.0) — THE server's gate, which the
+ * Reply button only mirrors: the reader may reply at all (commentMayReply()), the parent is a comment of THIS
+ * torrent, it is visible — a guest's held comment is answered once it is let through, a deleted one never — and a
+ * reply to it stays within comments_reply_depth. ['ok' => true, 'row' => parent] or ['ok' => false, 'status',
+ * 'error', 'vars'].
+ */
+function commentReplyTarget(PDO $db, array $cfg, ?array $me, string $hash, int $parentId, ?array $gate = null): array
+{
+    $may = commentMayReply($db, $cfg, $me, $gate);
+    if (!$may['ok']) return ['ok' => false, 'status' => 403, 'error' => (string)$may['reason'], 'vars' => []];
+    $row = $parentId > 0 ? commentRow($db, $parentId) : null;
+    if ($row === null || (string)$row['info_hash'] !== $hash) return ['ok' => false, 'status' => 404, 'error' => 'parent_gone', 'vars' => []];
+    if ((string)$row['status'] === 'deleted') return ['ok' => false, 'status' => 409, 'error' => 'parent_gone', 'vars' => []];
+    if ((string)$row['status'] !== 'visible') return ['ok' => false, 'status' => 409, 'error' => 'parent_pending', 'vars' => []];
+    $max = commentsReplyDepth($cfg);
+    if ((int)($row['depth'] ?? 0) + 1 > $max) return ['ok' => false, 'status' => 409, 'error' => 'too_deep', 'vars' => ['max' => $max]];
+    return ['ok' => true, 'row' => $row];
 }
 
 /* ── the guest's name ──────────────────────────────────────────────────────────────────────────── */
@@ -576,7 +674,7 @@ function commentMentionIds(PDO $db, string $body, int $authorId): array
  * (includes/db_clock.php), and the age by the database's clock — the two windows are measured without
  * PHP's clock taking part.
  */
-const COMMENT_ROW_SELECT = "SELECT c.id, c.info_hash, c.user_id, c.guest_tag, c.body, c.body_format, c.status, c.ip_bucket,
+const COMMENT_ROW_SELECT = "SELECT c.id, c.info_hash, c.parent_id, c.root_id, c.depth, c.user_id, c.guest_tag, c.body, c.body_format, c.status, c.ip_bucket,
                                    c.created_at, c.edited_at, c.edited_by, c.approved_at, c.approved_by, c.deleted_at, c.deleted_by, c.delete_reason,
                                    u.username, u.avatar_sha, u.status AS user_status,
                                    UNIX_TIMESTAMP(c.created_at) AS created_ts, UNIX_TIMESTAMP(c.edited_at) AS edited_ts,
@@ -620,14 +718,20 @@ function commentPendingCount(PDO $db, ?string $hash = null): int
 }
 
 /**
- * A page of a thread, OLDEST FIRST as it is read: the newest `$limit` comments below `$before` (none: the
- * newest of all), and whether there is anything earlier. A moderator's page carries the held guest
- * comments too, in their place.
+ * A page of a thread's TOP-LEVEL comments, OLDEST FIRST as it is read: the newest `$limit` of them below `$before`
+ * (none: the newest of all), and whether there is anything earlier. A moderator's page carries the held guest
+ * comments too, in their place. Since 1.72.0 a deleted top-level comment is on the page as well while its thread
+ * still shows something to this reader — a tombstone in its place (commentShape()); the replies come with
+ * commentThreads(). One key answers it: idx_hc_thread, (hash, root NULL) in id order.
  */
 function commentPage(PDO $db, string $hash, ?int $before, int $limit, bool $withPending): array
 {
     $limit = max(1, min(COMMENT_PAGE_MAX, $limit));
-    $where = $withPending ? "c.info_hash = ? AND c.status IN ('visible','pending')" : "c.info_hash = ? AND c.status = 'visible'";
+    $where = $withPending
+        ? "c.info_hash = ? AND c.root_id IS NULL AND (c.status IN ('visible','pending') OR (c.status = 'deleted' AND EXISTS (SELECT 1 FROM hash_comments d
+               WHERE d.info_hash = c.info_hash AND d.root_id = c.id AND d.status IN ('visible','pending'))))"
+        : "c.info_hash = ? AND c.root_id IS NULL AND (c.status = 'visible' OR (c.status = 'deleted' AND EXISTS (SELECT 1 FROM hash_comments d
+               WHERE d.info_hash = c.info_hash AND d.root_id = c.id AND d.status = 'visible')))";
     $args = [$hash];
     if ($before !== null && $before > 0) { $where .= " AND c.id < ?"; $args[] = $before; }
     $per = $limit + 1;
@@ -637,6 +741,164 @@ function commentPage(PDO $db, string $hash, ?int $before, int $limit, bool $with
     $earlier = count($rows) > $limit;
     if ($earlier) array_pop($rows);
     return ['rows' => array_reverse($rows), 'earlier' => $earlier];
+}
+
+/**
+ * One thread's replies as this reader is shown them (1.72.0): the SHOWN ones — visible, and for a moderator the
+ * held ones — oldest first, after reply `$after`, at most `$limit`; with `$upto` (a notification's link, the reply
+ * it points at) as many more as it takes to reach that one, never past COMMENT_REPLIES_SEEK.
+ * → ['rows' => raw rows ascending, 'last' => the last one's id (0: none), 'more' => shown replies after it].
+ * The tombstones those rows hang from are commentAncestors()' — this is the batch itself.
+ */
+function commentThreadPage(PDO $db, string $hash, int $rootId, int $after, int $limit, bool $withPending, int $upto = 0): array
+{
+    $limit = max(1, min(COMMENT_REPLIES_SEEK, $limit));
+    $want = $upto > $after ? COMMENT_REPLIES_SEEK : $limit;
+    $lim = $want + 1;
+    $where = $withPending ? "c.info_hash = ? AND c.root_id = ? AND c.id > ? AND c.status IN ('visible','pending')"
+                          : "c.info_hash = ? AND c.root_id = ? AND c.id > ? AND c.status = 'visible'";
+    $st = $db->prepare(COMMENT_ROW_SELECT . " WHERE $where ORDER BY c.id LIMIT $lim");
+    $st->execute([$hash, $rootId, max(0, $after)]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    $keep = $limit;
+    if ($upto > $after) {
+        foreach ($rows as $i => $r) if ((int)$r['id'] <= $upto) $keep = max($keep, $i + 1);
+        $keep = min($keep, COMMENT_REPLIES_SEEK);
+    }
+    $cut = count($rows) > $keep;
+    $rows = array_slice($rows, 0, $keep);
+    $last = $rows ? (int)end($rows)['id'] : max(0, $after);
+    $more = 0;
+    if ($cut) {
+        $where = $withPending ? "c.info_hash = ? AND c.root_id = ? AND c.id > ? AND c.status IN ('visible','pending')"
+                              : "c.info_hash = ? AND c.root_id = ? AND c.id > ? AND c.status = 'visible'";
+        $st = $db->prepare("SELECT COUNT(*) FROM hash_comments c WHERE $where");
+        $st->execute([$hash, $rootId, $last]);
+        $more = (int)$st->fetchColumn();
+    }
+    return ['rows' => $rows, 'last' => $last, 'more' => $more];
+}
+
+/**
+ * The replies the threads of a page bring (1.72.0): for each top-level id, its first COMMENT_REPLIES_FIRST shown
+ * replies (and, for the thread a notification's link points into, as many as reach `$find`). Bounded and cheap:
+ * one index-only count per page, the small threads in ONE query, a query of its own only for a thread with more
+ * replies than a page shows. → [root id => commentThreadPage()'s answer].
+ */
+function commentThreads(PDO $db, string $hash, array $rootIds, bool $withPending, int $find = 0, int $findRoot = 0): array
+{
+    $rootIds = array_values(array_unique(array_filter(array_map('intval', $rootIds), fn($i) => $i > 0)));
+    $out = [];
+    foreach ($rootIds as $r) $out[$r] = ['rows' => [], 'last' => 0, 'more' => 0];
+    if (!$rootIds) return $out;
+    $in = implode(',', array_fill(0, count($rootIds), '?'));
+    $where = $withPending ? "c.info_hash = ? AND c.root_id IN ($in) AND c.status IN ('visible','pending')"
+                          : "c.info_hash = ? AND c.root_id IN ($in) AND c.status = 'visible'";
+    $st = $db->prepare("SELECT c.root_id, COUNT(*) AS n FROM hash_comments c WHERE $where GROUP BY c.root_id");
+    $st->execute(array_merge([$hash], $rootIds));
+    $counts = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) $counts[(int)$c['root_id']] = (int)$c['n'];
+    $small = [];
+    foreach ($rootIds as $r) {
+        $n = $counts[$r] ?? 0;
+        if ($n === 0) continue;
+        if ($n <= COMMENT_REPLIES_FIRST && $r !== $findRoot) { $small[] = $r; continue; }
+        $out[$r] = commentThreadPage($db, $hash, $r, 0, COMMENT_REPLIES_FIRST, $withPending, $r === $findRoot ? $find : 0);
+    }
+    if ($small) {
+        $in = implode(',', array_fill(0, count($small), '?'));
+        $where = $withPending ? "c.info_hash = ? AND c.root_id IN ($in) AND c.status IN ('visible','pending')"
+                              : "c.info_hash = ? AND c.root_id IN ($in) AND c.status = 'visible'";
+        $st = $db->prepare(COMMENT_ROW_SELECT . " WHERE $where ORDER BY c.id");
+        $st->execute(array_merge([$hash], $small));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $r = (int)$row['root_id'];
+            $out[$r]['rows'][] = $row;
+            $out[$r]['last'] = (int)$row['id'];
+        }
+    }
+    return $out;
+}
+
+/**
+ * The tombstones a batch of replies hangs from (1.72.0): every DELETED comment on the way up from one of `$rows` to
+ * its thread's top that is neither in the batch nor one of `$known` (the page's top-level ids, what the page drew
+ * already), fetched by id — the chain at most COMMENT_REPLY_DEPTH_MAX long. So a deleted comment is drawn exactly
+ * while something under it is shown, and a reply never stands under a gap. A missing parent that is not deleted
+ * (a held one, for a reader who may not see it — which a reply cannot have) is not drawn. → raw rows ascending.
+ */
+function commentAncestors(PDO $db, string $hash, array $rows, array $known = []): array
+{
+    $have = [];
+    foreach ($rows as $r) $have[(int)$r['id']] = true;
+    foreach ($known as $k) $have[(int)$k] = true;
+    $found = [];
+    $need = [];
+    foreach ($rows as $r) {
+        $p = (int)($r['parent_id'] ?? 0);
+        if ($p > 0 && !isset($have[$p])) $need[$p] = true;
+    }
+    for ($round = 0; $need && $round <= COMMENT_REPLY_DEPTH_MAX; $round++) {
+        $ids = array_keys($need);
+        $need = [];
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $st = $db->prepare(COMMENT_ROW_SELECT . " WHERE c.id IN ($in) AND c.info_hash = ? AND c.status = 'deleted'");
+        $st->execute(array_merge($ids, [$hash]));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $a) {
+            $aid = (int)$a['id'];
+            if (isset($have[$aid])) continue;
+            $have[$aid] = true;
+            $found[$aid] = $a;
+            $p = (int)($a['parent_id'] ?? 0);
+            if ($p > 0 && !isset($have[$p])) $need[$p] = true;
+        }
+        foreach ($ids as $i) $have[$i] = true;   // asked: not asked again, found or not
+    }
+    ksort($found);
+    return array_values($found);
+}
+
+/**
+ * Is something under this comment still SHOWN to a reader (1.72.0) — a visible reply at any depth below it, or a
+ * held one for a moderator? What decides whether a deleted comment stays as a tombstone. The thread's rows after
+ * this one are walked up their parents (a reply is always younger than what it answers); bounded by the thread.
+ */
+function commentHasShownBelow(PDO $db, array $row, bool $withPending): bool
+{
+    $id = (int)$row['id'];
+    $root = (int)($row['root_id'] ?? 0);
+    $hash = (string)$row['info_hash'];
+    if ($root <= 0) {
+        $where = $withPending ? "d.info_hash = ? AND d.root_id = ? AND d.status IN ('visible','pending')" : "d.info_hash = ? AND d.root_id = ? AND d.status = 'visible'";
+        $st = $db->prepare("SELECT 1 FROM hash_comments d WHERE $where LIMIT 1");
+        $st->execute([$hash, $id]);
+        return (bool)$st->fetchColumn();
+    }
+    $st = $db->prepare("SELECT d.id, d.parent_id, d.status FROM hash_comments d WHERE d.info_hash = ? AND d.root_id = ? AND d.id > ? ORDER BY d.id");
+    $st->execute([$hash, $root, $id]);
+    $parent = [];
+    $shown = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $d) {
+        $parent[(int)$d['id']] = (int)($d['parent_id'] ?? 0);
+        if ($d['status'] === 'visible' || ($withPending && $d['status'] === 'pending')) $shown[] = (int)$d['id'];
+    }
+    foreach ($shown as $s) {
+        for ($p = $parent[$s] ?? 0, $guard = 0; $p > 0 && $guard <= COMMENT_REPLY_DEPTH_MAX + 1; $p = $parent[$p] ?? 0, $guard++) {
+            if ($p === $id) return true;
+            if ($p < $id) break;
+        }
+    }
+    return false;
+}
+
+/**
+ * What a deleted comment's tombstone says (1.72.0): 'removed' — "[removed by a moderator]" — when it was taken down
+ * WITH a reason (a moderator's removal always has one, commentDelete() insists), else 'deleted' — "[deleted]": its
+ * author took it back, or the account is gone.
+ */
+function commentTombstoneKind(array $row): string
+{
+    return trim((string)($row['delete_reason'] ?? '')) !== '' ? 'removed' : 'deleted';
 }
 
 /**
@@ -704,19 +966,29 @@ function commentDeleteRight(PDO $db, array $cfg, ?array $me, array $row): array
  * may do: edit (with the seconds left), delete ('own'/'any', seconds left), and whether the author is
  * somebody THEY blocked (the page folds the comment away until asked). `can_report` / `reported`: may this
  * reader report it, and have they (part E, contentReportFlags() in includes/reports.php).
+ *
+ * 1.72.0, replies: where it stands — `parent` (null: the top level), `root` (its thread's top-level id), `depth` —
+ * and `can_reply` (commentMayReply() for this reader, the comment visible, and a reply to it within
+ * comments_reply_depth). A DELETED row is only ever handed out as a tombstone (`tomb` 'deleted' | 'removed',
+ * commentTombstoneKind()): its place in the tree and nothing else — no author, no words, no time, nothing to do.
  */
 function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
 {
     if (!$raw) return [];
     $uid = (int)($me['id'] ?? 0);
-    $ctx = commentRenderContext($db, $cfg, $me, array_column($raw, 'body'));
+    // A tombstone's words are nobody's to read: not even handed to the name lookup.
+    $ctx = commentRenderContext($db, $cfg, $me, array_column(array_filter($raw, fn($r) => ($r['status'] ?? '') !== 'deleted'), 'body'));
     $base = (string)$ctx['base'];
     $profiles = function_exists('profilesEnabled') && profilesEnabled($cfg);
     $linksOn = commentLinksOn($cfg);
     $mod = $uid > 0 && commentCan($db, $cfg, $me, 'comment.moderate');
     $mayEditOwn = $uid > 0 && commentCan($db, $cfg, $me, 'comment.edit_own');
     $mayDelOwn = $uid > 0 && commentCan($db, $cfg, $me, 'comment.delete_own');
-    $writable = $uid > 0 && commentMayPost($db, $cfg, $me)['ok'];
+    $gate = commentMayPost($db, $cfg, $me);
+    $writable = $uid > 0 && $gate['ok'];
+    // Replies (1.72.0): may this reader answer anything here, and how deep may a thread go — asked once.
+    $replyOk = commentMayReply($db, $cfg, $me, $gate)['ok'];
+    $depthMax = commentsReplyDepth($cfg);
     $editWin = commentEditMinutes($cfg) * 60;
     $delWin = commentDeleteOwnMinutes($cfg) * 60;
     // The reader's clock, once for the batch; a guest reads the site's.
@@ -751,12 +1023,29 @@ function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
 
     $out = [];
     foreach ($raw as $r) {
+        $status = (string)$r['status'];
+        $place = [
+            'id'     => (int)$r['id'],
+            'parent' => ($r['parent_id'] ?? null) === null ? null : (int)$r['parent_id'],
+            'root'   => ($r['root_id'] ?? null) === null ? null : (int)$r['root_id'],
+            'depth'  => (int)($r['depth'] ?? 0),
+        ];
+        if ($status === 'deleted') {
+            // A tombstone (1.72.0): the place, and what it says — nothing of whose it was or what it said.
+            $out[] = $place + [
+                'tomb' => commentTombstoneKind($r), 'guest' => false, 'guest_tag' => '', 'user' => '', 'gone' => false,
+                'avatar' => '', 'profile' => false, 'html' => '', 'ts' => null, 'time' => '', 'at' => '', 'status' => 'deleted',
+                'edited' => false, 'edited_mod' => false, 'edited_at' => '', 'own' => false, 'blocked' => false,
+                'can_edit' => false, 'edit_left' => 0, 'can_delete' => null, 'del_left' => 0, 'can_approve' => false,
+                'can_reply' => false, 'can_report' => false, 'reported' => false,
+            ];
+            continue;
+        }
         $aid = $r['user_id'] === null ? 0 : (int)$r['user_id'];
         $name = ($aid > 0 && $r['username'] !== null) ? (string)$r['username'] : '';
         $guest = $aid <= 0 && $r['user_id'] === null;
         $own = $uid > 0 && $aid === $uid;
         $age = (isset($r['age_s']) && is_numeric($r['age_s'])) ? max(0, (int)$r['age_s']) : null;
-        $status = (string)$r['status'];
         // A guest's links are never links; a NEW account's are text too (1.71.0, includes/antispam.php) — decided
         // by when these words were written, so a link written on an account's first day stays text for good.
         $ctx['links'] = $linksOn && !$guest && !antispamWrittenNew($db, $cfg, $aid, $r['author_age_s'] ?? null);
@@ -781,8 +1070,8 @@ function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
         $ts = (isset($r['created_ts']) && is_numeric($r['created_ts'])) ? (int)$r['created_ts'] : null;
         $editedTs = (isset($r['edited_ts']) && is_numeric($r['edited_ts'])) ? (int)$r['edited_ts'] : null;
         $editedBy = ($r['edited_by'] ?? null) === null ? 0 : (int)$r['edited_by'];
-        $out[] = [
-            'id'         => (int)$r['id'],
+        $out[] = $place + [
+            'tomb'       => '',
             'guest'      => $guest,
             'guest_tag'  => $guest ? (string)($r['guest_tag'] ?? '') : '',
             'user'       => $name,
@@ -807,6 +1096,9 @@ function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
             'can_delete' => $delete,
             'del_left'   => $delLeft,
             'can_approve' => $mod && $status === 'pending',
+            // 1.72.0: a reply to it — this reader may reply here at all, it is visible (a held one is answered once it
+            // is let through), and one level more stays within the setting. commentReplyTarget() asks again.
+            'can_reply'  => $replyOk && $status === 'visible' && $place['depth'] < $depthMax,
             // Part E's Report button (window.Comments.onActions): somebody else's visible comment, a reader holding
             // content.report; `reported` — an open report of theirs on it, drawn as "Reported".
             'can_report' => !empty($reportFlags[(int)$r['id']]['can']),
@@ -857,7 +1149,16 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
     $id = (int)$row['id'];
     // Who, and why: EVERY reason each account has — each is told once, by the strongest reason they did not
     // switch off (a member who switched mentions off still hears of the thread they are in).
-    $why = [];   // uid => ['mention' => true, 'mine' => true, 'desc' => true, 'thread' => true] (any of)
+    $why = [];   // uid => ['reply' => true, 'mention' => true, 'mine' => true, 'desc' => true, 'thread' => true] (any of)
+    // A reply (1.72.0): the author of the comment it answers — while that comment is there to be answered (a member's,
+    // visible; a guest has nobody to tell, and a comment taken down is nobody's news any more).
+    $parentId = (int)($row['parent_id'] ?? 0);
+    if ($parentId > 0) {
+        $st = $db->prepare("SELECT user_id FROM hash_comments WHERE id = ? AND info_hash = ? AND status = 'visible' LIMIT 1");
+        $st->execute([$parentId, $hash]);
+        $pa = (int)($st->fetchColumn() ?: 0);
+        if ($pa > 0) $why[$pa]['reply'] = true;
+    }
     foreach (commentMentionIds($db, (string)$row['body'], $author) as $m) $why[(int)$m]['mention'] = true;
     try {
         $st = $db->prepare("SELECT submitter_id FROM whitelist WHERE info_hash = ? LIMIT 1");
@@ -905,8 +1206,10 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
     $torrent = commentTorrentName($db, $hash);
     $excerpt = commentExcerpt((string)$row['body']);
     $link = commentLink($hash, $id);
-    // The strongest reason first: a mention, then "my torrent", "my description", "my thread".
-    $bit = ['mention' => COMMENT_NOTIFY_MENTION, 'mine' => COMMENT_NOTIFY_MINE, 'desc' => COMMENT_NOTIFY_DESC, 'thread' => COMMENT_NOTIFY_THREAD];
+    // The strongest reason first: an answer to my comment (1.72.0), a mention, then "my torrent", "my description",
+    // "my thread". A reply that also names its parent's author is ONE notification to them, the reply's.
+    $bit = ['reply' => COMMENT_NOTIFY_REPLY, 'mention' => COMMENT_NOTIFY_MENTION, 'mine' => COMMENT_NOTIFY_MINE,
+            'desc' => COMMENT_NOTIFY_DESC, 'thread' => COMMENT_NOTIFY_THREAD];
     $told = [];
     foreach ($why as $uid => $reasons) {
         $u = $users[$uid] ?? null;
@@ -918,8 +1221,9 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
         }
         if ($reason === null) continue;                                     // every reason they have is switched off
         if (!commentCan($db, $cfg, $u, 'comment.view')) continue;           // may not read it: not news to them
-        $type = $reason === 'mention' ? 'comment_mention' : 'comment';
-        // A thread already unread in their notifications is not announced again (a mention always is).
+        $type = $reason === 'mention' ? 'comment_mention' : ($reason === 'reply' ? 'comment_reply' : 'comment');
+        // A thread already unread in their notifications is not announced again (a mention always is, and so is a
+        // reply: each answers them in particular).
         if ($type === 'comment') {
             $st = $db->prepare("SELECT 1 FROM user_notifications WHERE user_id = ? AND read_at IS NULL AND type = 'comment'
                                    AND link LIKE ? LIMIT 1");
@@ -936,17 +1240,21 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
     return $told;
 }
 
-/** The comment notifications this account has not read: ['comment' => every one, 'comment_mention' => the mentions]. */
+/**
+ * The comment notifications this account has not read: ['comment' => every one, 'comment_mention' => the mentions,
+ * 'comment_reply' => the replies to its comments (1.72.0)] — the pulse's numbers, each kind its own sound
+ * (assets/js/sounds.js takes the two named kinds out of the first, and all of them out of the plain notification's).
+ */
 function commentUnreadCounts(PDO $db, int $userId): array
 {
-    $zero = ['comment' => 0, 'comment_mention' => 0];
+    $zero = ['comment' => 0, 'comment_mention' => 0, 'comment_reply' => 0];
     if ($userId <= 0) return $zero;
     try {
-        $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(type = 'comment_mention'), 0) AS m FROM user_notifications
-                             WHERE user_id = ? AND read_at IS NULL AND type IN ('comment','comment_mention')");
+        $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(type = 'comment_mention'), 0) AS m, COALESCE(SUM(type = 'comment_reply'), 0) AS r
+                              FROM user_notifications WHERE user_id = ? AND read_at IS NULL AND type IN ('comment','comment_mention','comment_reply')");
         $st->execute([$userId]);
         $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
-        return ['comment' => (int)($r['n'] ?? 0), 'comment_mention' => (int)($r['m'] ?? 0)];
+        return ['comment' => (int)($r['n'] ?? 0), 'comment_mention' => (int)($r['m'] ?? 0), 'comment_reply' => (int)($r['r'] ?? 0)];
     } catch (\Throwable $e) {
         return $zero;
     }
@@ -1022,12 +1330,13 @@ function commentBodyFrom(array $input, array $cfg): array
 }
 
 /**
- * POST comment_post {csrf_token, hash, body[, captcha_token]} — the whole endpoint.
+ * POST comment_post {csrf_token, hash, body[, parent][, captcha_token]} — the whole endpoint.
  *
  * The gates in the order a person asks them (the shoutbox's order): is the request real, does the feature
- * exist, is there such a torrent for THIS reader, may they write here (and if not, why), how fast are they
- * writing — and only then, is what they wrote acceptable. Then the row, the people told, and the row as
- * the thread will show it.
+ * exist, is there such a torrent for THIS reader, may they write here (and if not, why), may they answer THIS
+ * comment (1.72.0, `parent`: commentReplyTarget() — replies on, comment.reply, the comment there, visible, the
+ * thread not at its depth), how fast are they writing — and only then, is what they wrote acceptable. Then the
+ * row, the people told, and the row as the thread will show it.
  *   → 200 {success, comment: <row>, pending: bool, message}
  */
 function commentPostRequest(PDO $db, array $cfg, ?array $me, array $input, string $ip = '', array $opts = []): array
@@ -1041,6 +1350,15 @@ function commentPostRequest(PDO $db, array $cfg, ?array $me, array $input, strin
     if (!$gate['ok']) {
         $st = ['disabled' => 404, 'login' => 401][$gate['reason']] ?? 403;
         return commentFail($st, $gate['reason'], ['until' => (string)($gate['until'] ?? '')], $gate['until'] ? ['until' => $gate['until']] : []);
+    }
+    // A reply (1.72.0): the comment it answers, asked of the server here — the page's Reply button is not the gate.
+    $parent = null;
+    $rawParent = $input['parent'] ?? null;
+    if ($rawParent !== null && $rawParent !== '' && $rawParent !== 0 && $rawParent !== '0') {
+        if (!is_int($rawParent) && !(is_string($rawParent) && ctype_digit($rawParent))) return commentFail(400, 'parent_gone');
+        $t = commentReplyTarget($db, $cfg, $me, $hash, (int)$rawParent, $gate);
+        if (!$t['ok']) return commentFail((int)$t['status'], (string)$t['error'], (array)($t['vars'] ?? []));
+        $parent = $t['row'];
     }
     $b = commentBodyFrom($input, $cfg);
     if (isset($b['fail'])) return $b['fail'];
@@ -1058,8 +1376,13 @@ function commentPostRequest(PDO $db, array $cfg, ?array $me, array $input, strin
     $uid = (int)($me['id'] ?? 0);
     $guest = $uid <= 0;
     $status = $guest && commentGuestReview($cfg) ? 'pending' : 'visible';
-    $db->prepare("INSERT INTO hash_comments (info_hash, user_id, guest_tag, body, body_format, status, ip_bucket) VALUES (?, ?, ?, ?, 'bbcode', ?, ?)")
-       ->execute([$hash, $guest ? null : $uid, $guest ? commentGuestTag($ip, $cfg) : null, $clean, $status,
+    // Where it stands (1.72.0): under its parent, in the parent's thread, one level down — or at the top level.
+    $parentId = $parent !== null ? (int)$parent['id'] : null;
+    $rootId = $parent !== null ? ((int)($parent['root_id'] ?? 0) ?: (int)$parent['id']) : null;
+    $depth = $parent !== null ? (int)($parent['depth'] ?? 0) + 1 : 0;
+    $db->prepare("INSERT INTO hash_comments (info_hash, parent_id, root_id, depth, user_id, guest_tag, body, body_format, status, ip_bucket)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, 'bbcode', ?, ?)")
+       ->execute([$hash, $parentId, $rootId, $depth, $guest ? null : $uid, $guest ? commentGuestTag($ip, $cfg) : null, $clean, $status,
                   $guest ? mb_substr(function_exists('ipBucket') ? ipBucket($ip) : $ip, 0, 45) : null]);
     $id = (int)$db->lastInsertId();
     antispamRecord($db, $ticket);
@@ -1206,6 +1529,9 @@ function commentNotifyMentions(PDO $db, array $cfg, array $row, array $ids): arr
  * `$opts['authority'] === 'panel'` (1.71.0 part E, includes/reports.php): the Reports page, whose caller has
  * already asked panelCan() for `panel.reports.comments.handle` — the removal is a moderator's ('any') whatever
  * the account behind the panel session holds, and the owner's own session (no account, id 0) stamps no one.
+ *
+ * 1.72.0: the same act for a comment with replies — the row is deleted all the same, and the readers see its place
+ * kept as a tombstone for as long as something under it is shown (commentPage(), commentAncestors()).
  */
 function commentDelete(PDO $db, array $cfg, ?array $me, array $row, string $reason = '', array $opts = []): array
 {
@@ -1215,6 +1541,9 @@ function commentDelete(PDO $db, array $cfg, ?array $me, array $row, string $reas
     $reason = trim((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $reason));
     $reason = mb_substr($reason, 0, COMMENT_REASON_MAX, 'UTF-8');
     if ($right['right'] === 'any' && $reason === '') return ['ok' => false, 'error' => 'reason_required', 'status' => 400];
+    // Your own takes no reason — and keeps none a caller sent (1.72.0): a stored reason is what makes a comment's
+    // tombstone say "removed by a moderator" (commentTombstoneKind()), and an author tidying their words is not that.
+    if ($right['right'] === 'own') $reason = '';
     $uid = (int)($me['id'] ?? 0);
     $st = $db->prepare("UPDATE hash_comments SET status = 'deleted', deleted_at = NOW(), deleted_by = ?, delete_reason = ?
                          WHERE id = ? AND status <> 'deleted'");
@@ -1244,8 +1573,10 @@ function commentDelete(PDO $db, array $cfg, ?array $me, array $row, string $reas
 }
 
 /**
- * POST comment_delete {csrf_token, id[, reason]} → 200 {success, right, count}. The request's half of
- * commentDelete(); `$opts` goes through to it (part E's silent choice).
+ * POST comment_delete {csrf_token, id[, reason]} → 200 {success, right, count, tomb}. The request's half of
+ * commentDelete(); `$opts` goes through to it (part E's silent choice). `tomb` (1.72.0): what the comment's place
+ * says now for this reader — 'deleted' | 'removed' while replies under it are still shown (it stays as a tombstone),
+ * '' when it simply goes.
  */
 function commentDeleteRequest(PDO $db, array $cfg, ?array $me, array $input, array $opts = []): array
 {
@@ -1256,7 +1587,11 @@ function commentDeleteRequest(PDO $db, array $cfg, ?array $me, array $input, arr
     if ($row === null || $row['status'] === 'deleted' || !commentHashVisible($db, $cfg, $me, (string)$row['info_hash'])) return commentFail(404, 'not_found');
     $r = commentDelete($db, $cfg, $me, $row, is_string($input['reason'] ?? null) ? (string)$input['reason'] : '', $opts);
     if (!$r['ok']) return commentFail((int)$r['status'], (string)$r['error']);
+    $fresh = commentRow($db, (int)$row['id']);
+    $mod = commentCan($db, $cfg, $me, 'comment.moderate');
+    $tomb = $fresh !== null && commentHasShownBelow($db, $fresh, $mod) ? commentTombstoneKind($fresh) : '';
     return ['status' => 200, 'body' => ['success' => true, 'right' => $r['right'], 'count' => commentCount($db, (string)$row['info_hash']),
+                                        'tomb' => $tomb,
                                         'message' => __($r['right'] === 'any' ? 'api.comment.removed' : 'api.comment.deleted')]];
 }
 
@@ -1350,14 +1685,26 @@ function commentComposerInfo(PDO $db, array $cfg, ?array $me): array
         'mentions'  => $gate['ok'] && $uid > 0,
         'moderator' => $uid > 0 && commentCan($db, $cfg, $me, 'comment.moderate'),
         'edit_minutes' => commentEditMinutes($cfg),
+        // Replies (1.72.0): may this reader answer at all (the rows say which ones: can_reply), and the setting.
+        'reply'     => commentMayReply($db, $cfg, $me, $gate)['ok'],
+        'reply_depth' => commentsReplyDepth($cfg),
         'picker'    => $picker,
     ];
 }
 
 /**
- * GET comment_list&hash=H[&before=ID] — a page of a thread and what this reader may do in it.
+ * GET comment_list&hash=H[&before=ID][&find=ID] — a page of a thread and what this reader may do in it.
  *   → 200 {success, hash, rows: [<row>…] oldest first, earlier: bool, count, pending (moderators),
- *          per_page, me: commentComposerInfo()}
+ *          per_page, reply_depth, me: commentComposerInfo()}
+ * GET comment_list&hash=H&thread=R&after=ID — the next replies of one thread ("Show N more replies", 1.72.0).
+ *   → 200 {success, hash, thread: R, rows: [<row>…], last, more, count, reply_depth}
+ *
+ * 1.72.0: `rows` are the TOP-LEVEL comments (a deleted one as a tombstone while its thread still shows something),
+ * each with its `thread` — {rows: its first COMMENT_REPLIES_FIRST shown replies oldest first with the tombstones
+ * they hang from, last: the last reply's id, more: how many more there are}. So a page is at most comments_per_page
+ * top-level comments and ten replies each, however long a thread grows. `find` (a notification's link, #comment-N)
+ * brings the replies of N's thread as far as N — at most COMMENT_REPLIES_SEEK — when that thread is on the page.
+ * The count is every VISIBLE comment, replies included.
  */
 function commentListRequest(PDO $db, array $cfg, ?array $me, array $query): array
 {
@@ -1367,17 +1714,67 @@ function commentListRequest(PDO $db, array $cfg, ?array $me, array $query): arra
     if (!commentHashVisible($db, $cfg, $me, $hash)) return commentFail(404, 'not_found');
     if (!commentCan($db, $cfg, $me, 'comment.view')) return commentFail((int)($me['id'] ?? 0) > 0 ? 403 : 401, 'no_view');
     $mod = (int)($me['id'] ?? 0) > 0 && commentCan($db, $cfg, $me, 'comment.moderate');
+    $num = fn(string $k): int => isset($query[$k]) && is_numeric($query[$k]) ? max(0, (int)$query[$k]) : 0;
+
+    // One thread's next replies.
+    if (isset($query['thread'])) {
+        $root = commentRow($db, $num('thread'));
+        if ($root === null || (string)$root['info_hash'] !== $hash || $root['root_id'] !== null) return commentFail(404, 'not_found');
+        $t = commentThreadPage($db, $hash, (int)$root['id'], $num('after'), COMMENT_REPLIES_MORE, $mod);
+        $raw = array_merge($t['rows'], commentAncestors($db, $hash, $t['rows'], [(int)$root['id']]));
+        usort($raw, fn($a, $b) => (int)$a['id'] <=> (int)$b['id']);
+        return ['status' => 200, 'body' => [
+            'success' => true, 'hash' => $hash, 'thread' => (int)$root['id'],
+            'rows' => commentShape($db, $cfg, $me, $raw), 'last' => $t['last'], 'more' => $t['more'],
+            'count' => commentCount($db, $hash), 'reply_depth' => commentsReplyDepth($cfg),
+        ]];
+    }
+
     $before = isset($query['before']) && is_numeric($query['before']) ? max(0, (int)$query['before']) : null;
     $per = commentsPerPage($cfg);
     $page = commentPage($db, $hash, $before, $per, $mod);
+    // A notification's link into a thread: which thread, so that one brings its replies as far as the linked one.
+    $find = $num('find');
+    $findRoot = 0;
+    if ($find > 0) {
+        $fr = commentRow($db, $find);
+        if ($fr !== null && (string)$fr['info_hash'] === $hash) $findRoot = (int)($fr['root_id'] ?? 0);
+    }
+    $roots = array_map(fn($r) => (int)$r['id'], $page['rows']);
+    $threads = commentThreads($db, $hash, $roots, $mod, $find, $findRoot);
+    // Everything shaped in ONE batch — one render context, one question about blocks, one about reports.
+    $raw = $page['rows'];
+    $replyIds = [];
+    foreach ($threads as $rootId => $t) {
+        $tomb = commentAncestors($db, $hash, $t['rows'], $roots);
+        $list = array_merge($t['rows'], $tomb);
+        usort($list, fn($a, $b) => (int)$a['id'] <=> (int)$b['id']);
+        $threads[$rootId]['rows'] = $list;
+        foreach ($list as $x) { $raw[] = $x; $replyIds[$rootId][] = (int)$x['id']; }
+    }
+    $byId = [];
+    foreach (commentShape($db, $cfg, $me, $raw) as $s) $byId[(int)$s['id']] = $s;
+    $rows = [];
+    foreach ($page['rows'] as $r) {
+        $rid = (int)$r['id'];
+        if (!isset($byId[$rid])) continue;
+        $one = $byId[$rid];
+        $one['thread'] = [
+            'rows' => array_values(array_filter(array_map(fn($i) => $byId[$i] ?? null, $replyIds[$rid] ?? []))),
+            'last' => (int)($threads[$rid]['last'] ?? 0),
+            'more' => (int)($threads[$rid]['more'] ?? 0),
+        ];
+        $rows[] = $one;
+    }
     return ['status' => 200, 'body' => [
         'success'  => true,
         'hash'     => $hash,
-        'rows'     => commentShape($db, $cfg, $me, $page['rows']),
+        'rows'     => $rows,
         'earlier'  => $page['earlier'],
         'count'    => commentCount($db, $hash),
         'pending'  => $mod ? commentPendingCount($db, $hash) : 0,
         'per_page' => $per,
+        'reply_depth' => commentsReplyDepth($cfg),
         'me'       => commentComposerInfo($db, $cfg, $me),
     ]];
 }
@@ -1385,7 +1782,8 @@ function commentListRequest(PDO $db, array $cfg, ?array $me, array $query): arra
 /**
  * What the Info panel's one answer carries about the comments (api/index_info.php): whether the section is
  * drawn at all, how many there are for this reader to open, and — for a reader who may not read them —
- * that there ARE some, so the space does not read as "nobody said anything".
+ * that there ARE some, so the space does not read as "nobody said anything". And (1.72.0) where the section
+ * stands in the panel and whether it opens unfolded — Settings' answers, commentsPosition() / commentsExpanded().
  */
 function commentPanelInfo(PDO $db, array $cfg, ?array $me, string $hash): ?array
 {
@@ -1394,12 +1792,13 @@ function commentPanelInfo(PDO $db, array $cfg, ?array $me, string $hash): ?array
     $n = commentCount($db, $hash);
     if (!$view && $n === 0) return null;
     return ['view' => $view, 'count' => $n, 'post' => $view && commentMayPost($db, $cfg, $me)['ok'],
-            'signed_in' => (int)($me['id'] ?? 0) > 0];
+            'signed_in' => (int)($me['id'] ?? 0) > 0,
+            'position' => commentsPosition($cfg), 'expanded' => commentsExpanded($cfg)];
 }
 
 /* ── the account's own choices ─────────────────────────────────────────────────────────────────── */
 
-/** users.comment_notify as the four named switches. */
+/** users.comment_notify as the five named switches (the fifth, `reply`, since 1.72.0). */
 function commentNotifyPrefs(?array $user): array
 {
     $v = (int)($user['comment_notify'] ?? COMMENT_NOTIFY_ALL);
@@ -1409,9 +1808,9 @@ function commentNotifyPrefs(?array $user): array
 }
 
 /**
- * GET / POST comment_prefs {csrf_token, mine?, desc?, thread?, mention?: 0|1} — which comments this account
+ * GET / POST comment_prefs {csrf_token, mine?, desc?, thread?, mention?, reply?: 0|1} — which comments this account
  * is told about. A key left out is left as it is. No password: a preference, like the mail ones beside it.
- *   → 200 {success, prefs: {mine, desc, thread, mention}}
+ *   → 200 {success, prefs: {mine, desc, thread, mention, reply}}
  */
 function commentPrefsRequest(PDO $db, array $cfg, ?array $me, array $input, bool $post): array
 {
@@ -1440,13 +1839,29 @@ function commentPrefsRequest(PDO $db, array $cfg, ?array $me, array $input, bool
 /**
  * Everything of this account in the comments, for userDeleteCascade(): its comments deleted (see the note
  * there), and every stamp that names it as the one who edited, took down or let through somebody else's
- * comment forgotten (NULL — the audit log keeps the name). ['comments' => n, 'comment_stamps' => n].
+ * comment forgotten (NULL — the audit log keeps the name). ['comments' => n, 'comment_tombstones' => n,
+ * 'comment_stamps' => n].
+ *
+ * 1.72.0: a comment of theirs that OTHER people replied to — a reply still shown (visible, or held for a
+ * moderator) somewhere under it — is not removed from the tree but emptied into a tombstone: deleted, its words
+ * and every trace of whose it was gone (author, guest tag, address group, edit stamps), a moderator's reason kept
+ * if it had been taken down already. Their own replies under it go like the rest of their comments, unless
+ * somebody else's reply hangs below those too (commentAccountTombstones()).
  */
 function commentForgetAccount(PDO $db, int $userId): array
 {
-    $out = ['comments' => 0, 'comment_stamps' => 0];
+    $out = ['comments' => 0, 'comment_tombstones' => 0, 'comment_stamps' => 0];
     if ($userId <= 0) return $out;
     try {
+        $keep = commentAccountTombstones($db, $userId);
+        if ($keep) {
+            $in = implode(',', array_fill(0, count($keep), '?'));
+            $st = $db->prepare("UPDATE hash_comments SET status = 'deleted', body = '', user_id = NULL, guest_tag = NULL, ip_bucket = NULL,
+                                       edited_at = NULL, edited_by = NULL, deleted_at = COALESCE(deleted_at, NOW())
+                                 WHERE id IN ($in) AND user_id = ?");
+            $st->execute(array_merge($keep, [$userId]));
+            $out['comment_tombstones'] = $st->rowCount();
+        }
         $st = $db->prepare("DELETE FROM hash_comments WHERE user_id = ?");
         $st->execute([$userId]);
         $out['comments'] = $st->rowCount();
@@ -1457,4 +1872,34 @@ function commentForgetAccount(PDO $db, int $userId): array
         }
     } catch (\Throwable $e) { /* the table arrives with schema 83 */ }
     return $out;
+}
+
+/**
+ * Which of this account's comments stay as tombstones when it goes (1.72.0): those with somebody ELSE's reply still
+ * shown below them (visible, or held for a moderator — a moderator would see it) at any depth. Each thread the
+ * account wrote in is read once — its rows' ids, parents, authors and states — and walked from the newest up: a row
+ * that survives the account, or has a survivor below it, marks its parent. → comment ids, ascending.
+ */
+function commentAccountTombstones(PDO $db, int $userId): array
+{
+    if ($userId <= 0) return [];
+    $st = $db->prepare("SELECT DISTINCT info_hash, COALESCE(root_id, id) AS thread FROM hash_comments WHERE user_id = ?");
+    $st->execute([$userId]);
+    $keep = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
+        $q = $db->prepare("SELECT id, parent_id, user_id, status FROM hash_comments WHERE info_hash = ? AND (id = ? OR root_id = ?) ORDER BY id DESC");
+        $q->execute([(string)$t['info_hash'], (int)$t['thread'], (int)$t['thread']]);
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+        $below = [];
+        foreach ($rows as $r) {
+            $id = (int)$r['id'];
+            $theirs = $r['user_id'] !== null && (int)$r['user_id'] === $userId;
+            $survives = !$theirs && in_array((string)$r['status'], ['visible', 'pending'], true);
+            if ($theirs && !empty($below[$id])) $keep[] = $id;
+            $p = (int)($r['parent_id'] ?? 0);
+            if ($p > 0 && ($survives || !empty($below[$id]))) $below[$p] = true;
+        }
+    }
+    sort($keep);
+    return array_values(array_unique($keep));
 }

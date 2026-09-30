@@ -17,7 +17,9 @@
  *      a suspended or unverified account, a membership not yet or no longer in force, a block, anonymous
  *      votes, the mode's values — each taking the member out of the rows AND the count;
  *   5. the lists section against the five list gates (and the account gates), by the same query
- *      listsContainingHash() now answers from;
+ *      listsContainingHash() now answers from — and (1.72.0) a list shared with friends: counted for the owner's
+ *      friend only, either way round, and out again for a pending request, the friends feature off, the owner's
+ *      friends.use gone, the section hidden, a block either way, the owner themselves, an unfriending;
  *   6. the favourites section's gates, unchanged;
  *   7. paging, clamping, the search (its wildcards literal), totals that equal the rows;
  *   8. EXPLAIN: each section drives through its hash's own index;
@@ -66,6 +68,8 @@ $cfgOn = array_merge($cfg, [
     'fav_enabled' => '1', 'fav_public_enabled' => '1', 'fav_who_enabled' => '1',
     'rep_enabled' => '1', 'rep_mode' => 'thumbs', 'profile_votes_enabled' => '1', 'who_votes_enabled' => '1',
     'lists_enabled' => '1', 'lists_public_enabled' => '1', 'who_lists_enabled' => '1',
+    // 1.72.0: a list shared with friends counts for a friend — the friends feature stated, not inherited.
+    'friends_enabled' => '1',
 ]);
 $GLOBALS['cfg'] = $cfgOn;
 $cfgStars = array_merge($cfgOn, ['rep_mode' => 'stars']);
@@ -249,7 +253,7 @@ $everyone = array_merge(array_values($M), [$S1, $S2]);
 $db->exec("UPDATE users SET fav_public = 1, fav_listed = 1, votes_public = 1, votes_listed = 1, lists_public = 1 WHERE id IN (" . implode(',', $everyone) . ")");
 $vIns = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote) VALUES (?, 'user', ?, ?)");
 $fIns = $db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)");
-$lIns = $db->prepare("INSERT INTO user_lists (user_id, name, slug, is_public, created_at, updated_at) VALUES (?, ?, ?, 1, '2026-01-01 00:00:00', ?)");
+$lIns = $db->prepare("INSERT INTO user_lists (user_id, name, slug, visibility, created_at, updated_at) VALUES (?, ?, ?, 'public', '2026-01-01 00:00:00', ?)");
 $iIns = $db->prepare("INSERT INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, 'Who fixture')");
 $L = [];
 foreach ($M as $i => $uid) {
@@ -412,8 +416,73 @@ check('lists — (2) public lists switched off: nothing, and no section', $lists
 $lgone('(3) the owner\'s group does not grant lists.public', fn() => $moveTo($M[1], $gBare), fn() => $moveTo($M[1], $gGrant));
 $lgone('(4) the owner hides the section (lists_public)', fn() => $db->exec("UPDATE users SET lists_public = 0 WHERE id = " . $M[1]), fn() => $db->exec("UPDATE users SET lists_public = 1 WHERE id = " . $M[1]));
 // (updated_at follows every write to the row — ON UPDATE — so the fixture's own moment is written back with it)
-$lgone('(5) the list itself is private', fn() => $db->exec("UPDATE user_lists SET is_public = 0 WHERE id = " . $L[1]),
-       fn() => $db->exec("UPDATE user_lists SET is_public = 1, updated_at = '2026-02-01 00:01:00' WHERE id = " . $L[1]));
+$lgone('(5) the list itself is private', fn() => $db->exec("UPDATE user_lists SET visibility = 'private' WHERE id = " . $L[1]),
+       fn() => $db->exec("UPDATE user_lists SET visibility = 'public', updated_at = '2026-02-01 00:01:00' WHERE id = " . $L[1]));
+$lgone('(5b) the list is shared with friends, and this reader is not one (1.72.0)', fn() => $db->exec("UPDATE user_lists SET visibility = 'friends' WHERE id = " . $L[1]),
+       fn() => $db->exec("UPDATE user_lists SET visibility = 'public', updated_at = '2026-02-01 00:01:00' WHERE id = " . $L[1]));
+
+/* ── 5c. (1.72.0) a list shared with FRIENDS: counted for a friend of its owner, and for nobody else ──
+ * The owner's group has friends.use and NOT lists.public: a friends list needs no grant of consent. One
+ * friends list, the newest of all (so a friend's first row is it); the gates one at a time, each taking it
+ * out of the rows AND the count; the public 25 never move. */
+$gFriends = $group('whot_friends', ['favourites.use', 'favourites.view_others', 'lists.use', 'friends.use', 'index.view']);
+$gNoFriends = $group('whot_nofriends', ['favourites.use', 'favourites.view_others', 'lists.use', 'index.view']);
+$FO = $member('whot_fowner', $gFriends);
+$db->exec("UPDATE users SET lists_public = 1 WHERE id = $FO");
+$db->prepare("INSERT INTO user_lists (user_id, name, slug, visibility, created_at, updated_at) VALUES (?, 'Friends pack', 'friends-pack', 'friends', '2026-01-01 00:00:00', '2026-03-01 00:00:00')")->execute([$FO]);
+$FL = (int)$db->lastInsertId();
+$iIns->execute([$FL, $H]);
+$befriend = fn(int $a, int $b, string $st = 'accepted') => $db->prepare("INSERT INTO user_friends (user_id, friend_id, status) VALUES (?, ?, ?)")->execute([$a, $b, $st]);
+$unfriend = fn() => $db->exec("DELETE FROM user_friends WHERE user_id IN ($FO, $reader) OR friend_id IN ($FO, $reader)");
+$hasFp = fn(array $r): bool => in_array('Friends pack', $lnames($r), true);
+$r0 = $lists();
+check('lists — a friends list is not counted for a reader who is not the owner\'s friend (the public 25 as they were)',
+      $r0['total'] === 25 && !$hasFp($r0), json_encode($r0['total']));
+$befriend($reader, $FO);
+$r1 = $lists();
+check('… a friendship ACCEPTED (asked by the reader): counted, in the rows and the count — first, as the newest',
+      $r1['total'] === 26 && ($lnames($r1)[0] ?? '') === 'Friends pack' && ($r1['rows'][0]['username'] ?? '') === 'whot_fowner', json_encode([$r1['total'], $lnames($r1)[0] ?? null]));
+$unfriend();
+$befriend($FO, $reader);
+check('… either way round: asked by the owner, accepted by the reader', $lists()['total'] === 26 && $hasFp($lists()));
+check('… its search finds it by its name and by its owner\'s', $lists(null, ['page' => 1, 'per_page' => 50, 'search' => 'Friends pack'])['total'] === 1
+      && $lists(null, ['page' => 1, 'per_page' => 50, 'search' => 'whot_fowner'])['total'] === 1);
+check('… and listsContainingHash() says the same for the friend', in_array('Friends pack', array_column(listsContainingHash($db, $cfgOn, $H, 50, $reader), 'name'), true));
+$fgone = function (string $what, callable $do, callable $undo, ?array $c = null, ?int $who = null) use ($db, $cfgOn, $H, $reader, $all, $hasFp): void {
+    $do();
+    $r = whoListsPage($db, $c ?? $cfgOn, $H, $who ?? $reader, $all);
+    check("lists — friends — $what: out of the rows AND the count", $r['total'] === 25 && !$hasFp($r), json_encode($r['total']));
+    $undo();
+};
+$fgone('a friendship only asked, not yet accepted', function () use ($db, $FO, $reader) { $db->exec("UPDATE user_friends SET status = 'pending' WHERE user_id = $FO AND friend_id = $reader"); },
+       function () use ($db, $FO, $reader) { $db->exec("UPDATE user_friends SET status = 'accepted' WHERE user_id = $FO AND friend_id = $reader"); });
+$fgone('the friends feature switched off (friends_enabled)', fn() => null, fn() => null, array_merge($cfgOn, ['friends_enabled' => '0']));
+$fgone('the owner\'s groups no longer give friends.use', fn() => $moveTo($FO, $gNoFriends), fn() => $moveTo($FO, $gFriends));
+$fgone('the owner hides the section (lists_public)', fn() => $db->exec("UPDATE users SET lists_public = 0 WHERE id = $FO"), fn() => $db->exec("UPDATE users SET lists_public = 1 WHERE id = $FO"));
+$fgone('the owner blocks the reader (no hide_profile) while the friendship row is still there',
+       fn() => $db->prepare("INSERT INTO user_blocks (user_id, blocked_id, hide_profile) VALUES (?, ?, 0)")->execute([$FO, $reader]),
+       fn() => $db->prepare("DELETE FROM user_blocks WHERE user_id = ?")->execute([$FO]));
+$fgone('the READER blocks the owner, the friendship row still there',
+       fn() => $db->prepare("INSERT INTO user_blocks (user_id, blocked_id, hide_profile) VALUES (?, ?, 0)")->execute([$reader, $FO]),
+       fn() => $db->prepare("DELETE FROM user_blocks WHERE user_id = ?")->execute([$reader]));
+$fgone('asked by the OWNER: their own friends list is not theirs to be counted in (as their private ones never were)', fn() => null, fn() => null, null, $FO);
+$fgone('asked by another member, not a friend', fn() => null, fn() => null, null, $M[2]);
+$fgone('the list made private again', fn() => $db->exec("UPDATE user_lists SET visibility = 'private' WHERE id = $FL"),
+       fn() => $db->exec("UPDATE user_lists SET visibility = 'friends', updated_at = '2026-03-01 00:00:00' WHERE id = $FL"));
+$adminG = (int)$db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn();
+$moveTo($FO, $adminG);
+check('… an owner in the system admin group alone: the blanket gives friends.use (a feature, not consent) — counted',
+      $adminG > 0 && $lists()['total'] === 26 && $hasFp($lists()), (string)$lists()['total']);
+$moveTo($FO, $gFriends);
+check('… and with the site keeping every list private (lists_public_enabled off) the friends list goes with the public ones',
+      whoListsPage($db, array_merge($cfgOn, ['lists_public_enabled' => '0']), $H, $reader, $all)['total'] === 0);
+$unfriend();
+check('… and the unfriending takes it away at once: the next question is answered without it', $lists()['total'] === 25 && !$hasFp($lists()));
+$befriend($reader, $FO);
+$r2 = whoListsPage($db, $cfgOn, $H, $reader, ['page' => 2, 'per_page' => 20, 'search' => '']);
+check('… with it back, the pages agree with the count: 26 over two pages of 20 (6 on the second)', $r2['total'] === 26 && count($r2['rows']) === 6 && $r2['pages'] === 2, json_encode([$r2['total'], count($r2['rows'])]));
+$unfriend();
+userDeleteCascade($db, $FO);
 $lgone('a suspended owner', fn() => $db->exec("UPDATE users SET status = 'suspended' WHERE id = " . $M[1]), fn() => $db->exec("UPDATE users SET status = 'active' WHERE id = " . $M[1]));
 $lgone('an unverified owner', fn() => $db->exec("UPDATE users SET email_verified = 0 WHERE id = " . $M[1]), fn() => $db->exec("UPDATE users SET email_verified = 1 WHERE id = " . $M[1]));
 $lgone('an owner who hid their profile from this reader', fn() => $db->prepare("INSERT INTO user_blocks (user_id, blocked_id, hide_profile) VALUES (?, ?, 1)")->execute([$M[1], $reader]),
@@ -489,9 +558,10 @@ $keyed = fn(array $t): bool => !in_array($t[0] ?? 'ALL', ['ALL', 'index'], true)
 check('votes: hash_votes by its hash (uq_vote_once / idx_votes_hash), the account by its primary key',
       $keyed($pv['v'] ?? []) && (bool)array_intersect(explode('|', $pv['v'][1] ?? ''), ['uq_vote_once', 'idx_votes_hash'])
       && ($pv['u'][1] ?? '') === 'PRIMARY', json_encode($pv));
-// The join ORDER of the lists is the optimiser's (on these few accounts it may start from the members of the granting
-// groups, as the 1.69.0 query of the same shape could): what matters is that the big table, the items, is never read
-// whole — only the rows of this hash (idx_item_hash) or one row per list (uq_list_item: list, hash).
+// The join ORDER of the lists was the optimiser's until 1.72.0 (on these few accounts it could start from the members of
+// the granting groups); under the OR of the public and the friends arms it started from every list, so the query writes
+// it down (STRAIGHT_JOIN: the items, then the list, then the owner). What matters is that the big table, the items, is
+// never read whole — only the rows of this hash (idx_item_hash) or one row per list (uq_list_item: list, hash).
 check('lists: user_list_items only through an index (idx_item_hash / uq_list_item), the list and the owner by their keys',
       $keyed($pl2['i'] ?? []) && in_array($pl2['i'][1] ?? '', ['idx_item_hash', 'uq_list_item'], true) && $keyed($pl2['l'] ?? []) && ($pl2['u'][1] ?? '') === 'PRIMARY',
       json_encode($pl2));

@@ -109,11 +109,12 @@ try:
     # The shoutbox adds three more numbers (1.58.0) and only when the room exists and this reader may
     # read it, so they are allowed here rather than required — the rule under test is that the pulse
     # carries NUMBERS and never a line of anybody's text. The comments add two (1.71.0, while they are on):
-    # the comment notifications waiting, and of those the ones that mention the reader.
+    # the comment notifications waiting, and of those the ones that mention the reader — and a third (1.72.0),
+    # the ones that reply to the reader's comments.
     check("… and nothing else — numbers, never content",
           set(j.keys()) <= {"success", "unread", "unread_pm", "unread_pm_friend", "live",
                             "unread_shout", "unread_shout_friend", "unread_shout_mention",
-                            "unread_comment", "unread_comment_mention"}, list(j.keys()))
+                            "unread_comment", "unread_comment_mention", "unread_comment_reply"}, list(j.keys()))
     check("… every one of them a number", all(isinstance(v, int) for k, v in j.items() if k.startswith("unread")), j)
     php("userNotify($db, " + str(uid) + ", 'account', 'Pulse fixture', 'a line');")
     s, j = me.api("user_pulse")

@@ -534,8 +534,12 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
             <label class="search-check acc-check"><input type="checkbox" id="acc-lists-public"<?= (int)($meUser['lists_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
                 <span><?= _h('account.lists_public_label') ?></span></label>
             <p class="text-muted acc-verify-note"><?= __('account.lists_public_hint') ?></p>
-            <?php if ($accLists['publish_blocked']): ?>
+            <?php /* Without the grant the switch still acts for the lists shared with friends (1.72.0), so the
+                     warning says what it does then rather than that nothing acts on it. */ ?>
+            <?php if ($accLists['publish_blocked'] && !$accLists['may_friends']): ?>
             <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'lists.public']) ?></p>
+            <?php elseif ($accLists['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.lists_friends_only', ['perm' => 'lists.public']) ?></p>
             <?php endif; ?>
             <?php endif; ?>
             <?php if ($accPeople['directory']): ?>
@@ -706,15 +710,16 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
 <div id="acc-notifications"><span class="text-muted"><?= _h('common.loading') ?></span></div>
 <div class="trans-pagination acc-notif-pagination" id="acc-notif-pagination"></div>
 <p class="text-muted acc-notif-note"><?= _h('account.notif_note') ?></p>
-<?php /* Which comments this account is told about (1.71.0, includes/comments.php, users.comment_notify): four
-         switches under the notifications they decide, each saved as it is ticked (assets/js/comments.js). Only
-         while comments exist and this account may read them — a switch about news it cannot receive is not one. */ ?>
+<?php /* Which comments this account is told about (1.71.0, includes/comments.php, users.comment_notify): five
+         switches under the notifications they decide — the fifth, a reply to one of my comments, since 1.72.0 —
+         each saved as it is ticked (assets/js/comments.js). Only while comments exist and this account may read
+         them — a switch about news it cannot receive is not one. */ ?>
 <?php if (function_exists('commentsEnabled') && commentsEnabled($cfg) && commentCan($db, $cfg, $meUser, 'comment.view')): ?>
 <?php $accCmPrefs = commentNotifyPrefs($meUser); ?>
 <div class="acc-comment-prefs" id="acc-comment-prefs">
     <h3 class="acc-comment-prefs-head" id="acc-comment-prefs-head"><i class="bi bi-chat-left-text" aria-hidden="true"></i> <?= _h('account.comment_prefs_head') ?></h3>
     <p class="text-muted acc-pref-note" id="acc-comment-prefs-note"><?= _h('account.comment_prefs_note') ?></p>
-    <?php foreach (['mine', 'desc', 'thread', 'mention'] as $accCmKey): ?>
+    <?php foreach (['mine', 'desc', 'thread', 'mention', 'reply'] as $accCmKey): ?>
     <label class="search-check acc-check acc-comment-pref"><input type="checkbox" id="acc-cm-<?= $accCmKey ?>" data-pref="<?= $accCmKey ?>"<?= !empty($accCmPrefs[$accCmKey]) ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
         <span id="acc-cm-<?= $accCmKey ?>-label"><?= _h('account.comment_pref_' . $accCmKey) ?></span></label>
     <?php endforeach; ?>

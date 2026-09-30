@@ -145,15 +145,39 @@ $cfg = getSettings($db);
 // Every settings row this part changes, as it was — value AND time — and put back so on the way out.
 // `users_enabled` too: the member half signs in over HTTP, and in the battery the tests before this one leave
 // accounts switched off — a test sets every switch it depends on and puts it back, never inherits one.
-$keep = ['shout_enabled', 'shout_placement', 'users_enabled'];
+// `index_enabled` and `profiles_enabled` too (1.72.0): the search page prints #search-csrf only with the catalogue's
+// search on, and a profile its #account-csrf only with profiles on. Until 1.72.0 the battery happened to leave both
+// on before this test; once the tests before it cleaned up after themselves, the check read "no ids" on those pages.
+$keep = ['shout_enabled', 'shout_placement', 'users_enabled', 'index_enabled', 'index_search_enabled', 'profiles_enabled'];
 $was = [];
 foreach ($keep as $k) {
     $st = $db->prepare("SELECT `value`, updated_at FROM settings WHERE `key` = ?");
     $st->execute([$k]);
     $was[$k] = $st->fetch(PDO::FETCH_ASSOC) ?: null;
 }
+// The sign-in below spends a hit of api/user_login.php's own limit — rateLimitAllow('user_login', <address bucket>,
+// rate_limit_user_login = 10, 900 s), a map in a FILE (config/rate_limits.json) that no table snapshot covers, and
+// it counts every sign-in, the good ones too. In the battery the smokes sign in more than ten times from this
+// machine a few minutes earlier, so inheriting the file meant "Too many login attempts" instead of a sign-in
+// (1.72.0's first battery) — four checks reporting a broken token for a reason that had nothing to do with tokens.
+// The `user_login|…` hits are taken out just before the sign-in, under the lock the site itself uses, and the whole
+// file is put back as it was on the way out.
+$throttleFile = $root . '/config/rate_limits.json';
+$throttleWas = is_file($throttleFile) ? (string)file_get_contents($throttleFile) : null;
+$throttleClearHere = function () use ($throttleFile): void {
+    $h = @fopen($throttleFile . '.lock', 'c');
+    if ($h) @flock($h, LOCK_EX);
+    try {
+        if (!is_file($throttleFile)) return;
+        $d = json_decode((string)file_get_contents($throttleFile), true) ?: [];
+        foreach (array_keys($d) as $k) if (str_starts_with((string)$k, 'user_login|')) unset($d[$k]);
+        file_put_contents($throttleFile, json_encode($d));
+    } finally {
+        if ($h) { @flock($h, LOCK_UN); @fclose($h); }
+    }
+};
 $tmp = [];
-$cleanup = function () use ($db, $was, &$tmp): void {
+$cleanup = function () use ($db, $was, &$tmp, $throttleFile, $throttleWas): void {
     foreach ($db->query("SELECT id FROM users WHERE username LIKE 'csrft\\_%'")->fetchAll(PDO::FETCH_COLUMN) as $id) userDeleteCascade($db, (int)$id);
     foreach ($was as $k => $row) {
         if ($row === null) $db->prepare("DELETE FROM settings WHERE `key` = ?")->execute([$k]);
@@ -161,6 +185,7 @@ $cleanup = function () use ($db, $was, &$tmp): void {
                 ->execute([$k, $row['value'], $row['updated_at']]);
     }
     foreach ($tmp as $f) @unlink($f);
+    if ($throttleWas === null) @unlink($throttleFile); else @file_put_contents($throttleFile, $throttleWas);
 };
 $cleanup();
 register_shutdown_function($cleanup);
@@ -223,12 +248,14 @@ $tok2 = $read(($g2['get'])('?action=home&lang=en')['body'])['metas'][0] ?? '';
 check('another browser (another session) is published another token', $tok2 !== '' && $tok2 !== $tok);
 
 // ── a member, signed in ──
-$db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('users_enabled', '1') ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")->execute();
+$db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('users_enabled', '1'), ('index_enabled', '1'), ('index_search_enabled', '1'), ('profiles_enabled', '1')
+               ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")->execute();
 $cfgOn = array_merge($cfg, ['users_enabled' => '1', 'users_require_email_verify' => '0']);
 $made = userCreate($db, $cfgOn, 'csrft_member', 'csrft_member@example.org', 'CsrfPass123!', '127.0.0.1');
 $uid = (int)($made['user']['id'] ?? 0);
 $db->prepare("UPDATE users SET email_verified = 1, status = 'active' WHERE id = ?")->execute([$uid]);
 $m = $browser();
+$throttleClearHere();
 $loginPage = $read(($m['get'])('?action=login&lang=en')['body']);
 $lt = $loginPage['metas'][0] ?? '';
 $in = ($m['post'])('user_login', ['csrf_token' => $lt, 'login' => 'csrft_member', 'password' => 'CsrfPass123!', 'session' => '1h']);

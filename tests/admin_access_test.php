@@ -571,8 +571,9 @@ check('every endpoint the map names is actually routed', $badEp === [], implode(
 // Default deny: the dangerous endpoints must NOT be in the map at any permission.
 $mapped = [];
 foreach ($mm as $row) $mapped[$row[1]] = $row[2];
+// admin/group_recommended (1.72.0) writes a group's permissions as group_save does, and is the owner's as it is.
 $mustBeOwnerOnly = ['admin/save_settings', 'admin/change_password', 'admin/account_email', 'admin/twofa',
-                    'admin/group_save', 'admin/group_delete', 'admin/user_delete', 'admin/backup_action',
+                    'admin/group_save', 'admin/group_delete', 'admin/group_recommended', 'admin/user_delete', 'admin/backup_action',
                     'admin/backup_download', 'admin/restart_tracker', 'admin/net_apply', 'admin/sysctl_apply',
                     'admin/ot_apply', 'admin/api_client_create', 'admin/bulk_send', 'admin/tracker_mode',
                     'admin/whitelist_regenerate', 'admin/delete_all', 'admin/delete_permanently'];

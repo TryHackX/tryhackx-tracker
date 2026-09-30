@@ -28,7 +28,10 @@
  *      — once each, never the author, never across a block, each by their own switch, in their language,
  *      an unread thread not repeated; the pulse's counts; the two sounds;
  *  11. the account going: its comments with it, its moderation stamps forgotten;
- *  12. the endpoint FILES, run as requests in a child process with a session and its token.
+ *  12. the endpoint FILES, run as requests in a child process with a session and its token;
+ *  13. (1.72.0) replies: the tree and its depth — the server refusing past it, the permission, the guest rules on a
+ *      reply, the setting lowered (old replies kept, new ones refused), tombstones, a page bounded however long a
+ *      thread is, the reply's notification and blocks, the account going under other people's replies.
  *
  * Every switch a check leans on is in $cfgOn — nothing is inherited from this database's live settings.
  * Self-cleaning: the accounts it makes (and with them their comments and notifications), the two catalogue
@@ -61,6 +64,7 @@ $cfgOn = array_merge($cfg, [
     'comments_enabled' => '1', 'comment_max_chars' => '500', 'comment_links' => '1', 'comment_edit_minutes' => '15',
     'comment_delete_own_minutes' => '60', 'comments_per_page' => '5', 'comment_rate_per_hour' => '1000',
     'captcha_pts_comment' => '1', 'comments_guest_review' => '1', 'link_trusted_domains' => 'example.org',
+    'comments_position' => 'after_files', 'comments_expanded' => '0', 'comments_reply_depth' => '3',
     'recaptcha_enabled' => '0', 'default_language' => 'en',
     'shout_enabled' => '1', 'shout_emotes_enabled' => '1', 'shout_stickers_enabled' => '1', 'emotes_everywhere' => '1',
     // The site's anti-spam layer (1.71.0) is tests/antispam_test.php's: off here, so a comment's own rules are what
@@ -73,9 +77,13 @@ $cfgCaptcha = array_merge($cfgOn, ['recaptcha_enabled' => '1', 'captcha_provider
 $verify = ['verify' => fn(string $tok): bool => $tok === 'good-token'];
 
 // ── what this run changes, and how it is put back ─────────────────────────────────────────────
-const CM_USERS = ['cmtest_alice', 'cmtest_bob', 'cmtest_carol', 'cmtest_dave', 'cmtest_erin', 'cmtest_mod', 'cmtest_mute', 'cmtest_rate', 'cmtest_http'];
+const CM_USERS = ['cmtest_alice', 'cmtest_bob', 'cmtest_carol', 'cmtest_dave', 'cmtest_erin', 'cmtest_mod', 'cmtest_mute', 'cmtest_rate', 'cmtest_http',
+                  // 13. replies (1.72.0)
+                  'cmtest_rp_a', 'cmtest_rp_b', 'cmtest_rp_c', 'cmtest_rp_x', 'cmtest_rp_mod', 'cmtest_rp_n'];
 const CM_H1 = 'c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1';   // the thread's torrent: an index row + a whitelist row
 const CM_H2 = 'c0c2c0c2c0c2c0c2c0c2c0c2c0c2c0c2c0c2c0c2';   // a hash nobody may see (no row at all)
+const CM_H3 = 'c0c5c0c5c0c5c0c5c0c5c0c5c0c5c0c5c0c5c0c5';   // 13. the replies' torrent: an index row
+const CM_H4 = 'c0c6c0c6c0c6c0c6c0c6c0c6c0c6c0c6c0c6c0c6';   // 13. another torrent (a parent from somewhere else)
 const CM_GUEST_IP = '198.51.100.23';
 $guestBefore = (string)$db->query("SELECT permissions FROM user_groups WHERE slug = 'guest'")->fetchColumn();
 $auditFloor = (int)$db->query("SELECT COALESCE(MAX(id), 0) FROM audit_log")->fetchColumn();
@@ -100,11 +108,13 @@ register_shutdown_function(function () use ($db, $guestBefore, $auditFloor, &$tm
         $id = (int)$st->fetchColumn();
         if ($id > 0) userDeleteCascade($db, $id);
     }
-    foreach ([CM_H1, CM_H2] as $h) {
+    foreach ([CM_H1, CM_H2, CM_H3, CM_H4] as $h) {
         $db->prepare("DELETE FROM hash_comments WHERE info_hash = ?")->execute([$h]);
         $db->prepare("DELETE FROM index_hashes WHERE info_hash = ?")->execute([$h]);
         $db->prepare("DELETE FROM whitelist WHERE info_hash = ?")->execute([$h]);
     }
+    $db->exec("DELETE m FROM user_group_members m JOIN user_groups g ON g.id = m.group_id WHERE g.slug = 'cmtest_noreply'");
+    $db->exec("DELETE FROM user_groups WHERE slug = 'cmtest_noreply'");
     if ($stickerId > 0) $db->prepare("DELETE FROM shout_emotes WHERE id = ?")->execute([$stickerId]);
     // The guest's row in the anti-spam layer's table: a guest's CAPTCHA is asked through the layer (1.71.0), which
     // keeps a row per address group even while its pacing is off (the accounts' rows go with userDeleteCascade()).
@@ -150,6 +160,10 @@ $T = 'cm-test-token';
 /* ══ 1. the schema, on both paths ═════════════════════════════════════════ */
 check('the schema is at 83 or later, and its line says what 83 is', TRACKER_SCHEMA_VERSION >= 83
       && str_contains($src('includes/schema.php'), '83 = comments on a torrent (includes/comments.php): `hash_comments`'));
+check('1.72.0: the schema is at 86 or later, and its line says what 86 is — the two settings of where the section stands and how it opens',
+      TRACKER_SCHEMA_VERSION >= 86 && str_contains($src('includes/schema.php'), "86 = where the Info panel's comments stand and whether they open folded (includes/comments.php): `comments_position`"));
+check('1.72.0: the schema is at 88 or later, and its line says what 88 is — replies to comments, as a tree',
+      TRACKER_SCHEMA_VERSION >= 88 && str_contains($src('includes/schema.php'), '88 = replies to comments, as a tree (includes/comments.php): `hash_comments`.parent_id'));
 $create = '';
 foreach (trackerSchemaStatements() as $sql) if (str_contains($sql, 'CREATE TABLE IF NOT EXISTS `hash_comments`')) $create = $sql;
 check('a fresh install creates hash_comments with its keys: a thread by hash/status/id, a member\'s, the guest queue',
@@ -157,6 +171,12 @@ check('a fresh install creates hash_comments with its keys: a thread by hash/sta
       && str_contains($create, 'KEY `idx_hc_status` (`status`, `created_at`)')
       && str_contains($create, "`status` ENUM('visible','pending','deleted') NOT NULL DEFAULT 'visible'")
       && str_contains($create, "`body_format` ENUM('bbcode','plain') NOT NULL DEFAULT 'bbcode'") && str_contains($create, '`delete_reason` VARCHAR(255)'));
+check('1.72.0: … and the reply\'s place — parent, thread, depth — with the key a page reads a thread by (hash, root, id, status)',
+      str_contains($create, '`parent_id` BIGINT UNSIGNED DEFAULT NULL') && str_contains($create, '`root_id` BIGINT UNSIGNED DEFAULT NULL')
+      && str_contains($create, '`depth` TINYINT UNSIGNED NOT NULL DEFAULT 0') && str_contains($create, 'KEY `idx_hc_thread` (`info_hash`, `root_id`, `id`, `status`)'));
+check('this database has the reply columns and their key', schemaColumnExists($db, 'hash_comments', 'parent_id') && schemaColumnExists($db, 'hash_comments', 'root_id')
+      && schemaColumnExists($db, 'hash_comments', 'depth') && schemaIndexExists($db, 'hash_comments', 'idx_hc_thread')
+      && schemaColumnDefault($db, 'users', 'comment_notify') === (string)COMMENT_NOTIFY_ALL);
 check('this database has the table, users.comment_notify and user_notifications.link',
       schemaTableExists($db, 'hash_comments') && schemaColumnExists($db, 'users', 'comment_notify') && schemaColumnExists($db, 'user_notifications', 'link'));
 $scratch = 'tracker_cm_' . bin2hex(random_bytes(3));
@@ -192,12 +212,35 @@ try {
         check('upgrade: the guarded statements bring the table and both columns back, without an error',
               !$errs && schemaTableExists($sdb, 'hash_comments') && schemaColumnExists($sdb, 'users', 'comment_notify')
               && schemaColumnExists($sdb, 'user_notifications', 'link'), implode(' | ', $errs));
-        check('… an existing account is told of all four kinds (15), like a new one',
+        check('… an existing account is told of every kind (31 since 1.72.0: the reply\'s with the four), like a new one',
               (int)$sdb->query("SELECT comment_notify FROM users WHERE username = 'old_account'")->fetchColumn() === COMMENT_NOTIFY_ALL);
         $a = ''; foreach (trackerSchemaStatements() as $s) if (str_contains($s, 'CREATE TABLE IF NOT EXISTS `hash_comments`')) $a = $s;
         $b = ''; foreach ($guarded as $s) if (is_string($s) && str_contains($s, 'CREATE TABLE IF NOT EXISTS `hash_comments`')) $b = $s;
         $norm = fn($s) => preg_replace('/\s+/', ' ', preg_replace('/^\s*--.*$/m', '', $s));
         check('… from the SAME definition as a fresh install\'s (a split between the two lists is the old fresh-install bug)', $a !== '' && $norm($a) === $norm($b));
+        // 1.72.0 (v88): a v87 database — hash_comments without the reply columns, users.comment_notify still DEFAULT 15.
+        $shape = fn(): string => preg_replace('/ AUTO_INCREMENT=\d+/', '', (string)$sdb->query("SHOW CREATE TABLE hash_comments")->fetch(PDO::FETCH_NUM)[1]);
+        $freshShape = $shape();
+        $sdb->exec("ALTER TABLE hash_comments DROP KEY idx_hc_thread, DROP COLUMN parent_id, DROP COLUMN root_id, DROP COLUMN depth");
+        $sdb->exec("ALTER TABLE users ALTER COLUMN comment_notify SET DEFAULT 15");
+        $sdb->exec("INSERT INTO hash_comments (info_hash, user_id, body) VALUES (REPEAT('e', 40), 1, 'written at v87')");
+        $sdb->exec("INSERT INTO users (username, pass_hash, comment_notify) VALUES ('v87_all', 'x', 15), ('v87_quiet', 'x', 7)");
+        $errs = [];
+        foreach (trackerSchemaGuardedStatements($sdb) as $s) {
+            $last = null;
+            foreach ((is_array($s) ? $s : [$s]) as $t) { try { $sdb->exec($t); $last = null; break; } catch (\Throwable $e) { $last = $e; } }
+            if ($last) $errs[] = $last->getMessage();
+        }
+        $old = $sdb->query("SELECT parent_id, root_id, depth FROM hash_comments WHERE body = 'written at v87'")->fetch(PDO::FETCH_ASSOC) ?: [];
+        $bits = $sdb->query("SELECT username, comment_notify FROM users WHERE username IN ('v87_all', 'v87_quiet') ORDER BY username")->fetchAll(PDO::FETCH_KEY_PAIR);
+        check('1.72.0: an upgrade from 87 — the reply columns and key where a fresh table has them (one shape), a comment written before a top-level one',
+              !$errs && $shape() === $freshShape && array_key_exists('parent_id', $old) && $old['parent_id'] === null
+              && array_key_exists('root_id', $old) && $old['root_id'] === null && (int)($old['depth'] ?? 9) === 0,
+              implode(' | ', $errs) . ' ' . json_encode($old));
+        check('… every account is told of replies from now on (bit 16 ON, the rest as it was), and the column\'s default is 31 — once: a second run asks nothing',
+              $bits === ['v87_all' => 31, 'v87_quiet' => 23] && schemaColumnDefault($sdb, 'users', 'comment_notify') === '31'
+              && !preg_grep('/comment_notify` \| 16|ALTER TABLE `hash_comments` ADD/', array_map(fn($s) => is_array($s) ? $s[0] : $s, trackerSchemaGuardedStatements($sdb))),
+              json_encode($bits));
         $sdb->exec("INSERT IGNORE INTO user_groups (slug, name, description, priority, is_default, is_system, permissions) VALUES ('moderator', 'Moderator', 'm', 500, 0, 1, '{}')");
         $sdb->exec("UPDATE user_groups SET permissions = '{\"index.view\":true}' WHERE slug IN ('member','guest')");
         trackerSchemaDataMigrations($sdb, ['admin_username' => '']);
@@ -208,6 +251,8 @@ try {
               !empty($pm['comment.view']) && !empty($pm['comment.post']) && !empty($pm['comment.edit_own']) && !empty($pm['comment.delete_own'])
               && empty($pm['comment.moderate']) && !empty($pd['comment.view']) && !empty($pd['comment.post']) && !empty($pd['comment.moderate'])
               && !array_filter(array_keys($pg), fn($k) => str_starts_with($k, 'comment.')), json_encode([$pm, $pd, $pg]));
+        check('1.72.0 (v88): … and both may reply — the guest group still nothing',
+              !empty($pm['comment.reply']) && !empty($pd['comment.reply']) && empty($pg['comment.reply']));
         $sdb->exec("UPDATE user_groups SET permissions = JSON_REMOVE(permissions, '$.\"comment.post\"') WHERE slug = 'member'");
         trackerSchemaDataMigrations($sdb, ['admin_username' => '']);
         $pm = json_decode((string)$sdb->query("SELECT permissions FROM user_groups WHERE slug = 'member'")->fetchColumn(), true) ?: [];
@@ -223,7 +268,10 @@ try {
 $defaults = trackerSchemaDefaultSettings();
 $want = ['comments_enabled' => '1', 'comment_max_chars' => '500', 'comment_links' => '1', 'comment_edit_minutes' => '15',
          'comment_delete_own_minutes' => '60', 'comments_per_page' => '20', 'comment_rate_per_hour' => '30',
-         'captcha_pts_comment' => '1', 'comments_guest_review' => '1', 'sound_default_comment' => '', 'sound_default_comment_mention' => ''];
+         'captcha_pts_comment' => '1', 'comments_guest_review' => '1', 'sound_default_comment' => '', 'sound_default_comment_mention' => '',
+         // 1.72.0: where the Info panel's section stands (its very end) and whether it opens unfolded (no); how deep a
+         // thread of replies may go (3), and the reply's sound (none chosen — the project's rule)
+         'comments_position' => 'after_files', 'comments_expanded' => '0', 'comments_reply_depth' => '3', 'sound_default_comment_reply' => ''];
 $save = $src('api/admin/save_settings.php');
 $tpl = $src('templates/admin/settings.php');
 $kw = settingsCatalogKeywords();
@@ -235,15 +283,32 @@ foreach ($want as $k => $v) {
     if (!str_contains($tpl, 'name="' . $k . '"')) $missing[] = "$k page";
 }
 check('every comment setting and both sound defaults: shipped with its default, saved, found by the search, on the page', $missing === [], implode(', ', $missing));
-check('the numbers are clamped on save, the three switches coerced to 0/1',
+check('the numbers are clamped on save, the four switches coerced to 0/1 (1.72.0: whether the section opens unfolded, the fourth)',
       str_contains($save, "'comment_max_chars' => [COMMENT_MAX_MIN, COMMENT_MAX_MAX, COMMENT_MAX_DEFAULT]")
       && str_contains($save, "'comment_edit_minutes' => [0, 1440, 15], 'comment_delete_own_minutes' => [0, 1440, 60]")
       && str_contains($save, "'comments_per_page' => [COMMENT_PAGE_MIN, COMMENT_PAGE_MAX, COMMENT_PAGE_DEFAULT]")
       && str_contains($save, "'comment_rate_per_hour' => [1, 1000, 30], 'captcha_pts_comment' => [0, 100, 1]")
-      && (bool)preg_match("/'comments_enabled', 'comment_links', 'comments_guest_review',\s*\n\s*'profile_descriptions_enabled'/", $save)
+      && (bool)preg_match("/'comments_enabled', 'comment_links', 'comments_guest_review', 'comments_expanded',\s*\n\s*'profile_descriptions_enabled'/", $save)
       && (bool)preg_match("/'covers_enabled', 'profile_bio_enabled'\] as \\\$k\)/", $save));
-check('… and the comments\' two sound defaults are judged against the library whether comments are on or not',
-      str_contains($save, "foreach (array_unique(array_merge(soundEventKinds(), ['comment', 'comment_mention'])) as \$k) {"));
+// 1.72.0: where the section stands is a closed set — saved as one of the three or as the default, read the same way.
+check('the section\'s place is one of three (after the rating, before the files, after them — the default), coerced on save and on read; unfolded only when said',
+      COMMENT_POSITIONS === ['after_rating', 'before_files', 'after_files'] && COMMENT_POSITION_DEFAULT === 'after_files'
+      && str_contains($save, "if (isset(\$data['comments_position']) && !in_array(\$data['comments_position'], COMMENT_POSITIONS, true)) {\n    \$data['comments_position'] = COMMENT_POSITION_DEFAULT;")
+      && commentsPosition([]) === 'after_files' && commentsPosition(['comments_position' => 'below']) === 'after_files'
+      && commentsPosition(['comments_position' => 'before_files']) === 'before_files' && commentsPosition(['comments_position' => 'after_rating']) === 'after_rating'
+      && commentsExpanded([]) === false && commentsExpanded(['comments_expanded' => '1']) === true && commentsExpanded(['comments_expanded' => 'yes']) === false);
+check('… and the comments\' sound defaults (1.72.0: the reply\'s with them) are judged against the library whether comments are on or not',
+      str_contains($save, "foreach (array_unique(array_merge(soundEventKinds(), ['comment', 'comment_mention', 'comment_reply'])) as \$k) {"));
+check('1.72.0: the reply depth is clamped on save 0..8 (0 a real answer, no replies) and on read — anything but a number is the shipped 3',
+      str_contains($save, "'comments_reply_depth' => [0, COMMENT_REPLY_DEPTH_MAX, COMMENT_REPLY_DEPTH_DEFAULT],")
+      && COMMENT_REPLY_DEPTH_MAX === 8 && COMMENT_REPLY_DEPTH_DEFAULT === 3
+      && commentsReplyDepth([]) === 3 && commentsReplyDepth(['comments_reply_depth' => '0']) === 0 && commentsReplyDepth(['comments_reply_depth' => '99']) === 8
+      && commentsReplyDepth(['comments_reply_depth' => '-2']) === 0 && commentsReplyDepth(['comments_reply_depth' => 'deep']) === 3
+      && commentsReplyDepth(['comments_reply_depth' => '5']) === 5);
+check('… and the Settings page says under the field what happens at the limit, and when it is lowered',
+      str_contains($tpl, 'data-setting="comments_reply_depth"') && str_contains($tpl, "__('settings.comments_reply_depth_hint', ['max' => COMMENT_REPLY_DEPTH_MAX])")
+      && str_contains(langFor('en', 'settings.comments_reply_depth_hint'), 'At the limit') && str_contains(langFor('en', 'settings.comments_reply_depth_hint'), 'Lowered later')
+      && str_contains(langFor('pl', 'settings.comments_reply_depth_hint'), 'Na granicy'));
 check('the readers clamp: the length 20..5000, the page 5..100, the windows 0..1440, the hour 1..1000',
       commentMax(['comment_max_chars' => '3']) === 20 && commentMax(['comment_max_chars' => '99999']) === 5000 && commentMax([]) === 500
       && commentsPerPage(['comments_per_page' => '1']) === 5 && commentsPerPage(['comments_per_page' => '999']) === 100
@@ -253,9 +318,11 @@ check('the readers clamp: the length 20..5000, the page 5..100, the windows 0..1
 $sec = (int)strpos($tpl, 'id="section-comments"');
 $secEnd = (int)strpos($tpl, 'class="settings-section"', $sec + 30);
 $secTxt = $sec > 0 ? substr($tpl, $sec, $secEnd - $sec) : '';
-check('Settings: a Comments section in the content group, between the descriptions and the ratings, with the permissions\' fold',
+check('Settings: a Comments section in the content group, between the descriptions and the ratings, with the permissions\' fold (and, 1.72.0, the place and the opening)',
       $sec > (int)strpos($tpl, 'id="section-content"') && $sec < (int)strpos($tpl, 'id="section-reputation"')
       && str_contains($secTxt, 'data-group="content"') && str_contains($secTxt, 'id="comment-matrix-wrap"')
+      && str_contains($secTxt, 'data-setting="comments_position"') && str_contains($secTxt, 'data-setting="comments_expanded"')
+      && str_contains($secTxt, "<?php foreach (COMMENT_POSITIONS as \$cmPos): ?>")
       && str_contains($src('assets/js/admin-shout.js'), "{ wrap: 'comment-matrix-wrap', table: 'comment-matrix',")
       && str_contains($secTxt, "__('settings.comments_guests_intro', ['captcha' => '#section-captcha'])"));
 $groupTitles = array_column(settingsCatalogGroups(), 'title', 'id');
@@ -282,6 +349,11 @@ check('with accounts off: no comments at all — the feature is off and every co
       && !userLegacyDefault('comment.moderate') && commentsEnabled(['users_enabled' => '1']) && !commentsEnabled(['users_enabled' => '1', 'comments_enabled' => '0']));
 check('the migration grants once (v83_comments) to member and moderator, and nothing to guest',
       str_contains($src('includes/schema.php'), "schemaGrantOnce(\$db, 'v83_comments', [\n        'member'    => ['comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own'],\n        'moderator' => ['comment.view', 'comment.post', 'comment.moderate'],\n    ]);"));
+check('1.72.0: comment.reply — registered, in the member and moderator presets, NO with accounts off, granted once (v88_replies) to member and moderator and not to guest',
+      isset($reg['comment.reply']) && in_array('comment.reply', $presets['member']['perms'], true) && in_array('comment.reply', $presets['moderator']['perms'], true)
+      && !userLegacyDefault('comment.reply')
+      && str_contains($src('includes/schema.php'), "schemaGrantOnce(\$db, 'v88_replies', [\n        'member'    => ['comment.reply'],\n        'moderator' => ['comment.reply'],\n    ]);")
+      && str_contains($src('assets/js/admin-shout.js'), "ids: ['comment.view', 'comment.post', 'comment.reply', 'comment.edit_own', 'comment.delete_own', 'comment.moderate'] },"));
 
 /* ══ 4. the renderer: the allow-list against hostile input ═════════════════ */
 /** Every element and attribute of an HTML fragment, read back through a DOM. */
@@ -599,8 +671,13 @@ check('an author who hid their profile from this reader: named, not linked', ($l
       && ($ld['body']['rows'][0]['profile'] ?? true) === false);
 $db->prepare("DELETE FROM user_blocks WHERE user_id = ? AND blocked_id = ?")->execute([$aliceId, $daveId]);
 check('a reader who may not read comments is told only that there are some (the Info panel\'s answer), a reader who may, the count',
-      commentPanelInfo($db, $cfgOn, null, CM_H1) === ['view' => false, 'count' => 8, 'post' => false, 'signed_in' => false]
+      commentPanelInfo($db, $cfgOn, null, CM_H1) === ['view' => false, 'count' => 8, 'post' => false, 'signed_in' => false, 'position' => 'after_files', 'expanded' => false]
       && commentPanelInfo($db, $cfgOn, $u($erinId), CM_H1)['view'] === true);
+$pOther = commentPanelInfo($db, array_merge($cfgOn, ['comments_position' => 'after_rating', 'comments_expanded' => '1']), $u($erinId), CM_H1);
+check('… and (1.72.0) where Settings puts the section and whether it opens unfolded — the panel places it (app.js), the section opens so (comments.js)',
+      ($pOther['position'] ?? '') === 'after_rating' && ($pOther['expanded'] ?? null) === true
+      && str_contains($src('assets/js/app.js'), "if (['after_rating', 'before_files', 'after_files'].includes(json.comments.position)) csAt = json.comments.position;")
+      && str_contains($src('assets/js/comments.js'), 'sec.open = !!info.expanded || target > 0 || !!(opts && opts.open);'));
 check('the Info panel carries the count only (api/index_info.php), the thread is its own request',
       str_contains($src('api/index_info.php'), "'comments'    => function_exists('commentPanelInfo') ? commentPanelInfo(\$db, \$cfg, \$me, \$hash) : null,"));
 $me = commentListRequest($db, $cfgOn, $u($aliceId), ['hash' => CM_H1])['body']['me'] ?? [];
@@ -696,7 +773,8 @@ check('… a mention always is', count($byUser($daveId)) === 1 && $byUser($daveI
 $db->exec("UPDATE user_notifications SET read_at = NOW() WHERE user_id IN ($bobId, $carolId, $daveId, $erinId) AND read_at IS NULL");
 // preferences
 $pr = commentPrefsRequest($db, $cfgOn, $u($erinId), ['csrf_token' => $T, 'mention' => 0], true);
-check('the account\'s switches: saved one at a time, the rest left as they were', $pr['status'] === 200 && $pr['body']['prefs'] === ['mine' => true, 'desc' => true, 'thread' => true, 'mention' => false]
+check('the account\'s switches: saved one at a time, the rest left as they were (1.72.0: five — the reply\'s the fifth)',
+      $pr['status'] === 200 && $pr['body']['prefs'] === ['mine' => true, 'desc' => true, 'thread' => true, 'mention' => false, 'reply' => true]
       && (int)$u($erinId)['comment_notify'] === (COMMENT_NOTIFY_ALL & ~COMMENT_NOTIFY_MENTION));
 check('… need the token and an account', commentPrefsRequest($db, $cfgOn, $u($erinId), ['csrf_token' => 'x', 'mention' => 1], true)['status'] === 403
       && commentPrefsRequest($db, $cfgOn, null, [], false)['status'] === 401
@@ -737,7 +815,8 @@ $post($u($aliceId), 'Pulse: @cmtest_erin');
 $db->exec("UPDATE users SET language = NULL WHERE id = $erinId");
 $post($u($daveId), 'Pulse, a thread comment.');
 $c = commentUnreadCounts($db, $erinId);
-check('the pulse\'s two counts: the comment notifications waiting, and of them the mentions', $c === ['comment' => 2, 'comment_mention' => 1], json_encode($c));
+check('the pulse\'s counts: the comment notifications waiting, and of them the mentions (and, 1.72.0, the replies: none here)',
+      $c === ['comment' => 2, 'comment_mention' => 1, 'comment_reply' => 0], json_encode($c));
 // A kind switched off silences THAT kind only: erin, in the thread now, switches mentions off and is named —
 // told as somebody in the thread, not as mentioned, and not left out.
 $db->exec("UPDATE user_notifications SET read_at = NOW() WHERE user_id = $erinId AND read_at IS NULL");
@@ -752,14 +831,20 @@ check('api/user_pulse.php and api/user_me.php carry them while comments are on',
       str_contains($src('api/user_pulse.php'), "\$out['unread_comment'] = \$cc['comment'];") && str_contains($src('api/user_pulse.php'), "\$out['unread_comment_mention'] = \$cc['comment_mention'];")
       && str_contains($src('api/user_me.php'), "\$out['unread_comment'] = \$cc['comment'];"));
 $kinds = soundEventKinds($cfgOn);
-check('two NEW sound kinds, comment and comment_mention, only while comments are on',
-      array_slice($kinds, -2) === ['comment', 'comment_mention'] && !in_array('comment', soundEventKinds(array_merge($cfgOn, ['comments_enabled' => '0'])), true));
+check('the comments\' sound kinds — comment and comment_mention, and (1.72.0) comment_reply — only while comments are on',
+      array_slice($kinds, -3) === ['comment', 'comment_mention', 'comment_reply']
+      && !array_intersect(['comment', 'comment_mention', 'comment_reply'], soundEventKinds(array_merge($cfgOn, ['comments_enabled' => '0']))));
 $sjs = $src('assets/js/sounds.js');
-check('sounds.js maps them, and takes the comment notifications out of the plain notification\'s count (one comment, one sound)',
-      str_contains($sjs, "unread_comment_other: 'comment', unread_comment_mention: 'comment_mention' };")
-      && str_contains($sjs, 'c.unread = Math.max(0, (Number(c.unread) || 0) - total);'));
-check('the account\'s Sounds tab and Settings → Sounds have words for both', langHas('account.snd_ev_comment') && langHas('account.snd_ev_comment_mention')
-      && langHas('settings.sounds_default_comment') && langHas('settings.sounds_ev_comment_mention'));
+check('sounds.js maps them, and takes the comment notifications out of the plain notification\'s count (one comment, one sound) — the replies out of the comment\'s',
+      str_contains($sjs, "unread_comment_other: 'comment', unread_comment_mention: 'comment_mention', unread_comment_reply: 'comment_reply' };")
+      && str_contains($sjs, 'c.unread = Math.max(0, (Number(c.unread) || 0) - total);')
+      && str_contains($sjs, 'c.unread_comment_other = Math.max(0, total - named - answered);'));
+check('the account\'s Sounds tab and Settings → Sounds have words for all three', langHas('account.snd_ev_comment') && langHas('account.snd_ev_comment_mention')
+      && langHas('settings.sounds_default_comment') && langHas('settings.sounds_ev_comment_mention')
+      && langHas('account.snd_ev_comment_reply') && langHas('settings.sounds_default_comment_reply') && langHas('settings.sounds_ev_comment_reply')
+      && str_contains($tpl, 'name="sound_default_comment_reply"')
+      && str_contains($src('api/user_pulse.php'), "\$out['unread_comment_reply'] = \$cc['comment_reply'];")
+      && str_contains($src('api/user_me.php'), "\$out['unread_comment_reply'] = \$cc['comment_reply'];"));
 check('a notification\'s link is only ever a site-relative address: anything else is dropped',
       str_contains($src('includes/users.php'), "function userNotify(PDO \$db, int \$userId, string \$type, string \$title, string \$body = '', ?string \$link = null): void {")
       && (bool)preg_match('/^\?action=/', commentLink(CM_H1, 5)));
@@ -845,6 +930,269 @@ check('comment_list as a request: the newest page with that comment last, and th
       !empty($j3['success']) && (end($j3['rows'])['html'] ?? '') === '<strong>From the endpoint</strong> [img]x[/img]' && ($j3['me']['can_post'] ?? false) === true, json_encode(array_keys($j3)));
 $j4 = $runPost('comment_delete', ['csrf_token' => 'cm-child-token', 'id' => (int)($j['comment']['id'] ?? 0)], $sess);
 check('comment_delete as a request: your own, taken back', !empty($j4['success']) && ($j4['right'] ?? '') === 'own', json_encode($j4));
+
+/* ══ 13. replies (1.72.0) ═════════════════════════════════════════════════ */
+// A torrent and people of their own: nothing above is touched.
+$rpA = cmUser($db, $cfgOn, 'cmtest_rp_a');     // writes the thread's comment
+$rpB = cmUser($db, $cfgOn, 'cmtest_rp_b');     // replies
+$rpC = cmUser($db, $cfgOn, 'cmtest_rp_c');     // replies to the reply
+$rpX = cmUser($db, $cfgOn, 'cmtest_rp_x');     // leaves the site
+$rpM = cmUser($db, $cfgOn, 'cmtest_rp_mod');   // a moderator
+userGrantGroup($db, $rpM, $modGid, null, 'comments_test', '', false);
+userPermissionsForget($rpM);
+$db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status) VALUES (?, 'Replies test torrent', 'done')")->execute([CM_H3]);
+$db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status) VALUES (?, 'Another test torrent', 'done')")->execute([CM_H4]);
+$rp = function (?array $me, string $body, $parent, ?array $cfgX = null, string $hash = CM_H3, array $opts = [], string $ip = '127.0.0.46', array $extra = []) use ($post): array {
+    return $post($me, $body, $cfgX, $opts, $hash, $ip, ['parent' => $parent] + $extra);
+};
+$hc = fn(string $h): int => (int)$db->query("SELECT COUNT(*) FROM hash_comments WHERE info_hash = '" . $h . "'")->fetchColumn();
+$threadOf = function (array $l, int $top): array {
+    foreach ($l['body']['rows'] ?? [] as $x) if ((int)$x['id'] === $top) return $x['thread'] ?? [];
+    return [];
+};
+$idsOf = fn(array $th): array => array_map('intval', array_column($th['rows'] ?? [], 'id'));
+$rowIn = function (array $th, int $id): ?array { foreach ($th['rows'] ?? [] as $x) if ((int)$x['id'] === $id) return $x; return null; };
+$markRead = function () use ($db, $rpA, $rpB, $rpC, $rpX, $rpM): void {
+    $db->exec("UPDATE user_notifications SET read_at = NOW() WHERE user_id IN ($rpA, $rpB, $rpC, $rpX, $rpM) AND read_at IS NULL");
+};
+
+// ── the tree, to the limit ──
+$floorR = $noteFloor();
+$r = $post($u($rpA), 'The thread starts here.', null, [], CM_H3);
+$top = (int)($r['body']['comment']['id'] ?? 0);
+check('replies: a top-level comment has no parent, no thread, depth 0 — and may be answered',
+      $r['status'] === 200 && $top > 0 && $r['body']['comment']['parent'] === null && $r['body']['comment']['root'] === null
+      && $r['body']['comment']['depth'] === 0 && $r['body']['comment']['can_reply'] === true && $r['body']['comment']['tomb'] === '', json_encode($r['body']));
+$r1 = $rp($u($rpB), 'A reply, one level down.', $top);
+$id1 = (int)($r1['body']['comment']['id'] ?? 0);
+$row1 = commentRow($db, $id1);
+check('a reply: 200, stored under its parent, in its thread, one level down — and answered as the thread will draw it',
+      $r1['status'] === 200 && $id1 > 0 && (int)$row1['parent_id'] === $top && (int)$row1['root_id'] === $top && (int)$row1['depth'] === 1
+      && $r1['body']['comment']['parent'] === $top && $r1['body']['comment']['root'] === $top && $r1['body']['comment']['depth'] === 1
+      && $r1['body']['message'] === __('api.comment.posted') && $r1['body']['count'] === 2, json_encode($r1['body']));
+$r2 = $rp($u($rpC), 'A reply to the reply.', $id1);
+$id2 = (int)($r2['body']['comment']['id'] ?? 0);
+$r3 = $rp($u($rpA), 'And one more: level three, as deep as the shipped setting goes.', (string)$id2);
+$id3 = (int)($r3['body']['comment']['id'] ?? 0);
+check('… to a reply: level 2, the same thread; and level 3 (the parent given as text, as a form sends it) — the deepest the shipped setting allows',
+      $r2['status'] === 200 && $r3['status'] === 200 && (int)commentRow($db, $id2)['depth'] === 2 && (int)commentRow($db, $id2)['root_id'] === $top
+      && (int)commentRow($db, $id3)['depth'] === 3 && (int)commentRow($db, $id3)['parent_id'] === $id2 && (int)commentRow($db, $id3)['root_id'] === $top);
+$n0 = $hc(CM_H3);
+$r4 = $rp($u($rpB), 'Deeper than the setting.', $id3);
+check('the SERVER refuses a reply past the setting — 409 too_deep, saying the limit; nothing written (the Reply button is not the gate)',
+      $r4['status'] === 409 && ($r4['body']['error'] ?? '') === 'too_deep' && str_contains((string)$r4['body']['message'], '3') && $hc(CM_H3) === $n0, json_encode($r4['body']));
+$l = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3]);
+$th = $threadOf($l, $top);
+check('the page: the top-level comment, its replies WITH it — oldest first, each with its parent, thread and depth; the count is every comment, replies included',
+      $l['status'] === 200 && array_map('intval', array_column($l['body']['rows'], 'id')) === [$top] && $idsOf($th) === [$id1, $id2, $id3]
+      && ($th['more'] ?? -1) === 0 && ($th['last'] ?? 0) === $id3 && $l['body']['count'] === 4 && $l['body']['reply_depth'] === 3
+      && ($rowIn($th, $id2)['parent'] ?? 0) === $id1 && ($rowIn($th, $id2)['depth'] ?? 0) === 2, json_encode($l['body']['rows']));
+check('… no Reply on the level-3 reply (the limit), Reply on every other; the composer is told replies are on, and how deep',
+      ($rowIn($th, $id3)['can_reply'] ?? true) === false && ($rowIn($th, $id2)['can_reply'] ?? false) === true && ($rowIn($th, $id1)['can_reply'] ?? false) === true
+      && ($l['body']['rows'][0]['can_reply'] ?? false) === true && ($l['body']['me']['reply'] ?? null) === true && ($l['body']['me']['reply_depth'] ?? null) === 3);
+// who was told
+$nA = $notes($rpA, $floorR); $nB = $notes($rpB, $floorR); $nC = $notes($rpC, $floorR);
+$replyNotes = fn(array $ns): array => array_values(array_filter($ns, fn($x) => $x['type'] === 'comment_reply'));
+check('a reply tells the author of the comment it answers: comment_reply, who and where, the words, the link to the REPLY',
+      count($replyNotes($nA)) === 1 && $replyNotes($nA)[0]['link'] === commentLink(CM_H3, $id1)
+      && $replyNotes($nA)[0]['title'] === 'cmtest_rp_b replied to your comment on "Replies test torrent"' && $replyNotes($nA)[0]['body'] === '“A reply, one level down.”'
+      && count($replyNotes($nB)) === 1 && $replyNotes($nB)[0]['link'] === commentLink(CM_H3, $id2)
+      && count($replyNotes($nC)) === 1 && $replyNotes($nC)[0]['link'] === commentLink(CM_H3, $id3), json_encode([$nA, $nB, $nC]));
+check('… and never the replier: A answered C — A is told nothing of their own reply', !array_filter($nA, fn($x) => str_ends_with((string)$x['link'], '#comment-' . $id3)));
+check('the pulse counts the replies apart (of the comment notifications): a sound of their own', commentUnreadCounts($db, $rpA)['comment_reply'] === 1
+      && commentUnreadCounts($db, $rpA)['comment'] === count($nA));
+$markRead();
+$f = $noteFloor();
+$rp($u($rpA), 'Answering my own comment.', $top);
+check('replying to your own comment tells you nothing', $notes($rpA, $f) === []);
+$f = $noteFloor();
+$rp($u($rpB), 'Hello @cmtest_rp_a, a reply that also names you.', $top);
+check('a reply that also @-names its parent\'s author is ONE notification to them — the reply\'s', count($notes($rpA, $f)) === 1 && $notes($rpA, $f)[0]['type'] === 'comment_reply',
+      json_encode($notes($rpA, $f)));
+$markRead();
+// blocks, either way
+$db->prepare("INSERT INTO user_blocks (user_id, blocked_id, hide_profile) VALUES (?, ?, 0)")->execute([$rpA, $rpC]);
+$f = $noteFloor();
+$rp($u($rpC), 'From somebody A blocked.', $top);
+check('a reply from somebody the parent\'s author BLOCKED tells them nothing — not as a reply, not as their thread', $notes($rpA, $f) === []);
+$db->prepare("DELETE FROM user_blocks WHERE user_id = ? AND blocked_id = ?")->execute([$rpA, $rpC]);
+$db->prepare("INSERT INTO user_blocks (user_id, blocked_id, hide_profile) VALUES (?, ?, 0)")->execute([$rpC, $rpA]);
+$markRead();
+$f = $noteFloor();
+$rp($u($rpC), 'From somebody who blocked A.', $top);
+check('… nor one from somebody who blocked THEM', $notes($rpA, $f) === []);
+$db->prepare("DELETE FROM user_blocks WHERE user_id = ? AND blocked_id = ?")->execute([$rpC, $rpA]);
+// the fifth switch
+$markRead();
+$pr = commentPrefsRequest($db, $cfgOn, $u($rpA), ['csrf_token' => $T, 'reply' => 0], true);
+$f = $noteFloor();
+$rp($u($rpB), 'Replies switched off by A.', $top);
+check('"…that replies to one of my comments" switched off (bit 16): not told as a reply — as the thread they are in, as the other switches allow',
+      $pr['status'] === 200 && ($pr['body']['prefs']['reply'] ?? true) === false && (int)$u($rpA)['comment_notify'] === (COMMENT_NOTIFY_ALL & ~COMMENT_NOTIFY_REPLY)
+      && count($notes($rpA, $f)) === 1 && $notes($rpA, $f)[0]['type'] === 'comment', json_encode($notes($rpA, $f)));
+commentPrefsRequest($db, $cfgOn, $u($rpA), ['csrf_token' => $T, 'reply' => 1], true);
+$markRead();
+
+// ── the refusals, in their order ──
+$r = $rp($u($rpB), 'x', $top, null, CM_H4);
+check('a parent from another torrent: 404 parent_gone', $r['status'] === 404 && ($r['body']['error'] ?? '') === 'parent_gone');
+$r = $rp($u($rpB), 'x', 999999999);
+$r2x = $rp($u($rpB), 'x', 'abc');
+check('a parent that is no comment: 404 parent_gone; one that is not a number: 400', $r['status'] === 404 && ($r['body']['error'] ?? '') === 'parent_gone'
+      && $r2x['status'] === 400 && ($r2x['body']['error'] ?? '') === 'parent_gone');
+$r = $rp($u($rpB), 'x', $top, array_merge($cfgOn, ['comments_reply_depth' => '0']));
+check('replies switched off (depth 0): 403 replies_off', $r['status'] === 403 && ($r['body']['error'] ?? '') === 'replies_off');
+$db->prepare("INSERT INTO user_groups (slug, name, description, priority, is_default, is_system, permissions) VALUES ('cmtest_noreply', 'cmtest noreply', 'comments_test', 2, 0, 0, ?)")
+   ->execute([json_encode(['index.view' => true, 'whitelist.view' => true, 'comment.view' => true, 'comment.post' => true])]);
+$noReplyGid = (int)$db->lastInsertId();
+$rpN = cmUser($db, $cfgOn, 'cmtest_rp_n');
+userRevokeGroup($db, $rpN, $memberGid, false);
+userGrantGroup($db, $rpN, $noReplyGid, null, 'comments_test', '', false);
+userPermissionsForget($rpN);
+$r = $rp($u($rpN), 'x', $top);
+$ln = commentListRequest($db, $cfgOn, $u($rpN), ['hash' => CM_H3]);
+check('an account that may comment but not reply (no comment.reply): 403 no_reply — a comment of its own still goes; no Reply button anywhere for it',
+      $r['status'] === 403 && ($r['body']['error'] ?? '') === 'no_reply' && $post($u($rpN), 'A comment is fine.', null, [], CM_H3)['status'] === 200
+      && ($ln['body']['me']['reply'] ?? true) === false && !array_filter($ln['body']['rows'] ?? [], fn($x) => $x['can_reply'])
+      && !array_filter($threadOf($ln, $top)['rows'] ?? [], fn($x) => $x['can_reply']), json_encode($r['body']));
+$db->prepare("DELETE FROM hash_comments WHERE user_id = ?")->execute([$rpN]);
+$db->prepare("UPDATE users SET pm_muted_until = NOW() + INTERVAL 1 DAY WHERE id = ?")->execute([$rpC]);
+$r = $rp($u($rpC), 'x', $top);
+check('silenced: 403 muted — what writing asks comes before what a reply asks', $r['status'] === 403 && ($r['body']['error'] ?? '') === 'muted');
+$db->prepare("UPDATE users SET pm_muted_until = NULL WHERE id = ?")->execute([$rpC]);
+
+// ── a guest's reply: every guest rule ──
+$gp = json_decode($guestBefore, true) ?: [];
+$db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'guest'")
+   ->execute([json_encode($gp + ['index.view' => true, 'comment.view' => true, 'comment.post' => true], JSON_UNESCAPED_SLASHES)]);
+userPermissionsForget(0);
+$r = $rp(null, 'A guest answers.', $top, $cfgCaptcha, CM_H3, $verify, CM_GUEST_IP, ['captcha_token' => 'good-token']);
+check('a guest group that may comment but was not granted comment.reply: 403 no_reply', $r['status'] === 403 && ($r['body']['error'] ?? '') === 'no_reply', json_encode($r['body']));
+$db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'guest'")
+   ->execute([json_encode($gp + ['index.view' => true, 'comment.view' => true, 'comment.post' => true, 'comment.reply' => true], JSON_UNESCAPED_SLASHES)]);
+userPermissionsForget(0);
+$r = $rp(null, 'A guest answers.', $top, $cfgCaptcha, CM_H3, $verify, CM_GUEST_IP);
+check('granted: a guest\'s reply asks for a CAPTCHA first (428), every time', $r['status'] === 428 && ($r['body']['error'] ?? '') === 'captcha_required');
+$r = $rp(null, 'See [url]https://example.org[/url]', $top, $cfgCaptcha, CM_H3, $verify, CM_GUEST_IP, ['captcha_token' => 'good-token']);
+check('… no links, whatever the setting', $r['status'] === 400 && ($r['body']['error'] ?? '') === 'no_links');
+$f = $noteFloor();
+$r = $rp(null, 'A guest answers.', $top, $cfgCaptcha, CM_H3, $verify, CM_GUEST_IP, ['captcha_token' => 'good-token']);
+$gid = (int)($r['body']['comment']['id'] ?? 0);
+$grow = commentRow($db, $gid);
+check('… solved: signed "Guest #tag", no account, one level under what it answers, HELD for a moderator — and nobody told yet',
+      $r['status'] === 200 && !empty($r['body']['pending']) && $grow && $grow['status'] === 'pending' && $grow['user_id'] === null
+      && $grow['guest_tag'] === commentGuestTag(CM_GUEST_IP, $cfgCaptcha) && (int)$grow['parent_id'] === $top && (int)$grow['depth'] === 1 && $notes($rpA, $f) === [],
+      json_encode($r['body']));
+$r = $rp($u($rpB), 'Answering a held one.', $gid);
+check('a held guest comment cannot be answered until it is let through: 409 parent_pending', $r['status'] === 409 && ($r['body']['error'] ?? '') === 'parent_pending');
+$lm = commentListRequest($db, $cfgOn, $u($rpM), ['hash' => CM_H3]);
+$lb = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3]);
+check('… a moderator\'s thread shows it in its place, with no Reply; a member\'s does not show it at all',
+      ($rowIn($threadOf($lm, $top), $gid)['status'] ?? '') === 'pending' && ($rowIn($threadOf($lm, $top), $gid)['can_reply'] ?? true) === false
+      && $rowIn($threadOf($lb, $top), $gid) === null);
+$ap = commentApproveRequest($db, $cfgOn, $u($rpM), ['csrf_token' => $T, 'id' => $gid]);
+$told = $notes($rpA, $f);
+check('let through: now the parent\'s author is told, as "A guest"', $ap['status'] === 200 && count($replyNotes($told)) === 1
+      && str_starts_with((string)$replyNotes($told)[0]['title'], 'A guest replied to your comment on') && $replyNotes($told)[0]['link'] === commentLink(CM_H3, $gid), json_encode($told));
+$db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'guest'")->execute([$guestBefore]);
+userPermissionsForget(0);
+$markRead();
+
+// ── the depth lowered: old replies stay, new ones are refused ──
+$cfg1 = array_merge($cfgOn, ['comments_reply_depth' => '1']);
+$l1 = commentListRequest($db, $cfg1, $u($rpB), ['hash' => CM_H3]);
+$th1 = $threadOf($l1, $top);
+check('lowered to 1: the replies written deeper STAY on the page (the page draws them at the deepest level allowed) — none can be answered now, the comment still can',
+      in_array($id2, $idsOf($th1), true) && in_array($id3, $idsOf($th1), true) && $l1['body']['reply_depth'] === 1
+      && ($rowIn($th1, $id1)['can_reply'] ?? true) === false && ($rowIn($th1, $id2)['can_reply'] ?? true) === false && ($l1['body']['rows'][0]['can_reply'] ?? false) === true);
+$r = $rp($u($rpC), 'Under a level-1 reply, with the depth at 1.', $id1, $cfg1);
+$rOk = $rp($u($rpC), 'Under the comment itself, with the depth at 1.', $top, $cfg1);
+check('… only NEW ones are refused: a reply to a level-1 one is too deep now (409), a reply to the comment is not',
+      $r['status'] === 409 && ($r['body']['error'] ?? '') === 'too_deep' && $rOk['status'] === 200 && (int)commentRow($db, (int)$rOk['body']['comment']['id'])['depth'] === 1);
+$cfg0 = array_merge($cfgOn, ['comments_reply_depth' => '0']);
+$l0 = commentListRequest($db, $cfg0, $u($rpB), ['hash' => CM_H3]);
+check('… at 0 (replies off) the thread still shows every reply written (flat, the page says whom each answers), and nothing can be answered',
+      in_array($id3, $idsOf($threadOf($l0, $top)), true) && $l0['body']['reply_depth'] === 0 && ($l0['body']['me']['reply'] ?? true) === false
+      && !array_filter($l0['body']['rows'], fn($x) => $x['can_reply']) && !array_filter($threadOf($l0, $top)['rows'], fn($x) => $x['can_reply']));
+
+// ── tombstones ──
+$cBefore = commentCount($db, CM_H3);
+$d = commentDeleteRequest($db, $cfgOn, $u($rpB), ['csrf_token' => $T, 'id' => $id1]);
+$lt = commentListRequest($db, $cfgOn, $u($rpC), ['hash' => CM_H3]);
+$tomb = $rowIn($threadOf($lt, $top), $id1);
+check('a comment WITH replies taken back by its author keeps its place: "[deleted]" (tomb deleted) — no author, no words, no time, nothing to do; its replies under it',
+      $d['status'] === 200 && ($d['body']['tomb'] ?? '') === 'deleted' && $tomb !== null && $tomb['tomb'] === 'deleted' && $tomb['user'] === '' && $tomb['html'] === ''
+      && $tomb['time'] === '' && $tomb['guest'] === false && $tomb['can_reply'] === false && $tomb['can_report'] === false && $tomb['can_delete'] === null
+      && in_array($id2, $idsOf($threadOf($lt, $top)), true) && in_array($id3, $idsOf($threadOf($lt, $top)), true), json_encode([$d['body'], $tomb]));
+check('… it is counted no more (the count is the visible comments), and a reply to it is refused: 409 parent_gone',
+      $d['body']['count'] === $cBefore - 1 && $lt['body']['count'] === $cBefore - 1
+      && ($rp($u($rpC), 'To a tombstone.', $id1)['body']['error'] ?? '') === 'parent_gone', json_encode([$cBefore, $d['body']['count'], $lt['body']['count']]));
+$d2 = commentDeleteRequest($db, $cfgOn, $u($rpC), ['csrf_token' => $T, 'id' => $id2]);
+$d3 = commentDeleteRequest($db, $cfgOn, $u($rpA), ['csrf_token' => $T, 'id' => $id3]);
+$lt = commentListRequest($db, $cfgOn, $u($rpC), ['hash' => CM_H3]);
+check('the replies under it taken back too: the last one simply goes (tomb \'\'), and so do the tombstones that had nothing else under them',
+      ($d2['body']['tomb'] ?? '') === 'deleted' && ($d3['body']['tomb'] ?? 'x') === '' && !array_intersect([$id1, $id2, $id3], $idsOf($threadOf($lt, $top))),
+      json_encode([$d2['body'], $d3['body'], $idsOf($threadOf($lt, $top))]));
+$rT = $post($u($rpC), 'A comment a moderator will remove.', null, [], CM_H3);
+$t2 = (int)$rT['body']['comment']['id'];
+$t2r = (int)($rp($u($rpB), 'A reply under it.', $t2)['body']['comment']['id'] ?? 0);
+$dm = commentDeleteRequest($db, $cfgOn, $u($rpM), ['csrf_token' => $T, 'id' => $t2, 'reason' => 'Off topic']);
+$lt = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3]);
+$tops = []; foreach ($lt['body']['rows'] as $x) $tops[(int)$x['id']] = $x;
+check('a TOP-LEVEL comment removed by a moderator (with a reason) while answered: "[removed by a moderator]" (tomb removed) in its place on the page, its thread under it',
+      ($dm['body']['tomb'] ?? '') === 'removed' && ($tops[$t2]['tomb'] ?? '') === 'removed' && ($tops[$t2]['user'] ?? 'x') === '' && ($tops[$t2]['html'] ?? 'x') === ''
+      && $idsOf($tops[$t2]['thread'] ?? []) === [$t2r], json_encode([$dm['body'], $tops[$t2] ?? null]));
+check('an author\'s own deletion keeps no reason, even one an API caller sent (what makes a tombstone say "removed by a moderator")',
+      ($own = $post($u($rpB), 'Mine, to delete with a reason.', null, [], CM_H3)) && commentDeleteRequest($db, $cfgOn, $u($rpB), ['csrf_token' => $T, 'id' => (int)$own['body']['comment']['id'], 'reason' => 'mine'])['status'] === 200
+      && commentRow($db, (int)$own['body']['comment']['id'])['delete_reason'] === null);
+
+// ── a page stays bounded, however long a thread is ──
+$t3 = (int)($post($u($rpA), 'A long thread.', null, [], CM_H3)['body']['comment']['id'] ?? 0);
+$long = [];
+for ($i = 1; $i <= 15; $i++) $long[] = (int)($rp($u($i % 2 ? $rpB : $rpC), "Long thread, reply $i", $t3)['body']['comment']['id'] ?? 0);
+$lp = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3]);
+$tl = $threadOf($lp, $t3);
+check('a thread of fifteen replies brings its first ten with the page (COMMENT_REPLIES_FIRST), and says how many more there are',
+      COMMENT_REPLIES_FIRST === 10 && $idsOf($tl) === array_slice($long, 0, 10) && ($tl['more'] ?? 0) === 5 && ($tl['last'] ?? 0) === $long[9], json_encode([$idsOf($tl), $tl['more'] ?? null]));
+$lm2 = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3, 'thread' => $t3, 'after' => $long[9]]);
+check('"Show 5 more replies": the thread\'s next ones (at most COMMENT_REPLIES_MORE), none after them',
+      $lm2['status'] === 200 && ($lm2['body']['thread'] ?? 0) === $t3 && array_map('intval', array_column($lm2['body']['rows'], 'id')) === array_slice($long, 10)
+      && $lm2['body']['more'] === 0 && $lm2['body']['last'] === $long[14] && COMMENT_REPLIES_MORE === 25);
+$lf = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3, 'find' => $long[13]]);
+check('a notification\'s link into the thread (find): the thread brings its replies as far as that one, the rest still "more"',
+      $idsOf($threadOf($lf, $t3)) === array_slice($long, 0, 14) && ($threadOf($lf, $t3)['more'] ?? 0) === 1);
+check('… and a thread that is not a thread (a reply\'s id, another torrent\'s comment): 404',
+      commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3, 'thread' => $long[0]])['status'] === 404
+      && commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H4, 'thread' => $t3])['status'] === 404);
+
+// ── the account going, under other people's replies ──
+$xTop = (int)($post($u($rpX), 'X starts a thread B answers.', null, [], CM_H3)['body']['comment']['id'] ?? 0);
+$xR1 = (int)($rp($u($rpB), 'B answers X.', $xTop)['body']['comment']['id'] ?? 0);
+$xLone = (int)($post($u($rpX), 'X alone.', null, [], CM_H3)['body']['comment']['id'] ?? 0);
+$bTop = (int)($post($u($rpB), 'B starts one X answers.', null, [], CM_H3)['body']['comment']['id'] ?? 0);
+$xRep = (int)($rp($u($rpX), 'X answers B.', $bTop)['body']['comment']['id'] ?? 0);
+$cR = (int)($rp($u($rpC), 'C answers X.', $xRep)['body']['comment']['id'] ?? 0);
+$xTop2 = (int)($post($u($rpX), 'X talks to themself.', null, [], CM_H3)['body']['comment']['id'] ?? 0);
+$xR2 = (int)($rp($u($rpX), 'X again.', $xTop2)['body']['comment']['id'] ?? 0);
+$gone = userDeleteCascade($db, $rpX);
+$xt = commentRow($db, $xTop);
+$xr = commentRow($db, $xRep);
+check('an account going: its comments that OTHER people answered stay as tombstones — deleted, no words, no author, no tag, no address',
+      ($gone['comment_tombstones'] ?? 0) === 2 && $xt && $xt['status'] === 'deleted' && $xt['body'] === '' && $xt['user_id'] === null && $xt['guest_tag'] === null
+      && $xt['ip_bucket'] === null && $xr && $xr['status'] === 'deleted' && $xr['body'] === '' && $xr['user_id'] === null && $xr['delete_reason'] === null, json_encode([$gone, $xt, $xr]));
+check('… the rest go as before (the lone one, and a thread only its own replies answered)', ($gone['comments'] ?? 0) === 3
+      && commentRow($db, $xLone) === null && commentRow($db, $xTop2) === null && commentRow($db, $xR2) === null);
+$lx = commentListRequest($db, $cfgOn, $u($rpB), ['hash' => CM_H3]);
+$txs = []; foreach ($lx['body']['rows'] as $x) $txs[(int)$x['id']] = $x;
+check('… and the replies of others survive in their place: B\'s under X\'s tombstone ("[deleted]"), C\'s under X\'s tombstoned reply',
+      ($txs[$xTop]['tomb'] ?? '') === 'deleted' && $idsOf($txs[$xTop]['thread'] ?? []) === [$xR1] && (int)commentRow($db, $xR1)['parent_id'] === $xTop
+      && ($rowIn($txs[$bTop]['thread'] ?? [], $xRep)['tomb'] ?? '') === 'deleted' && $rowIn($txs[$bTop]['thread'] ?? [], $cR) !== null,
+      json_encode([$txs[$xTop] ?? null, $txs[$bTop] ?? null]));
+
+// ── the endpoint, as a request: a reply through the file, its parent as a form sends it ──
+$jr = $runPost('comment_post', ['csrf_token' => 'cm-child-token', 'hash' => CM_H3, 'body' => 'A reply through the endpoint', 'parent' => (string)$t3], $sess);
+check('comment_post as a request, with a parent: a reply, one level down', !empty($jr['success']) && ($jr['comment']['parent'] ?? 0) === $t3 && ($jr['comment']['depth'] ?? 0) === 1,
+      json_encode($jr));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

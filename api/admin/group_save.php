@@ -21,7 +21,16 @@ $perms = [];
 foreach ((array)($input['permissions'] ?? []) as $k => $v) {
     if (isset($known[$k]) && $v) $perms[$k] = true;
 }
-$permJson = json_encode($perms, JSON_UNESCAPED_SLASHES);
+// The Admin group keeps every capability (1.72.0): its members pass every check by the blanket whatever is stored,
+// the editor draws those boxes ticked and disabled, and the stored list is what the matrix shows — so a save that
+// arrived without one (an old page, a hand-made request) does not make the matrix lie again. Its CONSENT boxes are
+// real choices and are taken as sent (userConsentPermissions()).
+$keepCaps = function (string $slug, array $perms): array {
+    if ($slug !== 'admin') return $perms;
+    foreach (userCapabilityPermissions() as $p) $perms[$p] = true;
+    return $perms;
+};
+$permJson = json_encode($keepCaps($slug, $perms), JSON_UNESCAPED_SLASHES);
 
 try {
     if ($id > 0) {
@@ -30,6 +39,7 @@ try {
         $cur = $st->fetch(PDO::FETCH_ASSOC);
         if (!$cur) jsonResponse(['error' => __('api.groups.not_found')], 404);
         if ((int)$cur['is_system'] === 1) $slug = $cur['slug'];   // guest/member keep their identity
+        $permJson = json_encode($keepCaps($slug, $perms), JSON_UNESCAPED_SLASHES);
         $db->prepare("UPDATE user_groups SET slug = ?, name = ?, description = ?, color = ?, priority = ?, is_default = ?, permissions = ? WHERE id = ?")
            ->execute([$slug, $name, $desc, $color, $priority, $isDefault, $permJson, $id]);
     } else {

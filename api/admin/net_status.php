@@ -85,8 +85,11 @@ $out['auto_state'] = ['over' => (int)($state['auto']['over'] ?? 0), 'under' => (
                       'note' => (string)($state['auto']['note'] ?? ''),
                       'hysteresis' => NET_AUTO_HYSTERESIS];
 if ((int)($state['last_apply_at'] ?? 0) > 0) {
+    // `words`: who loaded it, as the owner reads it ("when the IP lists were switched off — the janitor
+    // loaded the same limit without them"), not the code ("lists-off"); an unknown code is itself.
+    $src = (string)($state['last_apply_source'] ?? '');
     $out['last_apply'] = ['at' => (int)$state['last_apply_at'], 'pps' => (int)($state['last_apply_pps'] ?? 0),
-                          'source' => (string)($state['last_apply_source'] ?? '')];
+                          'source' => $src, 'words' => netlimitSourceWords($src)];
 }
 // Applied but not yet written to /etc: php-fpm's mount namespace makes /etc read-only, so the
 // janitor saves it on its next tick. The card has to say so — until then a reboot undoes the
@@ -121,10 +124,20 @@ try {
     $passedNow = (int)(($out['live']['pps']['in_passed'] ?? 0));
     $rec['text'] = netlimitRecommendText($rec, $flood, $passedNow);
     $rec['flood'] = $flood;
+    // A bucket too small for the limit (includes/netlimit.php netlimitBurstHintFrom()): the last hour
+    // against the burst the firewall reports, or the saved one while it has not answered.
+    // Its own try: a failure here must not take the recommendation with it.
+    try { $rec['burst_hint'] = netlimitBurstHint($db, $cfg, $now, isset($fw['burst']) && is_numeric($fw['burst']) ? (int)$fw['burst'] : null); }
+    catch (\Throwable $e) { $rec['burst_hint'] = null; }
     $out['recommend'] = $rec;
 } catch (\Throwable $e) {
     $out['recommend'] = null;
     $out['recommend_error'] = $e->getMessage();
 }
+
+// Handshakes per announce from the statistics timeline: the last hour and the last day, each left out
+// when the tracker restarted inside it (includes/netlimit.php netlimitHandshakes()).
+try { $out['handshakes'] = netlimitHandshakes($db, $cfg, $now); }
+catch (\Throwable $e) { $out['handshakes'] = null; }
 
 jsonResponse($out);

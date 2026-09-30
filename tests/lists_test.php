@@ -35,6 +35,8 @@ require_once $root . '/includes/shout.php';
 require_once $root . '/includes/people.php';
 require_once $root . '/includes/lang.php';
 require_once $root . '/includes/settings_catalog.php';
+// 1.72.0 B: the three answers' icons, through the site's map.
+require_once $root . '/includes/icons.php';
 
 $fails = 0; $n = 0;
 function check(string $name, bool $ok, string $info = ''): void {
@@ -103,7 +105,7 @@ $db->prepare("INSERT INTO user_group_members (user_id, group_id, granted_at) VAL
 
 $HASH = str_repeat('5c', 20);
 $db->prepare("DELETE FROM user_lists WHERE user_id = ?")->execute([$uid]);
-$db->prepare("INSERT INTO user_lists (user_id, name, slug, is_public) VALUES (?, 'Public pack', 'public-pack', 1)")->execute([$uid]);
+$db->prepare("INSERT INTO user_lists (user_id, name, slug, visibility) VALUES (?, 'Public pack', 'public-pack', 'public')")->execute([$uid]);
 $lid = (int)$db->lastInsertId();
 $db->prepare("INSERT INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, 'Fixture')")->execute([$lid, $HASH]);
 
@@ -134,10 +136,12 @@ $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
 $db->prepare("UPDATE users SET lists_public = 0 WHERE id = ?")->execute([$uid]);
 check('the owner hiding the section takes the list off the hash', listsContainingHash($db, $cfgOn, $HASH) === []);
 $db->prepare("UPDATE users SET lists_public = 1 WHERE id = ?")->execute([$uid]);
-// (5) the list's own flag
-$db->prepare("UPDATE user_lists SET is_public = 0 WHERE id = ?")->execute([$lid]);
+// (5) the list's own answer (1.72.0: its visibility — private, friends, public)
+$db->prepare("UPDATE user_lists SET visibility = 'private' WHERE id = ?")->execute([$lid]);
 check('a private list is not on the hash either', listsContainingHash($db, $cfgOn, $HASH) === []);
-$db->prepare("UPDATE user_lists SET is_public = 1 WHERE id = ?")->execute([$lid]);
+$db->prepare("UPDATE user_lists SET visibility = 'friends' WHERE id = ?")->execute([$lid]);
+check('… nor one shared with friends, for a reader who is nobody\'s friend (viewer 0)', listsContainingHash($db, $cfgOn, $HASH) === []);
+$db->prepare("UPDATE user_lists SET visibility = 'public' WHERE id = ?")->execute([$lid]);
 check('and putting the last answer back puts it there again',
     $named(listsContainingHash($db, $cfgOn, $HASH)) === 'Public pack');
 // a suspended account is nobody's public list
@@ -263,6 +267,8 @@ try {
           count($again) === 2 && str_contains($again[0], 'MODIFY COLUMN') && str_contains($again[1], 'ADD COLUMN'), json_encode($again));
     foreach ($again as $s) $db->exec($s);
     check('… and once the column is there, nothing', schemaListDescMigration($db, $oldT) === []);
+    // 1.72.0: the rest of the way to today — v87's visibility, walked on its own in §16 — before the shapes are compared.
+    foreach (schemaListVisibilityMigration($db, $oldT) as $s) $db->exec($s);
     $colsOf = static function (PDO $db, string $t): array {
         $o = [];
         foreach ($db->query("SHOW COLUMNS FROM `$t`")->fetchAll(PDO::FETCH_ASSOC) as $c) {
@@ -273,16 +279,17 @@ try {
     };
     $co = $colsOf($db, $oldT);
     $cn = $colsOf($db, $newT);
-    check('the upgraded table and one made by today\'s CREATE are the same: every column, its type, NULL and default',
+    check('the upgraded table (v80, then v87) and one made by today\'s CREATE are the same: every column, its type, NULL and default',
           $co === $cn, json_encode(['upgraded' => array_diff_assoc($co, $cn), 'fresh' => array_diff_assoc($cn, $co)]));
     $got = [];
-    foreach ($db->query("SELECT name, description, description_format, updated_at FROM `$oldT`")->fetchAll(PDO::FETCH_ASSOC) as $r) $got[$r['name']] = $r;
+    foreach ($db->query("SELECT name, description, description_format, visibility, updated_at FROM `$oldT`")->fetchAll(PDO::FETCH_ASSOC) as $r) $got[$r['name']] = $r;
     $rewrittenOk = true;
     foreach ($plainRows as $k => $v) {
         $rewrittenOk = $rewrittenOk && (string)($got[$k]['description'] ?? '?') === schemaListDescPlainToBbcode($v)
-                     && ($got[$k]['description_format'] ?? '') === 'bbcode' && ($got[$k]['updated_at'] ?? '') === '2020-01-02 03:04:05';
+                     && ($got[$k]['description_format'] ?? '') === 'bbcode' && ($got[$k]['updated_at'] ?? '') === '2020-01-02 03:04:05'
+                     && ($got[$k]['visibility'] ?? '') === 'private';
     }
-    check('every old text is its BBCode-safe rewrite, in the BBCode format, its updated_at untouched', $rewrittenOk, json_encode($got));
+    check('every old text is its BBCode-safe rewrite, in the BBCode format, its updated_at untouched (and, private then, private now)', $rewrittenOk, json_encode($got));
     check('the 500-character text grew past its old column (TEXT first) and kept every character',
           mb_strlen((string)$got['long']['description']) === 666 && str_replace("\u{2060}", '', (string)$got['long']['description']) === $plainRows['long']);
 } catch (\Throwable $e) {
@@ -399,8 +406,8 @@ try {
         }
     }
     $mkList = static function (int $uid, string $name, string $slug, int $public, string $desc = '', string $fmt = 'bbcode') use ($db): int {
-        $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, description_format, is_public) VALUES (?, ?, ?, ?, ?, ?)")
-           ->execute([$uid, $name, $slug, $desc, $fmt, $public]);
+        $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, description_format, visibility) VALUES (?, ?, ?, ?, ?, ?)")
+           ->execute([$uid, $name, $slug, $desc, $fmt, $public ? 'public' : 'private']);
         return (int)$db->lastInsertId();
     };
     $ownerId = $fxIds['listdescowner'];
@@ -507,7 +514,7 @@ try {
           str_contains($listSrc2, "\$op === 'edit' || \$op === 'describe'") && str_contains($listSrc2, "listEditRequest(\$db, \$cfg, \$me, \$own, \$input, \$op === 'edit')")
           && substr_count($listSrc2, 'SET description') === 0 && !str_contains($listSrc2, 'mb_substr(trim((string)($input[\'value\']'));
     check('… whose write is the owner\'s row by id AND owner, and never touches the slug',
-          str_contains($reqSrc, 'UPDATE user_lists SET name = ?, description = ?, description_format = ? WHERE id = ? AND user_id = ?') && !str_contains($reqSrc, 'slug ='));
+          str_contains($reqSrc, 'UPDATE user_lists SET name = ?, description = ?, description_format = ?, visibility = ? WHERE id = ? AND user_id = ?') && !str_contains($reqSrc, 'slug ='));
 
     /* ── 13. the endpoints, run as requests ──────────────────────────────── */
     $runner = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'lstd_runner_' . bin2hex(random_bytes(4)) . '.php';
@@ -689,6 +696,426 @@ require "api/" . $a["endpoint"] . ".php";
 } finally {
     $cleanupD();
     if (isset($runner)) @unlink($runner);
+}
+
+/* ══════════════ 1.72.0 B — whose eyes see a list's state, and a list for friends only ══════════════
+ *
+ * The owner: on somebody else's profile a public list was tinted green and badged "public" — the state is the
+ * owner's business — and "I would add friends-only lists as well". So the boolean `is_public` is a visibility
+ * (schema 87: private, friends, public), and what is proved here, without a browser: the migration — the
+ * fresh and the upgraded shape, every stopping point, no row losing its meaning; the rules as functions; and
+ * every path that serves a list or its rows run as a request, for the owner, a friend, a member who is no
+ * friend, a guest and a panel session — the shelf (the profile's section and a share link's list come from
+ * it), a list's rows, the write ops, "who has this" — then an unfriending and a block through the friends'
+ * own endpoint, each taking the access away on the very next request. The chips and the window are
+ * scratchpad/shots/lists_check.js's.
+ */
+
+/* ── 16. v87: the visibility's shape, fresh and upgraded ──────────────────── */
+check('1.72.0: the schema is at 87 or later', TRACKER_SCHEMA_VERSION >= 87 && (int)(getSettings($db, true)['schema_version'] ?? 0) >= 87);
+$freshV = $createOf(trackerSchemaStatements());
+$guardV = $createOf(trackerSchemaGuardedStatements($db));
+$v87Shape = static fn(string $s): bool => str_contains($s, "`visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private'")
+    && str_contains($s, 'KEY `idx_list_visibility` (`visibility`, `updated_at`)') && !str_contains($s, '`is_public`') && !str_contains($s, 'idx_list_public');
+check('fresh path: the CREATE carries `visibility` ENUM(private, friends, public) NOT NULL DEFAULT private and its key — no is_public',
+      $v87Shape($freshV), substr($freshV, 0, 200));
+check('… and the copy the upgrade list carries says exactly the same', $v87Shape($guardV));
+$liveV = [];
+foreach ($db->query("SHOW COLUMNS FROM user_lists")->fetchAll(PDO::FETCH_ASSOC) as $c) $liveV[$c['Field']] = $c;
+$liveKeys = array_unique(array_column($db->query("SHOW INDEX FROM user_lists")->fetchAll(PDO::FETCH_ASSOC), 'Key_name'));
+check('the live table — an UPGRADED one — has it: enum(private, friends, public), NOT NULL, private; the new key; no is_public, no old key',
+      strtolower((string)($liveV['visibility']['Type'] ?? '')) === "enum('private','friends','public')" && ($liveV['visibility']['Null'] ?? '') === 'NO'
+      && ($liveV['visibility']['Default'] ?? '') === 'private' && !isset($liveV['is_public'])
+      && in_array('idx_list_visibility', $liveKeys, true) && !in_array('idx_list_public', $liveKeys, true), json_encode([$liveV['visibility'] ?? null, $liveKeys]));
+check('… and the migration asks for nothing more once it is there', schemaListVisibilityMigration($db) === []);
+$v86T = 'lists_v86_' . getmypid() . '_' . bin2hex(random_bytes(2));
+$v87T = 'lists_v87_' . getmypid() . '_' . bin2hex(random_bytes(2));
+try {
+    // 1.70.0's shape, as an upgraded table has it (description_format appended last by v80), is_public holding
+    // what a hand-edited row may: 1, 0 and 2 (only 1 ever meant public: every reader asked `is_public = 1`).
+    $db->exec("CREATE TABLE `$v86T` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `name` VARCHAR(80) NOT NULL,
+        `slug` VARCHAR(90) NOT NULL,
+        `description` TEXT DEFAULT NULL,
+        `is_public` TINYINT(1) NOT NULL DEFAULT 0,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        UNIQUE KEY `uq_list_slug` (`user_id`, `slug`),
+        KEY `idx_list_user` (`user_id`, `updated_at`),
+        KEY `idx_list_public` (`is_public`, `updated_at`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $db->exec(str_replace('CREATE TABLE IF NOT EXISTS `user_lists`', "CREATE TABLE `$v87T`", $freshV));
+    $insV = $db->prepare("INSERT INTO `$v86T` (user_id, name, slug, is_public, updated_at) VALUES (1, ?, ?, ?, '2020-01-02 03:04:05')");
+    foreach (['pub' => 1, 'priv' => 0, 'odd' => 2, 'later' => 1, 'pub2' => 1] as $k => $p) $insV->execute([$k, $k, $p]);
+    $steps = schemaListVisibilityMigration($db, $v86T);
+    check('upgrade path: the column arrives NULLABLE where the old one stands, then the rows still NULL take their old answer, then ONE ALTER finishes it',
+          count($steps) === 3 && str_starts_with($steps[0], "ALTER TABLE `$v86T` ADD COLUMN `visibility` ENUM('private','friends','public') DEFAULT NULL AFTER `is_public`")
+          && str_contains($steps[1], "SET `visibility` = IF(`is_public` = 1, 'public', 'private'), `updated_at` = `updated_at` WHERE `visibility` IS NULL")
+          && str_contains($steps[2], "MODIFY COLUMN `visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private'")
+          && str_contains($steps[2], 'DROP KEY `idx_list_public`') && str_contains($steps[2], 'DROP COLUMN `is_public`')
+          && str_contains($steps[2], 'ADD KEY `idx_list_visibility` (`visibility`, `updated_at`)'), json_encode($steps));
+    $db->exec($steps[0]);
+    $mid = $db->query("SELECT name, visibility FROM `$v86T` ORDER BY id")->fetchAll(PDO::FETCH_KEY_PAIR);
+    check('stopped after the first: every row NULL — which every reader takes for private (nothing shown that was not)',
+          array_unique(array_values($mid)) === [null] && listVisibilityOf(null) === 'private', json_encode($mid));
+    // A choice made while it was stopped, by the site's own code (which writes the column): kept by the rest.
+    $db->exec("UPDATE `$v86T` SET visibility = 'friends', updated_at = '2021-05-06 07:08:09' WHERE name = 'later'");
+    $again = schemaListVisibilityMigration($db, $v86T);
+    check('… run again: no second ADD (the column is there), the fill and the finish', count($again) === 2 && str_starts_with($again[0], 'UPDATE'), json_encode($again));
+    $db->exec($again[0]);
+    $again2 = schemaListVisibilityMigration($db, $v86T);
+    check('… stopped after the fill as well: the finish alone is left', count($again2) === 2 && str_starts_with($again2[0], 'UPDATE') && str_starts_with($again2[1], 'ALTER'), json_encode($again2));
+    foreach ($again2 as $s) $db->exec($s);
+    $rowsV = [];
+    foreach ($db->query("SELECT name, visibility, updated_at FROM `$v86T`")->fetchAll(PDO::FETCH_ASSOC) as $r) $rowsV[$r['name']] = $r['visibility'] . '@' . $r['updated_at'];
+    check('no row loses its meaning: public stays public, 0 and a stray 2 are private — updated_at held on every one — and the choice made meanwhile is kept',
+          $rowsV === ['pub' => 'public@2020-01-02 03:04:05', 'priv' => 'private@2020-01-02 03:04:05', 'odd' => 'private@2020-01-02 03:04:05',
+                      'later' => 'friends@2021-05-06 07:08:09', 'pub2' => 'public@2020-01-02 03:04:05'], json_encode($rowsV));
+    check('… and then nothing is asked again', schemaListVisibilityMigration($db, $v86T) === []);
+    $shapeOf = static function (PDO $db, string $t): array {
+        $o = [];
+        foreach ($db->query("SHOW COLUMNS FROM `$t`")->fetchAll(PDO::FETCH_ASSOC) as $c) {
+            $o[$c['Field']] = strtolower((string)$c['Type']) . '|' . $c['Null'] . '|' . var_export($c['Default'], true) . '|' . strtolower((string)$c['Extra']);
+        }
+        ksort($o);
+        $k = [];
+        foreach ($db->query("SHOW INDEX FROM `$t`")->fetchAll(PDO::FETCH_ASSOC) as $x) $k[$x['Key_name']][(int)$x['Seq_in_index']] = $x['Column_name'];
+        ksort($k);
+        return ['cols' => $o, 'keys' => array_map(static fn($a) => implode(',', $a), $k)];
+    };
+    $s86 = $shapeOf($db, $v86T); $s87 = $shapeOf($db, $v87T);
+    check('the upgraded table and one made by today\'s CREATE are the same: every column (type, NULL, default) and every key',
+          $s86 === $s87, json_encode(['upgraded' => $s86, 'fresh' => $s87]));
+} catch (\Throwable $e) {
+    check('the v87 upgrade walk ran', false, $e->getMessage() . ' @ ' . $e->getLine());
+} finally {
+    $db->exec("DROP TABLE IF EXISTS `$v86T`");
+    $db->exec("DROP TABLE IF EXISTS `$v87T`");
+}
+
+/* ── 17. the rules, as functions ──────────────────────────────────────────── */
+check('a stored answer is one of the three, private for anything else (NULL, a typo)',
+      listVisibilityOf('friends') === 'friends' && listVisibilityOf('public') === 'public' && listVisibilityOf(null) === 'private'
+      && listVisibilityOf('PUBLIC') === 'private' && listVisibilityOf(1) === 'private');
+check('what a request may ask: the three words, or the boolean a 1.44.0 page sends — and nothing else',
+      listVisibilityFromInput('friends') === 'friends' && listVisibilityFromInput(1) === 'public' && listVisibilityFromInput('1') === 'public'
+      && listVisibilityFromInput(true) === 'public' && listVisibilityFromInput(0) === 'private' && listVisibilityFromInput(false) === 'private'
+      && listVisibilityFromInput('0') === 'private' && listVisibilityFromInput('yes') === null && listVisibilityFromInput(2) === null
+      && listVisibilityFromInput(null) === null && listVisibilityFromInput(['public']) === null);
+$onV = ['users_enabled' => '1', 'lists_enabled' => '1', 'lists_public_enabled' => '1', 'friends_enabled' => '1'];
+check('lists for friends need lists, the site\'s "lists may be shared" and the friends feature — each alone says no',
+      listsFriendsEnabled($onV) && !listsFriendsEnabled(array_merge($onV, ['friends_enabled' => '0']))
+      && !listsFriendsEnabled(array_merge($onV, ['lists_public_enabled' => '0'])) && !listsFriendsEnabled(array_merge($onV, ['lists_enabled' => '0'])));
+
+$lvNames = ['lvowner', 'lvfriend', 'lvstranger', 'lvadmin'];
+$lvIds = [];
+$lvGroups = [];
+$lvClean = static function () use ($db, $lvNames): void {
+    foreach ($lvNames as $u) {
+        $st = $db->prepare("SELECT id FROM users WHERE username = ?");
+        $st->execute([$u]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) userDeleteCascade($db, (int)$id);   // lists, items, friends, blocks, anti-spam rows
+    }
+    $db->exec("DELETE FROM user_groups WHERE slug IN ('lvowner', 'lvreader', 'lvnofriends')");
+};
+$lvClean();
+$lvRunner = null;
+try {
+    $gOf = static function (string $slug, array $perms) use ($db): int {
+        $db->prepare("INSERT INTO user_groups (slug, name, description, priority, is_default, is_system, permissions) VALUES (?, ?, 'fixture', 5, 0, 0, ?)")
+           ->execute([$slug, $slug, json_encode(array_fill_keys($perms, true))]);
+        return (int)$db->lastInsertId();
+    };
+    $lvGroups['owner'] = $gOf('lvowner', ['lists.use', 'lists.public', 'friends.use', 'favourites.view_others', 'index.view']);
+    $lvGroups['reader'] = $gOf('lvreader', ['lists.use', 'favourites.view_others', 'index.view', 'friends.use']);
+    $lvGroups['nofriends'] = $gOf('lvnofriends', ['lists.use', 'lists.public', 'favourites.view_others', 'index.view']);
+    $inG = static function (int $uid, int $gid) use ($db): void {
+        $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$uid]);
+        $db->prepare("INSERT INTO user_group_members (user_id, group_id, granted_at) VALUES (?, ?, '2000-01-01 00:00:00')")->execute([$uid, $gid]);
+        userPermissionsForget($uid);
+    };
+    foreach ($lvNames as $u) {
+        $r = userCreate($db, $cfg, $u, $u . '@example.org', 'ListVis123!', '127.0.0.1');
+        $lvIds[$u] = (int)($r['user']['id'] ?? $r['id'] ?? 0);
+    }
+    check('fixtures: four accounts (the owner, a friend, a member who is no friend, an administrator)', count(array_filter($lvIds)) === 4, json_encode($lvIds));
+    $db->prepare("UPDATE users SET status = 'active', email_verified = 1, lists_public = 1 WHERE username IN ('lvowner', 'lvfriend', 'lvstranger', 'lvadmin')")->execute();
+    $O = $lvIds['lvowner']; $F = $lvIds['lvfriend']; $S = $lvIds['lvstranger']; $A = $lvIds['lvadmin'];
+    $inG($O, $lvGroups['owner']); $inG($F, $lvGroups['reader']); $inG($S, $lvGroups['reader']);
+    $adminGid = (int)$db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn();
+    $inG($A, $adminGid);
+    $db->prepare("INSERT INTO user_friends (user_id, friend_id, status, accepted_at) VALUES (?, ?, 'accepted', NOW())")->execute([$F, $O]);
+    $LVH = str_repeat('4c', 20);
+    $lvList = static function (string $name, string $vis) use ($db, $O, $LVH): int {
+        $db->prepare("INSERT INTO user_lists (user_id, name, slug, description, visibility) VALUES (?, ?, ?, ?, ?)")
+           ->execute([$O, $name, strtolower(str_replace(' ', '-', $name)), 'Words of ' . $name, $vis]);
+        $id = (int)$db->lastInsertId();
+        $db->prepare("INSERT INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, 'Visibility fixture')")->execute([$id, $LVH]);
+        return $id;
+    };
+    $LP = $lvList('Lv private', 'private');
+    $LF = $lvList('Lv friends', 'friends');
+    $LU = $lvList('Lv public', 'public');
+    $cfgV = array_merge($cfg, $onV, ['profiles_enabled' => '1', 'user_require_email_verify' => '0']);
+    $ownerRow = static fn(): array => userFindById($db, $O) ?? [];
+
+    check('the owner may publish (their group GRANTS lists.public) and share with friends (friends.use)',
+          listsMayPublish($db, $cfgV, $O) && listsMayShareFriends($db, $cfgV, $O) && listVisibilityAllowed($db, $cfgV, $O, 'friends')
+          && listVisibilityAllowed($db, $cfgV, $O, 'public') && listVisibilityAllowed($db, $cfgV, $O, 'private') && !listVisibilityAllowed($db, $cfgV, $O, 'everyone'));
+    check('the administrator\'s blanket: friends.use yes (a feature, as their friends page has it), lists.public no (consent is a grant)',
+          listsMayShareFriends($db, $cfgV, $A) && !listsMayPublish($db, $cfgV, $A));
+    check('with the friends feature off nobody may choose friends; private is always theirs',
+          !listsMayShareFriends($db, array_merge($cfgV, ['friends_enabled' => '0']), $O) && listVisibilityAllowed($db, array_merge($cfgV, ['friends_enabled' => '0']), $O, 'private'));
+    check('a friend for a list\'s sake: the accepted friendship, either way round; not the owner themselves, not a stranger',
+          listsFriendOf($db, $O, $F) && listsFriendOf($db, $F, $O) && !listsFriendOf($db, $O, $S) && !listsFriendOf($db, $O, $O));
+    check('which of the owner\'s answers each reader may see: the friend public and friends, the stranger public, nobody (0) public',
+          listsVisibilitiesFor($db, $cfgV, $ownerRow(), $F) === ['public', 'friends'] && listsVisibilitiesFor($db, $cfgV, $ownerRow(), $S) === ['public']
+          && listsVisibilitiesFor($db, $cfgV, $ownerRow(), 0) === ['public']);
+    $inG($O, $lvGroups['reader']);   // friends.use, and NOT lists.public
+    check('an owner whose group does not grant lists.public: the friend still sees the friends side, the stranger nothing — and the profile\'s section follows (listsVisibleFor)',
+          listsVisibilitiesFor($db, $cfgV, $ownerRow(), $F) === ['friends'] && listsVisibilitiesFor($db, $cfgV, $ownerRow(), $S) === []
+          && listsVisibleFor($db, $cfgV, $ownerRow(), $F) && !listsVisibleFor($db, $cfgV, $ownerRow(), $S) && !listsVisibleFor($db, $cfgV, $ownerRow()));
+    $inG($O, $lvGroups['owner']);
+    $db->prepare("UPDATE users SET lists_public = 0 WHERE id = ?")->execute([$O]);
+    check('"Show my lists on my profile" off: nobody else sees any of them, the friend included', listsVisibilitiesFor($db, $cfgV, $ownerRow(), $F) === []);
+    $db->prepare("UPDATE users SET lists_public = 1 WHERE id = ?")->execute([$O]);
+    check('the site keeping every list private (lists_public_enabled off): the friends side goes with the public one',
+          listsVisibilitiesFor($db, array_merge($cfgV, ['lists_public_enabled' => '0']), $ownerRow(), $F) === []);
+    $profSrc = (string)@file_get_contents($root . '/templates/pages/profile.php');
+    check('the profile asks the same function with its reader, so the section exists for a friend of an owner who shares with friends only',
+          str_contains($profSrc, "listsVisibleFor(\$db, \$cfg, \$profile, (int)\$viewer['id'])"));
+
+    /* ── 18. every path, as a request: owner / friend / member who is no friend / guest / panel ── */
+    $lvRunner = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'lvis_runner_' . bin2hex(random_bytes(4)) . '.php';
+    file_put_contents($lvRunner, '<?php
+$a = json_decode((string)file_get_contents($argv[1]), true);
+chdir($a["root"]);
+$_SERVER["REQUEST_METHOD"] = $a["method"];
+$_SERVER["REMOTE_ADDR"] = $a["ip"];
+$_GET = $a["get"];
+$_POST = $a["post"];
+foreach (["config/app.php", "config/database.php", "includes/settings.php", "includes/functions.php", "includes/schema.php", "includes/whitelist.php",
+          "includes/index.php", "includes/richtext.php", "includes/mail.php", "includes/users.php", "includes/favourites.php", "includes/lists.php",
+          "includes/people.php", "includes/usermedia.php", "includes/profilebio.php", "includes/shout.php", "includes/audit.php", "includes/auth.php",
+          "includes/lang.php"] as $f) require_once $f;
+$db = getDb();
+$cfg = array_merge(getSettings($db), $a["cfg"]);
+$GLOBALS["db"] = $db; $GLOBALS["cfg"] = $cfg;
+session_id($a["sid"]);
+session_start();
+foreach ($a["session"] as $k => $v) $_SESSION[$k] = $v;
+register_shutdown_function(function () {
+    fwrite(STDERR, "STATUS:" . (int)http_response_code() . "\n");
+    if (session_status() === PHP_SESSION_ACTIVE) session_destroy();
+});
+langInit($cfg, "en");
+require "api/" . $a["endpoint"] . ".php";
+');
+    $cfgLvHttp = ['users_enabled' => '1', 'lists_enabled' => '1', 'lists_public_enabled' => '1', 'profiles_enabled' => '1', 'friends_enabled' => '1',
+                  'user_require_email_verify' => '0', 'rate_limit_favourites' => '1000', 'antispam_enabled' => '0'];
+    $lvIp = '203.0.113.' . random_int(10, 250);
+    $lvAsk = static function (string $endpoint, string $method, array $session, array $get = [], array $post = [], array $cfgX = []) use ($root, $lvRunner, $cfgLvHttp, $lvIp): array {
+        $arg = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'lvis_args_' . bin2hex(random_bytes(4)) . '.json';
+        file_put_contents($arg, json_encode(['root' => $root, 'endpoint' => $endpoint, 'method' => $method, 'get' => $get, 'post' => $post,
+                                             'cfg' => $cfgX + $cfgLvHttp, 'session' => $session, 'ip' => $lvIp, 'sid' => 'lvis' . bin2hex(random_bytes(8))]));
+        $p = proc_open([PHP_BINARY, '-d', 'display_errors=0', '-d', 'xdebug.mode=off', $lvRunner, $arg], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $out = (string)stream_get_contents($pipes[1]);
+        $errOut = (string)stream_get_contents($pipes[2]);
+        foreach ($pipes as $h) fclose($h);
+        proc_close($p);
+        @unlink($arg);
+        $j = json_decode(trim($out), true);
+        $j = is_array($j) ? $j : ['__raw' => substr($out . ' ' . $errOut, 0, 300)];
+        $j['__status'] = preg_match('/STATUS:(\d+)/', $errOut, $sm) ? (int)$sm[1] : 0;
+        return $j;
+    };
+    $who = [
+        'owner'    => ['user_id' => $O, 'user_login_time' => time() + 60, 'csrf_token' => 'lvis-token'],
+        'friend'   => ['user_id' => $F, 'user_login_time' => time() + 60, 'csrf_token' => 'lvis-token'],
+        'stranger' => ['user_id' => $S, 'user_login_time' => time() + 60, 'csrf_token' => 'lvis-token'],
+        'guest'    => ['csrf_token' => 'lvis-token'],
+        // A panel session is authority — every userCan() says yes — and no friendship: alone, and in a browser
+        // signed in as the member who is no friend.
+        'panel'    => ['loggedin' => true, 'login_time' => time(), 'last_activity' => time(), 'csrf_token' => 'lvis-token'],
+        'panel+stranger' => ['loggedin' => true, 'login_time' => time(), 'last_activity' => time(), 'user_id' => $S, 'user_login_time' => time() + 60, 'csrf_token' => 'lvis-token'],
+    ];
+    $shelfOf = static fn(array $j): array => array_map(static fn($l) => (string)$l['name'], (array)($j['lists'] ?? []));
+    $expect = ['owner' => ['Lv public', 'Lv friends', 'Lv private'], 'friend' => ['Lv public', 'Lv friends'], 'stranger' => ['Lv public'],
+               'guest' => null, 'panel' => null, 'panel+stranger' => ['Lv public']];
+    $shelfBad = [];
+    $stateLeak = [];
+    foreach ($who as $k => $sess) {
+        $j = $lvAsk('user_lists', 'GET', $sess, ['user' => 'lvowner']);
+        $got = !empty($j['success']) ? $shelfOf($j) : null;
+        $want = $expect[$k];
+        if ($want === null ? ($j['__status'] !== 404 || ($j['error'] ?? '') !== 'not_found') : ($got === null || array_diff($want, $got) || array_diff($got, $want))) {
+            $shelfBad[] = $k . ': ' . json_encode($got ?? $j);
+        }
+        if ($k !== 'owner' && str_contains(json_encode($j), '"visibility"')) $stateLeak[] = $k;
+    }
+    check('the shelf — what a profile section and a share link\'s list are drawn from: the owner all three, a friend public + friends, a member who is no friend the public one, a guest and a panel session alone 404, a panel session over a member who is no friend that member\'s',
+          $shelfBad === [], implode(' | ', $shelfBad));
+    check('… and nobody but the owner is told any list\'s state (no `visibility` in their answer)', $stateLeak === [], implode(',', $stateLeak));
+    $j = $lvAsk('user_lists', 'GET', $who['owner'], ['user' => 'lvowner']);
+    $mine = array_column((array)($j['lists'] ?? []), 'visibility', 'name');
+    check('the owner\'s own shelf says each state, and what they may choose: public yes, friends yes, the section shown',
+          $mine === ['Lv public' => 'public', 'Lv friends' => 'friends', 'Lv private' => 'private'] && ($j['may_publish'] ?? null) === true
+          && ($j['may_friends'] ?? null) === true && ($j['section_shown'] ?? null) === true, json_encode($j));
+    $j = $lvAsk('user_lists', 'GET', $who['owner']);
+    check('… the account page\'s shelf too (no user=): the states, may_friends', count(array_filter(array_column((array)($j['lists'] ?? []), 'visibility'))) === 3 && ($j['may_friends'] ?? null) === true, json_encode($j));
+
+    // A list's rows, by its id.
+    $rows = static fn(array $sess, int $lid, array $c = []) => $lvAsk('user_list_items', 'GET', $sess, ['list' => $lid], [], $c);
+    $nf = $rows($who['stranger'], $LP);
+    $matrix = [
+        'friends list' => [$LF, ['owner' => 200, 'friend' => 200, 'stranger' => 404, 'guest' => 404, 'panel' => 404, 'panel+stranger' => 404]],
+        'private list' => [$LP, ['owner' => 200, 'friend' => 404, 'stranger' => 404, 'guest' => 404, 'panel' => 404, 'panel+stranger' => 404]],
+        'public list'  => [$LU, ['owner' => 200, 'friend' => 200, 'stranger' => 200, 'guest' => 404, 'panel' => 404, 'panel+stranger' => 200]],
+    ];
+    $rowBad = [];
+    $sameNo = [];
+    foreach ($matrix as $label => [$lid, $want]) {
+        foreach ($want as $k => $code) {
+            $j = $rows($who[$k], $lid);
+            if ($j['__status'] !== $code) $rowBad[] = "$label/$k: {$j['__status']} not $code";
+            if ($code === 200 && ($j['rows'][0]['name'] ?? '') !== 'Visibility fixture') $rowBad[] = "$label/$k: no rows";
+            if ($code === 200 && $k !== 'owner' && array_key_exists('visibility', (array)($j['list'] ?? []))) $rowBad[] = "$label/$k: told the state";
+            if ($code === 200 && $k === 'owner' && ($j['list']['visibility'] ?? '') !== strtolower(explode(' ', $label)[0])) $rowBad[] = "$label/owner: state " . json_encode($j['list']['visibility'] ?? null);
+            if ($code === 404) { unset($j['__status']); $sameNo[json_encode($j)] = true; }
+        }
+    }
+    check('a list\'s rows (the list window, a share link): the friends list for its owner and their friend, nobody else; the private one for its owner; the public one for every member — each 200 with its rows, and the state told to the owner alone',
+          $rowBad === [], implode(' | ', $rowBad));
+    check('… and every "no" is the very same 404 — a friends list is never a hint that there is a list', count($sameNo) === 1 && isset($sameNo[json_encode(array_diff_key($nf, ['__status' => 1]))]),
+          implode(' || ', array_keys($sameNo)));
+
+    // "Who has this" (includes/who.php): a friends list counts for a friend only.
+    $lvWho = static fn(int $viewer, array $c = []) => array_column(listsContainingHash($db, array_merge($cfgV, $c), $LVH, 20, $viewer), 'name');
+    check('"who has this": the friend sees the friends list and the public one; the member who is no friend the public one; the owner their public one (never their own friends or private list)',
+          $lvWho($F) === ['Lv public', 'Lv friends'] || $lvWho($F) === ['Lv friends', 'Lv public'] ? ($lvWho($S) === ['Lv public'] && $lvWho($O) === ['Lv public']) : false,
+          json_encode([$lvWho($F), $lvWho($S), $lvWho($O)]));
+
+    /* ── 19. the writes ───────────────────────────────────────────────────── */
+    $vis = static fn(int $lid): string => (string)$db->query("SELECT visibility FROM user_lists WHERE id = " . (int)$lid)->fetchColumn();
+    $post = static fn(array $sess, array $body, array $c = []) => $lvAsk('user_lists', 'POST', $sess, [], $body + ['csrf_token' => 'lvis-token'], $c);
+    $j = $post($who['owner'], ['op' => 'visibility', 'id' => $LP, 'value' => 'friends']);
+    check('op visibility: the owner shares a private list with friends — 200 {visibility: friends}, stored', $j['__status'] === 200 && ($j['visibility'] ?? '') === 'friends' && $vis($LP) === 'friends', json_encode($j));
+    $j = $post($who['owner'], ['op' => 'visibility', 'id' => $LP, 'value' => 'nonsense']);
+    check('… an answer that is none of the three: 400 bad_visibility, with the words, nothing written', $j['__status'] === 400 && ($j['error'] ?? '') === 'bad_visibility'
+          && ($j['message'] ?? '') === 'That is not one of the three answers: private, friends or public.' && $vis($LP) === 'friends', json_encode($j));
+    $j = $post($who['owner'], ['op' => 'visibility', 'id' => $LP, 'value' => 0]);
+    check('… the 1.44.0 boolean still works: 0 is private', $j['__status'] === 200 && $vis($LP) === 'private', json_encode($j));
+    $j = $post($who['owner'], ['op' => 'visibility', 'id' => $LP, 'value' => 'friends'], ['friends_enabled' => '0']);
+    check('… friends with the friends feature off: 403 no_permission, nothing written', $j['__status'] === 403 && ($j['error'] ?? '') === 'no_permission' && $vis($LP) === 'private', json_encode($j));
+    $inG($O, $lvGroups['nofriends']);
+    $j = $post($who['owner'], ['op' => 'visibility', 'id' => $LP, 'value' => 'friends']);
+    check('… an owner whose groups do not give friends.use: 403, nothing written', $j['__status'] === 403 && $vis($LP) === 'private', json_encode($j));
+    $j = $rows($who['friend'], $LF);
+    check('… and their friends list is private in effect — the friend gets 404 — its choice remembered (still friends in the row)', $j['__status'] === 404 && $vis($LF) === 'friends', json_encode($j));
+    $inG($O, $lvGroups['reader']);   // friends, no lists.public
+    $j = $post($who['owner'], ['op' => 'visibility', 'id' => $LP, 'value' => 'public']);
+    check('… public without the GRANT of lists.public: 403, nothing written', $j['__status'] === 403 && $vis($LP) === 'private', json_encode($j));
+    $j = $lvAsk('user_lists', 'GET', $who['owner']);
+    check('… and the shelf says so: may_publish no, may_friends yes', ($j['may_publish'] ?? null) === false && ($j['may_friends'] ?? null) === true, json_encode($j));
+    $inG($O, $lvGroups['owner']);
+    $j = $post($who['stranger'], ['op' => 'visibility', 'id' => $LP, 'value' => 'public']);
+    check('… somebody else\'s list: 404 not_found, untouched', $j['__status'] === 404 && $vis($LP) === 'private', json_encode($j));
+    $j = $post($who['owner'], ['op' => 'create', 'name' => 'Lv new']);
+    $newId = (int)($j['id'] ?? 0);
+    check('a new list is private, and the answer says so', $j['__status'] === 200 && ($j['visibility'] ?? '') === 'private' && $vis($newId) === 'private' && !isset($j['is_public']), json_encode($j));
+    // The Edit window's one request carries it.
+    $rowOfL = static function (int $id) use ($db): array { $st = $db->prepare("SELECT * FROM user_lists WHERE id = ?"); $st->execute([$id]); return $st->fetch(PDO::FETCH_ASSOC) ?: []; };
+    $j = $post($who['owner'], ['op' => 'edit', 'id' => $newId, 'name' => 'Lv new renamed', 'description' => 'Some words', 'format' => 'bbcode', 'visibility' => 'friends']);
+    $nr = $rowOfL($newId);
+    check('op edit: the name, the description and who sees it in ONE request — all three stored, the answer says the state',
+          $j['__status'] === 200 && ($j['visibility'] ?? '') === 'friends' && $nr['name'] === 'Lv new renamed' && $nr['description'] === 'Some words' && $nr['visibility'] === 'friends', json_encode($j));
+    $inG($O, $lvGroups['nofriends']);
+    $j = $post($who['owner'], ['op' => 'edit', 'id' => $newId, 'name' => 'Lv new again', 'description' => 'Some words', 'format' => 'bbcode', 'visibility' => 'friends']);
+    check('… an answer the list already has is not judged again: renamed while friends.use is gone, the list still "friends"',
+          $j['__status'] === 200 && $rowOfL($newId)['name'] === 'Lv new again' && $rowOfL($newId)['visibility'] === 'friends', json_encode($j));
+    $j = $post($who['owner'], ['op' => 'edit', 'id' => $LP, 'name' => 'Lv private renamed', 'description' => 'Words of Lv private', 'format' => 'bbcode', 'visibility' => 'friends']);
+    check('… a NEW answer they may not give: 403 no_permission, with the words — and nothing of the request written (the name neither)',
+          $j['__status'] === 403 && ($j['error'] ?? '') === 'no_permission' && ($j['message'] ?? '') === 'You cannot share a list that way on this site.'
+          && $rowOfL($LP)['name'] === 'Lv private' && $rowOfL($LP)['visibility'] === 'private', json_encode($j));
+    $inG($O, $lvGroups['owner']);
+    // An Edit window's Save that changes only who sees it is not writing: the anti-spam layer is not asked.
+    $asRow = static fn(): int => (int)$db->query("SELECT COUNT(*) FROM antispam_state WHERE context = 'list' AND subject = " . $db->quote('u:' . $O))->fetchColumn();
+    $cfgAs = ['antispam_enabled' => '1', 'antispam_staff_exempt' => '0'];
+    $was = $asRow();
+    $j = $post($who['owner'], ['op' => 'edit', 'id' => $newId, 'name' => 'Lv new again', 'description' => 'Some words', 'format' => 'bbcode', 'visibility' => 'public'], $cfgAs);
+    $after1 = $asRow();
+    $j2 = $post($who['owner'], ['op' => 'edit', 'id' => $newId, 'name' => 'Lv new words', 'description' => 'Some words', 'format' => 'bbcode', 'visibility' => 'public'], $cfgAs);
+    $after2 = $asRow();
+    check('with the anti-spam layer ON: a Save that changes only who sees the list leaves the layer alone (no state for it), one that renames is counted',
+          $j['__status'] === 200 && $rowOfL($newId)['visibility'] === 'public' && $was === 0 && $after1 === 0 && $j2['__status'] === 200 && $after2 === 1,
+          json_encode([$j['__status'], $was, $after1, $j2['__status'], $after2]));
+    $j = $post($who['owner'], ['op' => 'delete', 'id' => $newId]);
+
+    /* ── 20. an unfriending and a block, through the friends' own endpoint: gone on the next request ── */
+    $people = static fn(array $sess, array $body) => $lvAsk('user_people', 'POST', $sess, [], $body + ['csrf_token' => 'lvis-token']);
+    check('before: the friend reads the friends list', $rows($who['friend'], $LF)['__status'] === 200);
+    $j = $people($who['friend'], ['op' => 'unfollow', 'user' => 'lvowner']);
+    $a1 = $rows($who['friend'], $LF);
+    $s1 = $shelfOf($lvAsk('user_lists', 'GET', $who['friend'], ['user' => 'lvowner']));
+    check('the friend unfriends (user_people unfollow): the very next request for the friends list is 404, and the shelf is the public one — no cache holds it',
+          !empty($j['success']) && $a1['__status'] === 404 && $s1 === ['Lv public'] && !in_array('Lv friends', $lvWho($F), true), json_encode([$j, $a1['__status'], $s1]));
+    $db->prepare("INSERT INTO user_friends (user_id, friend_id, status, accepted_at) VALUES (?, ?, 'accepted', NOW())")->execute([$O, $F]);
+    check('… friends again (asked by the owner this time): readable again', $rows($who['friend'], $LF)['__status'] === 200);
+    $j = $people($who['owner'], ['op' => 'block', 'user' => 'lvfriend', 'hide_profile' => 0]);
+    check('the owner BLOCKS the friend (without hiding the profile): the block ends the friendship, and the friends list is 404 while the public one still reads',
+          !empty($j['success']) && !areFriends($db, $O, $F) && $rows($who['friend'], $LF)['__status'] === 404 && $rows($who['friend'], $LU)['__status'] === 200, json_encode($j));
+    $db->prepare("INSERT INTO user_friends (user_id, friend_id, status, accepted_at) VALUES (?, ?, 'accepted', NOW())")->execute([$O, $F]);
+    check('… a friendship row that outlived the block (restored, raced) is still no friendship: 404, and nothing in "who has this" either',
+          areFriends($db, $O, $F) && $rows($who['friend'], $LF)['__status'] === 404 && !in_array('Lv friends', $lvWho($F), true));
+    $people($who['owner'], ['op' => 'unblock', 'user' => 'lvfriend']);
+    check('… unblocked, with the friendship there: readable again', $rows($who['friend'], $LF)['__status'] === 200);
+    $db->prepare("INSERT INTO user_blocks (user_id, blocked_id, hide_profile) VALUES (?, ?, 0)")->execute([$F, $O]);
+    check('… the FRIEND blocking the owner ends it the same way', $rows($who['friend'], $LF)['__status'] === 404 && !in_array('Lv friends', $lvWho($F), true));
+    $db->prepare("DELETE FROM user_blocks WHERE user_id = ?")->execute([$F]);
+    $db->prepare("UPDATE user_friends SET status = 'pending' WHERE user_id = ? AND friend_id = ?")->execute([$O, $F]);
+    check('… a request not yet accepted is no friendship', $rows($who['friend'], $LF)['__status'] === 404);
+    $db->prepare("UPDATE user_friends SET status = 'accepted' WHERE user_id = ? AND friend_id = ?")->execute([$O, $F]);
+    check('… accepted: readable', $rows($who['friend'], $LF)['__status'] === 200);
+    check('… with the friends feature switched off, the friends list is nobody\'s but its owner\'s (their own read stays)',
+          $rows($who['friend'], $LF, ['friends_enabled' => '0'])['__status'] === 404 && $rows($who['owner'], $LF, ['friends_enabled' => '0'])['__status'] === 200);
+
+    /* ── 21. what the pages carry ─────────────────────────────────────────── */
+    $leSrc = (string)@file_get_contents($root . '/templates/partials/list_edit.php');
+    check('the Edit window: a radiogroup of three buttons — private (a lock), friends (people), public (a globe) — each an icon and its word, the ones this reader may not give disabled with the line that says why',
+          str_contains($leSrc, 'role="radiogroup"') && str_contains($leSrc, "'private' => ['icon' => 'bi-lock'") && str_contains($leSrc, "'friends' => ['icon' => 'bi-people'")
+          && str_contains($leSrc, "'public'  => ['icon' => 'bi-globe2'") && str_contains($leSrc, 'role="radio"') && str_contains($leSrc, "' data-off=\"1\" disabled'")
+          && str_contains($leSrc, "__('lists.vis_why_' . \$leCtx['friends_why'])") && str_contains($leSrc, 'id="le-vis-hidden"'));
+    $fjs = (string)@file_get_contents($root . '/assets/js/favourites.js');
+    $css = (string)@file_get_contents($root . '/assets/css/style.css');
+    check('the cards: no tint and no "public" badge for anybody (the classes gone from the script and the stylesheet), no is_public read anywhere',
+          !str_contains($fjs, 'list-card-public') && !str_contains($fjs, 'list-badge-public') && !str_contains($fjs, 'is_public')
+          && !str_contains($css, '.list-card-public') && !str_contains($css, '.list-badge-public'));
+    check('… the owner\'s chip only where the answer is (the owner\'s shelf carries it), Share on every list a visitor sees and on the owner\'s shared ones',
+          substr_count($fjs, 'if (list.own && list.visibility)') === 2
+          && substr_count($fjs, "(!list.own || list.visibility === 'public' || list.visibility === 'friends')") === 2
+          && str_contains($fjs, "var LIST_VIS_ICON = { 'private': 'bi-lock', 'friends': 'bi-people', 'public': 'bi-globe2' };"));
+    check('… the Edit window sends who sees it with its one request', str_contains($fjs, 'if (s.vis) payload.visibility = s.vis;'));
+    $iconMap = iconFaMap();
+    check('the three icons are in the icon map (Font Awesome and Pro draw them through it): lock, people, globe2',
+          isset($iconMap['lock'], $iconMap['people'], $iconMap['globe2']));
+    $en = require $root . '/lang/en.php';
+    $pl = require $root . '/lang/pl.php';
+    $vw = ['lists.vis_label', 'lists.vis_private', 'lists.vis_friends', 'lists.vis_public', 'lists.vis_private_hint', 'lists.vis_friends_hint',
+           'lists.vis_public_hint', 'lists.vis_why_sharing_off', 'lists.vis_why_friends_off', 'lists.vis_why_no_friends', 'lists.vis_why_no_grant',
+           'lists.vis_section_hidden', 'js.lists.vis_private', 'js.lists.vis_friends', 'js.lists.vis_public', 'js.lists.vis_change', 'js.lists.vis_aria',
+           'api.lists.bad_visibility', 'api.lists.no_permission', 'account.lists_friends_only'];
+    $vMissing = array_values(array_filter($vw, static fn($k) => trim((string)($en[$k] ?? '')) === '' || trim((string)($pl[$k] ?? '')) === '' || ($en[$k] ?? '') === ($pl[$k] ?? '')));
+    check('every word of it in both languages, the Polish Polish — Prywatna / Dla znajomych / Publiczna — and the dead "public" / Public / Private switch words gone',
+          $vMissing === [] && $pl['lists.vis_friends'] === 'Dla znajomych' && $pl['js.lists.vis_public'] === 'Publiczna' && $en['lists.vis_label'] === 'Who can see it'
+          && !isset($en['js.lists.public'], $en['js.lists.vis_on'], $en['js.lists.vis_off']), json_encode($vMissing));
+} catch (\Throwable $e) {
+    check('the 1.72.0 B sections ran to the end', false, $e->getMessage() . ' @ ' . $e->getLine());
+} finally {
+    $lvClean();
+    if ($lvRunner) @unlink($lvRunner);
 }
 
 echo "\n$n checks, $fails failed\n";

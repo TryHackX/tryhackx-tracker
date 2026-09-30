@@ -187,7 +187,23 @@ function indexKeepSavedClause(array $cfg, string $expiryCol): string
 function indexMetaDailyBudget(array $cfg): int { return max(0, min(1000000, (int)($cfg['index_meta_daily_budget'] ?? 500))); }
 function indexMetaAutoQueue(array $cfg): bool { return (($cfg['index_meta_auto_queue'] ?? '0') === '1'); }
 function indexKeepFiles(array $cfg): bool { return (($cfg['index_keep_files'] ?? '1') === '1'); }
-function indexPollBudget(array $cfg): int { return max(5, min(120, (int)($cfg['index_poll_budget'] ?? 45) ?: 45)); }
+
+/**
+ * The poll's time budget: how long one poll may walk the scrape before it is cut and the next poll
+ * continues where it stopped. Read by the clamp below, the save's clamp (api/admin/save_settings.php)
+ * and the field's max= (templates/admin/settings.php) — one number, never retyped.
+ *
+ * 300, not 120 (1.72.0). At 120 a scrape of 1.95 M torrents no longer fitted: every other poll was cut
+ * at the budget and the next one finished the rest, so a pass took two polls and an hour. The poll runs
+ * in its own unit (tracker-janitor-heavy, tools/janitor.php janitorHeavy()), so a longer budget holds up
+ * nothing else — the minute tick samples the charts regardless. The download keeps its own ceiling
+ * (min(90, budget) in indexPoll()): the budget bounds the WALK, which starts once the file is here.
+ */
+const IDX_POLL_BUDGET_MIN = 5;
+const IDX_POLL_BUDGET_MAX = 300;
+function indexPollBudget(array $cfg): int {
+    return max(IDX_POLL_BUDGET_MIN, min(IDX_POLL_BUDGET_MAX, (int)($cfg['index_poll_budget'] ?? 45) ?: 45));
+}
 
 /**
  * The stored-files-per-torrent ceiling, for everything on the PHP side: the save clamp, the field's
@@ -705,6 +721,268 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
     } finally {
         @flock($lockH, LOCK_UN); @fclose($lockH);
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Poll history, read as PASSES (the coverage card, the budget's estimate)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE QUESTION THE COVERAGE CARD ANSWERS IS "DID WE SEE THE WHOLE TRACKER?", AND ONE POLL DOES NOT
+// ANSWER IT. When the scrape takes longer to walk than the time budget allows, a poll is cut at the
+// budget and the next one continues from the cursor; the two together are the whole scrape. Judged
+// one at a time (1.29.0 – 1.71.0: `coverage = delivered / rows_total` per poll) the continuing half of
+// every such pair read as a collapse — production 2026-09-28/29: "worst poll 0.1 %", the 1 453-entry
+// tail of a pass that had covered everything — and each cut was counted as "arrived truncated", the
+// words for a broken download, while `partial` was NULL on every one of those rows: nothing arrived
+// short. So the unit here is the PASS: a poll that starts at the beginning, plus the polls that
+// continue it, until one ends un-cut.
+
+/** Rows a history reply reads (newest first), and rows it may look back for the start of the first pass. */
+const IDX_POLL_HISTORY_MAX = 4000;
+const IDX_POLL_LOOKBACK = 200;
+
+/** The coverage card's ranges → seconds ('all' = the whole retention, index_poll_keep_days). */
+function indexPollRanges(): array {
+    return ['1h' => 3600, '6h' => 21600, '24h' => 86400, '7d' => 604800, '2w' => 1209600, '1m' => 2592000];
+}
+
+/**
+ * One index_polls row, read.
+ *
+ * `entries` is a FILE POSITION, not a delivery count: the parser counts every entry it walks past, the
+ * ones below the resume cursor included. What a poll contributed is what lies past the point it
+ * STARTED from — `delivered`.
+ *
+ * Where it started: `skip_from` is the cursor the poll applied (since 1.29.1), and a poll reads from
+ * entry 0 when that is 0 — or when its download ended early (`partial` set). A short file is not the
+ * same file, so indexPoll() reads every short download from the start; rows written by 1.29.0 recorded
+ * the STORED cursor there instead, which is why such a row can carry a `skip_from` above its entries.
+ * That is the old rule this keeps readable (the 1.29.1 fix: 31.2 % and 59 %, not 0 %), and `partial` is
+ * what tells it apart from the one other way `skip_from` can exceed `entries`: a poll that resumed on a
+ * scrape which had SHRUNK below the cursor walked the whole shorter file, found nothing past the
+ * cursor, and delivered nothing — it did not restart, and reading it as a restart (the rule before
+ * 1.72.0) credited it with the whole file.
+ */
+function indexPollPoint(array $r): array {
+    $entries = (int)$r['entries'];
+    $skip = (int)$r['skip_from'];
+    $partial = isset($r['partial']) ? (string)$r['partial'] : null;
+    $error = isset($r['error']) ? (string)$r['error'] : null;
+    $restart = $skip === 0 || $partial !== null;
+    $start = $restart ? 0 : $skip;
+    $truncated = (int)$r['truncated'] === 1;
+    return [
+        'ts'         => (int)$r['ts'],
+        'entries'    => $entries,
+        'skip_from'  => $skip,
+        'start'      => $start,
+        'delivered'  => max(0, $entries - $start),
+        'kept'       => (int)$r['kept'],
+        'bytes'      => (int)$r['bytes'],
+        'ms'         => (int)$r['ms'],
+        'truncated'  => $truncated,
+        // CUT BY THE TIME BUDGET: the walk ran out of time, and the next poll continues where it
+        // stopped. Not a fault — and never the words for one: a download that really ended early
+        // carries `partial`, and a failed poll `error`.
+        'cut'        => $truncated && $partial === null && $error === null,
+        'partial'    => $partial,
+        'restart'    => $restart,
+        // start = read from entry 0; resume = continued from a cursor; short = the download ended
+        // early (read from 0); error = the poll failed
+        'kind'       => $error !== null ? 'error' : ($partial !== null ? 'short' : ($restart ? 'start' : 'resume')),
+        'rows_total' => $r['rows_total'] !== null ? (int)$r['rows_total'] : null,
+        'index_rows' => $r['index_rows'] !== null ? (int)$r['index_rows'] : null,
+        'error'      => $error,
+    ];
+}
+
+/**
+ * Polls (indexPollPoint() rows, oldest first) grouped into passes.
+ *
+ *   · a poll that starts at the beginning opens a pass — except a SHORT download while a pass is open:
+ *     indexPoll() leaves the cursor at the further of the pass's reach and the short file's end, so the
+ *     next poll goes on with that same pass, and so does this one;
+ *   · a poll that continues from a cursor joins the open pass; with none open, its pass began before the
+ *     rows given (`began_before`: its coverage is not known, and it is never counted);
+ *   · a pass ends with a poll that is not cut (complete), with a failed poll (error: indexPoll() resets
+ *     the cursor), or with a fresh start while it was still open (abandoned: the cursor was lost);
+ *   · the newest pass, if its newest poll was cut, is IN PROGRESS: the next poll continues it. It is
+ *     never a low number — what it has walked so far is not a coverage.
+ *
+ * Per pass: polls, walked (the furthest entry reached — the scrape's length when it completed),
+ * delivered (the sum over its polls), kept, seconds (the polls' own time, download included),
+ * duration (first start → last end), coverage (walked against the newest tracker count the pass
+ * recorded, the last poll's when it has one), and whether it counts in a summary.
+ * Returns ['passes' => [...], 'points' => $points each with 'pass' (its index), 'pos' (1-based) and 'of'].
+ */
+function indexPollPasses(array $points): array {
+    $passes = [];
+    $open = null;
+    foreach ($points as $i => $p) {
+        $join = null;
+        if (!$p['restart']) {
+            $join = $open;                       // null: the pass began before these rows
+        } elseif ($p['partial'] !== null && $open !== null) {
+            $join = $open;
+        } elseif ($open !== null) {
+            $passes[$open]['status'] = 'abandoned';
+            $open = null;
+        }
+        if ($join === null) {
+            $passes[] = ['first_ts' => $p['ts'], 'last_ts' => $p['ts'], 'end_ts' => $p['ts'], 'polls' => 0,
+                         'walked' => 0, 'delivered' => 0, 'kept' => 0, 'ms' => 0, 'cut' => 0, 'short' => 0,
+                         'failed' => 0, 'rows_total' => null, 'began_before' => !$p['restart'], 'status' => 'open'];
+            $join = count($passes) - 1;
+        }
+        $x = &$passes[$join];
+        $x['polls']++;
+        $x['walked'] = max($x['walked'], $p['entries']);
+        $x['delivered'] += $p['delivered'];
+        $x['kept'] += $p['kept'];
+        $x['ms'] += $p['ms'];
+        if ($p['cut']) $x['cut']++;
+        if ($p['partial'] !== null) $x['short']++;
+        if ($p['error'] !== null) $x['failed']++;
+        if ($p['rows_total'] !== null) $x['rows_total'] = $p['rows_total'];
+        $x['last_ts'] = $p['ts'];
+        $x['end_ts'] = $p['ts'] + (int)ceil($p['ms'] / 1000);
+        if ($p['error'] !== null)  { $x['status'] = 'error'; $open = null; }
+        elseif ($p['truncated'])   { $x['status'] = 'open'; $open = $join; }
+        else                       { $x['status'] = 'complete'; $open = null; }
+        $points[$i]['pass'] = $join;
+        $points[$i]['pos'] = $x['polls'];
+        unset($x);
+    }
+    foreach ($passes as $k => $x) {
+        if ($x['status'] === 'open') $x['status'] = 'in_progress';      // only the newest can still be open
+        $x['coverage'] = ($x['rows_total'] !== null && $x['rows_total'] > 0)
+            ? min(100.0, round(100 * $x['walked'] / $x['rows_total'], 2)) : null;
+        $x['seconds'] = round($x['ms'] / 1000, 1);
+        $x['duration'] = $x['end_ts'] - $x['first_ts'];
+        $x['counted'] = !$x['began_before'] && $x['status'] !== 'in_progress';
+        $passes[$k] = $x;
+    }
+    foreach ($points as $i => $p) $points[$i]['of'] = $passes[$p['pass']]['polls'];
+    return ['passes' => $passes, 'points' => $points];
+}
+
+/**
+ * The coverage card's reply for one range: the polls in it (`points`), the passes they make, and a
+ * summary per PASS. api/admin/index_polls.php is this and nothing else.
+ *
+ * A window's first poll may continue a pass that began before it, so the rows just before the window
+ * are read back (up to IDX_POLL_LOOKBACK) while they kept a pass open — until its start. They count in
+ * that pass and are not points of their own: the chart draws the window that was asked for.
+ */
+function indexPollHistory(PDO $db, array $cfg, string $range = '24h', ?int $now = null): array {
+    $now = $now ?? time();
+    $ranges = indexPollRanges();
+    $key = $range;
+    if ($key === 'all') {
+        $from = $now - max(1, min(3650, (int)($cfg['index_poll_keep_days'] ?? 90))) * 86400;
+    } else {
+        if (!isset($ranges[$key])) $key = '24h';
+        $from = $now - $ranges[$key];
+    }
+    $cols = 'ts, entries, skip_from, kept, bytes, ms, truncated, partial, removed_wl, removed_ban, rows_total, index_rows, error';
+    // Newest first with a cap, then flipped: a window wider than the cap must lose its OLDEST points,
+    // not its most recent ones. A plain LIMIT on an ascending scan does the opposite.
+    // Bounded above too: `$now` is the moment the window ends (a test passes its own), and a row is
+    // stamped when its poll STARTED, so nothing real lies past it.
+    $st = $db->prepare("SELECT $cols FROM index_polls WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT " . IDX_POLL_HISTORY_MAX);
+    $st->execute([$from, $now]);
+    $rows = array_reverse($st->fetchAll(PDO::FETCH_ASSOC));
+    $window = array_map('indexPollPoint', $rows);
+    $back = [];
+    if ($window && !($window[0]['restart'] && $window[0]['partial'] === null)) {
+        $st = $db->prepare("SELECT $cols FROM index_polls WHERE ts < ? ORDER BY ts DESC LIMIT " . IDX_POLL_LOOKBACK);
+        $st->execute([$window[0]['ts']]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $p = indexPollPoint($r);
+            // only a poll that left the pass open can belong to it
+            if (!$p['truncated'] || $p['error'] !== null) break;
+            array_unshift($back, $p);
+            if ($p['restart'] && $p['partial'] === null) break;          // its start
+        }
+    }
+    $g = indexPollPasses(array_merge($back, $window));
+    $passes = $g['passes'];
+    $points = array_slice($g['points'], count($back));
+    $counted = array_values(array_filter($passes, static fn($x) => $x['counted'] && $x['coverage'] !== null));
+    $cov = array_column($counted, 'coverage');
+    $lastPass = $passes ? $passes[count($passes) - 1] : null;
+    $complete = array_values(array_filter($passes, static fn($x) => $x['status'] === 'complete' && !$x['began_before']));
+    $scrape = null;
+    foreach (array_reverse($points) as $p) { if ($p['rows_total'] !== null) { $scrape = $p['rows_total']; break; } }
+    $budget = indexPollBudget($cfg);
+    $summary = [
+        'polls'        => count($points),
+        'passes'       => count($passes),
+        'counted'      => count($counted),
+        'failed'       => count(array_filter($points, static fn($p) => $p['error'] !== null)),
+        'cut'          => count(array_filter($points, static fn($p) => $p['cut'])),
+        'short'        => count(array_filter($points, static fn($p) => $p['partial'] !== null)),
+        'truncated'    => count(array_filter($points, static fn($p) => $p['truncated'])),
+        'avg_coverage' => $cov ? round(array_sum($cov) / count($cov), 1) : null,
+        'min_coverage' => $cov ? min($cov) : null,
+        // how many polls a finished pass took: 1 everywhere = the budget is enough
+        'min_polls'    => $counted ? min(array_column($counted, 'polls')) : null,
+        'max_polls'    => $counted ? max(array_column($counted, 'polls')) : null,
+        'last'         => $points ? $points[count($points) - 1] : null,
+        'last_pass'    => $lastPass,
+        'in_progress'  => ($lastPass !== null && $lastPass['status'] === 'in_progress') ? $lastPass : null,
+        'budget'       => $budget,
+        'budget_max'   => IDX_POLL_BUDGET_MAX,
+        'estimate'     => indexPollEstimate($complete ? $complete[count($complete) - 1] : null, $scrape, $budget),
+    ];
+    // `lead`: the polls before the window that belong to its first pass — drawn as the lower parts of
+    // that pass's bar, never counted in the summary above.
+    return ['success' => true, 'range' => $key, 'from' => $from, 'points' => $points,
+            'lead' => array_slice($g['points'], 0, count($back)), 'passes' => $passes, 'summary' => $summary];
+}
+
+/**
+ * How long the current scrape takes to walk, from the newest COMPLETE pass: it walked `walked` entries
+ * in `seconds` of its polls' own time (downloads included), so the scrape of `$scrape` torrents needs
+ * about scrape / rate seconds — and with the budget at `$budget` that is ceil(needs / budget) polls.
+ * An estimate, and says so: a pass's rate moves with the machine's load and with what the upsert
+ * finds changed. Null without a complete pass to measure from. `$scrape` null = the pass's own length.
+ */
+function indexPollEstimate(?array $pass, ?int $scrape, int $budget): ?array {
+    if ($pass === null || ($pass['status'] ?? '') !== 'complete' || !empty($pass['began_before'])) return null;
+    $walked = (int)($pass['walked'] ?? 0);
+    // the polls' own milliseconds when the pass carries them: `seconds` is rounded for display
+    $seconds = isset($pass['ms']) ? (int)$pass['ms'] / 1000 : (float)($pass['seconds'] ?? 0);
+    if ($walked <= 0 || $seconds <= 0) return null;
+    $rate = $walked / $seconds;
+    $scrape = ($scrape !== null && $scrape > 0) ? $scrape : $walked;
+    $needs = max(1, (int)ceil($scrape / $rate));
+    $budget = max(1, $budget);
+    return ['rate' => (int)round($rate), 'scrape' => $scrape, 'needs' => $needs, 'budget' => $budget,
+            'polls' => max(1, (int)ceil($needs / $budget)), 'pass_ts' => (int)$pass['first_ts'], 'pass_polls' => (int)$pass['polls']];
+}
+
+/**
+ * The estimate for the Settings page: the newest complete pass of the last week, against the newest
+ * tracker count on record (the statistics timeline's last sample when no poll recorded one).
+ */
+function indexPollEstimateNow(PDO $db, array $cfg, ?int $now = null): ?array {
+    try {
+        $h = indexPollHistory($db, $cfg, '7d', $now);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    $pass = null;
+    foreach (array_reverse($h['passes']) as $x) {
+        if ($x['status'] === 'complete' && !$x['began_before']) { $pass = $x; break; }
+    }
+    $scrape = null;
+    foreach (array_reverse($h['points']) as $p) { if ($p['rows_total'] !== null) { $scrape = $p['rows_total']; break; } }
+    if ($scrape === null && function_exists('statsTimelineStateRead')) {
+        $ls = statsTimelineStateRead()['last_sample'] ?? null;
+        if (is_array($ls) && !empty($ls['torrents'])) $scrape = (int)$ls['torrents'];
+    }
+    return indexPollEstimate($pass, $scrape, indexPollBudget($cfg));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

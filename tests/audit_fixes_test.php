@@ -84,7 +84,13 @@ check('the netlimit poll does not write over a pps field that has focus', str_co
 check('the sysctl poll does not repaint over an edit', str_contains($src('assets/js/admin-sysctl.js'), 'if (formDirty() || gridHasFocus()) return;'));
 check('the index status card keeps the last good numbers on a failed poll', str_contains($src('assets/js/admin-index.js'), 'function markStale('));
 check('transparency numbers rows from the page size the server used', str_contains($src('api/transparency.php'), "'per_page' => \$perPage"));
-check('the coverage chart destroys uPlot before dropping it', str_contains($src('assets/js/admin-index-coverage.js'), 'chart.destroy()'));
+// 1.72.0: the coverage chart is SVG (its passes as stacked parts) — the leak this pinned was a uPlot
+// instance dropped without destroy(), whose window listeners and resize observer lived on. There is no
+// instance now, and the page-wide listeners are bound once, outside the function that redraws.
+$cov = $src('assets/js/admin-index-coverage.js');
+check('the coverage chart holds no uPlot instance to leak, and binds its window listeners once',
+      !str_contains($cov, 'new uPlot(') && substr_count($cov, "window.addEventListener('resize'") === 1
+      && strpos($cov, "window.addEventListener('resize'") > strpos($cov, 'function draw('));
 
 // ── fail fast in the web bootstrap ──────────────────────────────────────────
 // A deferred heavy migration leaves schema_version stale for minutes, and every request went to

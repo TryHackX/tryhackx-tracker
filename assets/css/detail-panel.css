@@ -44,6 +44,12 @@
    its label above its value, which is the shape a long value wants. */
 .info-kv-wide { grid-column: 1 / -1; flex-direction: column; align-items: flex-start; gap: 0.15rem; }
 .info-kv-wide .info-kv-value { text-align: left; width: 100%; }
+/* The label's line of such a row, when a button acts on its value (1.72.0 — the owner's markup, made a class):
+   the label at the left, the button (the Info hash's and the Magnet link's Copy) at the right, the value under
+   both. The Copy stood after the hash, and under the magnet's three lines, where it was the last thing found.
+   A box that opens after the button (the plain-HTTP fallback) takes a line of its own under them. */
+.info-kv-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.35rem 0.6rem; width: 100%; }
+.info-kv-head > .share-url { flex: 1 1 100%; margin-top: 0; }
 
 
 /* ── the rich-text tags added in 1.21.0 ─────────────────────────────────────

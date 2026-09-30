@@ -54,8 +54,10 @@ function auditActionGroups(): array {
         // 'user.create' was mapped from admin/user_create since the log was written and named in no
         // group, so every account the panel made was filed under 'other'. v1/users/provision writes
         // the same action now, which is how it was noticed.
+        // group.recommend (1.72.0): a seeded group given what it was missing of its recommended set, or reset to it —
+        // from the Groups tab or from tools/groups.php, one line either way (userGroupRecommendedAudit()).
         'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media', 'user.bio',
-                       'user.warn'],
+                       'user.warn', 'group.recommend'],
         'machine'  => ['tracker.mode', 'tracker.restart', 'tracker.reload', 'netlimit.apply', 'iplist.change', 'sysctl.apply',
                        'ot.apply', 'ot.cluster', 'livesync.apply', 'backup.run', 'backup.restore',
                        'backup.delete', 'backup.download', 'tuner.run'],
@@ -282,6 +284,7 @@ function auditEndpointAction(string $endpoint): ?string {
         'admin/user_notify'           => 'user.notify',
         'admin/group_save'            => 'group.save',
         'admin/group_delete'          => 'group.delete',
+        'admin/group_recommended'     => 'group.recommend',
         'admin/tracker_mode'          => 'tracker.mode',
         'admin/restart_tracker'       => 'tracker.restart',
         'admin/reload_tracker'        => 'tracker.reload',

@@ -36,11 +36,11 @@ add('who', {
     'search_lists': ('Search a list or its owner', 'Szukaj listy lub właściciela'),
     'why': (
         'Only people who chose to be named here are listed — everybody decides for themselves, under Privacy '
-        'on their account page — and a list only while its owner shows it. So a section can be empty even '
-        'though many people have this.',
+        'on their account page — and a list only while its owner shows it, to everybody or to their friends. '
+        'So a section can be empty even though many people have this.',
         'Wymienione są tylko osoby, które zgodziły się tu pojawiać — każdy decyduje o sobie w sekcji '
-        'Prywatność na stronie konta — a lista tylko wtedy, gdy jej właściciel ją pokazuje. Dlatego sekcja '
-        'może być pusta, choć wiele osób ma ten torrent.'),
+        'Prywatność na stronie konta — a lista tylko wtedy, gdy jej właściciel ją pokazuje, wszystkim albo '
+        'swoim znajomym. Dlatego sekcja może być pusta, choć wiele osób ma ten torrent.'),
 })
 
 # ── what the script writes into them (assets/js/favourites.js, initWho()) ─────
@@ -78,10 +78,11 @@ add('settings', {
     'who_lists_enabled': ('Lists in “Who has this”', 'Listy w „Kto ma to u siebie”'),
     'who_lists_enabled_hint': (
         'A torrent’s “Who has this” shows the public lists it is on, with their owners’ names — exactly the '
-        'lists their profiles show. Off hides that section; the lists stay public on the profiles.',
+        'lists their profiles show — and, to a reader who is the owner’s friend, the lists shared with friends. '
+        'Off hides that section; the lists stay on the profiles.',
         'Okno „Kto ma to u siebie” torrenta pokazuje publiczne listy, na których jest, z nazwami ich '
-        'właścicieli — dokładnie te listy, które pokazują ich profile. Wyłączenie ukrywa tę sekcję; listy '
-        'nadal są publiczne na profilach.'),
+        'właścicieli — dokładnie te listy, które pokazują ich profile — a czytelnikowi, który jest znajomym '
+        'właściciela, także listy udostępnione znajomym. Wyłączenie ukrywa tę sekcję; listy zostają na profilach.'),
 })
 
 # ── the account page: the new consent, right under the likes' own switch ─────
