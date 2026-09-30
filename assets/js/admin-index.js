@@ -222,12 +222,18 @@
             ]);
             hashCell.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); copyToClipboard(r.info_hash, e.currentTarget); });
             tr.appendChild(hashCell);
-            const badges = [];
-            if (r.protected) badges.push(el('span', { className: 'status-badge-sm status-badge', title: t('js.index.protected_title') },
-                                            el('i', { className: 'bi bi-shield-fill', 'aria-hidden': 'true' })));
-            if (r.promoted) badges.push(el('span', { className: 'status-badge-sm status-badge', title: t('js.index.promoted_title') },
-                                           el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' })));
-            tr.appendChild(el('td', { className: 'wl-name-cell' }, [el('span', { text: r.name || '—', title: r.name || '' }), ...badges]));
+            // The name and its marks — protected, promoted — in ONE row (1.72.1). Each mark was an icon in
+            // a span of its own after the name's span, with nothing between them: glued to the name's
+            // last letter ("[rjk]🛡"), and with a long name the mark was what the cell's ellipsis cut. In
+            // the row (admin.css, "The name and its marks") the name is the part that shrinks and gets
+            // the ellipsis, the marks keep their room, and the icon is the row's own child, so it stands
+            // where every icon beside words stands and at the same distance (the glyph's own room taken
+            // off the gap — admin.css for Bootstrap's, assets/js/icons.js for Font Awesome's).
+            const marks = [];
+            if (r.protected) marks.push(el('i', { className: 'bi bi-shield-fill idx-mark', role: 'img', title: t('js.index.protected_title'), 'aria-label': t('js.index.protected_title') }));
+            if (r.promoted) marks.push(el('i', { className: 'bi bi-star-fill idx-mark', role: 'img', title: t('js.index.promoted_title'), 'aria-label': t('js.index.promoted_title') }));
+            tr.appendChild(el('td', { className: 'wl-name-cell' }, el('div', { className: 'idx-name-row' },
+                [el('span', { className: 'idx-name', text: r.name || '—', title: r.name || '' }), ...marks])));
             tr.appendChild(el('td', { className: 'font-mono', text: r.total_size ? fmtBytes(r.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'font-mono', text: r.files_count != null ? String(r.files_count) : '—' }));
             const sl = (r.scrape_seeders != null ? r.scrape_seeders : r.last_seeders) + ' / ' + (r.scrape_leechers != null ? r.scrape_leechers : r.last_leechers);

@@ -332,7 +332,7 @@ $_GET = $a["get"];
 foreach (["config/app.php", "config/database.php", "includes/settings.php", "includes/functions.php", "includes/schema.php",
           "includes/whitelist.php", "includes/richtext.php", "includes/reputation.php", "includes/schedule.php", "includes/index.php",
           "includes/auth.php", "includes/mail.php", "includes/users.php", "includes/favourites.php", "includes/usermedia.php",
-          "includes/profilebio.php", "includes/profilevotes.php", "includes/lists.php", "includes/people.php",
+          "includes/profilebio.php", "includes/profilevotes.php", "includes/profiledescs.php", "includes/lists.php", "includes/people.php",
           "includes/audit.php", "includes/lang.php"] as $f) if (is_file($f)) require_once $f;
 $db = getDb();
 $cfg = array_merge(getSettings($db), $a["cfg"]);
@@ -421,6 +421,100 @@ check('the catalogue search, a reader without index.magnet, a hash prefix: searc
 $j = $fpGet('api/index_search.php', $fpMag, ['search' => substr($fpHashLive, 0, 6)], $fpSearchCfg);
 check('… with index.magnet the prefix still finds the registered row, hash and all',
       ($j['total'] ?? -1) === 1 && ($j['rows'][0]['info_hash'] ?? '') === $fpHashLive, json_encode($j));
+
+/* ── 13. the star on every row, in the READER's state (1.72.1) ───────────────────────────────── */
+//
+// A list's rows, a profile's favourites and uploads, the likes / ratings and the descriptions tables carry the
+// favourites star now (assets/js/favourites.js addMagnetInfo()), as the search results have: each row whose hash the
+// reader is shown gets `fav` — whether the READER keeps it — from one question for the page (favMarkRows()). A
+// reader who may not keep favourites, or may not find a hash at all (index.view, which the star's own POST asks),
+// gets none; nor does a row whose hash is withheld, nor the reader's own favourites (every row of those is on). The
+// answer is about the reader: what the owner keeps never shows through. Run as requests, §12's accounts and three more.
+$fpHashOther = 'f0f0c3' . str_repeat('0', 33) . '3';
+$gStar      = $fpGroup('favprobe_star', ['favourites.use', 'favourites.view_others', 'index.view', 'index.magnet', 'whitelist.view', 'content.view']);
+$gNoView    = $fpGroup('favprobe_noview', ['favourites.use', 'favourites.view_others', 'index.magnet', 'whitelist.view', 'content.view']);
+$gStarNoMag = $fpGroup('favprobe_starnomag', ['favourites.use', 'favourites.view_others', 'index.view', 'whitelist.view', 'content.view']);
+$fpStar      = $fpUser('favprobe_star', $gStar);
+$fpNoView    = $fpUser('favprobe_noview', $gNoView);
+$fpStarNoMag = $fpUser('favprobe_starnomag', $gStarNoMag);
+check('§13: three more accounts — may keep favourites; may, but finds no hash (no index.view); may, but is shown no hash (no index.magnet)',
+      $fpStar > 0 && $fpNoView > 0 && $fpStarNoMag > 0, "$fpStar/$fpNoView/$fpStarNoMag");
+// The owner's side, widened: a third torrent (registered, in their favourites and their list) that nobody else keeps,
+// their likes on it and on the live one, their description of the live one, and the consents those two lists need.
+$wlIns->execute([$fpHashOther, 'favprobe gamma', $fpOwner, 0]);
+$db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$fpOwner, $fpHashOther]);
+$db->prepare("INSERT INTO user_list_items (list_id, info_hash) VALUES (?, ?)")->execute([$fpList, $fpHashOther]);
+$vIns = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, weight, created_at, updated_at) VALUES (?, 'user', ?, ?, 100, '2026-09-01 00:00:00', '2026-09-01 00:00:00')");
+foreach ([[$fpHashLive, 1], [$fpHashOther, -1]] as [$vh, $vv]) $vIns->execute([$vh, (string)$fpOwner, $vv]);
+$db->prepare("UPDATE whitelist SET description = 'favprobe words', description_format = 'bbcode', content_status = 'approved', content_user_id = ?,
+                                   content_reviewed_at = '2026-09-01 00:00:00' WHERE info_hash = ?")->execute([$fpOwner, $fpHashLive]);
+$db->prepare("UPDATE users SET votes_public = 1, descriptions_public = 1, content_credit_public = 1 WHERE id = ?")->execute([$fpOwner]);
+$db->prepare("UPDATE user_groups SET permissions = JSON_MERGE_PATCH(permissions, ?) WHERE id = ?")
+   ->execute([json_encode(['rating.public' => true, 'content.public' => true, 'content.view' => true]), $gOwner]);
+// The reader who may keep favourites keeps the live one — and only that one.
+$db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$fpStar, $fpHashLive]);
+$starCfg = ['rep_enabled' => '1', 'rep_mode' => 'thumbs', 'profile_votes_enabled' => '1', 'profile_descriptions_enabled' => '1', 'wl_allow_description' => '1'];
+$favOf = fn(array $j): array => array_map(fn($r) => array_key_exists('fav', $r) ? $r['fav'] : 'none', $j['rows'] ?? []);
+$favBy = function (array $j): array {
+    $out = [];
+    foreach ($j['rows'] ?? [] as $r) $out[(string)($r['info_hash'] ?? 'null')][] = array_key_exists('fav', $r) ? $r['fav'] : 'none';
+    return $out;
+};
+$is = fn(array $m, string $k, array $want): bool => ($m[$k] ?? null) === $want;
+
+$j = $fpGet('api/user_favourites.php', $fpStar, ['user' => 'favprobe_owner'], $starCfg);
+$m = $favBy($j);
+check('§13 favourites, somebody else\'s: each row\'s `fav` is the READER\'s — on for the one they keep, off for the one only the owner keeps (the banned one is not theirs to see)',
+      !empty($j['success']) && count($j['rows'] ?? []) === 2 && $is($m, $fpHashLive, [true]) && $is($m, $fpHashOther, [false]), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_favourites.php', $fpMag, ['user' => 'favprobe_owner'], $starCfg);
+check('… a reader who may not keep favourites (no favourites.use): the hashes, and no `fav` on any row',
+      count($j['rows'] ?? []) === 2 && $favOf($j) === ['none', 'none'] && !in_array(null, $hashes($j), true), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_favourites.php', $fpNoView, ['user' => 'favprobe_owner'], $starCfg);
+check('… nor one who may keep them but may not find a hash (no index.view — the star\'s own POST would refuse)',
+      count($j['rows'] ?? []) === 2 && $favOf($j) === ['none', 'none'] && !in_array(null, $hashes($j), true), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_favourites.php', $fpStarNoMag, ['user' => 'favprobe_owner'], $starCfg);
+check('… nor a row whose hash the reader is not shown (no index.magnet): nothing to name the torrent by',
+      count($j['rows'] ?? []) === 2 && $hashes($j) === [null, null] && $favOf($j) === ['none', 'none'], json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_favourites.php', $fpOwner, [], $starCfg);
+check('… and the owner\'s own list carries none: every row of it is on',
+      count($j['rows'] ?? []) === 3 && $favOf($j) === ['none', 'none', 'none'], json_encode($j['rows'] ?? $j));
+
+$j = $fpGet('api/user_uploads.php', $fpStar, ['user' => 'favprobe_owner'], $starCfg);
+$m = $favBy($j);
+check('§13 uploads: the reader\'s own state (on / off); the banned row, its hash withheld, carries none',
+      !empty($j['success']) && count($j['rows'] ?? []) === 3 && $is($m, $fpHashLive, [true]) && $is($m, $fpHashOther, [false]) && $is($m, 'null', ['none']), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner'], $starCfg);
+check('… and none at all for a reader who may not keep favourites', count($j['rows'] ?? []) === 3 && $favOf($j) === ['none', 'none', 'none'], json_encode($j['rows'] ?? $j));
+
+$j = $fpGet('api/user_list_items.php', $fpStar, ['list' => (string)$fpList], $starCfg);
+$m = $favBy($j);
+check('§13 a list, somebody else\'s: the reader\'s own state on each row (the banned one is not theirs to see)',
+      !empty($j['success']) && count($j['rows'] ?? []) === 2 && $is($m, $fpHashLive, [true]) && $is($m, $fpHashOther, [false]), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_list_items.php', $fpOwner, ['list' => (string)$fpList], $starCfg);
+check('… the owner\'s own list read without index.magnet: no hash on a row, so no `fav` either',
+      !empty($j['success']) && count($j['rows'] ?? []) === 3 && $hashes($j) === [null, null, null] && $favOf($j) === ['none', 'none', 'none'], json_encode($j['rows'] ?? $j));
+
+$j = $fpGet('api/user_votes.php', $fpStar, ['user' => 'favprobe_owner'], $starCfg);
+$m = $favBy($j);
+check('§13 likes: the reader\'s own state on each row — never the owner\'s (they keep both)',
+      !empty($j['success']) && count($j['rows'] ?? []) === 2 && $is($m, $fpHashLive, [true]) && $is($m, $fpHashOther, [false]), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_votes.php', $fpNoView, ['user' => 'favprobe_owner'], $starCfg);
+check('… and none for a reader who may not find a hash', count($j['rows'] ?? []) === 2 && $favOf($j) === ['none', 'none'], json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_descriptions.php', $fpStar, ['user' => 'favprobe_owner'], $starCfg);
+$m = $favBy($j);
+check('§13 descriptions: the row carries the reader\'s own state',
+      !empty($j['success']) && count($j['rows'] ?? []) === 1 && $is($m, $fpHashLive, [true]), json_encode($j['rows'] ?? $j));
+$j = $fpGet('api/user_descriptions.php', $fpNoView, ['user' => 'favprobe_owner'], $starCfg);
+check('… and none for a reader who may not find a hash', count($j['rows'] ?? []) === 1 && $favOf($j) === ['none'], json_encode($j['rows'] ?? $j));
+// ONE question for the page: the helper asks favMarkFor() — one IN() per 500 hashes, §4 — once, and every endpoint
+// asks the helper once, for the page it answers with.
+$fmSrc = (string)file_get_contents($root . '/includes/favourites.php');
+$fmBody = preg_match('/function favMarkRows\(.*?\n\}/s', $fmSrc, $mm) ? $mm[0] : '';
+check('… one question for the page: favMarkRows() asks favMarkFor() once, outside any loop',
+      $fmBody !== '' && substr_count($fmBody, 'favMarkFor(') === 1 && !preg_match('/foreach\s*\([^)]*\)\s*\{[^}]*favMarkFor\(/s', $fmBody), $fmBody === '' ? 'favMarkRows() not found' : '');
+foreach (['api/user_favourites.php', 'api/user_uploads.php', 'api/user_list_items.php', 'api/user_votes.php', 'api/user_descriptions.php'] as $ep) {
+    check("… $ep asks it once, for the page it answers with", substr_count((string)file_get_contents($root . '/' . $ep), 'favMarkRows($db, $cfg, ') === 1);
+}
 
 $db->exec("DELETE FROM user_favourites WHERE user_id > 900000");
 echo "\n$n checks, $fails failed\n";

@@ -153,6 +153,36 @@ function favMarkFor(PDO $db, int $userId, array $hashes): array {
 }
 
 /**
+ * Whether THIS reader is given a star on a torrent's row (1.72.1): favourites on, signed in, `favourites.use` — and
+ * `index.view`, which the star's own POST asks (api/user_favourites.php: a hash somebody cannot find is a hash they
+ * cannot favourite), so no row offers a star that could only answer "no". The search results ask the page's
+ * favContext() (the search itself needs index.view); the Info panel asks the same of its own answer.
+ */
+function favStarShown(PDO $db, array $cfg): bool {
+    return favEnabled($cfg) && currentUser($db) !== null
+        && userCan($db, $cfg, 'favourites.use') && userCan($db, $cfg, 'index.view');
+}
+
+/**
+ * The star's state on a page of rows (1.72.1) — a list's, a profile's favourites or uploads, the likes / ratings and
+ * the descriptions tables: every row whose hash THIS reader is shown gets `fav`, whether the READER keeps it among
+ * their own favourites, from ONE query for the page (favMarkFor()), never one per row. A row whose hash is withheld
+ * gets nothing (there would be nothing to name the torrent by), and nor does any row for a reader who is given no star
+ * (favStarShown()). The answer is about the reader alone: somebody else's list says nothing more about its owner.
+ */
+function favMarkRows(PDO $db, array $cfg, array $rows): array {
+    if (!$rows || !favStarShown($db, $cfg)) return $rows;
+    $me = currentUser($db);
+    $shown = static fn($r): ?string => is_array($r) && is_string($r['info_hash'] ?? null) && $r['info_hash'] !== '' ? strtolower($r['info_hash']) : null;
+    $mark = favMarkFor($db, (int)$me['id'], array_values(array_filter(array_map($shown, $rows))));
+    foreach ($rows as $i => $r) {
+        $h = $shown($r);
+        if ($h !== null) $rows[$i]['fav'] = isset($mark[$h]);
+    }
+    return $rows;
+}
+
+/**
  * The metadata for a page of favourited hashes — the two-cheap-queries pattern, never a join.
  *
  * NEVER `FROM index_hashes h JOIN user_favourites f … MATCH(h.name)`: the optimiser starts at the

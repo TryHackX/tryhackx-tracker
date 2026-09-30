@@ -68,7 +68,8 @@ jsonResponse([
     'own'       => $isOwn,
     'mode'      => repMode($cfg),
     'min_votes' => repMinVotes($cfg),
-    'rows'      => $res['rows'],
+    // Each row's star in the READER's state (1.72.1, favMarkRows()): one question for the page.
+    'rows'      => favMarkRows($db, $cfg, $res['rows']),
     'total'     => $res['total'],
     'page'      => $res['page'],
     'pages'     => $res['pages'],

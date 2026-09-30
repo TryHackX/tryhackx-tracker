@@ -150,6 +150,8 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'public'         => (int)$r['submitter_public'] === 1,
     ];
 }
+// Each row's star in the READER's state (1.72.1, favMarkRows()): one question for the page.
+$rows = favMarkRows($db, $cfg, $rows);
 
 jsonResponse([
     'success'    => true,

@@ -23,6 +23,9 @@ $pdHead = static fn(string $id, string $col, string $sort, string $label, string
     . ($on ? '<i class="bi bi-arrow-down search-sort-icon active" aria-hidden="true"></i>'
            : '<i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i>')
     . '</button></th>';
+// The actions column holds the favourites star as well (1.72.1) where the rows can carry one — the likes table's rule
+// (templates/partials/votes_section.php).
+$pdFav = favStarShown($db, $cfg) && ($pdSelf || userCan($db, $cfg, 'index.magnet'));
 ?>
 <div class="pv-section pd-section" id="descs-section"
      data-user="<?= sanitize((string)$pdUser) ?>"
@@ -41,7 +44,7 @@ $pdHead = static fn(string $id, string $col, string $sort, string $label, string
     <div class="pv-wrap" id="pd-wrap" hidden>
         <table class="transparency-table pv-table pd-table" id="pd-table">
             <colgroup>
-                <col class="pd-c-name"><col class="pd-c-role"><col class="pd-c-date"><col class="pd-c-acts">
+                <col class="pd-c-name"><col class="pd-c-role"><col class="pd-c-date"><col class="pd-c-acts<?= $pdFav ? ' pd-c-acts-fav' : '' ?>">
             </colgroup>
             <thead><tr>
                 <?= $pdHead('pd-h-name', 'name', 'name', __('search.col_name')) ?>

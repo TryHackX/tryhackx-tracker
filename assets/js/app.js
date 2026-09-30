@@ -2697,6 +2697,34 @@ window.askInPlace = askInPlace;
         window.PulseTick = tick;   // the browser check pokes it rather than waiting a minute
     }
 
+    /**
+     * The card under the Overview's columns stands exactly 1.25rem below the lowest card (1.72.1).
+     *
+     * The columns are CSS columns the browser balances (.acc-flow), and when the two come out nearly equal the
+     * balancing leaves a strip of empty column under both — 7.6px measured, Polish with ratings on, 1 379 / 1 378px —
+     * so the security card stood that much further than the owner's 1.25rem. CSS cannot shorten a column box, so the
+     * strip is taken back as the flow's negative bottom margin, measured again whenever the flow or a card in it
+     * changes size (a tab shown, a picture loaded, the language swapped, the window resized). A single column has no
+     * strip and gets nothing.
+     */
+    function trimAccountFlow() {
+        const flow = document.querySelector('.acc-flow');
+        if (!flow || typeof ResizeObserver === 'undefined') return;
+        let queued = false;
+        const trim = () => {
+            queued = false;
+            const cards = [...flow.children].filter((c) => c.classList.contains('account-card') && c.getClientRects().length);
+            if (!cards.length) { flow.style.marginBottom = ''; return; }
+            const low = Math.max(...cards.map((c) => c.getBoundingClientRect().bottom));
+            const strip = flow.getBoundingClientRect().bottom - low;
+            flow.style.marginBottom = strip > 0.5 ? (-strip).toFixed(2) + 'px' : '';
+        };
+        const ro = new ResizeObserver(() => { if (!queued) { queued = true; requestAnimationFrame(trim); } });
+        ro.observe(flow);
+        [...flow.children].forEach((c) => ro.observe(c));
+        trim();
+    }
+
     function initAccount() {
         if (!$id('account-form')) {
             // not on the account page — still light up the nav badge for signed-in users
@@ -2718,6 +2746,7 @@ window.askInPlace = askInPlace;
             return;
         }
         initPulse();
+        trimAccountFlow();
         loadAccount();
         loadNotifications(1);
         $id('acc-mark-all').addEventListener('click', async (e) => {
@@ -4526,7 +4555,8 @@ window.askInPlace = askInPlace;
                     tr.appendChild(repTd);
                 }
                 const seenTd = document.createElement('td');
-                seenTd.className = 'search-num';
+                // search-seen: on a phone the date and its time may take a line each — see style.css
+                seenTd.className = 'search-num search-seen';
                 seenTd.textContent = fmtDatePub(r.last_seen);
                 tr.appendChild(seenTd);
                 if (canMagnet) {

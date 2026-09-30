@@ -63,8 +63,9 @@ add('account', {
                          'Pozwól, by moja nazwa pojawiała się na liście „kto ma to w ulubionych”'),
     'fav_listed_hint': ('Off, you are not on that list and you are not in its count either — nobody can work out that somebody is missing.',
                         'Wyłączone — nie ma cię na tej liście ani w jej liczniku; nikt nie wywnioskuje, że kogoś brakuje.'),
-    'fav_none':       ('Nothing here yet. The star beside a search result puts it here.',
-                       'Na razie pusto. Gwiazdka przy wyniku wyszukiwania dodaje torrent tutaj.'),
+    # 1.72.1: the star stands beside a torrent wherever its actions are, not only in the search results.
+    'fav_none':       ('Nothing here yet. The star beside a torrent puts it here — in the search results, a list or on a profile.',
+                       'Na razie pusto. Gwiazdka przy torrencie dodaje go tutaj — w wynikach wyszukiwania, na liście albo na profilu.'),
     'fav_count':      (':n of :max kept', ':n z :max'),
     'uploads_none':   ('You have not registered anything while signed in.',
                        'Nie zarejestrowałeś niczego będąc zalogowanym.'),

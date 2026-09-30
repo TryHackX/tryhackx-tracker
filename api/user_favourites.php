@@ -164,6 +164,9 @@ foreach ($slice as &$r) {
     }
 }
 unset($r);
+// Somebody else's list (1.72.1): each row's star in the READER's state — whether they keep it too. Your own list is
+// your favourites, every row of it on, and needs no second answer.
+if (!$isOwn) $slice = favMarkRows($db, $cfg, $slice);
 
 jsonResponse([
     'success'  => true,

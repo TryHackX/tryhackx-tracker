@@ -233,6 +233,9 @@ foreach ($slice as &$row) {
     if (!$canMagnet || $row['banned']) $row['info_hash'] = null;
 }
 unset($row);
+// Each row's star in the READER's state (1.72.1, favMarkRows()) — the owner's list or a friend's, one question for
+// the page, and only where the row's hash is shown.
+$slice = favMarkRows($db, $cfg, $slice);
 
 jsonResponse([
     'success'  => true,

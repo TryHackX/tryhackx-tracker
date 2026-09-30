@@ -9,6 +9,10 @@ handshakes per announce from the statistics timeline.
 
 The rewritten words of the coverage card's older keys stay where they were (js.py, admin_index.py,
 admin_settings.py); what is new is here.
+
+1.72.1: the chart over long windows — one bar per bucket of time when one per pass would be narrower than
+a few pixels (its legend, its span words, its tooltip), a re-read poll's "read again from the start", and
+WHEN the short downloads and failed polls were (a warning only while recent).
 """
 
 S = {}
@@ -40,8 +44,19 @@ add('js.coverage', {
         'Pobranie urwane przed końcem'),
     'ended_early_note': ('the tracker stopped sending before the end; what arrived was read from the start',
         'tracker przestał wysyłać przed końcem; to, co dotarło, zostało przeczytane od początku'),
-    'ended_early_alert': ('Downloads that ended early in this window: :n. The tracker stopped sending before the end of the scrape; what arrived was read from the start and the cursor kept its place, so the next poll went on from where the pass had got. If it keeps happening, look at the tracker’s side of it.',
-        'Pobrania urwane przed końcem w tym oknie: :n. Tracker przestał wysyłać, zanim skończył się scrape; to, co dotarło, zostało przeczytane od początku, a kursor został na swoim miejscu, więc następne odpytanie ruszyło dalej od miejsca, do którego doszedł przebieg. Jeśli to się powtarza, przyjrzyj się trackerowi.'),
+    # 1.72.1: WHEN, as well as how many — the warning (and "if it keeps happening…") only while one
+    # happened in the last day; older ones are history with a date (production's 52 of 04.09 – 05.09)
+    'ended_early_alert': ('Downloads that ended early in this window: :n, the last :ago ago. The tracker stopped sending before the end of the scrape; what arrived was read from the start and the cursor kept its place, so the next poll went on from where the pass had got. If it keeps happening, look at the tracker’s side of it.',
+        'Pobrania urwane przed końcem w tym oknie: :n, ostatnie :ago temu. Tracker przestał wysyłać, zanim skończył się scrape; to, co dotarło, zostało przeczytane od początku, a kursor został na swoim miejscu, więc następne odpytanie ruszyło dalej od miejsca, do którego doszedł przebieg. Jeśli to się powtarza, przyjrzyj się trackerowi.'),
+    'ended_early_old_alert': ('Downloads that ended early in this window: :n, the last on :when — none since. What arrived was read from the start and the cursor kept its place, so the next poll went on from where the pass had got.',
+        'Pobrania urwane przed końcem w tym oknie: :n, ostatnie :when — od tamtej pory żadnego. To, co dotarło, zostało przeczytane od początku, a kursor został na swoim miejscu, więc następne odpytanie ruszyło dalej od miejsca, do którego doszedł przebieg.'),
+    # under the short-download and failed-poll tiles ("pobranie", "odpytanie": both neuter in Polish)
+    'last_ago': ('the last :ago ago',
+        'ostatnie :ago temu'),
+    'last_old': ('the last on :when — none since',
+        'ostatnie :when — od tamtej pory żadnego'),
+    'worst_when': ('the pass that began :when',
+        'przebieg rozpoczęty :when'),
     'last_pass': ('Last pass',
         'Ostatni przebieg'),
     'polls_one': ('one poll',
@@ -78,6 +93,12 @@ add('js.coverage', {
         'pobranie urwało się przed końcem: dotarło wpisów :n, przeczytanych od początku (:reason)'),
     'tip_error': ('the poll failed: :err',
         'odpytanie się nie powiodło: :err'),
+    # 1.72.1: a short download restarting inside an open pass walks old ground again — its part is only
+    # what was new in it
+    'tip_again': ('read again from the start: :n entries, :m of them new',
+        'przeczytane ponownie od początku: wpisów :n, z czego nowych :m'),
+    'tip_again_none': ('read again from the start: :n entries, none of them new — nothing added to the pass',
+        'przeczytane ponownie od początku: wpisów :n, żadnego nowego — nic nie dodało do przebiegu'),
     'tip_numbers': ('delivered :d · kept :k · :t',
         'dostarczone :d · zachowane :k · :t'),
     'tip_pass': ('this pass: :pct · :state',
@@ -109,6 +130,24 @@ add('js.coverage', {
         'W toku'),
     'chart_aria': ('Scrape coverage: :p passes from :n polls',
         'Pokrycie scrape: przebiegi :p, odpytania :n'),
+
+    # 1.72.1: when one bar per pass would be narrower than a few pixels, one bar per bucket of time
+    'chart_aria_buckets': ('Scrape coverage: :p passes from :n polls, one bar per :span',
+        'Pokrycie scrape: przebiegi :p, odpytania :n, jeden słupek na :span'),
+    'legend_bucket': ('One bar = :span, the average of its passes',
+        'Jeden słupek = :span, średnia jego przebiegów'),
+    'legend_worst': ('Worst pass, below :pct %',
+        'Najgorszy przebieg, poniżej :pct %'),
+    'bucket_passes': ('Passes: :n',
+        'Przebiegi: :n'),
+    'span_hours': (':n h',
+        ':n h'),
+    'span_day': ('1 day',
+        '1 dzień'),
+    'span_two_days': ('2 days',
+        '2 dni'),
+    'span_week': ('1 week',
+        '1 tydzień'),
 
     'estimate_one': ('At the last full pass’s pace (:rate entries/s) the scrape (:scrape torrents) needs about :needs s — with the budget at :budget s one poll walks it.',
         'W tempie ostatniego pełnego przebiegu (:rate wpisów/s) scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s wystarczy jedno odpytanie.'),

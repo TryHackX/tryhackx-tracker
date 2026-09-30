@@ -163,12 +163,24 @@
             var t = ctx.measureText(ch);
             g = metrics[key] = { mid: (t.actualBoundingBoxAscent - t.actualBoundingBoxDescent) / 200,
                                  l: Math.max(0, -t.actualBoundingBoxLeft / 100),
-                                 r: Math.max(0, (t.width - t.actualBoundingBoxRight) / 100) };
+                                 r: Math.max(0, (t.width - t.actualBoundingBoxRight) / 100),
+                                 // How far the ink reaches either way from the middle of the glyph's advance (1.72.1) — the
+                                 // middle of the box an icon-only button centres it in.
+                                 il: (t.width / 2 + t.actualBoundingBoxLeft) / 100,
+                                 ir: (t.actualBoundingBoxRight - t.width / 2) / 100 };
         }
         el.style.setProperty('--bi-mid', g.mid.toFixed(3) + 'em');
         var p = el.parentNode;
         // `wordsBefore` null: an icon button's glyph (solo()), whose row has no gap to take the room off.
         if (wordsBefore !== null && p && p.style) p.style.setProperty('--bi-sb', (wordsBefore ? g.l : g.r).toFixed(3) + 'em');
+        // The favourites star (1.72.1) is the one icon button drawn without a frame, so its row stands its framed
+        // neighbours at the row's gap from its INK, not from its box (assets/css/style.css, "the star's place"): the
+        // button carries how far its glyph's ink reaches either way from the box's middle. Bootstrap's two stars have
+        // theirs written in the stylesheet.
+        if (wordsBefore === null && p && p.style && p.classList && p.classList.contains('fav-star')) {
+            p.style.setProperty('--bi-il', g.il.toFixed(3) + 'em');
+            p.style.setProperty('--bi-ir', g.ir.toFixed(3) + 'em');
+        }
     }
     if (document.fonts && document.fonts.addEventListener) {
         document.fonts.addEventListener('loadingdone', function () {

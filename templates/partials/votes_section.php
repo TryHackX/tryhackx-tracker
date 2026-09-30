@@ -16,6 +16,9 @@
  */
 $pvMode  = repMode($cfg);
 $pvStars = $pvMode === 'stars';
+// The actions column holds the favourites star as well (1.72.1) where the rows can carry one: a reader who is given
+// a star (favStarShown()) and shown the hashes (their own list, or index.magnet) — api/user_votes.php's own rule.
+$pvFav   = favStarShown($db, $cfg) && ($pvSelf || userCan($db, $cfg, 'index.magnet'));
 $pvWho   = $pvSelf ? 'self' : 'other';
 $pvOwnLabel = __('votes.col_own_' . $pvMode . '_' . $pvWho);
 // A header cell: its words, then the search table's arrow, joined by a no-break space so a header that
@@ -102,7 +105,7 @@ $pvHead = static fn(string $id, string $col, string $sort, string $label, string
     <div class="pv-wrap" id="pv-wrap" hidden>
         <table class="transparency-table pv-table pv-mode-<?= sanitize($pvMode) ?>" id="pv-table">
             <colgroup>
-                <col class="pv-c-name"><col class="pv-c-size"><col class="pv-c-sl"><col class="pv-c-own"><col class="pv-c-score"><col class="pv-c-votes"><col class="pv-c-date"><col class="pv-c-acts">
+                <col class="pv-c-name"><col class="pv-c-size"><col class="pv-c-sl"><col class="pv-c-own"><col class="pv-c-score"><col class="pv-c-votes"><col class="pv-c-date"><col class="pv-c-acts<?= $pvFav ? ' pv-c-acts-fav' : '' ?>">
             </colgroup>
             <thead><tr>
                 <?= $pvHead('pv-h-name', 'name', 'name', __('search.col_name')) ?>

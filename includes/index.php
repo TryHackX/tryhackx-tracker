@@ -740,6 +740,8 @@ function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = n
 /** Rows a history reply reads (newest first), and rows it may look back for the start of the first pass. */
 const IDX_POLL_HISTORY_MAX = 4000;
 const IDX_POLL_LOOKBACK = 200;
+/** How recent a short download, a failed poll or the worst pass must be to be said as a warning (1.72.1). */
+const IDX_POLL_RECENT = 86400;
 
 /** The coverage card's ranges → seconds ('all' = the whole retention, index_poll_keep_days). */
 function indexPollRanges(): array {
@@ -813,6 +815,17 @@ function indexPollPoint(array $r): array {
  * delivered (the sum over its polls), kept, seconds (the polls' own time, download included),
  * duration (first start → last end), coverage (walked against the newest tracker count the pass
  * recorded, the last poll's when it has one), and whether it counts in a summary.
+ *
+ * THE NEW GROUND (1.72.1). `delivered` is what a poll walked past its OWN start, and a short download
+ * that joins an open pass starts at 0 — so it walks again what the pass had already walked. Stacked,
+ * those parts made a bar the SUM of overlapping walks: production's 04.09 09:29 pass, thirteen short
+ * downloads and the poll that finished it, stood at 5 017 793 over a scrape of 1 468 888, and the y axis
+ * followed it (0 – 6M on the month, everything else squashed under 2.3M). So each poll also carries
+ * what was NEW in it: `new_from` = the further of its start and what the pass had reached before it,
+ * `new` = what it walked past that, `again` = the old ground it walked a second time, `kept_new` = its
+ * kept share of the new ground (kept × new / delivered — an estimate for a re-read, where the row does
+ * not say which of the kept were new). A pass's `ground` = the sum of `new` — its walked for a pass seen
+ * from its start — and never more than the scrape.
  * Returns ['passes' => [...], 'points' => $points each with 'pass' (its index), 'pos' (1-based) and 'of'].
  */
 function indexPollPasses(array $points): array {
@@ -830,15 +843,24 @@ function indexPollPasses(array $points): array {
         }
         if ($join === null) {
             $passes[] = ['first_ts' => $p['ts'], 'last_ts' => $p['ts'], 'end_ts' => $p['ts'], 'polls' => 0,
-                         'walked' => 0, 'delivered' => 0, 'kept' => 0, 'ms' => 0, 'cut' => 0, 'short' => 0,
-                         'failed' => 0, 'rows_total' => null, 'began_before' => !$p['restart'], 'status' => 'open'];
+                         'walked' => 0, 'ground' => 0, 'delivered' => 0, 'kept' => 0, 'kept_new' => 0, 'ms' => 0, 'cut' => 0,
+                         'short' => 0, 'failed' => 0, 'rows_total' => null, 'began_before' => !$p['restart'], 'status' => 'open'];
             $join = count($passes) - 1;
         }
         $x = &$passes[$join];
+        $reachBefore = $x['walked'];
+        $newFrom = max($p['start'], $reachBefore);
+        $new = max(0, $p['entries'] - $newFrom);
+        $points[$i]['new_from'] = $newFrom;
+        $points[$i]['new'] = $new;
+        $points[$i]['again'] = max(0, min($p['entries'], $reachBefore) - $p['start']);
+        $points[$i]['kept_new'] = $p['delivered'] > 0 ? (int)round($p['kept'] * $new / $p['delivered']) : 0;
         $x['polls']++;
         $x['walked'] = max($x['walked'], $p['entries']);
+        $x['ground'] += $new;
         $x['delivered'] += $p['delivered'];
         $x['kept'] += $p['kept'];
+        $x['kept_new'] += $points[$i]['kept_new'];
         $x['ms'] += $p['ms'];
         if ($p['cut']) $x['cut']++;
         if ($p['partial'] !== null) $x['short']++;
@@ -915,6 +937,16 @@ function indexPollHistory(PDO $db, array $cfg, string $range = '24h', ?int $now 
     $scrape = null;
     foreach (array_reverse($points) as $p) { if ($p['rows_total'] !== null) { $scrape = $p['rows_total']; break; } }
     $budget = indexPollBudget($cfg);
+    // WHEN, not only how many (1.72.1). A month's window counted production's 52 short downloads of
+    // 04.09 – 05.09 — every one of them before the tracker's fix on 05.09 12:48, none since — and said
+    // them as a current warning, "if it keeps happening, look at the tracker's side of it", three weeks
+    // on. The newest of each kind, and how many fell in the last IDX_POLL_RECENT seconds of the window,
+    // let the card say "the last on 05.09 — none since" and keep the warning for what is happening now.
+    $recentFrom = $now - IDX_POLL_RECENT;
+    $shortTs = array_values(array_map(static fn($p) => $p['ts'], array_filter($points, static fn($p) => $p['partial'] !== null)));
+    $failTs = array_values(array_map(static fn($p) => $p['ts'], array_filter($points, static fn($p) => $p['error'] !== null)));
+    $worst = null;                                   // the worst counted pass; of equals, the newest
+    foreach ($counted as $x) { if ($worst === null || $x['coverage'] <= $worst['coverage']) $worst = $x; }
     $summary = [
         'polls'        => count($points),
         'passes'       => count($passes),
@@ -934,10 +966,18 @@ function indexPollHistory(PDO $db, array $cfg, string $range = '24h', ?int $now 
         'budget'       => $budget,
         'budget_max'   => IDX_POLL_BUDGET_MAX,
         'estimate'     => indexPollEstimate($complete ? $complete[count($complete) - 1] : null, $scrape, $budget),
+        'recent_s'     => IDX_POLL_RECENT,
+        'short_last'   => $shortTs ? max($shortTs) : null,
+        'short_recent' => count(array_filter($shortTs, static fn($t) => $t >= $recentFrom)),
+        'failed_last'  => $failTs ? max($failTs) : null,
+        'failed_recent'=> count(array_filter($failTs, static fn($t) => $t >= $recentFrom)),
+        'worst_ts'     => $worst !== null ? $worst['first_ts'] : null,
+        'worst_recent' => $worst !== null && $worst['last_ts'] >= $recentFrom,
     ];
     // `lead`: the polls before the window that belong to its first pass — drawn as the lower parts of
-    // that pass's bar, never counted in the summary above.
-    return ['success' => true, 'range' => $key, 'from' => $from, 'points' => $points,
+    // that pass's bar, never counted in the summary above. `now`: the moment the window ends, which the
+    // card measures "the last … ago" from.
+    return ['success' => true, 'range' => $key, 'from' => $from, 'now' => $now, 'points' => $points,
             'lead' => array_slice($g['points'], 0, count($back)), 'passes' => $passes, 'summary' => $summary];
 }
 

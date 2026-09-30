@@ -696,5 +696,29 @@ check('… and a duotone glyph in its button is measured as both layers are draw
       && str_contains($ojs72, "font = cs.fontStyle + ' ' + cs.fontWeight + ' 100px ' + fams[fams.length - 1].trim();")
       && str_contains($ojs72, 'document.fonts.load(font, ch).catch('));
 
+// ── 9. the favourites star's place (1.72.1) ─────────────────────────────────
+// The owner: the star "is aligned, but as if it had that box on it too, and it does not, so it looks further away" —
+// and "do not put a frame round it". The star keeps its button's box and its glyph the box's middle; a FRAMED neighbour
+// stands the row's gap from its INK: the box reaches into the gap by the room its glyph leaves (half an em for
+// Bootstrap's two stars, which fill their square; a Font Awesome star's measured in its face by the observer and set
+// on the button). Measured in every mode by scratchpad/shots/icons_align_check.js (judgeStar()).
+$st721 = (string)file_get_contents($root . '/assets/css/style.css');
+$js721 = (string)file_get_contents($root . '/assets/js/icons.js');
+check('1.72.1: the star\'s place — Bootstrap\'s half an em each way, the pull on each side a neighbour stands on (rows, the Info panel\'s head, Share beyond a lone star)',
+      str_contains($st721, '.fav-star.ic-btn { --bi-il: 0.5em; --bi-ir: 0.5em; }')
+      && str_contains($st721, ':is(.search-c-actions-inner, .pf-acts, .info-acts) > .fav-star.ic-btn:not(:first-child) { margin-left: calc(var(--bi-il) - var(--ic-box, 1.625rem) / 2); }')
+      && str_contains($st721, ':is(.search-c-actions-inner, .pf-acts, .info-acts) > .fav-star.ic-btn:not(:last-child) { margin-right: calc(var(--bi-ir) - var(--ic-box, 1.625rem) / 2); }')
+      && str_contains($st721, '.files-head:has(> .info-share) > .info-acts > .fav-star.ic-btn:last-child { margin-right: calc(var(--bi-ir) - var(--ic-box, 1.625rem) / 2); }')
+      && !preg_match('/\.fav-star[^{]*\{[^}]*\bborder:\s*1px/', $st721));
+check('… and a Font Awesome star\'s reach measured in the face it is drawn in, set on its button (the observer), for the star alone',
+      str_contains($js721, 'il: (t.width / 2 + t.actualBoundingBoxLeft) / 100,') && str_contains($js721, 'ir: (t.actualBoundingBoxRight - t.width / 2) / 100 };')
+      && str_contains($js721, "if (wordsBefore === null && p && p.style && p.classList && p.classList.contains('fav-star')) {")
+      && str_contains($js721, "p.style.setProperty('--bi-il', g.il.toFixed(3) + 'em');") && str_contains($js721, "p.style.setProperty('--bi-ir', g.ir.toFixed(3) + 'em');"));
+check('… the columns that hold it take its pull off: the search results\' (-fav), the likes and descriptions tables\' (-fav, new), a row\'s actions',
+      str_contains($st721, '.search-c-actions.search-c-actions-fav { width: calc(4 * 1.625rem + 3 * 0.35rem + 1.5rem - 0.3rem); }')
+      && str_contains($st721, '.pv-c-acts.pv-c-acts-fav, .pd-c-acts.pd-c-acts-fav { width: calc(3 * 1.625rem + 2 * 0.35rem + 1rem - 0.3rem); }')
+      && str_contains($st721, 'min-width: calc(3 * 1.625rem + 2 * 0.35rem - 0.3rem); justify-content: flex-end; }')
+      && str_contains($st721, '.pf-acts:has(> .list-remove) { min-width: calc(4 * 1.625rem + 3 * 0.35rem - 0.6rem); }'));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

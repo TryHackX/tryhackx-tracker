@@ -18,6 +18,15 @@
  *   5. the estimate from the newest complete pass (rate, needs, polls), and its line under the field;
  *   6. the words: a cut says cut and continues, never "truncated", in both languages; a short download
  *      keeps words of its own; every key the card's script asks for exists.
+ *  1.72.1 (the chart over long windows):
+ *   2b. the NEW ground of each poll (indexPollPasses(): new_from / new / again / kept_new, a pass's
+ *      ground) — a short download inside an open pass adds only what lies past the pass's reach; production's
+ *      04.09 09:29 pass (thirteen short downloads, 5 017 793 stacked over a scrape of 1 468 888) comes to its
+ *      1 468 888; the 1.29.0 cursor beyond the reach; the shrunk scrape; the NULL tracker count of 05.09 12:51;
+ *   3. the reply's `now` and WHEN (short_last / short_recent, failed_last / failed_recent, worst_ts /
+ *      worst_recent: recent = the window's last day), the new ground in points, lead and passes, a row
+ *      without a count arriving as null;
+ *   6. the recent warning and the old note in both languages, a re-read poll's words, the buckets' words.
  * Needs the local test database for section 3 (deploy/local_bootstrap.php); the rest is pure.
  */
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
@@ -138,11 +147,80 @@ check('old rows: the 1.29.0 cursor on a short download is read as the restart it
 $g = passesOf([row(100, 1000, 0, false, 22, null)]);
 check('no count: a pass with no tracker count has no coverage (null), not 0', $g['passes'][0]['coverage'] === null);
 
+// ── 2b. the new ground (1.72.1) ─────────────────────────────────────────────
+// A short download that joins an open pass starts at entry 0: it walks AGAIN what the pass had walked. The
+// chart stacked what each poll delivered past its own start, so such a pass stood at the sum of its walks.
+$g = passesOf([row(100, 1500000, 0, true, 126000, 1950000),
+               row(200, 432703, 0, true, 60000, 1950000, 'the transfer ended early'),
+               row(300, 1950500, 1500000, false, 40000, 1950400)]);
+$q = $g['points'];
+check('new ground: a short download inside an open pass walked 432 703 entries again and nothing new',
+      $q[1]['new_from'] === 1500000 && $q[1]['new'] === 0 && $q[1]['again'] === 432703 && $q[1]['kept_new'] === 0, json_encode($q[1]));
+check('new ground: … the poll that finished the pass is new from where the pass had got (1 500 000 → 1 950 500)',
+      $q[2]['new_from'] === 1500000 && $q[2]['new'] === 450500 && $q[2]['again'] === 0, json_encode($q[2]));
+check('new ground: … so the pass\'s ground is its walked (1 950 500), not the 2 383 203 its polls delivered between them',
+      $g['passes'][0]['ground'] === 1950500 && $g['passes'][0]['walked'] === 1950500 && $g['passes'][0]['delivered'] === 2383203, json_encode($g['passes'][0]));
+// a short download that got FURTHER than the pass had: the part past the old reach is new
+$g = passesOf([row(100, 400000, 0, true, 60000, 1000000), row(200, 600000, 0, true, 60000, 1000000, 'the transfer ended early', null, 300000),
+               row(300, 1000000, 600000, false, 60000, 1000100)]);
+$q = $g['points'];
+check('new ground: a short download reaching past the pass (to 600 000 over 400 000) adds 200 000 and re-read 400 000',
+      $q[1]['new_from'] === 400000 && $q[1]['new'] === 200000 && $q[1]['again'] === 400000, json_encode($q[1]));
+check('new ground: … its kept share of the new ground is kept × new / delivered (300 000 × 1/3 = 100 000)', $q[1]['kept_new'] === 100000, json_encode($q[1]));
+check('new ground: … and the pass\'s parts add up to the scrape it walked (1 000 000)', $g['passes'][0]['ground'] === 1000000
+      && array_sum(array_column($q, 'new')) === 1000000);
+// production, 2026-09-04 09:29 – 16:07: thirteen short downloads and the poll that finished the pass — the tallest
+// spike of the month (5 017 793 stacked over a scrape of 1 468 888, the y axis at 6M)
+$p94 = [[1788506973, 288392, 125593, 26360, 1449508], [1788509084, 48088, 20892, 5169, 1455921], [1788510894, 432812, 188274, 43680, 1446188],
+        [1788512697, 48090, 20721, 5036, 1446028], [1788514501, 529109, 227933, 56643, 1447170], [1788516305, 192295, 83257, 18598, 1447258],
+        [1788518121, 808436, 350252, 94665, 1447573], [1788519962, 240364, 103788, 22908, 1453042], [1788521766, 1018020, 444739, 95165, 1450994],
+        [1788523610, 192275, 83552, 19042, 1455765], [1788525413, 48068, 20796, 5180, 1447632], [1788527213, 576811, 253467, 58427, 1461704],
+        [1788529027, 144165, 63036, 16092, 1468323]];
+$rows94 = array_map(static fn($r) => row($r[0], $r[1], 0, true, $r[3], $r[4], 'chunk hex-length char not a hex digit', null, $r[2]), $p94);
+$rows94[] = row(1788530830, 1468888, 1018020, false, 49535, 1468935, null, null, 197960);
+$g = passesOf($rows94);
+$x = $g['passes'][0];
+check('production 04.09: fourteen polls, one pass, complete at 100 %', count($g['passes']) === 1 && $x['polls'] === 14 && $x['coverage'] == 100.0);
+check('production 04.09: what the polls delivered between them is the old spike (5 017 793)', $x['delivered'] === 5017793, (string)$x['delivered']);
+check('production 04.09: the new ground is the scrape walked (1 468 888) — the stack cannot exceed it',
+      $x['ground'] === 1468888 && $x['walked'] === 1468888 && array_sum(array_column($g['points'], 'new')) === 1468888, json_encode([$x['ground'], $x['walked']]));
+check('production 04.09: eight of the short downloads added nothing (they re-read ground the pass had), five added what lay past it',
+      count(array_filter($g['points'], static fn($p) => $p['kind'] === 'short' && $p['new'] === 0)) === 8
+      && count(array_filter($g['points'], static fn($p) => $p['kind'] === 'short' && $p['new'] > 0)) === 5);
+check('production 04.09: every part stands where the one before it stopped (no gap, no overlap)',
+      (static function (array $pts): bool { $reach = 0; foreach ($pts as $p) { if ($p['new'] > 0 && $p['new_from'] !== $reach) return false; $reach = max($reach, $p['new_from'] + $p['new']); } return true; })($g['points']));
+check('production 04.09: the kept share of the new ground is at most what was kept, and what the finishing poll kept is all new',
+      $x['kept_new'] <= $x['kept'] && $g['points'][13]['kept_new'] === 197960 && $x['kept_new'] === 640436, json_encode([$x['kept_new'], $x['kept']]));
+// production's very first rows (04.09 01:56): short downloads to 817 099, then a resume at the cursor 1 003 054 a pass
+// BEFORE the table had left (1.29.0 recorded the stored cursor on the short rows) — the ground between is not this pass's
+$g = passesOf([row(1788479770, 817099, 1003054, true, 65572, 1385091, 'chunk hex-length char not a hex digit: 0xffffffdf', null, 359103),
+               row(1788481581, 432703, 1003054, true, 40288, 1385207, 'chunk hex-length char not a hex digit: 0xffffff90', null, 189434),
+               row(1788486990, 1373465, 1003054, false, 37797, 1373558, null, null, 162693)]);
+$q = $g['points'];
+check('new ground: a resume at a cursor beyond the pass\'s reach stands at its own start (1 003 054), leaving the gap it did not walk',
+      $q[2]['new_from'] === 1003054 && $q[2]['new'] === 370411 && $g['passes'][0]['ground'] === 817099 + 370411 && $g['passes'][0]['walked'] === 1373465,
+      json_encode([$q[2], $g['passes'][0]['ground']]));
+// the scrape shrank below the cursor (production 05.09 12:51, right after the tracker's restart): nothing new, nothing re-read
+$g = passesOf([row(1788603759, 769163, 0, true, 63989, 1639043, 'chunk hex-length char not a hex digit: 0x68', null, 321788),
+               row(1788605488, 310700, 769163, false, 1354, null, null, null, 0)]);
+$q = $g['points'];
+check('new ground: a resume on a scrape that shrank below the cursor adds nothing and re-reads nothing',
+      $q[1]['new'] === 0 && $q[1]['again'] === 0 && $q[1]['new_from'] === 769163, json_encode($q[1]));
+// NULL rows_total: that same row has no count — the pass keeps the newest one it has, and the row stays null
+check('no count: production\'s NULL row (05.09 12:51) stays null, and its pass is measured against the count before it (1 639 043 → 46.93 %)',
+      $q[1]['rows_total'] === null && $g['passes'][0]['rows_total'] === 1639043 && abs($g['passes'][0]['coverage'] - 46.93) < 0.01, json_encode($g['passes'][0]));
+// a continuation whose start is not in the rows: its part stands at its own start
+$g = passesOf([row(100, 1668105, 1586043, false, 14000, 1668187)]);
+check('new ground: a continuation without its start stands at the cursor (1 586 043), not at 0', $g['points'][0]['new_from'] === 1586043
+      && $g['points'][0]['new'] === 82062 && $g['passes'][0]['ground'] === 82062);
+
 // ── 3. the history reply on the database ─────────────────────────────────────
 $db = getDb(); $cfg = getSettings($db); ensureSchema($db, $cfg);
 $cfg = getSettings($db, true);
 $T = 2000000000;                                   // 2033 — no real poll row is anywhere near it
 $fixtures = [
+    // 1.72.1: a poll with no tracker count (production's 05.09 12:51 row) — outside every window below but the week's
+    row($T - 100000, 1500000, 0, false, 100000, null),
     // a continuation whose start is not in the table (its row lost): the poll before it ended un-cut
     row($T - 40000, 1640000, 0, false, 118000, 1640500),
     row($T - 36000, 1645000, 1000000, false, 60000, 1645100),
@@ -193,6 +271,30 @@ try {
         check('history: at the budget in force (' . indexPollBudget($cfg) . ' s) that is ' . (int)ceil(152 / indexPollBudget($cfg)) . ' polls',
               $s['estimate']['polls'] === (int)ceil(152 / indexPollBudget($cfg)) && $s['budget'] === indexPollBudget($cfg) && $s['budget_max'] === IDX_POLL_BUDGET_MAX);
         check('history: some pass took one poll, so min_polls is 1 (the "every pass needed more" note stays away)', $s['min_polls'] === 1 && $s['max_polls'] === 2);
+        // WHEN (1.72.1): the newest short download and failed poll, how many fell in the window's last day, the worst pass's start
+        check('recency: the reply says when its window ends, and "recent" is the last day of it', $h['now'] === $T && $s['recent_s'] === IDX_POLL_RECENT
+              && IDX_POLL_RECENT === 86400);
+        check('recency: the short download (2 h 30 min before the end) and the failed poll (1 h 30 min) are the newest, and recent',
+              $s['short_last'] === $T - 9000 && $s['short_recent'] === 1 && $s['failed_last'] === $T - 5400 && $s['failed_recent'] === 1,
+              json_encode([$s['short_last'], $s['short_recent'], $s['failed_last'], $s['failed_recent']]));
+        check('recency: the worst pass (the failed one) says when it began, and that it is recent', $s['worst_ts'] === $T - 5400 && $s['worst_recent'] === true,
+              json_encode([$s['worst_ts'], $s['worst_recent']]));
+        check('new ground in the reply: every point carries new_from / new / again / kept_new, every pass its ground and kept_new',
+              !array_filter($h['points'], static fn($p) => !isset($p['new_from'], $p['new'], $p['again'], $p['kept_new']))
+              && !array_filter($h['passes'], static fn($x) => !isset($x['ground'], $x['kept_new'])));
+        check('new ground in the reply: the look-back poll carries it too (the lower part of the first bar)', isset($h['lead'][0]['new']) && $h['lead'][0]['new'] === 1586043);
+        $hw = indexPollHistory($db, $cfg, '7d', $T + 2 * 86400);
+        $sw = $hw['summary'];
+        check('recency: two days on, the week still counts them — and none of them is recent any more',
+              $sw['short'] === 1 && $sw['short_last'] === $T - 9000 && $sw['short_recent'] === 0 && $sw['failed'] === 1 && $sw['failed_recent'] === 0
+              && $sw['worst_ts'] === $T - 5400 && $sw['worst_recent'] === false,
+              json_encode([$sw['short'], $sw['short_last'], $sw['short_recent'], $sw['failed_recent'], $sw['worst_ts'], $sw['worst_recent']]));
+        $nullPt = array_values(array_filter($hw['points'], static fn($p) => $p['ts'] === $T - 100000));
+        check('no count in the reply: the row without a tracker count arrives as null (a gap on the chart), never 0',
+              count($nullPt) === 1 && $nullPt[0]['rows_total'] === null && str_contains(json_encode($nullPt[0]), '"rows_total":null'));
+        $nullPass = $hw['passes'][$nullPt[0]['pass']] ?? null;
+        check('no count in the reply: … its pass has no coverage and is left out of the average and the worst',
+              $nullPass !== null && $nullPass['coverage'] === null && $sw['min_coverage'] !== null && abs($sw['min_coverage'] - 54.88) < 0.01);
         // a window that opens on a continuation whose start is gone: the row before it ended un-cut, so
         // nothing is read back, and the pass is flagged — never a number in the summary
         $h2 = indexPollHistory($db, $cfg, '1h', $T - 35500);
@@ -304,6 +406,24 @@ foreach (['pass_complete', 'pass_in_progress', 'pass_error', 'pass_abandoned', '
 }
 foreach (['complete', 'in_progress', 'error', 'abandoned'] as $st) {
     check("words: every pass status the server can send ($st) has words", isset($en['js.coverage.pass_' . $st]) && str_contains($idx, "'" . $st . "'"));
+}
+// 1.72.1: WHEN — a warning while it is recent, a date once it is not; a re-read poll; the buckets
+check('words: a recent short download is a warning that says how long ago, and "if it keeps happening" (EN / PL)',
+      str_contains($en['js.coverage.ended_early_alert'] ?? '', ':ago ago') && str_contains($en['js.coverage.ended_early_alert'] ?? '', 'If it keeps happening')
+      && str_contains($pl['js.coverage.ended_early_alert'] ?? '', ':ago temu') && str_contains($pl['js.coverage.ended_early_alert'] ?? '', 'Jeśli to się powtarza'));
+check('words: an old one gives its date and "none since", and no "if it keeps happening" (EN / PL)',
+      str_contains($en['js.coverage.ended_early_old_alert'] ?? '', 'the last on :when — none since') && stripos($en['js.coverage.ended_early_old_alert'] ?? '', 'keeps happening') === false
+      && str_contains($pl['js.coverage.ended_early_old_alert'] ?? '', 'od tamtej pory żadnego') && !str_contains($pl['js.coverage.ended_early_old_alert'] ?? '', 'powtarza'));
+check('words: under the tiles, "the last … ago" and "the last on … — none since" (EN / PL)',
+      __('js.coverage.last_old', ['when' => '05.09 12:22']) === 'the last on 05.09 12:22 — none since'
+      && langFor('pl', 'js.coverage.last_old', ['when' => '05.09 12:22']) === 'ostatnie 05.09 12:22 — od tamtej pory żadnego'
+      && __('js.coverage.last_ago', ['ago' => '2 h 5 min']) === 'the last 2 h 5 min ago' && langFor('pl', 'js.coverage.last_ago', ['ago' => '2 h 5 min']) === 'ostatnie 2 h 5 min temu');
+check('words: a re-read poll says "read again from the start: N entries, M of them new" (or none)',
+      __('js.coverage.tip_again', ['n' => '432,703', 'm' => '47,907']) === 'read again from the start: 432,703 entries, 47,907 of them new'
+      && str_contains($en['js.coverage.tip_again_none'] ?? '', 'none of them new') && str_contains($pl['js.coverage.tip_again'] ?? '', 'ponownie od początku')
+      && str_contains($pl['js.coverage.tip_again_none'] ?? '', 'żadnego nowego'));
+foreach (['span_hours', 'span_day', 'span_two_days', 'span_week', 'legend_bucket', 'legend_worst', 'bucket_passes', 'chart_aria_buckets', 'worst_when'] as $k) {
+    check("words: js.coverage.$k (1.72.1) exists in both languages", isset($en['js.coverage.' . $k], $pl['js.coverage.' . $k]));
 }
 
 echo "\n$n checks, $fails failed\n";

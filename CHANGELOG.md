@@ -4,6 +4,191 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.72.1] — 2026-09-30
+
+Corrections from the owner's screenshots of 1.72.0 on his server. The scrape-coverage chart reads over a week, a
+month and All: one bar per bucket of time where one per pass no longer fits, a pass's bar never taller than the
+ground it walked (the spikes of 04–05.09 were short downloads stacked on top of each other), and short downloads
+of three weeks ago said as old, not as a warning. The Index catalogue's protected mark stands apart from the name.
+The favourites star stands wherever a torrent's actions stand — a list's rows, the likes and descriptions tables,
+somebody else's favourites and uploads — in the reader's own state, and as far from its neighbour as the framed
+buttons stand from each other, still without a frame. And on a phone the search results' "Last seen" takes two
+lines instead of running under the Magnet.
+
+### Changed — the scrape-coverage chart reads over a week, a month and All
+
+* **The owner's screenshots** (production, 2026-09-30): six hours and a day read well; a week's bars were 3 px,
+  two weeks' hairlines, and on the month and All the bars were gone — only the dashed line was left — with tall
+  spikes around 04.09 – 08.09 stretching the y axis and a vertical white dashed stroke near 08.09; the month's
+  "Download ended early 52" and its warning ("If it keeps happening, look at the tracker's side of it") were
+  about 04.09 – 05.09, before opentracker's MSG_ZEROCOPY fix of 05.09 12:48 — none since.
+* **Measured on production's own rows** (all 1 274 polls, 04.09 → 30.09, loaded locally): one bar per pass is
+  2.1 px for a week at 1 440 px, 1.1 for two weeks, less than a pixel for a month — and a bar that narrow is its
+  own 1-px dark outline, the background's colour: the bars were drawn, invisibly. The spikes were eleven passes
+  of 04.09 – 05.09 made of short downloads: each restarted at entry 0 and joined the open pass, and the bar
+  stacked what every poll delivered past its own start — the 04.09 09:29 pass, thirteen short downloads and the
+  poll that finished it, stood at 5 017 793 over a scrape of 1 468 888, and the month's axis ran to 6M. The
+  coverage numbers were right all along (a pass's walked is the furthest entry). The vertical stroke was not the
+  one row without a tracker count (05.09 12:51 — the line already broke there): it was the tracker's real count
+  of 07.09 12:45, 289 419 for the one poll after a restart, between 1 579 527 and 1 367 400 — a V an hour wide,
+  drawn across 26 days.
+* **One bar per bucket of time when one per pass does not fit**: when the passes' median spacing at the chart's
+  actual width is under 4 px, the passes are grouped into the smallest of 1 h, 2 h, 3 h, 6 h, 12 h, a day, two
+  days or a week (on the local clock; weeks from a Monday) that is 4 px wide — worked out on every redraw, so a
+  resize or a phone re-buckets. A pass counts in the bucket of its first poll; the bar is the **mean** coverage of
+  its finished passes (the statistic of the "Average coverage per pass" tile) of the bucket's tracker count, the
+  darker part what was kept of the ground walked; a light tick overhangs the bar where its worst pass stood when
+  that was below 95 %; a download that ended early or a failed poll is a strip at the bar's foot in the legend's
+  amber or red; a bucket holding only the pass in progress is dimmed, what is left outlined. A bucket's column
+  answers a pointer or a tap with its time, passes and polls, average and worst coverage, cuts, short downloads,
+  failed polls and the tracker's count — the tiles' own words — and the legend says what one bar is ("One bar =
+  3 h, the average of its passes"). The per-pass chart of 1.72.0 stays wherever it fits: six hours and a day on a
+  desktop (and on a phone), a week at 1 920 px. Production's month at 1 440 px: a week in 1-hour buckets, two
+  weeks 2 h, the month and All 3 h; on a 360 px phone 3 h, 6 h, 12 h, 12 h.
+* **The stack is the ground covered, never more**: each poll's part is the NEW ground it walked — from the further
+  of its own start and what its pass had reached before it, to its end (`new_from` / `new` / `again` /
+  `kept_new` per poll and `ground` per pass in the reply, from `indexPollPasses()`). A poll that walked old
+  ground again — a short download restarting inside an open pass — adds nothing to the bar's height: it is a
+  2-px sliver inside it, and says "read again from the start: 432 703 entries, none of them new" (or "…, 47 907 of
+  them new"). The y axis is the larger of the tracker's count and the furthest entry, with a little headroom —
+  never a sum: the month's is 2.5M.
+* **The dashed line**: one bar per pass, it breaks where a poll has no count (as it did; now tested); one bar per
+  bucket, it is the largest count the tracker reported in the bucket — a restart only ever lowers the count, for
+  a poll or two, so the line no longer dives with it — the bucket's words giving "lo – hi" when they differ, and it
+  breaks only where a bucket has no count at all.
+* **When, not only how many**: the reply gives the window's newest short download and failed poll, and how many
+  fell in its last day. The tile and the note say "the last on 05.09 12:22 — none since" — muted, no warning, no
+  "if it keeps happening" — or, within the last 24 hours, "the last 2 h 5 min ago" with the warning as before. The
+  failed-polls tile is red only while one is recent and says when the last was; the worst pass says when it began
+  and takes the warning colour only while it is recent. Dates in the card's own dd.mm hh:mm (the axis's format).
+* **Also**: All starts at the oldest row, not at the retention's start (production's All was 64 empty days beside
+  26 drawn ones); the x axis steps up to 2, 4, 8 and 13 weeks and keeps daily and weekly ticks on midnight across a
+  change of the clocks — a phone's All had printed thirteen dates over one another in 244 px.
+
+### Changed — the Index catalogue's protected and promoted marks stand apart from the name
+
+* **The owner**: on the panel's Index page a protected row's shield stood against the name's last letter ("…[FLAC]
+  [rjk]🛡"). Measured: 1.5 – 2.0 px from where the letter stands to the shield's ink, in every icon mode — and when
+  the name filled its column, the shield was what the cell's ellipsis cut (such a name ended in two "…").
+* **One row** (`.idx-name-row`, admin-index.js and admin.css): the name shrinks and takes the ellipsis, a mark never
+  does and never wraps alone, and the space between them is the panel's own for an icon beside words ("An icon and
+  its words" in admin.css — a space of the face from the glyph's ink). Measured the same way as the toolbar's
+  buttons above the table (their icon's ink to the first letter's box: Bootstrap 3.4 – 4.5 px, Free 6 3.7 – 4.2,
+  Free 7 4.2 – 4.3): the name's last letter to the shield's ink Bootstrap 4.1 – 4.2 px, Font Awesome Free and Pro 6.7.2
+  / 7.3.1 4.0 px; level with the name within 0.6 px (Font Awesome 7's star in the promoted mark was 1.1 px high and
+  is 0.1 now — it is measured by assets/js/icons.js as a glyph beside words); English and Polish, 1 440 px and a
+  360 px phone. Each mark carries its name ("Protected", "Promoted") as its title and label.
+* **The faint square after the shortened hash** is the copy button's clipboard — the right glyph in every mode
+  (Bootstrap's clipboard, Font Awesome's regular clipboard, drawn by the chosen face) — in Bootstrap's light-theme
+  text colour (#212529) on the panel's #1e1e1e cells, about 1.1 : 1. Left as it is, as asked; a colour for
+  `.wl-copy` in admin.css would bring it out.
+
+### Tests — the coverage chart and the Index marks
+
+* `tests/index_polls_test.php` (112 → 149 checks): the new ground — a short download inside an open pass,
+  one that got further than the pass, production's 04.09 09:29 pass (5 017 793 delivered, 1 468 888 of ground,
+  every part standing where the one before it stopped), the 1.29.0 cursor beyond the reach, the shrunk scrape,
+  a continuation without its start; production's NULL count of 05.09 12:51 (pure, and through the database: null
+  in the reply, never 0; its pass out of the average and the worst); the reply's `now` and when — recent, and two
+  days on not; the words in both languages.
+* `scratchpad/shots/traffic_cards_check.js` (61 → 129 PASS): a short download inside an open pass (a sliver, the bar
+  ending at the ground walked, its words) and a poll without a count (the line breaks); production's month, every
+  range at 1 440, 1 920 and 1 280 px and on a phone — bars at least 3 px, none above the axis, nothing sideways,
+  no date printed over another; the month and All bucketed with the axis at 2.5M, no vertical stroke, the NULL
+  row's bucket taking the count beside it, the strip of 04.09's short downloads, the worst pass's tick; a day one
+  bar per pass, a week too at 1 920 px; the legend; a resize re-bucketing without a reload; a bucket's words on
+  hover and on a tap; the 52 old short downloads muted with their date and a plain note, the worst pass's date,
+  Polish; then a fresh short download an hour ago — a warning again. Run on the local copy of production's rows,
+  which never enter the repository (skipped, and said, without them).
+
+### Added — the favourites star wherever a torrent's actions stand
+
+* **The owner**: "the icons to add to favourites are missing when we browse a list, on the descriptions too — and on
+  the profile (the public view) add the stars on the hash actions, the likes are missing them, the descriptions and so
+  on". The star stood in the search results, the Info panel's head and your own favourites only. It stands after Info
+  now in every row that has Magnet and Info: a list's window (your own, before the row's ✕, and anybody else's you may
+  read), the favourites and the uploads on somebody else's profile and your own (before an upload's "Shown on your
+  profile" switch), and the likes / ratings and the descriptions tables — the account page's tabs and a profile's
+  sections. For a reader who may keep favourites (`favourites.use`, and `index.view`, which the star's own request
+  asks); nobody else sees one.
+* **It is the reader's own**: filled when YOU keep that torrent, whoever's list it is on — what the owner keeps never
+  shows through. The state comes with the rows: each endpoint that serves them (user_favourites for somebody else's
+  list, user_uploads, user_list_items, user_votes, user_descriptions) marks every row whose hash the reader is shown
+  with `fav`, from one question for the page (`favMarkRows()`, `includes/favourites.php` — never one per row); a row
+  whose hash is withheld has no star, and a reader given no star gets no `fav` at all. A press goes the search results'
+  own way — the same request, the page's token, the same hourly limit and the same messages — both ways, and every
+  other star of that torrent on the page (the search results', the Info panel's head, the other rows') follows it at
+  once; a table the live language switch draws again keeps it.
+* Your own favourites keep their star as it was (always on; un-starring takes the row away). Left without one, on
+  purpose: the whitelist form's result (a receipt for what was just registered, a guest's too), "Who has this"
+  (people), the list picker (lists). The empty Favourites tab says where the star is: "The star beside a torrent puts
+  it here — in the search results, a list or on a profile."
+
+### Fixed — the star stood further from its neighbour than the buttons from each other
+
+* **The owner's screenshot**: `[Magnet] [Copy] [Info] ☆` — "aligned, but as if it had that box on it too, and it does
+  not, so it looks further away" — "but do not put a frame round it". The star is the one icon button drawn without a
+  frame, in a button's 26px box that draws nothing but the glyph: beside Info its empty half read as more room — its
+  ink 10.7px from Info's edge where two framed buttons stand 5.6px apart (Bootstrap; 10.3 with Font Awesome 6, 10.0
+  with 7 and Pro 7.3.1), and 12.2px from the "+" in the Info panel's head, whose buttons stand 6.4px apart.
+* **A framed neighbour stands the row's gap from the star's INK now**: the box reaches that far into the gap on each
+  side that has a neighbour — after Info in a row, before the "+" (or Share) in the head, both sides where a row's
+  own control follows it (a list's ✕, an upload's switch) — and its undrawn room stays on the side with none, the
+  row's end or the head's title side. How far a star's ink reaches is its glyph's: half an em for Bootstrap's two
+  stars, which fill their square; a Font Awesome star's measured in the face it is drawn in by the observer
+  (`assets/js/icons.js`, set on the button — 0.53em for Free 6, 0.54 / 0.56em for Free 7 and Pro 7). Still no
+  frame, still a 26px target (28px in the head), its glyph in its box's middle.
+* **Measured** (the ink, at two device pixels a CSS pixel, `icons_align_check.js` over the search results, the Info
+  panel, a list's window, the account's tabs and the profile, English and Polish, desktop and phone): from a framed
+  neighbour to the star's ink within 0.3px of the row's gap between two framed buttons in every mode — Bootstrap
+  −0.26 to +0.08, Free 6 +0.04 to +0.30, Free 7 and Pro 7.3.1 (solid, light) −0.03 to +0.16, Pro 7 Jelly −0.02 to
+  +0.08 — where it stood 4.3–5.1px off; its glyph up/down within 0.74px of its neighbours' middle. The columns that
+  hold it take the pull off (0.3rem, between the libraries' 4.4 and 5px): the search results' 140px with the star
+  (145 before), the likes and descriptions tables' 100px for Magnet, Info and the star (74 before — the name column
+  gives back 27px), a row's actions 84px (111px in your own list's window, with its ✕).
+
+### Tests — the favourites star
+
+* `tests/favourites_test.php` §13 (20 checks, 128 in all): favourites, uploads, a list, the likes and the descriptions, each
+  answered as a request — `fav` the reader's own, none for a reader without `favourites.use` or `index.view`, none on
+  a row whose hash is withheld, none on your own favourites; `favMarkRows()` asks `favMarkFor()` once and each endpoint
+  asks it once. `tests/icons_test.php` §9 pins the star's place and the observer's measure.
+* `icons_align_check.js` holds the star's ink against its framed neighbours (±1px) in every row and mode (a new judge;
+  a mode that measures no star fails), with a list's window and a like of smokeuser's among its states; `fav_check`,
+  `lists_check`, `descriptions_check` and `profile_votes_check` press the new stars both ways as another member and as
+  the owner (the reader's state, the database, the Info panel's head following), `csrf_everywhere_check` presses one on
+  the Likes tab with the page's token. `star_shots.js` photographs every place before and after
+  (`scratchpad/shots1721/star-*.png`).
+* Run for this part (targeted, the owner's "no full battery"): fav_check "0 failed" (60), lists_check (109),
+  descriptions_check (56), profile_votes_check (126), csrf_everywhere_check (45; one run's `ERR_NO_BUFFER_SPACE`
+  re-run alone), icons_align_check limited to the search, the account and the own profile in Bootstrap, Free 6 and 7
+  and Pro 7.3.1 solid, light and Jelly (421); PHP favourites 128/0, lists 177/0, profile_votes 150/0, content 199/0,
+  csrf_token 29/0, sql_safety 8/0, lang 226/0, icons 137/0.
+
+### Fixed — on a phone, the search results' "Last seen" ran under the Magnet
+
+* Seen in this release's own phone screenshots, and older than them: at 480px and below the column is 7.5em, a date
+  with its time ("30.09.2026, 13:56") is wider, and `.search-num` kept it on one line, so the time ran on under the
+  Magnet beside it. The cell (`search-seen`) may break there now where the locale puts a space — between the date
+  and the time — and takes two lines; a desktop is unchanged.
+
+### Fixed — the security card stood 7.6px lower when the account Overview's two columns came out even
+
+* 1.72.0 put the card under the Overview's columns 1.25rem below the lowest card, and measured it so — with the
+  columns uneven. When they come out nearly equal (Polish with ratings on: 1 379 / 1 378px), the browser's column
+  balancing leaves a strip of empty column under both, and the card stood 27.6px below instead of 20. CSS cannot
+  shorten a column box, so `trimAccountFlow()` (assets/js/app.js) takes the strip back as the flow's negative bottom
+  margin, measured again whenever the flow or one of its cards changes size (a tab shown, a picture loaded, the
+  language swapped, the window resized); one column has no strip and gets nothing. `account_width_check` holds 20px
+  in every language, with ratings on and off, at every width.
+
+### Tests — the phone, and what the release touched last
+
+* The phone lanes of `icons_align_check` (`ALIGN_WIDTHS=phone`, English and Polish, every icon mode — Bootstrap,
+  Font Awesome Free 6 and 7, Pro 6.7.2 and 7.3.1 in their styles): 0 failed, 783 checks, the worst offset under 0.9px
+  in every mode and the star's ink within 0.3px of the row's gap. `account_width_check` 0 failed (320 – 1 920px),
+  `fav_check` and `langswap_check` 0 failed on the final scripts, `csrf_token_test` 29/0.
+
 ## [1.72.0] — 2026-09-30
 
 The owner's next list, as one release. It opens with eight corrections to how things look, each from his own

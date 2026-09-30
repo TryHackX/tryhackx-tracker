@@ -189,8 +189,15 @@
     /**
      * Magnet and Info, the two things every row that names a torrent offers — a favourites or uploads
      * row, a list's row, and a likes / ratings table row (1.69.0), which is why they live here once.
+     *
+     * And the star after them (1.72.1), as the search results have it: `starOn` is the READER's own state for the
+     * row — true or false where the endpoint answered it (`fav`, favMarkRows() in includes/favourites.php: one
+     * question for the page, asked only for a reader who may keep favourites and of a hash they are shown), true on
+     * their own favourites list, undefined where there is no star to draw. The star is makeStar()'s, pressed through
+     * the one delegated listener above: the same request, token, rate limit and messages as the search results', and
+     * every other star for that torrent on the page follows it.
      */
-    function addMagnetInfo(acts, r, trackers) {
+    function addMagnetInfo(acts, r, trackers, starOn) {
         // No magnet for a banned hash: the tracker refuses to serve it, and a link that cannot work
         // is worse than saying so.
         // Icons since 1.71.0, the search results' own: the magnet (the primary, filled box) and the "i" — named
@@ -211,6 +218,7 @@
             inf.addEventListener('click', function () { window.TorrentInfo.open(r.info_hash, r.name || null); });
             acts.appendChild(inf);
         }
+        if (r.info_hash && typeof starOn === 'boolean') acts.appendChild(makeStar(r.info_hash, starOn));
     }
 
     function torrentRow(r, opts) {
@@ -277,8 +285,9 @@
         row.appendChild(meta);
 
         var acts = el('div', { className: 'pf-acts' });
-        addMagnetInfo(acts, r, opts.trackers);
-        if (opts.star && r.info_hash) acts.appendChild(makeStar(r.info_hash, true));
+        // The star: on your own favourites every row is on (un-starring takes the row away); anywhere else the
+        // reader's own state, as the endpoint answered it (1.72.1) — the row's own controls come after it.
+        addMagnetInfo(acts, r, opts.trackers, opts.star ? true : r.fav);
         if (opts.visibility && r.info_hash) {
             // Both words, the true one shown (1.72.0, .pf-vis-row): the switch is as wide as its longer word
             // whichever it says, so every upload row is one width and its columns stand under each other.
@@ -603,14 +612,15 @@
                 if (hooks && typeof hooks.onList === 'function' && j.list) hooks.onList(j.list);
                 if (!j.rows.length) rows.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.empty') }));
                 j.rows.forEach(function (r) {
+                    // The star in the reader's own state (1.72.1: `fav`, the owner's list or anybody else's they may read).
                     var row = torrentRow(r, { trackers: cfg.trackers, star: false });
                     // Something has to NAME the row: the hash where the reader may have it, and the
                     // row's own id where they may not (no `index.magnet`, or a banned row — the
                     // endpoint sends info_hash = null for both). Without the id, a reader who may
                     // not build magnets could fill a list and never empty it.
                     if (list.own && (r.info_hash || r.id)) {
-                        // The row's third icon button (1.71.0: the box of Magnet and Info beside it, its name in
-                        // the site's tooltip like theirs).
+                        // The row's own control, after the torrent's (1.71.0: the box of Magnet and Info beside it, its
+                        // name in the site's tooltip like theirs; since 1.72.1 after the star).
                         var rm = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn list-remove',
                                                 'aria-label': t('js.lists.remove_title'), dataset: { tip: t('js.lists.remove_title') } },
                                     el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
@@ -1715,7 +1725,8 @@
             if (r.voted_full) when.title = r.voted_full;
             tr.appendChild(when);
             var acts = el('div', { className: 'pf-acts pv-acts-in' });
-            addMagnetInfo(acts, r, trackers);
+            // Magnet, Info and the reader's own star (1.72.1: `fav`, where the answer carries one).
+            addMagnetInfo(acts, r, trackers, r.fav);
             tr.appendChild(el('td', { className: 'pv-cell pv-acts' }, acts));
             return tr;
         }
@@ -1792,7 +1803,19 @@
         // A vote changed in the Info panel opened from one of these rows (assets/js/app.js): the row is
         // out of date, and this is the one list on the site that is about exactly that.
         document.addEventListener('rating:changed', function () { load(page); });
+        document.addEventListener('favourites:changed', function (e) { starMoved(last, e); });
         load(1);
+    }
+
+    /**
+     * A star pressed anywhere on the page (1.72.1). The delegated listener has already moved every star of that
+     * torrent that is drawn; a table drawn again from its last answer — on a live language switch — draws it from
+     * that answer, which has to say so too.
+     */
+    function starMoved(answer, e) {
+        var d = e && e.detail;
+        if (!answer || !d || !Array.isArray(answer.rows)) return;
+        answer.rows.forEach(function (x) { if (x && x.info_hash === d.hash && typeof x.fav === 'boolean') x.fav = !!d.on; });
     }
 
     /* ───────────── the descriptions a member wrote: the account tab and the profile section ─────────────
@@ -1876,7 +1899,8 @@
             if (r.at_full) when.title = r.at_full;
             tr.appendChild(when);
             var acts = el('div', { className: 'pf-acts pv-acts-in' });
-            addMagnetInfo(acts, r, trackers);
+            // Magnet, Info and the reader's own star (1.72.1), as in the likes table.
+            addMagnetInfo(acts, r, trackers, r.fav);
             tr.appendChild(el('td', { className: 'pv-cell pv-acts' }, acts));
             return tr;
         }
@@ -1926,6 +1950,7 @@
         });
         if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
         document.addEventListener('langswap', function () { if (last) render(); else load(page); });
+        document.addEventListener('favourites:changed', function (e) { starMoved(last, e); });
         load(1);
     }
 

@@ -1638,7 +1638,17 @@ input[type="number"] {
 .idx-th-check { text-align: center; }
 #idx-table td, #idx-table th { vertical-align: middle; }
 #idx-table .idx-dates { font-size: 0.72rem; line-height: 1.25; }
-#idx-table .wl-name-cell span:first-child { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* The name and its marks, protected and promoted (1.72.1; admin-index.js renderRows). They were spans in
+   a row of inline boxes with nothing between them: the shield stood against the name's last letter
+   ("[rjk]🛡") and, when the name filled the column, it was the shield the cell's ellipsis cut. Now one
+   flex row: the name shrinks and takes the ellipsis, a mark never does and never wraps alone, and the
+   space between them is the one every icon beside words has in the panel ("An icon and its words" at the
+   top of this file) — a space of the face from the glyph's ink, the glyph's own room (--bi-sb, set on
+   the row for its icon) taken off the gap. Baseline-aligned, so the glyph placement above stands the icon
+   level with the name. */
+#idx-table .idx-name-row { display: flex; align-items: baseline; column-gap: max(0px, var(--bi-gap, 0.275em) - var(--bi-sb)); min-width: 0; }
+#idx-table .idx-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#idx-table .idx-name-row > .bi { flex: none; }
 .idx-mgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.35rem 1.2rem; margin-bottom: 0.5rem; }
 .idx-mkv { display: flex; justify-content: space-between; gap: 0.75rem; border-bottom: 1px solid #1c1c2a; padding: 0.25rem 0; font-size: 0.85rem; }
 .idx-mkv-k { color: #8a8a9a; } .idx-mkv-v { color: #e6e6ee; font-family: 'JetBrains Mono', Consolas, monospace; text-align: right; word-break: break-all; }
@@ -2448,6 +2458,21 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .idx-cov-open .idx-cov-seg { opacity: 0.6; }
 .idx-cov-rest { fill: none; stroke: #9ecbea; stroke-width: 1; stroke-dasharray: 3 2; pointer-events: none; }
 .idx-cov-tracker { fill: none; stroke: #c3ccd8; stroke-width: 1.2; stroke-dasharray: 4 3; pointer-events: none; }
+/* 1.72.1: bars under 5 px lose the 1-px outline — on a 1-px bar it WAS the bar, in the background's
+   colour, and a month of passes showed nothing but the dashed line. One bar per bucket of time when the
+   passes do not fit (admin-index-coverage.js drawBuckets): the bar in the "from the start" blue, a light
+   tick overhanging it where its worst pass stood, a strip at its foot for a download that ended early or
+   a failed poll, and its whole column as the target for a pointer or a finger. */
+.idx-cov-thin .idx-cov-seg { stroke: none; }
+.idx-cov-bar { fill: #4d9fd6; pointer-events: none; }
+.idx-cov-bucket.is-on .idx-cov-bar { filter: brightness(1.25); }
+.idx-cov-open .idx-cov-bar { opacity: 0.6; }
+.idx-cov-seg.idx-cov-hit { fill: transparent; stroke: none; }
+.idx-cov-bucket.is-on .idx-cov-hit { fill: rgba(158, 203, 234, 0.08); }
+.idx-cov-worst { fill: #f0f6fc; pointer-events: none; }
+.idx-cov-ev { pointer-events: none; }
+.idx-cov-ev-short { fill: #e0b96c; }
+.idx-cov-ev-error { fill: #e06c75; }
 .idx-cov-tip {
     position: absolute; z-index: 5; max-width: min(320px, calc(100% - 4px));
     padding: 0.4rem 0.55rem; background: #161b22; border: 1px solid #30363d; border-radius: 6px;
@@ -2465,6 +2490,8 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .idx-cov-sw-kept { background: linear-gradient(to top, rgba(13, 17, 23, 0.34) 50%, transparent 50%), #4d9fd6; }
 .idx-cov-sw-tracker { width: 14px; height: 0; border-radius: 0; border-top: 1.5px dashed #c3ccd8; }
 .idx-cov-sw-rest { background: transparent; border: 1px dashed #9ecbea; }
+.idx-cov-sw-bucket { background: #4d9fd6; }
+.idx-cov-sw-worst { width: 14px; height: 2px; border-radius: 0; background: #f0f6fc; }
 .idx-cov-empty { padding: 2rem 1rem; text-align: center; color: #8a94a2; font-size: 0.84rem; }
 
 

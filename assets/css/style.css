@@ -2163,6 +2163,10 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 @media (max-width: 480px) {
     .search-c-name { width: 13em; }
     .search-c-seen { width: 7.5em; }
+    /* A date with its time ("30.09.2026, 13:56") is wider than 7.5em, and `.search-num` keeps it on one line — so
+       on a phone it ran on under the Magnet beside it (seen in 1.72.1's screenshots, older than them). Here it may
+       break where the locale puts a space — between the date and the time — and takes two lines instead. */
+    .search-seen { white-space: normal; }
     .account-kv td:first-child { width: auto; white-space: normal; }
     .home-stats-widget { margin-left: 0; margin-right: 0; }
 }
@@ -2767,9 +2771,12 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    still, of the three buttons every favourites and list row has, so a row that lacks one (a banned
    torrent has no Magnet) keeps its columns where the other rows have theirs; the uploads' switch keeps
    its longer word's width (.pf-vis-row), so every upload row is one width too. In rem, as the buttons are:
-   a list's window draws its rows a size smaller, and its box was 170px where the page's is 200. */
+   a list's window draws its rows a size smaller, and its box was 170px where the page's is 200.
+   1.72.1: the three are Magnet, Info and the star on every row now — less the star's pull (0.3rem, "the star's
+   place") — and four in a list of your own, where the star stands between Info and the row's ✕ (pulled both ways). */
 .pf-acts { display: flex; gap: 0.35rem; align-items: center; margin-left: auto;
-    min-width: calc(3 * 1.625rem + 2 * 0.35rem); justify-content: flex-end; }
+    min-width: calc(3 * 1.625rem + 2 * 0.35rem - 0.3rem); justify-content: flex-end; }
+.pf-acts:has(> .list-remove) { min-width: calc(4 * 1.625rem + 3 * 0.35rem - 0.6rem); }
 .pf-badge { font-size: 0.7rem; padding: 0.05rem 0.35rem; border-radius: 3px; border: 1px solid var(--border);
     color: var(--text-muted); white-space: nowrap; }
 .pf-badge-bad { color: #ff6b6b; border-color: #6b2a2a; }
@@ -2823,8 +2830,11 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 /* Magnet and Info, exactly (1.72.0): two icon buttons, the gap between them and the cell's 0.5rem each side,
    at the cell's right edge (`.pv-table .pf-acts` below). 9.5em was what the two words needed, and since
    1.71.0 it left 78px empty at the table's right edge — the owner's screenshot — while the name beside it
-   broke onto a second line in 216px. The name has them now. The descriptions table's is the same (.pd-c-acts). */
+   broke onto a second line in 216px. The name has them now. The descriptions table's is the same (.pd-c-acts).
+   1.72.1: and the reader's star after them where the rows carry one (the partial's <col> says so, from the question
+   the endpoint asks) — less its pull, 0.3rem, as the search results' column ("the star's place"). */
 .pv-c-acts  { width: calc(2 * 1.625rem + 0.35rem + 1rem); }
+.pv-c-acts.pv-c-acts-fav, .pd-c-acts.pd-c-acts-fav { width: calc(3 * 1.625rem + 2 * 0.35rem + 1rem - 0.3rem); }
 /* The header's words are buttons (the keyboard reaches them), dressed as the words they were.
    `overflow-wrap: anywhere` (1.70.0) is the floor under the widths above: the columns are fixed, and a
    header that does not fit its column — text drawn larger or wider than it is here (a browser's
@@ -3426,6 +3436,23 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    close's glyph at the row's size, not the 0.75em of the old multiplication sign's button. */
 .files-head .ic-btn { --ic-box: 1.75rem; }
 .files-close.ic-btn > .bi { font-size: 1rem; }
+/* THE STAR'S PLACE (1.72.1). The star is the one icon button drawn without a frame: a button's box, so a click lands
+   where a button's would, and nothing drawn in it but the glyph. Beside a framed neighbour its empty half read as
+   more room — 10.7px from Info's edge to the star's ink where two framed buttons stand 5.6px apart (the owner's
+   screenshot: "as if it had the box too"). So a framed neighbour stands the ROW'S GAP from the star's INK: the box
+   reaches that far into the gap on each side that has a neighbour — after Info in a row, before the "+" in the Info
+   panel's head, both sides where a row's own control follows it (a list's ✕, an upload's switch) — and its undrawn
+   room stays on the side that has none: the row's end, the head's title side. How far the ink reaches either way from
+   the box's middle is --bi-il / --bi-ir: half an em for Bootstrap's two stars, which fill their square (0 to 16 of
+   16); a Font Awesome star's as the face it is drawn in says, set on the button by assets/js/icons.js (Free 6's
+   0.53em, 7's and Pro 7's 0.54–0.56em). The box keeps its 26px (28px in the head) and the glyph its middle; the
+   pull is less than the gap, so the box never reaches its neighbour. Measured, the ink against the frames, in every
+   mode: scratchpad/shots/icons_align_check.js (the star's own judge) and star_shots.js. */
+.fav-star.ic-btn { --bi-il: 0.5em; --bi-ir: 0.5em; }
+:is(.search-c-actions-inner, .pf-acts, .info-acts) > .fav-star.ic-btn:not(:first-child) { margin-left: calc(var(--bi-il) - var(--ic-box, 1.625rem) / 2); }
+:is(.search-c-actions-inner, .pf-acts, .info-acts) > .fav-star.ic-btn:not(:last-child) { margin-right: calc(var(--bi-ir) - var(--ic-box, 1.625rem) / 2); }
+/* The head's star alone in its group (no "+", no "Who has this"): Share is the framed neighbour, one gap further. */
+.files-head:has(> .info-share) > .info-acts > .fav-star.ic-btn:last-child { margin-right: calc(var(--bi-ir) - var(--ic-box, 1.625rem) / 2); }
 /* The search box's magnifier and its clearing cross: the library's glyphs at the size the drawings had,
    the cross in the round 24px target it always had. */
 .search-box-icon { font-size: 0.875rem; }
@@ -3435,9 +3462,11 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    star, 113px without) — at the cell's right edge. 1.71.0's 9.75rem left 11px empty right of the star (the
    owner's screenshot), and 43px where there is no star; the name has it now. The <col> says whether the star
    is drawn (templates/pages/search.php, from the question the rows ask). A phone's table scrolls sideways
-   and has the same column: the four are one line at every width. */
+   and has the same column: the four are one line at every width. Less the star's pull (1.72.1, "the star's place"
+   above): 0.3rem, between the libraries' 4.4px (Font Awesome 7) and 5px (Bootstrap) — the rest, under half a pixel,
+   is inside the cell's padding. */
 .search-c-actions { width: calc(3 * 1.625rem + 2 * 0.35rem + 1.5rem); }
-.search-c-actions.search-c-actions-fav { width: calc(4 * 1.625rem + 3 * 0.35rem + 1.5rem); }
+.search-c-actions.search-c-actions-fav { width: calc(4 * 1.625rem + 3 * 0.35rem + 1.5rem - 0.3rem); }
 .search-c-actions-inner { justify-content: flex-end; }
 /* The whitelist form's result rows stack on a phone; the copy button keeps its square, at the end. */
 @media (max-width: 600px) { .wl-magnet > .wl-copy.ic-btn { align-self: flex-end; } }
