@@ -120,6 +120,9 @@ H2 = "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a702"
 SITE_MARK = "/assets/img/favicon.svg"
 SHAPE = re.compile(r"^/api\.php\?endpoint=(?:user_media&h=[0-9a-f]{16}&s=(?:64|128|256)"
                    r"|user_avatar_default&l=[A-Z0-9]&c=(?:[0-9]|1[01]))$|^/assets/img/favicon\.svg$")
+# A moment on the reader's clock (1.73.0 part E, pmReaderTime()): 'Y-m-d H:i' in the reader's zone — a time and nothing
+# else. The fields 1.73.0 added to the answers below are held to it (or to a Unix instant), so no id rides in under them.
+READER_TIME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")
 SETTINGS = {
     "users_enabled": "1", "users_require_email_verify": "1", "profiles_enabled": "1",
     "avatars_enabled": "1", "avatar_default": "generated",
@@ -278,14 +281,30 @@ try:
     th = {x.get("with"): x for x in j.get("threads") or []}
     check("inbox: each conversation carries the other person's picture (32 px -> the 64 square)",
           (th.get(ALICE) or {}).get("avatar") == pic(ALICE, 32) and (th.get(BOB) or {}).get("avatar") == pic(BOB, 32), th)
-    check("… and a row is exactly what it was, plus that address — no id", keys(th.values()) ==
-          {tuple(sorted(["with", "avatar", "unread", "last_at", "mine", "preview"]))}, keys(th.values()))
+    # 1.73.0: plus `last_id` — the id of the last MESSAGE listed (what a Delete from the row moves into the Trash, and
+    # no further); still no id of an account. And `last_time` (part E, the reader's clock): `last_at` again as
+    # 'Y-m-d H:i' in the reader's zone — its value held to that shape, so it is a time and cannot be an id.
+    check("… and a row is exactly what it was, plus that address — no id of theirs", keys(th.values()) ==
+          {tuple(sorted(["with", "avatar", "unread", "last_at", "mine", "preview", "last_id", "last_time"]))}
+          and all(READER_TIME.match(str(x.get("last_time"))) for x in th.values()),
+          (keys(th.values()), [x.get("last_time") for x in th.values()]))
     s, j, t = me.api("user_messages&with=" + ALICE)
     texts.append(t)
     check("a conversation carries the picture of the person it is with",
           s == 200 and j.get("with") == ALICE and j.get("with_avatar") == pic(ALICE, 32), (s, j.get("with"), j.get("with_avatar")))
+    # 1.73.0: plus where the conversation is — the part shown, its place and its Trash (a message id for its edge, dates),
+    # the Trash's days and the three places' counts — none of it an id of an account. Part E gave the Trash's two
+    # moments to the reader's clock as well: as instants (`trashed_ts`, `until_ts`: Unix seconds, null with nothing in
+    # the Trash) and as 'Y-m-d H:i' in the reader's zone (`trashed_time`, `until_time`: '' then) — held to those shapes.
+    st = j.get("state") or {}
     check("… and its answer has no id of theirs either", set(j.keys()) == {"success", "with", "with_avatar", "rows", "can_write", "reason",
-          "may_report", "live", "typing_on", "unread"}, sorted(j.keys()))
+          "may_report", "live", "typing_on", "unread", "part", "state", "trash_days", "counts"}
+          and set(st.keys()) == {"place", "archived", "live", "trash", "upto", "trashed_at", "until",
+                                 "trashed_ts", "until_ts", "trashed_time", "until_time"}
+          and all(st.get(k) is None or (type(st.get(k)) is int and st.get(k) > 10 ** 9) for k in ("trashed_ts", "until_ts"))
+          and all(st.get(k) == "" or READER_TIME.match(str(st.get(k))) for k in ("trashed_time", "until_time"))
+          and set((j.get("counts") or {}).keys()) == {"inbox", "archive", "trash", "unread_inbox", "unread_archive"},
+          (sorted(j.keys()), st, sorted((j.get("counts") or {}).keys())))
     seen += [x.get("avatar", "") for x in th.values()] + [j.get("with_avatar", "")]
     s, j, t = me.api("user_messages&with=" + DAVE)
     texts.append(t)
@@ -304,8 +323,12 @@ try:
     check("… my blocks: the picture is where the name is — the reader's own list of whom she blocked",
           (views["blocks"].get(DAVE) or {}).get("avatar") == pic(DAVE, 32), views["blocks"])
     allrows = [r for v in views.values() for r in v.values()]
+    # 1.73.0 part E: plus `since_time` — `since` on the reader's clock, 'Y-m-d H:i' in their zone ('' where there is no
+    # `since`) — held to that shape.
     check("… and every row is exactly what it was, plus the address — no id",
-          keys(allrows) == {tuple(sorted(["username", "avatar", "since", "hide_profile", "note"]))}, keys(allrows))
+          keys(allrows) == {tuple(sorted(["username", "avatar", "since", "since_time", "hide_profile", "note"]))}
+          and all(READER_TIME.match(str(r.get("since_time"))) if r.get("since") else r.get("since_time") == "" for r in allrows),
+          (keys(allrows), [(r.get("since"), r.get("since_time")) for r in allrows]))
 
     # ── 4. the directory ────────────────────────────────────────────────────────────────────────
     s, j, t = me.api("user_directory&per_page=100&search=avt")

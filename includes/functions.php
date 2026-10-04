@@ -34,7 +34,7 @@ require_once __DIR__ . '/icons.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.72.1';
+const TRACKER_VERSION = '1.73.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -461,9 +461,14 @@ function captchaCspHosts(array $cfg): array {
  */
 function captchaNoticeHtml(array $cfg, string $class = 'captcha-notice'): string {
     if (!captchaConfigured($cfg) || captchaProvider($cfg) !== 'recaptcha_v3') return '';
-    return '<p class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '">This site is protected by reCAPTCHA and the Google '
-        . '<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy Policy</a> and '
-        . '<a href="https://policies.google.com/terms" target="_blank" rel="noopener">Terms of Service</a> apply.</p>';
+    // In the reader's language (1.73.0: it was English on every page): the sentence escaped, its two links put in
+    // at their placeholders (private-use characters survive the escaping and appear in no translation).
+    $links = [
+        "\u{E000}" => '<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">' . _h('captcha.v3_privacy') . '</a>',
+        "\u{E001}" => '<a href="https://policies.google.com/terms" target="_blank" rel="noopener">' . _h('captcha.v3_terms') . '</a>',
+    ];
+    return '<p class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '">'
+        . strtr(_h('captcha.v3_notice', ['privacy' => "\u{E000}", 'terms' => "\u{E001}"]), $links) . '</p>';
 }
 
 function isCaptchaRequired(array $cfg, string $context = 'report'): bool {
@@ -979,6 +984,48 @@ function rateLimitAllowLocked(string $file, string $key, string $action, int $no
     $data[$key] = $hits;
     rateLimitWrite($file, $data);
     return true;
+}
+
+/**
+ * The longest window any rateLimitAllow() caller passes, in seconds — an hour (1.73.0). A hit older than this
+ * can no longer count against anything, so rateLimitPrune() drops it. A caller that needs a LONGER window must
+ * raise this as well, or the janitor would forget its hits early: tests/retention_test.php reads every call's
+ * window out of the code and fails on one that is longer.
+ */
+const RATE_LIMIT_KEEP_SECONDS = 3600;
+
+/**
+ * The janitor's half of the limiter's retention (1.73.0). rateLimitAllowLocked() prunes only the CALLING
+ * action's keys — rightly, since windows differ — so an action nobody called again kept its addresses and
+ * times in config/rate_limits.json for ever. This drops every hit older than RATE_LIMIT_KEEP_SECONDS, and
+ * every key left empty, for all actions at once — under the limiter's own lock, rewriting the file only when
+ * something went. Returns the number of hits dropped. $now is for the tests (a clock passed in).
+ */
+function rateLimitPrune(?int $now = null): int {
+    $file = __DIR__ . '/../config/rate_limits.json';
+    if (!is_file($file)) return 0;
+    $now = $now ?? time();
+    $lockH = @fopen($file . '.lock', 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        $raw  = @file_get_contents($file);
+        $data = $raw ? json_decode($raw, true) : [];
+        if (!is_array($data)) return 0;   // not a map we wrote: leave it to the next writer, which starts over
+        $dropped = 0;
+        $changed = false;
+        foreach ($data as $k => $times) {
+            $keep = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < RATE_LIMIT_KEEP_SECONDS));
+            $dropped += count((array)$times) - count($keep);
+            if ($keep && count($keep) === count((array)$times)) continue;
+            $changed = true;
+            if ($keep) $data[$k] = $keep;
+            else unset($data[$k]);
+        }
+        if ($changed) rateLimitWrite($file, $data);
+        return $dropped;
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
 }
 
 /** tmp + rename, so a reader never sees a half-written map. Called with the lock held. */

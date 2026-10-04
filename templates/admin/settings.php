@@ -13,7 +13,14 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/media-editor.css<?= assetVer('assets/css/media-editor.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl) ?>
+    <?php /* The page's own script (at the end) says some words of the Settings page's own (1.73.0): they come with the
+             bundle the live language switch reloads, rather than frozen into the script by json_encode(__()). And the
+             icon pack import's answer (api.iconpack.), found back by key (t.find) so its report follows the switch. And
+             what every permission allows (perm.<id>): the shoutbox / emote / comment matrices (admin-shout.js) say it
+             by the id; and the server's names of the pages and home sections the page editor and the home layout
+             card show (tos.h1, info.h1, a.pages., a.home.), found back by key. */ ?>
+    <?= langJsBridge($baseUrl, ['js.', 'settings.js_', 'settings.sched_', 'settings.confirm_body', 'settings.donation_field_', 'api.iconpack.', 'perm.',
+                                'tos.h1', 'info.h1', 'a.pages.', 'a.home.']) ?>
 </head>
 <body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide">
@@ -100,7 +107,7 @@
                                      repeating it inside every option only made the open list wider
                                      than the control it drops out of. */ ?>
                             <?php foreach (tzChoices(null, true) as $tzGrp => $tzIds): ?>
-                            <optgroup label="<?= sanitize($tzGrp) ?>">
+                            <optgroup label="<?= sanitize(tzRegionLabel($tzGrp)) ?>">
                                 <?php foreach ($tzIds as $tzId => $tzLabel): ?>
                                 <option value="<?= sanitize($tzId) ?>"<?= $tzId === $siteTzNow ? ' selected' : '' ?>><?= sanitize($tzLabel) ?></option>
                                 <?php endforeach; ?>
@@ -1454,6 +1461,21 @@
                         </select>
                         <small class="settings-hint"><?= __('settings.pm_typing_hint') ?></small>
                     </div>
+                    <?php /* The Archive and the Trash (1.73.0, includes/people.php): whether a new message brings an archived
+                             conversation back to the inbox, and how long a deleted one waits in the Trash. */ ?>
+                    <div class="col-md-3" data-setting="pm_archive_returns">
+                        <label class="form-label"><?= _h('settings.pm_archive_returns') ?></label>
+                        <select class="form-select bg-dark text-light border-secondary" name="pm_archive_returns">
+                            <option value="1" <?= ($cfg['pm_archive_returns'] ?? '1') !== '0' ? 'selected' : '' ?>><?= _h('settings.pm_archive_returns_yes') ?></option>
+                            <option value="0" <?= ($cfg['pm_archive_returns'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.pm_archive_returns_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.pm_archive_returns_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="pm_trash_days">
+                        <label class="form-label"><?= _h('settings.pm_trash_days') ?></label>
+                        <input type="number" class="form-control bg-dark text-light border-secondary" name="pm_trash_days" value="<?= (int)(function_exists('pmTrashDays') ? pmTrashDays($cfg) : ($cfg['pm_trash_days'] ?? 30)) ?>" min="0" max="365">
+                        <small class="settings-hint"><?= __('settings.pm_trash_days_hint') ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.friends_enabled') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="friends_enabled">
@@ -2094,7 +2116,7 @@
                         <label class="form-label"><?= _h('settings.schedule_tz') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="tracker_schedule_tz">
                             <?php foreach ($schedTzGroups as $grp => $ids): ?>
-                            <optgroup label="<?= sanitize($grp) ?>">
+                            <optgroup label="<?= sanitize(tzRegionLabel($grp)) ?>">
                                 <?php foreach ($ids as $tzId): ?>
                                 <option value="<?= sanitize($tzId) ?>" <?= $tzId === $schedTz ? 'selected' : '' ?>><?= sanitize($tzId) ?></option>
                                 <?php endforeach; ?>
@@ -2119,7 +2141,7 @@
                                     $to   = is_array($v) ? $v['to'] : '02:30';
                                 ?>
                                 <tr data-sched-day="<?= $d ?>">
-                                    <td><strong><?= SCHEDULE_DAY_LABELS[$d] ?></strong></td>
+                                    <td><strong><?= _h('common.dow_' . (array_search($d, SCHEDULE_DAYS, true) + 1)) ?></strong></td>
                                     <td>
                                         <select class="form-select form-select-sm bg-dark text-light border-secondary" data-sched-kind>
                                             <option value="all" <?= $kind === 'all' ? 'selected' : '' ?>><?= _h('settings.schedule_kind_all') ?></option>
@@ -2140,10 +2162,10 @@
                         </div>
                         <?php if ($schedSt): ?>
                         <div class="settings-hint mt-2" id="sched-summary">
-                            <strong><?= _h('settings.schedule_saved') ?></strong> <?= sanitize($schedSt['describe']) ?>.
+                            <strong><?= _h('settings.schedule_saved') ?></strong> <?= sanitize($schedSt['describe_text'] ?? $schedSt['describe']) ?>.
                             <?php if ($schedSt['enabled']): ?>
                                 <?= _h('settings.schedule_desired_now') ?> <strong><?= sanitize($schedSt['desired'] ?? __('settings.schedule_invalid')) ?></strong> (<?= _h('settings.schedule_tracker_is_in') ?> <strong><?= sanitize($schedSt['current']) ?></strong>);
-                                <?= _h('settings.schedule_next_change') ?> <strong><?= sanitize($schedSt['next_change_local'] ?? __('settings.schedule_none')) ?></strong> <?= $schedSt['next_change_local'] ? '(' . sanitize($schedSt['tz']) . ')' : '' ?>.
+                                <?= _h('settings.schedule_next_change') ?> <strong><?= sanitize($schedSt['next_change_text'] ?? __('settings.schedule_none')) ?></strong> <?= $schedSt['next_change_text'] ? '(' . sanitize($schedSt['tz']) . ')' : '' ?>.
                                 <?php if ($schedSt['last_result']): ?>
                                     <?= _h('settings.schedule_last_switch') ?> <strong><?= sanitize($schedSt['last_result']) ?></strong><?= $schedSt['last_switch_at'] ? ' ' . __('settings.schedule_switch_at') . ' ' . date('Y-m-d H:i', (int)$schedSt['last_switch_at']) . ' (' . sanitize((string)$schedSt['last_from']) . ' → ' . sanitize((string)$schedSt['last_to']) . ')' : '' ?><?= $schedSt['last_error'] ? ' — <span class="text-danger">' . sanitize($schedSt['last_error']) . '</span>' : '' ?>.
                                 <?php endif; ?>
@@ -2725,7 +2747,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <label class="form-label"><?= _h('settings.timeline_default_range') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="stats_timeline_default_range">
                             <?php foreach (statsTimelineRangeButtons() as $rKey => $rLabel): ?>
-                            <option value="<?= $rKey ?>" <?= $tlDefaultRange === $rKey ? 'selected' : '' ?>><?= sanitize($rLabel) ?> (<?= $rKey ?>)</option>
+                            <option value="<?= $rKey ?>" <?= $tlDefaultRange === $rKey ? 'selected' : '' ?>><?= sanitize(statsTimelineRangeLabel($rKey)) ?> (<?= $rKey ?>)</option>
                             <?php endforeach; ?>
                         </select>
                         <small class="settings-hint"><?= _h('settings.timeline_default_range_hint') ?></small>
@@ -2736,7 +2758,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                             <?php foreach (statsTimelineRangeButtons() as $rKey => $rLabel): ?>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input tl-range-check" type="checkbox" id="tlr-<?= $rKey ?>" value="<?= $rKey ?>" <?= in_array($rKey, $tlEnabledRanges, true) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="tlr-<?= $rKey ?>"><?= sanitize($rLabel) ?></label>
+                                <label class="form-check-label" for="tlr-<?= $rKey ?>"><?= sanitize(statsTimelineRangeLabel($rKey)) ?></label>
                             </div>
                             <?php endforeach; ?>
                         </div>
@@ -4169,7 +4191,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                             <?php foreach (BACKUP_DAY_LABELS as $d => $label): ?>
                             <div class="form-check form-check-inline">
                                 <input class="form-check-input bk-day-check" type="checkbox" id="bk-day-<?= $d ?>" value="<?= $d ?>" <?= in_array($d, $bkDays, true) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="bk-day-<?= $d ?>"><?= $label ?></label>
+                                <label class="form-check-label" for="bk-day-<?= $d ?>"><?= _h('common.dow_' . (array_search($d, array_keys(BACKUP_DAY_LABELS), true) + 1)) ?></label>
                             </div>
                             <?php endforeach; ?>
                             <span class="bk-sched-at"><?= _h('settings.backups_sched_at') ?></span>
@@ -4185,7 +4207,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                         <label class="form-label"><?= _h('settings.backups_tz_label') ?></label>
                         <select class="form-select bg-dark text-light border-secondary" name="backup_schedule_tz" id="backup-tz">
                             <?php foreach ($bkTzGroups as $grp => $ids): ?>
-                            <optgroup label="<?= sanitize($grp) ?>">
+                            <optgroup label="<?= sanitize(tzRegionLabel($grp)) ?>">
                                 <?php foreach ($ids as $tzId): ?>
                                 <option value="<?= sanitize($tzId) ?>" <?= $tzId === $bkTz ? 'selected' : '' ?>><?= sanitize($tzId) ?></option>
                                 <?php endforeach; ?>
@@ -4701,6 +4723,9 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     </div>
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
+    <?php /* What the server wrote, marked before the page's own scripts run (1.73.0, assets/js/lang-swap.js) — after the
+             dialogs above, which stand below the Bootstrap bundle on this page. */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="<?= $baseUrl ?>assets/js/admin-settings.js<?= assetVer('assets/js/admin-settings.js') ?>"></script>
     <!-- admin-common.js only defines window.AdminCommon (apiCall / el / showToast) and adds no globals
          of its own, so it can join this page without colliding with the inline script above. Without
@@ -4774,16 +4799,16 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const wide = (msg, cls) => { body.innerHTML = ''; const td = el('td', msg, cls || 'text-muted'); td.colSpan = 6; body.appendChild(el('tr')).appendChild(td); };
 
         async function load() {
-            wide(t('js.common.loading'));
+            wide(t.key('js.common.loading'));
             let json;
             try {
                 const res = await fetch(API_BASE + 'admin/csp_reports', { headers: { 'Accept': 'application/json' } });
                 json = await res.json();
-            } catch { json = { error: t('js.settings.network_error') }; }
+            } catch { json = { error: t.key('js.settings.network_error') }; }
             if (json.error) { wide(json.error, 'text-danger'); return; }
-            note(json.reporting ? '' : t('js.settings.csp_reporting_off'), 'alert-warning');
+            note(json.reporting ? '' : t.key('js.settings.csp_reporting_off'), 'alert-warning');
             body.innerHTML = '';
-            if (!json.rows || !json.rows.length) { wide(t('js.settings.csp_no_reports')); return; }
+            if (!json.rows || !json.rows.length) { wide(t.key('js.settings.csp_no_reports')); return; }
             json.rows.forEach(r => {
                 const tr = el('tr');
                 tr.appendChild(el('td', r.scope));
@@ -4807,10 +4832,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     body: JSON.stringify({ op: 'clear' }),
                 });
                 json = await res.json();
-            } catch { json = { error: t('js.settings.network_error') }; }
+            } catch { json = { error: t.key('js.settings.network_error') }; }
             if (json.error) { note(json.error, 'alert-danger'); return; }
             await load();
-            note(json.deleted === 1 ? t('js.settings.csp_cleared_one') : t('js.settings.csp_cleared', { n: json.deleted }), 'alert-success');
+            note(json.deleted === 1 ? t.key('js.settings.csp_cleared_one') : t.key('js.settings.csp_cleared', { n: json.deleted }), 'alert-success');
         });
         load();
     })();
@@ -4831,14 +4856,14 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     body: bodyObj === undefined ? undefined : JSON.stringify(bodyObj),
                 });
                 return await res.json();
-            } catch { return { error: t('js.settings.network_error') }; }
+            } catch { return { error: t.key('js.settings.network_error') }; }
         };
         async function loadPeers() {
             const json = await call('admin/fetch_fed_peers');
             body.innerHTML = '';
             if (json.error) { body.appendChild(el('tr')).appendChild(el('td', json.error, 'text-danger')).colSpan = 8; return; }
             if (!json.peers.length) {
-                const td = el('td', t('js.settings.no_peers'), 'text-muted');
+                const td = el('td', t.key('js.settings.no_peers'), 'text-muted');
                 td.colSpan = 8;
                 body.appendChild(el('tr')).appendChild(td);
             }
@@ -4846,48 +4871,48 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 const tr = el('tr');
                 tr.appendChild(el('td', p.name));
                 tr.appendChild(el('td', p.base_url, 'text-break'));
-                tr.appendChild(el('td', p.pull_enabled ? (p.has_bearer ? t('js.settings.yes') : t('js.settings.yes_no_bearer')) : t('js.settings.no'), p.pull_enabled && !p.has_bearer ? 'text-warning' : ''));
-                tr.appendChild(el('td', p.api_client_id ? ((p.client_key_id || '?') + (p.client_enabled === 0 ? t('js.settings.disabled_suffix') : '')) : '—', p.client_enabled === 0 ? 'text-warning' : ''));
-                tr.appendChild(el('td', p.last_pull_at || t('js.settings.never'), 'text-muted'));
+                tr.appendChild(el('td', p.pull_enabled ? (p.has_bearer ? t.key('js.settings.yes') : t.key('js.settings.yes_no_bearer')) : t.key('js.settings.no'), p.pull_enabled && !p.has_bearer ? 'text-warning' : ''));
+                tr.appendChild(el('td', p.api_client_id ? ((p.client_key_id || '?') + (p.client_enabled === 0 ? t.key('js.settings.disabled_suffix') : '')) : '—', p.client_enabled === 0 ? 'text-warning' : ''));
+                tr.appendChild(el('td', p.last_pull_at || t.key('js.settings.never'), 'text-muted'));
                 tr.appendChild(el('td', String(p.rows_imported || 0)));
                 tr.appendChild(el('td', p.last_status || '—', 'text-muted small'));
                 const act = el('td');
                 act.className = 'text-nowrap';
-                const testBtn = el('button', t('js.settings.test'), 'btn btn-sm btn-outline-info me-1');
+                const testBtn = el('button', t.key('js.settings.test'), 'btn btn-sm btn-outline-info me-1');
                 testBtn.type = 'button';
                 testBtn.addEventListener('click', async () => {
                     testBtn.disabled = true;
                     const r = await call('admin/fed_peer_test', { id: p.id });
                     testBtn.disabled = false;
-                    if (r.success) note(t('js.settings.peer_test_ok', { peer: p.name, node: r.reply.node || '?', state: r.reply.export_enabled ? t('js.settings.on') : t('js.settings.off'), rows: (r.reply.exportable_rows || 0).toLocaleString() }), 'alert-success');
-                    else note(t('js.settings.test_failed', { error: r.error || '?' }), 'alert-danger');
+                    if (r.success) note(t.key('js.settings.peer_test_ok', { peer: p.name, node: r.reply.node || '?', state: r.reply.export_enabled ? t.key('js.settings.on') : t.key('js.settings.off'), rows: (r.reply.exportable_rows || 0).toLocaleString() }), 'alert-success');
+                    else note(t.key('js.settings.test_failed', { error: r.error || '?' }), 'alert-danger');
                 });
-                const togglePull = el('button', p.pull_enabled ? t('js.settings.pull_off') : t('js.settings.pull_on'), 'btn btn-sm btn-outline-secondary me-1');
+                const togglePull = el('button', p.pull_enabled ? t.key('js.settings.pull_off') : t.key('js.settings.pull_on'), 'btn btn-sm btn-outline-secondary me-1');
                 togglePull.type = 'button';
                 togglePull.addEventListener('click', async () => {
                     const r = await call('admin/fed_peer_save', { id: p.id, name: p.name, base_url: p.base_url, pull_enabled: p.pull_enabled ? 0 : 1, pull_files: p.pull_files });
                     if (r.error) note(r.error, 'alert-danger'); else loadPeers();
                 });
-                const bearerBtn = el('button', t('js.settings.bearer_btn'), 'btn btn-sm btn-outline-secondary me-1');
+                const bearerBtn = el('button', t.key('js.settings.bearer_btn'), 'btn btn-sm btn-outline-secondary me-1');
                 bearerBtn.type = 'button';
-                bearerBtn.title = t('js.settings.bearer_title');
+                bearerBtn.title = t.key('js.settings.bearer_title');
                 bearerBtn.addEventListener('click', async () => {
                     const val = window.prompt(t('js.settings.bearer_prompt', { peer: p.name }));
                     if (val === null) return;
                     const r = await call('admin/fed_peer_save', { id: p.id, name: p.name, base_url: p.base_url, pull_enabled: p.pull_enabled, pull_files: p.pull_files, bearer: val.trim() === '' ? 'CLEAR' : val.trim() });
-                    if (r.error) note(r.error, 'alert-danger'); else { note(t('js.settings.bearer_updated'), 'alert-success'); loadPeers(); }
+                    if (r.error) note(r.error, 'alert-danger'); else { note(t.key('js.settings.bearer_updated'), 'alert-success'); loadPeers(); }
                 });
-                const grantBtn = el('button', t('js.settings.grant_inbound'), 'btn btn-sm btn-outline-secondary me-1');
+                const grantBtn = el('button', t.key('js.settings.grant_inbound'), 'btn btn-sm btn-outline-secondary me-1');
                 grantBtn.type = 'button';
-                grantBtn.title = t('js.settings.grant_inbound_title');
+                grantBtn.title = t.key('js.settings.grant_inbound_title');
                 if (p.api_client_id) grantBtn.disabled = true;
                 grantBtn.addEventListener('click', async () => {
                     const r = await call('admin/fed_peer_save', { id: p.id, name: p.name, base_url: p.base_url, pull_enabled: p.pull_enabled, pull_files: p.pull_files, grant_inbound: 1 });
                     if (r.error) { note(r.error, 'alert-danger'); return; }
-                    if (r.inbound) note(t('js.settings.inbound_bearer_for', { peer: p.name, bearer: r.inbound.bearer }), 'alert-warning');
+                    if (r.inbound) note(t.key('js.settings.inbound_bearer_for', { peer: p.name, bearer: r.inbound.bearer }), 'alert-warning');
                     loadPeers();
                 });
-                const delBtn = el('button', t('js.settings.delete'), 'btn btn-sm btn-outline-danger');
+                const delBtn = el('button', t.key('js.settings.delete'), 'btn btn-sm btn-outline-danger');
                 delBtn.type = 'button';
                 delBtn.addEventListener('click', async () => {
                     if (!window.confirm(t('js.settings.delete_peer_confirm', { peer: p.name }))) return;
@@ -4898,13 +4923,13 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 // can own a million rows, so the browser walks it in bounded pieces instead of
                 // asking MariaDB — shared with mail, the forum and the tracker — for one huge
                 // statement. The endpoint offers the CLI equivalent for the genuinely large cases.
-                const undoBtn = el('button', t('js.settings.undo_import'), 'btn btn-sm btn-outline-warning me-1');
+                const undoBtn = el('button', t.key('js.settings.undo_import'), 'btn btn-sm btn-outline-warning me-1');
                 undoBtn.type = 'button';
-                undoBtn.title = t('js.settings.undo_import_title');
+                undoBtn.title = t.key('js.settings.undo_import_title');
                 undoBtn.addEventListener('click', async () => {
                     const c = await call('admin/fed_purge', { op: 'count', peer: p.name });
                     if (c.error) { note(c.error, 'alert-danger'); return; }
-                    if (!c.rows) { note(t('js.settings.nothing_from_peer', { peer: p.name }), 'alert-info'); return; }
+                    if (!c.rows) { note(t.key('js.settings.nothing_from_peer', { peer: p.name }), 'alert-info'); return; }
                     if (!window.confirm(t('js.settings.undo_import_confirm', { peer: p.name, rows: c.rows.toLocaleString(), files: c.files.toLocaleString() }))) return;
                     const pw = window.prompt(t('js.settings.admin_password_prompt'));
                     if (!pw) return;
@@ -4914,7 +4939,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                         const r = await call('admin/fed_purge', { op: 'run', peer: p.name, password: pw });
                         if (r.error) { note(r.error, 'alert-danger'); break; }
                         total += r.done;
-                        note(t('js.settings.undo_progress', { peer: p.name, done: total.toLocaleString(), left: r.remaining.toLocaleString() }), 'alert-info');
+                        note(t.key('js.settings.undo_progress', { peer: p.name, done: total.toLocaleString(), left: r.remaining.toLocaleString() }), 'alert-info');
                         if (!r.remaining || !r.done) { note(r.message, 'alert-success'); break; }
                     }
                     undoBtn.disabled = false;
@@ -4929,7 +4954,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             if (sel) {
                 const keep = sel.value;
                 sel.innerHTML = '';
-                sel.appendChild(el('option', t('js.settings.all_peers'))).value = '';
+                sel.appendChild(el('option', t.key('js.settings.all_peers'))).value = '';
                 json.peers.forEach(p => { sel.appendChild(el('option', p.name)).value = p.name; });
                 sel.value = keep;
             }
@@ -4948,8 +4973,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             document.getElementById('fp-url').value = '';
             document.getElementById('fp-bearer').value = '';
             document.getElementById('fp-grant').checked = false;
-            if (r.inbound) note(t('js.settings.peer_added_bearer', { bearer: r.inbound.bearer }), 'alert-warning');
-            else note(t('js.settings.peer_added'), 'alert-success');
+            if (r.inbound) note(t.key('js.settings.peer_added_bearer', { bearer: r.inbound.bearer }), 'alert-warning');
+            else note(t.key('js.settings.peer_added'), 'alert-success');
             loadPeers();
         });
         loadPeers();
@@ -4994,7 +5019,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             rbody.innerHTML = '';
             if (!r.rows.length) {
                 const td = el('td', '', '');
-                td.appendChild(AdminCommon.emptyState(state === 'rejected' ? t('js.common.nothing_rejected') : t('js.common.nothing_waiting'),
+                td.appendChild(AdminCommon.emptyState(state === 'rejected' ? t.key('js.common.nothing_rejected') : t.key('js.common.nothing_waiting'),
                                                       state === 'rejected' ? 'bi-x-circle' : 'bi-inbox'));
                 td.colSpan = 7;
                 rbody.appendChild(el('tr')).appendChild(td);
@@ -5007,24 +5032,24 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 pick.type = 'checkbox'; pick.className = 'form-check-input fr-pick'; pick.value = String(row.id);
                 pick.addEventListener('change', syncButtons);
                 tr.appendChild(el('td')).appendChild(pick);
-                const nameTd = el('td', row.name || t('js.settings.no_name'), 'text-break');
+                const nameTd = el('td', row.name || t.key('js.settings.no_name'), 'text-break');
                 nameTd.title = row.info_hash;
                 tr.appendChild(nameTd);
                 tr.appendChild(el('td', bytes(row.total_size), 'text-nowrap'));
-                tr.appendChild(el('td', (row.files_count || 0).toLocaleString() + (row.files_truncated ? t('js.settings.list_capped') : ''), 'text-nowrap'));
+                tr.appendChild(el('td', (row.files_count || 0).toLocaleString() + (row.files_truncated ? t.key('js.settings.list_capped') : ''), 'text-nowrap'));
                 tr.appendChild(el('td', row.peer_name, 'text-muted'));
                 tr.appendChild(el('td', row.origin_at || '—', 'text-muted small text-nowrap'));
                 const act = el('td', undefined, 'text-nowrap');
                 if (state === 'pending') {
-                    const yes = el('button', t('js.settings.accept'), 'btn btn-sm btn-outline-success me-1');
+                    const yes = el('button', t.key('js.settings.accept'), 'btn btn-sm btn-outline-success me-1');
                     yes.type = 'button';
                     yes.addEventListener('click', () => decide('accept', [row.id]));
-                    const no = el('button', t('js.settings.reject'), 'btn btn-sm btn-outline-danger');
+                    const no = el('button', t.key('js.settings.reject'), 'btn btn-sm btn-outline-danger');
                     no.type = 'button';
                     no.addEventListener('click', () => decide('reject', [row.id]));
                     act.append(yes, no);
                 } else {
-                    const un = el('button', t('js.settings.allow_again'), 'btn btn-sm btn-outline-secondary');
+                    const un = el('button', t.key('js.settings.allow_again'), 'btn btn-sm btn-outline-secondary');
                     un.type = 'button';
                     un.addEventListener('click', () => decide('unreject', [row.id]));
                     act.appendChild(un);
@@ -5068,7 +5093,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const pathInput = document.querySelector('input[name="blacklist_path"]');
         const pathVal = pathInput ? pathInput.value.trim() : '';
 
-        el.innerHTML = '<span class="text-info">' + t('js.settings.testing') + '</span>';
+        el.innerHTML = '<span class="text-info">' + t.html('js.settings.testing') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/check_blacklist', {
                 method: 'POST',
@@ -5077,15 +5102,15 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             });
             const json = await res.json();
             if (json.ok) {
-                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.path_ok') + '</span>' +
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t.html('js.settings.path_ok') + '</span>' +
                     (json.suggestions.length ? '<br><small style="color: #a0a0b0;">' + json.suggestions.join('<br>') + '</small>' : '');
             } else {
                 el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + json.errors.join('<br>') + '</span>' +
                     (json.suggestions.length ? '<br><small class="text-warning">' + json.suggestions.join('<br>') + '</small>' : '') +
-                    '<br><small style="color: #a0a0b0;">' + t('js.settings.os_php_user', { os: json.os, user: json.php_user }) + '</small>';
+                    '<br><small style="color: #a0a0b0;">' + t.html('js.settings.os_php_user', { os: json.os, user: json.php_user }) + '</small>';
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">' + t('js.settings.network_error') + '</span>';
+            el.innerHTML = '<span class="text-danger">' + t.html('js.settings.network_error') + '</span>';
         }
     });
 
@@ -5093,7 +5118,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const el = document.getElementById('whitelist-result');
         const pathInput = document.querySelector('input[name="whitelist_path"]');
         const pathVal = pathInput ? pathInput.value.trim() : '';
-        el.innerHTML = '<span class="text-info">' + t('js.settings.testing') + '</span>';
+        el.innerHTML = '<span class="text-info">' + t.html('js.settings.testing') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/check_whitelist_path', {
                 method: 'POST',
@@ -5103,16 +5128,16 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const json = await res.json();
             const sug = (json.suggestions || []).map(esc);
             if (json.ok) {
-                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.dir_ok') + '</span>' +
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t.html('js.settings.dir_ok') + '</span>' +
                     (sug.length ? '<br><small style="color: #a0a0b0;">' + sug.join('<br>') + '</small>' : '') +
-                    (json.file ? '<br><small style="color:#a0a0b0;">' + (json.file.exists ? t('js.settings.file_exists', { lines: esc(String(json.file.lines)), size: esc(String(json.file.size)), mode: esc(json.file.mode || ''), owner: esc(json.file.owner || '') }) : t('js.settings.file_missing')) + '</small>' : '');
+                    (json.file ? '<br><small style="color:#a0a0b0;">' + (json.file.exists ? t.html('js.settings.file_exists', { lines: String(json.file.lines), size: String(json.file.size), mode: json.file.mode || '', owner: json.file.owner || '' }) : t.html('js.settings.file_missing')) + '</small>' : '');
             } else {
-                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t('js.settings.test_failed_short')]).map(esc).join('<br>') + '</span>' +
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t.key('js.settings.test_failed_short')]).map(esc).join('<br>') + '</span>' +
                     (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') +
-                    '<br><small style="color: #a0a0b0;">' + t('js.settings.os_php_user', { os: esc(json.os || ''), user: esc(json.php_user || '') }) + '</small>';
+                    '<br><small style="color: #a0a0b0;">' + t.html('js.settings.os_php_user', { os: json.os || '', user: json.php_user || '' }) + '</small>';
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">' + t('js.settings.network_error') + '</span>';
+            el.innerHTML = '<span class="text-danger">' + t.html('js.settings.network_error') + '</span>';
         }
     });
 
@@ -5133,11 +5158,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const esc2 = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         let html;
         if (j.ok) {
-            html = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + esc2(okText) + '</span>';
+            html = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + esc(okText) + '</span>';   // a t.key() word as keyed markup
         } else if (j.configured === false) {
-            html = '<span class="text-info"><i class="bi bi-info-circle" aria-hidden="true"></i> ' + t('js.settings.test_not_set_up') + '</span>';
+            html = '<span class="text-info"><i class="bi bi-info-circle" aria-hidden="true"></i> ' + t.html('js.settings.test_not_set_up') + '</span>';
         } else {
-            html = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + t('js.settings.test_path_missing') + '</span>';
+            html = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + t.html('js.settings.test_path_missing') + '</span>';
         }
         html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
         (j.checks || []).forEach(c => {
@@ -5153,7 +5178,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         html += '</ul>';
         (j.errors || []).forEach(x => { html += '<div class="text-warning" style="font-size:.85rem;">' + esc2(x) + '</div>'; });
         if ((j.suggestions || []).length) {
-            html += '<div class="settings-hint mt-2">' + t('js.settings.run_as_root') + '</div>';
+            html += '<div class="settings-hint mt-2">' + t.html('js.settings.run_as_root') + '</div>';
             html += '<pre class="nl-preview" style="white-space:pre-wrap;">' + esc2(j.suggestions.join(String.fromCharCode(10))) + '</pre>';
         }
         return html;
@@ -5171,14 +5196,14 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         }
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.settings.testing');
-        box.innerHTML = '<span class="text-info">' + t('js.settings.asking_helper') + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.settings.testing');
+        box.innerHTML = '<span class="text-info">' + t.html('js.settings.asking_helper') + '</span>';
         try {
             const res = await fetch(API_BASE + btn.dataset.test, { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            box.innerHTML = renderTestResult(j, btn.dataset.okText || t('js.settings.test_all_in_place'));
+            box.innerHTML = renderTestResult(j, btn.dataset.okText || t.key('js.settings.test_all_in_place'));
         } catch {
-            box.innerHTML = '<span class="text-danger">' + t('js.settings.network_error') + '</span>';
+            box.innerHTML = '<span class="text-danger">' + t.html('js.settings.network_error') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5187,11 +5212,11 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
     async function runTrackerPermTest(op, btn) {
         const el = document.getElementById('tracker-perm-result');
-        const label = op === 'reload' ? t('js.settings.op_reload') : t('js.settings.op_restart');
+        const label = op === 'reload' ? t.key('js.settings.op_reload') : t.key('js.settings.op_restart');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.settings.testing');
-        el.innerHTML = '<span class="text-info">' + t('js.settings.testing_perm', {op: label}) + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.settings.testing');
+        el.innerHTML = '<span class="text-info">' + t.html('js.settings.testing_perm', {op: label}) + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/test_tracker_permission&op=' + encodeURIComponent(op), {
                 method: 'GET',
@@ -5199,20 +5224,20 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             });
             const json = await res.json();
             const suggestions = (json.suggestions || []);
-            const meta = '<br><small style="color:#a0a0b0;">' + t('js.settings.meta_command') + '<code>' + esc(json.command || '') + '</code>'
-                + (json.output ? '<br>' + t('js.settings.meta_output') + '<code>' + esc(json.output) + '</code>' : '')
-                + '<br>' + t('js.settings.meta_os') + esc(json.os || '') + ' | ' + t('js.settings.meta_php_user') + esc(json.php_user || '') + '</small>';
+            const meta = '<br><small style="color:#a0a0b0;">' + t.html('js.settings.meta_command') + '<code>' + esc(json.command || '') + '</code>'
+                + (json.output ? '<br>' + t.html('js.settings.meta_output') + '<code>' + esc(json.output) + '</code>' : '')
+                + '<br>' + t.html('js.settings.meta_os') + esc(json.os || '') + ' | ' + t.html('js.settings.meta_php_user') + esc(json.php_user || '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.perm_ok', {op: label}) + '</span>'
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t.html('js.settings.perm_ok', {op: label}) + '</span>'
                     + (suggestions.length ? '<br><small style="color:#a0a0b0;">' + suggestions.map(esc).join('<br>') + '</small>' : '')
                     + meta;
             } else {
-                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t('js.settings.perm_test_failed')]).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t.key('js.settings.perm_test_failed')]).map(esc).join('<br>') + '</span>'
                     + (suggestions.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + suggestions.map(esc).join('<br>') + '</small>' : '')
                     + meta;
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">' + t('js.settings.network_error') + '</span>';
+            el.innerHTML = '<span class="text-danger">' + t.html('js.settings.network_error') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5232,15 +5257,15 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const summary = document.getElementById('bk-sched-summary');
         const tzEl = document.getElementById('backup-tz');
         if (!dayChecks.length || !timeEl || !jsonEl) return;
-        const LABELS = { mon: t('js.settings.day_mon'), tue: t('js.settings.day_tue'), wed: t('js.settings.day_wed'), thu: t('js.settings.day_thu'), fri: t('js.settings.day_fri'), sat: t('js.settings.day_sat'), sun: t('js.settings.day_sun') };
+        const LABELS = { mon: t.key('js.settings.day_mon'), tue: t.key('js.settings.day_tue'), wed: t.key('js.settings.day_wed'), thu: t.key('js.settings.day_thu'), fri: t.key('js.settings.day_fri'), sat: t.key('js.settings.day_sat'), sun: t.key('js.settings.day_sun') };
         function sync() {
             const days = dayChecks.filter(c => c.checked).map(c => c.value);
             const time = /^\d{2}:\d{2}$/.test(timeEl.value) ? timeEl.value : '04:00';
             jsonEl.value = days.length ? JSON.stringify({ days: days, time: time }) : '';
             if (summary) {
                 summary.textContent = days.length
-                    ? t('js.settings.schedule_summary', {days: days.length === 7 ? t('js.settings.every_day') : days.map(d => LABELS[d]).join(', '), time: time, tz: (tzEl ? tzEl.value : '')})
-                    : t('js.settings.no_auto_backups');
+                    ? t.key('js.settings.schedule_summary', {days: days.length === 7 ? t.key('js.settings.every_day') : days.map(d => LABELS[d]).join(', '), time: time, tz: (tzEl ? tzEl.value : '')})
+                    : t.key('js.settings.no_auto_backups');
             }
         }
         dayChecks.forEach(c => c.addEventListener('change', sync));
@@ -5272,8 +5297,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const dir = (document.querySelector('[name="backup_dir"]') || {}).value || '';
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.settings.testing');
-        el.innerHTML = '<span class="text-info">' + t('js.settings.checking_backup_dir') + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.settings.testing');
+        el.innerHTML = '<span class="text-info">' + t.html('js.settings.checking_backup_dir') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/backup_test_path', {
                 method: 'POST',
@@ -5285,22 +5310,22 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const c = json.check || {};
             const facts = [];
             if (json.exists) {
-                facts.push(t('js.settings.fact_mode_owner', {mode: esc(json.mode || '?'), owner: esc(json.owner || '?')}));
-                if (json.archives !== undefined) facts.push(t('js.settings.fact_archives', {n: esc(String(json.archives))}));
-            } else { facts.push(t('js.settings.not_exist_yet')); }
-            if (json.free_bytes) facts.push(t('js.settings.fact_free', {n: Math.round(json.free_bytes / 1073741824)}));
-            if (c.mode) facts.push(t('js.settings.fact_backup_mode', {mode: esc(c.mode === 'script' ? t('js.settings.backup_mode_full') : t('js.settings.backup_mode_builtin'))}));
+                facts.push(t.key('js.settings.fact_mode_owner', {mode: esc(json.mode || '?'), owner: esc(json.owner || '?')}));
+                if (json.archives !== undefined) facts.push(t.key('js.settings.fact_archives', {n: esc(String(json.archives))}));
+            } else { facts.push(t.key('js.settings.not_exist_yet')); }
+            if (json.free_bytes) facts.push(t.key('js.settings.fact_free', {n: Math.round(json.free_bytes / 1073741824)}));
+            if (c.mode) facts.push(t.key('js.settings.fact_backup_mode', {mode: esc(c.mode === 'script' ? t.key('js.settings.backup_mode_full') : t.key('js.settings.backup_mode_builtin'))}));
             const meta = '<br><small style="color:#a0a0b0;">' + facts.join(' | ')
-                + '<br>' + t('js.settings.meta_os') + esc(json.os || '') + ' | ' + t('js.settings.meta_php_user') + esc(json.php_user || '') + '</small>';
+                + '<br>' + t.html('js.settings.meta_os') + esc(json.os || '') + ' | ' + t.html('js.settings.meta_php_user') + esc(json.php_user || '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t('js.settings.backup_dir_ok') + '</span>'
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t.html('js.settings.backup_dir_ok') + '</span>'
                     + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             } else {
-                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t.key('settings.js_test_failed')]).map(esc).join('<br>') + '</span>'
                     + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+            el.innerHTML = '<span class="text-danger">' + t.html('settings.js_network_error_short') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5315,26 +5340,26 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const el = document.getElementById('netlimit-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
-        el.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_checking_fw_helper')) ?> + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_testing');
+        el.innerHTML = '<span class="text-info">' + t('settings.js_checking_fw_helper') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/net_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const json = await res.json();
             const sug = (json.suggestions || []).map(esc);
             const meta = '<br><small style="color:#a0a0b0;">'
-                + (json.command ? <?= json_encode(__('settings.js_meta_command')) ?> + '<code>' + esc(json.command) + '</code><br>' : '')
-                + (json.output ? <?= json_encode(__('settings.js_meta_output')) ?> + '<code>' + esc(json.output) + '</code><br>' : '')
-                + <?= json_encode(__('settings.js_meta_os')) ?> + esc(json.os || '') + ' | ' + <?= json_encode(__('settings.js_meta_php_user')) ?> + esc(json.php_user || '')
-                + (json.cpus ? ' | ' + <?= json_encode(__('settings.js_meta_cpu_cores')) ?> + esc(String(json.cpus)) : '') + '</small>';
+                + (json.command ? t.html('settings.js_meta_command') + '<code>' + esc(json.command) + '</code><br>' : '')
+                + (json.output ? t.html('settings.js_meta_output') + '<code>' + esc(json.output) + '</code><br>' : '')
+                + t.html('settings.js_meta_os') + esc(json.os || '') + ' | ' + t.html('settings.js_meta_php_user') + esc(json.php_user || '')
+                + (json.cpus ? ' | ' + t.html('settings.js_meta_cpu_cores') + esc(String(json.cpus)) : '') + '</small>';
             if (json.ok) {
-                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + <?= json_encode(__('settings.js_netlimit_ok')) ?> + '</span>'
+                el.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t.html('settings.js_netlimit_ok') + '</span>'
                     + (sug.length ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             } else {
-                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [<?= json_encode(__('settings.js_test_failed')) ?>]).map(esc).join('<br>') + '</span>'
+                el.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + (json.errors || [t.key('settings.js_test_failed')]).map(esc).join('<br>') + '</span>'
                     + (sug.length ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + sug.join('<br>') + '</small>' : '') + meta;
             }
         } catch {
-            el.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+            el.innerHTML = '<span class="text-danger">' + t.html('settings.js_network_error_short') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5348,26 +5373,26 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('ot-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
-        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_testing');
+        box.innerHTML = '<span class="text-info">' + t('settings.js_asking_helper') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/ot_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
             const meta = '<br><small style="color:#a0a0b0;">'
-                + (j.unit ? <?= json_encode(__('settings.js_meta_unit')) ?> + '<code>' + esc(j.unit) + '</code> | ' : '')
-                + (j.cpus ? <?= json_encode(__('settings.js_meta_cores')) ?> + esc(String(j.cpus)) + ' | ' : '')
-                + <?= json_encode(__('settings.js_meta_dropin_dir')) ?> + '<code>' + esc(j.dropin_dir || '?') + '</code>'
-                + (j.dropin_writable === false ? ' ' + <?= json_encode(__('settings.js_dropin_readonly')) ?> : '')
+                + (j.unit ? t.html('settings.js_meta_unit') + '<code>' + esc(j.unit) + '</code> | ' : '')
+                + (j.cpus ? t.html('settings.js_meta_cores') + esc(String(j.cpus)) + ' | ' : '')
+                + t.html('settings.js_meta_dropin_dir') + '<code>' + esc(j.dropin_dir || '?') + '</code>'
+                + (j.dropin_writable === false ? ' ' + t('settings.js_dropin_readonly') : '')
                 + '</small>';
             if (j.ok) {
-                box.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + <?= json_encode(__('settings.js_ot_test_ok')) ?> + '</span>'
+                box.innerHTML = '<span class="text-success"><i class="bi bi-check-lg" aria-hidden="true"></i> ' + t.html('settings.js_ot_test_ok') + '</span>'
                     + (j.hint ? '<br><small style="color:#a0a0b0;white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             } else {
-                box.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + esc(j.error || <?= json_encode(__('settings.js_test_failed')) ?>) + '</span>'
+                box.innerHTML = '<span class="text-danger"><i class="bi bi-x-lg" aria-hidden="true"></i> ' + esc(j.error || t.key('settings.js_test_failed')) + '</span>'
                     + (j.hint ? '<br><small class="text-warning" style="white-space:pre-wrap;">' + esc(j.hint) + '</small>' : '') + meta;
             }
         } catch {
-            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+            box.innerHTML = '<span class="text-danger">' + t.html('settings.js_network_error_short') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5382,12 +5407,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('cluster-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
-        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_testing');
+        box.innerHTML = '<span class="text-info">' + t('settings.js_asking_helper') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/ot_cluster_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_cluster_test_ok')) ?>);
+            box.innerHTML = renderTestResult(j, t.key('settings.js_cluster_test_ok'));
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
@@ -5403,7 +5428,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             }
             if (html) box.innerHTML = html;
         } catch {
-            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+            box.innerHTML = '<span class="text-danger">' + t.html('settings.js_network_error_short') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5419,12 +5444,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('sysctl-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
-        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_testing');
+        box.innerHTML = '<span class="text-info">' + t('settings.js_asking_helper') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/sysctl_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_sysctl_test_ok')) ?>);
+            box.innerHTML = renderTestResult(j, t.key('settings.js_sysctl_test_ok'));
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
@@ -5440,7 +5465,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             }
             if (html) box.innerHTML = html;
         } catch {
-            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+            box.innerHTML = '<span class="text-danger">' + t.html('settings.js_network_error_short') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5453,12 +5478,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const box = document.getElementById('dbmem-test-result');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_testing')) ?>;
-        box.innerHTML = '<span class="text-info">' + <?= json_encode(__('settings.js_asking_helper')) ?> + '</span>';
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_testing');
+        box.innerHTML = '<span class="text-info">' + t('settings.js_asking_helper') + '</span>';
         try {
             const res = await fetch(API_BASE + 'admin/dbmem_test', { method: 'GET', headers: { 'X-CSRF-Token': CSRF } });
             const j = await res.json();
-            box.innerHTML = renderTestResult(j, <?= json_encode(__('settings.js_dbmem_test_ok')) ?>);
+            box.innerHTML = renderTestResult(j, t.key('settings.js_dbmem_test_ok'));
             let html = '';
             html += '<ul style="margin:.4rem 0 0 1rem;padding:0;list-style:none;font-size:.85rem;">';
             (j.checks || []).forEach(c => {
@@ -5474,7 +5499,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             }
             if (html) box.innerHTML = html;
         } catch {
-            box.innerHTML = '<span class="text-danger">' + <?= json_encode(__('settings.js_network_error_short')) ?> + '</span>';
+            box.innerHTML = '<span class="text-danger">' + t.html('settings.js_network_error_short') + '</span>';
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -5492,17 +5517,25 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     const dfAdd = document.getElementById('donation-field-add');
     const DF_MAX = 15;
 
-    function dfRowHtml() {
-        return `<div class="row g-2 mb-2 donation-field-row">
-            <div class="col-md-3"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_label_ph') ?>" data-df="label"></div>
-            <div class="col"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="<?= _h('settings.donation_field_value_ph') ?>" data-df="value"></div>
-            <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger donation-field-remove" title="<?= _h('settings.donation_field_remove_title') ?>"><i class="bi bi-x-lg"></i></button></div>
+    // A new row's placeholders and tooltip are t.key() words (the bundle carries settings.donation_field_*): they keep
+    // their keys and follow the live language switch (1.73.0 — PHP printed them into this script, frozen).
+    function dfRow() {
+        const holder = document.createElement('div');
+        holder.innerHTML = `<div class="row g-2 mb-2 donation-field-row">
+            <div class="col-md-3"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" data-df="label"></div>
+            <div class="col"><input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" data-df="value"></div>
+            <div class="col-auto"><button type="button" class="btn btn-sm btn-outline-danger donation-field-remove"><i class="bi bi-x-lg"></i></button></div>
         </div>`;
+        const row = holder.firstElementChild;
+        row.querySelector('[data-df="label"]').placeholder = t.key('settings.donation_field_label_ph');
+        row.querySelector('[data-df="value"]').placeholder = t.key('settings.donation_field_value_ph');
+        row.querySelector('.donation-field-remove').title = t.key('settings.donation_field_remove_title');
+        return row;
     }
 
     dfAdd.addEventListener('click', () => {
         if (dfList.querySelectorAll('.donation-field-row').length >= DF_MAX) return;
-        dfList.insertAdjacentHTML('beforeend', dfRowHtml());
+        dfList.appendChild(dfRow());
     });
 
     dfList.addEventListener('click', (e) => {
@@ -5530,11 +5563,12 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const note = row.querySelector('[data-sched-note]');
         from.disabled = to.disabled = (kind !== 'window');
         if (kind === 'window' && from.value && to.value) {
-            note.textContent = to.value <= from.value ? <?= json_encode(__('settings.sched_ends_next_day_at')) ?> + to.value : <?= json_encode(__('settings.sched_same_day')) ?>;
+            if (to.value <= from.value) note.replaceChildren(t.key('settings.sched_ends_next_day_at'), to.value);
+            else note.textContent = t.key('settings.sched_same_day');
         } else if (kind === 'window') {
-            note.textContent = <?= json_encode(__('settings.sched_set_both_times')) ?>;
+            note.textContent = t.key('settings.sched_set_both_times');
         } else {
-            note.textContent = kind === 'all' ? <?= json_encode(__('settings.sched_all_day')) ?> : <?= json_encode(__('settings.sched_open_mode')) ?>;
+            note.textContent = kind === 'all' ? t.key('settings.sched_all_day') : t.key('settings.sched_open_mode');
         }
     }
     function collectSchedule() {
@@ -5570,9 +5604,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
     // place to extend it, and the page cannot be out of date about it.
     function settingsConfirmOpen(payload, reason, keys) {
         settingsPayloadToSubmit = payload;
-        let body = reason === 'exec' ? <?= json_encode(__('settings.confirm_body_exec')) ?> : <?= json_encode(__('settings.confirm_body')) ?>;
-        if (Array.isArray(keys) && keys.length) body += ' (' + keys.join(', ') + ')';
-        document.getElementById('settings-confirm-body').textContent = body;
+        // Pieces, not one string: the sentence is a t.key() word and keeps its key (the setting names after it are names).
+        const body = [reason === 'exec' ? t.key('settings.confirm_body_exec') : t.key('settings.confirm_body')];
+        if (Array.isArray(keys) && keys.length) body.push(' (' + keys.join(', ') + ')');
+        document.getElementById('settings-confirm-body').replaceChildren(...body);
         document.getElementById('settings-confirm-password').value = '';
         document.getElementById('settings-confirm-alert').innerHTML = '';
         const modal = new bootstrap.Modal(document.getElementById('settingsConfirmModal'));
@@ -5594,7 +5629,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 // switching the tracker mode writes a row, it does not move the symlinks. That is a
                 // warning, not an error, and it must not be dressed up as a success and forgotten.
                 if (json.warning) showToast('error', json.warning);
-                else showToast('success', <?= json_encode(__('settings.js_saved_ok')) ?>);
+                else showToast('success', t.key('settings.js_saved_ok'));
                 return true;
             } else if (json.reauth_required && !data.confirm_password) {
                 // Not an error yet: the server wants the password for this particular save. Only when
@@ -5603,7 +5638,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 settingsConfirmOpen(data, Array.isArray(json.reauth_keys) && json.reauth_keys.length ? 'exec' : 'limits', json.reauth_keys);
                 return false;
             } else {
-                const errMsg = json.error || <?= json_encode(__('settings.js_save_error')) ?>;
+                const errMsg = json.error || t.key('settings.js_save_error');
                 const confirmAlert = document.getElementById('settings-confirm-alert');
                 const confirmModalEl = document.getElementById('settingsConfirmModal');
                 if (confirmAlert && confirmModalEl.classList.contains('show')) {
@@ -5622,20 +5657,22 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             const confirmAlert = document.getElementById('settings-confirm-alert');
             const confirmModalEl = document.getElementById('settingsConfirmModal');
             if (confirmAlert && confirmModalEl.classList.contains('show')) {
-                confirmAlert.innerHTML = '<div class="alert alert-danger py-1 px-2 modal-alert-sm">' + <?= json_encode(__('settings.js_network_error')) ?> + '</div>';
+                confirmAlert.innerHTML = '<div class="alert alert-danger py-1 px-2 modal-alert-sm">' + t.html('settings.js_network_error') + '</div>';
                 setTimeout(() => {
                     const alertDiv = confirmAlert.querySelector('.modal-alert-sm');
                     if (alertDiv) alertDiv.classList.add('alert-fade');
                 }, 4500);
                 setTimeout(() => confirmAlert.innerHTML = '', 5000);
             } else {
-                showToast('error', <?= json_encode(__('settings.js_network_error')) ?>);
+                showToast('error', t.key('settings.js_network_error'));
             }
             return false;
         }
     }
 
+    // A t.key() word comes out as markup that keeps its key (t.html(), assets/js/i18n.js, 1.73.0) — text content only.
     function esc(str) {
+        if (t.isKey(str)) return t.html(str);
         if (!str) return '';
         const d = document.createElement('div');
         d.textContent = str;
@@ -5694,7 +5731,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const btn = e.target.querySelector('button[type="submit"]');
         const origHtml = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_saving')) ?>;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_saving');
 
         const success = await saveSettingsSubmit(settingsPayloadToSubmit);
         btn.disabled = false;
@@ -5726,34 +5763,34 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const confirm = form.confirm_password.value;
 
         if (!current) {
-            showToast('error', <?= json_encode(__('settings.js_current_password_required')) ?>);
+            showToast('error', t.key('settings.js_current_password_required'));
             return;
         }
 
         if (newPass && newPass !== confirm) {
-            showToast('error', <?= json_encode(__('settings.js_passwords_mismatch')) ?>);
+            showToast('error', t.key('settings.js_passwords_mismatch'));
             return;
         }
 
         if (newPass) {
             if (newPass.length < 10) {
-                showToast('error', <?= json_encode(__('settings.js_password_too_short')) ?>);
+                showToast('error', t.key('settings.js_password_too_short'));
                 return;
             }
             if (!/[a-z]/.test(newPass)) {
-                showToast('error', <?= json_encode(__('settings.js_password_need_lower')) ?>);
+                showToast('error', t.key('settings.js_password_need_lower'));
                 return;
             }
             if (!/[A-Z]/.test(newPass)) {
-                showToast('error', <?= json_encode(__('settings.js_password_need_upper')) ?>);
+                showToast('error', t.key('settings.js_password_need_upper'));
                 return;
             }
             if (!/[0-9]/.test(newPass)) {
-                showToast('error', <?= json_encode(__('settings.js_password_need_digit')) ?>);
+                showToast('error', t.key('settings.js_password_need_digit'));
                 return;
             }
             if (!/[^a-zA-Z0-9]/.test(newPass)) {
-                showToast('error', <?= json_encode(__('settings.js_password_need_special')) ?>);
+                showToast('error', t.key('settings.js_password_need_special'));
                 return;
             }
         }
@@ -5765,7 +5802,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         const wantEmail = emailNow !== null && emailNow !== ADMIN_EMAIL_CURRENT;
         const wantCreds = username !== ADMIN_USERNAME_CURRENT || !!newPass;
         if (!wantCreds && !wantEmail) {
-            showToast('error', <?= json_encode(__('settings.js_nothing_to_change')) ?>);
+            showToast('error', t.key('settings.js_nothing_to_change'));
             return;
         }
 
@@ -5780,7 +5817,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
 
         const saveBtn = form.querySelector('button[type="submit"]');
         const btnHtml = saveBtn ? saveBtn.innerHTML : '';
-        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + <?= json_encode(__('settings.js_saving_ellipsis')) ?>; }
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('settings.js_saving_ellipsis'); }
         try {
             let ok = true;
             if (wantCreds) {
@@ -5788,24 +5825,24 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 if (newPass) payload.new_password = newPass;
                 const json = await post('admin/change_password', payload);
                 if (json.success) {
-                    showToast('success', json.message || <?= json_encode(__('settings.js_saved_short')) ?>);
+                    showToast('success', json.message || t.key('settings.js_saved_short'));
                     ADMIN_USERNAME_CURRENT = username;
                 } else {
                     ok = false;
-                    showToast('error', json.error || <?= json_encode(__('settings.js_error')) ?>);
+                    showToast('error', json.error || t.key('settings.js_error'));
                 }
             }
             if (ok && wantEmail) {
                 const json = await post('admin/account_email', { current_password: current, email: emailNow });
                 if (json.success) {
-                    showToast('success', json.message || <?= json_encode(__('settings.js_email_change_started')) ?>);
+                    showToast('success', json.message || t.key('settings.js_email_change_started'));
                     // the address only really moves once the mailboxes confirm it, so keep showing
                     // the stored one until then
                     if (json.stage === 'done_direct') ADMIN_EMAIL_CURRENT = emailNow;
                     else emailField.value = ADMIN_EMAIL_CURRENT;
                 } else {
                     ok = false;
-                    showToast('error', json.error || <?= json_encode(__('settings.js_error')) ?>);
+                    showToast('error', json.error || t.key('settings.js_error'));
                     emailField.value = ADMIN_EMAIL_CURRENT;
                 }
             }
@@ -5815,7 +5852,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 form.confirm_password.value = '';
             }
         } catch {
-            showToast('error', <?= json_encode(__('settings.js_network_error')) ?>);
+            showToast('error', t.key('settings.js_network_error'));
         } finally {
             if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = btnHtml; }
         }
@@ -5833,14 +5870,14 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             });
             const json = await res.json();
             if (json.success) {
-                showToast('success', json.message || <?= json_encode(__('settings.js_cancelled')) ?>);
+                showToast('success', json.message || t.key('settings.js_cancelled'));
                 document.getElementById('admin-email-pending')?.remove();
             } else {
-                showToast('error', json.error || <?= json_encode(__('settings.js_error')) ?>);
+                showToast('error', json.error || t.key('settings.js_error'));
                 btn.disabled = false;
             }
         } catch {
-            showToast('error', <?= json_encode(__('settings.js_network_error')) ?>);
+            showToast('error', t.key('settings.js_network_error'));
             btn.disabled = false;
         }
     });

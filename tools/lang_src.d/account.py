@@ -54,9 +54,15 @@ add('account', {
                     'niezweryfikowane adresy nadal wysyłamy resety hasła.'),
     'mail_prefs':  ('What we may send you', 'Co możemy do Ciebie wysyłać'),
     'pref_account': ('Account mail', 'Poczta o koncie'),
-    'pref_account_note': ('Expiry warnings, security notices and anything else about this account.',
-                          'Ostrzeżenia o wygaśnięciu, powiadomienia bezpieczeństwa i wszystko inne '
-                          'dotyczące tego konta.'),
+    # What the switch governs, and only that (1.73.0, includes/users.php userNotifyMail()): the groups' notices
+    # and the e-mail copies of the operator's notices. The transactional mail never asks it — it used to, and
+    # switching this off stopped the password reset.
+    'pref_account_note': ('Your groups — access granted, access about to end — and e-mail copies of the operator\'s '
+                          'notices. Password resets, e-mail address changes and their confirmations always reach '
+                          'you, whatever you choose here.',
+                          'Twoje grupy — przyznany dostęp i dostęp, który zaraz wygaśnie — oraz kopie e-mailowe '
+                          'powiadomień od operatora. Resety hasła, zmiany adresu e-mail i ich potwierdzenia '
+                          'docierają zawsze, niezależnie od tego wyboru.'),
     'pref_bulk':   ('Announcements', 'Ogłoszenia'),
     'pref_bulk_note': ('Occasional messages sent to everyone. Turning this off stops those only — '
                        'password resets and security notices still reach you.',

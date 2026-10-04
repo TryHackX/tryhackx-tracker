@@ -196,15 +196,19 @@ function authHandoffRedeem(PDO $db, string $token, string $direction): ?array {
 }
 
 /**
- * Drop spent and expired tickets. Called from the janitor and, cheaply, when one is minted.
+ * Drop spent and expired tickets. Called from the janitor (includes/retention.php — from 1.73.0; the
+ * sentence was here before the call was) and, cheaply, when one is minted.
  * A spent ticket is kept for an hour so that a person who double-clicks a link is told "already
  * used" rather than "no such ticket" — the same event, but only one of those sentences is true.
+ * Bounded ($limit rows a pass); $now is for the tests (a clock passed in), the database's own clock otherwise.
  */
-function authHandoffPrune(PDO $db): int {
+function authHandoffPrune(PDO $db, ?int $now = null, int $limit = 5000): int {
+    // FROM_UNIXTIME(NULL) is NULL, so without a clock passed in the COALESCE is the database's NOW().
     $st = $db->prepare("DELETE FROM auth_handoffs
-                         WHERE expires_at < DATE_SUB(NOW(), INTERVAL 1 HOUR)
-                            OR (used_at IS NOT NULL AND used_at < DATE_SUB(NOW(), INTERVAL 1 HOUR))");
-    $st->execute();
+                         WHERE expires_at < DATE_SUB(COALESCE(FROM_UNIXTIME(?), NOW()), INTERVAL 1 HOUR)
+                            OR (used_at IS NOT NULL AND used_at < DATE_SUB(COALESCE(FROM_UNIXTIME(?), NOW()), INTERVAL 1 HOUR))
+                         LIMIT " . max(1, $limit));
+    $st->execute([$now, $now]);
     return $st->rowCount();
 }
 

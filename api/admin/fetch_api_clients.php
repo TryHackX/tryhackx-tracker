@@ -13,8 +13,8 @@ foreach ($st->fetchAll() as $c) {
     $c['required_fields'] = apiClientCleanFields($c['required_fields'], (string)$c['scope']);
     // Built here rather than in the browser: the guide address has to match what the SERVER thinks
     // the key is configured to do, and the browser only knows what it last drew.
-    $c['docs_url'] = apiClientDocsUrl((string)$c['scope'],
-        (string)$c['scope'] === 'abuse' ? $c['abuse_auto_block'] : $c['auto_approve'], $c['required_fields']);
+    // approve= from auto_approve, block= from abuse_auto_block — an `all` key has both chapters (1.73.0).
+    $c['docs_url'] = apiClientDocsUrl((string)$c['scope'], $c['auto_approve'], $c['required_fields'], $c['abuse_auto_block']);
     $clients[] = $c;
 }
 jsonResponse(['clients' => $clients, 'api_enabled' => (($cfg['api_enabled'] ?? '0') === '1')]);

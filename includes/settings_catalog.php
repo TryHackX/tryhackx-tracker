@@ -296,6 +296,9 @@ function settingsCatalogKeywords(): array {
         'pm_max_per_day'            => 'private messages limit per day spam flood cap',
         'rate_limit_pm'             => 'private messages per hour address ip network script ceiling flood rate limit wiadomosci na godzine adres',
         'pm_max_chars'              => 'private message length limit characters maximum',
+        // the Archive and the Trash (1.73.0)
+        'pm_archive_returns'        => 'messages archive archived hidden conversation comes back new message returns inbox unhide archiwum wraca',
+        'pm_trash_days'             => 'messages trash bin deleted conversations restore undo retention days keep purge empty kosz przywroc usuniete dni',
         'pm_live_seconds'           => 'messages live refresh poll seconds chat realtime conversation updates',
         'site_live_seconds'         => 'navigation badge unread count refresh pulse poll seconds notifications live site wide',
         'pm_typing_enabled'         => 'typing indicator is writing messages live chat',

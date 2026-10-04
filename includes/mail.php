@@ -88,6 +88,24 @@ function sendEmail(string $to, string $subject, string $plainText, string $htmlB
     return @mail($to, $subject, $body, $headers, "-f" . $fromEmail);
 }
 
+/**
+ * "Unsubscribe from everything" for one address — what a mail client's one-click Unsubscribe (RFC 8058) and
+ * api/unsubscribe.php do: the report mails' five kinds off, and the address in `unsubscribed_emails`, which
+ * isUnsubscribed() reads for EVERY kind — so the account notices a member may switch off and the
+ * announcements stop as well. Never the transactional mail (the password reset, an e-mail change and its
+ * confirmations, the verification): that never asks (userNotifyMail(), userVerifySend()).
+ */
+function unsubscribeAll(PDO $db, string $email): void {
+    $stmt = $db->prepare(
+        "INSERT INTO email_preferences (email, type, enabled) VALUES (?, ?, 0)
+         ON DUPLICATE KEY UPDATE enabled = 0"
+    );
+    foreach (['submission', 'review', 'status', 'custom', 'appeal'] as $t) {
+        $stmt->execute([$email, $t]);
+    }
+    $db->prepare("INSERT IGNORE INTO unsubscribed_emails (email) VALUES (?)")->execute([$email]);
+}
+
 function isUnsubscribed(PDO $db, string $email, string $type = ''): bool {
     // Check legacy table first (full unsubscribe)
     $stmt = $db->prepare("SELECT COUNT(*) FROM unsubscribed_emails WHERE email = ?");

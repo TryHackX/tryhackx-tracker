@@ -831,7 +831,11 @@ footer p { margin: 0.25rem 0; }
     color: var(--text-muted);
 }
 
-.status-link {
+/* :visited too (1.73.0): `a:visited` (0,1,1) outranks a bare class (0,1,0), so the statistics page's "Git commit"
+   link — the build of opentracker, opened once — turned the visited colour for good, as the sign-in's links did
+   before 1.71.0. A value that links out is not a page the reader has read. */
+.status-link,
+.status-link:visited {
     color: var(--link);
 }
 
@@ -2029,10 +2033,14 @@ body.page-search .container { max-width: 86em; }
 .search-table { table-layout: fixed; }
 .search-table thead th { border-top: 0; }
 .search-c-size { width: 6.5em; }
-.search-c-sl { width: 6.5em; }
+/* 9em, not 6.5 (1.73.0): the busiest torrents' "23456 / 12345" is 112.3px of the site's monospace, and a number never
+   wraps — at 6.5em it ran 20px over the Rating beside it (table_fit_check.js). With the cell's 24px and 4 for a wider
+   font. */
+.search-c-sl { width: 9em; }
 /* 11.25em, not 10: the Polish "Ostatnio widziany", its arrow and the cell's padding need 177px, and at
-   160 the arrow ran out of its cell (1.68.1). */
-.search-c-seen { width: 11.25em; }
+   160 the arrow ran out of its cell (1.68.1). 12.75em (1.73.0): a reader whose browser writes the date in 12 hours,
+   "10/01/2026, 11:59 PM", needs 172.8px of it — 4.8px past the cell at 11.25. */
+.search-c-seen { width: 12.75em; }
 /* Only drawn when ratings are shown in results — the colgroup asks the same question the <thead>
    does, from the same variable. */
 .search-c-rep { width: 5.5em; }
@@ -2143,9 +2151,12 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
        scrolls the rest. */
     .search-c-name { width: 15em; }
     .search-c-size { width: 5.5em; }
-    .search-c-sl { width: 5.5em; }
+    .search-c-sl { width: 8.75em; }   /* "23456 / 12345" whole (1.73.0); it was 5.5em, and the pair ran 36px out */
     .search-c-rep { width: 4.5em; }
     .search-c-seen { width: 8.5em; }
+    /* the date and its time on two lines where they do not fit one (1.73.0: from 768px, not 480 — a 12-hour date,
+       "10/01/2026, 11:59 PM", is 172.8px and the column 8.5em) */
+    .search-seen { white-space: normal; }
     .trans-pagination { flex-wrap: wrap; row-gap: 0.4rem; }
     .trans-pagination button { padding: 0.3rem 0.6rem; }
     .trans-pagination .pg-edge { display: none; }   /* keep Prev/box/Next on small screens */
@@ -2738,8 +2749,16 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .profile-list { display: flex; flex-direction: column; gap: 0.35rem; }
 .pf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
     padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 5px; }
-.pf-main { flex: 1 1 18rem; min-width: 0; display: flex; align-items: center; gap: 0.4rem; }
+/* The name and its badges wrap (1.73.0): an upload's two badges, "Nie przeszło sprawdzenia" and "Opis przejrzany i
+   opublikowany", are 330px and more, wider than the part of the row they stand in, and on one line they ran up to 94px
+   over the row's facts beside them, at every width (table_fit_check.js). Badges that fit beside the name stay beside
+   it; the others go under it, whole. A badge never shrinks; the name does, and takes the ellipsis with its title. */
+.pf-main { flex: 1 1 18rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.4rem; }
 .pf-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-main > .pf-badge { flex: none; }
+/* A member's name in People and the directory breaks instead (1.73.0): its row gives it no title to read an
+   ellipsised name in, and a 32-character name was cut to a quarter of itself on a phone. */
+.pe-row .pf-name { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .pf-gone { color: var(--text-muted); font-style: italic; }
 /* Columns, not a flex run. Every row here used to size its own three facts to their own content,
    so the sizes, the swarm and the hash landed at a different x on every line and the list read as
@@ -2819,7 +2838,8 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 /* Every column but the name has the width its content and its header need (measured in both
    languages and both modes, see scratchpad/shots/profile_votes_check.js); the name takes the rest. */
 .pv-c-size  { width: 6.5em; }
-.pv-c-sl    { width: 5.5em; }
+/* 8.5em, not 5.5 (1.73.0): "23456 / 12345", the busiest torrents' swarm, is 112.3px and ran 32px into the next column. */
+.pv-c-sl    { width: 8.5em; }
 /* The header wraps between its words and never between the last word and its arrow (a no-break space in
    templates/partials/votes_section.php), so these two hold their longest word AND the arrow: the Polish
    UŻYTKOWNIKA (84px in the header's capitals, then 22px of arrow) and AVERAGE / ŚREDNIA. */
@@ -2929,31 +2949,100 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    so what this hides is the row's own hover highlight fighting with it. */
 .pm-row-wrap { position: relative; display: flex; }
 .pm-row-wrap > .pm-row { flex: 1 1 auto; min-width: 0; }
-/* 1.67.0: the bin sat ON the date — it is laid over the corner the date is printed in. Now the meta
-   line keeps the bin's width free on its right AT ALL TIMES (so nothing moves when it appears and
-   nothing is ever under it), and the bin is centred on that line: the row's border and top padding,
-   then half of what the name's line (1.7rem) has over the bin's own 1.5rem box — the same hit box as
-   the shoutbox's row controls. */
-.pm-del {
+/* A ROW'S ACTIONS (1.64.0 the bin; 1.73.0 two per place — Archive and Delete in the Inbox, Move to inbox and
+   Delete in the Archive, Restore and Delete forever in the Trash): one group laid over the row's top right
+   corner, on the date's line. 1.67.0: the bin sat ON the date — now the meta line keeps the group's whole width
+   free on its right AT ALL TIMES (so nothing moves when it appears and nothing is ever under it), and the group
+   is centred on that line: the row's border and top padding, then half of what the name's line (1.7rem) has
+   over a button's own 1.5rem box — the same hit box as the shoutbox's row controls. Out of the way until the row
+   is hovered or one of them has the focus; always there where there is no hover. While the in-place question is
+   open it stands where the pair stood, over the pair, and the other button stands aside — "No" lands where it
+   was, never on the button beside it. */
+.pm-row-acts {
     position: absolute; top: calc(1px + 0.5rem + (1.7rem - 1.5rem) / 2); right: 0.3rem;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 1.5rem; height: 1.5rem; padding: 0; box-sizing: border-box;
-    background: none; border: 0; border-radius: 4px; line-height: 1;
-    color: var(--text-muted); font: inherit; font-size: 0.85rem; cursor: pointer;
-    opacity: 0; transition: opacity 0.15s, color 0.15s;
+    display: inline-flex; align-items: center; gap: 0.1rem;
 }
-.pm-del .bi { display: block; line-height: 1; }
-.pm-row-wrap .pm-meta { padding-right: 1.4rem; }
-.pm-row-wrap:hover .pm-del, .pm-del:focus-visible { opacity: 1; }
-.pm-del:hover { color: var(--error); }
+/* The glyph at a WHOLE pixel (14px in the 24px box): at the old bin's 0.85rem (13.6px) the glyph's line was rounded
+   apart from the box and stood 1.0–1.4px above its middle in every library (icons_align_check.js) — the icon
+   buttons' "a whole pixel" rule (further down). */
+.pm-act.ic-btn {
+    --ic-box: 1.5rem; box-sizing: border-box; background: none; border: 0; border-radius: 4px;
+    color: var(--text-muted); font-size: 0.875rem; cursor: pointer; opacity: 0; transition: opacity 0.15s, color 0.15s;
+}
+.pm-row-wrap .pm-meta { padding-right: 3rem; }
+.pm-row-wrap:hover .pm-act, .pm-act:focus-visible, .pm-row-acts:focus-within .pm-act { opacity: 1; }
+.pm-act:hover, .pm-act:focus-visible { color: var(--text); }
+.pm-act.pm-del:hover, .pm-act.pm-purge:hover { color: var(--error); }
+.pm-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pm-row-wrap .shout-confirm {
-    position: absolute; top: 0.2rem; right: 0.35rem; z-index: 2;
+    position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 2; white-space: nowrap;
     background: var(--bg-card); border: 1px solid var(--accent); border-radius: var(--radius);
     padding: 0.15rem 0.4rem;
 }
 .pm-row-wrap.shout-asking > .pm-row { pointer-events: none; }
+.pm-row-wrap.shout-asking .pm-row-acts > .pm-act { visibility: hidden; }
 @media (hover: none) {
-    .pm-del { opacity: 1; }
+    .pm-act.ic-btn { opacity: 1; }
+}
+/* The three places (the account page's Messages tab): the sub-tabs the People tab uses, an icon and the word
+   each, the number of conversations beside Archive and Trash, and the unread pill of the tab bar above for
+   the two places the badge counts. They wrap on a phone rather than push the page sideways. */
+.pm-views { margin-bottom: 0.5rem; flex-wrap: wrap; row-gap: 0.3rem; column-gap: 0.1rem; border-bottom: 0; padding-left: 0; padding-right: 0; }
+/* Three to a line in the inbox's column (22rem at most): a tab's own padding, less of it. */
+.pm-views .rt-tab { padding: 0.25rem 0.5rem; }
+.pm-view-n { color: var(--text-muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.rt-tab.active .pm-view-n { color: var(--text); }
+.pm-views .rt-tab[hidden] { display: none; }
+/* Words a screen reader says and the page does not draw (the tab's "Unread: " before its number). */
+.pm-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.pm-view-note { font-size: 0.8rem; line-height: 1.45; margin: 0 0 0.5rem; }
+.pm-view-note[hidden] { display: none; }
+.pm-trash-note { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.pm-trash-note > .text-muted { flex: 1 1 12rem; min-width: 0; }
+.pm-trash-note .btn { flex: 0 0 auto; }
+/* The bar under a conversation's head: where it is, and its way back — a line of words and its buttons, the
+   buttons at the line's end and under the words when there is no room. The Trash's in the error colour's
+   quiet form: it runs out. */
+.pm-bar { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius);
+          padding: 0.45rem 0.6rem; margin: -0.1rem 0 0.6rem; background: var(--bg); font-size: 0.84rem; }
+.pm-bar-trash { border-left-color: var(--error); }
+.pm-bar-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.6rem; }
+.pm-bar-line + .pm-bar-line { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px solid var(--border); }
+.pm-bar-text { flex: 1 1 14rem; min-width: 0; }
+.pm-nowrap { white-space: nowrap; }
+.pm-bar-acts { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; margin-left: auto; }
+.pm-bar-line.shout-asking .pm-bar-acts > .btn { visibility: hidden; }
+.pm-bar-line.shout-asking .pm-bar-acts > .shout-confirm { visibility: visible; }
+/* What lies in the Trash, opened: the same messages, drawn as the ones on their way out. */
+.pm-msgs-trash .pm-msg { border-style: dashed; }
+/* THE SITE'S TOAST (assets/js/app.js siteToast): what just happened, with Undo — at the foot of the window,
+   the newest lowest, three at most; the width of a phone less its 16px gutters, never wider than the screen.
+   Above the page's windows (the Info panel, a list, the pickers), under the "you are leaving" question and
+   the CAPTCHA. Only the toasts take pointers; the strip between them is the page's. */
+.site-toasts {
+    position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 1900;
+    display: flex; flex-direction: column; gap: 0.5rem; width: min(32rem, calc(100vw - 32px)); pointer-events: none;
+}
+.site-toast {
+    pointer-events: auto; display: flex; align-items: center; gap: 0.6rem; box-sizing: border-box; width: 100%;
+    padding: 0.5rem 0.5rem 0.5rem 0.85rem; background: var(--bg-card); color: var(--text);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); font-size: 0.88rem; line-height: 1.4;
+    opacity: 0; transform: translateY(8px); transition: opacity 0.18s, transform 0.18s;
+}
+.site-toast.show { opacity: 1; transform: none; }
+.site-toast-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.site-toast-undo {
+    flex: 0 0 auto; background: none; border: 1px solid var(--accent); color: var(--accent); border-radius: 4px;
+    padding: 0.15rem 0.65rem; font: inherit; font-weight: 600; cursor: pointer;
+}
+.site-toast-undo:hover { background: var(--accent); color: #000; }
+.site-toast-undo:disabled { opacity: 0.6; cursor: default; }
+.site-toast-x.ic-btn { --ic-box: 1.5rem; flex: 0 0 auto; background: none; border: 0; border-radius: 4px; color: var(--text-muted); font-size: 0.75rem; cursor: pointer; }
+.site-toast-x:hover { color: var(--text); }
+.site-toast-undo:focus-visible, .site-toast-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+    .site-toast { transition: none; transform: none; }
 }
 .pm-row-unread { border-color: var(--accent); }
 /* Which conversation the pane beside this list is showing. */

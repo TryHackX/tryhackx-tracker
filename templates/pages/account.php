@@ -462,7 +462,7 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
                 <select id="acc-timezone" class="acc-language acc-timezone">
                     <option value=""<?= $accTzOwn === '' ? ' selected' : '' ?>><?= _h('account.tz_site', ['zone' => $accTzSite->getName(), 'offset' => tzOffsetLabel($accTzSite)]) ?></option>
                     <?php foreach (tzChoices(null, true) as $accTzGrp => $accTzIds): ?>
-                    <optgroup label="<?= sanitize($accTzGrp) ?>">
+                    <optgroup label="<?= sanitize(tzRegionLabel($accTzGrp)) ?>">
                         <?php foreach ($accTzIds as $accTzId => $accTzLabel): ?>
                         <option value="<?= sanitize($accTzId) ?>"<?= $accTzOwn === $accTzId ? ' selected' : '' ?>><?= sanitize($accTzLabel) ?></option>
                         <?php endforeach; ?>
@@ -807,11 +807,19 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
 <?php /* Messages. The inbox on the left, the conversation beside it — and nothing about either is
          rendered here: api/user_messages.php decides what this reader may see, including whether
          they may write at all, and says why when they may not. */ ?>
+<?php
+// The three places' sizes (1.73.0), drawn with the page so the tabs are right before the list arrives — the
+// list's own answer carries them again, and every operation's.
+$accBoxes = pmBoxCounts($db, (int)$meUser['id']);
+$accTrashDays = (int)$accPeople['trash_days'];
+?>
 <div class="acc-pane" id="acc-pane-messages" hidden>
     <h2 class="section-heading-spaced"><?= _h('account.tab_messages') ?></h2>
     <div id="account-messages" class="profile-section pm-wrap"
          data-max-chars="<?= (int)$accPeople['max_chars'] ?>"
-         data-max-day="<?= (int)$accPeople['max_per_day'] ?>">
+         data-max-day="<?= (int)$accPeople['max_per_day'] ?>"
+         data-trash-days="<?= $accTrashDays ?>"
+         data-archive-returns="<?= $accPeople['archive_returns'] ? '1' : '0' ?>">
         <div class="pm-left">
             <div class="profile-toolbar">
                 <input type="text" class="profile-search" id="pm-search" maxlength="60" placeholder="<?= _h('pm.search_ph') ?>" autocomplete="off">
@@ -830,7 +838,23 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
                 <datalist id="pm-friends"></datalist>
                 <button type="button" class="btn btn-small" id="pm-new-go"><?= _h('pm.new_go') ?></button>
             </div>
-            <div class="pm-list" id="pm-threads"></div>
+            <?php /* THE THREE PLACES (1.73.0): the Inbox, the Archive (what "hide" did — nothing deleted, back in
+                     one click) and the Trash (Delete: restorable for pm_trash_days, then deleted for good — for this
+                     reader; the other person keeps their copy). The words are the page's, so the language switch
+                     swaps them with everything else; the numbers are assets/js/people.js's, kept current from every
+                     answer: how many conversations are there, and — for the two places the badge counts — how many
+                     messages wait unread. The Trash tab is not drawn where there is no Trash, unless one is left. */ ?>
+            <div class="rt-tabs pm-views" id="pm-views" role="tablist" aria-label="<?= _h('pm.views_label') ?>">
+                <button type="button" class="rt-tab active" id="pm-view-inbox" data-view="inbox" role="tab" aria-selected="true" aria-controls="pm-threads"><i class="bi bi-inbox" aria-hidden="true"></i> <?= _h('pm.view_inbox') ?> <span class="pm-unread-badge pm-view-unread"<?= $accBoxes['unread_inbox'] ? '' : ' hidden' ?>><span class="pm-sr"><?= _h('pm.unread_sr') ?></span><span class="pm-view-unread-n"><?= (int)$accBoxes['unread_inbox'] ?></span></span></button>
+                <button type="button" class="rt-tab" id="pm-view-archive" data-view="archive" role="tab" aria-selected="false" aria-controls="pm-threads"><i class="bi bi-archive" aria-hidden="true"></i> <?= _h('pm.view_archive') ?> <span class="pm-view-n">(<?= (int)$accBoxes['archive'] ?>)</span> <span class="pm-unread-badge pm-view-unread"<?= $accBoxes['unread_archive'] ? '' : ' hidden' ?>><span class="pm-sr"><?= _h('pm.unread_sr') ?></span><span class="pm-view-unread-n"><?= (int)$accBoxes['unread_archive'] ?></span></span></button>
+                <button type="button" class="rt-tab" id="pm-view-trash" data-view="trash" role="tab" aria-selected="false" aria-controls="pm-threads"<?= ($accTrashDays > 0 || $accBoxes['trash'] > 0) ? '' : ' hidden' ?>><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('pm.view_trash') ?> <span class="pm-view-n">(<?= (int)$accBoxes['trash'] ?>)</span></button>
+            </div>
+            <p class="text-muted pm-view-note" id="pm-note-archive" hidden><?= _h($accPeople['archive_returns'] ? 'pm.note_archive' : 'pm.note_archive_stays') ?></p>
+            <div class="pm-view-note pm-trash-note" id="pm-note-trash" hidden>
+                <span class="text-muted"><?= $accTrashDays > 0 ? _h($accTrashDays === 1 ? 'pm.note_trash_one' : 'pm.note_trash_many', ['days' => $accTrashDays]) : _h('pm.note_trash_none') ?></span>
+                <button type="button" class="btn btn-secondary btn-small" id="pm-empty-trash"><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('pm.empty_trash') ?></button>
+            </div>
+            <div class="pm-list" id="pm-threads" role="tabpanel" aria-labelledby="pm-view-inbox"></div>
         </div>
         <div class="pm-right" id="pm-thread" hidden></div>
     </div>

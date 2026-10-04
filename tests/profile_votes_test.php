@@ -667,8 +667,11 @@ check('… and a pane it knows but this page does not carry (the feature switche
 check('… the privacy switch posts votes_public', str_contains($fj, "['acc-votes-public', 'votes_public']"));
 $vjFrom = (int)strpos($fj, 'function starsReadOnly(');
 $vj = $vjFrom > 0 ? substr($fj, $vjFrom, (int)strpos($fj, '"who has this in favourites"', $vjFrom) - $vjFrom) : '';
-check('the component builds with textContent only, redraws on a live language switch, and reloads when a vote changes',
-      $vj !== '' && !str_contains($vj, 'innerHTML') && !str_contains($vj, 'insertAdjacentHTML') && str_contains($vj, "document.addEventListener('langswap'")
+// 1.73.0: the live language switch needs no redraw here — the words are t.key() words that keep their keys on the
+// element (assets/js/i18n.js); dates are ISO and counts the browser's digits. The listener it had redrew the rows and,
+// holding no answer, asked the server again in the middle of the switch.
+check('the component builds with textContent only, its words t.key() words (they follow a live language switch), and reloads when a vote changes',
+      $vj !== '' && !str_contains($vj, 'innerHTML') && !str_contains($vj, 'insertAdjacentHTML') && str_contains($vj, "t.key('js.votes.")
       && str_contains($vj, "document.addEventListener('rating:changed'") && str_contains($src('assets/js/app.js'), "new CustomEvent('rating:changed'"));
 check('its strings reach the public pages (js.votes. in LANG_JS_PUBLIC)', in_array('js.votes.', LANG_JS_PUBLIC, true));
 $map = iconFaMap();

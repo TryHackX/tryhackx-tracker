@@ -169,7 +169,9 @@ finally:
         "$db->prepare('DELETE FROM message_reports WHERE thread_id = ?')->execute([" + str(ids.get("t", 0)) + "]);"
         "$db->prepare('DELETE FROM user_messages WHERE thread_id = ?')->execute([" + str(ids.get("t", 0)) + "]);"
         "$db->prepare('DELETE FROM message_threads WHERE id = ?')->execute([" + str(ids.get("t", 0)) + "]);"
-        "$db->prepare(\"DELETE FROM users WHERE username IN ('rpalice','rpbob')\")->execute();"
+        # The way an account goes (1.73.0): a bare DELETE FROM users left each one's group membership behind.
+        "foreach (['rpalice','rpbob'] as $u) { $st = $db->prepare('SELECT id FROM users WHERE username = ?'); $st->execute([$u]);"
+        " if ($id = (int)$st->fetchColumn()) userDeleteCascade($db, $id); }"
         + ("setSetting($db, 'users_enabled', '" + was_users + "');" if was_users else ""))
     clear_throttles()
 

@@ -9,6 +9,16 @@ if ($email && $token) {
     if (verifyUnsubscribeToken($email, $token, $hmacSecret)) {
         $valid = true;
 
+        // RFC 8058 one-click (1.73.0). A mail client's own "Unsubscribe" button POSTs the body
+        // `List-Unsubscribe=One-Click` to the List-Unsubscribe address — which is THIS page
+        // (getUnsubscribeUrl()). Nothing here read a POST, so the client told the reader "unsubscribed" and
+        // nothing changed. Now it unsubscribes the address from everything that can be switched off (the
+        // same as api/unsubscribe.php's POST); the page below then shows every switch off. Transactional
+        // mail — a password reset, an e-mail change — carries no List-Unsubscribe and is sent regardless.
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && (string)($_POST['List-Unsubscribe'] ?? '') === 'One-Click') {
+            unsubscribeAll($db, $email);
+        }
+
         // Load current preferences
         $types = ['submission', 'review', 'status', 'custom', 'appeal'];
         foreach ($types as $t) {
@@ -144,9 +154,12 @@ if ($email && $token) {
 
     typeToggles.forEach(cb => cb.addEventListener('change', syncMaster));
 
+    // The words come from the page's dictionary bundle (layout.php gives this page `unsub.*`): t.key() words, which
+    // leave their keys on the element, so what this script puts on the screen follows the live language switch
+    // (1.73.0 — they were written into this block in the page's language).
     saveBtn.addEventListener('click', async () => {
         saveBtn.disabled = true;
-        saveBtn.textContent = <?= json_encode(__('unsub.saving')) ?>;
+        saveBtn.textContent = t.key('unsub.saving');
 
         const preferences = {};
         typeToggles.forEach(cb => {
@@ -166,18 +179,18 @@ if ($email && $token) {
             const json = await res.json();
             if (json.success) {
                 alert.className = 'alert alert-success show';
-                alert.textContent = <?= json_encode(__('unsub.saved')) ?>;
+                alert.textContent = t.key('unsub.saved');
             } else {
                 alert.className = 'alert alert-error show';
-                alert.textContent = json.error || <?= json_encode(__('unsub.save_failed')) ?>;
+                alert.textContent = json.error || t.key('unsub.save_failed');
             }
         } catch {
             alert.className = 'alert alert-error show';
-            alert.textContent = <?= json_encode(__('unsub.net_error')) ?>;
+            alert.textContent = t.key('unsub.net_error');
         }
 
         saveBtn.disabled = false;
-        saveBtn.textContent = <?= json_encode(__('unsub.save')) ?>;
+        saveBtn.textContent = t.key('unsub.save');
         setTimeout(() => { alert.className = 'alert'; }, 5000);
     });
 })();

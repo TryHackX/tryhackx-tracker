@@ -41,11 +41,11 @@ $pages = max(1, (int)ceil($total / $perPage));
 $page = min($page, $pages);
 // `link` (v83): where it happened, site-relative — the page offers it as a button (a comment's "Show").
 // A database whose migration has not run yet has no such column: the list is read without it.
-$cols = 'id, type, title, body, created_at, read_at, link';
+$cols = 'id, type, title, body, created_at, UNIX_TIMESTAMP(created_at) AS created_ts, read_at, link';
 try {
     $db->query("SELECT link FROM user_notifications LIMIT 0");
 } catch (\Throwable $e) {
-    $cols = 'id, type, title, body, created_at, read_at, NULL AS link';
+    $cols = 'id, type, title, body, created_at, UNIX_TIMESTAMP(created_at) AS created_ts, read_at, NULL AS link';
 }
 $st = $db->prepare("SELECT $cols FROM user_notifications
                     WHERE user_id = ? ORDER BY (read_at IS NULL) DESC, id DESC LIMIT ? OFFSET ?");
@@ -54,6 +54,15 @@ $st->bindValue(2, $perPage, PDO::PARAM_INT);
 $st->bindValue(3, ($page - 1) * $perPage, PDO::PARAM_INT);
 $st->execute();
 $rows = [];
-foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $n) { $n['id'] = (int)$n['id']; $rows[] = $n; }
+// When it arrived on the READER's clock (1.73.0 part E): 'Y-m-d H:i' in their zone (users.timezone, the site's
+// otherwise), from the instant the database computes — the page wrote the raw DATETIME (the database session's
+// wall clock) through the browser's own reading of it. `created_at` stays as it was.
+$readerTz = userDisplayTimezone($u, $cfg);
+foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $n) {
+    $n['id'] = (int)$n['id'];
+    $n['created_ts'] = is_numeric($n['created_ts'] ?? null) ? (int)$n['created_ts'] : null;
+    $n['created_time'] = $n['created_ts'] !== null ? userDisplayTime($n['created_ts'], $readerTz, 'Y-m-d H:i') : '';
+    $rows[] = $n;
+}
 jsonResponse(['success' => true, 'notifications' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages,
               'unread' => userUnreadCount($db, (int)$u['id'])]);

@@ -28,12 +28,13 @@
             if (v === null || v === undefined || v === false) return;
             if (k === 'className') n.className = v;
             else if (k === 'text') n.textContent = v;
-            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.dataset[d] = v[d]; });
+            // data-* through setAttribute, which keeps a t.key() word's key (dataset would write its words only, 1.73.0)
+            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.setAttribute('data-' + d.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); }), v[d]); });
             else n.setAttribute(k, v === true ? '' : v);
         });
         (Array.isArray(kids) ? kids : kids ? [kids] : []).forEach(function (c) {
             if (c === null || c === undefined || c === false) return;
-            n.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+            n.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key
         });
         return n;
     }
@@ -140,8 +141,10 @@
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
         // What pressing it does, in the site's tooltip (1.71.0: data-tip, as every icon button beside it;
         // `title` drew the browser's own box a second later) and for a screen reader.
-        btn.dataset.tip = on ? t('js.fav.remove') : t('js.fav.add');
-        btn.setAttribute('aria-label', btn.dataset.tip);
+        // Through setAttribute, so both keep the word's key and follow the live language switch (1.73.0).
+        var tip = on ? t.key('js.fav.remove') : t.key('js.fav.add');
+        btn.setAttribute('data-tip', tip);
+        btn.setAttribute('aria-label', tip);
         btn.removeAttribute('title');
         // The icon library's star, empty or filled (1.68.0 — it was two star characters, which every
         // library draws the same way). The label above is what a screen reader hears.
@@ -170,9 +173,13 @@
         btn.disabled = false;
         if (!r || !r.success) {
             paintStar(btn, !want);
-            var msg = r && r.error === 'fav_limit' ? t('js.fav.limit', { n: r.limit }) : t('js.fav.failed');
-            if (typeof showToastPub === 'function') showToastPub(msg);
-            else if (window.console) window.console.warn(msg);
+            // Said in the site's toast (app.js's siteToast(), 1.73.0 — this called a `showToastPub` that never
+            // existed, so a full list or a failed press said nothing at all). The toast is given the KEY: it says it
+            // again in the other language if the switch is pressed while it is up.
+            var limit = r && r.error === 'fav_limit';
+            if (typeof window.siteToast === 'function') {
+                window.siteToast({ text: limit ? 'js.fav.limit' : 'js.fav.failed', args: limit ? { n: r.limit } : null, key: 'fav-star' });
+            }
             return;
         }
         paintStar(btn, r.on);
@@ -205,7 +212,7 @@
         // renames them there reaches these rows too, and explained in the site's tooltip.
         if (r.info_hash && !r.banned && trackers) {
             acts.appendChild(el('a', { className: 'btn btn-small ic-btn pf-magnet', href: magnetFor(r.info_hash, r.name, trackers),
-                                       'aria-label': t('js.app.magnet'), dataset: { tip: t('js.app.magnet_title') } },
+                                       'aria-label': t.key('js.app.magnet'), dataset: { tip: t.key('js.app.magnet_title') } },
                                 el('i', { className: 'bi bi-magnet', 'aria-hidden': 'true' })));
         }
         // The same Info the search results have, opening the same panel — the markup for it is a
@@ -213,7 +220,7 @@
         // sends the reader back to the search page to type the name in again.
         if (r.info_hash && window.TorrentInfo && document.getElementById('info-overlay')) {
             var inf = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn pf-info',
-                                     'aria-label': t('js.app.info'), dataset: { tip: t('js.app.info_title') } },
+                                     'aria-label': t.key('js.app.info'), dataset: { tip: t.key('js.app.info_title') } },
                          el('i', { className: 'bi bi-info-circle', 'aria-hidden': 'true' }));
             inf.addEventListener('click', function () { window.TorrentInfo.open(r.info_hash, r.name || null); });
             acts.appendChild(inf);
@@ -230,14 +237,14 @@
             // A favourite outlives the catalogue row on purpose: the janitor prunes index_hashes and
             // emptying somebody's list along with it would be a silent loss. The hash alone still
             // builds a working magnet.
-            main.appendChild(el('span', { className: 'pf-name pf-gone', title: t('js.fav.gone_title'), text: t('js.fav.gone') }));
+            main.appendChild(el('span', { className: 'pf-name pf-gone', title: t.key('js.fav.gone_title'), text: t.key('js.fav.gone') }));
         }
-        if (r.banned) main.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t('js.fav.blocked') }));
+        if (r.banned) main.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t.key('js.fav.blocked') }));
         if (opts.statusBadges && r.status) {
-            main.appendChild(el('span', { className: 'pf-badge pf-st-' + r.status, text: t('js.fav.status_' + r.status) }));
+            main.appendChild(el('span', { className: 'pf-badge pf-st-' + r.status, text: t.key('js.fav.status_' + r.status) }));
         }
         if (opts.statusBadges && r.content_status && r.content_status !== 'none') {
-            main.appendChild(el('span', { className: 'pf-badge pf-badge-muted', text: t('js.fav.content_' + r.content_status) }));
+            main.appendChild(el('span', { className: 'pf-badge pf-badge-muted', text: t.key('js.fav.content_' + r.content_status) }));
         }
         row.appendChild(main);
 
@@ -263,7 +270,7 @@
             // part of the room the icon buttons gave back), then the ellipsis — in ONE inline span: the chip is a
             // flex box, and three pieces of it would be three items, read (and copied, and spoken) as three lines.
             var full = String(r.info_hash);
-            var hs = el('span', { className: 'pf-hash pf-hash-copy', title: t('js.fav.hash_copy_title'), role: 'button', tabindex: '0' },
+            var hs = el('span', { className: 'pf-hash pf-hash-copy', title: t.key('js.fav.hash_copy_title'), role: 'button', tabindex: '0' },
                         el('span', { className: 'pf-hash-text' }, [full.slice(0, 12), el('span', { className: 'pf-hash-more', text: full.slice(12, 16) }), '…']));
             var chip = Array.prototype.slice.call(hs.childNodes);
             var copyHash = function (e) {
@@ -271,9 +278,9 @@
                 var done = function () {
                     hs.classList.add('is-copied');
                     setTimeout(function () { hs.classList.remove('is-copied'); }, 1500);
-                    if (typeof window.pubTip === 'function') { window.pubTip(hs, t('js.common.copied')); return; }
+                    if (typeof window.pubTip === 'function') { window.pubTip(hs, t.key('js.common.copied')); return; }
                     // A page without app.js has no tooltip to borrow: say it in the chip, as before.
-                    hs.textContent = t('js.common.copied');
+                    hs.textContent = t.key('js.common.copied');
                     setTimeout(function () { hs.textContent = ''; chip.forEach(function (n) { hs.appendChild(n); }); }, 1500);
                 };
                 if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(full).then(done, function () { /* refused */ });
@@ -293,8 +300,8 @@
             // whichever it says, so every upload row is one width and its columns stand under each other.
             var v = el('button', { type: 'button', className: 'pf-vis pf-vis-row' + (r.public ? ' pf-vis-on' : ''),
                                    dataset: { visHash: r.info_hash } },
-                       [el('span', { className: 'pf-vis-t pf-vis-t-on', text: t('js.fav.public_on') }),
-                        el('span', { className: 'pf-vis-t pf-vis-t-off', text: t('js.fav.public_off') })]);
+                       [el('span', { className: 'pf-vis-t pf-vis-t-on', text: t.key('js.fav.public_on') }),
+                        el('span', { className: 'pf-vis-t pf-vis-t-off', text: t.key('js.fav.public_off') })]);
             v.setAttribute('aria-pressed', r.public ? 'true' : 'false');
             acts.appendChild(v);
         }
@@ -323,12 +330,12 @@
      */
     function fileCheck() {
         if (!canSearchFiles()) return null;
-        var lab = el('label', { className: 'search-check', title: t('js.fav.files_title') });
+        var lab = el('label', { className: 'search-check', title: t.key('js.fav.files_title') });
         var cb = el('input', { type: 'checkbox' });
         cb.checked = true;
         lab.appendChild(cb);
         lab.appendChild(el('span', { className: 'search-check-box' }));
-        lab.appendChild(el('span', { text: t('js.fav.files') }));
+        lab.appendChild(el('span', { text: t.key('js.fav.files') }));
         return { label: lab, box: cb };
     }
 
@@ -358,9 +365,9 @@
             b.addEventListener('click', function () { go(target); });
             return b;
         };
-        box.appendChild(mk(t('js.common.pg_prev'), page - 1, page <= 1));
-        box.appendChild(el('span', { className: 'pg-total', text: t('js.app.page_of', { page: page, pages: pages }) }));
-        box.appendChild(mk(t('js.common.pg_next'), page + 1, page >= pages));
+        box.appendChild(mk(t.key('js.common.pg_prev'), page - 1, page <= 1));
+        box.appendChild(el('span', { className: 'pg-total', text: t.key('js.app.page_of', { page: page, pages: pages }) }));
+        box.appendChild(mk(t.key('js.common.pg_next'), page + 1, page >= pages));
     }
 
     /**
@@ -383,7 +390,7 @@
             page = p || 1;
             asked = searchKey(searchEl, [filesEl]);
             listEl.textContent = '';
-            listEl.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            listEl.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
             var qs = cfg.endpoint + '&page=' + page + '&per_page=25';
             if (cfg.user) qs += '&user=' + encodeURIComponent(cfg.user);
             if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
@@ -395,16 +402,16 @@
             var j = await get(qs);
             listEl.textContent = '';
             if (!j || !j.success) {
-                listEl.appendChild(el('div', { className: 'pf-empty', text: (j && j.error === 'login_required') ? t('js.app.search_login_required') : t('js.fav.load_failed') }));
+                listEl.appendChild(el('div', { className: 'pf-empty', text: (j && j.error === 'login_required') ? t.key('js.app.search_login_required') : t.key('js.fav.load_failed') }));
                 if (totalEl) totalEl.textContent = '';
                 if (pagerEl) pagerEl.textContent = '';
                 return;
             }
             if (!j.rows.length) {
-                listEl.appendChild(el('div', { className: 'pf-empty', text: cfg.emptyText || t('js.fav.nothing') }));
+                listEl.appendChild(el('div', { className: 'pf-empty', text: cfg.emptyText || t.key('js.fav.nothing') }));
             }
             j.rows.forEach(function (r) { listEl.appendChild(torrentRow(r, cfg)); });
-            if (totalEl) totalEl.textContent = j.total ? t('js.app.results_many', { n: j.total.toLocaleString() }) : '';
+            if (totalEl) totalEl.textContent = j.total ? t.key('js.app.results_many', { n: j.total.toLocaleString() }) : '';
             if (pagerEl) renderPagerInto(pagerEl, j.page, j.pages, load);
             if (typeof cfg.onLoad === 'function') cfg.onLoad(j);
         }
@@ -455,13 +462,13 @@
         if (!r || !r.success) {
             // The permission can be gone since the page was drawn, the row can have stopped being
             // theirs. Either way the reader is owed a line saying the switch did not move.
-            sayNear(b, t('js.fav.failed'));
+            sayNear(b, t.key('js.fav.failed'));
             return;
         }
         b.setAttribute('aria-pressed', want ? 'true' : 'false');
         b.classList.toggle('pf-vis-on', want);
         // An upload row's switch carries both words and shows the true one by its class (1.72.0).
-        if (!b.classList.contains('pf-vis-row')) b.textContent = want ? t('js.fav.public_on') : t('js.fav.public_off');
+        if (!b.classList.contains('pf-vis-row')) b.textContent = want ? t.key('js.fav.public_on') : t.key('js.fav.public_off');
     });
 
     /**
@@ -505,11 +512,11 @@
             var wrap = el('div', { className: 'list-items' });
             var tools = el('div', { className: 'profile-toolbar list-items-tools' });
             var search = el('input', { type: 'text', className: 'profile-search', maxlength: 120,
-                                       placeholder: t('js.fav.search_ph') });
-            var sort = el('select', { title: t('js.fav.sort') });
+                                       placeholder: t.key('js.fav.search_ph') });
+            var sort = el('select', { title: t.key('js.fav.sort') });
             [['added:desc', 'sort_added'], ['name:asc', 'sort_name'], ['size:desc', 'sort_size'],
              ['seeders:desc', 'sort_seeders']].forEach(function (o) {
-                sort.appendChild(el('option', { value: o[0], text: t('js.fav.' + o[1]) }));
+                sort.appendChild(el('option', { value: o[0], text: t.key('js.fav.' + o[1]) }));
             });
             var total = el('span', { className: 'profile-total' });
             var files = fileCheck();
@@ -523,8 +530,8 @@
             if (list.own) {
                 var addRow = el('div', { className: 'list-add' });
                 var addIn = el('input', { type: 'text', className: 'profile-search', maxlength: 2048,
-                                          placeholder: t('js.lists.add_ph') });
-                var addGo = el('button', { type: 'button', className: 'btn btn-small', text: t('js.lists.add') });
+                                          placeholder: t.key('js.lists.add_ph') });
+                var addGo = el('button', { type: 'button', className: 'btn btn-small', text: t.key('js.lists.add') });
                 var addMsg = el('span', { className: 'list-add-msg text-muted' });
                 // Format first, in the browser, and only then a question for the server. The look of
                 // an info hash is decidable here — forty hex characters, or a magnet carrying them —
@@ -550,17 +557,17 @@
                     var v = addIn.value.trim();
                     if (!v) { setState(null, ''); addGo.disabled = false; return; }
                     var h = hashOf(v);
-                    if (!h) { setState('list-add-bad', t('js.lists.add_failed_invalid')); addGo.disabled = true; return; }
-                    setState(null, t('js.lists.checking'));
+                    if (!h) { setState('list-add-bad', t.key('js.lists.add_failed_invalid')); addGo.disabled = true; return; }
+                    setState(null, t.key('js.lists.checking'));
                     addGo.disabled = false;
                     if (h === 'base32') { setState(null, ''); return; }   // the server decodes those
                     checkTimer = setTimeout(async function () {
                         var r = await post('user_list_items', { op: 'check', list: list.id, magnet: v });
                         if (addIn.value.trim() !== v) return;             // they kept typing
                         if (!r || !r.success) { setState(null, ''); return; }
-                        if (r.blocked) { setState('list-add-bad', t('js.lists.add_failed_blocked')); addGo.disabled = true; return; }
-                        if (!r.known) { setState('list-add-bad', t('js.lists.add_failed_unknown')); addGo.disabled = true; return; }
-                        setState('list-add-ok', r.name ? t('js.lists.known_named', { name: r.name }) : t('js.lists.known'));
+                        if (r.blocked) { setState('list-add-bad', t.key('js.lists.add_failed_blocked')); addGo.disabled = true; return; }
+                        if (!r.known) { setState('list-add-bad', t.key('js.lists.add_failed_unknown')); addGo.disabled = true; return; }
+                        setState('list-add-ok', r.name ? t.key('js.lists.known_named', { name: r.name }) : t.key('js.lists.known'));
                     }, 600);
                 });
                 var doAdd = async function () {
@@ -573,15 +580,15 @@
                         var why = (r && r.error) === 'list_full' ? 'full'
                             : (r && r.error) === 'hash_blocked' ? 'blocked'
                             : (r && r.error) === 'hash_unknown' ? 'unknown' : 'invalid';
-                        setState('list-add-bad', t('js.lists.add_failed_' + why));
+                        setState('list-add-bad', t.key('js.lists.add_failed_' + why));
                         return;
                     }
                     setState(null, '');
                     addIn.value = '';
-                    addMsg.textContent = t('js.lists.added');
+                    addMsg.textContent = t.key('js.lists.added');
                     list.items = r.items;
                     var cnt = countHolder.querySelector('.list-count');
-                    if (cnt) cnt.textContent = t(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
+                    if (cnt) cnt.textContent = t.key(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
                     load(1);
                 };
                 addGo.addEventListener('click', doAdd);
@@ -598,7 +605,7 @@
             async function load(p) {
                 asked = searchKey(search, [files && files.box]);
                 rows.textContent = '';
-                rows.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+                rows.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
                 var qs = 'user_list_items&list=' + list.id + '&page=' + (p || 1) + '&per_page=25'
                        + '&sort=' + encodeURIComponent(sort.value);
                 if (search.value.trim()) qs += '&search=' + encodeURIComponent(search.value.trim());
@@ -606,11 +613,11 @@
                 var j = await get(qs);
                 rows.textContent = '';
                 if (!j || !j.success) {
-                    rows.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') }));
+                    rows.appendChild(el('div', { className: 'pf-empty', text: t.key('js.fav.load_failed') }));
                     return;
                 }
                 if (hooks && typeof hooks.onList === 'function' && j.list) hooks.onList(j.list);
-                if (!j.rows.length) rows.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.empty') }));
+                if (!j.rows.length) rows.appendChild(el('div', { className: 'pf-empty', text: t.key('js.lists.empty') }));
                 j.rows.forEach(function (r) {
                     // The star in the reader's own state (1.72.1: `fav`, the owner's list or anybody else's they may read).
                     var row = torrentRow(r, { trackers: cfg.trackers, star: false });
@@ -622,7 +629,7 @@
                         // The row's own control, after the torrent's (1.71.0: the box of Magnet and Info beside it, its
                         // name in the site's tooltip like theirs; since 1.72.1 after the star).
                         var rm = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn list-remove',
-                                                'aria-label': t('js.lists.remove_title'), dataset: { tip: t('js.lists.remove_title') } },
+                                                'aria-label': t.key('js.lists.remove_title'), dataset: { tip: t.key('js.lists.remove_title') } },
                                     el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
                         rm.addEventListener('click', async function () {
                             rm.disabled = true;
@@ -632,14 +639,14 @@
                             if (!rr || !rr.success) { rm.disabled = false; return; }
                             list.items = rr.items;
                             var c2 = countHolder.querySelector('.list-count');
-                            if (c2) c2.textContent = t(rr.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: rr.items });
+                            if (c2) c2.textContent = t.key(rr.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: rr.items });
                             load(1);
                         });
                         row.querySelector('.pf-acts').appendChild(rm);
                     }
                     rows.appendChild(row);
                 });
-                total.textContent = j.total ? t('js.app.results_many', { n: j.total.toLocaleString() }) : '';
+                total.textContent = j.total ? t.key('js.app.results_many', { n: j.total.toLocaleString() }) : '';
                 renderPagerInto(pager, j.page, j.pages, load);
             }
             search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
@@ -682,10 +689,10 @@
                 openListOverlay(list, cfg, state);
             });
             var head = el('div', { className: 'list-card-head' });
-            var name = el('button', { type: 'button', className: 'list-name', text: list.name, title: t('js.lists.open') });
+            var name = el('button', { type: 'button', className: 'list-name', text: list.name, title: t.key('js.lists.open') });
             head.appendChild(name);
             head.appendChild(el('span', { className: 'list-count text-muted',
-                text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
+                text: t.key(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
             // Who sees it (1.72.0) — the OWNER's business: only the owner's own shelf carries the answer, and
             // only there is it drawn — a lock, people or a globe with its word, the button that opens Edit on
             // that question. Somebody else's card carries no tint and no badge: a visitor only ever sees the
@@ -715,18 +722,18 @@
                 // page (your own cards). The Public / Private switch that stood before it is the chip above now.
                 if (listEdit) {
                     var edit = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-edit',
-                                              text: t('js.lists.edit'), title: t('js.lists.edit_title') });
+                                              text: t.key('js.lists.edit'), title: t.key('js.lists.edit_title') });
                     edit.addEventListener('click', function () { openEdit(list, edit, ''); });
                     acts.appendChild(edit);
                 }
-                var del = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-del', text: t('js.lists.delete') });
+                var del = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-del', text: t.key('js.lists.delete') });
                 del.addEventListener('click', async function () {
                     // Two clicks, no dialog: the second click is the confirmation, and the button
                     // says so in between. A list is somebody's work and one stray click is not consent.
                     if (del.dataset.armed !== '1') {
                         del.dataset.armed = '1';
-                        del.textContent = t('js.lists.delete_sure');
-                        setTimeout(function () { if (del.dataset.armed === '1') { del.dataset.armed = '0'; del.textContent = t('js.lists.delete'); } }, 4000);
+                        del.textContent = t.key('js.lists.delete_sure');
+                        setTimeout(function () { if (del.dataset.armed === '1') { del.dataset.armed = '0'; del.textContent = t.key('js.lists.delete'); } }, 4000);
                         return;
                     }
                     var r = await post('user_lists', { op: 'delete', id: list.id });
@@ -745,7 +752,7 @@
         function render() {
             box.textContent = '';
             if (!state.lists.length) {
-                box.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.none') }));
+                box.appendChild(el('div', { className: 'pf-empty', text: t.key('js.lists.none') }));
                 return;
             }
             state.lists.forEach(function (l) { box.appendChild(card(l)); });
@@ -760,7 +767,7 @@
         async function load() {
             asked = searchKey(cfg.searchEl, options());
             box.textContent = '';
-            box.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            box.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
             var qs = 'user_lists';
             if (cfg.user) qs += '&user=' + encodeURIComponent(cfg.user);
             if (cfg.searchEl && cfg.searchEl.value.trim()) {
@@ -772,7 +779,7 @@
             var j = await get(qs);
             if (!j || !j.success) {
                 box.textContent = '';
-                box.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') }));
+                box.appendChild(el('div', { className: 'pf-empty', text: t.key('js.fav.load_failed') }));
                 return;
             }
             state.ctx = { mayPublish: !!j.may_publish, sectionShown: j.section_shown !== false, maxLists: j.max_lists, maxItems: j.max_items };
@@ -785,17 +792,12 @@
         function paintTotal() {
             if (!cfg.totalEl) return;
             cfg.totalEl.textContent = state.lists.length
-                ? t(state.lists.length === 1 ? 'js.lists.count_lists_one' : 'js.lists.count_lists_many', { n: state.lists.length })
+                ? t.key(state.lists.length === 1 ? 'js.lists.count_lists_one' : 'js.lists.count_lists_many', { n: state.lists.length })
                 : '';
         }
-        // A live language switch (assets/js/lang-swap.js): the cards are drawn by this script, so the walk
-        // has nothing to put their words against — they are drawn again from the answer the shelf already
-        // has, in the new language ("Edit" / "Edytuj"), with no request. Not before the first answer.
-        document.addEventListener('langswap', function () {
-            if (!state.loaded) return;
-            paintTotal();
-            render();
-        });
+        // A live language switch (assets/js/lang-swap.js) needs nothing from here (1.73.0): every word this file draws
+        // is a t.key() word that keeps its key, and the switch says it again where it stands ("Edit" / "Edytuj") — an open
+        // card, a half-typed name stay as they are. (The cards used to be drawn again from the shelf's answer.)
         // The privacy card's "Show my lists on my profile", saved on the same page (1.72.0).
         document.addEventListener('lists:section', function (e) {
             if (state.loaded && state.ctx && e && e.detail) state.ctx.sectionShown = !!e.detail.shown;
@@ -832,15 +834,15 @@
      * its answer, the word on the screen included in that name.
      */
     function visChip(list, button) {
-        var v = listVisOf(list.visibility), word = t('js.lists.vis_' + v);
+        var v = listVisOf(list.visibility), word = t.key('js.lists.vis_' + v);
         var c = el(button ? 'button' : 'span', { className: 'list-vis list-vis-' + v, dataset: { vis: v } },
                    [el('i', { className: 'bi ' + LIST_VIS_ICON[v], 'aria-hidden': 'true' }), el('span', { className: 'list-vis-t', text: word })]);
         if (button) {
             c.type = 'button';
-            c.setAttribute('aria-label', t('js.lists.vis_aria', { state: word }));
-            c.title = t('js.lists.vis_change');
+            c.setAttribute('aria-label', t.key('js.lists.vis_aria', { state: word }));
+            c.title = t.key('js.lists.vis_change');
         } else {
-            c.title = t('js.lists.vis_aria', { state: word });
+            c.title = t.key('js.lists.vis_aria', { state: word });
         }
         return c;
     }
@@ -865,11 +867,11 @@
     }
     function shareButton(list, state) {
         var b = el('button', { type: 'button', className: 'btn btn-secondary btn-small share-btn list-share',
-                               text: t('js.lists.share'), title: t('js.lists.share_link') });
+                               text: t.key('js.lists.share'), title: t.key('js.lists.share_link') });
         b.addEventListener('click', function () {
             var url = listAddress(list, state);
             if (!url) return;
-            if (typeof window.ShareLink === 'function') window.ShareLink(b, url, t('js.lists.share_link'));
+            if (typeof window.ShareLink === 'function') window.ShareLink(b, url, t.key('js.lists.share_link'));
         });
         return b;
     }
@@ -889,7 +891,7 @@
         head.textContent = '';
         head.appendChild(el('span', { className: 'lo-name', text: list.name }));
         head.appendChild(el('span', { className: 'list-count text-muted',
-            text: t(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
+            text: t.key(list.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: list.items }) }));
         // Who sees it, for its owner only (1.72.0) — the card's rule; Share the card's rule too.
         if (list.own && list.visibility) head.appendChild(visChip(list, false));
         if (shareEnabled() && (!list.own || list.visibility === 'public' || list.visibility === 'friends')) head.appendChild(shareButton(list, state));
@@ -1111,7 +1113,7 @@
         function closeX() {
             if (!cur || saving) return;
             if (!dirty() || armed) { finish(); return; }
-            hint.textContent = t('js.lists.close_again');
+            hint.textContent = t.key('js.lists.close_again');
             hint.hidden = false;
             armed = setTimeout(disarm, 3000);
         }
@@ -1144,12 +1146,12 @@
         async function doSave() {
             if (!cur || saving) return;
             var s = now();
-            if (!s.name) { say(t('js.lists.name_required'), true); nameIn.focus(); return; }
+            if (!s.name) { say(t.key('js.lists.name_required'), true); nameIn.focus(); return; }
             saving = true;
             save.disabled = true;
             cancel.disabled = true;
             disarm();
-            say(t('js.lists.saving'));
+            say(t.key('js.lists.saving'));
             // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for, the same
             // save again; a wait counts down on Save with the sentence beside it.
             // Who sees it rides along (1.72.0); the server judges it only when it changed, and asks the anti-spam
@@ -1163,7 +1165,7 @@
             cancel.disabled = false;
             if (!cur) return;
             if (!r || !r.success) {
-                if (!layerWaiting(save)) say((r && r.message) || t(r && r.error === 'rate_limit' ? 'js.lists.rate_limited' : 'js.lists.edit_failed'), true);
+                if (!layerWaiting(save)) say((r && r.message) || t.key(r && r.error === 'rate_limit' ? 'js.lists.rate_limited' : 'js.lists.edit_failed'), true);
                 return;
             }
             var l = cur.list, done = cur.onSaved;
@@ -1225,14 +1227,9 @@
         // A press anywhere but on the × takes its arming away, like any other key.
         box.addEventListener('pointerdown', function (e) { if (armed && !x.contains(e.target)) disarm(); }, true);
         closeOnBackdrop(box, tryClose);
-        // A live language switch: the window's own words are the server's and are swapped by id; the two
-        // this script wrote (the counter, a message) are written again or dropped.
-        document.addEventListener('langswap', function () {
-            disarm();
-            if (!cur) return;
-            if (!saving) say('');
-            ta.dispatchEvent(new Event('input', { bubbles: true }));
-        });
+        // A live language switch: the window's own words are the server's and the walk swaps them; what this script
+        // wrote (the counter, a message, an armed ×'s tip) are t.key() words and follow by themselves (1.73.0) — nothing
+        // is dropped or disarmed any more.
         return { open: open, close: finish, state: function () {
             // For the browser check: what the window holds and whether leaving it would ask.
             return { open: !!cur, dirty: dirty(), saving: saving, asking: !ask.hidden, armed: !!armed,
@@ -1294,8 +1291,8 @@
         var open = section.querySelector('.list-new-form');
         if (open) { open.remove(); return; }
         var form = el('div', { className: 'list-new-form' });
-        var input = el('input', { type: 'text', className: 'profile-search', maxlength: 80, placeholder: t('js.lists.new_ph') });
-        var go = el('button', { type: 'button', className: 'btn btn-small', text: t('js.lists.create') });
+        var input = el('input', { type: 'text', className: 'profile-search', maxlength: 80, placeholder: t.key('js.lists.new_ph') });
+        var go = el('button', { type: 'button', className: 'btn btn-small', text: t.key('js.lists.create') });
         var msg = el('span', { className: 'text-muted list-add-msg' });
         var submit = async function () {
             if (go.disabled) return;
@@ -1308,7 +1305,7 @@
             go.disabled = false;
             if (!r || !r.success) {
                 msg.textContent = r && (r.antispam || r.error === 'captcha_cancelled') && r.message ? r.message
-                                : t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
+                                : t.key(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
                 return;
             }
             form.remove();
@@ -1364,25 +1361,25 @@
             label.appendChild(el('span', { className: 'search-check-box' }));
             label.appendChild(el('span', { className: 'lp-name', text: l.name }));
             label.appendChild(el('span', { className: 'text-muted lp-count',
-                text: t(l.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: l.items }) }));
+                text: t.key(l.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: l.items }) }));
             cb.addEventListener('change', async function () {
                 cb.disabled = true;
                 var r = await post('user_list_items', { op: cb.checked ? 'add' : 'remove', list: l.id, magnet: hash });
                 cb.disabled = false;
                 if (!r || !r.success) {
                     cb.checked = !cb.checked;
-                    msg.textContent = t(r && r.error === 'list_full' ? 'js.lists.add_failed_full'
+                    msg.textContent = t.key(r && r.error === 'list_full' ? 'js.lists.add_failed_full'
                         : r && r.error === 'hash_blocked' ? 'js.lists.add_failed_blocked' : 'js.fav.load_failed');
                     return;
                 }
                 l.has = cb.checked;
-                msg.textContent = cb.checked ? t('js.lists.added') : t('js.lists.removed');
+                msg.textContent = cb.checked ? t.key('js.lists.added') : t.key('js.lists.removed');
                 // The number beside the name is the number this click just changed. Leaving it
                 // stale is how a page teaches somebody to reload it to find out what happened.
                 if (typeof r.items === 'number') {
                     l.items = r.items;
                     var c = label.querySelector('.lp-count');
-                    if (c) c.textContent = t(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
+                    if (c) c.textContent = t.key(r.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: r.items });
                 }
             });
             return label;
@@ -1399,14 +1396,14 @@
                 // still showing lists, the rows are the answer — ticking one is what this window is
                 // for, and a "make another" button beside them is a second way to do one thing.
                 go.hidden = !q || rows.length > 0;
-                go.textContent = t('js.lists.new_named', { name: query().length > 24 ? query().slice(0, 24) + '…' : query() });
+                go.textContent = t.key('js.lists.new_named', { name: query().length > 24 ? query().slice(0, 24) + '…' : query() });
             }
 
             body.textContent = '';
             if (!all.length) {
-                body.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.none_yet') }));
+                body.appendChild(el('div', { className: 'pf-empty', text: t.key('js.lists.none_yet') }));
             } else if (!rows.length) {
-                body.appendChild(el('div', { className: 'pf-empty', text: t('js.lists.no_match') }));
+                body.appendChild(el('div', { className: 'pf-empty', text: t.key('js.lists.no_match') }));
             } else {
                 rows.slice((page - 1) * PER, page * PER).forEach(function (l) { body.appendChild(rowFor(l)); });
             }
@@ -1416,11 +1413,11 @@
         async function load() {
             body.textContent = '';
             if (pager) pager.textContent = '';
-            body.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            body.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
             var j = await get('user_lists&hash=' + encodeURIComponent(hash));
             if (!j || !j.success) {
                 body.textContent = '';
-                body.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') }));
+                body.appendChild(el('div', { className: 'pf-empty', text: t.key('js.fav.load_failed') }));
                 return;
             }
             all = j.lists || [];
@@ -1443,9 +1440,9 @@
                     // reader was doing when they typed the name.
                     var added = await post('user_list_items', { op: 'add', list: r.id, magnet: hash });
                     if (added && !added.success && added.error === 'hash_unknown') {
-                        msg.textContent = t('js.lists.add_failed_unknown');
+                        msg.textContent = t.key('js.lists.add_failed_unknown');
                     } else {
-                        msg.textContent = t('js.lists.added');
+                        msg.textContent = t.key('js.lists.added');
                     }
                     nameIn.value = '';
                     go.disabled = false;
@@ -1453,7 +1450,7 @@
                     return;
                 }
                 msg.textContent = r && (r.antispam || r.error === 'captcha_cancelled') && r.message ? r.message
-                                : t(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
+                                : t.key(r && r.error === 'too_many_lists' ? 'js.lists.too_many' : 'js.fav.load_failed');
                 go.disabled = false;
             };
             go.addEventListener('click', mk);
@@ -1481,7 +1478,7 @@
         var o = document.getElementById('info-overlay');
         if (!o || o.dataset.lists !== '1' || typeof window.openListPicker !== 'function') return null;
         // One of the head's icon buttons (1.71.0): its name in the site's tooltip, like its neighbours'.
-        var b = el('button', { type: 'button', className: 'search-share lp-open ic-btn', 'aria-label': t('js.lists.pick_title'), dataset: { tip: t('js.lists.pick_title') } },
+        var b = el('button', { type: 'button', className: 'search-share lp-open ic-btn', 'aria-label': t.key('js.lists.pick_title'), dataset: { tip: t.key('js.lists.pick_title') } },
                    el('i', { className: 'bi bi-plus-lg', 'aria-hidden': 'true' }));
         b.addEventListener('click', function () { window.openListPicker(hash, name); });
         return b;
@@ -1555,16 +1552,29 @@
      * The server decides everything a reader may see: whether the list exists for them at all, which
      * rows, whether a score is shown (never below the site's minimum number of votes), what the time
      * reads in their zone. This only draws it — with textContent, a torrent's name being a stranger's
-     * text — and redraws it from the last answer on a live language switch, because the rows are the
-     * one part of this table the switch cannot reach (assets/js/lang-swap.js leaves script-built rows
-     * alone, and the render it fetches has an empty body).
+     * text. On a live language switch (1.73.0) the rows' words are t.key() words and follow by themselves
+     * (assets/js/i18n.js); what does not is the phone's label in front of each cell (data-label, drawn
+     * by CSS): a COPY of the column's header, which the switch translates where it stands — so the copies
+     * are taken from the headers again (relabelCells(), below, for both tables of this kind).
      */
+    document.addEventListener('langswap', function relabelCells() {
+        document.querySelectorAll('table.pv-table').forEach(function (table) {
+            var heads = table.tHead ? table.tHead.rows[0] : null;
+            if (!heads) return;
+            Array.prototype.forEach.call(table.querySelectorAll('tbody td[data-label]'), function (td) {
+                var th = heads.cells[td.cellIndex];
+                if (!th || !th.hasAttribute('data-col')) return;
+                var b = th.querySelector('.pv-sort');
+                td.setAttribute('data-label', String((b || th).textContent || '').replace(/\s+/g, ' ').trim());
+            });
+        });
+    });
 
     /** Stars, in half steps, read-only: the Info panel's markup (a dim star under a clipped lit one). */
     function starsReadOnly(value) {
         var n = Math.max(0, Math.min(5, Math.round(Number(value) * 2) / 2));
         var wrap = el('span', { className: 'stars pv-stars', role: 'img',
-                                'aria-label': t('js.votes.stars_aria', { n: n % 1 ? n.toFixed(1) : String(n) }) });
+                                'aria-label': t.key('js.votes.stars_aria', { n: n % 1 ? n.toFixed(1) : String(n) }) });
         for (var i = 0; i < 5; i++) {
             var full = n >= i + 1, half = !full && n >= i + 0.5;
             wrap.appendChild(el('span', { className: 'star' + (full ? ' star-full' : half ? ' star-half' : ''), 'aria-hidden': 'true' }, [
@@ -1577,7 +1587,7 @@
 
     /** A thumb, up or down — the icons of the Info panel's two buttons, filled, because this one is cast. */
     function thumbFor(vote) {
-        var up = vote > 0, word = t(up ? 'js.votes.up' : 'js.votes.down');
+        var up = vote > 0, word = t.key(up ? 'js.votes.up' : 'js.votes.down');
         return el('span', { className: 'pv-thumb ' + (up ? 'pv-thumb-up' : 'pv-thumb-down'), role: 'img', 'aria-label': word, title: word },
                   el('i', { className: up ? 'bi bi-hand-thumbs-up-fill' : 'bi bi-hand-thumbs-down-fill', 'aria-hidden': 'true' }));
     }
@@ -1673,7 +1683,7 @@
         // A value is one piece: on a phone, where the header's word stands in front of it, a line may
         // break after that label but never inside the value ("2026-09-" on one line, "11" on the next).
         function cell(col, lab, value) {
-            var v = typeof value === 'string' ? el('span', { className: 'pv-v', text: value }) : value;
+            var v = (typeof value === 'string' || t.isKey(value)) ? el('span', { className: 'pv-v', text: value }) : value;
             return el('td', { className: 'pv-cell pv-' + col, 'data-label': lab[col] || null }, v === undefined ? null : v);
         }
 
@@ -1684,7 +1694,7 @@
                 // count that is still missing in the tooltip.
                 c.textContent = '—';
                 c.classList.add('text-muted');
-                c.title = t(stars ? 'js.votes.too_few_stars' : 'js.votes.too_few_thumbs', { n: r.votes_count, min: min });
+                c.title = t.key(stars ? 'js.votes.too_few_stars' : 'js.votes.too_few_thumbs', { n: r.votes_count, min: min });
                 return c;
             }
             if (stars) {
@@ -1692,12 +1702,12 @@
                 c.classList.add('search-rep-stars');
                 c.appendChild(document.createTextNode(s + ' '));
                 c.appendChild(el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' }));
-                c.title = t('js.votes.avg_title', { stars: s, n: r.votes_count });
+                c.title = t.key('js.votes.avg_title', { stars: s, n: r.votes_count });
             } else {
                 var pct = Math.round(r.score_x100 / 100);
                 c.classList.add(pct >= 50 ? 'search-rep-up' : 'search-rep-down');
                 c.textContent = pct + '%';
-                c.title = t('js.votes.score_title', { pct: pct, up: r.votes_up, down: r.votes_down });
+                c.title = t.key('js.votes.score_title', { pct: pct, up: r.votes_up, down: r.votes_down });
             }
             return c;
         }
@@ -1709,9 +1719,9 @@
                 name.appendChild(el('span', { className: 'pv-title', title: r.name, text: r.name }));
             } else {
                 // Gone from the catalogue (or not the reader's to see): the vote is still theirs.
-                name.appendChild(el('span', { className: 'pf-gone', title: t('js.fav.gone_title'), text: t('js.fav.gone') }));
+                name.appendChild(el('span', { className: 'pf-gone', title: t.key('js.fav.gone_title'), text: t.key('js.fav.gone') }));
             }
-            if (r.banned) name.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t('js.fav.blocked') }));
+            if (r.banned) name.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t.key('js.fav.blocked') }));
             tr.appendChild(name);
             tr.appendChild(cell('size', lab, fmtBytes(r.total_size)));
             tr.appendChild(cell('sl', lab, r.seeders === null || r.seeders === undefined ? '—'
@@ -1735,11 +1745,11 @@
             var j = last;
             if (!j) return;
             paintSort();
-            totalEl.textContent = j.total ? t('js.votes.total', { n: Number(j.total).toLocaleString() }) : '';
+            totalEl.textContent = j.total ? t.key('js.votes.total', { n: Number(j.total).toLocaleString() }) : '';
             body.textContent = '';
             if (!j.rows.length) {
-                say(narrowed(j.params) ? t('js.votes.none_match')
-                    : mine ? t(stars ? 'js.votes.none_own_stars' : 'js.votes.none_own_thumbs') : t('js.fav.nothing'));
+                say(narrowed(j.params) ? t.key('js.votes.none_match')
+                    : mine ? t.key(stars ? 'js.votes.none_own_stars' : 'js.votes.none_own_thumbs') : t.key('js.fav.nothing'));
                 pager.textContent = '';
                 return;
             }
@@ -1764,7 +1774,7 @@
                 last = null;
                 totalEl.textContent = '';
                 pager.textContent = '';
-                say(j && j.error === 'login_required' ? t('js.app.search_login_required') : t('js.fav.load_failed'));
+                say(j && j.error === 'login_required' ? t.key('js.app.search_login_required') : t.key('js.fav.load_failed'));
                 return;
             }
             last = j;
@@ -1796,10 +1806,8 @@
             if (c.tagName === 'SELECT') c.addEventListener('change', function () { load(1); });
             else c.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 400); });
         });
-        // Redrawn from the last answer in the new language — no second request for words. Without one (the
-        // first request failed, or is still on its way) there is nothing to redraw, and the switch has just
-        // put the render's "Loading…" back into the message: ask again, in the new language.
-        document.addEventListener('langswap', function () { if (last) render(); else load(page); });
+        // A live language switch needs nothing from here (1.73.0): the rows' words are t.key() words that keep their keys
+        // (assets/js/i18n.js). (They were drawn again from the last answer — and without one, asked for again.)
         // A vote changed in the Info panel opened from one of these rows (assets/js/app.js): the row is
         // out of date, and this is the one list on the site that is about exactly that.
         document.addEventListener('rating:changed', function () { load(page); });
@@ -1872,24 +1880,24 @@
         }
         function say(text) { wrap.hidden = true; msg.textContent = text; msg.hidden = false; }
         function roleText(r) {
-            if (r.role === 'author') return t('js.descs.role_author');
-            if (r.role === 'coauthor') return t('js.descs.role_coauthor', { pct: r.share });
-            return t(r.role === 'edit' ? 'js.descs.role_edit' : 'js.descs.role_rewrite');
+            if (r.role === 'author') return t.key('js.descs.role_author');
+            if (r.role === 'coauthor') return t.key('js.descs.role_coauthor', { pct: r.share });
+            return t.key(r.role === 'edit' ? 'js.descs.role_edit' : 'js.descs.role_rewrite');
         }
         function rowFor(r, lab) {
             var tr = el('tr');
             var name = el('td', { className: 'pv-cell pv-name pd-name' });
             var head = el('div', { className: 'pd-head' });
             if (r.name) head.appendChild(el('span', { className: 'pv-title', title: r.name, text: r.name }));
-            else head.appendChild(el('span', { className: 'pf-gone', title: t('js.fav.gone_title'), text: t('js.fav.gone') }));
-            if (r.banned) head.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t('js.fav.blocked') }));
+            else head.appendChild(el('span', { className: 'pf-gone', title: t.key('js.fav.gone_title'), text: t.key('js.fav.gone') }));
+            if (r.banned) head.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t.key('js.fav.blocked') }));
             // Its state, where it is anything but published (only its own reader is ever sent one).
             if (r.status && r.status !== 'published') {
-                head.appendChild(el('span', { className: 'pf-badge pd-st pd-st-' + r.status, text: t('js.descs.st_' + r.status) }));
+                head.appendChild(el('span', { className: 'pf-badge pd-st pd-st-' + r.status, text: t.key('js.descs.st_' + r.status) }));
             }
             name.appendChild(head);
             // What it says, a line or two — or, for a description that is a source link alone, the link.
-            var ex = r.excerpt ? r.excerpt : (r.source_url ? t('js.descs.excerpt_source', { url: r.source_url }) : '');
+            var ex = r.excerpt ? r.excerpt : (r.source_url ? t.key('js.descs.excerpt_source', { url: r.source_url }) : '');
             if (ex) name.appendChild(el('div', { className: 'pd-excerpt text-muted', title: ex, text: ex }));
             tr.appendChild(name);
             tr.appendChild(el('td', { className: 'pv-cell pd-role', 'data-label': lab.role || null },
@@ -1908,10 +1916,10 @@
             var j = last;
             if (!j) return;
             paintSort();
-            totalEl.textContent = j.total ? t('js.descs.total', { n: Number(j.total).toLocaleString() }) : '';
+            totalEl.textContent = j.total ? t.key('js.descs.total', { n: Number(j.total).toLocaleString() }) : '';
             body.textContent = '';
             if (!j.rows.length) {
-                say(j.params && j.params.search ? t('js.descs.none_match') : (mine ? t('js.descs.none_own') : t('js.fav.nothing')));
+                say(j.params && j.params.search ? t.key('js.descs.none_match') : (mine ? t.key('js.descs.none_own') : t.key('js.fav.nothing')));
                 pager.textContent = '';
                 return;
             }
@@ -1932,7 +1940,7 @@
                 last = null;
                 totalEl.textContent = '';
                 pager.textContent = '';
-                say(j && j.error === 'login_required' ? t('js.app.search_login_required') : t('js.fav.load_failed'));
+                say(j && j.error === 'login_required' ? t.key('js.app.search_login_required') : t.key('js.fav.load_failed'));
                 return;
             }
             last = j;
@@ -1949,7 +1957,7 @@
             });
         });
         if (search) search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
-        document.addEventListener('langswap', function () { if (last) render(); else load(page); });
+        // (A live language switch needs nothing: the rows' words keep their keys, 1.73.0.)
         document.addEventListener('favourites:changed', function (e) { starMoved(last, e); });
         load(1);
     }
@@ -2024,35 +2032,35 @@
             a.appendChild(el('span', { className: 'who-list-name', text: r.name }));
             var by = el('span', { className: 'who-list-by text-muted' });
             if (typeof window.userAvatarPhrase === 'function') {
-                by.appendChild(window.userAvatarPhrase(t('js.lists.who_by', { user: window.userAvatarSlot(0) }),
+                by.appendChild(window.userAvatarPhrase(t.key('js.lists.who_by', { user: window.userAvatarSlot(0) }),
                                                        [[face(r.username, r.avatar), r.username]]));
             } else {
-                by.textContent = t('js.lists.who_by', { user: r.username });
+                by.textContent = t.key('js.lists.who_by', { user: r.username });
             }
             a.appendChild(by);
             return a;
         }
         function countText(s) {
-            if (s.q !== '') return t('js.who.found', { n: num(s.total) });
-            if (s.name === 'lists') return s.total === 1 ? t('js.who.lists_one') : t('js.who.lists_n', { n: num(s.total) });
-            return s.total === 1 ? t('js.who.people_one') : t('js.who.people_n', { n: num(s.total) });
+            if (s.q !== '') return t.key('js.who.found', { n: num(s.total) });
+            if (s.name === 'lists') return s.total === 1 ? t.key('js.who.lists_one') : t.key('js.who.lists_n', { n: num(s.total) });
+            return s.total === 1 ? t.key('js.who.people_one') : t.key('js.who.people_n', { n: num(s.total) });
         }
         // An empty section is a decision, not a failure, and says so in its own words; the line under the
         // sections (#who-why, the server's) says why a section can be empty.
         function emptyText(s) {
-            if (s.q !== '') return t('js.who.no_match');
-            if (s.name === 'fav') return t('js.who.fav_none');
-            if (s.name === 'lists') return t('js.who.lists_none');
-            return s.mode === 'stars' ? t('js.who.votes_none_stars') : t('js.who.votes_none_thumbs');
+            if (s.q !== '') return t.key('js.who.no_match');
+            if (s.name === 'fav') return t.key('js.who.fav_none');
+            if (s.name === 'lists') return t.key('js.who.lists_none');
+            return s.mode === 'stars' ? t.key('js.who.votes_none_stars') : t.key('js.who.votes_none_thumbs');
         }
 
         /** The section as it stands: its rows, its count, its "Show more", its search box. */
         function draw(s) {
             s.body.textContent = '';
             var busyFirst = s.state === 'loading' && !s.rows.length;
-            if (busyFirst) s.body.appendChild(el('div', { className: 'pf-loading who-msg', text: t('js.common.loading') }));
-            else if (s.state === 'error') s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: t('js.fav.load_failed') }));
-            else if (s.state === 'limited') s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: t('js.who.rate_limited') }));
+            if (busyFirst) s.body.appendChild(el('div', { className: 'pf-loading who-msg', text: t.key('js.common.loading') }));
+            else if (s.state === 'error') s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: t.key('js.fav.load_failed') }));
+            else if (s.state === 'limited') s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: t.key('js.who.rate_limited') }));
             else if (!s.rows.length) s.body.appendChild(el('div', { className: 'pf-empty who-msg', text: emptyText(s) }));
             else {
                 var wrap = el('div', { className: 'who-names' + (s.name === 'lists' ? ' who-lists' : '') });
@@ -2063,7 +2071,7 @@
             var left = s.total - s.rows.length;
             s.more.hidden = !(left > 0 && (s.state === 'ok' || s.state === 'loading'));
             s.more.disabled = s.state === 'loading';
-            s.more.textContent = s.state === 'loading' ? t('js.common.loading') : t('js.who.more', { n: num(Math.min(left, PER)) });
+            s.more.textContent = s.state === 'loading' ? t.key('js.common.loading') : t.key('js.who.more', { n: num(Math.min(left, PER)) });
             // Something to search: more than one page of it, or a search already typed (so it can be cleared).
             if (s.search) s.search.hidden = !(s.many || s.q !== '' || s.search.value !== '');
         }
@@ -2109,8 +2117,10 @@
             });
         });
         // A live language switch: the server's words (the headings, the placeholders, the line under them) are
-        // swapped by id; the ones written here are written again from what each section holds.
-        document.addEventListener('langswap', function () { secs.forEach(draw); });
+        // swapped by the walk and the words written here are t.key() words that follow by themselves (1.73.0) — but
+        // the counts are written in the page language's number format (num()), so the sections are drawn again from
+        // the rows they hold: no request, the search typed in them untouched.
+        document.addEventListener('langswap', function () { if (!box.hidden) secs.forEach(draw); });   // a closed one asks afresh when opened
         // A vote cast or taken back in the Info panel under the overlay (1.71.0, castVote() in app.js): while it
         // is open on that torrent its likes are asked for again, so a vote taken back leaves the names at once.
         // Every opening asks afresh anyway.

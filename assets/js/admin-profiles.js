@@ -43,8 +43,8 @@
             const res = await fetch(API() + 'admin/user_media', { method: 'POST', body: fd,
                                     headers: { 'Accept': 'application/json', 'X-CSRF-Token': CSRF() } });
             j = await res.json();
-        } catch (e) { return { ok: false, message: t('js.mediaadmin.failed') }; }
-        return j && j.success ? { ok: true, message: j.message, site: j.site } : { ok: false, message: (j && j.error) || t('js.mediaadmin.failed') };
+        } catch (e) { return { ok: false, message: t.key('js.mediaadmin.failed') }; }
+        return j && j.success ? { ok: true, message: j.message, site: j.site } : { ok: false, message: (j && j.error) || t.key('js.mediaadmin.failed') };
     }
 
     function block(kind) {
@@ -62,7 +62,7 @@
             preview.textContent = '';
             if (adjust) adjust.hidden = !st.has;
             if (remove) remove.hidden = !st.has;
-            if (!st.has) { preview.appendChild(document.createTextNode(t('js.mediaadmin.not_set'))); return; }
+            if (!st.has) { preview.append(t.key('js.mediaadmin.not_set')); return; }
             const im = document.createElement('img');
             im.alt = '';
             if (kind === 'avatar') {
@@ -80,17 +80,17 @@
 
         const edit = (src, fresh, file) => window.MediaEditor.open({
             mode: kind, src: src, file: fresh ? file : null, fresh: fresh, buttons: BUTTONS,
-            title: t(kind === 'cover' ? 'js.mediaadmin.title_cover' : 'js.mediaadmin.title_avatar'),
+            title: t.key(kind === 'cover' ? 'js.mediaadmin.title_cover' : 'js.mediaadmin.title_avatar'),
             x: fresh ? 50 : site[kind].x, y: fresh ? 50 : site[kind].y, zoom: fresh ? 1 : site[kind].zoom,
             coverH: site.cover_h, coverHm: site.cover_hm, desktopW: site.desk_w, phoneW: site.phone_w,
-            note: t(kind === 'cover' ? 'js.mediaadmin.note_cover' : 'js.mediaadmin.note_avatar'),
+            note: t.key(kind === 'cover' ? 'js.mediaadmin.note_cover' : 'js.mediaadmin.note_avatar'),
             returnFocus: fresh ? drop : adjust,
             save: async (st) => {
                 let r;
                 if (fresh) r = await upload(kind, file, st);
                 else {
                     const j = await apiCall('admin/user_media', 'POST', { op: 'default_position', kind: kind, x: st.x, y: st.y, zoom: st.zoom });
-                    r = j && j.success ? { ok: true, message: j.message, site: j.site } : { ok: false, message: (j && j.error) || t('js.mediaadmin.failed') };
+                    r = j && j.success ? { ok: true, message: j.message, site: j.site } : { ok: false, message: (j && j.error) || t.key('js.mediaadmin.failed') };
                 }
                 if (r.ok) { site = Object.assign(site, r.site || {}); paintAll(); showToast(r.message || 'OK', 'success'); }
                 return r;
@@ -120,12 +120,12 @@
         }
         if (adjust) adjust.addEventListener('click', () => { if (site[kind].has && site[kind].src) edit(site[kind].src, false, null); });
         if (remove) remove.addEventListener('click', async () => {
-            if (!(await confirmAction(t('js.mediaadmin.remove_title'), t(kind === 'cover' ? 'js.mediaadmin.remove_q_cover' : 'js.mediaadmin.remove_q_avatar')))) return;
+            if (!(await confirmAction(t.key('js.mediaadmin.remove_title'), t.key(kind === 'cover' ? 'js.mediaadmin.remove_q_cover' : 'js.mediaadmin.remove_q_avatar')))) return;
             const j = await apiCall('admin/user_media', 'POST', { op: 'default_remove', kind: kind });
-            if (!j || !j.success) { showToast((j && j.error) || t('js.mediaadmin.failed'), 'danger'); return; }
+            if (!j || !j.success) { showToast((j && j.error) || t.key('js.mediaadmin.failed'), 'danger'); return; }
             site = Object.assign(site, j.site || {});
             paintAll();
-            showToast(j.message || t('js.mediaadmin.removed'), 'success');
+            showToast(j.message || t.key('js.mediaadmin.removed'), 'success');
         });
         return paint;
     }

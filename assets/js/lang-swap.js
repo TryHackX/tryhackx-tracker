@@ -23,14 +23,44 @@
  *   · Match children by `id` BEFORE matching them by order. The settings search physically moves
  *     sections around (insertBefore in admin-settings.js), so while a search is active the live
  *     order is a permutation of the render's.
+ *   · THE WALK REWRITES ONLY WHAT THE SERVER WROTE, AND ONLY WHILE IT STILL SAYS SO (1.73.0). The page
+ *     marks what the server sent — LangSwap.mark(), called before the first script of <body> runs
+ *     (templates/layout.php, every panel page): its elements, its text, the words in its attributes.
+ *     A node a script made takes no part in the walk, not even in the order pass: that pass used to
+ *     line a script's row up with the server's placeholder and write "Loading…" over it, a script's
+ *     heading with the server's generic one (the Info panel's title — a torrent's name — became
+ *     "Szczegóły"), the appeals' headers with the reports'. And a server node a script has since
+ *     written something else into is left as the script left it. (A page that never marked keeps
+ *     the old rule: everything on it is the server's.) A server button put back from a copy of its
+ *     markup after a script's "Working…" is the server's again — and one lent to a script while the
+ *     language changed is given back in the new language the moment the script puts that copy back.
+ *   · A sentence whose inline markup comes in another order in the other language (a <code> first in
+ *     Polish, after a word in English) is planned WHOLE: an element of nothing but text and inline
+ *     tags, untouched by scripts, takes the fetched pieces (1.73.0) — pairing them one by one left a
+ *     word of the old language standing.
  *   · A live child with no counterpart in the fetched document is SKIPPED, not deleted. That is
  *     what keeps nodes built by scripts — toasts, table rows, pagination, the toolbar's cloned
- *     switcher — from breaking the walk, with nothing to mark and nothing to maintain.
+ *     switcher — from breaking the walk.
+ *   · WHAT A SCRIPT WROTE KEEPS ITS KEY (1.73.0). t() stays a plain string; where a script writes a word
+ *     into the page it writes t.key() — the word that knows its key (assets/js/i18n.js) — and written into
+ *     a node — its text, title, placeholder, any attribute through setAttribute(), a child through append()
+ *     and its kin, markup through the templates' escapers — it leaves its key there, on the element. The
+ *     swap asks t.ours() for every keyed word that still says what the old
+ *     dictionary says, loads the new bundle, and t.say()s them again — in place: nothing is redrawn,
+ *     nothing open closes, nothing typed is touched. A part a script DRAWS from an answer it holds (a
+ *     list, a table) may instead draw itself again on `langswap` — from that answer, never by asking
+ *     the server again: a swap is one request (the one exception: an open emoji picker asks for its
+ *     names in the new language — they exist only in a file per language).
+ *   · A <template> is language too (1.73.0): what a script clones from one after the swap has to be in
+ *     the new language, so the walk goes into its content like into any element — and a copy already
+ *     on the page follows its template (LangSwap.adopt(): the message composer, the description editor).
  *   · Never touch what somebody typed: no <textarea> contents and no <input> value, except the
  *     label on a button. Switching language must not eat an unsaved form.
- *   · Strings frozen into an inline <script> at render time (settings.php, adminlogin.php and
- *     unsubscribe.php do this with json_encode(__(...))) are NOT in the js.* bundle and are not
- *     swapped. They stay in the old language until the next full page load.
+ *   · No inline <script> freezes a translated string any more (1.73.0): settings.php, adminlogin.php
+ *     and unsubscribe.php read theirs from the bundle, which the swap reloads.
+ *   · An error page is a page too (1.73.0): the fetched copy of a page that was itself served with an
+ *     error status (<html data-status>, the panel's hidden 404) answers with the same status, and is
+ *     swapped like any other.
  */
 (function () {
     'use strict';
@@ -303,11 +333,154 @@
     // its search reads it, so leaving it behind would let the visible heading and the searchable
     // one disagree about what language the page is in. `data-tip` (1.71.0) is an icon button's
     // explanation, shown in the site's tooltip where a word used to say what the button does.
-    var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title', 'data-tip'];
+    // 1.73.0: every other attribute the templates write words into — an <optgroup>/<option>'s label,
+    // the account lists' `data-empty-text`, the shoutbox's `data-closed`, the stats heat map's
+    // `data-tooltip`, Settings' `data-snd-label` / `data-ok-text` — and the ARIA attributes that are
+    // read aloud. A script that reads one of them reads it when it needs it, not once at start.
+    var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title', 'data-tip', 'label', 'aria-description',
+                 'aria-roledescription', 'aria-valuetext', 'aria-placeholder', 'data-label', 'data-empty-text', 'data-closed',
+                 'data-tooltip', 'data-snd-label', 'data-ok-text'];
     // Subtrees the walk does not enter. Scripts and styles because their text is not language;
-    // <textarea> because its text is what somebody typed.
-    var OPAQUE = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, TEXTAREA: 1, SVG: 1, CANVAS: 1 };
+    // <textarea> because its text is what somebody typed. (A <template> it DOES enter, through its
+    // content: see planNode.)
+    var OPAQUE = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1, SVG: 1, CANVAS: 1 };
     var BUTTONISH = { submit: 1, button: 1, reset: 1 };
+
+    /*
+     * WHAT THE SERVER WROTE (1.73.0). mark() is called once, before the first script of the body runs,
+     * and remembers every element, every text and every translatable attribute the server sent — the
+     * walk below takes only those, and only while they still say what the server said. After a swap
+     * the new words are what the server says now. Weak maps: a node a script throws away goes with it.
+     */
+    var marked = false;
+    var serverEl = new WeakSet(), serverText = new WeakMap(), serverAttr = new WeakMap();
+    /*
+     * A BUTTON PUT BACK FROM A COPY is the server's again (1.73.0). The panel's buttons say "Working…" with a
+     * spinner while they act, and are then put back from a copy of their markup (`btn.innerHTML = orig`, or
+     * just the label inside: `label.textContent = orig` — a bulk scrape's progress) — the same words, but new
+     * nodes, which the walk would take for a script's and leave in the language they were copied in, for good.
+     * So each server button's markup is remembered (as the server sent it, and as every swap leaves it), and a
+     * button that holds exactly that markup again counts as the server's again.
+     * A button LENT to a script at the moment of a swap (its words are the script's just then) is given back in
+     * the new language: the walk keeps its counterpart in the fetched page, and when the script puts back the
+     * markup it copied — the old language's — that markup counts as the server's and is planned against the
+     * counterpart at once (a MutationObserver on the lent buttons only), instead of waiting for the next swap.
+     */
+    var serverButtons = [], buttonHtml = new WeakMap(), counterpart = new WeakMap(), lent = [], watcher = null;
+    function noteButton(el) {
+        if (el.tagName !== 'BUTTON') return;
+        if (!buttonHtml.has(el)) serverButtons.push(el);
+        buttonHtml.set(el, el.innerHTML);
+    }
+    // Every node in it is one the server wrote, still saying what it wrote (blank text aside).
+    function wholeServer(node) {
+        for (var c = node.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3) { if (c.nodeValue.trim() !== '' && serverText.get(c) !== c.nodeValue) return false; continue; }
+            if (c.nodeType !== 1) continue;
+            if (!serverEl.has(c) || (!OPAQUE[c.tagName] && !wholeServer(c))) return false;
+        }
+        return true;
+    }
+    function regainButtons() {
+        serverButtons.forEach(function (b) {
+            var html = buttonHtml.get(b);
+            if (html === undefined || b.innerHTML !== html || wholeServer(b)) return;
+            markTree(b);
+        });
+    }
+    function rememberButtons() {
+        serverButtons = serverButtons.filter(function (b) { return b.isConnected; });   // one a script took away goes
+        lent = [];
+        serverButtons.forEach(function (b) {
+            if (wholeServer(b)) { buttonHtml.set(b, b.innerHTML); counterpart.delete(b); }
+            else if (counterpart.has(b)) lent.push(b);        // keeps the markup the script will put back
+        });
+        if (watcher) watcher.disconnect();
+        watcher = null;
+        if (!lent.length || !window.MutationObserver) return;
+        watcher = new MutationObserver(giveBack);
+        lent.forEach(function (b) { watcher.observe(b, { childList: true, subtree: true, characterData: true, attributes: true }); });
+    }
+    function giveBack() {
+        lent = lent.filter(function (b) {
+            if (!b.isConnected) return false;
+            if (b.innerHTML !== buttonHtml.get(b)) return true;             // still the script's
+            var out = [], fresh = counterpart.get(b);
+            counterpart.delete(b);
+            markTree(b);
+            try { planNode(b, fresh, out, 0); } catch (e) { out = []; }
+            applyPlan(out);
+            buttonHtml.set(b, b.innerHTML);
+            return false;
+        });
+        if (!lent.length && watcher) { watcher.disconnect(); watcher = null; }
+    }
+    function attrsOf(el) {
+        var o = null;
+        for (var i = 0; i < ATTRS.length; i++) {
+            var v = el.getAttribute(ATTRS[i]);
+            if (v !== null) (o || (o = {}))[ATTRS[i]] = v;
+        }
+        if (el.tagName === 'A' && el.hasAttribute('href')) (o || (o = {})).href = el.getAttribute('href');
+        if (el.tagName === 'INPUT' && BUTTONISH[(el.getAttribute('type') || '').toLowerCase()] && el.hasAttribute('value')) (o || (o = {})).value = el.getAttribute('value');
+        return o;
+    }
+    function markTree(node) {
+        for (var c = node.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3) { serverText.set(c, c.nodeValue); continue; }
+            if (c.nodeType !== 1) continue;
+            serverEl.add(c);
+            var a = attrsOf(c);
+            if (a) serverAttr.set(c, a);
+            if (c.tagName === 'TEMPLATE' && c.content) markTree(c.content);
+            else if (!OPAQUE[c.tagName]) { markTree(c); if (c.isConnected) noteButton(c); }
+        }
+    }
+    function mark() {
+        if (marked || !document.body) return;
+        markTree(document.body);
+        marked = true;
+    }
+    /*
+     * A COPY OF A <template> IS THE SERVER'S WORDS TOO (1.73.0): the message composer and the Info panel's
+     * description editor are cloned from one, and a clone is a node a script made — so the walk would never
+     * reach it, and an editor open while the language changes kept its Write / Preview / Formatting help in
+     * the old one. adopt(nodes, templateId) — the copy's top-level nodes, taken before the copy is put in the
+     * page — says "these were cloned from that template": they count as the server's from that moment, and
+     * every swap walks them against the template's new content. What the script then writes into the copy is
+     * its own, as anywhere else.
+     */
+    var adopted = [];
+    function markNode(n) {
+        if (n.nodeType === 3) { serverText.set(n, n.nodeValue); return; }
+        if (n.nodeType !== 1) return;
+        serverEl.add(n);
+        var a = attrsOf(n);
+        if (a) serverAttr.set(n, a);
+        if (!OPAQUE[n.tagName]) markTree(n);
+    }
+    function adopt(nodes, templateId) {
+        nodes = Array.prototype.slice.call(nodes || []).filter(function (n) { return meaningful(n); });
+        if (!nodes.length || !templateId) return;
+        nodes.forEach(markNode);
+        adopted = adopted.filter(function (a) { return a.nodes.some(function (n) { return n.isConnected; }); });
+        adopted.push({ nodes: nodes, id: templateId });
+    }
+    // Is this press the language switcher's? A popover that closes on a press outside it lets this one through
+    // (1.73.0): the switch translates what is open in place, and pressing it must not close the thing to translate.
+    function isSwitch(el) { return !!(el && el.closest && el.closest(LINKS)); }
+    window.LangSwap = { mark: mark, adopt: adopt, isSwitch: isSwitch };
+    // A page that did not mark itself early is marked as it finishes loading — this listener was the first one
+    // added, so it runs before every other script's. (What a script built BEFORE that moment counts as the
+    // server's there, which is no worse than the rule before marks existed.)
+    onReady(mark);
+    // A child the walk may take: anything on a page that never marked; on a marked page, only the server's.
+    function isServer(n) { return !marked || (n.nodeType === 3 ? serverText.has(n) : serverEl.has(n)); }
+    function stillServer(el, name, value) {
+        if (!marked) return true;
+        var a = serverAttr.get(el);
+        return !!a && a[name] === value;
+    }
 
     function swapEnabled() {
         return !!(window.t && window.t.swap) && document.querySelectorAll(LINKS).length > 1;
@@ -372,38 +545,83 @@
     function planNode(live, fresh, out, depth) {
         if (depth > 60) throw new Error('too deep');
         if (live.nodeType === 3) {
-            if (live.nodeValue !== fresh.nodeValue) out.push({ text: live, v: fresh.nodeValue });
+            // Only while it still says what the server wrote: a count a script keeps in a server text is the script's.
+            if (live.nodeValue !== fresh.nodeValue && (!marked || serverText.get(live) === live.nodeValue)) out.push({ text: live, v: fresh.nodeValue });
             return;
         }
         if (live.nodeType !== 1) return;
         if (live.tagName !== fresh.tagName) throw new Error('tag mismatch');
         if (live.hasAttribute('data-lang-keep')) return;
+        // A server button lent to a script just now: what it says once given back (see giveBack()).
+        if (marked && live.tagName === 'BUTTON' && buttonHtml.has(live) && !wholeServer(live)) counterpart.set(live, fresh);
 
         for (var i = 0; i < ATTRS.length; i++) {
             var a = ATTRS[i];
             var lv = live.getAttribute(a), fv = fresh.getAttribute(a);
-            if (lv !== null && fv !== null && lv !== fv) out.push({ el: live, attr: a, v: fv });
+            if (lv !== null && fv !== null && lv !== fv && stillServer(live, a, lv)) out.push({ el: live, attr: a, v: fv });
         }
         // The label on a button is text; the value of a field is somebody's data.
         if (live.tagName === 'INPUT' && BUTTONISH[(live.getAttribute('type') || '').toLowerCase()]) {
             var bl = live.getAttribute('value'), bf = fresh.getAttribute('value');
-            if (bl !== null && bf !== null && bl !== bf) out.push({ el: live, attr: 'value', v: bf });
+            if (bl !== null && bf !== null && bl !== bf && stillServer(live, 'value', bl)) out.push({ el: live, attr: 'value', v: bf });
         }
         // An <a> whose address differs between the two renders differs BECAUSE of the language.
         if (live.tagName === 'A') {
             var hl = live.getAttribute('href'), hf = fresh.getAttribute('href');
-            if (hl !== null && hf !== null && hl !== hf) out.push({ el: live, attr: 'href', v: hf });
+            if (hl !== null && hf !== null && hl !== hf && stillServer(live, 'href', hl)) out.push({ el: live, attr: 'href', v: hf });
+        }
+        // What a script will clone from a template later must be the new language's (1.73.0).
+        if (live.tagName === 'TEMPLATE') {
+            if (live.content && fresh.content) planChildren(live.content, fresh.content, out, depth);
+            return;
         }
         if (OPAQUE[live.tagName]) return;
+        if (planPhrase(live, fresh, out)) return;
 
         planChildren(live, fresh, out, depth);
     }
 
-    function planChildren(live, fresh, out, depth) {
-        var lk = [], fk = [], n, k;
-        for (n = live.firstChild; n; n = n.nextSibling) if (meaningful(n)) lk.push(n);
-        for (n = fresh.firstChild; n; n = n.nextSibling) if (meaningful(n)) fk.push(n);
+    /*
+     * A SENTENCE WHOSE MARKUP SITS IN ANOTHER ORDER (1.73.0). "A member's <code>[url]</code> becomes a link" is, in
+     * Polish, "<code>[url]</code> od członka staje się linkiem": the same words and tags, in another order — so pairing
+     * the pieces one by one leaves "A member's" standing. An element that holds nothing but text and inline markup
+     * (no ids, nothing a script touched) and whose pieces come in another order in the fetched page is planned whole:
+     * its pieces are replaced by the fetched ones, which count as the server's from then on.
+     */
+    var INLINE = { CODE: 1, B: 1, I: 1, EM: 1, STRONG: 1, SMALL: 1, KBD: 1, MARK: 1, SUP: 1, SUB: 1, BR: 1, SPAN: 1, A: 1, ABBR: 1,
+                   U: 1, S: 1, Q: 1, CITE: 1, DFN: 1, VAR: 1, SAMP: 1, TIME: 1 };
+    function phraseOnly(el, live) {
+        for (var c = el.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3) { if (live && marked && serverText.get(c) !== c.nodeValue) return false; continue; }
+            if (c.nodeType !== 1) continue;
+            if (!INLINE[c.tagName] || c.id || (live && marked && !serverEl.has(c)) || !phraseOnly(c, live)) return false;
+        }
+        return true;
+    }
+    function shapeOf(el) {
+        var s = [];
+        for (var c = el.firstChild; c; c = c.nextSibling) if (meaningful(c)) s.push(c.nodeType === 3 ? 'T' : c.tagName);
+        return s.join(',');
+    }
+    function planPhrase(live, fresh, out) {
+        if (!live.firstChild || shapeOf(live) === shapeOf(fresh)) return false;
+        if (!phraseOnly(live, true) || !phraseOnly(fresh, false)) return false;
+        if (live.textContent.replace(/\s+/g, ' ').trim() === fresh.textContent.replace(/\s+/g, ' ').trim()) return false;
+        out.push({ phrase: live, from: fresh });
+        return true;
+    }
 
+    function planChildren(live, fresh, out, depth) {
+        var lk = [], fk = [], n;
+        // A node a script made is not the server's to pair (1.73.0): it takes no part in either pass.
+        for (n = live.firstChild; n; n = n.nextSibling) if (meaningful(n) && isServer(n)) lk.push(n);
+        for (n = fresh.firstChild; n; n = n.nextSibling) if (meaningful(n)) fk.push(n);
+        planList(lk, fk, out, depth);
+    }
+
+    /** Two lists of siblings — a live element's server children, the render's — lined up and planned. */
+    function planList(lk, fk, out, depth) {
+        var k;
         // Pass 1 — BY ID, and without regard to position. This is the pass that matters: the
         // Settings search physically moves sections around with insertBefore, so while a query is
         // active the live order is a permutation of the render's and position means nothing.
@@ -424,6 +642,29 @@
         // out of the alignment instead of pushing everything after it one place along.
         var pairs = alignByOrder(liveRest, freshRest);
         for (k = 0; k < pairs.length; k++) planNode(liveRest[pairs[k][0]], freshRest[pairs[k][1]], out, depth + 1);
+    }
+
+    /** Carry out a plan: texts and attributes rewritten in place, a sentence planned whole given the fetched pieces. */
+    function applyPlan(out) {
+        for (var i = 0; i < out.length; i++) {
+            var c = out[i];
+            if (c.phrase) {                       // a sentence planned whole (planPhrase): the fetched pieces, marked
+                var kids = [];
+                for (var f = c.from.firstChild; f; f = f.nextSibling) kids.push(document.importNode(f, true));
+                while (c.phrase.firstChild) c.phrase.removeChild(c.phrase.firstChild);
+                kids.forEach(function (k) { c.phrase.appendChild(k); });
+                if (marked) markTree(c.phrase);
+                continue;
+            }
+            if (c.text) {
+                c.text.nodeValue = c.v;
+                if (marked) serverText.set(c.text, c.v);
+            } else {
+                c.el.setAttribute(c.attr, c.v);
+                var sa = marked ? serverAttr.get(c.el) : null;
+                if (sa) sa[c.attr] = c.v;
+            }
+        }
     }
 
     function markActive(code) {
@@ -471,7 +712,10 @@
             headers: { 'Accept': 'text/html', 'X-Lang-Swap': '1' },
             signal: ctrl ? ctrl.signal : undefined,
         }).then(function (res) {
-            if (!res.ok) throw new Error('HTTP ' + res.status);
+            // An error page asked for again answers with its own error (1.73.0): the panel's hidden 404
+            // in the other language is still the page the reader is on. Any OTHER status is not.
+            var was = Number(document.documentElement.getAttribute('data-status') || 0);
+            if (!res.ok && !(was && res.status === was)) throw new Error('HTTP ' + res.status);
             return res.text();
         }).then(function (html) {
             clearTimeout(timer);
@@ -483,17 +727,28 @@
             if (!bundle || bundle.lang !== code || !doc.body) throw new Error('not the same page');
 
             var out = [];
+            if (marked) regainButtons();
             planChildren(document.body, doc.body, out, 0);
-            if (!out.length) throw new Error('nothing to change');
+            // The copies of templates still on the page, against the template's new content (see adopt()).
+            adopted = adopted.filter(function (a) { return a.nodes.some(function (n) { return n.isConnected; }); });
+            adopted.forEach(function (a) {
+                var tpl = doc.getElementById(a.id);
+                if (!tpl || !tpl.content) return;
+                var fresh = [];
+                for (var f = tpl.content.firstChild; f; f = f.nextSibling) if (meaningful(f)) fresh.push(f);
+                planList(a.nodes.filter(function (n) { return n.isConnected; }), fresh, out, 0);
+            });
+            // The words scripts wrote and keep the keys of, while the old dictionary is still the one
+            // loaded: those that still say what it says are said again once the new one is (1.73.0).
+            var ours = (window.t && window.t.ours) ? window.t.ours(document.body) : [];
+            if (!out.length && !ours.length) throw new Error('nothing to change');
 
-            for (var i = 0; i < out.length; i++) {
-                var c = out[i];
-                if (c.text) c.text.nodeValue = c.v;
-                else c.el.setAttribute(c.attr, c.v);
-            }
+            applyPlan(out);
             var liveData = document.getElementById('i18n-data');
             if (liveData) liveData.textContent = dataNode.textContent;
             if (window.t && window.t.reload) window.t.reload();
+            if (window.t && window.t.say) window.t.say(ours);
+            if (marked) rememberButtons();
             document.documentElement.lang = code;
             if (doc.title) document.title = doc.title;
             markActive(code);

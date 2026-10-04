@@ -60,7 +60,8 @@
             stylesBox.hidden = true;
             paintFrame(null, null);
             cover.textContent = '';
-            cover.appendChild(el('div', { className: 'alert alert-warning py-1 px-2 wl-small mb-0' }, [el('i', { className: 'bi bi-exclamation-triangle' }), ' ' + (j.error || t('js.iconpack.failed'))]));
+            cover.appendChild(el('div', { className: 'alert alert-warning py-1 px-2 wl-small mb-0' }, [el('i', { className: 'bi bi-exclamation-triangle' }), ' ',
+                j.error ? t.find(j.error, 'api.iconpack.') : t.key('js.iconpack.failed')]));   // pieces: the word keeps its key (1.73.0)
             return;
         }
         preview = j;
@@ -89,8 +90,10 @@
         // ticked boxes nobody can untick; the separate files are the choice.
         stylesCore.textContent = '';
         const fixed = ps.filter((s) => s.fixed);
-        stylesCore.appendChild(el('span', {}, (setup.core === 'fontawesome' ? t('js.iconpack.core_fontawesome') : t('js.iconpack.core_all')) + ' '));
-        stylesCore.appendChild(el('span', { className: 'ip-core-list' }, fixed.map((s) => s.label + (s.layers > 1 ? ' (' + t('js.iconpack.two_layers') + ')' : '')).join(' · ')));
+        // Pieces, not one string (1.73.0): each t.key() word keeps its key for the live language switch.
+        stylesCore.appendChild(el('span', {}, [setup.core === 'fontawesome' ? t.key('js.iconpack.core_fontawesome') : t.key('js.iconpack.core_all'), ' ']));
+        stylesCore.appendChild(el('span', { className: 'ip-core-list' }, fixed.reduce((out, s, i) =>
+            out.concat(i ? [' · '] : [], [s.label], s.layers > 1 ? [' (', t.key('js.iconpack.two_layers'), ')'] : []), [])));
         const on = ticks();
         ps.filter((s) => !s.fixed).forEach((s) => {
             const id = 'ip-st-' + s.key;
@@ -109,12 +112,12 @@
                 box,
                 el('span', { className: 'ip-style-name' }, s.label),
                 el('span', { className: 'ip-style-facts' }, String(s.weight)),
-                size ? el('span', { className: 'ip-style-size', title: t('js.iconpack.size_title') }, size) : null,
-                s.layers > 1 ? el('span', { className: 'wl-badge wl-b-muted', title: t('js.iconpack.two_layers_title') }, t('js.iconpack.two_layers')) : null,
+                size ? el('span', { className: 'ip-style-size', title: t.key('js.iconpack.size_title') }, size) : null,
+                s.layers > 1 ? el('span', { className: 'wl-badge wl-b-muted', title: t.key('js.iconpack.two_layers_title') }, t.key('js.iconpack.two_layers')) : null,
             ]);
             stylesGrid.appendChild(row);
         });
-        if (!stylesGrid.children.length) stylesGrid.appendChild(el('div', { className: 'text-muted small' }, t('js.iconpack.no_extra')));
+        if (!stylesGrid.children.length) stylesGrid.appendChild(el('div', { className: 'text-muted small' }, t.key('js.iconpack.no_extra')));
     }
 
     /** The site's common icons, drawn by the setup being previewed, in a document of its own. */
@@ -219,11 +222,11 @@
         cover.textContent = '';
         if (!c) return;
         const line = el('div', { className: 'ip-cov-line' }, [
-            el('strong', {}, t('js.iconpack.cov_total', { n: c.total })), ' ',
-            el('span', { className: 'wl-badge wl-b-ok' }, t('js.iconpack.cov_exact', { n: c.exact })), ' ',
-            c.twins ? el('span', { className: 'wl-badge wl-b-api' }, t('js.iconpack.cov_twins', { n: c.twins })) : null, c.twins ? ' ' : null,
-            el('span', { className: 'wl-badge wl-b-muted' }, t('js.iconpack.cov_approx', { n: c.approx })), ' ',
-            el('span', { className: 'wl-badge ' + (c.fallbacks.length ? 'wl-b-warn' : 'wl-b-muted') }, t('js.iconpack.cov_fallbacks', { n: c.fallbacks.length })),
+            el('strong', {}, t.key('js.iconpack.cov_total', { n: c.total })), ' ',
+            el('span', { className: 'wl-badge wl-b-ok' }, t.key('js.iconpack.cov_exact', { n: c.exact })), ' ',
+            c.twins ? el('span', { className: 'wl-badge wl-b-api' }, t.key('js.iconpack.cov_twins', { n: c.twins })) : null, c.twins ? ' ' : null,
+            el('span', { className: 'wl-badge wl-b-muted' }, t.key('js.iconpack.cov_approx', { n: c.approx })), ' ',
+            el('span', { className: 'wl-badge ' + (c.fallbacks.length ? 'wl-b-warn' : 'wl-b-muted') }, t.key('js.iconpack.cov_fallbacks', { n: c.fallbacks.length })),
         ]);
         cover.appendChild(line);
         // A package with an index (1.69.0) has already had what the chosen family lacks drawn in the
@@ -233,8 +236,8 @@
         const known = c.fallbacks.some((f) => f.why === 'style_lacks');
         if (measured && (measured.missing || measured.other || !known)) {
             cover.appendChild(el('div', { className: 'ip-cov-measure ' + (measured.missing ? 'text-danger' : (measured.other ? 'text-warning' : 'text-muted')) },
-                measured.missing ? t('js.iconpack.probe_missing', { n: measured.missing })
-                    : (measured.other ? t('js.iconpack.probe_other', { n: measured.other, family: measured.family }) : t('js.iconpack.probe_all', { family: measured.family }))));
+                measured.missing ? t.key('js.iconpack.probe_missing', { n: measured.missing })
+                    : (measured.other ? t.key('js.iconpack.probe_other', { n: measured.other, family: measured.family }) : t.key('js.iconpack.probe_all', { family: measured.family }))));
         }
         if (!c.fallbacks.length) return;
         // Grouped by reason and style: fifty outlines drawn in Regular because Sharp Regular is not
@@ -249,13 +252,13 @@
         ((preview && preview.setup.pack_styles) || []).forEach((s) => { labels[s.key] = s.label; });
         Object.entries((preview && preview.setup.styles) || {}).forEach(([k, s]) => { labels[k] = labels[k] || s.label; });
         const lab = (k) => labels[k] || k;
-        const det = el('details', { className: 'ip-cov-list' }, [el('summary', {}, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), ' ' + t('js.iconpack.cov_show')])]);
+        const det = el('details', { className: 'ip-cov-list' }, [el('summary', {}, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), ' ', t.key('js.iconpack.cov_show')])]);
         Object.values(groups).forEach(({ f, names }) => {
             let why;
-            if (f.why === 'twin_missing') why = t('js.iconpack.fb_twin', { wanted: f.wanted });
-            else if (f.why === 'name_missing') why = t('js.iconpack.fb_name', { wanted: f.wanted });
-            else if (f.why === 'style_not_loaded') why = t('js.iconpack.fb_not_loaded', { wanted: lab(f.wanted), drawn: lab(f.style) });
-            else why = t('js.iconpack.fb_style', { wanted: lab(f.wanted), drawn: lab(f.style) });
+            if (f.why === 'twin_missing') why = t.key('js.iconpack.fb_twin', { wanted: f.wanted });
+            else if (f.why === 'name_missing') why = t.key('js.iconpack.fb_name', { wanted: f.wanted });
+            else if (f.why === 'style_not_loaded') why = t.key('js.iconpack.fb_not_loaded', { wanted: lab(f.wanted), drawn: lab(f.style) });
+            else why = t.key('js.iconpack.fb_style', { wanted: lab(f.wanted), drawn: lab(f.style) });
             det.appendChild(el('div', { className: 'ip-fb' }, [el('span', { className: 'ip-fb-why' }, why), ' ', el('code', {}, names.map((n) => 'bi-' + n).join(' '))]));
         });
         cover.appendChild(det);
@@ -263,22 +266,22 @@
 
     function paintNote() {
         const lib = libSel ? libSel.value : 'bootstrap';
-        note.textContent = lib === 'fontawesome' ? '' : t('js.iconpack.note_bootstrap');
+        note.textContent = lib === 'fontawesome' ? '' : t.key('js.iconpack.note_bootstrap');
     }
 
     // ── the packages ─────────────────────────────────────────────────────────
     function renderList() {
         const packs = (state && state.packages) || [];
         list.textContent = '';
-        if (countEl) { countEl.hidden = false; countEl.textContent = t('js.iconpack.count', { n: packs.filter((p) => !p.broken).length, max: state.limits.packages }); }
-        if (!packs.length) { list.appendChild(el('div', { className: 'text-muted small' }, t('js.iconpack.none'))); return; }
+        if (countEl) { countEl.hidden = false; countEl.textContent = t.key('js.iconpack.count', { n: packs.filter((p) => !p.broken).length, max: state.limits.packages }); }
+        if (!packs.length) { list.appendChild(el('div', { className: 'text-muted small' }, t.key('js.iconpack.none'))); return; }
         const table = el('table', { className: 'table table-dark table-sm align-middle mb-0 ip-table' }, [
             el('thead', {}, [el('tr', {}, [
-                el('th', { scope: 'col' }, t('js.iconpack.col_package')),
-                el('th', { scope: 'col' }, t('js.iconpack.col_styles')),
-                el('th', { scope: 'col' }, t('js.iconpack.col_size')),
-                el('th', { scope: 'col' }, t('js.iconpack.col_installed')),
-                el('th', { scope: 'col', className: 'text-end' }, [el('span', { className: 'visually-hidden' }, t('js.iconpack.col_actions'))]),
+                el('th', { scope: 'col' }, t.key('js.iconpack.col_package')),
+                el('th', { scope: 'col' }, t.key('js.iconpack.col_styles')),
+                el('th', { scope: 'col' }, t.key('js.iconpack.col_size')),
+                el('th', { scope: 'col' }, t.key('js.iconpack.col_installed')),
+                el('th', { scope: 'col', className: 'text-end' }, [el('span', { className: 'visually-hidden' }, t.key('js.iconpack.col_actions'))]),
             ])]),
         ]);
         const body = el('tbody');
@@ -289,35 +292,35 @@
 
     function rowFor(p) {
         if (p.broken) {
-            const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: t('js.iconpack.delete'), 'aria-label': t('js.iconpack.delete') }, [el('i', { className: 'bi bi-trash' })]);
+            const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: t.key('js.iconpack.delete'), 'aria-label': t.key('js.iconpack.delete') }, [el('i', { className: 'bi bi-trash' })]);
             del.addEventListener('click', () => remove(p));
-            return el('tr', {}, [el('td', { colspan: '4' }, [el('code', {}, p.id), ' ', el('span', { className: 'wl-badge wl-b-bad' }, t('js.iconpack.broken'))]),
+            return el('tr', {}, [el('td', { colspan: '4' }, [el('code', {}, p.id), ' ', el('span', { className: 'wl-badge wl-b-bad' }, t.key('js.iconpack.broken'))]),
                                  el('td', { className: 'text-end' }, [del])]);
         }
-        const use = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info', title: t('js.iconpack.activate_title') }, [el('i', { className: 'bi bi-check2-circle' }), ' ' + t('js.iconpack.activate')]);
+        const use = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info', title: t.key('js.iconpack.activate_title') }, [el('i', { className: 'bi bi-check2-circle' }), ' ', t.key('js.iconpack.activate')]);
         use.addEventListener('click', () => activate(p));
         use.hidden = !!p.active;
-        const ver = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t('js.iconpack.verify'), 'aria-label': t('js.iconpack.verify') }, [el('i', { className: 'bi bi-shield-check' })]);
+        const ver = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t.key('js.iconpack.verify'), 'aria-label': t.key('js.iconpack.verify') }, [el('i', { className: 'bi bi-shield-check' })]);
         ver.addEventListener('click', () => verify(p, ver));
         // 1.70.0: a package whose metadata is an index can have it read again — the catalogue of every icon
         // the shoutbox picker offers is written from it (the picker builds it itself when it first needs it).
-        const rei = p.index ? el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t('js.iconpack.reindex'), 'aria-label': t('js.iconpack.reindex') }, [el('i', { className: 'bi bi-arrow-repeat' })]) : null;
+        const rei = p.index ? el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t.key('js.iconpack.reindex'), 'aria-label': t.key('js.iconpack.reindex') }, [el('i', { className: 'bi bi-arrow-repeat' })]) : null;
         if (rei) rei.addEventListener('click', () => reindex(p, rei));
-        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: p.active ? t('js.iconpack.delete_active') : t('js.iconpack.delete'), 'aria-label': t('js.iconpack.delete') }, [el('i', { className: 'bi bi-trash' })]);
+        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: p.active ? t.key('js.iconpack.delete_active') : t.key('js.iconpack.delete'), 'aria-label': t.key('js.iconpack.delete') }, [el('i', { className: 'bi bi-trash' })]);
         del.disabled = !!p.active;
         del.addEventListener('click', () => remove(p));
         const name = el('td', { className: 'ip-cell-name' }, [
             el('span', { className: 'ip-name' }, 'Font Awesome ' + (p.edition === 'pro' ? 'Pro' : 'Free') + ' ' + p.version),
-            p.active ? el('span', { className: 'wl-badge wl-b-ok ms-1' }, t('js.iconpack.active')) : null,
+            p.active ? el('span', { className: 'wl-badge wl-b-ok ms-1' }, t.key('js.iconpack.active')) : null,
             el('div', { className: 'ip-id' }, p.id),
         ]);
-        const styles = el('td', { className: 'small' }, [t('js.iconpack.n_styles', { n: p.styles }),
-            p.outside_all ? el('div', { className: 'text-muted' }, t('js.iconpack.n_outside', { n: p.outside_all })) : null]);
-        const size = el('td', { className: 'small text-nowrap' }, [fmtBytes(p.bytes), el('div', { className: 'text-muted' }, t('js.iconpack.n_icons', { n: p.icons }))]);
+        const styles = el('td', { className: 'small' }, [t.key('js.iconpack.n_styles', { n: p.styles }),
+            p.outside_all ? el('div', { className: 'text-muted' }, t.key('js.iconpack.n_outside', { n: p.outside_all })) : null]);
+        const size = el('td', { className: 'small text-nowrap' }, [fmtBytes(p.bytes), el('div', { className: 'text-muted' }, t.key('js.iconpack.n_icons', { n: p.icons }))]);
         const when = el('td', { className: 'small' }, [String(p.installed_at || '').replace('T', ' ').replace('Z', ' UTC'),
-            el('div', { className: 'text-muted' }, t('js.iconpack.by', { who: p.installed_by || '?' })
-                + (p.metadata && p.metadata !== 'none' ? ' · ' + t('js.iconpack.meta_' + (p.metadata === 'pro' ? 'pro' : p.metadata === 'free' ? 'free' : 'unknown')) : '')),
-            p.index ? el('div', { className: 'text-muted ip-catalog' }, p.catalog ? t('js.iconpack.catalog', { n: p.catalog.icons, c: p.catalog.categories }) : t('js.iconpack.catalog_none')) : null]);
+            el('div', { className: 'text-muted' }, [t.key('js.iconpack.by', { who: p.installed_by || '?' })]
+                .concat(p.metadata && p.metadata !== 'none' ? [' · ', t.key('js.iconpack.meta_' + (p.metadata === 'pro' ? 'pro' : p.metadata === 'free' ? 'free' : 'unknown'))] : [])),
+            p.index ? el('div', { className: 'text-muted ip-catalog' }, p.catalog ? t.key('js.iconpack.catalog', { n: p.catalog.icons, c: p.catalog.categories }) : t.key('js.iconpack.catalog_none')) : null]);
         return el('tr', { className: p.active ? 'ip-row-active' : '' }, [name, styles, size, when,
             el('td', { className: 'text-end text-nowrap' }, [el('div', { className: 'd-inline-flex gap-1' }, [use, ver, rei, del])])]);
     }
@@ -327,7 +330,7 @@
         const packs = ((state && state.packages) || []).filter((p) => !p.broken);
         const was = packSel.value;
         packSel.textContent = '';
-        if (!packs.length) packSel.appendChild(el('option', { value: '' }, t('js.iconpack.none_short')));
+        if (!packs.length) packSel.appendChild(el('option', { value: '' }, t.key('js.iconpack.none_short')));
         packs.forEach((p) => packSel.appendChild(el('option', { value: p.id }, 'Font Awesome ' + (p.edition === 'pro' ? 'Pro' : 'Free') + ' ' + p.version + ' — ' + p.id)));
         if (packs.some((p) => p.id === was)) packSel.value = was;
         const packOpt = sourceSel.querySelector('option[value="pack"]');
@@ -336,17 +339,17 @@
 
     /** A write that needs the password: asked for first, posted with it, the reply's refusal shown as it is. */
     async function withPassword(title, fn) {
-        const pw = await promptPassword(title, t('js.iconpack.password_why'));
+        const pw = await promptPassword(title, t.key('js.iconpack.password_why'));
         if (pw === null) return null;
         const j = await fn(pw);
-        if (j && j.signed_out) { showToast(j.error || t('js.iconpack.failed'), 'danger'); setTimeout(() => location.reload(), 1500); return null; }
+        if (j && j.signed_out) { showToast(j.error || t.key('js.iconpack.failed'), 'danger'); setTimeout(() => location.reload(), 1500); return null; }
         return j;
     }
 
     async function activate(p) {
-        const j = await withPassword(t('js.iconpack.activate_title'), (pw) => apiCall('admin/iconpacks', 'POST', { op: 'activate', id: p.id, confirm_password: pw }));
+        const j = await withPassword(t.key('js.iconpack.activate_title'), (pw) => apiCall('admin/iconpacks', 'POST', { op: 'activate', id: p.id, confirm_password: pw }));
         if (!j) return;
-        if (!j.success) { showToast(j.error || t('js.iconpack.failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.iconpack.failed'), 'danger'); return; }
         showToast(j.message || 'OK', 'success');
         // The head of this very page loads the old stylesheet; the new one is a reload away.
         setTimeout(() => location.reload(), 900);
@@ -355,30 +358,30 @@
     async function verify(p, btn) {
         btn.disabled = true;
         let j;
-        try { j = await apiCall('admin/iconpacks&op=verify&id=' + encodeURIComponent(p.id)); } catch (e) { j = { error: t('js.iconpack.failed') }; }
+        try { j = await apiCall('admin/iconpacks&op=verify&id=' + encodeURIComponent(p.id)); } catch (e) { j = { error: t.key('js.iconpack.failed') }; }
         btn.disabled = false;
-        if (!j.success) { showToast(j.error || t('js.iconpack.failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.iconpack.failed'), 'danger'); return; }
         const v = j.verify;
-        if (v.ok) showToast(t('js.iconpack.verify_ok', { n: v.files }), 'success');
-        else showToast(t('js.iconpack.verify_bad', { missing: v.missing.length, changed: v.changed.length }), 'danger');
+        if (v.ok) showToast(t.key('js.iconpack.verify_ok', { n: v.files }), 'success');
+        else showToast(t.key('js.iconpack.verify_bad', { missing: v.missing.length, changed: v.changed.length }), 'danger');
     }
 
     /** Read a package's index again (1.70.0): the catalogue written, the table told what it holds now. */
     async function reindex(p, btn) {
         btn.disabled = true;
         let j;
-        try { j = await apiCall('admin/iconpacks', 'POST', { op: 'reindex', id: p.id }); } catch (e) { j = { error: t('js.iconpack.failed') }; }
+        try { j = await apiCall('admin/iconpacks', 'POST', { op: 'reindex', id: p.id }); } catch (e) { j = { error: t.key('js.iconpack.failed') }; }
         btn.disabled = false;
         if (j && Array.isArray(j.packages)) { state = j; renderList(); }
-        if (!j || !j.success) { showToast((j && j.error) || t('js.iconpack.failed'), 'danger'); return; }
+        if (!j || !j.success) { showToast((j && j.error) || t.key('js.iconpack.failed'), 'danger'); return; }
         showToast(j.message || 'OK', 'success');
     }
 
     async function remove(p) {
-        if (!(await confirmAction(t('js.iconpack.delete'), t('js.iconpack.delete_confirm', { id: p.id }), { code: p.id }))) return;
-        const j = await withPassword(t('js.iconpack.delete'), (pw) => apiCall('admin/iconpacks', 'POST', { op: 'delete', id: p.id, confirm_password: pw }));
+        if (!(await confirmAction(t.key('js.iconpack.delete'), t.key('js.iconpack.delete_confirm', { id: p.id }), { code: p.id }))) return;
+        const j = await withPassword(t.key('js.iconpack.delete'), (pw) => apiCall('admin/iconpacks', 'POST', { op: 'delete', id: p.id, confirm_password: pw }));
         if (!j) return;
-        if (!j.success) { showToast(j.error || t('js.iconpack.failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.iconpack.failed'), 'danger'); return; }
         state = j;
         renderList();
         syncPackSelect();
@@ -392,7 +395,7 @@
         const main = drop.querySelector('.ipl-drop-main');
         main.textContent = '';
         if (f) main.appendChild(document.createTextNode(f.name + ' · ' + fmtBytes(f.size)));
-        else { main.appendChild(el('u', {}, t('js.iconpack.drop_choose'))); main.appendChild(document.createTextNode(' ' + t('js.iconpack.drop_or'))); }
+        else { main.appendChild(el('u', {}, t.key('js.iconpack.drop_choose'))); main.append(' ', t.key('js.iconpack.drop_or')); }
     }
     const chosen = () => dropped || (fileIn.files && fileIn.files[0]) || null;
     ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('dragging'); }));
@@ -418,21 +421,32 @@
         report.textContent = '';
         const r = j.report || {};
         report.classList.toggle('is-refused', !j.success);
+        // The server's own sentence is found back by its key (the Settings bridge carries api.iconpack.), and the
+        // lines below are pieces — each t.key() word keeps its key for the live language switch (1.73.0).
         report.appendChild(el('div', { className: 'ip-report-head' }, [el('i', { className: 'bi ' + (j.success ? 'bi-check-circle-fill text-success' : 'bi-x-circle text-danger') }), ' ',
-            j.success ? (j.message || '') : (j.error || t('js.iconpack.failed'))]));
+            j.success ? t.find(j.message || '', 'api.iconpack.') : (j.error ? t.find(j.error, 'api.iconpack.') : t.key('js.iconpack.failed'))]));
         const dl = el('dl', { className: 'ip-report-list' });
         const add = (k, v) => { if (v === null || v === undefined || v === '') return; dl.appendChild(el('dt', {}, k)); dl.appendChild(el('dd', {}, v)); };
-        if (r.root !== null && r.root !== undefined) add(t('js.iconpack.rep_root'), r.root === '' ? t('js.iconpack.rep_root_top') : r.root);
+        if (r.root !== null && r.root !== undefined) add(t.key('js.iconpack.rep_root'), r.root === '' ? t.key('js.iconpack.rep_root_top') : r.root);
         if (r.ok) {
-            add(t('js.iconpack.rep_package'), 'Font Awesome ' + (r.edition === 'pro' ? 'Pro' : 'Free') + ' ' + r.version + ' — ' + t('js.iconpack.n_styles', { n: r.styles }));
+            add(t.key('js.iconpack.rep_package'), ['Font Awesome ' + (r.edition === 'pro' ? 'Pro' : 'Free') + ' ' + r.version + ' — ', t.key('js.iconpack.n_styles', { n: r.styles })]);
             const kinds = {};
             (r.kept || []).forEach((k) => { const d = String(k.path).split('/')[0]; kinds[d] = (kinds[d] || 0) + 1; });
-            add(t('js.iconpack.rep_kept'), t('js.iconpack.rep_kept_n', { n: (r.kept || []).length, size: fmtBytes(r.bytes) }) + ' (' + Object.entries(kinds).map(([d, n]) => d + ' ' + n).join(', ') + ')');
+            add(t.key('js.iconpack.rep_kept'), [t.key('js.iconpack.rep_kept_n', { n: (r.kept || []).length, size: fmtBytes(r.bytes) }), ' (' + Object.entries(kinds).map(([d, n]) => d + ' ' + n).join(', ') + ')']);
         }
         const sk = Object.entries(r.skipped || {});
-        if (sk.length) add(t('js.iconpack.rep_skipped'), sk.map(([k, n]) => k.replace(/^outside:/, t('js.iconpack.rep_outside') + ' ').replace(/^too_large:/, t('js.iconpack.rep_too_large') + ' ') + ' ' + n).join(', '));
-        (r.skipped_notes || []).forEach((n) => add(t('js.iconpack.rep_note'), n.path + ' — ' + t('js.iconpack.note_' + n.why)));
-        (r.refused || []).forEach((x) => add(t('js.iconpack.rep_refused'), x.path + (x.detail && x.detail !== x.path ? ' — ' + x.detail : '')));
+        if (sk.length) {
+            const parts = [];
+            sk.forEach(([k, n], i) => {
+                if (i) parts.push(', ');
+                const m = /^(outside|too_large):/.exec(k);
+                if (m) parts.push(t.key(m[1] === 'outside' ? 'js.iconpack.rep_outside' : 'js.iconpack.rep_too_large'), ' ' + k.slice(m[0].length) + ' ' + n);
+                else parts.push(k + ' ' + n);
+            });
+            add(t.key('js.iconpack.rep_skipped'), parts);
+        }
+        (r.skipped_notes || []).forEach((n) => add(t.key('js.iconpack.rep_note'), [n.path + ' — ', t.key('js.iconpack.note_' + n.why)]));
+        (r.refused || []).forEach((x) => add(t.key('js.iconpack.rep_refused'), x.path + (x.detail && x.detail !== x.path ? ' — ' + x.detail : '')));
         report.appendChild(dl);
     }
 
@@ -441,12 +455,12 @@
         let body = null;
         if (kind === 'upload') {
             const f = chosen();
-            if (!f) { showToast(t('js.iconpack.pick_file'), 'warning'); drop.focus(); return; }
+            if (!f) { showToast(t.key('js.iconpack.pick_file'), 'warning'); drop.focus(); return; }
             const lim = state && state.limits ? Number(state.limits.upload) : 0;
-            if (lim > 0 && f.size > lim) { showToast(t('js.iconpack.upload_too_large', { max: fmtBytes(lim) }), 'danger'); return; }
+            if (lim > 0 && f.size > lim) { showToast(t.key('js.iconpack.upload_too_large', { max: fmtBytes(lim) }), 'danger'); return; }
             body = f;
-        } else if (!pathIn.value.trim()) { showToast(t('js.iconpack.pick_path'), 'warning'); pathIn.focus(); return; }
-        const pw = await promptPassword(t('js.iconpack.install_title'), t('js.iconpack.password_why'));
+        } else if (!pathIn.value.trim()) { showToast(t.key('js.iconpack.pick_path'), 'warning'); pathIn.focus(); return; }
+        const pw = await promptPassword(t.key('js.iconpack.install_title'), t.key('js.iconpack.password_why'));
         if (pw === null) return;
         setBusy(true);
         let j;
@@ -461,16 +475,16 @@
                 const res = await fetch((document.body.dataset.apiBase || '') + 'admin/iconpacks', {
                     method: 'POST', headers: { 'X-CSRF-Token': document.body.dataset.csrf || '', 'Accept': 'application/json' }, body: fd,
                 });
-                try { j = await res.json(); } catch (e) { j = { error: t('js.iconpack.upload_too_large', { max: fmtBytes(state.limits.upload) }) }; }
+                try { j = await res.json(); } catch (e) { j = { error: t.key('js.iconpack.upload_too_large', { max: fmtBytes(state.limits.upload) }) }; }
             } else {
                 j = await apiCall('admin/iconpacks', 'POST', { op: 'install_path', path: pathIn.value.trim(), confirm_password: pw });
             }
-        } catch (e) { j = { error: t('js.iconpack.failed') }; }
+        } catch (e) { j = { error: t.key('js.iconpack.failed') }; }
         setBusy(false);
         if (j && j.signed_out) { showToast(j.error, 'danger'); setTimeout(() => location.reload(), 1500); return; }
         if (j && j.packages) { state = j; renderList(); syncPackSelect(); refreshSoon(); }
         if (j && (j.report || j.success !== undefined)) paintReport(j);
-        if (!j || !j.success) { showToast((j && j.error) || t('js.iconpack.failed'), 'danger'); return; }
+        if (!j || !j.success) { showToast((j && j.error) || t.key('js.iconpack.failed'), 'danger'); return; }
         showToast(j.message || 'OK', 'success');
         if (kind === 'upload') { fileIn.value = ''; dropped = null; markFile(null); }
     }
@@ -495,8 +509,8 @@
 
     async function load() {
         let j;
-        try { j = await apiCall('admin/iconpacks'); } catch (e) { list.textContent = t('js.iconpack.failed'); return; }
-        if (!j.success) { list.textContent = j.error || t('js.iconpack.failed'); return; }
+        try { j = await apiCall('admin/iconpacks'); } catch (e) { list.textContent = t.key('js.iconpack.failed'); return; }
+        if (!j.success) { list.textContent = j.error || t.key('js.iconpack.failed'); return; }
         state = j;
         renderList();
         refresh();

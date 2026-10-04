@@ -183,13 +183,11 @@ function backupProfileLabel(string $profile): string {
     // including index_hashes and index_files — several GB — and nothing in its name said so, while
     // "Full" sounded like the bigger of the two when it is the same database plus some small files.
     // These say which database and what else, because those are the two questions.
-    return [
-        'tracker-lekki'      => 'Light — config and lists, database without the two huge index tables',
-        'tracker-pelny'      => 'Everything — full database (several GB) plus config, lists and units',
-        'tracker-baza'       => 'Full database only — every table, including the index (several GB)',
-        'tracker-baza-lekka' => 'Light database only — without index_hashes and index_files',
-        'custom'             => 'Custom selection',
-    ][$profile] ?? $profile;
+    // The dictionary's words (1.73.0: English on every page). api.backup.profile_* — the backups page's script finds
+    // a label the status answer gave back by its key (t.find), so its select follows the live language switch.
+    $key = ['tracker-lekki' => 'light', 'tracker-pelny' => 'everything', 'tracker-baza' => 'db_full',
+            'tracker-baza-lekka' => 'db_light', 'custom' => 'custom'][$profile] ?? null;
+    return $key !== null && function_exists('__') ? __('api.backup.profile_' . $key) : $profile;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -52,19 +52,12 @@ $_SESSION['admin_login_form_at'] = time();
     // feature is off and the modal appears for nothing, do not ask when it is on and every login
     // writes a phantom failure into the audit log.
     const CAPTCHA_ON = <?= isCaptchaRequired($cfg, 'login') ? 'true' : 'false' ?>;
-    // Every message this script can put on screen, translated server-side. They belong in the same
-    // dictionary as the rest of the page, not hard-coded in English halfway down a script block.
-    const T = {
-        captchaUnavailable: <?= json_encode(__('adminlogin.captcha_unavailable')) ?>,
-        captchaCancelled:   <?= json_encode(__('adminlogin.captcha_cancelled')) ?>,
-        enterCode:          <?= json_encode(__('adminlogin.enter_code')) ?>,
-        codeHintLow:        <?= json_encode(__('adminlogin.code_hint_low')) ?>,
-        expired:            <?= json_encode(__('adminlogin.expired')) ?>,
-        badCredentials:     <?= json_encode(__('adminlogin.bad_credentials')) ?>,
-        loginFailed:        <?= json_encode(__('adminlogin.login_failed')) ?>,
-        networkError:       <?= json_encode(__('adminlogin.network_error')) ?>,
-        codeWrong:          <?= json_encode(__('adminlogin.code_wrong')) ?>,
-    };
+    // Every message this script can put on screen comes from the page's dictionary bundle (layout.php gives this page
+    // `adminlogin.*` and the sign-in API's `api.login.*`): t.key() words, which leave their keys on the element, so a
+    // message on the screen follows the live language switch (1.73.0 — they were written into this block in the page's
+    // language, and a switch left them in the old one). The server's own answers are found back in the bundle by t.find().
+    const T = (k, p) => t.key('adminlogin.' + k, p);
+    const said = (s) => t.find(s, 'api.login.');
     const form = document.getElementById('admin-login-form');
     const alertEl = document.getElementById('admin-login-alert');
     const api = '<?= $baseUrl ?>api.php?endpoint=';
@@ -104,8 +97,8 @@ $_SESSION['admin_login_form_at'] = time();
                 const first = await window.showCaptchaModal({ action: 'admin_login' });
                 if (!first) {
                     fail(window.captchaWasUnavailable && window.captchaWasUnavailable()
-                        ? T.captchaUnavailable
-                        : T.captchaCancelled);
+                        ? T('captcha_unavailable')
+                        : T('captcha_cancelled'));
                     return;
                 }
                 data['captcha_token'] = first;
@@ -116,7 +109,7 @@ $_SESSION['admin_login_form_at'] = time();
             // server is entitled to say so. This loop is now the exception rather than the rule.
             for (let attempt = 0; attempt < 2 && json.captcha_required; attempt++) {
                 const token = await window.showCaptchaModal({ action: 'admin_login' });
-                if (!token) { fail(window.captchaWasUnavailable && window.captchaWasUnavailable() ? T.captchaUnavailable : T.captchaCancelled); return; }
+                if (!token) { fail(window.captchaWasUnavailable && window.captchaWasUnavailable() ? T('captcha_unavailable') : T('captcha_cancelled')); return; }
                 data['captcha_token'] = token;
                 data['g-recaptcha-response'] = token;
                 json = await post();
@@ -130,21 +123,20 @@ $_SESSION['admin_login_form_at'] = time();
                 form.style.display = 'none';
                 twofaForm.style.display = '';
                 alertEl.className = 'alert alert-info show';
-                alertEl.textContent = json.message || T.enterCode;
+                alertEl.textContent = said(json.message) || T('enter_code');
                 if (typeof json.recovery_left === 'number' && json.recovery_left <= 2) {
-                    document.getElementById('al-code-hint').textContent =
-                        T.codeHintLow.replace(':n', json.recovery_left);
+                    document.getElementById('al-code-hint').textContent = T('code_hint_low', { n: json.recovery_left });
                 }
                 setTimeout(() => codeInput.focus(), 50);
             } else if ((json.error || '').indexOf('CSRF') !== -1) {
                 // the session behind this page expired (PHP session GC) — reload for a fresh token
-                fail(T.expired);
+                fail(T('expired'));
                 setTimeout(() => window.location.reload(), 1200);
             } else {
-                fail(json.error === 'Invalid credentials' ? T.badCredentials : (json.error || T.loginFailed));
+                fail(json.error === 'Invalid credentials' ? T('bad_credentials') : (said(json.error) || T('login_failed')));
             }
         } catch {
-            fail(T.networkError);
+            fail(T('network_error'));
         } finally {
             btn.disabled = false;
         }
@@ -171,11 +163,11 @@ $_SESSION['admin_login_form_at'] = time();
                     window.location.reload();
                 }
             } else {
-                fail(json.error || T.codeWrong);
+                fail(said(json.error) || T('code_wrong'));
                 codeInput.select();
             }
         } catch {
-            fail(T.networkError);
+            fail(T('network_error'));
         } finally {
             btn.disabled = false;
         }

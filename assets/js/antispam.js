@@ -24,12 +24,30 @@
 (function () {
     'use strict';
 
-    function tr(key, vars, fallback) {
+    // `keyed`: the word goes into the page (a note, a message shown), so it is the t.key() word that leaves its key
+    // on the element and follows the live language switch (1.73.0); a unit glued into a time stays plain words.
+    function tr(key, vars, fallback, keyed) {
         if (typeof window.t === 'function') {
             const s = window.t(key, vars || {});
-            if (s && s !== key) return s;
+            if (s && s !== key) return keyed && window.t.key ? window.t.key(key, vars || {}) : s;
         }
         return fallback !== undefined ? fallback : key;
+    }
+
+    /**
+     * The refusal's sentence, with `left` seconds in it when it is a wait (1.73.0): the dictionary's own words —
+     * the t.key() word, which leaves its key on the note it is written into, so the note follows the live language
+     * switch — when the page carries the key the answer names (api.antispam.*, LANG_JS_PUBLIC); else the server's
+     * template (`tpl`, the time at "{time}"), else its sentence.
+     */
+    function sentence(r, left) {
+        const a = r && r.antispam;
+        if (!a) return (r && r.message) || '';
+        if (a.key && typeof window.t === 'function' && window.t.has && window.t.has(a.key)) {
+            return window.t.key(a.key, Object.assign({}, a.vars || {}, left > 0 ? { time: timeText(left) } : {}));
+        }
+        if (left > 0 && typeof a.tpl === 'string' && a.tpl.indexOf('{time}') !== -1) return a.tpl.split('{time}').join(timeText(left));
+        return r.message || '';
     }
 
     /** Is this answer the layer asking for a CAPTCHA? */
@@ -88,6 +106,8 @@
         const until = Date.now() + seconds * 1000;
         const note = typeof opts.note === 'function' ? opts.note : null;
         const tpl = typeof opts.tpl === 'string' && opts.tpl.indexOf('{time}') !== -1 ? opts.tpl : '';
+        // The answer itself (1.73.0), when the caller has it: its sentence by key, see sentence().
+        const answer = opts.answer && opts.answer.antispam ? opts.answer : null;
         button.classList.add('as-waiting');
         button.setAttribute('aria-disabled', 'true');
         return new Promise((resolve) => {
@@ -112,7 +132,8 @@
                 // cut the wait short.
                 button.disabled = true;
                 button.setAttribute('data-as-wait', clock(left));
-                if (note && tpl) note(tpl.split('{time}').join(timeText(left)));
+                if (note && answer) note(sentence(answer, left));
+                else if (note && tpl) note(tpl.split('{time}').join(timeText(left)));
             };
             entry = { timer: setInterval(tick, 250), finish };
             running.set(button, entry);
@@ -131,7 +152,7 @@
     function cancelled() {
         const gone = typeof window.captchaWasUnavailable === 'function' && window.captchaWasUnavailable();
         return { success: false, error: 'captcha_cancelled',
-                 message: tr(gone ? 'js.app.captcha_unavailable' : 'js.app.captcha_cancelled') };
+                 message: tr(gone ? 'js.app.captcha_unavailable' : 'js.app.captcha_cancelled', null, undefined, true) };
     }
 
     /**
@@ -155,18 +176,18 @@
         }
         let r = await doPost(extra);
         for (let i = 0; i < 2 && isCaptcha(r); i++) {
-            if (note && r && r.message) note(r.message);
+            if (note && r && r.message) note(sentence(r, 0));
             const tok = await solve(r, opts.action);
             if (!tok) return cancelled();
-            if (note) note(tr('js.antispam.solving', null, ''));
+            if (note) note(tr('js.antispam.solving', null, '', true));
             r = await doPost({ captcha_token: tok, 'g-recaptcha-response': tok });
         }
         const s = waitSeconds(r);
         if (s > 0 && opts.button) {
-            countdown(opts.button, s, { note, tpl: r.antispam && r.antispam.tpl, doneText: opts.doneText });
+            countdown(opts.button, s, { note, tpl: r.antispam && r.antispam.tpl, answer: r, doneText: opts.doneText });
         }
         return r;
     }
 
-    window.Antispam = { send, countdown, solve, isCaptcha, waitSeconds, waiting, stop, timeText, clock };
+    window.Antispam = { send, countdown, solve, isCaptcha, waitSeconds, waiting, stop, timeText, clock, sentence };
 })();

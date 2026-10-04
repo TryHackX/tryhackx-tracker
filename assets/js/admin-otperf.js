@@ -122,19 +122,17 @@
         const cpus = Math.max(1, Number(s.cpus || 1));
         const workers = Number(s.workers || 0);
         const share = (m.total / (cpus * 100)) * 100;
-        const head = t('js.otperf.verdict_head', { total: m.total.toFixed(0), cap: cpus * 100, share: share.toFixed(0), hottest: m.hottest.toFixed(0) });
+        const head = t.key('js.otperf.verdict_head', { total: m.total.toFixed(0), cap: cpus * 100, share: share.toFixed(0), hottest: m.hottest.toFixed(0) });
 
+        // Pieces, not one string (1.73.0): each sentence a t.key() word that keeps its key for the live language switch.
         if (m.hottest >= 85 && workers > 0 && workers >= cpus) {
-            return { level: 'warn', text: head + ' ' + t('js.otperf.verdict_ceiling_second') };
+            return { level: 'warn', text: [head, ' ', t.key('js.otperf.verdict_ceiling_second')] };
         }
         if (m.hottest >= 85) {
-            return { level: 'warn', text: head + ' ' + t('js.otperf.verdict_ceiling_workers', { workers: workers, cpus: cpus }) };
+            return { level: 'warn', text: [head, ' ', t.key('js.otperf.verdict_ceiling_workers', { workers: workers, cpus: cpus })] };
         }
-        const why = (m.dropsPerSec !== null && m.dropsPerSec > 1)
-            ? ' ' + t('js.otperf.verdict_drops')
-            : ' ' + t('js.otperf.verdict_no_drops');
-        return { level: 'info', text: head + ' ' + t('js.otperf.verdict_far') + why
-            + ' ' + t('js.otperf.verdict_second_useless') };
+        const why = (m.dropsPerSec !== null && m.dropsPerSec > 1) ? t.key('js.otperf.verdict_drops') : t.key('js.otperf.verdict_no_drops');
+        return { level: 'info', text: [head, ' ', t.key('js.otperf.verdict_far'), ' ', why, ' ', t.key('js.otperf.verdict_second_useless')] };
     }
 
     function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text: text }); }
@@ -144,7 +142,7 @@
         const v = el('div', { className: 'wl-kv-v' });
         (Array.isArray(children) ? children : [children]).forEach(c => {
             if (c == null) return;
-            v.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+            v.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key (1.73.0)
         });
         box.appendChild(v);
         return box;
@@ -170,7 +168,7 @@
         try {
             j = await apiCall('admin/ot_status');
         } catch (e) {
-            if (my > painted) { painted = my; fatal(t('js.otperf.status_unreachable', { err: (e && e.message) || t('js.otperf.net_error_short') })); }
+            if (my > painted) { painted = my; fatal(t.key('js.otperf.status_unreachable', { err: (e && e.message) || t.key('js.otperf.net_error_short') })); }
             return;
         } finally {
             if (busy === my) { busy = 0; clearWd(); }
@@ -186,19 +184,20 @@
     function arm() {
         clearWd();
         if (painted) return;
-        watchdog = setTimeout(() => { watchdog = null; if (!painted) fatal(t('js.otperf.status_timeout')); }, 15000);
+        watchdog = setTimeout(() => { watchdog = null; if (!painted) fatal(t.key('js.otperf.status_timeout')); }, 15000);
     }
     function clearWd() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
 
     function fatal(msg) {
         const g = $('ot-grid');
         g.textContent = '';
-        g.appendChild(kv(t('js.otperf.service'), [badge(t('js.otperf.unavailable'), 'wl-b-bad'), ' ',
-            el('span', { className: 'wl-small text-muted', text: msg || t('js.otperf.helper_silent') }),
+        g.appendChild(kv(t.key('js.otperf.service'), [badge(t.key('js.otperf.unavailable'), 'wl-b-bad'), ' ',
+            // the server's sentence found back by key (t.find(); the page's bundle carries api.helper., 1.73.0)
+            el('span', { className: 'wl-small text-muted', text: t.find(msg, 'api.') || t.key('js.otperf.helper_silent') }),
             el('div', {}, [el('button', {
                 className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
                 onclick: () => { painted = 0; busy = 0; load(true); },
-            }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.otperf.try_again')])])]));
+            }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ', t.key('js.otperf.try_again')])])]));
         $('ot-notes').textContent = '';
     }
 
@@ -207,37 +206,37 @@
         const c = j.configured || {};
         const g = $('ot-grid');
         g.textContent = '';
-        $('ot-updated').textContent = s.unit ? t('js.otperf.updated_unit', { unit: s.unit, cpus: s.cpus }) : '';
+        $('ot-updated').textContent = s.unit ? t.key('js.otperf.updated_unit', { unit: s.unit, cpus: s.cpus }) : '';
 
-        g.appendChild(kv(t('js.otperf.service'), [
-            badge(s.active ? t('js.otperf.running') : t('js.otperf.stopped'), s.active ? 'wl-b-ok' : 'wl-b-bad'), ' ',
+        g.appendChild(kv(t.key('js.otperf.service'), [
+            badge(s.active ? t.key('js.otperf.running') : t.key('js.otperf.stopped'), s.active ? 'wl-b-ok' : 'wl-b-bad'), ' ',
             el('span', { className: 'wl-small text-muted', text: s.unit || '' })]));
 
         // What is loaded versus what the panel would write. Two numbers, and the gap between them
         // is the only thing on this card worth acting on.
-        const wparts = [badge(t('js.otperf.threads_count', { n: num(s.workers) }), s.workers > 0 ? 'wl-b-ok' : 'wl-b-muted')];
+        const wparts = [badge(t.key('js.otperf.threads_count', { n: num(s.workers) }), s.workers > 0 ? 'wl-b-ok' : 'wl-b-muted')];
         if (c.udp_workers && !j.workers_in_sync) {
             wparts.push(' ', el('span', { className: 'wl-small text-warning',
-                text: t('js.otperf.settings_say', { n: num(c.udp_workers) }) }));
+                text: t.key('js.otperf.settings_say', { n: num(c.udp_workers) }) }));
         }
         if (s.workers_consistent === false) {
             wparts.push(el('div', { className: 'wl-small text-warning',
-                text: t('js.otperf.configs_disagree') }));
+                text: t.key('js.otperf.configs_disagree') }));
         }
-        g.appendChild(kv(t('js.otperf.udp_workers'), wparts));
+        g.appendChild(kv(t.key('js.otperf.udp_workers'), wparts));
 
-        g.appendChild(kv(t('js.otperf.scheduling'), [
+        g.appendChild(kv(t.key('js.otperf.scheduling'), [
             el('span', { text: 'nice ' + (s.nice === undefined ? '—' : s.nice) }),
-            el('span', { className: 'nl-unit', text: t('js.otperf.weight', { w: s.cpu_weight || t('js.otperf.default') }) }),
-            el('div', { className: 'wl-small text-muted', text: (s.cpu_affinity ? t('js.otperf.pinned', { cores: s.cpu_affinity }) : t('js.otperf.every_core')) })]));
+            el('span', { className: 'nl-unit', text: t.key('js.otperf.weight', { w: s.cpu_weight || t.key('js.otperf.default') }) }),
+            el('div', { className: 'wl-small text-muted', text: (s.cpu_affinity ? t.key('js.otperf.pinned', { cores: s.cpu_affinity }) : t.key('js.otperf.every_core')) })]));
 
-        g.appendChild(kv(t('js.otperf.open_files'), [el('span', { text: num(s.limit_nofile) }),
+        g.appendChild(kv(t.key('js.otperf.open_files'), [el('span', { text: num(s.limit_nofile) }),
             el('div', { className: 'wl-small text-muted', text: 'LimitNOFILE' })]));
 
         // The panel's own file: present or not, and whether what it says is what is running.
-        const dparts = [badge(s.dropin_present ? t('js.otperf.written') : t('js.otperf.not_written'), s.dropin_present ? 'wl-b-ok' : 'wl-b-muted')];
+        const dparts = [badge(s.dropin_present ? t.key('js.otperf.written') : t.key('js.otperf.not_written'), s.dropin_present ? 'wl-b-ok' : 'wl-b-muted')];
         if (s.dropin_present && j.in_sync === false) {
-            dparts.push(' ', el('span', { className: 'wl-small text-warning', text: t('js.otperf.out_of_sync') }));
+            dparts.push(' ', el('span', { className: 'wl-small text-warning', text: t.key('js.otperf.out_of_sync') }));
         }
         dparts.push(el('div', { className: 'wl-small text-muted', text: s.dropin || '' }));
         if (s.dropin_writable === false) {
@@ -245,11 +244,11 @@
             // the helper reports `deferred`, the panel records what was asked for, and the janitor
             // writes the file within a minute. Saying it fails made a working feature look broken.
             dparts.push(el('div', { className: 'wl-small text-muted',
-                text: t('js.otperf.dropin_readonly') }));
+                text: t.key('js.otperf.dropin_readonly') }));
         }
         // Two columns: it is the only tile carrying a sentence, and five tiles in a three-column grid
         // otherwise leave a hole where the sixth would be.
-        const dropTile = kv(t('js.otperf.panel_dropin'), dparts);
+        const dropTile = kv(t.key('js.otperf.panel_dropin'), dparts);
         dropTile.classList.add('ot-dropin-tile');
         g.appendChild(dropTile);
 
@@ -259,9 +258,9 @@
         const m = measure(s) || lastGood;
         if (m) {
             const box = el('div', { className: 'wl-kv-v' });
-            box.appendChild(el('div', { className: 'wl-small text-muted',
-                text: t('js.otperf.over_last', { secs: Math.round(m.secs) })
-                      + (m.machine !== null ? t('js.otperf.whole_machine', { pct: m.machine.toFixed(0) }) : '') }));
+            box.appendChild(el('div', { className: 'wl-small text-muted' }, [   // pieces: each keeps its key (1.73.0)
+                t.key('js.otperf.over_last', { secs: Math.round(m.secs) }),
+                m.machine !== null ? t.key('js.otperf.whole_machine', { pct: m.machine.toFixed(0) }) : '']));
             m.threads.slice(0, 12).forEach(t => {
                 const row = el('div', { className: 'ot-thread' });
                 row.appendChild(el('span', { className: 'ot-thread-tid', text: String(t.tid) }));
@@ -278,19 +277,19 @@
             // auto-fill grid leaves a hole the size of the tall one; the bar chart wants the width
             // anyway, and the small facts want to sit together.
             const wrap = el('div', { className: 'wl-kv-item ot-load-tile' });
-            wrap.appendChild(el('div', { className: 'wl-kv-k', text: t('js.otperf.load_per_thread') }));
+            wrap.appendChild(el('div', { className: 'wl-kv-k', text: t.key('js.otperf.load_per_thread') }));
             wrap.appendChild(box);
             g.appendChild(wrap);
         } else if (s.threads) {
-            g.appendChild(kv(t('js.otperf.load_per_thread'), el('span', { className: 'wl-small text-muted',
-                text: t('js.otperf.measuring') })));
+            g.appendChild(kv(t.key('js.otperf.load_per_thread'), el('span', { className: 'wl-small text-muted',
+                text: t.key('js.otperf.measuring') })));
         }
 
         const notes = $('ot-notes');
         notes.textContent = '';
         if (m) {
             const v = verdict(m, s);
-            notes.appendChild(el('div', { className: 'nl-note ' + (v.level === 'warn' ? 'nl-note-warn' : 'nl-note-info'), text: v.text }));
+            notes.appendChild(el('div', { className: 'nl-note ' + (v.level === 'warn' ? 'nl-note-warn' : 'nl-note-info') }, v.text));
         }
         (j.advice || []).forEach(a => {
             notes.appendChild(el('div', {
@@ -303,28 +302,28 @@
     // ── the operations ───────────────────────────────────────────────────────
     const COPY = {
         apply: {
-            title: t('js.otperf.apply_title'),
-            ok: t('js.otperf.apply_ok'), okClass: 'btn-outline-success',
-            text: () => t('js.otperf.apply_text'),
-            undo: () => t('js.otperf.apply_undo'),
+            title: t.key('js.otperf.apply_title'),
+            ok: t.key('js.otperf.apply_ok'), okClass: 'btn-outline-success',
+            text: () => t.key('js.otperf.apply_text'),
+            undo: () => t.key('js.otperf.apply_undo'),
         },
         workers: {
-            title: t('js.otperf.workers_title'),
-            ok: t('js.otperf.workers_ok'), okClass: 'btn-outline-warning',
-            text: () => t('js.otperf.workers_text'),
-            undo: () => t('js.otperf.workers_undo'),
+            title: t.key('js.otperf.workers_title'),
+            ok: t.key('js.otperf.workers_ok'), okClass: 'btn-outline-warning',
+            text: () => t.key('js.otperf.workers_text'),
+            undo: () => t.key('js.otperf.workers_undo'),
         },
         reset: {
-            title: t('js.otperf.reset_title'),
-            ok: t('js.otperf.reset_ok'), okClass: 'btn-outline-secondary',
-            text: () => t('js.otperf.reset_text'),
-            undo: () => t('js.otperf.reset_undo'),
+            title: t.key('js.otperf.reset_title'),
+            ok: t.key('js.otperf.reset_ok'), okClass: 'btn-outline-secondary',
+            text: () => t.key('js.otperf.reset_text'),
+            undo: () => t.key('js.otperf.reset_undo'),
         },
         restart: {
-            title: t('js.otperf.restart_title'),
-            ok: t('js.otperf.restart_ok'), okClass: 'btn-outline-danger',
-            text: () => t('js.otperf.restart_text'),
-            undo: () => t('js.otperf.restart_undo'),
+            title: t.key('js.otperf.restart_title'),
+            ok: t.key('js.otperf.restart_ok'), okClass: 'btn-outline-danger',
+            text: () => t.key('js.otperf.restart_text'),
+            undo: () => t.key('js.otperf.restart_undo'),
         },
     };
 
@@ -362,7 +361,7 @@
         const btn = $('ot-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.otperf.working');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.otperf.working');
         alert.textContent = '';
         const body = { op: op, password: $('ot-confirm-password').value };
         if (op === 'workers') body.workers = parseInt($('ot-workers-input').value, 10) || 4;
@@ -370,17 +369,17 @@
             const r = await apiCall('admin/ot_apply', 'POST', body);
             if (r.success) {
                 bootstrap.Modal.getInstance($('otConfirmModal')).hide();
-                showToast(r.message || t('js.otperf.done'), 'success');
+                showToast(r.message || t.key('js.otperf.done'), 'success');
                 painted = 0;
                 load(true);
             } else {
                 alert.textContent = '';
-                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t('js.otperf.failed') }));
+                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t.key('js.otperf.failed') }));
                 if (r.output) alert.appendChild(el('pre', { className: 'nl-preview mt-1', text: String(r.output).slice(0, 600) }));
             }
         } catch (err) {
             alert.textContent = '';
-            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.otperf.network_error') }));
+            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.otperf.network_error') }));
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -390,10 +389,10 @@
     async function preview() {
         try {
             const r = await apiCall('admin/ot_apply', 'POST', { op: 'preview' });
-            $('ot-preview-title').textContent = r.file || t('js.otperf.preview_title');
-            $('ot-preview-body').textContent = r.content || r.error || t('js.otperf.nothing');
+            $('ot-preview-title').textContent = r.file || t.key('js.otperf.preview_title');
+            $('ot-preview-body').textContent = r.content || r.error || t.key('js.otperf.nothing');
             bootstrap.Modal.getOrCreateInstance($('otPreviewModal')).show();
-        } catch (e) { showToast(t('js.otperf.network_error_toast'), 'error'); }
+        } catch (e) { showToast(t.key('js.otperf.network_error_toast'), 'error'); }
     }
 
     function init() {

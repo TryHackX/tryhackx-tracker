@@ -4,6 +4,625 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.73.0] — 2026-10-05
+
+The owner's last list before the final audit. Private messages get an **Archive** (what "hide" did, now a place
+you can open and bring things back from) and a **Trash** that keeps a deleted conversation restorable for a set
+number of days, with a confirmation before anything goes and an **Undo** after every move. The live language switch
+swaps every word on every page and in every state — tooltips, labels, toasts, dialogs, the panel — proven by a
+check over 74 states in both directions — and the words that had no Polish at all (the permissions' descriptions,
+the traffic card's advice, the time-zone groups) have it now. Messages, friends and notifications tell time in the
+reader's zone. No badge, button or control in any table is cut any more (4 036 cuts in 68
+places, Polish's longer words first). Older bugs found while documenting are fixed: unsubscribing stopped password
+resets, a deleted account left its 2FA secret behind, a submission waiting for a person's review was already
+served by the tracker. The Info and Terms pages, the home page's features and every document are rewritten against
+the code — nothing promised that the code does not do — and the footer states the project's licence: MIT.
+Schema 91 (90: the messages' trash; 91: orphans cleared once, the transparency switch's default).
+
+### Added — messages get an Archive and a Trash, a question before and an Undo after
+
+* **The owner** (Polish, from his note): "the messages could be improved, e.g. a message bin. I clicked … pm-hide and
+  the messages were gone, but in the members list I can press Write and see them … hiding needs somebody to write to
+  us to bring them back, or some global setting … a confirmation is missing too, a message disappears at once and I
+  cannot restore it — and after confirming, 3–5 seconds to restore it".
+* **Three places per side of a conversation**, as tabs above the list on the account page's Messages tab —
+  `Inbox · Archive (n) · Trash (n)`, an icon and the word each, the number of conversations beside Archive and Trash
+  and the unread pill (the tab bar's own) beside the two places the badge counts; walked with the arrow keys; they
+  wrap on a phone. Each place lists, previews, counts and searches ITS part of a conversation only.
+* **The Archive** is `u_*_hidden` — every conversation somebody hid until today is in it, nothing moved. A row's (and
+  the head's) archive box puts a conversation there; "Move to inbox" — on the Archive's rows and on the conversation's
+  bar — brings it back. Whether a NEW message brings an archived conversation back to the Inbox is a setting,
+  **pm_archive_returns** (Settings → People: messages, friends, directory; on by default = what hiding always did).
+  Off, the conversation stays in the Archive, marked unread there, and it IS counted on the badge: the Archive tab's
+  pill says where the number is, and opening it there reads it. Writing in an archived conversation always brings it
+  back for the writer.
+* **The Trash** (the owner's "kosz"): Delete moves what a member is shown of a conversation into their Trash — up to
+  the last message the page had (`u_*_trash_upto`) and when (`u_*_trashed_at`). Restore brings all of it back, to the
+  Inbox or to the Archive, wherever the conversation was; **Delete forever** and **Empty the Trash** delete for good at
+  once — v70's watermark over it; the janitor does the same for whatever has been in a Trash **pm_trash_days** (30 as
+  shipped, 1–365; **0 = no Trash**: Delete deletes at once, as it did from 1.64.0, and the Trash tab goes), in bounded
+  batches — per side one statement a batch, oldest first by its own key — and says so in its journal
+  (`[pm] trash purged=N`). Deleting is always FOR YOU: the other person's copy never moves, and no row leaves
+  `user_messages`.
+* **A new message in a trashed conversation**: the conversation is back in the Inbox showing only what came after the
+  Trash's edge; the older part stays in the Trash until it is restored or runs out ("Earlier messages of this
+  conversation are in your Trash (n) — Restore them"). A conversation somebody trashed or deleted whole comes back as a
+  new one in the Inbox — never into the Archive, whatever pm_archive_returns says.
+* **Opened from anywhere** — the members list's or a profile's Message, an address, a notification — a conversation
+  in the Archive or the Trash says so, in a bar under its head, with its way back: "This conversation is in your
+  Archive — Move to inbox"; "This conversation is in your Trash — it will be deleted for good on <date> — Restore ·
+  Delete forever", showing what lies there (dashed), with the composer: a message written there starts the
+  conversation again after the Trash.
+* **A question before, an Undo after.** Delete asks first, in place — the site's own question (the shoutbox's, the
+  bin's since 1.64.0), never `window.confirm` — "Delete it? It goes to the Trash."; Delete forever and Empty the Trash
+  ask with "This cannot be undone" (and Delete does too where there is no Trash). After Archive, Move to inbox,
+  Delete and Restore a **toast** at the foot of the window says what happened, with **Undo**, for five seconds —
+  held while the pointer rests on it or the reader's focus is in it; the keyboard's focus lands on Undo when the row
+  that was pressed has gone; Esc dismisses it; three at most, the newest lowest. The Undo is the explicit opposite
+  operation, and one that comes too late — the Trash emptied, restored or grown since — changes nothing and says so.
+  The toast is the site's (`siteToast()` in assets/js/app.js) for any page that wants one.
+* **Icons and words**: the archive box, the inbox, the bin (filled for Delete forever) and the counter-clockwise arrow
+  for Restore — through the icon map, so Font Awesome and its Pro twins draw them —, every button named for a screen
+  reader and explained in the site's tooltip (no browser `title`). They follow the live language switch — the old
+  head's tooltip did not (see Fixed).
+
+### Changed
+
+* **The unread counters count the Archive** (`pmUnreadCount`, `pmUnreadCountFriends`): above the member's floor —
+  neither deleted nor in the Trash — in the Inbox or the Archive. The Trash is never counted. Until 1.72.x a hidden
+  conversation could not hold anything unread (every message un-hid it); with pm_archive_returns off it can, and a
+  message nobody is told about is the one they miss.
+* **Every read path has the Trash's twin of the watermark** — the open conversation, its poll, the three lists and
+  both previews, the deep search, both counters, the tabs' counts — and a read mark is written only for the part on
+  the screen: opening a conversation never says "read" of a message in the reader's Trash.
+* **The inbox's stamp** (what the list is watched by) covers every conversation of the reader's, archived too.
+* **The endpoint** (`api/user_messages.php`): `view=inbox|archive|trash`; `with=…&part=trash`; the explicit, idempotent
+  operations `archive`, `unarchive`, `trash {upto}`, `restore {to, from}`, `purge`, `empty_trash` — asking for what
+  already is answers `changed: false`, never an error; every answer carries where the conversation is now, the three
+  places' counts and the badge's number. `hide` and `delete`, the old names, mean `archive` and `trash`. None of it is
+  written to the audit log — it is a member's own mailbox, and the panel reads that log; the panel has no view of
+  anybody's Archive or Trash.
+* **Schema 90**: `message_threads`.u_low_/u_high_trash_upto (0 = an empty trash), u_low_/u_high_trashed_at (NULL exactly
+  when it is empty) + two keys for the janitor; the settings pm_archive_returns (1) and pm_trash_days (30). One ALTER
+  of only what is missing; every existing row an empty Trash.
+
+### Fixed
+
+* **A conversation's head followed not the live language switch**: its tooltips were written once, in the language
+  the page loaded in (people.js had no `langswap` listener). Every word the messages' new parts write keeps its
+  dictionary key and is said again on a switch; the list is redrawn from its last answer. (The composer and the older
+  lines of a conversation are part B's — see its notes.)
+* The messages' own tests deleted their accounts with a bare `DELETE FROM users` and left each one's group
+  membership behind (tests/people_test.php five a run, message_report_test.py, pulse_test.py, msgreport_check.js) —
+  `userDeleteCascade()` now, checked.
+
+### Tests
+
+* `tests/pm_trash_test.php` (new, 105 checks): the upgrade walked on a v70-shaped table (one ALTER, an empty Trash,
+  a second run nothing); the settings everywhere a setting has to be; then every read path — the thread, the poll,
+  the three lists and their previews and unread numbers, the deep search, both counters, the tabs' counts, the place —
+  for BOTH sides after each move: archive (and its switch both ways, the writer's return), trash (the edge, the moment,
+  idempotent), a new message after it (two places at once), trashed from the Archive then a message (back in the
+  Inbox), restore and the exact Undo of a Trash (a stale Undo is a no-op), purge, pm_trash_days 0, empty the Trash;
+  the janitor with a clock passed in (30 days, 29 days, bounded batches, days 0); read marks only for what is shown;
+  a reported message both sides deleted for good still readable to the panel; no panel file touching the columns; no
+  audit line; account deletion; every key the script and the toast use in the public bundle.
+* `tests/pm_delete_test.py` (34 checks): Delete is the Trash over HTTP — A's Trash lists and opens it, B's copy whole,
+  a new message shows alone with the five waiting in the Trash, the deep search per place, a stale Undo, purge (the
+  watermark), `delete` = `trash`, `empty_trash`, the CSRF token, an unknown operation refused.
+* `tests/people_test.php`: the stamp now counts an archived conversation; its accounts leave nothing behind.
+* `scratchpad/shots/pm_trash_check.js` (new, in the sweep after people_check; it reads as an account of its own): the
+  tabs and counts, the rows' actions and tooltips, Archive with its toast and Undo within 5 s, the toast going by
+  itself and staying under the pointer, by the keyboard (focus on Undo, Enter, the focus back on the row), toasts
+  stacking (three at most, the same key replacing), Delete asked (No changes nothing) then Undo, Restore and its Undo, Delete
+  forever and Empty the Trash asked "cannot be undone", the bar from the members list, from a profile's Message and
+  from the Trash, writing in a trashed conversation and "Restore them", the live switch to Polish and back (tabs,
+  rows, head, bar, an open toast), pm_archive_returns 0 and pm_trash_days 0, and a phone at 360 and 390 px (nothing
+  wider than the screen, the actions drawn, the toast inside) — each step read back from the database; screenshots.
+* `people_check.js` (Delete moves one side's Trash edge), `csrf_everywhere_check.js` (archive, unarchive, trash,
+  restore, purge, empty_trash through their buttons, each with the page's token), `icons_align_check.js` (a
+  conversation of smokeuser's with an older part in the Trash: the three tabs, the head's icons, the bar's button,
+  the Trash's rows' actions), `icons_test.php`, `avatar_names_test.py` (the new keys are a message id, places, dates
+  and counts — still no account id), `sql_safety_test.php` (the side prefix reviewed).
+
+### Changed — the live language switch swaps everything, on every page
+
+* **The owner**: "some elements in the messages section do not change language dynamically when the switcher is
+  clicked — e.g. the tooltip on the archive button … check the WHOLE site" (after a reload it was fine). Measured
+  first, by a new check that walks every page type and state — as a guest, a member and in the panel, both
+  directions, open-then-swap and swap-then-open, desktop and a 390 px phone — and reads every word back (text,
+  title, aria-label, placeholder, alt, label, data-tip and the other data-* words, option labels, document.title,
+  the tooltip bubble while it is shown, toasts): 880 distinct words stayed in the old language in 282 desktop runs,
+  in 58 areas of the dictionary; every state with words a script draws had some. Besides, the search page asked the
+  server again on every switch (1–4 requests) and threw away an open description editor with the words typed in
+  it, the settings page asked for its search catalogue again, the panel's hidden 404 fell back to a reload, and the
+  emoji picker and the "Are you sure?" question closed.
+* **What a script writes into the page keeps its key there** (assets/js/i18n.js): t() stays a plain string — for
+  comparisons, switches, payloads — and where a script writes a word into the page it writes `t.key(…)`, a word that
+  leaves its key on the element: through textContent, title, placeholder, setAttribute() (data-tip, aria-label…) or
+  append() and its kin (data-i18n, data-i18n-a, data-i18n-p on the element, so a clone or a moved node keeps it), and
+  in markup through the templates' escapers (t.html / t.ah). The switch notes which keyed words still say what the
+  old dictionary says, loads the new bundle and says them again — in place: nothing is redrawn, nothing open closes,
+  nothing typed is touched, and the switch is one request. Every script's writes were converted (some 3 200), and
+  where words were GLUED into one string the lines now hand over pieces (pagers, counters, "Description by …", the
+  stars line, the coverage card, the backups card, the DB memory card, toasts…); a sentence with people in it
+  (":reporter reported :reported") keeps its key round its people; a word kept since the page loaded (the password
+  checklist, the stats loading texts) is never stale.
+* **Words the page wrote from stored values or English helpers** are words of the dictionary now: the panel's Users
+  table said "ACTIVE" / "BANNED" on a Polish page; the whitelist's add results, its bans' sources and its source
+  names, the index detail's metadata state, the sign-in form's "Stay signed in for" choices, and on Settings the
+  metadata fetch order's modes, shares and "left out" list, the timeline's range buttons, the backup profiles and
+  the schedules' day names were English on every page. The check now flags a word of the other language standing
+  in a label's place (a badge, a status, a heading cell, a button, an option), whatever its case.
+* **The walk rewrites only what the server wrote** (assets/js/lang-swap.js): the page marks what the server sent
+  before its first script runs (LangSwap.mark()), and a node a script made — or wrote into since — takes no part in
+  the walk. That ends "Loading…" written back over a script's rows, a torrent's name turned into "Details" (the
+  Info panel's title) and the reports' column headers written over the appeals'. Templates are walked too, and a
+  copy of one follows its template (the description editor, the message composer). Attributes the walk never
+  swapped are swapped (data-empty-text, data-snd-label, data-ok-text, optgroup labels…), and an error page swaps
+  like any other (the panel's hidden 404). A button a script borrows for a moment — "Working…", a bulk scrape's
+  count in its label — and puts back from a copy is the server's again (after any bulk scrape, the Refresh S/L
+  label used to stay in the language it was in), and one borrowed while the language changes comes back in the
+  new language.
+* **No word is frozen into a page any more**: Settings, the admin sign-in and the unsubscribe page read theirs from
+  the page's dictionary; a server's own sentence a script shows is found back by its key (the sign-in's answers,
+  why you may not rate, where an importer's link came from), and the anti-spam layer's countdown speaks the
+  dictionary's sentence by the key its answer names. The reCAPTCHA notice and the whitelist form's counter, English
+  on every page, are translated.
+* **What redrew itself, or asked the server again, no longer does**: the search page, its Info panel and comments,
+  the favourites / likes / descriptions lists, the messages' rows; Settings re-indexes its search from the
+  catalogue it already has. The "Are you sure?" question stays open, its button waiting beside it; the emoji picker
+  stays open on its page with the search typed in it (the one request a switch may add: an open picker's emoji
+  names, which exist only in a file per language); the switcher's own press no longer closes a popover; the
+  tooltip bubble showing at that moment reads its button again (and goes, when its button was drawn anew). The
+  "who has this" window still draws itself again from the rows it holds — its counts are written in the page
+  language's number format.
+* **The favourites star says when it cannot**: a full list ("Your favourites list is full (N)…") or a failure is said
+  in the site's toast — favourites.js called a showToastPub that never existed, and said nothing.
+* **Found on the way**: the panel's IP lists "replace from a file" called its file's text `t` and threw on every
+  word it tried to say (before 1.73.0 too).
+* **The check**: scratchpad/shots/langswap_all_check.js (+ _states.js, _fixtures.js), in browsersweep.sh — 74 states,
+  0 words left in the old language (both directions, both orders, desktop and phone); tests/lang_test.php pins the
+  wiring (t() a plain string, t.key() never compared or glued, the escapers, the el() helpers, the marks, no frozen
+  inline word, a borrowed button given back).
+
+### Changed — the panel's words that were English in every language are translated
+
+* **What part B's live-switch check found English on the Polish page even after a full reload** — the words had no
+  Polish at all: the 75 permission descriptions (the Groups matrix's tooltips, the group editor's boxes, the
+  Recommended window, Settings' shoutbox / emote / comment matrices), the Traffic card's recommendation under the
+  slider, the time-zone selects' region groups, the page editor's page names, the home page's live-sync beacon.
+* **Permissions** (`includes/users.php`): every id has its words in the dictionary (`perm.<id>`,
+  `tools/lang_src.d/permissions.py`, written for the operator ticking the boxes), and `userPermissionList()` answers
+  in the reader's language — the ids, their order and their number never change; `userPermissionList(true)` is the
+  English the registry keeps (a shell tool). The panel says the words by the id (`t.key('perm.' + id)`; the Users and
+  Settings pages carry `perm.`), so they follow the live language switch; the editor's box no longer glues them to
+  the id. The group editor's "Start from" presets (Moderator, Content reviewer, Whitelist curator, Read-only
+  auditor…) are named in the reader's language too. `panel.messages.view` / `.handle` were the only panel
+  permissions whose words lacked the "PANEL — " mark: they have it. `tests/groups_matrix_test.php` holds the
+  dictionary's English to the registry's word for word, both ways.
+* **Traffic** (`includes/netlimit.php`): the paragraph under the slider is its sentences now —
+  `netlimitRecommendParts()`, each a dictionary key and its numbers — said in the reader's language with the
+  reader's numbers (40,000 / 40 000), and admin/net_status answers the parts beside the text, so the card writes
+  every sentence as a word that keeps its key (the live switch; the anti-spam layer's way). The load study's
+  reason for having no answer the same way; the card's three failures through the dictionary. "Last 1 day" is
+  "Last day". The OpenTracker card beside it said its advice (workers against cores, the kernel's receive-buffer
+  cap and the packets it discarded, the two config files disagreeing, foreign drop-ins) and its failures in English
+  while the DB memory and sysctl cards' were the dictionary's: now they are too.
+* **Time zones** (`includes/db_clock.php` `tzRegionLabel()`): the region groups of the four zone selects (the account
+  page; Settings → Site, the schedule's zone, the backups' zone) are words — Europa, Ameryka, Ocean Indyjski, Inne…;
+  the zone names stay IANA's ids, which are what is stored.
+* **Pages** (`includes/pagecontent.php`, `includes/homelayout.php`): Settings → Site pages and the page editor name the
+  two pages by their own headings (Regulamin, Informacje o trackerze), a home section "Strona główna — …"; Settings →
+  Home page layout names its sections and says what each is in the reader's language, and the page editor's
+  placeholder buttons say what each {{placeholder}} puts on the page. The audit log keeps English, whoever reads it
+  (`pageContentLabel(…, true)`).
+* **The home page's live-sync beacon** (`includes/homeblocks.php`): its tooltip is the dictionary's — the same words
+  app.js writes when it takes the title over, so it no longer changes language halfway.
+
+### Fixed — `traffic_cards_check.js` passed only on the day production's rows were taken
+
+* It loads production's real `index_polls` (2026-09-04 → 09-30) and checks every range; from 2026-10-01 the 6 h range
+  held none of them, the coverage chart was never drawn and the check timed out waiting for it. The rows now move
+  by one constant — their spacing (the passes, the short downloads, the row with no count) exactly as recorded —
+  and the times the assertions name move with them. The constant is a whole number of six hours of the local clock:
+  the chart's buckets of 1, 2 and 3 hours start on the local clock's whole hours, and a shift that put the newest
+  row five minutes before the run regrouped the rows (the 2-hour bucket of the row with no count lost its bar). So
+  the newest row stands within the last six hours — as on 2026-09-30, when it stood an hour and a half before the
+  run — and every bucket holds the rows it held then, across a clock change too.
+
+### Fixed — nothing in a table is cut any more: badges, buttons, icons, in both languages
+
+* **The owner's screenshot**: the Reports page's Archive in Polish, about 1660px wide — the STATUS column's red
+  "Zablokowane" wider than its cell, the cell's own "…" standing in the badge's right corner ("Sprawdzone" fitted;
+  the English "Blocked" is short enough never to show it). "Nie wiem czy w innych tabelkach cos podobnego sie nie
+  dzieje" — it did, in most of them.
+* **Measured everywhere first** (`scratchpad/shots/table_fit_check.js`, new, in the sweep): every table of the panel
+  — the Reports' eight tabs (the four card tabs too), Whitelist's five views, Index, Users (users, groups and their
+  matrix, the sends), Audit, Backups, Traffic's tables and tiles, Settings' tables — and of the public site — the
+  search results, the account's favourites, uploads, likes, descriptions, lists, devices, notifications, people and
+  members, the profile, transparency, the status page's two answers, stats, the API guide —, in English (an en-US
+  browser) and Polish (pl-PL), at 1920, 1660, 1440 and 1280 and on a 390px phone, with Bootstrap Icons and Font Awesome
+  6, filled with rows of every state a table shows (the longest word of each language: "Zaakceptowane", "Wstrzymaj do
+  przeglądu", "POBIERANIE", "Opis przejrzany i opublikowany"…) and the longest values a column gets (32-character
+  names, IPv6 addresses, five-digit swarms, a 32-character audit action). Every cell asks: is each badge, button,
+  icon, checkbox, select and input inside the box the cell shows it in (±0.5px), with no ellipsis on it; does a
+  select show its chosen option whole; does text that is cut end in "…" with its full value in a title? Before the
+  fixes: 844 views, 4 036 hits in 68 places — screenshots `scratchpad/shots1730/table-before-*.png`.
+* **One rule for a cell of badges** (`admin.css`, `td.col-badge` — the class the badge columns' headers already had,
+  now on their cells across the panel: Reports' status and type, Whitelist's source and metadata, the banned list's
+  source, an API key's scope, an API ban's reason, Index's metadata, Users' status and groups, Groups' default,
+  Backups' integrity, Audit's action): never ellipsised; its badges wrap between them and a badge of several words
+  between its words, never inside one; the column is as wide as its longest word in the longer language, measured,
+  and takes the width from the columns that may ellipsise (the tables' floors raised where those were already at
+  their headers' minimum). The status column of the Reports and the appeals: 118px for "Zaakceptowane" (97px) —
+  the reports' floor 1224, the appeals' 1244 (their "DESCRIPTION" header was cut too).
+* **A badge after a name** became the line under it: the partner a report came through ("via …", the Whitelist's own
+  line since 1.63.1, `.cell-sub`, ellipsised with its full text in its title) — the label badge after the name stood
+  89–379px under the name cell's "…"; Users' name row (the name ellipsises, the owner's shield never) with the bridges
+  on a line under it; an upload's two badges go under its name when they do not fit beside it (they ran up to 94px
+  over the row's facts).
+* **Widths that were measured for a Polish browser** hold an en-US one: "09/30/2026, 03:03 PM" (130px) in Whitelist's,
+  Users' and the search results' date columns; five-digit swarms ("23456 / 12345") in Whitelist, Index, the search
+  results and the likes; Whitelist's metadata column holds "POBIERANIE" (its wide set now from 1910px, where the name
+  keeps 150px); Users has a colgroup (nine equal shares before); an API key's scope a column of its own.
+* **Text cut with nothing to read it in** has its title: Audit's actor and address, Backups' profile and contents,
+  Users' address (the cell's title was the verification state), Groups' name, slug and permissions, a send's subject,
+  an API ban's "lifted (by …)"; Index's metadata state is the Whitelist's badge (its classes existed only in the public
+  stylesheet: plain words); on a phone the tracker week's rule selects keep their width (they were 50px), a reported
+  comment's head breaks a 40-character hash, a member's name in People breaks instead of an ellipsis without a title.
+* **After**: 0 hits in all 840 views, both libraries; the same 77 places before and after
+  (`scratchpad/shots1730/table-before-*.png` / `table-after-*.png`, the before ones taken with the last release's
+  stylesheets and panel scripts served in place of the tree's — the check's TFC_OVERLAY — which gave the BEFORE run's
+  hits back one for one), the owner's own view among them (`table-*-owner-reports-archive-pl-1660.png`).
+
+### Tests — tables that fit
+
+* `scratchpad/shots/table_fit_check.js` (in the sweep, after panel_fixes_check): the views above; the fixtures —
+  reports, archives, appeals and their archive of every state, API keys of every scope, whitelist rows of every
+  source and metadata state, banned hashes of every source, API bans of every reason, observed hashes, members with
+  every group, warnings and a bridge, a group, audit lines of every area, failed, with the longest action, reported
+  messages, comments, descriptions and shouts open and closed, sends, address lists, CSP reports, federation peers
+  and their review queue, sounds used as every default, emotes waiting and approved, a member's favourites, likes,
+  descriptions, proposals, uploads, lists, devices, notifications and a friend request — and what a page reads from
+  the machine (the backups' archives, the database-memory card, a third language, the icon packages, the stats'
+  HTTP errors) answered in the page, never on the server; every table, row, counter and state file put back exactly
+  (dumped before, loaded after). TFC_ONLY / TFC_LANGS / TFC_WIDTHS / TFC_LIBS / TFC_LOCALE / TFC_DUMP /
+  TFC_SHOTS / TFC_PLACES / TFC_OVERLAY.
+* Run with it: admin_access_test, authbridge, content_reports, emoji, groups_matrix, icons, partner_api, addressable,
+  antispam, audit_fixes, index_polls, lists, profile_bio, schedule, shout_emotes (0 failed), lang_test;
+  panel_fixes_check (its parts 1–3), settings_groups_check, settings_hit_check, account_width_check, reports_check,
+  msgreport_check, polish_check, icons_align_check on the pages changed.
+
+### Fixed — a member could switch off the password reset and lock themselves out
+
+* **What happened**: every account mail asked the address's preferences, the password reset included. Switching
+  off *Account mail* on the account page, or the master switch of the unsubscribe page that EVERY mail's footer
+  leads to (`unsubscribed_emails`, which `isUnsubscribed()` reads for every kind), silently stopped the reset, every
+  step of an e-mail change and its confirmations — only the verification mail still went out. Somebody who had done
+  that and then forgot their password could not get back in.
+* **Transactional mail is always sent and carries no unsubscribe**: the password reset (now `userResetSend()`, the
+  endpoint's code moved where it can be tested), the four mails of an e-mail change and the verification mail never
+  ask the preferences, and carry neither the footer's preferences link nor a `List-Unsubscribe` header — there is
+  nothing in them to unsubscribe from (`userNotifyMail(…, ['transactional' => true])`).
+* **The switch governs what it says, in its own words**: *Account mail* is "Your groups — access granted, access
+  about to end — and e-mail copies of the operator's notices. Password resets, e-mail address changes and their
+  confirmations always reach you, whatever you choose here." (it said "expiry warnings, security notices and
+  anything else about this account"). Those mails — group granted from the panel or a shop, the expiry warning,
+  the copy of an operator's notice — still ask it and still carry the header.
+* **A mail client's one-click Unsubscribe works**: RFC 8058 clients POST `List-Unsubscribe=One-Click` to the
+  `List-Unsubscribe` address — the unsubscribe page — which read no POST: the client told the reader
+  "unsubscribed" and nothing was recorded. The page now unsubscribes the address from everything that may be
+  switched off (`unsubscribeAll()`, shared with `api/unsubscribe.php`); the transactional mail is not among it.
+
+### Fixed — deleting an account left its second factor behind (schema 91)
+
+* `userDeleteCascade()` never touched `user_twofa`: a deleted account's TOTP secret and recovery hashes stayed. Every
+  account column in the schema was checked against the cascade: it also missed the "…is typing" rows and a bulk mail
+  still queued for the account (the janitor would have mailed somebody whose account was gone — now skipped, "account
+  deleted", the way a cancelled batch is). And its votes went but the totals stored on the catalogue rows — what a
+  search listing shows beside a torrent — went on counting them until somebody voted on that hash again: the hashes
+  it voted on are counted again (`repRecount()`, in the site's mode). Kept on purpose, and said so in the code: the
+  audit log, a partner shop's order rows (the ledger and its replay guard), a moderator's stamps on others' shouts and
+  an emote's uploader (raw ids), the address-keyed mail preferences.
+* **Schema 91** removes, once, what the cascade left behind before it knew those tables
+  (`schemaAccountOrphans()`): second-factor and typing rows of accounts that no longer exist, a queued mail to one
+  (skipped), and a gone account's votes from before 1.42.0 put `hash_votes` in the cascade, with the totals of
+  exactly the hashes they touched counted again. A live account's rows are never touched.
+
+### Fixed — a partner's held submission was served while it waited for a person
+
+* 1.42.0's review queue promises that a partner key which does not publish directly has nothing served until somebody
+  approves it, and the accesslist generator honours that (`review_status IN ('none','approved')`). But the add path
+  in whitelist mode APPENDS what it added to the live file — and it appended a held row too, so a waiting submission
+  was served from the second it arrived until the next full regeneration. It appends only what the generator would
+  write now. `tests/partner_api_test.php` proved the generator; it now proves the add path too, on a real file.
+* **A registration proving itself is served while it does — on purpose, and now consistently.** Its proof is a peer
+  announcing to THIS tracker, and a tracker in whitelist mode refuses the announces of a hash its list does not
+  carry, so a probe whose hash is not served can never pass. The add path always served it; the generator dropped
+  `probing` rows, so any full regeneration in the probe's minutes (another probe passing, a ban) withdrew it and the
+  probe then failed for a reason that was not the torrent's; and a failed probe stayed served until some unrelated
+  regeneration came along. The generator keeps `probing` rows, a failure is withdrawn at once, and the panel's words
+  say what happens ("to stay on the tracker… served while it tries… leaves the list the moment it fails"); Info says
+  it in one sentence where the feature is on.
+
+### Fixed — the whitelist hours in English on the Polish page
+
+The whitelist page printed `scheduleDescribe()` — "Mon–Fri 22:00–06:00 (next day), … (Europe/Warsaw)" — and PHP's
+English day ("next change at 02:30 Tue") on its Polish page; the panel's Whitelist card and Settings did the same.
+One function, `scheduleDescribeText()`, now says the week in the reader's language for every page and the panel
+("pon–pt 22:00–06:00 następnego dnia, sob–niedz cały dzień, czas Europe/Warsaw"), the next change is "wt 02:30",
+and Info's and the home page's hours are the same function (part C's words, moved where the schedule lives). The
+CLI and the API's `describe` keep their English.
+
+### Fixed — the partner API: an `all` key with a report field refused every registration, and the guide said the wrong thing
+
+* `v1/whitelist/submit` read the key's required fields raw. An `all` key's list holds both halves — `reporter`,
+  `statement`… beside `name`, `url` — and a registration can never carry `reporter`, so every item came back
+  `invalid`, `missing_reporter`. It reads them through the registrations' vocabulary, as the report endpoint does its own.
+* **The guide's address says each chapter's own answer**: `approve=` what happens to a registration, `block=` what
+  happens to a report. A new abuse key's address carried its creator's *approval* answer — a key that holds reports
+  for review was handed a guide saying they block on arrival — and an `all` key's reporting chapter had no answer of
+  its own. The key list, the new-key dialog and the editor's live preview all write both now; a key that sends
+  nothing (users, shop, federation) carries neither.
+
+### Fixed — retention that never ran
+
+The janitor runs one retention step in every tracker mode (`includes/retention.php`): API bans 90 days after they
+ran out (pruned only in whitelist mode, by one request in fifty), the sign-in bridge's spent and expired tickets
+(its comment said the janitor pruned them; nothing called it but the next ticket), the panel's failed sign-ins
+older than the lockout window for every address (only the failing address's own list was ever trimmed), and the
+forms' limits older than an hour for every action (an action trimmed only its own keys, when it was next called).
+Bounded; the two files under their own locks, rewritten only when something went. So what Info says — "for as long
+as the limit lasts" — is true without anybody coming back.
+
+### Fixed — the Transparency page's switch had no default (schema 91)
+
+`transparency_enabled` was written by the installer but not by the migration. Without the row the menu link and the
+page's text read it as on and the page's data as off (403): a link to a page that could not load its table, on
+every install whose settings came from the migration. It is a default row now ('1'), never overwriting a stored one.
+
+### Fixed — message times said the database's clock, not the reader's
+
+The messages' times — a conversation's lines (also as they arrive through the poll), the inbox's and the Archive's
+rows, the Trash's rows and its "deleted for good on" date — were the database session's wall clock, cut to sixteen
+characters by the page; so were the friends' and blocks' dates and the account page's notifications (read by the
+browser as if they were its own zone). The shoutbox has said its times in the reader's zone since 1.62.0; now these do
+too: every moment travels as an instant (`UNIX_TIMESTAMP()` of the column, from the database, which knows the zone it
+wrote it in) and the endpoints send it as 'Y-m-d H:i' on the reader's clock — the zone chosen on the account page,
+the site's otherwise (`pmReaderTime()`, `userDisplayTimezone()`). Digits only, so the live language switch has nothing
+to say again in them; the raw fields stay for anything that reads them. Found on the way: `people_check.js`'s
+"a line after the deletion" was written with the mysql client's clock (`DEFAULT`, `NOW()`) — two hours ahead of the
+app locally; it is written on the app's clock now. Tests: `tests/people_test.php` (the instants of a message, an
+inbox row and the Trash; a reader in Tokyo, one in the site's Warsaw; the endpoints and the page),
+`people_check.js` (a peer reading in Tokyo: the message and its inbox row in English and Polish, a notification);
+`pm_trash_check.js`, `pulse_check.js`, `msgreport_check.js` and `langswap_all_check.js` on the messages' states.
+Not changed, the same class elsewhere: the account page's "Member since" and the bridge's "linked since" still print
+the database session's clock (server-side, templates/pages/account.php).
+
+### Documentation
+
+`tools/opentracker/README.md` names `WANT_SPOT_WOODPECKER` among the flags deliberately left out — the first
+install's recipe, and the main README until part C's rewrite, listed it. Checked against the shipped binaries
+rather than the notes: the word `woodpeckers` is in them only because upstream's `/stats` mode table carries it
+whatever the flags; the flag's code — a `stats_issue_event(EVENT_WOODPECKER, …)` call and its case — is not (in both
+builds no call passes that event, and the event switch sends it to the no-op case).
+
+### Tests
+
+New: `tests/mail_test.php` (50 checks — PHP's `mail.log` records every mail the real `sendEmail()` builds: the
+transactional mails to an address unsubscribed from everything, their missing header, the governed ones off and on,
+the expiry warning through the janitor's tick, the one-click on the real page), `tests/account_delete_test.php` (29
+— a fresh account's row in every table the cascade had missed; a registry that fails on the next table naming an
+account that is neither in the cascade nor kept on purpose; nothing left with the id; the v91 step on orphans beside
+a live account's rows), `tests/retention_test.php` (23 — each prune with a clock passed in, both files put back byte
+for byte, every limiter call's window read out of the code with PHP's tokeniser). In existing suites:
+`partner_api_test.php` (88 — the add path on a real file, the probe's rows in and out of it, the guide's two
+answers, an `all` key over HTTP), `schedule_test.php` (90 — the hours EN/PL, and the whitelist page rendered in both
+languages), `install_test.php` (39 — the v91 default on fresh and upgraded installs, an operator's "off" surviving),
+`reputation_test.php` (81 — the generator's filter as it is now), `partner_bridge_check.js` (`block=` in the key
+editor's live link, an `all` key's two answers), `texts_check.js` (the probe on in its "everything on" pass). And
+every suite that runs the cascade or the changed code, all green: antispam, authbridge, comments, content_reports,
+content, csrf_token, favourites, groups_cli, groups_matrix, lists, people, pm_trash, profile_bio, profile_votes,
+sounds, usermedia, who, rate_limit, cluster, hash_check, iconpack, user2fa, audit_fixes, pagecontent; guest_pages,
+shop_api, audit_lists, avatar_names, message_report, pm_delete, pulse, usermedia and hash_check over HTTP.
+
+### Changed — Info, Terms and the Features list say what this version does, and only what is switched on
+
+* **The owner**: "make sure info and terms and features are written for the newest version." Production serves
+  the built-in pages (its `page_content` is empty), so what the code ships is what every visitor reads — and what
+  it shipped was written at 1.34.0. It promised two things nothing in the code does: "random IP addresses are
+  inserted into peer lists" (no patch, no build flag, no line of PHP does that — opentracker has a test macro of
+  that name and nothing else) and "we do not keep IP address logs" beside a site that keeps a registrant's, a
+  reporter's, an account's and a guest commenter's address. It said "the tracker only stores active swarms… no
+  torrent names" on a site with a catalogue of names and file lists, "registrations are anonymous" where the
+  address is kept, "abusive accounts are deleted together with their registrations" where deletion keeps them,
+  and nothing at all about accounts' second factor, devices, profiles, lists, friends, messages, comments, the
+  shoutbox, reports, warnings or the anti-spam layer.
+* **Info, rewritten against the code**, every sentence with its file and line in the release's claims table: what
+  an announce carries and what opentracker keeps (in memory only, dropped 45 minutes after the last announce — its
+  `OT_PEER_TIMEOUT` —, never logged, never in the site's database; the one request it writes down is a full scrape,
+  with the address that asked; the egress budget's three hours, in memory, where it is installed); the whitelist,
+  its hours and how to register (a CAPTCHA every time in public mode, the address kept for as long as the
+  registration exists); the catalogue — what it records, that a name arrives for a limited number a day, how long
+  an entry lives (`index_grace_days`, `index_protect_days`, kept longer when somebody saved it); accounts, the
+  second factor, devices and the "until you sign out" default, groups that end on a date, notifications (read ones
+  deleted after 90 days, any after a year); profiles (signed-in members only, everything on them off until the
+  member says yes), pictures re-encoded and stripped of their metadata; favourites and lists; friends, blocks and
+  private messages — the Archive, the Trash and its days, and that deleting only ever deletes for you, the messages
+  themselves staying until an account is deleted; comments (soft removal kept with who, when and why; guests and
+  their address group), descriptions with their credits, ratings; the shoutbox and its retention; reports and what
+  moderation can do; the anti-spam layer (fingerprints, never the words, forgotten after two days). Then **what this
+  site keeps and for how long**, one line per kind of record, and **the cookies and what the browser loads from
+  elsewhere** (`PHPSESSID` on every visit, `thx_remember` and `lang` only when chosen, jsDelivr's icon font, the
+  CAPTCHA provider, hot-linked pictures). The questions answer truthfully: a hash can be banned in either mode, the
+  tracker sees only the hash while the index may know names, the tracker keeps no announce log while the site keeps
+  addresses in the places listed.
+* **Terms, rewritten**: the owner's general clauses stay (personal use, the commercial fee, no uptime promise); the
+  registration and index clauses say what is kept; a report clause; accounts (your password is yours to keep, the
+  second factor, what partners connected through the API receive, groups that end, the bridge, abuse, deletion by
+  writing to the operator); **what you write** — comments, guests, descriptions and their credits, lists, messages,
+  the shoutbox, the profile; **reports and moderation** — the flag, nobody told who reported, the reporter told the
+  outcome; remove, warn, silence (what a silence stops) for a day, a week, a month or until lifted, suspend for a
+  week, a month or until lifted, each silently or as a warning that stays with the account; never against staff or
+  oneself; no formal appeal, but the operator can be written to; **anti-spam** and getting around it. Nothing in it
+  promises an appeal, a deletion button or a notice the code does not have.
+* **Every optional paragraph stands under its feature's condition.** Forty conditions joined the sixteen —
+  `twofa`, `email_cooldown`, `profiles`, `pictures`, `bio`, `favourites`, `lists`, `lists_public`, `lists_friends`, `saved`,
+  `friends`, `directory`, `messages`, `trash`, `archive_returns`, `people`, `comments`, `guest_comments`,
+  `writing`, `shoutbox`, `sounds`, `community`, `reportable`, `report_words`, `antispam`, `antispam_new`, `api`,
+  `bridge`, `federation`, `audit`, `audit_members`, `backups`, `backup_days`, `csp_reports`, `captcha`,
+  `icons_cdn`, `images`, `index_kept`, `registration_members`, `whitelist_or_schedule` — each asking the feature's
+  OWN gate (`commentsEnabled()`, `shoutEnabled()` …), never a second reading of its switch. That is how one was
+  found broken: `[[if:ratings]]` read `rating_enabled`, a setting that has never existed (the switch is
+  `rep_enabled`), so its paragraph had never appeared.
+* **`[[value:name]]`**: a retention period that is a setting is written as the setting's name and read when the page
+  is shown — `index_grace_days`, `index_protect_days`, `shout_keep_days`, `shout_keep_rows`, `pm_trash_days`,
+  `antispam_new_days`, `audit_keep_days`, `backup_keep_days`, `email_change_days`, `schedule_hours` — so a saved
+  page does not go on saying 30 after the operator chose 14. A number of days comes with its noun in the reader's
+  language ("30 days", "1 day"; "30 dni", "1 dzień"): the noun has to agree with a number only the code knows, and
+  "przez :days dni" would have said "przez 1 dni" the day somebody chose 1. The whitelist hours are words in the
+  reader's language too — they were English on the Polish home page ("Mon–Fri 22:00–06:00 (next day)").
+  Terms say the e-mail cool-down and the new accounts' slower pace only while they exist (0 switches either off),
+  and Info no longer mentions a Trash on a site that has none.
+* **One description of each page, two renderings.** The conditions used to be written twice — PHP in
+  `templates/pages/info.php` / `tos.php`, markers in `pageContentDefault()` — and with forty optional paragraphs
+  that is forty chances to drift. Both pages are now data (`pageContentSpec()`); the templates print it
+  (`pageContentHtml()`) and *Restore built-in* writes the same list out with the markers. The home page's
+  Features list asks the same conditions: a bullet for each feature that is on (accounts, the second factor,
+  profiles, favourites and lists, friends, messages, comments, descriptions, ratings, the shoutbox, the anti-spam
+  layer), the transparency bullet saying what that page counts ("of every removal request" was more than it
+  shows), a link to what is stored, and the two bullets nothing backed gone. About's "running on Linux Debian since
+  2020" — the owner's own server, shipped to every install — is now the footer's two settings (`footer_os_name`,
+  `footer_os_since_year`), and absent when the footer does not show them.
+
+### Fixed — a hidden list item split the editor's Terms in two
+
+`pageContentResolveMarkers()` left a hidden block's line break behind — a blank line, which ends a Markdown list:
+the built-in Terms restored and saved in blacklist mode came out as two lists, the second numbered from 1 again (the
+CHANGELOG of 1.34.0 said the numbering closed over the gap; the test counted items, not lists). A hidden block that
+stands on lines of its own now takes its line break with it, and a shown block left empty by the hidden ones inside
+it goes the same way; a marker inside a sentence still removes only itself. The editor's default text also links to
+the site's own pages with absolute addresses (`site_url`): the renderer keeps only `http(s)` links, so *Restore* used
+to give back a page whose every link to the site was plain words. And a page is no longer held to a description's
+length when it is saved or previewed (`pageContentValidate()` — the renderer's link rules, the image limit, the
+page's own 60 000-byte cap): the built-in Info is about 19 000 characters, Terms 7 000, and with `desc_max_chars`
+(4 000) neither could have been restored and saved again.
+
+### Changed — the integration guide says what the API does
+
+* The rules: the per-key limits are a minute's requests and a day's **bytes** (the numbers this tracker uses, read
+  from its settings), answered with `429` and `Retry-After` — **never a ban** (the page said the key would be banned
+  for sending on). What does ban is a malformed, unknown or wrong key: the address it came from, for `api_ban_days`,
+  the right key refused from there too — said beside the header, where an integrator reads it first. The error list
+  names every status the endpoints answer.
+* The check-it-works commands change nothing any more: the whitelist one used to POST the example to
+  `v1/whitelist/submit` — registering the placeholder hash for good, on a page that says nothing can be taken back —
+  and the federation one pulled a page of the catalogue. Each scope now has a call that only answers (the pings, a
+  lookup, an empty report batch refused as `no_items` after the key was accepted).
+* `v1/whitelist/ping` and the status endpoint's `invalid` row are documented; an item's forms (a magnet, a 40-hex or
+  base32 hash, a `ref`); `added` means served from the next reload (`active_in_seconds`) and only in whitelist mode;
+  `exists` also for a row waiting or turned down. The reporting chapter reads its own answer (`block=`, review by
+  default — an `all` key's page used to borrow the whitelist half's "publish immediately" and tell a partner its
+  reports block on arrival), names the batch-level `reporter` / `statement`, and `blocked_in_database_only`. The shop
+  chapter: the durations, that a grant with neither duration nor date is permanent, the order id's limits, that a
+  refunded order never grants again, and that `external_id` only works for a key that runs the bridge (a shop key
+  uses `login` or `user_id`). The bridge: the ticket's real lifetime, `&next=`, `create_failed:email_taken`. The
+  federation chapter says what the export is (resolved metadata, page by page, from a cursor) instead of "exchanges
+  hash lists". The browser tab is called "Integration guide" (it said "Home"). Numbers are written the reader's way
+  ("1,000" read as one in Polish) and the Polish text was proofread.
+
+### Documentation
+
+* **INSTALL.md**, rewritten so a stranger can install from it alone: PHP 8.0+ and every extension the code calls
+  (with GD's WebP check), MariaDB 10.6+ (a fresh install fails on MySQL), an MTA, the php.ini and php-fpm limits, the
+  files and their two writable directories (`config/`, `lang/`), Apache with php-fpm, the subfolder `RewriteBase`,
+  what `.htaccess` does not deny (`.git`, `tests`, `worker` — the vhost does), the **enforced `.htaccess` CSP** under
+  php-fpm, opentracker (the accesslist files 0664, `access.stats 127.0.0.1`, the unit exactly as the helpers expect),
+  the installer step by step, the first settings (the service name, the statistics URL, *Switch the tracker now*),
+  the janitor and its slow half (`tracker-janitor-heavy` through the netlimit helper, inline without it), all eight
+  root helpers with their sudoers lines and the four fields that ship empty, nftables persistence and the egress
+  budget, the worker, tuning, backups **and restoring**, the health check, icon packages and the CLI tools, a
+  checklist, upgrading (the copies `git pull` does not update, the schema lock, what each release asked for by
+  hand), twenty-five symptoms with their causes, and the security notes.
+* **README.md**: the Features list rewritten — every feature of this version, each with what it needs (the setting
+  and its default, the permission and the group that holds it, the helper or extension); Requirements; a table of
+  all eighteen Settings groups and their sections; the API reference names every endpoint `api.php` routes (a hundred
+  were missing); Project structure and Database schema complete (28 tables were missing); the Site pages section for
+  the spec, every marker and the values; the nginx deny rules (`^~ /api/`, `tools|worker|lang`, dotfiles) and headers;
+  every Settings path that had been renamed; the build recipe with all four patches and the pinned commit; no more
+  `DB_*` environment variables, `sql/` directory, `[[/ifnot]]` closer or `deploy/` files that do not exist.
+* **worker/README.md** and the example conf: the heartbeat is a JSON line (and the `UMask` that hid it from the
+  panel), the grants the fetch order and the federation review need, every conf key with its default, every
+  `federation.py` option; the example names no real tracker. **tools/opentracker/README.md**: four patches, every
+  helper, the recipe in order, the garbled commit string in the shipped builds, the lab notes marked internal and the
+  conclusions they later overturned marked superseded; **UPSTREAM-REPORT.md** carries an *internal draft* banner and
+  no longer says nothing was patched. `.htaccess`'s comments say what its policy does under php-fpm.
+  `assets/sounds/README.md`, `tools/api_client_example.py` (the `shop` scope, `order_id`, `premium`) follow the code.
+
+### Tests
+
+`tests/pagecontent_test.php` (112 checks): the HTML page and the editor's default have every item the spec shows,
+in as many lists — the split list caught —, no marker or key; every condition, value and key the spec names exists in
+both languages; the resolver's line-break rules; values — a number of days with its noun in English and Polish, and
+no shipped sentence writing "days" after one; the whitelist hours in both languages; absolute links; the page
+validator. New
+`scratchpad/shots/texts_check.js` (88 checks, with `texts_expected.php`): Info, Terms and the home page in English
+and Polish with every feature on and as much as possible off — each page exactly what the spec renders for those
+settings, no marker, no untranslated key, no heading over nothing, none of the off features' words; every cookie,
+route and host the texts name exists in the code; no sideways scroll at 390 px; screenshots
+`scratchpad/shots1730/texts-*.png`.
+
+### Changed — the footer states the project's licence: MIT
+
+* The footer's second line said "Content rights waived via CC0" on every page — a waiver the repository's `LICENSE`
+  (MIT) never made, and one no site can make for what its members write. The owner: "Robimy pełen MIT." The line is
+  now "Released under the MIT License" / "Udostępnione na licencji MIT" (`footer.license_mit`, `footer.cc0` gone), a
+  link to the repository's `LICENSE` when Settings has a GitHub address, plain words when it has none.
+
+### Fixed — `tests/audit_test.php` failed once the checkout's own audit lines turned 31 days old
+
+* The retention check ages its three lines by 400 days and prunes with a 30-day window, then expected exactly 3 removed.
+  The prune removes every line past the window, and from 2026-10-01 the local checkout had 390 of its own (the first
+  September runs), so it read 393 — and deleted them. The older lines now wait in a temporary table of the test's
+  connection while the prune runs and go back with their own ids; the check counts 3 plus them, and a new one proves
+  they are all back.
+
+### Fixed — the statistics page's "Git commit" link took the visited colour
+
+* The owner: the Stats page's version value (`#val-version`, opentracker's build as a link) showed in the visited pink
+  once opened. `.status-link` set the link colour with a bare class (0,1,0), which the site-wide `a:visited` (0,1,1)
+  outranks — the same trap 1.71.0 closed for the sign-in's links. `.status-link:visited` now keeps the link colour, for
+  every link of that class (the status page's report link too).
+
+### Fixed — the Whitelist's Source column holds the Polish "ADMINISTRATOR"
+
+* The release's own final check (`table_fit_check.js`) found the panel's Whitelist and banned list showing a row's
+  source as a badge sized before the sources became words of the dictionary: the Polish "ADMINISTRATOR" (110 px)
+  stood 22–33 px past its cell, in both views of the Whitelist and in the banned list. The column is now as wide as
+  that word plus the cell's padding and the 4 px for a wider font — 128 px in the Whitelist's narrow set of widths,
+  132 in its wide set and the banned list — and the tables' floors grew by as much (1240, 936), so the name and the
+  reason keep their room. The Whitelist's wide set (the whole 40-character hash) waits until 1955 px, where it still
+  leaves the name 150 px; at 1920 the hash is shortened (full in its title, a click copies it) and the name gets 354.
+  Measured again: every table, both icon libraries, both languages, 1920 to a phone — 840 views, nothing cut; the
+  Whitelist also at 1955 and 2560.
+
+### Tests — what the final battery found
+
+* `tests/shout_test.php`: four pins quoted the scripts as they were before their words became `t.key()` words, and
+  the in-place "Are you sure?" from when a language switch closed it. They read today's code — the question's own
+  function: hidden controls, its timer, the button waiting hidden beside it, one finish() that takes down the timer
+  and both listeners, every way out through it — and fail if the old language-switch exit comes back. The browser
+  shows each behaviour (shout_check, people_check; the favourites chip's "Copied!" pressed in both languages).
+* `tests/avatar_names_test.py`: the inbox rows, a conversation's state and the people rows carry the reader's-clock
+  fields 1.73.0 added (`last_time`; `trashed_ts`, `until_ts`, `trashed_time`, `until_time`; `since_time`). Read in real
+  answers — times and instants, never an id — they are pinned with their shapes.
+* `tests/account_delete_test.php` failed in the battery only: a message report left behind by the smoke run (it
+  deletes conversations without their reports and empties `users`, so ids are handed out again) carried the id the
+  test's fresh account was then given. Not a gap in the deletion — a report is filed by one of its conversation's two
+  people and goes with the conversation. The test counts, before it makes its accounts, what already names an id no
+  account has, and judges only what it put there itself; a copy that leaves its own rows behind still fails.
+
 ## [1.72.1] — 2026-09-30
 
 Corrections from the owner's screenshots of 1.72.0 on his server. The scrape-coverage chart reads over a week, a

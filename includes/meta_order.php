@@ -58,29 +58,35 @@ function metaOrderDefaultMix(): array {
             'seen' => 0, 'completed' => 0, 'random' => 15];
 }
 
+/** A word of the dictionary when the dictionary is loaded (a page, the API) — the English one when this file is
+ *  loaded alone (a CLI tool, tests/meta_order_test.php). 1.73.0: the labels below were English on every page. */
+function metaOrderWord(string $key, string $en): string {
+    return function_exists('__') ? __($key) : $en;
+}
+
 /** Labels for the mode select. Next to the list so a mode cannot be added to one and not the other. */
 function metaOrderModeLabels(): array {
     return [
-        'oldest'    => 'Queue order — as added to pending (default)',
-        'newest'    => 'Newest first',
-        'seeders'   => 'Most seeders first',
-        'seen'      => 'Seen most often first',
-        'completed' => 'Most completed downloads first',
-        'random'    => 'Random',
-        'mix'       => 'Balanced mix (shares below)',
+        'oldest'    => metaOrderWord('settings.meta_mode_oldest', 'Queue order — as added to pending (default)'),
+        'newest'    => metaOrderWord('settings.meta_mode_newest', 'Newest first'),
+        'seeders'   => metaOrderWord('settings.meta_mode_seeders', 'Most seeders first'),
+        'seen'      => metaOrderWord('settings.meta_mode_seen', 'Seen most often first'),
+        'completed' => metaOrderWord('settings.meta_mode_completed', 'Most completed downloads first'),
+        'random'    => metaOrderWord('settings.meta_mode_random', 'Random'),
+        'mix'       => metaOrderWord('settings.meta_mode_mix', 'Balanced mix (shares below)'),
     ];
 }
 
 /** Field labels for the shares, in the order they are edited. */
 function metaOrderShareLabels(): array {
     return [
-        'whitelist' => 'Whitelist (registered)',
-        'seeders'   => 'Most seeders',
-        'newest'    => 'Newest',
-        'seen'      => 'Seen most often',
-        'completed' => 'Most completed',
-        'random'    => 'Random',
-        'oldest'    => 'Queue order',
+        'whitelist' => metaOrderWord('settings.meta_share_whitelist', 'Whitelist (registered)'),
+        'seeders'   => metaOrderWord('settings.meta_share_seeders', 'Most seeders'),
+        'newest'    => metaOrderWord('settings.meta_share_newest', 'Newest'),
+        'seen'      => metaOrderWord('settings.meta_share_seen', 'Seen most often'),
+        'completed' => metaOrderWord('settings.meta_share_completed', 'Most completed'),
+        'random'    => metaOrderWord('settings.meta_share_random', 'Random'),
+        'oldest'    => metaOrderWord('settings.meta_share_oldest', 'Queue order'),
     ];
 }
 
@@ -109,14 +115,17 @@ function metaOrderIndexes(): array {
  * reason reads as an oversight.
  */
 function metaOrderRejected(): array {
+    // The dictionary's words (1.73.0): the names and the reasons were English on every page.
     return [
-        'Last seen'    => 'every hash in a poll is stamped with the same time, so "most recently seen" '
-                        . 'sorts three million rows that are all equal — it would order by nothing.',
-        'Peak seeders' => 'nearly the same ranking as "most seeders" on this data, for the cost of '
-                        . 'another index on a table that is rewritten on every poll.',
-        'Name / size / file count'
-                       => 'not known until the metadata has been fetched, which is the thing being '
-                        . 'ordered. Sorting the queue by the answer needs the answer.',
+        metaOrderWord('settings.meta_rej_last_seen', 'Last seen')
+            => metaOrderWord('settings.meta_rej_last_seen_why', 'every hash in a poll is stamped with the same time, so "most recently seen" '
+                . 'sorts three million rows that are all equal — it would order by nothing.'),
+        metaOrderWord('settings.meta_rej_peak_seeders', 'Peak seeders')
+            => metaOrderWord('settings.meta_rej_peak_seeders_why', 'nearly the same ranking as "most seeders" on this data, for the cost of '
+                . 'another index on a table that is rewritten on every poll.'),
+        metaOrderWord('settings.meta_rej_name_size', 'Name / size / file count')
+            => metaOrderWord('settings.meta_rej_name_size_why', 'not known until the metadata has been fetched, which is the thing being '
+                . 'ordered. Sorting the queue by the answer needs the answer.'),
     ];
 }
 

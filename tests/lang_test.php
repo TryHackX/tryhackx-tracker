@@ -293,7 +293,7 @@ check('… and only when there is more than one language', str_contains($nav, 'c
 // A switcher that sends you to the front page is one people stop pressing.
 check('… and it keeps you on the page you were reading', str_contains($nav, '$langQuery = $_GET;'));
 $layout = (string)file_get_contents($root . '/templates/layout.php');
-check('the html lang attribute follows the language', str_contains($layout, '<html lang="<?= sanitize(langCurrent()) ?>">'));
+check('the html lang attribute follows the language', str_contains($layout, '<html lang="<?= sanitize(langCurrent()) ?>"'));
 $acc = (string)file_get_contents($root . '/templates/pages/account.php');
 check('an account can pin its own language', str_contains($acc, "id=\"acc-language\""));
 $css = (string)file_get_contents($root . '/assets/css/style.css');
@@ -412,7 +412,10 @@ $enAll = langLoad('en');
 foreach (glob($root . '/assets/js/*.js') as $jsPath) {
     $src = (string)@file_get_contents($jsPath);
     $jsName = basename($jsPath);
-    preg_match_all("/\bt\(\s*'([A-Za-z0-9_.]+)'/", $src, $mk);
+    // 1.73.0: a key is asked for through t() and through the ways that keep it on the node too — t.key('…'),
+    // t.node('…'), t.html('…'), t.text(node, '…'), t.attr(node, 'name', '…'), t.ah('name', '…') (assets/js/i18n.js).
+    preg_match_all("/\bt(?:\.key|\.node|\.html)?\(\s*'([A-Za-z0-9_.]+)'|\bt\.text\([^,()]+,\s*'([A-Za-z0-9_.]+)'|\bt\.attr\([^,()]+,\s*'[a-z-]+',\s*'([A-Za-z0-9_.]+)'|\bt\.ah\(\s*'[a-z-]+',\s*'([A-Za-z0-9_.]+)'/", $src, $mk);
+    $mk[1] = array_values(array_filter(array_merge($mk[1], $mk[2], $mk[3], $mk[4])));
     $bad = [];
     $missing = [];
     foreach (array_unique($mk[1]) as $key) {
@@ -427,6 +430,121 @@ foreach (glob($root . '/assets/js/*.js') as $jsPath) {
     check("... and every one of them is in the dictionary",
           $missing === [], implode(', ', array_slice($missing, 0, 6)));
 }
+
+/* ── 1.73.0: the live switch reaches EVERYTHING ──────────────────────────────
+   The owner: a tooltip in the messages stayed English after a switch to Polish ("after a reload it was fine,
+   only the live swap was not"). scratchpad/shots/langswap_all_check.js walks every page type and state in a real
+   browser and reads every word back; what is pinned HERE is the wiring that rests on. */
+$i18nJs = (string)@file_get_contents($root . '/assets/js/i18n.js');
+$swapJs = (string)@file_get_contents($root . '/assets/js/lang-swap.js');
+// t() stays a primitive string — for a comparison, a switch, a Map key, a payload, a test's own t() call (a t() that
+// answered an object broke `===` in panel_fixes_check) — and the word a script WRITES into the page is t.key(): a
+// String that says itself in the language loaded now and leaves its key on the element it is written into.
+check('i18n.js: t() is a plain string; t.key() is the word written into the page, which keeps its key there',
+      str_contains($i18nJs, 'function t(key, params) { return words(key, params); }')
+      && str_contains($i18nJs, 'class Keyed extends String') && str_contains($i18nJs, 'toString() { return words(this.key, this.params); }')
+      && str_contains($i18nJs, 'toJSON() { return words(this.key, this.params); }')
+      && str_contains($i18nJs, 't.key = function (key, params) { return new Keyed(key, params); };') && str_contains($i18nJs, 't.words = words;'));
+// … and a t.key() word goes INTO the page: never into a comparison (an object there) or a glued string (its key lost).
+$keyedData = [];
+foreach (glob($root . '/assets/js/*.js') as $f) {
+    $src = (string)@file_get_contents($f);
+    // `+ t.key(`, `=== t.key(`, `t.key(…) +` / `===`, and a t.key() word inside a parenthesis that is glued:
+    // `x + (c ? t.key(…) : '')` (the parenthesis holds no call of its own before the word)
+    if (preg_match_all('~(\+\s*t\.key\(|(?:===|!==|==|!=)\s*t\.key\(|\+\s*\((?:[^()]|\([^()]*\))*?(?<![\w$.])t\.key\(|t\.key\((?:\'[^\']*\'|[^()\'])*(?:\((?:\'[^\']*\'|[^()\'])*\)(?:\'[^\']*\'|[^()\'])*)*\)\s*(?:\+|===|!==))~', $src, $mm)) {
+        $keyedData[] = basename($f) . ' (' . count($mm[0]) . ')';
+    }
+}
+check('… and no script compares a t.key() word or glues it into a longer string', $keyedData === [], implode(', ', $keyedData));
+check('… with what markup and a server\'s answers need: t.html / t.esc (text), t.ah (attributes), t.find (a dictionary sentence by key)',
+      str_contains($i18nJs, 't.html = function (key, params)') && str_contains($i18nJs, 't.esc = function (v)')
+      && str_contains($i18nJs, 't.ah = function (name, key, params)') && str_contains($i18nJs, 't.find = function (text, prefix)'));
+// The escapers of the templates keep a t() word's key; the el() helpers hand it over as a keyed <span>.
+$escKeyed = [];
+foreach (['assets/js/admin.js' => 'function esc(str) {' . "\n" . '    if (t.isKey(str)) return t.html(str);',
+          'assets/js/admin-common.js' => "    function esc(str) {\n        if (t.isKey(str)) return t.html(str);",
+          'assets/js/app.js' => "function escHtml(str) {\n    if (t.isKey(str)) return t.html(str);"] as $rel => $needle) {
+    if (!str_contains(str_replace("\r\n", "\n", (string)@file_get_contents($root . '/' . $rel)), $needle)) $escKeyed[] = $rel;
+}
+check('… the templates\' escapers say a t() word as keyed markup', $escKeyed === [], implode(', ', $escKeyed));
+$elKeyed = [];
+foreach (['account-security', 'admin-common', 'admin-otperf', 'emoji-picker', 'favourites', 'media-editor', 'people', 'shoutbox'] as $m) {
+    if (!str_contains((string)@file_get_contents($root . '/assets/js/' . $m . '.js'), 'appendChild(t.child(c))')) $elKeyed[] = $m;
+}
+check('… and every module\'s el() helper hands a t() word over as a keyed <span> (t.child)', $elKeyed === [], implode(', ', $elKeyed));
+check('… a sentence with people in it keeps its key round them (avatar.js\'s phrase → t.phraseMark, the people in their places)',
+      str_contains($i18nJs, 't.phraseMark = function (node, word)') && str_contains($i18nJs, 'function sayPhrase(node, sentence)')
+      && str_contains((string)@file_get_contents($root . '/assets/js/avatar.js'), "if (keyed) t.phraseMark(host, text);")
+      && str_contains((string)@file_get_contents($root . '/assets/js/avatar.js'), "who.setAttribute('data-slot', part);"));
+check('… a server\'s own sentences ride along where a script shows them (the anti-spam layer by key, ratings and sources by t.find)',
+      in_array('api.antispam.', LANG_JS_PUBLIC, true) && in_array('api.rep.', LANG_JS_PUBLIC, true) && in_array('api.index.source_auto_', LANG_JS_PUBLIC, true)
+      && str_contains((string)@file_get_contents($root . '/includes/antispam.php'), "'key' => \$key, 'vars' => (object)\$plain")
+      && str_contains((string)@file_get_contents($root . '/assets/js/antispam.js'), 'function sentence(r, left)'));
+check('… the browser\'s writers taught to keep it: textContent, title, placeholder, setAttribute, append and its kin',
+      str_contains($i18nJs, "teachSetter(Node.prototype, 'textContent', 'text');") && str_contains($i18nJs, "teachSetter(HTMLElement.prototype, 'title', 'title');")
+      && str_contains($i18nJs, 'Element.prototype.setAttribute = function (name, value)')
+      && str_contains($i18nJs, "['append', 'prepend', 'replaceChildren', 'before', 'after']"));
+check('… and the swap\'s two halves: which keyed words are still ours (t.ours) and saying them again (t.say)',
+      str_contains($i18nJs, 't.ours = function (root)') && str_contains($i18nJs, 't.say = sayAll;') && str_contains($i18nJs, 't.relabel = function (root)'));
+check('lang-swap.js walks only what the server wrote (marks), templates and their adopted copies, and says the keyed words',
+      str_contains($swapJs, 'window.LangSwap = { mark: mark, adopt: adopt, isSwitch: isSwitch };') && str_contains($swapJs, 'isServer(n)) lk.push(n);')
+      && str_contains($swapJs, "if (live.tagName === 'TEMPLATE') {") && str_contains($swapJs, 'window.t.ours(document.body)')
+      && str_contains($swapJs, 'window.t.say(ours);'));
+check('… a server button put back from a copy is the server\'s again; a sentence whose markup sits in another order is swapped whole',
+      str_contains($swapJs, 'function regainButtons()') && str_contains($swapJs, 'if (marked) regainButtons();')
+      && str_contains($swapJs, 'function planPhrase(live, fresh, out)') && str_contains($swapJs, 'if (planPhrase(live, fresh, out)) return;'));
+// The bulk scrape's label ("Stop — 12 scraped (40 left)") is put back from a copy BEHIND the button's server icon:
+// the whole markup decides (not the first child), a node left keyless keeps no placeholders (or the copy never
+// matches), and a button lent to a script while the language changes is given back in the new one.
+check('… whatever node of it a script borrowed; one lent while the language changes is given back in the new language',
+      str_contains($swapJs, 'if (html === undefined || b.innerHTML !== html || wholeServer(b)) return;')
+      && str_contains($swapJs, 'function giveBack()') && str_contains($swapJs, 'counterpart.set(live, fresh);')
+      && str_contains($i18nJs, 'function bare(node)') && str_contains($i18nJs, "this.removeAttribute(TEXT); bare(this);"));
+check('… an error page swaps like any other page (its own status comes back)',
+      str_contains($swapJs, "document.documentElement.getAttribute('data-status')") && str_contains($layout, "data-status=\""));
+check('the public layout marks the page before its first script',
+      ($mk = strpos($layout, 'LangSwap.mark()')) !== false && $mk < (int)strpos($layout, '<script src="<?= $baseUrl ?>assets/js/captcha.js'));
+$unmarked = [];
+foreach (['audit', 'backups', 'dashboard', 'index_page', 'settings', 'traffic', 'users', 'whitelist'] as $pg) {
+    $src = (string)@file_get_contents($root . '/templates/admin/' . $pg . '.php');
+    // the first <script src=…assets/js/admin….js> (a comment naming a module is not its script)
+    $firstModule = preg_match('~<script src="[^"]*assets/js/admin[a-z-]*\.js~', $src, $mm, PREG_OFFSET_CAPTURE) ? $mm[0][1] : -1;
+    $at = strpos($src, 'LangSwap.mark()');
+    if ($at === false || $firstModule < 0 || $at > $firstModule) $unmarked[] = $pg;
+}
+check('every panel page marks itself before its own scripts', $unmarked === [], implode(', ', $unmarked));
+// No word is frozen into an inline script any more: the swap reloads the js.* bundle, and nothing else.
+$frozen = [];
+foreach (array_merge(glob($root . '/templates/*.php'), glob($root . '/templates/*/*.php')) as $f) {
+    $src = (string)@file_get_contents($f);
+    if (!preg_match_all('~<script(?![^>]*application/json)[^>]*>(.*?)</script>~s', $src, $blocks)) continue;
+    foreach ($blocks[1] as $b) if (preg_match('~(json_encode\(\s*__\(|_h\(|\b__\()~', $b)) { $frozen[] = basename(dirname($f)) . '/' . basename($f); break; }
+}
+check('no template freezes a translated word into an inline script', $frozen === [], implode(', ', $frozen));
+$setTplSrc = (string)@file_get_contents($root . '/templates/admin/settings.php');
+check('… the Settings page\'s own script reads its words from its bundle (the page\'s bridge carries them)',
+      str_contains($setTplSrc, "langJsBridge(\$baseUrl, ['js.', 'settings.js_'"));
+check('… and the admin sign-in and unsubscribe pages\' scripts read theirs from theirs',
+      str_contains($layout, "'adminlogin.'") && str_contains($layout, "'unsub.'"));
+
+// ── 1.73.0: the time-zone regions ───────────────────────────────────────────
+// The four zone selects (account, Settings → Site, the schedule's and the backups' zone) group every zone under its
+// region — "Europe", "America"… and "Other" for UTC — and those group labels were English on a Polish page. The zone
+// names stay IANA's ids; the regions are words (tz.region_*, includes/db_clock.php tzRegionLabel()).
+$tzRegions = ['Other'];
+foreach (DateTimeZone::listIdentifiers() as $tzId) if (($tzCut = strpos($tzId, '/')) !== false) $tzRegions[] = substr($tzId, 0, $tzCut);
+$tzRegions = array_values(array_unique($tzRegions));
+$tzMiss = array_values(array_filter($tzRegions, fn($r) => ($en['tz.region_' . strtolower($r)] ?? null) !== $r || !isset($pl['tz.region_' . strtolower($r)])));
+check('every time-zone region PHP knows has its words in both languages (the English IANA\'s own region word)',
+      $tzMiss === [] && count($tzRegions) >= 10, implode(',', $tzMiss));
+relang(['default_language' => 'pl']);
+$tzPl = [tzRegionLabel('Europe'), tzRegionLabel('Other'), tzRegionLabel('Mars'), tzRegionLabel('<b>')];
+relang([]);
+check('… tzRegionLabel() says them in the reader\'s language; a region it does not know as it is',
+      $tzPl === [$pl['tz.region_europe'], $pl['tz.region_other'], 'Mars', '<b>'] && tzRegionLabel('Europe') === 'Europe', json_encode($tzPl, JSON_UNESCAPED_UNICODE));
+check('… and the four zone selects print it on their groups',
+      substr_count($setTplSrc, '<optgroup label="<?= sanitize(tzRegionLabel(') === 3
+      && str_contains($acc, '<optgroup label="<?= sanitize(tzRegionLabel($accTzGrp)) ?>">'));
 
 // ── the generated files are what the sources make ───────────────────────────
 // lang/en.php and lang/pl.php are GENERATED from tools/lang_src.d/. Between 1.43 and 1.50, 369

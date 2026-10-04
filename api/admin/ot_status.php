@@ -24,14 +24,16 @@ $out = [
     'advice'  => [],
     'error'   => null,
 ];
+// In the reader's language (1.73.0: English on every page); the card finds them back by key (t.find(…, 'api.'): the
+// traffic page's bundle carries api.ot.), so they follow the live language switch.
 if (!$out['configured']['cmd_set']) {
-    $out['error'] = 'No OpenTracker helper command is configured.';
+    $out['error'] = __('api.ot.no_helper');
 } elseif (!trackerExecAvailable()) {
-    $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the helper.';
+    $out['error'] = __('api.ot.exec_disabled');
 } else {
     $st = otStatus($cfg, !empty($_GET['fresh']));
     if (empty($st['ok'])) {
-        $out['error'] = (string)($st['error'] ?? 'The helper did not answer.');
+        $out['error'] = (string)($st['error'] ?? __('api.ot.no_answer'));
         $out['helper_output'] = mb_substr((string)($st['output'] ?? ''), 0, 1000);
     } else {
         $out['status'] = $st;

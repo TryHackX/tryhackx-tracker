@@ -1,3 +1,10 @@
+> **INTERNAL — a draft for upstream, not documentation.** Nothing here is needed to install or run the
+> tracker: the patches it describes ship in `tools/opentracker/` and the guide is
+> [INSTALL.md](../../INSTALL.md). Kept in the repository as the record of what was found and how.
+> Read as the state of 2026-09-06: the zerocopy fix and the seven patches of Addendum 2 have run in
+> production since (with `sighup-udp-workers.patch` and `udp-reject-interval.patch`, which predate
+> this report).
+
 # Bug report for upstream — libowfat `iob_send()`: MSG_ZEROCOPY without completion handling
 
 *A draft, ready to send as-is to Felix von Leitner (libowfat, git.fefe.de) and to cc erdgeist for
@@ -28,7 +35,8 @@ chunk-size header (`"%zx\r\n"`, an `asprintf` allocation) is a separate small en
 does not read as fast as the tracker writes receives, at a chunk boundary, bytes like
 `\x00e\xe3[\xadU` (0x55ad…) or `\xc9\x7f` (0x7fc9…) instead of the hex length, and the transfer
 dies with "chunk hex-length char not a hex digit". On our machine, with a panel fetching the
-40 MB gzip scrape over loopback every 30 minutes, 10 of 13 polls failed this way.
+40 MB gzip scrape over loopback every 30 minutes, 10 of 13 polls failed this way. (The size grew
+with the swarm: 30 MB in tools/opentracker/README.md's notes, 40 MB when this was written.)
 
 **Reproduction** (opentracker 1c7fac4, libowfat 0.34, Debian 13, kernel 6.x, x86-64):
 
@@ -82,8 +90,10 @@ off on its time budget, and those carry no framing error. The review below cover
 no `WANT_ARC4RANDOM`, no `WANT_DEV_RANDOM`). Findings are grouped by how far they were checked:
 "stands" means a second reader traced the code path and agreed; "unverified" means one reader
 raised it and nobody got to confirm it before the session ended; "refuted" means the second reader
-showed it does not happen. Nothing here has been patched — the zerocopy fix above is the only
-change we run.*
+showed it does not happen. When this addendum was written nothing in it had been patched — the
+zerocopy fix above was the only change we ran besides two small patches of our own (the SIGHUP
+worker-thread order and a well-formed UDP reject reply); Addendum 2 below patches seven of these
+findings, two of the "unverified" ones included.*
 
 ### Stands (traced by a second reader)
 
@@ -165,7 +175,11 @@ the reason valgrind's exit summary is never clean.
 ## Addendum 2 — patches (2026-09-06)
 
 *Attached as `opentracker-review-fixes.patch` (apply with `patch -p1` inside the opentracker
-directory, after the two earlier patches). Each hunk was written against 1c7fac4, reviewed by a
+directory, after our two earlier patches: `sighup-udp-workers.patch`, which blocks the signals before
+the UDP worker threads exist — upstream starts them first, so a SIGHUP reload can land on a worker
+and kill the process — and `udp-reject-interval.patch`, which answers a rejected UDP announce with a
+well-formed reply carrying an interval; both are in tools/opentracker/). Each hunk was written
+against 1c7fac4, reviewed by a
 second reader who had to apply it and try to break it, then built and run under valgrind through
 a lab of announces, scrapes, aborted `/stats` clients and sixty accesslist reloads under load.*
 

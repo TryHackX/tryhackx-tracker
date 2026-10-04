@@ -141,7 +141,8 @@ try:
     check("the endpoint releases the session before it reads", "session_write_close()" in ep and ep.index("session_write_close()") < ep.index("userUnreadCount"))
 finally:
     php("$db->prepare('DELETE FROM user_notifications WHERE user_id = ?')->execute([" + str(uid) + "]);"
-        "$db->prepare('DELETE FROM users WHERE username = ?')->execute(['" + USER + "']);"
+        # The way an account goes (1.73.0): a bare DELETE FROM users left its group membership behind.
+        "if (" + str(uid) + " > 0) userDeleteCascade($db, " + str(uid) + ");"
         + "".join("setSetting($db, '%s', '%s');" % (k, v) for k, v in was.items() if v != ""))
     clear_throttles()
 

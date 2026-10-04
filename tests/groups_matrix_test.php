@@ -524,7 +524,8 @@ foreach (['guest', 'member', 'premium', 'moderator'] as $slug) {
           setDiff($presets[$slug]['perms'] ?? [], userGroupRecommended($slug) ?? []));
 }
 // The window names each set in the reader's language (a.users.rec_name_* / rec_about_*); its English is the preset's
-// own label and line, word for word, so the two cannot drift (the editor's "Start from" shows the preset's).
+// own label and line, word for word, so the two cannot drift (the editor's "Start from" names the presets by the same
+// words since 1.73.0 — below).
 $enDict = include $root . '/lang/en.php';
 $plDict = include $root . '/lang/pl.php';
 $labelDrift = [];
@@ -536,6 +537,55 @@ foreach (USER_RECOMMENDED_SLUGS as $slug) {
     }
 }
 check('every recommended set has its name and line in both languages, the English word for word the preset\'s', $labelDrift === [], implode(',', $labelDrift));
+// 1.73.0: … and so has every preset of the group editor's "Start from" (the three that are no seeded group's too):
+// admin/fetch_groups answers them in the reader's language through the same family.
+$presetDrift = [];
+foreach (userGroupPresets() as $slug => $p) {
+    if (($enDict['a.users.rec_name_' . $slug] ?? null) !== ($p['label'] ?? '') || ($enDict['a.users.rec_about_' . $slug] ?? null) !== ($p['about'] ?? '')
+        || trim((string)($plDict['a.users.rec_name_' . $slug] ?? '')) === '' || trim((string)($plDict['a.users.rec_about_' . $slug] ?? '')) === '') {
+        $presetDrift[] = $slug;
+    }
+}
+$fgSrc = (string)file_get_contents($root . '/api/admin/fetch_groups.php');
+check('1.73.0: every preset has its name and line in both languages, the English word for word the preset\'s — and the groups endpoint answers them so',
+      $presetDrift === [] && count(userGroupPresets()) >= 7 && str_contains($fgSrc, "['label' => 'a.users.rec_name_', 'about' => 'a.users.rec_about_']")
+      && str_contains($fgSrc, "'presets' => \$presets"), implode(',', $presetDrift));
+
+// What every permission allows was English on every page (the matrix's tooltips, the editor's boxes, the Recommended
+// window, Settings' matrices). Each id has perm.<id> in both languages, the English word for word the registry's — so
+// a sentence changed in includes/users.php and not in tools/lang_src.d/permissions.py (or back) fails here — and the
+// dictionary has no perm.* words for an id the registry does not know.
+$regEn = userPermissionList(true);
+$permDrift = []; $permOrphan = [];
+foreach ($regEn as $id => $words) {
+    if (($enDict['perm.' . $id] ?? null) !== $words || trim((string)($plDict['perm.' . $id] ?? '')) === '' || ($plDict['perm.' . $id] ?? '') === $words) {
+        $permDrift[] = $id;
+    }
+}
+foreach (array_keys($enDict) as $k) if (str_starts_with($k, 'perm.') && !isset($regEn[substr($k, 5)])) $permOrphan[] = $k;
+check('1.73.0: every registered permission has its words in both languages (perm.<id>), the English the registry\'s own, the Polish its own',
+      $permDrift === [] && count($regEn) === count($registry), implode(',', $permDrift));
+check('… and no perm.* words for an id the registry does not know', $permOrphan === [], implode(',', $permOrphan));
+$plWords = array_map(fn($id) => (string)($plDict['perm.' . $id] ?? ''), array_keys($regEn));
+check('… no two permissions read the same in Polish (or in English)', count(array_unique($plWords)) === count($plWords) && count(array_unique($regEn)) === count($regEn));
+// userPermissionList() answers in the reader's language: the same ids in the same order, only the words change.
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl'], null);
+$regPl = userPermissionList();
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'en'], null);
+check('… userPermissionList() says them in the reader\'s language — the same ids, in the same order (Polish here), and the English on request',
+      array_keys($regPl) === array_keys($regEn) && ($regPl['panel.audit.view'] ?? '') === ($plDict['perm.panel.audit.view'] ?? '?')
+      && ($regPl['index.view'] ?? '') === ($plDict['perm.index.view'] ?? '?') && userPermissionList() === $regEn,
+      ($regPl['index.view'] ?? '') . ' | ' . (userPermissionList()['index.view'] ?? ''));
+// The panel's scripts say the words by the id, so they follow the live language switch: the pages that show them carry
+// perm. in their bundle.
+$auJs = (string)file_get_contents($root . '/assets/js/admin-users.js');
+$asJs = (string)file_get_contents($root . '/assets/js/admin-shout.js');
+check('… and the panel says them by the id (t.key(\'perm.\' + id)) — the Users and Settings pages\' bundles carry perm.',
+      str_contains($auJs, "const permWords = (id) => (t.has('perm.' + id) ? t.key('perm.' + id) : (state.permList[id] || ''));")
+      && substr_count($auJs, 'permWords(') >= 3 && !str_contains($auJs, "' — ' + desc")   // the matrix, the editor, the Recommended window
+      && str_contains($asJs, "t.has('perm.' + key) ? t.key('perm.' + key) : (permList[key] || '')")
+      && str_contains((string)file_get_contents($root . '/templates/admin/users.php'), "langJsBridge(\$baseUrl, ['js.', 'a.users.rec_', 'perm.'])")
+      && (bool)preg_match("/langJsBridge\(\\\$baseUrl, \['js\.', 'settings\.js_'[^\]]*'perm\.'/", (string)file_get_contents($root . '/templates/admin/settings.php')));
 check('a group without a seed has no recommended set (a group the operator made has nothing to go back to)',
       userGroupRecommended('vip') === null && userGroupRecommended('grantprobe') === null && userGroupRecommended('') === null);
 check('the guest\'s set is the public statistics and nothing else (whitelist page, search, descriptions, comments, writing: the operator\'s to open)',

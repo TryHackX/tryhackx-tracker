@@ -60,7 +60,13 @@ $idx = array_column($db->query("SHOW INDEX FROM message_threads")->fetchAll(PDO:
 check('two people can only ever have ONE thread', in_array('uq_thread_pair', $idx, true), implode(',', array_unique($idx)));
 
 /* ── 2. two accounts to walk the gate with ────────────────────────────────── */
-$db->prepare("DELETE FROM users WHERE username IN ('pmalice','pmbob')")->execute();
+// Its accounts go the way an account goes (1.73.0): a bare DELETE FROM users left each one's group membership behind
+// — five orphan rows in user_group_members every run. userDeleteCascade() takes everything keyed to the account.
+$drop = static function (PDO $db, array $names): void {
+    $st = $db->prepare('SELECT id FROM users WHERE username = ?');
+    foreach ($names as $nm) { $st->execute([$nm]); if ($id = (int)$st->fetchColumn()) userDeleteCascade($db, $id); }
+};
+$drop($db, ['pmalice', 'pmbob']);
 $mk = static function (PDO $db, array $cfg, string $name): int {
     $r = userCreate($db, $cfg, $name, $name . '@example.org', 'PmTest123!', '127.0.0.1');
     $id = (int)($r['user']['id'] ?? $r['id'] ?? 0);
@@ -203,7 +209,7 @@ check('the messages inside it are gone', $left("SELECT COUNT(*) FROM user_messag
 check('and the report that pointed at one of them', $left("SELECT COUNT(*) FROM message_reports WHERE thread_id = ?", [(int)$t1['id']]) === 0, json_encode($gone));
 check('the friendship is gone too', $left("SELECT COUNT(*) FROM user_friends WHERE user_id = ? OR friend_id = ?", [$bId, $bId]) === 0);
 
-$db->prepare("DELETE FROM users WHERE id = ?")->execute([$aId]);
+$drop($db, ['pmalice']);
 $db->prepare("DELETE FROM user_groups WHERE id = ?")->execute([$gid]);
 
 /* ── 7. the settings and permissions exist everywhere a setting has to ────── */
@@ -280,7 +286,7 @@ $db->exec("DELETE FROM message_typing WHERE thread_id IN (99001, 99002, 99003)")
 // A pair of its own: the cascade section above deletes the two accounts this file started with, and
 // a test that reads a row somebody else removed fails for a reason that has nothing to do with what
 // it is checking.
-$db->prepare("DELETE FROM users WHERE username IN ('pmmute','pmmate')")->execute();
+$drop($db, ['pmmute', 'pmmate']);
 $alice = userFindById($db, $mk($db, $cfg, 'pmmute'));
 $bob   = userFindById($db, $mk($db, $cfg, 'pmmate'));
 $db->prepare("UPDATE users SET pm_muted_until = NOW() + INTERVAL 1 DAY WHERE id = ?")->execute([(int)$alice['id']]);
@@ -311,7 +317,7 @@ userLiftExpiredPunishments($db);
 check('a ban with no end date stays until somebody lifts it',
     (string)$db->query("SELECT status FROM users WHERE id = " . (int)$bob['id'])->fetchColumn() === 'banned');
 $db->prepare("UPDATE users SET status = 'active', banned_until = NULL WHERE id = ?")->execute([(int)$bob['id']]);
-$db->prepare("DELETE FROM users WHERE username IN ('pmmute','pmmate')")->execute();
+$drop($db, ['pmmute', 'pmmate']);
 
 /* ── one message, one record (v56) ──────────────────────────────────────────────────────────────
  *
@@ -349,13 +355,74 @@ check('… and one with a conversation in it reports that conversation',
     pmInboxStamp($db, $nid) === '2026-01-02 03:04:05');
 $db->prepare("UPDATE message_threads SET last_message_at = '2026-01-02 03:04:06' WHERE id = ?")->execute([(int)$th['id']]);
 check('… and it moves when the newest line does', pmInboxStamp($db, $nid) === '2026-01-02 03:04:06');
-// Hidden means hidden: a conversation somebody has put away does not keep their list awake.
+// 1.73.0: an ARCHIVED conversation is still one of theirs. Until 1.72.x a hidden one could not receive a message
+// without being un-hidden by it; now (pm_archive_returns off) it can, and the message changes the Archive tab — its
+// count, its unread pill — so it moves the stamp the list is watched by. tests/pm_trash_test.php has the rest.
 $col = (int)$th['u_low'] === $nid ? 'u_low_hidden' : 'u_high_hidden';
 $db->prepare("UPDATE message_threads SET $col = 1 WHERE id = ?")->execute([(int)$th['id']]);
-check('… and a conversation this reader has put away is not one of theirs', pmInboxStamp($db, $nid) === '');
+check('… and an archived conversation still moves it — a message there changes the Archive tab', pmInboxStamp($db, $nid) === '2026-01-02 03:04:06');
 $db->prepare("DELETE FROM message_threads WHERE id = ?")->execute([(int)$th['id']]);
 $db->prepare("DELETE FROM user_notifications WHERE user_id = ?")->execute([$nid]);
-$db->prepare("DELETE FROM users WHERE id IN (?, ?)")->execute([$nid, $mateId]);
+$drop($db, ['pmnotif', 'pmstamp']);
+
+/* ── 1.73.0 part E: a message's moment on the READER's clock ───────────────── */
+// The messages showed the database session's wall clock — the page cut the DATETIME to sixteen characters — while
+// the shoutbox has said its times in the reader's zone since 1.62.0. Now every moment travels as an instant
+// (UNIX_TIMESTAMP() of the column, computed by the database, which knows the zone it wrote it in) and the endpoints
+// send 'Y-m-d H:i' on the reader's clock beside it (pmReaderTime()). Written by the app's own connection at a moment
+// this file knows: 2026-01-15 23:30:00 UTC.
+$drop($db, ['pmtzwriter', 'pmtzreader']);
+$tzW = $mk($db, $cfg, 'pmtzwriter');
+$tzR = $mk($db, $cfg, 'pmtzreader');
+$tzTh = pmThreadFor($db, $tzW, $tzR);
+$INSTANT = 1768519800;
+$db->prepare("INSERT INTO user_messages (thread_id, sender_id, body, body_format, created_at) VALUES (?, ?, 'tz test', 'bbcode', FROM_UNIXTIME(?))")
+   ->execute([(int)$tzTh['id'], $tzW, $INSTANT]);
+$db->prepare("UPDATE message_threads SET last_message_at = FROM_UNIXTIME(?) WHERE id = ?")->execute([$INSTANT, (int)$tzTh['id']]);
+$tzRows = pmThreadMessages($db, pmThreadFor($db, $tzR, $tzW, false), $tzR, 'live');
+$tzMsg = end($tzRows) ?: [];
+check('a message carries its moment as an instant', (int)($tzMsg['created_ts'] ?? 0) === $INSTANT, json_encode($tzMsg));
+$db->prepare("UPDATE users SET timezone = 'Asia/Tokyo' WHERE id = ?")->execute([$tzR]);
+$tzReader = userFindById($db, $tzR);
+check('a reader in Tokyo reads it on their own clock: the next morning',
+      ($s = pmReaderTime($tzMsg['created_ts'] ?? null, userDisplayTimezone($tzReader, $cfg))) === '2026-01-16 08:30', $s);
+$db->prepare("UPDATE users SET timezone = NULL WHERE id = ?")->execute([$tzR]);
+$cfgWaw = array_merge($cfg, ['site_timezone' => 'Europe/Warsaw']);
+check('… one who chose no zone reads the site\'s (Warsaw, in January: half past midnight)',
+      ($s = pmReaderTime($tzMsg['created_ts'] ?? null, userDisplayTimezone(userFindById($db, $tzR), $cfgWaw))) === '2026-01-16 00:30', $s);
+check('… and nothing for no moment', pmReaderTime(null, new DateTimeZone('UTC')) === '' && pmReaderTime('', new DateTimeZone('UTC')) === '');
+$tzList = array_values(array_filter(pmListThreads($db, $tzR, 'inbox'), fn($r) => (int)$r['id'] === (int)$tzTh['id']));
+check('the inbox row carries its moments as instants (the last message, the conversation\'s last line)',
+      (int)($tzList[0]['last_ts'] ?? 0) === $INSTANT && (int)($tzList[0]['last_message_ts'] ?? 0) === $INSTANT, json_encode($tzList[0] ?? null));
+// The Trash: when it was put there, and when it goes for good, both as instants on the reader's side.
+$tzSide = (int)$tzTh['u_low'] === $tzR ? 'u_low' : 'u_high';
+$tzMax = (int)$db->query("SELECT MAX(id) FROM user_messages WHERE thread_id = " . (int)$tzTh['id'])->fetchColumn();
+$db->prepare("UPDATE message_threads SET {$tzSide}_trash_upto = ?, {$tzSide}_trashed_at = FROM_UNIXTIME(?) WHERE id = ?")
+   ->execute([$tzMax, $INSTANT, (int)$tzTh['id']]);
+$tzState = pmThreadState($db, $cfg, pmThreadFor($db, $tzR, $tzW, false), $tzR);
+check('the Trash says when, as an instant, and when it runs out',
+      ($tzState['trashed_ts'] ?? null) === $INSTANT && ($tzState['until_ts'] ?? null) === $INSTANT + pmTrashDays($cfg) * 86400, json_encode($tzState));
+$tzTrash = array_values(array_filter(pmListThreads($db, $tzR, 'trash'), fn($r) => (int)$r['id'] === (int)$tzTh['id']));
+check('… and so does the Trash\'s list row', (int)($tzTrash[0]['trashed_ts'] ?? 0) === $INSTANT && (int)($tzTrash[0]['last_ts'] ?? 0) === $INSTANT,
+      json_encode($tzTrash[0] ?? null));
+// What the endpoints send, and what the page draws (the rendered page: scratchpad/shots/people_check.js).
+$apiPm = (string)file_get_contents(__DIR__ . '/../api/user_messages.php');
+check('the conversation, the poll, the inbox and the Trash bar send the reader\'s clock',
+      substr_count($apiPm, "'time'") >= 2 && str_contains($apiPm, "'last_time' => pmReaderTime(") && str_contains($apiPm, "'until_time'")
+      && str_contains($apiPm, '$readerTz = userDisplayTimezone($me, $cfg);'));
+check('… friends and blocks too', str_contains((string)file_get_contents(__DIR__ . '/../api/user_people.php'), "'since_time'   => pmReaderTime("));
+check('… and the notifications', str_contains((string)file_get_contents(__DIR__ . '/../api/user_notifications.php'), "'created_time'"));
+$pjs = (string)file_get_contents(__DIR__ . '/../assets/js/people.js');
+check('the page draws them', str_contains($pjs, 'localTime(m.time, m.created)') && str_contains($pjs, 'localTime(x.last_time, x.last_at)')
+      && str_contains($pjs, 'localTime(st.until_time, st.until)') && str_contains($pjs, 'localTime(p.since_time, p.since)'));
+check('… and the account page\'s notifications', str_contains((string)file_get_contents(__DIR__ . '/../assets/js/app.js'), 'n.created_time || fmtDatePub(n.created_at)'));
+$db->prepare("DELETE FROM user_messages WHERE thread_id = ?")->execute([(int)$tzTh['id']]);
+$db->prepare("DELETE FROM message_threads WHERE id = ?")->execute([(int)$tzTh['id']]);
+$drop($db, ['pmtzwriter', 'pmtzreader']);
+check('the accounts this file made are gone, and no membership of theirs is left behind',
+    (int)$db->query("SELECT COUNT(*) FROM users WHERE username IN ('pmalice','pmbob','pmmute','pmmate','pmnotif','pmstamp')")->fetchColumn() === 0
+    && (int)$db->query("SELECT COUNT(*) FROM user_group_members m LEFT JOIN users u ON u.id = m.user_id WHERE u.id IS NULL AND m.user_id IN ("
+                       . implode(',', array_map('intval', [$aId, $bId, (int)$alice['id'], (int)$bob['id'], $nid, $mateId])) . ")")->fetchColumn() === 0);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

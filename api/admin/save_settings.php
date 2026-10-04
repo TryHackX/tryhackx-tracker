@@ -108,6 +108,9 @@ $allowed = [
     // "who has this": its likes / ratings and its lists sections (1.70.0, includes/who.php)
     'who_votes_enabled', 'who_lists_enabled',
     'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
+    // the messages' Archive and Trash (1.73.0, includes/people.php): does a new message bring an archived
+    // conversation back, and how many days the Trash keeps one (0 = no Trash)
+    'pm_archive_returns', 'pm_trash_days',
     // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
     // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
     // same screen they turned it on from.
@@ -398,6 +401,8 @@ $intClamp = [
     'lists_desc_max' => [LIST_DESC_MAX_MIN, LIST_DESC_MAX_MAX, LIST_DESC_MAX_DEFAULT],
     'fav_max_per_user' => [10, 5000, 500], 'auth_bridge_ttl' => [30, 900, 120],
     'pm_max_per_day' => [1, 1000, 50], 'pm_max_chars' => [200, 20000, 4000],
+    // The Trash's days (1.73.0): 0 is a real answer — no Trash, Delete deletes at once — and a year the ceiling.
+    'pm_trash_days' => [0, 365, 30],
     'index_keep_saved_days' => [1, 3650, 90],
     // 0 is a real answer here — it means "do not poll at all" — so the floor is 0 and
     // pmLiveSeconds() is what raises anything between 1 and 2 to the two-second floor on read.
@@ -520,6 +525,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
+          'pm_archive_returns',
           'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
           'who_votes_enabled', 'who_lists_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',

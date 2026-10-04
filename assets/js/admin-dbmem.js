@@ -33,11 +33,11 @@
         const my = ++seq;
         let j;
         try { j = await apiCall('admin/dbmem_status'); }
-        catch (e) { if (my > painted) { painted = my; fatal((e && e.message) || t('js.dbmem.network_error')); } return; }
+        catch (e) { if (my > painted) { painted = my; fatal((e && e.message) || t.key('js.dbmem.network_error')); } return; }
         if (my <= painted) return;
         painted = my;
-        if (!j || j.enabled === false) { fatal(t('js.dbmem.helper_off')); return; }
-        if (!j.ok) { fatal(j.error || t('js.dbmem.helper_no_answer')); return; }
+        if (!j || j.enabled === false) { fatal(t.key('js.dbmem.helper_off')); return; }
+        if (!j.ok) { fatal(j.error || t.key('js.dbmem.helper_no_answer')); return; }
         state.data = j;
         seedWanted();
         if (formDirty() || gridHasFocus()) return;
@@ -52,9 +52,9 @@
     function fatal(msg) {
         const g = $('dm-grid');
         g.textContent = '';
-        g.appendChild(el('div', { className: 'nl-note nl-note-bad', text: msg || t('js.dbmem.unavailable') }));
+        g.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.find(msg, 'api.') || t.key('js.dbmem.unavailable') }));
         g.appendChild(el('div', {}, [el('button', { className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
-            onclick: () => { painted = 0; load(true); } }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.dbmem.try_again')])]));
+            onclick: () => { painted = 0; load(true); } }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ', t.key('js.dbmem.try_again')])]));
         $('dm-notes').textContent = '';
         ['btn-dm-apply', 'btn-dm-restart', 'btn-dm-reset'].forEach(id => { const b = $(id); if (b) b.disabled = true; });
     }
@@ -84,29 +84,30 @@
 
         // the engine, the machine
         const head = el('div', { className: 'dm-facts' });
+        // `value` may be pieces (a list): a t.key() word among them keeps its key (1.73.0)
         const fact = (label, value, cls) => head.appendChild(el('div', { className: 'dm-fact' + (cls ? ' ' + cls : '') }, [
-            el('span', { className: 'dm-fact-k', text: label }), el('span', { className: 'dm-fact-v', text: value })]));   // returns the row, so a caller can add a title
-        fact(t('js.dbmem.engine'), (st.engine === 'mariadb' ? 'MariaDB' : 'MySQL') + ' ' + (st.server_version || '').split('-')[0] + (st.unit ? ' · ' + st.unit : ''));
-        fact(t('js.dbmem.ram'), fmtBytes((st.mem_total_kb || 0) * 1024) + ' · ' + t('js.dbmem.available', { v: fmtBytes((st.mem_available_kb || 0) * 1024) }));
+            el('span', { className: 'dm-fact-k', text: label }), el('span', { className: 'dm-fact-v' }, value)]));   // returns the row, so a caller can add a title
+        fact(t.key('js.dbmem.engine'), (st.engine === 'mariadb' ? 'MariaDB' : 'MySQL') + ' ' + (st.server_version || '').split('-')[0] + (st.unit ? ' · ' + st.unit : ''));
+        fact(t.key('js.dbmem.ram'), [fmtBytes((st.mem_total_kb || 0) * 1024) + ' · ', t.key('js.dbmem.available', { v: fmtBytes((st.mem_available_kb || 0) * 1024) })]);
         const total = Number(s.Innodb_buffer_pool_pages_total) || 0, free = Number(s.Innodb_buffer_pool_pages_free) || 0;
-        if (total) fact(t('js.dbmem.pool_used'), Math.round(100 * (total - free) / total) + ' %');
+        if (total) fact(t.key('js.dbmem.pool_used'), Math.round(100 * (total - free) / total) + ' %');
         const reads = Number(s.Innodb_buffer_pool_reads) || 0, reqs = Number(s.Innodb_buffer_pool_read_requests) || 0;
-        if (reqs) fact(t('js.dbmem.disk_reads'), (100 * reads / reqs).toFixed(2) + ' %');
+        if (reqs) fact(t.key('js.dbmem.disk_reads'), (100 * reads / reqs).toFixed(2) + ' %');
         const tmpAll = Number(s.Created_tmp_tables) || 0, tmpDisk = Number(s.Created_tmp_disk_tables) || 0;
-        if (tmpAll) fact(t('js.dbmem.tmp_disk'), Math.round(100 * tmpDisk / tmpAll) + ' %');
-        fact(t('js.dbmem.connections'), t('js.dbmem.of_limit', { used: num(s.Threads_connected), peak: num(s.Max_used_connections), limit: num(vars.max_connections) }));
+        if (tmpAll) fact(t.key('js.dbmem.tmp_disk'), Math.round(100 * tmpDisk / tmpAll) + ' %');
+        fact(t.key('js.dbmem.connections'), t.key('js.dbmem.of_limit', { used: num(s.Threads_connected), peak: num(s.Max_used_connections), limit: num(vars.max_connections) }));
         // WHAT THE POOL IS FOR. Every other number here describes the pool; without these three,
         // "is the pool big enough?" cannot be answered from this screen at all — and on this
         // deployment the catalogue is several times the pool, which is the single most useful thing
         // the card can say. `title` carries the data/index split and the row estimate, because a
         // table that is mostly index is a different problem from one that is mostly rows.
         const sz = d.sizes || {};
-        if (sz.db != null) fact(t('js.dbmem.db_size'), fmtBytes(sz.db));
+        if (sz.db != null) fact(t.key('js.dbmem.db_size'), fmtBytes(sz.db));
         ['index_hashes', 'index_files'].forEach(name => {
             const tsz = (sz.tables || {})[name];
             if (!tsz) return;
-            const f = fact(t('js.dbmem.table_size', { table: name }), fmtBytes(tsz.total));
-            f.title = t('js.dbmem.table_size_title', {
+            const f = fact(t.key('js.dbmem.table_size', { table: name }), fmtBytes(tsz.total));
+            f.title = t.key('js.dbmem.table_size_title', {
                 data: fmtBytes(tsz.data), index: fmtBytes(tsz.index),
                 rows: tsz.rows == null ? '—' : Number(tsz.rows).toLocaleString(),
             });
@@ -116,8 +117,8 @@
         // the table
         const table = el('table', { className: 'table table-dark table-sm dm-table' });
         table.appendChild(el('thead', {}, [el('tr', {}, [
-            el('th', { text: t('js.dbmem.col_key') }), el('th', { text: t('js.dbmem.col_live') }),
-            el('th', { text: t('js.dbmem.col_file') }), el('th', { text: t('js.dbmem.col_new') }), el('th', { text: '' })])]));
+            el('th', { text: t.key('js.dbmem.col_key') }), el('th', { text: t.key('js.dbmem.col_live') }),
+            el('th', { text: t.key('js.dbmem.col_file') }), el('th', { text: t.key('js.dbmem.col_new') }), el('th', { text: '' })])]));
         const tb = el('tbody', {});
         (d.key_names || []).forEach(k => {
             const meta = keys[k] || {};
@@ -128,9 +129,9 @@
             // A value in the file that is not the live one yet is marked with a dot (an icon since
             // 1.68.0; it was a bullet character in the stylesheet).
             const pending = inFile !== null && live !== null && inFile !== live;
-            tr.appendChild(el('td', {}, [el('div', { className: 'dm-key' }, [t('js.dbmem.k_' + k),
+            tr.appendChild(el('td', {}, [el('div', { className: 'dm-key' }, [t.key('js.dbmem.k_' + k),
                 pending ? el('i', { className: 'bi bi-dot dm-pending-mark', 'aria-hidden': 'true' }) : null]),
-                el('div', { className: 'dm-hint', text: t('js.dbmem.h_' + k) })]));
+                el('div', { className: 'dm-hint', text: t.key('js.dbmem.h_' + k) })]));
             tr.appendChild(el('td', { className: 'font-mono', text: live === null ? '—' : human(k, live) }));
             tr.appendChild(el('td', { className: 'font-mono text-muted', text: inFile === null ? '—' : human(k, inFile) }));
             // the input, in the reader's unit
@@ -153,8 +154,8 @@
                 cell.appendChild(sel);
             }
             tr.appendChild(cell);
-            const badge = meta.dynamic ? el('span', { className: 'dm-badge dm-badge-live', text: t('js.dbmem.live_badge'), title: t('js.dbmem.live_title') })
-                                       : el('span', { className: 'dm-badge dm-badge-restart', text: t('js.dbmem.restart_badge'), title: t('js.dbmem.restart_title_badge') });
+            const badge = meta.dynamic ? el('span', { className: 'dm-badge dm-badge-live', text: t.key('js.dbmem.live_badge'), title: t.key('js.dbmem.live_title') })
+                                       : el('span', { className: 'dm-badge dm-badge-restart', text: t.key('js.dbmem.restart_badge'), title: t.key('js.dbmem.restart_title_badge') });
             tr.appendChild(el('td', {}, [badge]));
             tb.appendChild(tr);
         });
@@ -165,12 +166,12 @@
         const notes = $('dm-notes');
         notes.textContent = '';
         if (d.restart_pending && d.restart_pending.length) {
-            notes.appendChild(el('div', { className: 'nl-note nl-note-warn', text: t('js.dbmem.restart_pending', { keys: d.restart_pending.join(', ') }) }));
+            notes.appendChild(el('div', { className: 'nl-note nl-note-warn', text: t.key('js.dbmem.restart_pending', { keys: d.restart_pending.join(', ') }) }));
         }
-        if (d.pending) notes.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.dbmem.deferred') }));
+        if (d.pending) notes.appendChild(el('div', { className: 'nl-note nl-note-info', text: t.key('js.dbmem.deferred') }));
         (d.advice || []).forEach(a => notes.appendChild(el('div', { className: 'nl-note ' + (a.level === 'warn' ? 'nl-note-warn' : 'nl-note-info'), text: a.text })));
         if (d.last_error) notes.appendChild(el('div', { className: 'nl-note nl-note-bad', text: d.last_error }));
-        if (st.file) notes.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: t('js.dbmem.file_line', { file: st.file, present: st.file_present ? t('js.dbmem.file_present') : t('js.dbmem.file_absent') }) }));
+        if (st.file) notes.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: t.key('js.dbmem.file_line', { file: st.file, present: st.file_present ? t.key('js.dbmem.file_present') : t.key('js.dbmem.file_absent') }) }));
         ['btn-dm-apply', 'btn-dm-restart', 'btn-dm-reset'].forEach(id => { const b = $(id); if (b) b.disabled = false; });
     }
 
@@ -184,45 +185,47 @@
     async function apply() {
         if (!state.data) return;
         const pairs = changedPairs();
-        if (!Object.keys(pairs).length) { showToast(t('js.dbmem.nothing_changed'), 'info'); return; }
-        const list = Object.keys(pairs).map(k => t('js.dbmem.k_' + k) + ': ' + human(k, pairs[k])).join(' · ');
-        const pw = await promptPassword(t('js.dbmem.apply_title'), t('js.dbmem.apply_body') + '\n' + list);
+        if (!Object.keys(pairs).length) { showToast(t.key('js.dbmem.nothing_changed'), 'info'); return; }
+        // pieces, each t.key() word keeping its key for the live language switch (1.73.0)
+        const list = [];
+        Object.keys(pairs).forEach((k, i) => { if (i) list.push(' · '); list.push(t.key('js.dbmem.k_' + k), ': ' + human(k, pairs[k])); });
+        const pw = await promptPassword(t.key('js.dbmem.apply_title'), [t.key('js.dbmem.apply_body'), '\n'].concat(list));
         if (!pw) return;
         const btn = $('btn-dm-apply'); btn.disabled = true;
         try {
             const r = await apiCall('admin/dbmem_apply', 'POST', { op: 'apply', values: pairs, password: pw });
-            if (!r || r.error) { showToast((r && r.error) || t('js.dbmem.apply_failed'), 'danger'); return; }
+            if (!r || r.error) { showToast((r && r.error) || t.key('js.dbmem.apply_failed'), 'danger'); return; }
             const applied = (r.result && r.result.applied) || {};
             let live = 0, restart = 0;
             const lines = [];
             Object.keys(applied).forEach(k => {
                 const a = applied[k];
                 if (a.live) live++; if (a.restart_required) restart++;
-                if (a.note) lines.push(t('js.dbmem.k_' + k) + ': ' + a.note);
+                if (a.note) { if (lines.length) lines.push(' · '); lines.push(t.key('js.dbmem.k_' + k), ': ' + a.note); }
             });
-            showToast(t('js.dbmem.applied', { n: live, r: restart }) + (r.result && r.result.deferred ? ' ' + t('js.dbmem.deferred') : ''), restart ? 'warning' : 'success');
-            if (lines.length) $('dm-notes').appendChild(el('div', { className: 'nl-note nl-note-info', text: lines.join(' · ') }));
+            showToast([t.key('js.dbmem.applied', { n: live, r: restart })].concat(r.result && r.result.deferred ? [' ', t.key('js.dbmem.deferred')] : []), restart ? 'warning' : 'success');
+            if (lines.length) $('dm-notes').appendChild(el('div', { className: 'nl-note nl-note-info' }, lines));
             state.wanted = {}; state.unit = {};
             painted = 0; await load(true);
-        } catch (e) { showToast((e && e.message) || t('js.dbmem.apply_failed'), 'danger'); }
+        } catch (e) { showToast((e && e.message) || t.key('js.dbmem.apply_failed'), 'danger'); }
         finally { btn.disabled = false; }
     }
 
     async function restart() {
         if (!state.data) return;
-        if (!(await confirmAction(t('js.dbmem.restart_title'), t('js.dbmem.restart_body'), { danger: true, okLabel: t('js.dbmem.restart_ok_label') }))) return;
-        const pw = await promptPassword(t('js.dbmem.restart_title'), t('js.dbmem.restart_pw_body'));
+        if (!(await confirmAction(t.key('js.dbmem.restart_title'), t.key('js.dbmem.restart_body'), { danger: true, okLabel: t.key('js.dbmem.restart_ok_label') }))) return;
+        const pw = await promptPassword(t.key('js.dbmem.restart_title'), t.key('js.dbmem.restart_pw_body'));
         if (!pw) return;
         const btn = $('btn-dm-restart'); btn.disabled = true;
         const origHtml = btn.innerHTML;
-        btn.textContent = t('js.dbmem.restarting');
+        btn.textContent = t.key('js.dbmem.restarting');
         try {
             const r = await apiCall('admin/dbmem_apply', 'POST', { op: 'restart', ack: true, password: pw });
-            if (!r || r.error) { showToast((r && r.error) || t('js.dbmem.restart_failed'), 'danger'); return; }
-            showToast(t('js.dbmem.restart_done', { s: (r.result && r.result.seconds) || 0 }), 'success');
+            if (!r || r.error) { showToast((r && r.error) || t.key('js.dbmem.restart_failed'), 'danger'); return; }
+            showToast(t.key('js.dbmem.restart_done', { s: (r.result && r.result.seconds) || 0 }), 'success');
             state.wanted = {}; state.unit = {};
             painted = 0; await load(true);
-        } catch (e) { showToast((e && e.message) || t('js.dbmem.restart_failed'), 'danger'); }
+        } catch (e) { showToast((e && e.message) || t.key('js.dbmem.restart_failed'), 'danger'); }
         finally { btn.innerHTML = origHtml; btn.disabled = false; }
     }
 

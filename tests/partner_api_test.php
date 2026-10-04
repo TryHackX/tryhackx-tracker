@@ -92,8 +92,30 @@ check('the guide address names the page', str_contains($u, 'action=apidocs'));
 check('… the scope', str_contains($u, 'scope=whitelist'));
 check('… the approval mode', str_contains($u, 'approve=review'));
 check('… and the required fields', str_contains($u, 'fields=name%2Curl') || str_contains($u, 'fields=name,url'));
-check('auto is the other value, not the absence of one', str_contains(apiClientDocsUrl('users', true, []), 'approve=auto'));
-check('no fields means no parameter at all', !str_contains(apiClientDocsUrl('users', true, []), 'fields='));
+check('auto is the other value, not the absence of one', str_contains(apiClientDocsUrl('whitelist', true, []), 'approve=auto'));
+check('no fields means no parameter at all', !str_contains(apiClientDocsUrl('whitelist', true, []), 'fields='));
+// ONE ANSWER PER CHAPTER (1.73.0): approve= is what happens to a registration, block= what happens to a report.
+// An abuse key's guide used to carry its creator's auto_approve — "blocks on arrival" for a key that holds
+// reports for review — and an `all` key's reporting chapter borrowed the registrations' answer.
+$ab = apiClientDocsUrl('abuse', true, ['reporter'], false);
+check('an abuse key\'s guide says what happens to a REPORT: block=, its own answer', str_contains($ab, 'block=review'), $ab);
+check('… and nothing about registrations it cannot make', !str_contains($ab, 'approve='), $ab);
+check('… block=auto when the key blocks on arrival', str_contains(apiClientDocsUrl('abuse', false, [], true), 'block=auto'));
+$al = apiClientDocsUrl('all', true, ['name', 'reporter'], false);
+check('an `all` key\'s guide carries both answers, each its own', str_contains($al, 'approve=auto') && str_contains($al, 'block=review'), $al);
+check('a key that sends nothing gets neither (users, shop, federation)',
+      !preg_match('/approve=|block=|fields=/', apiClientDocsUrl('users', true, ['name']) . apiClientDocsUrl('shop', true, [])
+                                              . apiClientDocsUrl('federation', false, [], true)));
+$createSrc = (string)@file_get_contents($root . '/api/admin/api_client_create.php');
+$fetchSrc = (string)@file_get_contents($root . '/api/admin/fetch_api_clients.php');
+check('the new key\'s guide link gets the key\'s own blocking answer',
+      str_contains($createSrc, 'apiClientDocsUrl((string)$c[\'scope\'], $autoApprove === 1, $fields, $autoBlock === 1)'));
+check('… and so does every row of the key list',
+      str_contains($fetchSrc, "apiClientDocsUrl((string)\$c['scope'], \$c['auto_approve'], \$c['required_fields'], \$c['abuse_auto_block'])"));
+$wlJs = (string)@file_get_contents($root . '/assets/js/admin-whitelist.js');
+check('the panel\'s live preview builds the same two answers',
+      str_contains($wlJs, "if (submits) u.searchParams.set('approve'") && str_contains($wlJs, "if (reports) u.searchParams.set('block'")
+      && str_contains($wlJs, 'docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1)'));
 // The whole reason it can travel in the same mail as the key.
 foreach (['key_id', 'secret', 'bearer', 'token'] as $word) {
     check("the address says nothing about the $word", !str_contains(strtolower($u), $word));
@@ -115,6 +137,10 @@ check('nothing on the page reads the database',
 $subSrc = (string)@file_get_contents($root . '/api/v1/whitelist_submit.php');
 check('the endpoint reads the key own approval setting', str_contains($subSrc, "client['auto_approve']"));
 check('… and the key own required fields', str_contains($subSrc, "client['required_fields']"));
+// 1.73.0: read through the whitelist half's vocabulary — an `all` key's stored list also holds the report's
+// fields, and read raw, `reporter` refused every registration (proved over HTTP below).
+check('… cleaned to the fields a registration can carry',
+      str_contains($subSrc, "apiClientCleanFields((string)(\$client['required_fields'] ?? ''), 'whitelist')"));
 check("a held item is passed to the store as 'pending'", preg_match("/'review'\s*=>\s*\\\$autoApprove\s*\?\s*'none'\s*:\s*'pending'/", $subSrc) === 1);
 // A missing field is a problem with ONE item, not with the request: the rest of the batch still
 // goes through, and the reply says which one and why.
@@ -198,6 +224,98 @@ check('the details panel draws the review state', str_contains($jsSrc, "js.wl.re
 check('the key editor offers both per-key settings',
       str_contains($jsSrc, 'auto_approve') && str_contains($jsSrc, 'required_fields'));
 check('the guide link is copyable from the key row', str_contains($jsSrc, 'docs_url'));
+
+/* ── 9. the FAST PATH holds a waiting row back too (1.73.0) ───────────────── */
+// The generator was right; the add path was not. In whitelist mode whitelistAddHashes() APPENDS what it
+// added to the live file — and it appended a held row as well, so a partner's waiting submission was served
+// from the second it arrived until the next full regeneration. The file is seeded first, so the append path
+// (not a regeneration of an empty file) is the one under test.
+require_once $root . '/includes/wlprobe.php';
+$hHeld = $mk('fastpath-held');
+$hDirect = $mk('fastpath-direct');
+$hProbing = $mk('probe-probing');
+$hFailed = $mk('probe-failed');
+$fast = [$hHeld, $hDirect, $hProbing, $hFailed];
+$db->prepare("DELETE FROM whitelist WHERE info_hash IN (?,?,?,?)")->execute($fast);
+$cfgLive = array_merge($cfg, ['whitelist_path' => $tmpFile, 'tracker_mode' => 'whitelist', 'opentracker_service_name' => '']);
+file_put_contents($tmpFile, str_repeat('a', 40) . "\n");   // a non-empty, writable file: the append path
+$add = function (string $hash, string $review) use ($db, $cfgLive) {
+    return whitelistAddHashes($db, $cfgLive, [['input' => $hash, 'hash' => $hash, 'name' => 'fast path test']],
+        ['source' => 'api', 'ip' => '127.0.0.1', 'review' => $review]);
+};
+$r1 = $add($hHeld, 'pending');
+$file1 = (string)@file_get_contents($tmpFile);
+check('a held registration is stored', ($r1['summary']['added'] ?? 0) === 1, json_encode($r1['summary'] ?? $r1));
+check('… and NOT appended to the file the tracker reads', !str_contains($file1, $hHeld), $file1);
+$r2 = $add($hDirect, 'none');
+$file2 = (string)@file_get_contents($tmpFile);
+check('a registration that publishes directly IS appended at once', str_contains($file2, $hDirect), json_encode($r2['file'] ?? null));
+check('… and the held one is still not there', !str_contains($file2, $hHeld));
+
+/* ── 10. a registration proving itself is served while it does; a failed one leaves at once (1.73.0) ─ */
+// Its proof is a peer announcing HERE, and a whitelist-mode tracker refuses the announces of a hash its list
+// does not carry — so a probe whose hash is not served can never pass (includes/wlprobe.php).
+$pi = $db->prepare("INSERT INTO whitelist (info_hash, name, source, banned, probe_status, probe_started_at, meta_status)
+                    VALUES (?, 'probe test', 'web', 0, ?, NOW() - INTERVAL 1 MINUTE, ?)");
+$pi->execute([$hProbing, 'probing', 'pending']);
+$pi->execute([$hFailed, 'failed', 'failed']);
+whitelistRegenerate($db, $cfgLive);
+$file3 = (string)@file_get_contents($tmpFile);
+check('a full regeneration keeps a registration that is still proving itself', str_contains($file3, $hProbing));
+check('… and leaves out one that failed', !str_contains($file3, $hFailed));
+check('… and still leaves out the held one', !str_contains($file3, $hHeld));
+// The probe fails it (its metadata could not be fetched): the tick withdraws it from the file at once.
+$db->prepare("UPDATE whitelist SET meta_status = 'failed' WHERE info_hash = ?")->execute([$hProbing]);
+$cfgProbe = array_merge($cfgLive, ['wl_probe_required' => '1', 'wl_probe_on_fail' => 'keep']);
+$tick = wlProbeTick($db, $cfgProbe);
+$file4 = (string)@file_get_contents($tmpFile);
+$st = $db->prepare("SELECT probe_status FROM whitelist WHERE info_hash = ?");
+$st->execute([$hProbing]);
+check('the probe gives up on it', $st->fetchColumn() === 'failed', json_encode($tick));
+check('… and the file no longer carries it — no waiting for some other regeneration', !str_contains($file4, $hProbing), json_encode($tick));
+$wlSrcNow = (string)@file_get_contents($root . '/includes/wlprobe.php');
+check('the tick regenerates on a failure as well as on a pass',
+      str_contains($wlSrcNow, "if (\$out['passed'] > 0 || \$out['failed'] > 0) {"));
+$db->prepare("DELETE FROM whitelist WHERE info_hash IN (?,?,?,?)")->execute($fast);
+
+/* ── 11. over HTTP: an `all` key that asks for a reporter still registers (1.73.0) ─────────────── */
+// The endpoint read the key's required fields raw: an `all` key's list holds the report's fields too, and a
+// whitelist item can never carry `reporter`, so every item came back invalid, missing_reporter.
+$site = rtrim(getenv('VERIFY_BASE') ?: 'http://127.0.0.1:8089/', '/') . '/';
+$probe = @file_get_contents($site . '?action=tos', false, stream_context_create(['http' => ['ignore_errors' => true, 'timeout' => 10]]));
+if ($probe === false || !function_exists('curl_init')) {
+    echo "SKIP the HTTP half: the local site is not answering at $site\n";
+} else {
+    $apiWas = $cfg['api_enabled'] ?? null;
+    $db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('api_enabled', '1') ON DUPLICATE KEY UPDATE `value` = '1'")->execute();
+    $db->prepare("DELETE FROM api_clients WHERE label = 'partner-api-test-all'")->execute();
+    $key = apiClientCreate($db, 'partner-api-test-all', 'all');
+    // Held for review, so nothing this sends is served (the fast path above).
+    $db->prepare("UPDATE api_clients SET auto_approve = 0, abuse_auto_block = 0, required_fields = 'name,reporter' WHERE id = ?")
+       ->execute([(int)$key['id']]);
+    $hNamed = $mk('http-named'); $hBare = $mk('http-bare');
+    $db->prepare("DELETE FROM whitelist WHERE info_hash IN (?, ?)")->execute([$hNamed, $hBare]);
+    $c = curl_init($site . 'api.php?endpoint=v1/whitelist/submit');
+    curl_setopt_array($c, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Authorization: Bearer ' . $key['key_id'] . '.' . $key['secret']],
+        CURLOPT_POSTFIELDS => json_encode(['items' => [['hash' => $hNamed, 'name' => 'Named release'], ['hash' => $hBare]]])]);
+    $body = (string)curl_exec($c);
+    $code = (int)curl_getinfo($c, CURLINFO_RESPONSE_CODE);
+    curl_close($c);
+    $j = json_decode($body, true) ?: [];
+    check('the `all` key\'s submission is answered 200', $code === 200, $code . ' ' . substr($body, 0, 300));
+    check('… an item with a name is taken (held for review, as the key says), not refused for a reporter',
+          ($j['results'][0]['status'] ?? '') === 'pending', json_encode($j['results'][0] ?? null));
+    check('… an item without one is refused for the field it lacks: the name',
+          ($j['results'][1]['status'] ?? '') === 'invalid' && ($j['results'][1]['error'] ?? '') === 'missing_name',
+          json_encode($j['results'][1] ?? null));
+    check('… and the reply names only the fields a registration is asked for', ($j['required_fields'] ?? null) === ['name'],
+          json_encode($j['required_fields'] ?? null));
+    $db->prepare("DELETE FROM whitelist WHERE info_hash IN (?, ?)")->execute([$hNamed, $hBare]);
+    $db->prepare("DELETE FROM api_clients WHERE id = ?")->execute([(int)$key['id']]);
+    if ($apiWas === null) $db->prepare("DELETE FROM settings WHERE `key` = 'api_enabled'")->execute();
+    else $db->prepare("UPDATE settings SET `value` = ? WHERE `key` = 'api_enabled'")->execute([$apiWas]);
+}
 
 /* ── clean up ─────────────────────────────────────────────────────────────── */
 $db->prepare("DELETE FROM whitelist WHERE info_hash IN (?,?,?,?)")->execute($all);

@@ -34,7 +34,10 @@ if ($commentsHere && !$recaptchaNeeded && $navUser === null && captchaConfigured
 $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') && (userAvatarsEnabled($cfg) || userCoversEnabled($cfg));
 ?>
 <!DOCTYPE html>
-<html lang="<?= sanitize(langCurrent()) ?>">
+<?php /* An error page says so (1.73.0): the live language switch asks for the same address in the other language, gets
+         the same status back, and swaps the page in place like any other (assets/js/lang-swap.js) — the panel's hidden
+         404 used to fall back to a reload. */ ?>
+<html lang="<?= sanitize(langCurrent()) ?>"<?= (int)http_response_code() >= 400 ? ' data-status="' . (int)http_response_code() . '"' : '' ?>>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -58,7 +61,11 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <title><?= sanitize($pageTitle) ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl, LANG_JS_PUBLIC) ?>
+    <?php /* Two pages whose own script says a few words of their own (1.73.0): the panel's sign-in and the e-mail
+             preferences. Theirs go into the page's bundle, beside the public scripts', so the live switch reloads
+             them with the rest — they used to be frozen into the script in the language the page was drawn in. */ ?>
+    <?= langJsBridge($baseUrl, array_merge(LANG_JS_PUBLIC, $action === 'adminlogin' ? ['adminlogin.', 'api.login.'] : [],
+                                           $action === 'unsubscribe' ? ['unsub.'] : [])) ?>
     <?php /* The icon font, on EVERY page (1.68.0). It used to come only with the handful of actions
              known to draw an icon, and anything drawn elsewhere — the inbox's bin with pictures and
              covers switched off — was an empty box. Which font is Settings → Site's choice.
@@ -98,6 +105,9 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     </div>
     <?php endif; ?>
     <script<?= nonceAttr() ?>>
+    <?php /* What the server wrote, marked before any script of the page can add to it (1.73.0): the live language
+             switch rewrites only that (assets/js/lang-swap.js). The first thing after the page's markup. */ ?>
+    if (window.LangSwap) window.LangSwap.mark();
     const APP_BASE = '<?= $baseUrl ?>';
     const APP_API = '<?= $baseUrl ?>api.php?endpoint=';
     <?php /* The two facts window.userAvatarUrl() needs to build the same address userAvatarUrl() does:

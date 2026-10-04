@@ -63,12 +63,13 @@
             if (k === 'className') n.className = v;
             else if (k === 'text') n.textContent = v;
             else if (k === 'html') n.innerHTML = v;          // server-rendered, already sanitized
-            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.dataset[d] = v[d]; });
+            // data-* through setAttribute, which keeps a t.key() word's key (dataset would write its words only, 1.73.0)
+            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.setAttribute('data-' + d.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); }), v[d]); });
             else n.setAttribute(k, v === true ? '' : v);
         });
         (Array.isArray(kids) ? kids : kids ? [kids] : []).forEach(function (c) {
             if (c === null || c === undefined || c === false) return;
-            n.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+            n.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key
         });
         return n;
     }
@@ -111,14 +112,14 @@
     function errText(r, maxChars) {
         var code = (r && r.error) || 'failed';
         if (typeof code !== 'string') code = 'failed';
-        if (code === 'flood') return t('js.shout.err_flood', { seconds: Number(r.retry_after || 0) });
-        if (code === 'too_long') return t('js.shout.err_too_long', { limit: Number(r.limit || maxChars || 0) });
-        if (code === 'muted') return t('js.shout.err_muted', { until: String(r.until || '') });
-        if (code === 'too_large') return t('js.shout.err_too_large', { kb: Number(r.limit || r.kb || 0) });
-        if (CODES[code]) return t('js.shout.err_' + code);
+        if (code === 'flood') return t.key('js.shout.err_flood', { seconds: Number(r.retry_after || 0) });
+        if (code === 'too_long') return t.key('js.shout.err_too_long', { limit: Number(r.limit || maxChars || 0) });
+        if (code === 'muted') return t.key('js.shout.err_muted', { until: String(r.until || '') });
+        if (code === 'too_large') return t.key('js.shout.err_too_large', { kb: Number(r.limit || r.kb || 0) });
+        if (CODES[code]) return t.key('js.shout.err_' + code);
         // Already a sentence rather than a code — show it rather than swallowing it.
         if (/\s/.test(code)) return code;
-        return t('js.shout.err_failed');
+        return t.key('js.shout.err_failed');
     }
 
     /**
@@ -208,10 +209,10 @@
         // layout.php), and the words beside or behind them for whoever cannot see a glyph.
         var orig = el('a', { className: 'shout-lb-orig', target: '_blank', rel: 'noopener noreferrer' }, [
             el('i', { className: 'bi bi-box-arrow-up-right', 'aria-hidden': 'true' }),
-            ' ' + t('js.shout.lb_original'),
+            ' ', t.key('js.shout.lb_original'),
         ]);
-        var shut = el('button', { type: 'button', className: 'shout-lb-close', title: t('js.shout.lb_close'),
-                                  'aria-label': t('js.shout.lb_close') },
+        var shut = el('button', { type: 'button', className: 'shout-lb-close', title: t.key('js.shout.lb_close'),
+                                  'aria-label': t.key('js.shout.lb_close') },
                       el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
         // 1.64.0: the two controls are INSIDE the picture, not on a bar under it — the close as an
         // icon in the top right corner, the link to the original centred along the bottom edge,
@@ -220,7 +221,7 @@
         // thing the window is for, and it took 3.5rem off the height the picture could use. Where
         // there is no hover to have — a phone — the stylesheet leaves them on.
         var root = el('div', { className: 'shout-lightbox', hidden: true, role: 'dialog', 'aria-modal': 'true',
-                               'aria-label': t('js.shout.lb_label') }, [
+                               'aria-label': t.key('js.shout.lb_label') }, [
             el('div', { className: 'shout-lb-frame' }, [img, shut, orig]),
         ]);
         var from = null;              // the link that opened it: the focus goes back there
@@ -433,8 +434,8 @@
             // The pencil (1.66.0) — per row, because the answer is: this reader's own line inside the
             // window, or anybody's with shout.edit_any. `data-left` is the window the server had left.
             if (r.editable) {
-                ctl.push(el('button', { type: 'button', className: 'shout-edit', title: t('js.shout.edit_title'),
-                                        'aria-label': t('js.shout.edit'),
+                ctl.push(el('button', { type: 'button', className: 'shout-edit', title: t.key('js.shout.edit_title'),
+                                        'aria-label': t.key('js.shout.edit'),
                                         'data-left': Number(r.edit_left) > 0 ? String(Number(r.edit_left)) : null },
                             el('i', { className: 'bi bi-pencil', 'aria-hidden': 'true' })));
             }
@@ -444,7 +445,7 @@
             if (mayModerate) ctl.push(pinButton(!!r.pinned));
             if (r.deletable) {
                 ctl.push(el('button', { type: 'button', className: 'shout-del',
-                                        title: t('js.shout.delete_title'), 'aria-label': t('js.shout.delete'),
+                                        title: t.key('js.shout.delete_title'), 'aria-label': t.key('js.shout.delete'),
                                         'data-left': Number(r.del_left) > 0 ? String(Number(r.del_left)) : null },
                             el('i', { className: 'bi bi-trash', 'aria-hidden': 'true' })));
             }
@@ -468,8 +469,8 @@
         }
         function labelReport(b, on) {
             b.classList.toggle('shout-report-on', !!on);
-            b.title = t(on ? 'js.shout.reported_title' : 'js.shout.report_title');
-            b.setAttribute('aria-label', t(on ? 'js.shout.reported' : 'js.shout.report'));
+            b.title = t.key(on ? 'js.shout.reported_title' : 'js.shout.report_title');
+            b.setAttribute('aria-label', t.key(on ? 'js.shout.reported' : 'js.shout.report'));
             if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
             var i = b.querySelector('i');
             if (i) i.className = 'bi ' + (on ? 'bi-flag-fill' : 'bi-flag');
@@ -479,7 +480,7 @@
             var row = b.closest('.shout-row');
             if (!row) return;
             if (b.classList.contains('shout-report-on')) {
-                if (typeof window.pubTip === 'function') window.pubTip(b, t('js.shout.reported_title'));
+                if (typeof window.pubTip === 'function') window.pubTip(b, t.key('js.shout.reported_title'));
                 return;
             }
             if (!window.Reports || typeof window.Reports.open !== 'function') return;
@@ -500,8 +501,8 @@
         }
         function labelPin(b, on) {
             b.classList.toggle('shout-pin-on', !!on);
-            b.title = t(on ? 'js.shout.unpin_title' : 'js.shout.pin_title');
-            b.setAttribute('aria-label', t(on ? 'js.shout.unpin' : 'js.shout.pin'));
+            b.title = t.key(on ? 'js.shout.unpin_title' : 'js.shout.pin_title');
+            b.setAttribute('aria-label', t.key(on ? 'js.shout.unpin' : 'js.shout.pin'));
             var i = b.querySelector('i');
             if (i) i.className = 'bi ' + (on ? 'bi-pin-angle-fill' : 'bi-pin-angle');
         }
@@ -545,8 +546,8 @@
             if (!r || !r.edited) return null;
             var mod = !!r.edited_mod, at = String(r.edited_at || '');
             return el('span', { className: 'shout-edited' + (mod ? ' shout-edited-mod' : ''), id: id || null,
-                                title: t(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: at }),
-                                'data-at': at, text: t(mod ? 'js.shout.edited_mod' : 'js.shout.edited') });
+                                title: t.key(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: at }),
+                                'data-at': at, text: t.key(mod ? 'js.shout.edited_mod' : 'js.shout.edited') });
         }
 
         /**
@@ -608,7 +609,7 @@
             pinnedEl.appendChild(el('span', { className: 'shout-body rt-body', html: row.html || '' }));
             if (mayModerate) {
                 pinnedEl.appendChild(el('button', { type: 'button', className: 'shout-unpin',
-                                                    title: t('js.shout.unpin_title'), 'aria-label': t('js.shout.unpin') },
+                                                    title: t.key('js.shout.unpin_title'), 'aria-label': t.key('js.shout.unpin') },
                                         el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' })));
             }
         }
@@ -770,7 +771,7 @@
             // press — true for about a second and then merely a sentence sitting under the composer
             // reading like a state the room is in. pubTip() is the tooltip the rest of the site
             // already uses (assets/js/app.js) and it takes itself away after a moment.
-            if (!n) tip(refreshBtn, t('js.shout.nothing_new'), note);
+            if (!n) tip(refreshBtn, t.key('js.shout.nothing_new'), note);
             clearTimeout(refreshCool);
             refreshCool = setTimeout(function () { refreshBtn.disabled = false; }, 2000);
         }
@@ -786,7 +787,7 @@
             olderBtn.disabled = false;
             if (!j || !j.success) { note(errText(j, maxChars)); return; }
             var rows = j.rows || [];
-            if (!rows.length) { olderBtn.hidden = true; note(t('js.shout.no_more')); return; }
+            if (!rows.length) { olderBtn.hidden = true; note(t.key('js.shout.no_more')); return; }
             // Measured before the insert and restored after it: the browser keeps scrollTop where it
             // was, which means the content under it has moved down by exactly the height added.
             // Only when the older rows go in ABOVE what is on the screen — with the newest at the
@@ -826,7 +827,7 @@
             // this is the second lock on the same door.
             if (row.classList.contains('shout-editing')) return;
             var id = Number(row.dataset.id) || 0;
-            askInPlace(btn, t('js.shout.delete_q'), async function () {
+            askInPlace(btn, t.key('js.shout.delete_q'), async function () {
                 var r = await post('shout_delete', { id: id });
                 if (r && r.success) { row.remove(); note(''); return true; }
                 // A row somebody else already deleted is gone either way: take it off the screen.
@@ -834,7 +835,7 @@
                 // The window closed while the page was open (1.66.0): say so, and let the cross go
                 // once the question has put it back — it can only be refused again.
                 if (r && r.error === 'too_late') {
-                    note(t('js.shout.err_too_late_delete'));
+                    note(t.key('js.shout.err_too_late_delete'));
                     btn.dataset.until = '1';
                     setTimeout(expire, 0);
                     return false;
@@ -844,12 +845,9 @@
             }, {
                 // The pin button is absolutely positioned over the end of the row and shown on
                 // hover — which puts it exactly on "No" (1.64.0). It goes away while the question
-                // is up and comes back on every way out of it.
+                // is up and comes back on every way out of it. (The cross waits beside the question, hidden, and
+                // its words follow a language switch where it stands — nothing to re-read on the way back, 1.73.0.)
                 host: row,
-                relabel: function (b) {
-                    b.title = t('js.shout.delete_title');
-                    b.setAttribute('aria-label', t('js.shout.delete'));
-                },
             });
         }
 
@@ -890,7 +888,7 @@
 
         function countUpdate() {
             if (!countEl || !ta) return;
-            countEl.textContent = t('js.shout.chars', { n: ta.value.length, max: maxChars });
+            countEl.textContent = t.key('js.shout.chars', { n: ta.value.length, max: maxChars });
         }
 
         /**
@@ -969,7 +967,7 @@
             var lead = pad && before !== '' && !/\s$/.test(before) ? ' ' : '';
             var tail = pad && !/^\s/.test(after) ? ' ' : '';
             var add = lead + text + tail;
-            if (before.length + after.length + add.length > maxChars) { note(t('js.shout.err_too_long', { limit: maxChars })); return false; }
+            if (before.length + after.length + add.length > maxChars) { note(t.key('js.shout.err_too_long', { limit: maxChars })); return false; }
             ta.value = before + add + after;
             var pos = s + add.length;
             try { ta.setSelectionRange(pos, pos); } catch (err) { /* a box that will not be told */ }
@@ -1059,7 +1057,7 @@
             mentionQ = tok.q;
             if (mentionSel >= mentionNames.length) mentionSel = 0;
             mentionPop = el('div', { className: 'shout-mention-pop', id: 'shout-mention-pop',
-                                     role: 'listbox', 'aria-label': t('js.shout.mention_list') });
+                                     role: 'listbox', 'aria-label': t.key('js.shout.mention_list') });
             mentionNames.forEach(function (n) {
                 var b = el('button', { type: 'button', className: 'shout-mention-item', role: 'option', text: n });
                 // mousedown rather than click: the textarea losing focus is what closes this list,
@@ -1148,8 +1146,8 @@
         /** What the server's refusal of an edit means, in this reader's language. */
         function editErr(r) {
             var code = r && r.error;
-            if (code === 'too_late') return t('js.shout.err_too_late_edit');
-            if (code === 'no_permission') return t('js.shout.err_edit_denied');
+            if (code === 'too_late') return t.key('js.shout.err_too_late_edit');
+            if (code === 'no_permission') return t.key('js.shout.err_edit_denied');
             return errText(r, maxChars);
         }
 
@@ -1157,15 +1155,15 @@
             var base = 'shout-edit-' + id, taId = base + '-body';
             var form = el('div', { className: 'shout-edit-form', id: base });
             var tarea = el('textarea', { id: taId, className: 'pm-input shout-input shout-edit-input', rows: '2',
-                                         maxlength: String(maxChars), 'aria-label': t('js.shout.edit_label') });
+                                         maxlength: String(maxChars), 'aria-label': t.key('js.shout.edit_label') });
             tarea.value = body;
             if (fmt === 'plain') {
                 form.appendChild(tarea);
             } else {
                 var editor = el('div', { className: 'rt-editor pm-editor shout-editor shout-edit-editor' });
                 var tabs = el('div', { className: 'rt-tabs' }, [
-                    el('button', { type: 'button', className: 'rt-tab active', 'data-rt': 'write', text: t('js.shout.edit_write') }),
-                    el('button', { type: 'button', className: 'rt-tab', 'data-rt': 'preview', text: t('js.shout.edit_preview') }),
+                    el('button', { type: 'button', className: 'rt-tab active', 'data-rt': 'write', text: t.key('js.shout.edit_write') }),
+                    el('button', { type: 'button', className: 'rt-tab', 'data-rt': 'preview', text: t.key('js.shout.edit_preview') }),
                     // The editor reads its syntax from `<id>-format` (assets/js/app.js); a hidden field
                     // says the stored one and offers no choice, because the server would not take one.
                     el('input', { type: 'hidden', id: taId + '-format', value: fmt }),
@@ -1183,11 +1181,11 @@
                 editor.appendChild(el('div', { className: 'rt-preview rt-body', id: taId + '-preview', hidden: true }));
                 form.appendChild(editor);
             }
-            var save = el('button', { type: 'button', className: 'btn btn-small shout-edit-save', text: t('js.shout.edit_save') });
-            var cancel = el('button', { type: 'button', className: 'btn btn-secondary btn-small shout-edit-cancel', text: t('js.shout.edit_cancel') });
+            var save = el('button', { type: 'button', className: 'btn btn-small shout-edit-save', text: t.key('js.shout.edit_save') });
+            var cancel = el('button', { type: 'button', className: 'btn btn-secondary btn-small shout-edit-cancel', text: t.key('js.shout.edit_cancel') });
             var enote = el('span', { className: 'shout-edit-note', role: 'status', 'aria-live': 'polite' });
             form.appendChild(el('div', { className: 'shout-edit-acts' }, [save, cancel,
-                el('span', { className: 'shout-edit-hint text-muted', text: t('js.shout.edit_hint') }), enote]));
+                el('span', { className: 'shout-edit-hint text-muted', text: t.key('js.shout.edit_hint') }), enote]));
             return { form: form, ta: tarea, save: save, cancel: cancel, enote: enote, taId: taId };
         }
 
@@ -1203,7 +1201,7 @@
             btn.disabled = false;
             if (mine !== editSeq || !row.isConnected || row.classList.contains('shout-asking')) return;
             if (!j || !j.success) {
-                if (j && j.error === 'not_found') { row.remove(); note(t('js.shout.err_not_found')); return; }
+                if (j && j.error === 'not_found') { row.remove(); note(t.key('js.shout.err_not_found')); return; }
                 // The window closed, or the permission went, since the page was drawn: the pencil
                 // can only be refused again, so it goes.
                 if (j && (j.error === 'too_late' || j.error === 'no_permission')) btn.remove();
@@ -1278,7 +1276,7 @@
             var ed = editing;
             if (!ed || ed.busy) return;
             var body = ed.ta.value.trim();
-            if (!body) { ed.enote.textContent = t('js.shout.err_empty'); ed.ta.focus({ preventScroll: true }); return; }
+            if (!body) { ed.enote.textContent = t.key('js.shout.err_empty'); ed.ta.focus({ preventScroll: true }); return; }
             ed.busy = true;
             ed.save.disabled = true;
             // A correction passes the anti-spam layer too (1.71.0): a few seconds from the last one — a wait
@@ -1291,7 +1289,7 @@
             if (!(window.Antispam && window.Antispam.waiting(ed.save))) ed.save.disabled = false;
             if (editing !== ed) return;               // cancelled while the answer was on its way
             if (!r || !r.success) {
-                if (r && r.error === 'not_found') { closeEdit(false); ed.row.remove(); note(t('js.shout.err_not_found')); return; }
+                if (r && r.error === 'not_found') { closeEdit(false); ed.row.remove(); note(t.key('js.shout.err_not_found')); return; }
                 // Refused: the words stay in the box, so they can still be copied somewhere.
                 if (r && r.antispam) { if (!(window.Antispam && window.Antispam.waiting(ed.save))) ed.enote.textContent = r.message || editErr(r); }
                 else ed.enote.textContent = editErr(r);
@@ -1326,33 +1324,33 @@
         function relabelRow(row) {
             Array.prototype.forEach.call(row.querySelectorAll('.shout-dow[data-dow]'), function (d) {
                 var n = Number(d.dataset.dow) || 0;
-                if (n >= 1 && n <= 7) d.textContent = t('js.common.dow_' + n);
+                if (n >= 1 && n <= 7) d.textContent = t.key('js.common.dow_' + n);
             });
             var mark = row.querySelector('.shout-edited');
             if (mark) {
                 var mod = mark.classList.contains('shout-edited-mod');
-                mark.textContent = t(mod ? 'js.shout.edited_mod' : 'js.shout.edited');
-                mark.title = t(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: mark.dataset.at || '' });
+                mark.textContent = t.key(mod ? 'js.shout.edited_mod' : 'js.shout.edited');
+                mark.title = t.key(mod ? 'js.shout.edited_mod_title' : 'js.shout.edited_title', { at: mark.dataset.at || '' });
             }
             var b;
             // The pin's words depend on its state (1.67.0), so they come from the state it carries.
             if ((b = row.querySelector('.shout-pin'))) labelPin(b, b.classList.contains('shout-pin-on'));
-            if ((b = row.querySelector('.shout-edit'))) { b.title = t('js.shout.edit_title'); b.setAttribute('aria-label', t('js.shout.edit')); }
-            if ((b = row.querySelector('.shout-del'))) { b.title = t('js.shout.delete_title'); b.setAttribute('aria-label', t('js.shout.delete')); }
-            if ((b = row.querySelector('.shout-unpin'))) { b.title = t('js.shout.unpin_title'); b.setAttribute('aria-label', t('js.shout.unpin')); }
+            if ((b = row.querySelector('.shout-edit'))) { b.title = t.key('js.shout.edit_title'); b.setAttribute('aria-label', t.key('js.shout.edit')); }
+            if ((b = row.querySelector('.shout-del'))) { b.title = t.key('js.shout.delete_title'); b.setAttribute('aria-label', t.key('js.shout.delete')); }
+            if ((b = row.querySelector('.shout-unpin'))) { b.title = t.key('js.shout.unpin_title'); b.setAttribute('aria-label', t.key('js.shout.unpin')); }
             if ((b = row.querySelector('.shout-report'))) labelReport(b, b.classList.contains('shout-report-on'));
         }
 
         /** The open editor's own words, and its copy of the rail from the composer's, re-worded. */
         function relabelEdit(ed) {
             var tabs = ed.form.querySelectorAll('.rt-tab');
-            if (tabs[0]) tabs[0].textContent = t('js.shout.edit_write');
-            if (tabs[1]) tabs[1].textContent = t('js.shout.edit_preview');
-            ed.save.textContent = t('js.shout.edit_save');
-            ed.cancel.textContent = t('js.shout.edit_cancel');
-            ed.ta.setAttribute('aria-label', t('js.shout.edit_label'));
+            if (tabs[0]) tabs[0].textContent = t.key('js.shout.edit_write');
+            if (tabs[1]) tabs[1].textContent = t.key('js.shout.edit_preview');
+            ed.save.textContent = t.key('js.shout.edit_save');
+            ed.cancel.textContent = t.key('js.shout.edit_cancel');
+            ed.ta.setAttribute('aria-label', t.key('js.shout.edit_label'));
             var hint = ed.form.querySelector('.shout-edit-hint');
-            if (hint) hint.textContent = t('js.shout.edit_hint');
+            if (hint) hint.textContent = t.key('js.shout.edit_hint');
             var rail = document.getElementById('shout-body-tools');
             var copy = document.getElementById(ed.taId + '-tools');
             if (rail && copy) {
@@ -1367,9 +1365,9 @@
             if (pinnedEl) relabelRow(pinnedEl);
             if (editing) relabelEdit(editing);
             if (jumpBtn) {
-                jumpBtn.title = t('js.shout.new_lines_title');
+                jumpBtn.title = t.key('js.shout.new_lines_title');
                 var jt = jumpBtn.querySelector('.shout-jump-text');
-                if (jt) jt.textContent = t('js.shout.new_lines');
+                if (jt) jt.textContent = t.key('js.shout.new_lines');
             }
         }
 
@@ -1618,7 +1616,7 @@
             if (!navigator.clipboard || !navigator.clipboard.writeText) return;
             navigator.clipboard.writeText(token).then(function () {
                 if (chip.dataset.was === undefined) chip.dataset.was = chip.textContent;
-                chip.textContent = t('js.common.copied');
+                chip.textContent = t.key('js.common.copied');
                 chip.classList.add('is-copied');
                 setTimeout(function () {
                     chip.textContent = chip.dataset.was;
@@ -1635,7 +1633,7 @@
                 if (!btn || !mine.contains(btn)) return;
                 var card = btn.closest('.emote-card');
                 var id = Number(btn.dataset.id || (card && card.dataset.id) || 0);
-                askInPlace(btn, t('js.shout.emote_delete_q'), async function () {
+                askInPlace(btn, t.key('js.shout.emote_delete_q'), async function () {
                     var r = await post('shout_emote_delete', { id: id });
                     if (r && r.success) {
                         if (card) card.remove();
@@ -1643,7 +1641,7 @@
                         var twin = document.querySelector('.emote-grid .emote-card[data-id="' + id + '"]');
                         if (twin) twin.remove();
                         if (Picker) Picker.forgetEmotes();   // the picker's copy is one emote out of date
-                        note(t('js.shout.emote_deleted'));
+                        note(t.key('js.shout.emote_deleted'));
                         return true;
                     }
                     if (r && r.error === 'not_found') { if (card) card.remove(); return true; }
@@ -1651,7 +1649,6 @@
                     return false;
                 }, {
                     host: card,
-                    relabel: function (b) { b.textContent = t('js.shout.delete'); },
                 });
             });
         }
@@ -1679,8 +1676,8 @@
             main.textContent = '';
             if (file) main.appendChild(document.createTextNode(file.name + ' · ' + Math.max(1, Math.round(file.size / 1024)) + ' KB'));
             else {
-                main.appendChild(el('u', { text: t('js.shout.drop_choose') }));
-                main.appendChild(document.createTextNode(' ' + t('js.shout.drop_or')));
+                main.appendChild(el('u', { text: t.key('js.shout.drop_choose') }));
+                main.append(' ', t.key('js.shout.drop_or'));
             }
             // A code nobody typed yet: the file's own name is very nearly always the right guess.
             if (file && codeIn && !codeIn.value.trim()) {
@@ -1720,31 +1717,31 @@
             var card = el('div', { className: 'emote-card', dataset: { id: String(row.id || 0), code: String(row.code || '') } });
             card.appendChild(el('div', { className: 'emote-shot' },
                 [emoteImg(row, row.sticker ? 'shout-sticker' : 'shout-emote')]));
-            card.appendChild(el('button', { type: 'button', className: 'emote-copy', title: t('js.shout.emote_copy_title'),
+            card.appendChild(el('button', { type: 'button', className: 'emote-copy', title: t.key('js.shout.emote_copy_title'),
                                             dataset: { emoteCopy: ':' + row.code + ':' }, text: ':' + row.code + ':' }));
             card.appendChild(el('span', { className: 'emote-name', text: row.name || row.code }));
             if (pending) {
-                card.appendChild(el('span', { className: 'emote-wait', title: t('js.shout.emote_waiting_hint'),
-                                              text: t('js.shout.emote_waiting') }));
+                card.appendChild(el('span', { className: 'emote-wait', title: t.key('js.shout.emote_waiting_hint'),
+                                              text: t.key('js.shout.emote_waiting') }));
             }
             card.appendChild(el('button', { type: 'button', className: 'emote-del', dataset: { id: String(row.id || 0) },
-                                            text: t('js.shout.delete') }));
+                                            text: t.key('js.shout.delete') }));
             return card;
         }
 
         if (!btn) return;
         btn.addEventListener('click', function () {
             var f = chosen();
-            if (!f) { note(t('js.shout.pick_file'), true); return; }
-            if (f.size > maxKb * 1024) { note(t('js.shout.err_too_large', { kb: maxKb }), true); return; }
+            if (!f) { note(t.key('js.shout.pick_file'), true); return; }
+            if (f.size > maxKb * 1024) { note(t.key('js.shout.err_too_large', { kb: maxKb }), true); return; }
             var code = (codeIn ? codeIn.value : '').trim().toLowerCase();
-            if (!/^[a-z0-9_]{2,32}$/.test(code)) { note(t('js.shout.err_bad_code'), true); return; }
+            if (!/^[a-z0-9_]{2,32}$/.test(code)) { note(t.key('js.shout.err_bad_code'), true); return; }
             var reader = new FileReader();
-            reader.onerror = function () { note(t('js.shout.err_failed'), true); };
+            reader.onerror = function () { note(t.key('js.shout.err_failed'), true); };
             reader.onload = async function () {
                 if (btn.disabled) return;          // counting down (the anti-spam layer's wait), or already out
                 btn.disabled = true;
-                note(t('js.shout.uploading'));
+                note(t.key('js.shout.uploading'));
                 var body = {
                     code: code,
                     // Empty stays EMPTY. The server falls back to the prettified code
@@ -1784,13 +1781,13 @@
                 dropped = null;
                 markFile(null);
                 if (Picker) Picker.forgetEmotes();     // the picker's copy is one emote out of date
-                // The whole token, not the bare code: `:code` is what t() replaces, so a dictionary
+                // The whole token, not the bare code: `:code` is what t.key() replaces, so a dictionary
                 // string written as `:code:` would have eaten its own opening colon.
                 //
                 // Two different answers, because they are two different situations: a picture that
                 // works now, and one that is stored and waiting for somebody. Telling the second one
                 // "write :code: to use it" would be a straight lie — the token does nothing yet.
-                note(r.pending ? t('js.shout.emote_pending') : t('js.shout.emote_added', { token: ':' + row.code + ':' }));
+                note(r.pending ? t.key('js.shout.emote_pending') : t.key('js.shout.emote_added', { token: ':' + row.code + ':' }));
             };
             reader.readAsDataURL(f);
         });

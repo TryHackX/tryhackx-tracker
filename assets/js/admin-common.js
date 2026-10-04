@@ -19,13 +19,15 @@
         }
         const res = await fetch(API_BASE() + endpoint, opts);
         let json;
-        try { json = await res.json(); } catch { json = { error: t('js.common.invalid_response', { status: res.status }) }; }
+        try { json = await res.json(); } catch { json = { error: t.key('js.common.invalid_response', { status: res.status }) }; }
         if (!res.ok && json && json.error === undefined) json.error = 'HTTP ' + res.status;
         json.__status = res.status;
         return json;
     }
 
+    // A t.key() word comes out as markup that keeps its key (t.html(), assets/js/i18n.js, 1.73.0) — text content only.
     function esc(str) {
+        if (t.isKey(str)) return t.html(str);
         if (str === null || str === undefined || str === '') return '';
         const d = document.createElement('div');
         d.textContent = String(str);
@@ -42,14 +44,15 @@
                 else if (k === 'text') node.textContent = v;
                 else if (k === 'html') node.innerHTML = v; // only for trusted static markup (icons)
                 else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
-                else if (k === 'dataset') Object.assign(node.dataset, v);
+                // data-* through setAttribute, which keeps a t.key() word's key (dataset writes its words only, 1.73.0)
+                else if (k === 'dataset') Object.keys(v).forEach(d => node.setAttribute('data-' + d.replace(/[A-Z]/g, c => '-' + c.toLowerCase()), v[d]));
                 else node.setAttribute(k, v === true ? '' : v);
             }
         }
         if (children !== undefined) {
             (Array.isArray(children) ? children : [children]).forEach(c => {
                 if (c === null || c === undefined || c === false) return;
-                node.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+                node.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key
             });
         }
         return node;
@@ -64,7 +67,11 @@
         return c;
     }
 
-    /** showToast(message, type) — type: success | danger | warning | info. Also accepts legacy (type, msg). */
+    /**
+     * showToast(message, type) — type: success | danger | warning | info. Also accepts legacy (type, msg).
+     * `message` may be a t.key() word or a list of pieces (1.73.0): a t.key() word in it keeps its key, so a toast still on the
+     * screen when the language changes is said in the new one (assets/js/i18n.js).
+     */
     function showToast(msg, type = 'success') {
         if (['success', 'danger', 'warning', 'info', 'error'].includes(msg) && typeof type === 'string' && !['success', 'danger', 'warning', 'info', 'error'].includes(type)) {
             [msg, type] = [type, msg];
@@ -74,7 +81,8 @@
         const container = ensureToastContainer();
         const toast = el('div', { className: 'toast align-items-center border-0 show toast-dark', role: 'alert' }, [
             el('div', { className: 'd-flex' }, [
-                el('div', { className: 'toast-body text-light' }, [el('i', { className: 'bi ' + (iconMap[type] || iconMap.info) }), ' ', String(msg)]),
+                el('div', { className: 'toast-body text-light' }, [el('i', { className: 'bi ' + (iconMap[type] || iconMap.info) }), ' ']
+                    .concat((Array.isArray(msg) ? msg : [msg]).map(p => (p instanceof Node || t.isKey(p)) ? p : String(p)))),
                 el('button', { type: 'button', className: 'btn-close btn-close-white me-2 m-auto', onclick: () => toast.remove() }),
             ]),
         ]);
@@ -115,7 +123,7 @@
     let confirmModalEl = null;
     /** confirmAction(title, message, {okLabel, danger}) → Promise<boolean>. Also accepts (message). */
     function confirmAction(title, message, opts = {}) {
-        if (message === undefined) { message = title; title = t('js.common.please_confirm'); }
+        if (message === undefined) { message = title; title = t.key('js.common.please_confirm'); }
         return new Promise((resolve) => {
             if (!confirmModalEl) {
                 confirmModalEl = el('div', { className: 'modal confirm-modal', id: 'commonConfirmModal', tabindex: '-1' }, [
@@ -128,8 +136,8 @@
                                 el('code', { className: 'confirm-code', id: 'commonConfirm-code', style: 'display:none' }),
                                 el('p', { className: 'text-light mb-3 confirm-msg', id: 'commonConfirm-after', style: 'display:none' }),
                                 el('div', { className: 'd-flex justify-content-center gap-2' }, [
-                                    el('button', { className: 'btn btn-sm btn-outline-secondary', id: 'commonConfirm-cancel', type: 'button' }, [el('i', { className: 'bi bi-x-lg' }), ' ' + t('js.common.cancel')]),
-                                    el('button', { className: 'btn btn-sm btn-outline-danger', id: 'commonConfirm-ok', type: 'button' }, [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.common.ok')]),
+                                    el('button', { className: 'btn btn-sm btn-outline-secondary', id: 'commonConfirm-cancel', type: 'button' }, [el('i', { className: 'bi bi-x-lg' }), ' ', t.key('js.common.cancel')]),
+                                    el('button', { className: 'btn btn-sm btn-outline-danger', id: 'commonConfirm-ok', type: 'button' }, [el('i', { className: 'bi bi-check-lg' }), ' ', t.key('js.common.ok')]),
                                 ]),
                             ]),
                         ]),
@@ -150,7 +158,7 @@
             okBtn.className = 'btn btn-sm ' + (opts.danger === false ? 'btn-outline-info' : 'btn-outline-danger');
             okBtn.textContent = '';
             okBtn.appendChild(el('i', { className: 'bi bi-check-lg' }));
-            okBtn.appendChild(document.createTextNode(' ' + (opts.okLabel || t('js.common.ok'))));
+            okBtn.append(' ', opts.okLabel || t.key('js.common.ok'));   // a t.key() word keeps its key (1.73.0)
             const modal = bootstrap.Modal.getOrCreateInstance(confirmModalEl);
             let resolved = false;
             const cleanup = () => {
@@ -178,8 +186,8 @@
      * The value is returned untrimmed (empty string is a valid answer — callers decide).
      */
     function promptModal(opts = {}) {
-        if (typeof opts === 'string') opts = { title: opts };
-        const o = Object.assign({ title: t('js.common.input'), label: '', value: '', placeholder: '', okLabel: t('js.common.ok'), danger: false, multiline: false, maxlength: null, hint: '', password: false }, opts);
+        if (typeof opts === 'string' || t.isKey(opts)) opts = { title: opts };
+        const o = Object.assign({ title: t.key('js.common.input'), label: '', value: '', placeholder: '', okLabel: t.key('js.common.ok'), danger: false, multiline: false, maxlength: null, hint: '', password: false }, opts);
         return new Promise((resolve) => {
             if (!promptModalEl) {
                 promptModalEl = el('div', { className: 'modal confirm-modal prompt-modal', id: 'commonPromptModal', tabindex: '-1', 'aria-labelledby': 'commonPrompt-title' }, [
@@ -191,7 +199,7 @@
                                 el('div', { id: 'commonPrompt-field' }),
                                 el('div', { className: 'wl-small text-muted mt-1 prompt-hint', id: 'commonPrompt-hint' }),
                                 el('div', { className: 'd-flex justify-content-end gap-2 mt-3' }, [
-                                    el('button', { className: 'btn btn-sm btn-outline-secondary', id: 'commonPrompt-cancel', type: 'button' }, [el('i', { className: 'bi bi-x-lg' }), ' ' + t('js.common.cancel')]),
+                                    el('button', { className: 'btn btn-sm btn-outline-secondary', id: 'commonPrompt-cancel', type: 'button' }, [el('i', { className: 'bi bi-x-lg' }), ' ', t.key('js.common.cancel')]),
                                     el('button', { className: 'btn btn-sm btn-primary', id: 'commonPrompt-ok', type: 'button' }),
                                 ]),
                             ]),
@@ -205,7 +213,9 @@
             labelEl.textContent = o.label || '';
             labelEl.classList.toggle('d-hidden', !o.label);
             const hintEl = promptModalEl.querySelector('#commonPrompt-hint');
-            hintEl.textContent = o.hint || '';
+            // a list of pieces too: t.key() words among them keep their keys (1.73.0)
+            if (Array.isArray(o.hint)) hintEl.replaceChildren(...o.hint.filter(p => p !== null && p !== undefined && p !== false).map(t.child));
+            else hintEl.textContent = o.hint || '';
             hintEl.classList.toggle('d-hidden', !o.hint);
             // Fresh field each time so input ⇄ textarea and maxlength never leak between calls.
             const field = promptModalEl.querySelector('#commonPrompt-field');
@@ -222,7 +232,7 @@
             okBtn.className = 'btn btn-sm ' + (o.danger ? 'btn-danger' : 'btn-primary');
             okBtn.textContent = '';
             okBtn.appendChild(el('i', { className: 'bi ' + (o.danger ? 'bi-slash-circle' : 'bi-check-lg') }));
-            okBtn.appendChild(document.createTextNode(' ' + (o.okLabel || t('js.common.ok'))));
+            okBtn.append(' ', o.okLabel || t.key('js.common.ok'));   // a t.key() word keeps its key (1.73.0)
 
             const modal = bootstrap.Modal.getOrCreateInstance(promptModalEl);
             let resolved = false;
@@ -363,19 +373,20 @@
             b.addEventListener('click', () => go(target));
             return b;
         };
-        const first = btn([el('i', { className: 'bi bi-chevron-double-left' }), ' ' + t('js.common.pg_first')], 1, page <= 1, 'pg-edge');
-        const prev = btn([el('i', { className: 'bi bi-chevron-left' }), ' ' + t('js.common.pg_prev')], page - 1, page <= 1);
-        const next = btn([t('js.common.pg_next') + ' ', el('i', { className: 'bi bi-chevron-right' })], page + 1, page >= pages);
-        const last = btn([t('js.common.pg_last') + ' ', el('i', { className: 'bi bi-chevron-double-right' })], pages, page >= pages, 'pg-edge');
-        const input = el('input', { type: 'number', className: 'pg-input', min: '1', max: String(pages), step: '1', value: String(page), title: t('js.common.pg_goto_title'), 'aria-label': t('js.common.pg_page_number') });
+        const first = btn([el('i', { className: 'bi bi-chevron-double-left' }), ' ', t.key('js.common.pg_first')], 1, page <= 1, 'pg-edge');
+        const prev = btn([el('i', { className: 'bi bi-chevron-left' }), ' ', t.key('js.common.pg_prev')], page - 1, page <= 1);
+        // Words and glyphs as separate pieces: a t.key() word keeps its key only on its own (assets/js/i18n.js, 1.73.0).
+        const next = btn([t.key('js.common.pg_next'), ' ', el('i', { className: 'bi bi-chevron-right' })], page + 1, page >= pages);
+        const last = btn([t.key('js.common.pg_last'), ' ', el('i', { className: 'bi bi-chevron-double-right' })], pages, page >= pages, 'pg-edge');
+        const input = el('input', { type: 'number', className: 'pg-input', min: '1', max: String(pages), step: '1', value: String(page), title: t.key('js.common.pg_goto_title'), 'aria-label': t.key('js.common.pg_page_number') });
         input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); goFromInput(input); } });
         input.addEventListener('change', () => goFromInput(input));
         input.addEventListener('focus', () => input.select());
-        const jump = el('span', { className: 'pg-jump' }, [t('js.common.pg_page') + ' ', input, ' ' + t('js.common.pg_of', { n: pages })]);
+        const jump = el('span', { className: 'pg-jump' }, [t.key('js.common.pg_page'), ' ', input, ' ', t.key('js.common.pg_of', { n: pages })]);
         container.appendChild(first);
         container.appendChild(prev);
         container.appendChild(jump);
-        if (total) container.appendChild(el('span', { className: 'pg-total', text: t('js.common.pg_rows', { n: total }) }));
+        if (total) container.appendChild(el('span', { className: 'pg-total', text: t.key('js.common.pg_rows', { n: total }) }));
         container.appendChild(next);
         container.appendChild(last);
     }
@@ -410,7 +421,7 @@
         if (!anchor) return;
         let dot = anchor.nextElementSibling;
         if (!dot || !dot.classList || !dot.classList.contains('sync-dot')) {
-            dot = el('span', { className: 'sync-dot', title: t('js.common.refreshing') });
+            dot = el('span', { className: 'sync-dot', title: t.key('js.common.refreshing') });
             anchor.after(dot);
         }
         dot.classList.toggle('on', !!on);
@@ -486,7 +497,7 @@
         }
         renderNode(root, container, 0);
         if (hidden > 0) {
-            const more = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t('js.common.show_all_more', { n: hidden }) });
+            const more = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t.key('js.common.show_all_more', { n: hidden }) });
             more.addEventListener('click', () => { container.querySelectorAll('.wl-tree-more').forEach(x => x.classList.remove('d-hidden')); more.remove(); });
             container.appendChild(more);
         }
@@ -537,8 +548,8 @@
                     setTimeout(() => { icon.className = orig; }, 1200);
                 }
             }
-            flashTip(target, t('js.common.copied'), { variant: 'success' });
-        }).catch(() => flashTip(target, t('js.common.clipboard_unavailable'), { variant: 'warning', duration: 2000 }));
+            flashTip(target, t.key('js.common.copied'), { variant: 'success' });
+        }).catch(() => flashTip(target, t.key('js.common.clipboard_unavailable'), { variant: 'warning', duration: 2000 }));
     }
 
     /** The 40-hex `hash` in the address, or null. Anything else is not an address we wrote. */
@@ -582,8 +593,8 @@
         if (head) {
             btn = el('button', {
                 type: 'button', className: 'btn btn-sm btn-outline-secondary ms-auto me-2',
-                title: t('js.common.copy_link_title'),
-            }, [el('i', { className: 'bi bi-link-45deg' }), ' ' + t('js.common.copy_link')]);
+                title: t.key('js.common.copy_link_title'),
+            }, [el('i', { className: 'bi bi-link-45deg' }), ' ', t.key('js.common.copy_link')]);
             btn.hidden = true;
             btn.addEventListener('click', () => { if (current) copyToClipboard(linkFor(current), btn); });
             const close = head.querySelector('.btn-close');
@@ -598,15 +609,9 @@
             } else {
                 head.appendChild(btn);
             }
-            // The button is built once per page and never appears in the document lang-swap.js
-            // fetches, so the in-place language switch skips it the way it skips every script-made
-            // node. Unlike a toast, this one is permanent, so it has to re-read its own strings.
-            document.addEventListener('langswap', () => {
-                btn.title = t('js.common.copy_link_title');
-                btn.textContent = '';
-                btn.appendChild(el('i', { className: 'bi bi-link-45deg' }));
-                btn.appendChild(document.createTextNode(' ' + t('js.common.copy_link')));
-            });
+            // The button is built once per page and never appears in the document lang-swap.js fetches; its
+            // words are t.key() words that keep their keys (assets/js/i18n.js, 1.73.0), so the switch says them again
+            // itself (it used to need a `langswap` listener here that built the button's insides anew).
         }
         modalEl.addEventListener('hidden.bs.modal', () => {
             current = null;
@@ -634,11 +639,11 @@
      */
     function promptPassword(title, message) {
         return promptModal({
-            title: title || t('js.common.confirm'),
-            label: t('js.common.admin_password'),
+            title: title || t.key('js.common.confirm'),
+            label: t.key('js.common.admin_password'),
             hint: message || '',
             password: true,
-            okLabel: t('js.common.confirm'),
+            okLabel: t.key('js.common.confirm'),
         });
     }
 
@@ -659,16 +664,16 @@
         box.setAttribute('role', 'dialog');
         box.setAttribute('aria-modal', 'true');
         const inner = el('div', { className: 'leave-box' }, [
-            el('h3', { text: t('js.common.leave_title') }),
-            el('p', { text: t('js.common.leave_body') }),
+            el('h3', { text: t.key('js.common.leave_title') }),
+            el('p', { text: t.key('js.common.leave_body') }),
             // textContent, not innerHTML: the URL is the untrusted part of a dialog whose entire
             // purpose is warning about untrusted things.
             el('code', { className: 'leave-url', text: url }),
         ]);
         const acts = el('div', { className: 'leave-acts' });
-        const cancel = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', text: t('js.common.leave_stay') });
+        const cancel = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', text: t.key('js.common.leave_stay') });
         const go = el('a', { className: 'btn btn-sm btn-outline-warning', href: url, target: '_blank',
-                             rel: 'nofollow noopener noreferrer ugc', text: t('js.common.leave_open') });
+                             rel: 'nofollow noopener noreferrer ugc', text: t.key('js.common.leave_open') });
         const close = () => { if (box.parentNode) box.parentNode.removeChild(box); document.removeEventListener('keydown', onEsc, true); };
         // Its Esc is its own (1.70.0): heard in the capture phase and taken, so the detail modal it was opened
         // from — Bootstrap's, which closes on an Esc that reaches it — stays open, and a second Esc closes that.

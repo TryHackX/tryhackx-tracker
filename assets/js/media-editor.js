@@ -34,7 +34,8 @@
  */
 (function () {
     'use strict';
-    const T = (k, v) => (typeof window.t === 'function' ? window.t(k, v) : k);
+    // Every word here goes into the editor or its notes: the t.key() word, which leaves its key on the element (1.73.0).
+    const T = (k, v) => (typeof window.t === 'function' ? window.t.key(k, v) : k);
     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     const r2 = (v) => Math.round(v * 100) / 100;
     const ZMIN = 0.5, ZMAX = 4;
@@ -53,11 +54,11 @@
             if (v === null || v === undefined || v === false) return;
             if (k === 'className') n.className = v;
             else if (k === 'text') n.textContent = v;
-            else n.setAttribute(k, v === true ? '' : String(v));
+            else n.setAttribute(k, v === true ? '' : (t.isKey(v) ? v : String(v)));   // a t() word keeps its key (1.73.0)
         });
         (Array.isArray(kids) ? kids : (kids ? [kids] : [])).forEach((c) => {
             if (c === null || c === undefined || c === false) return;
-            n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+            n.appendChild(t.child(c));
         });
         return n;
     }
@@ -313,7 +314,7 @@
             const save = el('button', { type: 'button', className: btn.primary + ' fe-save', disabled: true, text: T('js.media.save') });
             const cancel = el('button', { type: 'button', className: btn.secondary + ' fe-cancel', text: T('js.media.cancel') });
             const recentre = el('button', { type: 'button', className: btn.secondary + ' fe-recentre' },
-                [el('i', { className: 'bi bi-crosshair', 'aria-hidden': 'true' }), ' ' + T('js.media.recentre')]);
+                [el('i', { className: 'bi bi-crosshair', 'aria-hidden': 'true' }), ' ', T('js.media.recentre')]);
             const discard = el('button', { type: 'button', className: btn.danger + ' fe-discard', text: T('js.media.discard') });
             const keep = el('button', { type: 'button', className: btn.secondary + ' fe-keep', text: T('js.media.keep') });
             const ask = el('span', { className: 'fe-ask', hidden: true }, [el('span', { text: T('js.media.discard_q') }), discard, keep]);
@@ -553,9 +554,13 @@
         const yes = el('button', { type: 'button', className: 'btn btn-secondary btn-small fe-btn-danger acc-media-yes', text: yesLabel });
         const no = el('button', { type: 'button', className: 'btn btn-secondary btn-small acc-media-no', text: T('js.media.no') });
         const box = el('span', { className: 'shout-confirm acc-media-ask', role: 'group' }, [el('span', { className: 'shout-confirm-q', text: question }), yes, no]);
-        yes.addEventListener('click', async () => { yes.disabled = no.disabled = true; await onYes(); box.replaceWith(btn); btn.focus(); });
-        no.addEventListener('click', () => { box.replaceWith(btn); btn.focus(); });
-        btn.replaceWith(box);
+        // The button waits beside the question, hidden — never out of the page, where the live language switch could
+        // not reach its words (1.73.0, as the site's askInPlace() in app.js).
+        const back = () => { box.remove(); btn.hidden = false; btn.focus(); };
+        yes.addEventListener('click', async () => { yes.disabled = no.disabled = true; await onYes(); back(); });
+        no.addEventListener('click', back);
+        btn.after(box);
+        btn.hidden = true;
         no.focus();
     }
 

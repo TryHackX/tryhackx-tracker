@@ -71,7 +71,7 @@
         }
         // The box the widget providers draw into — the layout's own markup, built the same way.
         if (provider() !== 'recaptcha_v3' && !document.getElementById('captcha-overlay')) {
-            const tt = (k, d) => (typeof window.t === 'function' ? window.t(k) : d);
+            const tt = (k, d) => (typeof window.t === 'function' ? window.t.key(k) : d);   // written into the box (1.73.0)
             const overlay = document.createElement('div');
             overlay.className = 'captcha-overlay';
             overlay.id = 'captcha-overlay';

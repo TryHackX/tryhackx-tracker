@@ -160,6 +160,32 @@ function apiBan(PDO $db, array $cfg, string $ip, string $reason, string $detail,
     }
 }
 
+/**
+ * How long a ban row is kept after it ran out (1.73.0: a name for the 90 days whitelistJanitor() used to spell).
+ * The row holds the address, the user agent and the request as it arrived (secrets masked), and a lifted or
+ * expired ban stays readable on the API bans page this long.
+ */
+const API_BAN_KEEP_DAYS = 90;
+
+/**
+ * The janitor's half of the bans' retention (1.73.0): rows that expired more than API_BAN_KEEP_DAYS ago, $limit
+ * a pass. It used to run only inside whitelistJanitor() — in whitelist mode, on one request in fifty — so a
+ * tracker in blacklist mode kept every ban row and its request for ever. $now is for the tests (a clock passed
+ * in); the database's own clock otherwise.
+ */
+function apiBansPrune(PDO $db, ?int $now = null, int $limit = 500): int {
+    try {
+        // FROM_UNIXTIME(NULL) is NULL, so without a clock passed in the COALESCE is the database's NOW().
+        $st = $db->prepare("DELETE FROM api_bans
+                             WHERE expires_at < DATE_SUB(COALESCE(FROM_UNIXTIME(?), NOW()), INTERVAL " . API_BAN_KEEP_DAYS . " DAY)
+                             LIMIT " . max(1, $limit));
+        $st->execute([$now]);
+        return $st->rowCount();
+    } catch (\Throwable $e) {
+        return 0;   // a database that predates the table
+    }
+}
+
 /** Read the raw request body with a hard size cap. Returns null when the cap is exceeded. */
 function apiReadRawBody(int $max = API_MAX_BODY_BYTES): ?string {
     $len = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
@@ -424,11 +450,21 @@ function apiAbsoluteBase(array $cfg): string {
  * without it BEING the key: somebody who finds the link learns how the public API is shaped, which
  * is the one thing about it that was never a secret.
  */
-function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields): string {
+function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields, bool $autoBlock = false): string {
+    // ONE ANSWER PER CHAPTER (1.73.0). `approve=` is what happens to a REGISTRATION (the key's auto_approve) and
+    // `block=` what happens to a REPORT (abuse_auto_block — review unless somebody said otherwise), each written
+    // only for a key that has that chapter: an `all` key gets both, an abuse key only block=, a key that submits
+    // nothing (users, shop, federation) neither — the panel's live preview has always left them out there. An
+    // abuse key's address used to carry its creator's auto_approve, so a key that holds reports for review was
+    // given a guide saying they block on arrival; an `all` key's reporting chapter borrowed the registrations'
+    // answer. templates/pages/apidocs.php reads block= first (approve= stays its fallback for old links).
+    $submits = in_array($scope, ['whitelist', 'all'], true);
+    $reports = in_array($scope, ['abuse', 'all'], true);
     // Absolute: this address is sent to somebody who is not on this site — that is its whole job.
     return apiAbsoluteBase($GLOBALS['cfg'] ?? []) . '/?action=apidocs&scope=' . urlencode($scope)
-         . '&approve=' . ($autoApprove ? 'auto' : 'review')
-         . ($fields ? '&fields=' . urlencode(implode(',', $fields)) : '');
+         . ($submits ? '&approve=' . ($autoApprove ? 'auto' : 'review') : '')
+         . ($reports ? '&block=' . ($autoBlock ? 'auto' : 'review') : '')
+         . ($fields && ($submits || $reports) ? '&fields=' . urlencode(implode(',', $fields)) : '');
 }
 
 function apiClientCreate(PDO $db, string $label, string $scope = 'whitelist'): array {

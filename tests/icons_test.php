@@ -627,15 +627,21 @@ check('1.71.0: the places draw icons, not words — the Info panel\'s head (Shar
       str_contains($src71('templates/partials/info_overlay.php'), 'class="search-share share-btn info-share ic-btn" id="info-share"')
       && str_contains($src71('templates/partials/info_overlay.php'), '<i class="bi bi-share" aria-hidden="true"></i>')
       && str_contains($app71, "iconButton('a', 'btn btn-small search-act-btn search-act-magnet', 'bi-magnet'")
-      && str_contains($app71, "'bi-copy', t('js.app.copy'), t('js.app.copy_magnet_title')")
-      && str_contains($app71, "'bi-info-circle', t('js.app.info'), t('js.app.info_title')")
-      && str_contains($app71, "canAdd ? 'bi-pen' : 'bi-vector-pen'") && str_contains($app71, "'bi-pencil-square', t('js.app.desc_edit')")
+      // 1.73.0: a word written into the page is a t.key() word (it keeps its key for the live language switch)
+      && str_contains($app71, "'bi-copy', t.key('js.app.copy'), t.key('js.app.copy_magnet_title')")
+      && str_contains($app71, "'bi-info-circle', t.key('js.app.info'), t.key('js.app.info_title')")
+      && str_contains($app71, "canAdd ? 'bi-pen' : 'bi-vector-pen'") && str_contains($app71, "'bi-pencil-square', t.key('js.app.desc_edit')")
       && str_contains($app71, "glyph('bi-trash-fill')") && str_contains($app71, "iconButton('button', 'btn btn-secondary btn-small info-copy', 'bi-copy', label)")
       && str_contains($app71, "'search-share fav-who-open', 'bi-people'"));
-check('… a conversation\'s Back and Clear, the torrent rows\' Magnet and Info, the star and the "+" named in the tooltip',
-      str_contains($src71('assets/js/people.js'), "className: 'bi bi-arrow-left'") && str_contains($src71('assets/js/people.js'), "className: 'bi bi-archive'")
+// 1.73.0: a conversation's head is drawn by people.js's icBtn() — the whole icon class, the name and the tooltip by key
+// (they follow the live language switch) — and its Clear is Archive now, beside Delete (into the Trash).
+check('… a conversation\'s Back and Archive, the torrent rows\' Magnet and Info, the star and the "+" named in the tooltip',
+      str_contains($src71('assets/js/people.js'), "icBtn('btn btn-secondary btn-small pm-back', 'bi bi-arrow-left', 'js.pm.back', 'js.pm.back_title')")
+      && str_contains($src71('assets/js/people.js'), "icBtn('btn btn-secondary btn-small pm-arch', 'bi bi-archive', 'js.pm.act_archive', 'js.pm.act_archive_tip', args)")
       && str_contains($src71('assets/js/favourites.js'), "className: 'bi bi-magnet'") && str_contains($src71('assets/js/favourites.js'), "className: 'bi bi-info-circle'")
-      && str_contains($src71('assets/js/favourites.js'), "btn.dataset.tip = on ? t('js.fav.remove') : t('js.fav.add');")
+      // 1.73.0: a t.key() word through setAttribute, which keeps its key (the live language switch says it again)
+      && str_contains($src71('assets/js/favourites.js'), "var tip = on ? t.key('js.fav.remove') : t.key('js.fav.add');")
+      && str_contains($src71('assets/js/favourites.js'), "btn.setAttribute('data-tip', tip);")
       && str_contains($src71('assets/js/favourites.js'), "'search-share lp-open ic-btn'"));
 $svgIn = [];
 foreach (['includes/homeblocks.php', 'templates/pages/whitelist.php', 'templates/pages/search.php'] as $rel) if (str_contains($src71($rel), '<svg')) $svgIn[] = $rel;
@@ -649,7 +655,7 @@ check('… and no inline drawing stands for an icon in the announce, donation an
 check('… each explained in the site\'s tooltip on hover and keyboard focus (pubTip held, quiet), swapped by the live language switch',
       str_contains($app71, 'function tipOnHover()') && str_contains($app71, "pubTip(el, text, { hold: true, quiet: true })")
       && str_contains($app71, "if (e.pointerType === 'touch') return;") && str_contains($app71, "if (!opts.hold) hideTimer = setTimeout(")
-      && str_contains($src71('assets/js/lang-swap.js'), "var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title', 'data-tip'];"));
+      && str_contains($src71('assets/js/lang-swap.js'), "var ATTRS = ['title', 'placeholder', 'aria-label', 'alt', 'data-title', 'data-tip', 'label',"));
 $st71 = $src71('assets/css/style.css');
 check('1.71.0: an icon button is one box with the glyph in its middle in either library — its display at one class\'s weight before .d-hidden, its <i> and glyph a block of line-height 1, the ink moved by the glyph\'s own middle',
       ($icAt = strpos($st71, "\n.ic-btn { display: inline-flex; }")) !== false && $icAt < (int)strpos($st71, "\n.d-hidden {")

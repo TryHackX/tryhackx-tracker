@@ -181,14 +181,16 @@ $REVIEWED = [
     // fixed map keyed by the query string, and $deepWhere is either '' , ' AND 1 = 0', or a list of
     // '?' placeholders whose values are bound.
     'api/user_directory.php:$order'            => 'one of four literal ORDER BY strings from a fixed map; the key is looked up, not spliced',
-    'api/user_messages.php:$deepWhere'         => 'literal SQL: empty, an impossible condition, or a run of bound placeholders',
-    // v70, "delete this conversation for me". $cleared is pmClearedSql() — a fixed string this
-    // codebase writes ("IF(t.u_low = ?, t.u_low_cleared_id, t.u_high_cleared_id)"), whose only
-    // value is a bound placeholder; it is one function so seven queries cannot disagree about it.
-    // $cleared/$hidden in the POST are COLUMN NAMES chosen by a two-way comparison of the reader's
-    // id against the thread's own two columns — one of two literals each, never anything carried in.
-    'api/user_messages.php:$cleared'           => 'pmClearedSql(): a literal fragment whose only value is a bound placeholder — or one of two literal column names',
-    'api/user_messages.php:$hidden'            => "one of two literal column names, picked by comparing the reader's id with the thread's",
+    // 1.73.0, the messages' Archive and Trash (includes/people.php). The read paths spell their ranges with
+    // pmClearedSql() / pmVisibleSql() / pmTrashUptoSql() — fixed strings whose only values are bound placeholders,
+    // called in place (a call is not a variable, so nothing here needs a line for them). What IS interpolated is a
+    // SIDE of the thread: $side is 'u_low' or 'u_high' — picked by comparing the reader's id with the thread's own
+    // two columns, or the loop over exactly those two literals in the janitor's purge and in pmEmptyTrash() —
+    // prefixed onto literal column names; $writerCol / $readerCol are the two `hidden` columns pmSide() picks the
+    // same way. (1.64.0's $cleared / $hidden / $deepWhere left api/user_messages.php with the listing's SQL.)
+    'includes/people.php:$side'                => "one of two literal column prefixes ('u_low' / 'u_high'), picked by comparing the reader's id with the thread's, or iterated from that literal pair",
+    'includes/people.php:$writerCol'           => "one of two literal column names (u_low_hidden / u_high_hidden), picked by pmSide() from the writer's id",
+    'includes/people.php:$readerCol'           => "one of two literal column names (u_low_hidden / u_high_hidden), picked by pmSide() from the other side's id",
     'includes/index.php:$keepGrace'            => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$keepProtect'          => 'from indexKeepSavedClause(): literal SQL, the only number an int from a clamped helper',
     'includes/index.php:$clA'                  => 'literal conditions from $where plus one clause built with placeholders; values bound',

@@ -36,11 +36,7 @@ if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
 else flush();
 
-if ($u && $u['status'] === 'active' && trim((string)$u['email']) !== '') {
-    $reset = userResetCreate($db, (int)$u['id']);
-    $link = mailAbsoluteUrl($cfg, '?action=reset&token=' . $reset);
-    userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — password reset',
-        'A password reset was requested for your account. The link below sets a new password and is valid for ' . USER_RESET_TTL_MIN . " minutes.\nIf this was not you, ignore this message — your password stays unchanged.",
-        ['title' => 'Password reset', 'action_url' => $link, 'action_label' => 'Set a new password']);
-}
+// The token and the mail (includes/users.php userResetSend()): sent whatever the account's mail preferences
+// say — a reset is not a notification anybody can switch off (1.73.0).
+userResetSend($db, $cfg, $u);
 exit;

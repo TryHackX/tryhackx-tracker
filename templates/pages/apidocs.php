@@ -38,7 +38,33 @@ $docAsked = (string)($_GET['scope'] ?? '');
 if ($docAsked === 'auth') $docAsked = 'users';
 $docScope = isset($docScopes[$docAsked]) ? $docAsked : 'whitelist';
 $docReview = ((string)($_GET['approve'] ?? 'auto')) === 'review';
+// What happens to a REPORT is a second answer (`abuse_auto_block`, review as shipped), and one
+// `approve=` cannot carry both halves of an `all` key: `block=` says it when the address has it. Without
+// it, an abuse key's page reads `approve=` as it always has (the panel's row link sends the key's
+// abuse_auto_block there), and an `all` key's reporting chapter says what a new key does — review — rather
+// than borrowing the whitelist half's answer: the page may under-promise a block, never promise a person
+// who is not there.
+$docBlockAsked = (string)($_GET['block'] ?? '');
+$docBlockReview = $docBlockAsked !== '' ? $docBlockAsked !== 'auto' : ($docScope === 'abuse' ? $docReview : true);
+// The numbers the rules below quote, read the way includes/api_auth.php reads them (0 = that half is off).
+$docPerMin   = function_exists('apiRateLimitPerMin') ? apiRateLimitPerMin($cfg) : 60;
+$docBytesDay = function_exists('apiRateLimitBytesDay') ? apiRateLimitBytesDay($cfg) : 5368709120;
+$docBanDays  = max(1, min(3650, (int)($cfg['api_ban_days'] ?? 30)));
+$docTtl      = function_exists('authBridgeTtl') ? authBridgeTtl($cfg) : 120;
+// Numbers as the reader writes them: "1,000" is a thousand in English and one in Polish (1.73.0). The
+// separators are the dictionary's (apidocs.num_decimal / num_thousands), and a number of days carries
+// its noun in the reader's language ("1 day", "30 dni" — pageContentDays()).
+$docDec = __('apidocs.num_decimal');
+$docNum = fn($n, int $dec = 0): string => number_format((float)$n, $dec, $docDec, __('apidocs.num_thousands'));
+$docBanText = function_exists('pageContentDays') ? pageContentDays($docBanDays) : $docBanDays . ' days';
+// A byte budget said the way a person reads it: 5 GB, 750 MB, 1,5 GB in Polish.
+$docBytesText = $docBytesDay >= 1073741824 ? rtrim(rtrim($docNum($docBytesDay / 1073741824, 1), '0'), $docDec) . ' GB'
+              : rtrim(rtrim($docNum($docBytesDay / 1048576, 1), '0'), $docDec) . ' MB';
 $docFields = function_exists('apiClientCleanFields') ? apiClientCleanFields($_GET['fields'] ?? [], $docScope) : [];
+// Each chapter names the fields ITS endpoint reads: an `all` key's list is both halves merged, and a
+// whitelist item is never asked for a reporter, nor a report for a link back to a post.
+$docFieldsWl = function_exists('apiClientCleanFields') ? apiClientCleanFields($docFields, 'whitelist') : [];
+$docFieldsAb = function_exists('apiClientCleanFields') ? apiClientCleanFields($docFields, 'abuse') : [];
 // ABSOLUTE. Every address on this page is copied into somebody else's code on somebody else's
 // server; "/api.php?endpoint=…" is their host, not this one.
 $docBase = function_exists('apiAbsoluteBase') ? apiAbsoluteBase($cfg) : rtrim(getBaseUrl(), '/');
@@ -71,15 +97,23 @@ if (in_array('url', $docFields, true)) $exRef['url'] = 'https://partner.example.
 if (in_array('source_id', $docFields, true)) $exRef['post_id'] = 1234;
 if ($exRef) $exItem['ref'] = $exRef;
 $exBody = json_encode(['items' => [$exItem], 'source' => 'api'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+// Every field api/v1/whitelist_submit.php answers with, in its order — a partner's parser is written
+// against this example, and a field it never saw here is one it will not read.
 $exReply = json_encode([
     'ok' => true,
-    'results' => [['index' => 0, 'hash' => '0123456789abcdef0123456789abcdef01234567',
+    'results' => [['index' => 0, 'input' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
+                   'hash' => '0123456789abcdef0123456789abcdef01234567',
                    'status' => $docReview ? 'pending' : 'added', 'error' => null]],
     'summary' => $docReview ? ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0, 'pending' => 1]
                             : ['added' => 1, 'exists' => 0, 'banned' => 0, 'invalid' => 0, 'pending' => 0],
+    'active_in_seconds' => 45,
+    'mode' => 'whitelist',
     'auto_approve' => !$docReview,
     'required_fields' => $docFields,
+    'server_time' => 1790000000,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exPing = json_encode(['ok' => true, 'server_time' => 1790000000, 'mode' => 'whitelist', 'whitelist_count' => 1234,
+                       'api_version' => 1, 'client' => 'Partner forum'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
 // "What happened to what I sent?" — the other half of a key that does not publish directly. The
 // example shows a row that was turned down, because that is the case the note exists for.
@@ -112,12 +146,14 @@ if (in_array('statement', $docFields, true)) $exAbuseBody['statement'] = true;
 $exAbuse = json_encode($exAbuseBody, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 $exAbuseReply = json_encode([
     'ok' => true,
-    'results' => [['index' => 0, 'hash' => '0123456789abcdef0123456789abcdef01234567',
-                   'status' => $docReview ? 'received' : 'blocked', 'report_id' => 41, 'error' => null]],
-    'summary' => $docReview ? ['received' => 1, 'blocked' => 0, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0]
-                            : ['received' => 0, 'blocked' => 1, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0],
-    'auto_block' => !$docReview,
+    'results' => [['index' => 0, 'input' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
+                   'hash' => '0123456789abcdef0123456789abcdef01234567',
+                   'status' => $docBlockReview ? 'received' : 'blocked', 'report_id' => 41, 'error' => null]],
+    'summary' => $docBlockReview ? ['received' => 1, 'blocked' => 0, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0]
+                                 : ['received' => 0, 'blocked' => 1, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0],
+    'auto_block' => !$docBlockReview,
     'required_fields' => $docFields,
+    'server_time' => 1790000000,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
 // The shop flow, as three bodies and two replies. The retry's reply is shown beside the first one
@@ -161,17 +197,17 @@ $exLoginReply = json_encode([
         <code class="apidocs-v"><?= sanitize($docUrl) ?></code></div>
     <?php if ($showAbuse): ?>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_blocking') ?></span>
-        <span class="apidocs-v"><?= _h($docReview ? 'apidocs.block_review' : 'apidocs.block_auto') ?></span></div>
+        <span class="apidocs-v"><?= _h($docBlockReview ? 'apidocs.block_review' : 'apidocs.block_auto') ?></span></div>
     <?php endif; ?>
     <?php if ($showSubmit): ?>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_approval') ?></span>
         <span class="apidocs-v"><?= _h($docReview ? 'apidocs.approve_review' : 'apidocs.approve_auto') ?></span></div>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_required') ?></span>
-        <span class="apidocs-v"><?= $docFields ? sanitize(implode(', ', $docFields)) : _h('apidocs.required_none') ?></span></div>
+        <span class="apidocs-v"><?= $docFieldsWl ? sanitize(implode(', ', $docFieldsWl)) : _h('apidocs.required_none') ?></span></div>
     <?php endif; ?>
-    <?php if ($showAbuse && !$showSubmit): ?>
-    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_required') ?></span>
-        <span class="apidocs-v"><?= $docFields ? sanitize(implode(', ', $docFields)) : _h('apidocs.required_none') ?></span></div>
+    <?php if ($showAbuse): ?>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h($showSubmit ? 'apidocs.k_required_report' : 'apidocs.k_required') ?></span>
+        <span class="apidocs-v"><?= $docFieldsAb ? sanitize(implode(', ', $docFieldsAb)) : _h('apidocs.required_none') ?></span></div>
     <?php endif; ?>
 </div>
 
@@ -179,34 +215,53 @@ $exLoginReply = json_encode([
 <p><?= __('apidocs.auth_body') ?></p>
 <pre class="apidocs-pre"><code>Authorization: Bearer &lt;key_id&gt;.&lt;secret&gt;
 Content-Type: application/json</code></pre>
+<?php /* The one rule that costs a partner a month if nobody says it: a WRONG key bans the address it came
+         from (includes/api_auth.php apiBan(), `api_ban_days`), and from then on the right key is refused
+         from there too. Said here, where the header is, and again in the rules. */ ?>
+<div class="alert alert-warning show"><?= __('apidocs.auth_ban', ['days' => $docBanText]) ?></div>
 
 <?php if ($showSubmit): ?>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>POST v1/whitelist/submit</code></td><td><?= __('apidocs.ep_wl_submit') ?></td></tr>
+        <tr><td><code>GET|POST v1/whitelist/status</code></td><td><?= __('apidocs.ep_wl_status') ?></td></tr>
+        <tr><td><code>GET v1/whitelist/ping</code></td><td><?= __('apidocs.ep_wl_ping') ?></td></tr>
+    </tbody>
+</table>
+</div>
+
 <h2><?= _h('apidocs.h_request') ?></h2>
 <p><?= __('apidocs.request_body') ?></p>
 <pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/submit') ?>
 
 <?= sanitize($exBody) ?></code></pre>
 
-<?php if ($docFields): ?>
-<div class="alert alert-warning show"><?= __('apidocs.required_note', ['fields' => sanitize(implode(', ', $docFields))]) ?></div>
+<?php if ($docFieldsWl): ?>
+<div class="alert alert-warning show"><?= __('apidocs.required_note', ['fields' => sanitize(implode(', ', $docFieldsWl))]) ?></div>
 <?php endif; ?>
 
 <h2><?= _h('apidocs.h_reply') ?></h2>
 <p><?= __($docReview ? 'apidocs.reply_review' : 'apidocs.reply_auto') ?></p>
 <pre class="apidocs-pre"><code><?= sanitize($exReply) ?></code></pre>
+<p><?= __('apidocs.mode_note') ?></p>
 
 <h2><?= _h('apidocs.h_status') ?></h2>
 <div class="transparency-table-wrap">
 <table class="transparency-table apidocs-table">
     <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
     <tbody>
-        <tr><td><code>added</code></td><td><?= _h('apidocs.st_added') ?></td></tr>
-        <?php if ($docReview): ?>
+        <?php /* A key held for review never sees `added`: api/v1/whitelist_submit.php reports every new row
+                 of such a key as `pending`, so the row would describe an answer this key cannot get. */ ?>
+        <?php if (!$docReview): ?>
+        <tr><td><code>added</code></td><td><?= __('apidocs.st_added') ?></td></tr>
+        <?php else: ?>
         <tr><td><code>pending</code></td><td><?= _h('apidocs.st_pending') ?></td></tr>
         <?php endif; ?>
-        <tr><td><code>exists</code></td><td><?= _h('apidocs.st_exists') ?></td></tr>
+        <tr><td><code>exists</code></td><td><?= __('apidocs.st_exists') ?></td></tr>
         <tr><td><code>banned</code></td><td><?= _h('apidocs.st_banned') ?></td></tr>
-        <tr><td><code>invalid</code></td><td><?= _h('apidocs.st_invalid') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= __('apidocs.st_invalid') ?></td></tr>
     </tbody>
 </table>
 </div>
@@ -230,10 +285,19 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
         <tr><td><code>rejected</code></td><td><?= _h('apidocs.ck_rejected') ?></td></tr>
         <tr><td><code>banned</code></td><td><?= _h('apidocs.ck_banned') ?></td></tr>
         <tr><td><code>unknown</code></td><td><?= _h('apidocs.ck_unknown') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= __('apidocs.ck_invalid') ?></td></tr>
     </tbody>
 </table>
 </div>
 <p class="text-muted"><?= __('apidocs.check_note') ?></p>
+
+<?php /* The authenticated health check (api/v1/whitelist_ping.php) — what the partner forum's "Test
+         connection" calls, and the one call here that changes nothing. */ ?>
+<h2><?= _h('apidocs.h_ping') ?></h2>
+<p><?= __('apidocs.ping_body') ?></p>
+<pre class="apidocs-pre"><code>GET <?= sanitize($docApi . 'v1/whitelist/ping') ?>
+
+<?= sanitize($exPing) ?></code></pre>
 <?php endif; ?>
 
 <?php if ($showAbuse): ?>
@@ -242,17 +306,18 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
          has it. A partner reading only this page should still know which one they are doing. */ ?>
 <h2><?= _h('apidocs.h_abuse') ?></h2>
 <p><?= __('apidocs.abuse_intro') ?></p>
-<div class="alert <?= $docReview ? 'alert-info' : 'alert-warning' ?> show"><?= __($docReview ? 'apidocs.abuse_note_review' : 'apidocs.abuse_note_auto') ?></div>
+<div class="alert <?= $docBlockReview ? 'alert-info' : 'alert-warning' ?> show"><?= __($docBlockReview ? 'apidocs.abuse_note_review' : 'apidocs.abuse_note_auto') ?></div>
 <pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/blacklist/submit') ?>
 
 <?= sanitize($exAbuse) ?></code></pre>
+<p><?= __('apidocs.abuse_fields', ['n' => defined('API_MAX_ITEMS') ? API_MAX_ITEMS : 500]) ?></p>
 
-<?php if ($docFields): ?>
-<div class="alert alert-warning show"><?= __('apidocs.required_note', ['fields' => sanitize(implode(', ', $docFields))]) ?></div>
+<?php if ($docFieldsAb): ?>
+<div class="alert alert-warning show"><?= __('apidocs.required_note_abuse', ['fields' => sanitize(implode(', ', $docFieldsAb))]) ?></div>
 <?php endif; ?>
 
 <h2><?= _h('apidocs.h_abuse_reply') ?></h2>
-<p><?= __($docReview ? 'apidocs.abuse_reply_review' : 'apidocs.abuse_reply_auto') ?></p>
+<p><?= __($docBlockReview ? 'apidocs.abuse_reply_review' : 'apidocs.abuse_reply_auto') ?></p>
 <pre class="apidocs-pre"><code><?= sanitize($exAbuseReply) ?></code></pre>
 
 <div class="transparency-table-wrap">
@@ -260,8 +325,8 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
     <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
     <tbody>
         <tr><td><code>received</code></td><td><?= _h('apidocs.ab_received') ?></td></tr>
-        <?php if (!$docReview): ?>
-        <tr><td><code>blocked</code></td><td><?= _h('apidocs.ab_blocked') ?></td></tr>
+        <?php if (!$docBlockReview): ?>
+        <tr><td><code>blocked</code></td><td><?= __('apidocs.ab_blocked') ?></td></tr>
         <?php endif; ?>
         <tr><td><code>duplicate</code></td><td><?= _h('apidocs.ab_duplicate') ?></td></tr>
         <tr><td><code>already_blocked</code></td><td><?= _h('apidocs.ab_already') ?></td></tr>
@@ -280,13 +345,17 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 <ol class="apidocs-rules">
     <li><?= __('apidocs.bridge_step1') ?></li>
     <li><?= __('apidocs.bridge_step2') ?></li>
-    <li><?= __('apidocs.bridge_step3') ?></li>
+    <li><?= __('apidocs.bridge_step3', ['ttl' => $docTtl]) ?></li>
     <li><?= __('apidocs.bridge_step4') ?></li>
 </ol>
+<?php if (!(function_exists('authBridgeEnabled') && authBridgeEnabled($cfg))): ?>
+<div class="alert alert-warning show"><?= __('apidocs.bridge_off') ?></div>
+<?php endif; ?>
 <pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/auth/login') ?>
 
 <?= sanitize($exLogin) ?></code></pre>
 <pre class="apidocs-pre"><code><?= sanitize($exLoginReply) ?></code></pre>
+<p><?= __('apidocs.bridge_login_rules') ?></p>
 <p><?= __('apidocs.bridge_reverse') ?></p>
 <div class="transparency-table-wrap">
 <table class="transparency-table apidocs-table">
@@ -321,6 +390,13 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
     </tbody>
 </table>
 </div>
+<p><?= __('apidocs.users_identity') ?></p>
+<?php if (!$isShopOnly): ?>
+<p><?= __('apidocs.users_provision_note') ?></p>
+<?php endif; ?>
+<?php if (!usersEnabled($cfg)): ?>
+<div class="alert alert-warning show"><?= __('apidocs.users_off') ?></div>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($showShop): ?>
@@ -347,6 +423,7 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 <pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/users/revoke') ?>
 
 <?= sanitize($exRefund) ?></code></pre>
+<p><?= __('apidocs.shop_errors') ?></p>
 <?php endif; ?>
 
 <?php if ($showFed): ?>
@@ -356,11 +433,20 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 <table class="transparency-table apidocs-table">
     <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
     <tbody>
-        <tr><td><code>v1/federation/ping</code></td><td><?= __('apidocs.ep_fed_ping') ?></td></tr>
-        <tr><td><code>v1/federation/export</code></td><td><?= __('apidocs.ep_fed_export') ?></td></tr>
+        <tr><td><code>GET|POST v1/federation/ping</code></td><td><?= __('apidocs.ep_fed_ping') ?></td></tr>
+        <tr><td><code>POST v1/federation/export</code></td><td><?= __('apidocs.ep_fed_export') ?></td></tr>
     </tbody>
 </table>
 </div>
+<?php /* The export's body and cursor, as api/v1/federation_export.php reads them. The peer's own
+         worker (worker/federation.py) already speaks this; the paragraph is for anybody else. */ ?>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/federation/export') ?>
+
+{"since": 0, "after": "", "limit": 2000, "files": true, "gzip": false}</code></pre>
+<p><?= __('apidocs.fed_export_body', ['max' => $docNum(function_exists('fedExportMaxBatch') ? fedExportMaxBatch($cfg) : 2000)]) ?></p>
+<?php if (!(function_exists('fedExportEnabled') && fedExportEnabled($cfg))): ?>
+<div class="alert alert-warning show"><?= __('apidocs.fed_off') ?></div>
+<?php endif; ?>
 <?php endif; ?>
 
 <h2><?= _h('apidocs.h_rules') ?></h2>
@@ -368,26 +454,44 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
     <?php if ($showSubmit): ?>
     <li><?= __('apidocs.rule_idempotent') ?></li>
     <li><?= __('apidocs.rule_additive') ?></li>
+    <?php endif; ?>
+    <?php if ($showSubmit || $showAbuse): ?>
     <li><?= __('apidocs.rule_batch', ['n' => defined('API_MAX_ITEMS') ? API_MAX_ITEMS : 500]) ?></li>
     <?php endif; ?>
-    <li><?= __('apidocs.rule_limits') ?></li>
-    <li><?= __('apidocs.rule_errors') ?></li>
+    <li><?= __($docPerMin > 0 || $docBytesDay > 0 ? 'apidocs.rule_limits' : 'apidocs.rule_limits_off',
+               ['per_min' => $docPerMin > 0 ? $docNum($docPerMin) : '—', 'bytes' => $docBytesDay > 0 ? $docBytesText : '—']) ?></li>
+    <li><?= __('apidocs.rule_errors', ['days' => $docBanText]) ?></li>
 </ul>
 
 <h2><?= _h('apidocs.h_curl') ?></h2>
 <?php
 // The one command that proves the key works, for the scope it actually has. A guide whose "check
 // it works" line calls an endpoint this key cannot reach is a guide that opens with a 403.
-// For an accounts or shop key it is the LOOKUP, never the grant: "check it works" must not be a
-// command that sells somebody a month of something.
-$curlUrl = $showSubmit ? $docApi . 'v1/whitelist/submit' : ($showUsers ? $docApi . 'v1/users/lookup' : $docUrl);
-$curlBody = $showSubmit
-    ? json_encode(['items' => [$exItem], 'source' => 'api'], JSON_UNESCAPED_SLASHES)
-    : ($showUsers ? json_encode(['login' => 'kasia'], JSON_UNESCAPED_SLASHES) : '{}');
+//
+// AND IT MUST CHANGE NOTHING (1.73.0). The whitelist check used to POST the example to
+// v1/whitelist/submit — which registers the placeholder hash for good, on a tracker where
+// `rule_additive` says nothing can be taken back — and the federation one POSTed {} to the export,
+// which answers with a whole page of the catalogue. Each scope now has a call that only answers:
+// the two pings, the lookup (never the grant: "check it works" must not sell somebody a month of
+// something), and for a reporting key — which has no ping — an EMPTY batch, refused as `no_items`
+// only after the key and its scope were accepted.
+if ($showSubmit) {
+    $curlCmd = "curl -sS '" . $docApi . "v1/whitelist/ping' \\\n  -H 'Authorization: Bearer <key_id>.<secret>'";
+    $curlNote = 'apidocs.curl_note_ping';
+} elseif ($showUsers) {
+    $curlCmd = "curl -sS -X POST '" . $docApi . "v1/users/lookup' \\\n  -H 'Authorization: Bearer <key_id>.<secret>' \\\n"
+             . "  -H 'Content-Type: application/json' \\\n  --data '" . json_encode(['login' => 'kasia'], JSON_UNESCAPED_SLASHES) . "'";
+    $curlNote = 'apidocs.curl_note_lookup';
+} elseif ($showFed) {
+    $curlCmd = "curl -sS '" . $docApi . "v1/federation/ping' \\\n  -H 'Authorization: Bearer <key_id>.<secret>'";
+    $curlNote = 'apidocs.curl_note_ping';
+} else {
+    $curlCmd = "curl -sS -X POST '" . $docApi . "v1/blacklist/submit' \\\n  -H 'Authorization: Bearer <key_id>.<secret>' \\\n"
+             . "  -H 'Content-Type: application/json' \\\n  --data '{\"items\": []}'";
+    $curlNote = 'apidocs.curl_note_abuse';
+}
 ?>
-<pre class="apidocs-pre"><code>curl -sS -X POST '<?= sanitize($curlUrl) ?>' \
-  -H 'Authorization: Bearer &lt;key_id&gt;.&lt;secret&gt;' \
-  -H 'Content-Type: application/json' \
-  --data '<?= sanitize($curlBody) ?>'</code></pre>
+<pre class="apidocs-pre"><code><?= sanitize($curlCmd) ?></code></pre>
+<p><?= __($curlNote) ?></p>
 
 <p class="text-muted apidocs-foot"><?= __('apidocs.foot') ?></p>

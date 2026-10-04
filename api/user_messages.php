@@ -2,12 +2,26 @@
 /**
  * Private messages: the inbox, one conversation, and what somebody may do with it.
  *
- *   GET  user_messages                       — the inbox: one row per person, newest first
- *   GET  user_messages&with=<name>           — that conversation, oldest first (marks it read)
+ *   GET  user_messages[&view=inbox|archive|trash]  — one place's conversations: one row per person, newest first,
+ *                                                     with the three places' counts (1.73.0)
+ *   GET  user_messages&with=<name>[&part=trash]     — that conversation, oldest first (marks what it shows read):
+ *                                                     what is not in the Trash, or — with part=trash, or when
+ *                                                     nothing else is left — what is; and where it is
  *   GET  user_messages&can=<name>            — may I write to them, and if not, why
  *   POST user_messages {op:'send', to:<name>, body, format}
- *   POST user_messages {op:'read'|'hide', with:<name>}
+ *   POST user_messages {op:'read'|'archive'|'unarchive'|'purge', with:<name>}
+ *   POST user_messages {op:'trash', with:<name>, upto?:<id>}       — Delete: into the Trash (pm_trash_days 0: for good)
+ *   POST user_messages {op:'restore', with:<name>, to?:<id>, from?:<id>}   — out of it (an Undo names what it undoes)
+ *   POST user_messages {op:'empty_trash'}
  *   POST user_messages {op:'report', message:<id>, reason}
+ *
+ * ── the Archive and the Trash (1.73.0) ─────────────────────────────────────────────────────────
+ * Every one of those operations is EXPLICIT and idempotent (includes/people.php says why): asking for what already
+ * is answers success with `changed: false`, so an Undo is the opposite operation and an Undo that comes too late is
+ * a no-op, never an error. Each answers where the conversation is now (`state`), the three places' counts and the
+ * badge's number. `hide` and `delete` are the names 1.52 – 1.72 used, kept for a page loaded before the update:
+ * they mean `archive` and `trash`. None of it is written to the audit log — it is somebody's own mailbox, and the
+ * panel reads that log.
  *
  * ── a blocked sender is told ───────────────────────────────────────────────────────────────────
  * The gate lives in pmCanWrite() (includes/people.php) and this endpoint reports its reason back
@@ -25,6 +39,14 @@ if (!pmEnabled($cfg)) jsonResponse(['error' => 'pm_disabled'], 404);
 $me = currentUser($db);
 if (!$me) jsonResponse(['error' => 'login_required'], 401);
 $uid = (int)$me['id'];
+
+// The reader's clock (1.73.0 part E): every moment below also travels as an instant (`ts`) and as 'Y-m-d H:i' in
+// THIS reader's zone (`time`, pmReaderTime()) — their own choice on the account page, the site's otherwise — the
+// way the shoutbox says its times since 1.62.0. The plain DATETIME fields (`created`, `last_at`, `until`) stay as
+// they were for anything that reads them; the page shows the `*time` ones.
+$readerTz = userDisplayTimezone($me, $cfg);
+$stateTimes = static fn(array $s): array => $s + ['trashed_time' => pmReaderTime($s['trashed_ts'] ?? null, $readerTz),
+                                                  'until_time'   => pmReaderTime($s['until_ts'] ?? null, $readerTz)];
 
 /* ─────────────────────────────── POST ───────────────────────────────────── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -91,12 +113,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $tid = (int)$them['id'];
         $thread = pmThreadFor($db, $uid, $tid);
         if (!$thread) jsonResponse(['error' => 'not_found'], 404);
+        // Asked BEFORE the insert (1.73.0): was anything of this conversation left for them outside the Trash?
+        $theyHadVisible = pmHasVisible($db, $thread, $tid);
         $db->prepare("INSERT INTO user_messages (thread_id, sender_id, body, body_format) VALUES (?, ?, ?, ?)")
            ->execute([(int)$thread['id'], $uid, $body, $format]);
-        // A thread somebody cleared out comes back for them when it has something new in it —
-        // hiding is "I am done with this for now", not "never show me this person again".
-        $db->prepare("UPDATE message_threads SET last_message_at = NOW(), u_low_hidden = 0, u_high_hidden = 0 WHERE id = ?")
-           ->execute([(int)$thread['id']]);
+        // Whose Archive it leaves (1.73.0, pmAfterMessage()): the writer's always — writing in a conversation brings
+        // it back to your inbox; the other side's when pm_archive_returns says so (as hiding always did: "I am done
+        // with this for now", not "never show me this person again") or when all they had of it was in the Trash.
+        // The message's id is above everybody's Trash, so it is shown on its own there, the older part staying put.
+        pmAfterMessage($db, $cfg, $thread, $uid, $theyHadVisible);
         antispamRecord($db, $as['ticket']);
         $db->commit();
         // No notification. The message IS the notification: it is counted on the Messages tab and
@@ -105,42 +130,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonResponse(['success' => true, 'thread' => (int)$thread['id']]);
     }
 
-    if ($op === 'read' || $op === 'hide' || $op === 'delete') {
+    // The names 1.52 – 1.72 used (a page loaded before the update may still send them): the Archive IS what hiding
+    // was, and Delete is now the Trash — restorable, or with pm_trash_days 0 exactly what `delete` did.
+    if ($op === 'hide') $op = 'archive';
+    if ($op === 'delete') $op = 'trash';
+
+    /* ── one conversation's place: read, archive / unarchive, trash / restore / purge (1.73.0) ────────
+     *
+     * Nothing here removes a message. The Trash and "for good" are two marks on THIS reader's side of the thread
+     * (includes/people.php): the other person's copy is untouched, and a reported message stays readable to the
+     * panel. Explicit and idempotent, each one — see the header. */
+    if (in_array($op, ['read', 'archive', 'unarchive', 'trash', 'restore', 'purge'], true)) {
         $name = trim((string)($input['with'] ?? ''));
         $them = userValidUsername($name) ? userFindByLogin($db, $name) : null;
         if (!$them) jsonResponse(['error' => 'not_found'], 404);
         $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
         if (!$thread || !pmInThread($thread, $uid)) jsonResponse(['error' => 'not_found'], 404);
+        $num = static fn(string $k): ?int => (isset($input[$k]) && is_numeric($input[$k])) ? max(0, (int)$input[$k]) : null;
+        $out = ['success' => true, 'op' => $op, 'with' => (string)$them['username']];
         if ($op === 'read') {
-            $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
-               ->execute([(int)$thread['id'], $uid]);
-        } elseif ($op === 'delete') {
-            /* ── "delete this conversation", which means FOR ME (v70) ──────────────────────────
-             *
-             * Nothing is removed. My own watermark moves to the last id the thread holds, and
-             * every read path filters `m.id > ` that number — so the conversation disappears from
-             * my inbox and my window, the other person's copy is untouched, and a message that
-             * arrives later (a higher id) brings the thread back showing only what came after I
-             * deleted it. `hide` as well, because a thread with nothing left to show me should not
-             * be listed until it has something.
-             *
-             * Not a DELETE, on purpose: a reported message has to stay readable to the panel, and
-             * a conversation one side chose to keep is not the other side's to destroy.
-             */
-            $mx = $db->prepare("SELECT COALESCE(MAX(id), 0) FROM user_messages WHERE thread_id = ?");
-            $mx->execute([(int)$thread['id']]);
-            $upto = (int)$mx->fetchColumn();
-            $cleared = pmClearedCol($thread, $uid);
-            $hidden = (int)$thread['u_low'] === $uid ? 'u_low_hidden' : 'u_high_hidden';
-            // GREATEST, so a second delete cannot walk the watermark backwards over a message that
-            // arrived between the read above and this write.
-            $db->prepare("UPDATE message_threads SET `$cleared` = GREATEST(`$cleared`, ?), `$hidden` = 1 WHERE id = ?")
-               ->execute([$upto, (int)$thread['id']]);
+            // What this reader is shown, and nothing in their Trash (pmMarkRead()).
+            $out['changed'] = pmMarkRead($db, $thread, $uid, 'live') > 0;
+        } elseif ($op === 'archive' || $op === 'unarchive') {
+            $out['changed'] = pmSetArchived($db, $thread, $uid, $op === 'archive');
+        } elseif ($op === 'trash') {
+            // `upto`: the last message the page had — one that arrived after it last looked is not what was chosen.
+            $out += pmTrash($db, $cfg, $thread, $uid, $num('upto'));
+        } elseif ($op === 'restore') {
+            // An Undo of a Trash sends what that Trash answered: to = its `was`, from = its `upto`.
+            $out += pmRestore($db, $thread, $uid, $num('to'), $num('from'));
         } else {
-            $col = (int)$thread['u_low'] === $uid ? 'u_low_hidden' : 'u_high_hidden';
-            $db->prepare("UPDATE message_threads SET `$col` = 1 WHERE id = ?")->execute([(int)$thread['id']]);
+            $out['changed'] = pmPurge($db, $thread, $uid);
+            $out['final'] = true;
         }
-        jsonResponse(['success' => true, 'unread' => pmUnreadCount($db, $uid)]);
+        $now = pmThreadFor($db, $uid, (int)$them['id'], false) ?: $thread;
+        $out['state'] = $stateTimes(pmThreadState($db, $cfg, $now, $uid));
+        $out['counts'] = pmBoxCounts($db, $uid);
+        $out['unread'] = pmUnreadCount($db, $uid);
+        $out['trash_days'] = pmTrashDays($cfg);
+        jsonResponse($out);
+    }
+
+    if ($op === 'empty_trash') {
+        $n = pmEmptyTrash($db, $uid);
+        jsonResponse(['success' => true, 'op' => $op, 'changed' => $n > 0, 'purged' => $n, 'final' => true,
+                      'counts' => pmBoxCounts($db, $uid), 'unread' => pmUnreadCount($db, $uid)]);
     }
 
     if ($op === 'report') {
@@ -250,30 +284,28 @@ if ((string)($_GET['poll'] ?? '') === '1') {
     if (!$thread) jsonResponse(['success' => true, 'rows' => [], 'typing' => false, 'unread' => 0, 'read_upto' => 0]);
 
     // v70: never below MY watermark — whatever `after` says, a conversation I deleted starts again
-    // at the first message that arrived after I deleted it.
-    $after = max($after, pmClearedId($thread, $uid));
-    $st = $db->prepare("SELECT id, sender_id, body, body_format, created_at, read_at, reported
-                          FROM user_messages WHERE thread_id = ? AND id > ? ORDER BY id ASC LIMIT 50");
-    $st->execute([(int)$thread['id'], $after]);
-    $fresh = $st->fetchAll(PDO::FETCH_ASSOC);
+    // at the first message that arrived after I deleted it. 1.73.0: nor below my Trash (pmThreadMessages()'s
+    // 'live' part — the floor is pmVisibleFrom()): what I put there stays there until I restore it.
+    $fresh = pmThreadMessages($db, $thread, $uid, 'live', $after, 50);
     // Arriving in front of somebody who is looking at the conversation is the same as opening it:
-    // they have read it. Only written when something actually came in.
+    // they have read it. Only written when something actually came in — and only what they are shown.
     $incoming = array_filter($fresh, static fn($m) => (int)$m['sender_id'] !== $uid);
-    if ($incoming) {
-        $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
-           ->execute([(int)$thread['id'], $uid]);
-    }
+    if ($incoming) pmMarkRead($db, $thread, $uid, 'live');
     // …and the other half of the same courtesy: how far the other side has read MY side.
     $rd = $db->prepare("SELECT COALESCE(MAX(id), 0) FROM user_messages WHERE thread_id = ? AND sender_id = ? AND read_at IS NOT NULL");
     $rd->execute([(int)$thread['id'], $uid]);
 
     jsonResponse([
         'success'   => true,
+        // The tabs' numbers (1.73.0) — only when something came in and was read here, which is when they move.
+        'counts'    => $incoming ? pmBoxCounts($db, $uid) : null,
         'rows'      => array_map(static fn($m) => [
             'id'      => (int)$m['id'],
             'mine'    => (int)$m['sender_id'] === $uid,
             'html'    => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg, true, $db),
             'created' => (string)$m['created_at'],
+            'ts'      => is_numeric($m['created_ts'] ?? null) ? (int)$m['created_ts'] : null,
+            'time'    => pmReaderTime($m['created_ts'] ?? null, $readerTz),
             'read'    => $m['read_at'] !== null,
             'reported' => (int)$m['reported'] === 1,
         ], $fresh),
@@ -306,22 +338,31 @@ if ($with !== '') {
         // whether it may start it.
         $gate = pmCanWrite($db, $cfg, $me, $them);
         jsonResponse(['success' => true, 'with' => (string)$them['username'], 'with_avatar' => $pmFace($them), 'rows' => [],
-                      'can_write' => $gate['ok'], 'reason' => $gate['reason'], 'unread' => pmUnreadCount($db, $uid)]);
+                      'can_write' => $gate['ok'], 'reason' => $gate['reason'], 'unread' => pmUnreadCount($db, $uid),
+                      'part' => 'live', 'state' => ['place' => 'none', 'archived' => false, 'live' => false, 'trash' => 0,
+                                                     'upto' => 0, 'trashed_at' => null, 'until' => null,
+                                                     'trashed_ts' => null, 'until_ts' => null,
+                                                     'trashed_time' => '', 'until_time' => ''],
+                      'trash_days' => pmTrashDays($cfg)]);
     }
-    $db->prepare("UPDATE user_messages SET read_at = NOW() WHERE thread_id = ? AND sender_id <> ? AND read_at IS NULL")
-       ->execute([(int)$thread['id'], $uid]);
-    // v70: only what is above MY watermark. A conversation this reader deleted opens empty until
-    // something new arrives in it, and opens showing only that afterwards.
-    $st = $db->prepare("SELECT m.id, m.sender_id, m.body, m.body_format, m.created_at, m.read_at, m.reported
-                          FROM user_messages m WHERE m.thread_id = ? AND m.id > ? ORDER BY m.id ASC LIMIT 500");
-    $st->execute([(int)$thread['id'], pmClearedId($thread, $uid)]);
+    // WHICH PART (1.73.0). What is not in this reader's Trash — the Inbox's or the Archive's conversation — unless
+    // the Trash is asked for (its view opens its conversations so), or unless the Trash is all there is: a
+    // conversation opened from somebody's profile while it lies in the Trash shows what lies there, under a bar
+    // that says so and offers it back, rather than an empty page that suggests it is gone.
+    $state = $stateTimes(pmThreadState($db, $cfg, $thread, $uid));
+    $part = ((string)($_GET['part'] ?? '') === 'trash' && $state['trash'] > 0) || (!$state['live'] && $state['trash'] > 0) ? 'trash' : 'live';
+    // v70: never what is under MY watermark — a conversation this reader deleted opens empty until something new
+    // arrives in it, and then shows only that. Read marks: only the part on the screen (pmMarkRead()).
+    pmMarkRead($db, $thread, $uid, $part);
     $rows = [];
-    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
+    foreach (pmThreadMessages($db, $thread, $uid, $part) as $m) {
         $rows[] = [
             'id'       => (int)$m['id'],
             'mine'     => (int)$m['sender_id'] === $uid,
             'html'     => pmRenderBody((string)$m['body'], (string)$m['body_format'], $cfg, true, $db),
             'created'  => (string)$m['created_at'],
+            'ts'       => is_numeric($m['created_ts'] ?? null) ? (int)$m['created_ts'] : null,
+            'time'     => pmReaderTime($m['created_ts'] ?? null, $readerTz),
             'read'     => $m['read_at'] !== null,
             'reported' => (int)$m['reported'] === 1,
         ];
@@ -331,20 +372,30 @@ if ($with !== '') {
                   'can_write' => $gate['ok'], 'reason' => $gate['reason'],
                   'may_report' => userCan($db, $cfg, 'pm.report'),
                   'live' => pmLiveSeconds($cfg), 'typing_on' => pmTypingEnabled($cfg),
-                  'unread' => pmUnreadCount($db, $uid)]);
+                  'unread' => pmUnreadCount($db, $uid),
+                  // Where it is (1.73.0): the part shown, the place (inbox / archive / trash), what its Trash holds —
+                  // and the three places' sizes after this opening read what it showed (an Archive tab's unread pill).
+                  'part' => $part, 'state' => $state, 'trash_days' => pmTrashDays($cfg),
+                  'counts' => pmBoxCounts($db, $uid)]);
 }
 
-/* ── the inbox ─────────────────────────────────────────────────────────────────────────────────
+/* ── the inbox, the Archive, the Trash ─────────────────────────────────────────────────────────
  *
  * One row per conversation, with the last line of it and how many are waiting — the two facts
- * somebody scans an inbox for.
+ * somebody scans an inbox for. `view` (1.73.0) is which of the three places: each lists, previews,
+ * counts and searches ITS part only (pmListThreads(): the Inbox and the Archive above the reader's
+ * floor — neither deleted nor in the Trash —, the Trash its own range), and every answer carries the
+ * three places' sizes for the tabs above the list.
  *
  * `search` filters by the other person's name, which the browser could do by itself. `deep=1` also
  * looks INSIDE this reader's own conversations, which it could not: that is a LIKE over
  * `user_messages`, so it is opt-in, needs two characters, and costs one of a small budget per
- * address. It reads only threads this account is in — the WHERE below is the same one the listing
- * uses, not a second opinion about who may read what.
+ * address. It reads only threads this account is in, and only the part of each that the place on the
+ * screen shows (pmDeepSearchIds()): a word in a message this reader deleted is no hit anywhere, a word
+ * in the Trash is a hit in the Trash only.
  */
+$view = (string)($_GET['view'] ?? 'inbox');
+if (!in_array($view, ['inbox', 'archive', 'trash'], true)) $view = 'inbox';
 $search = trim((string)($_GET['search'] ?? ''));
 $deep   = (string)($_GET['deep'] ?? '') === '1' && mb_strlen($search) >= 2;
 $deepIds = null;
@@ -352,63 +403,40 @@ if ($deep) {
     if (!rateLimitAllow('pmsearch', ipBucket(getClientIp($cfg)), 60, 60)) {
         jsonResponse(['error' => 'rate_limit', 'retry_after' => 60], 429);
     }
-    $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
-    // v70: a word in a message this reader deleted is not a hit. Their own watermark, the same one
-    // every other read path here applies.
-    $q = $db->prepare("SELECT DISTINCT m.thread_id FROM user_messages m
-                         JOIN message_threads t ON t.id = m.thread_id
-                        WHERE (t.u_low = ? OR t.u_high = ?) AND m.body LIKE ?
-                          AND m.id > " . pmClearedSql() . "
-                        LIMIT 200");
-    $q->execute([$uid, $uid, $like, $uid]);
-    $deepIds = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+    // A deep search that found nothing returns nothing, not everything: [] is "no rows" to pmListThreads().
+    $deepIds = pmDeepSearchIds($db, $uid, $view, $search);
 }
-
-// A deep search that found nothing must return nothing, not everything: `IN ()` is not valid SQL,
-// so the impossible condition is spelled out rather than left to an empty list quietly vanishing.
-$deepWhere = '';
-$deepParams = [];
-if ($deepIds !== null) {
-    $deepWhere = $deepIds ? ' AND t.id IN (' . implode(',', array_fill(0, count($deepIds), '?')) . ')' : ' AND 1 = 0';
-    $deepParams = $deepIds;
-}
-// v70: `cleared` is this reader's own watermark in each row (pmClearedSql) — the id below which
-// they have deleted this conversation for themselves. The unread count and BOTH preview subqueries
-// look only above it, and a thread with nothing above it at all is not listed: the newest thing in
-// it is something this reader has thrown away, so there is no line to draw for them.
-$cleared = pmClearedSql();
-$st = $db->prepare(
-    "SELECT t.id, t.last_message_at,
-            IF(t.u_low = ?, t.u_high, t.u_low) AS other_id,
-            u.username AS other_name, u.avatar_sha AS other_avatar_sha,
-            (SELECT COUNT(*) FROM user_messages m WHERE m.thread_id = t.id AND m.sender_id <> ? AND m.read_at IS NULL
-                                                    AND m.id > $cleared) AS unread,
-            (SELECT m2.body FROM user_messages m2 WHERE m2.thread_id = t.id AND m2.id > $cleared ORDER BY m2.id DESC LIMIT 1) AS last_body,
-            (SELECT m3.sender_id FROM user_messages m3 WHERE m3.thread_id = t.id AND m3.id > $cleared ORDER BY m3.id DESC LIMIT 1) AS last_sender
-       FROM message_threads t
-       JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
-      WHERE ((t.u_low = ? AND t.u_low_hidden = 0) OR (t.u_high = ? AND t.u_high_hidden = 0))
-        AND u.status = 'active'
-        AND EXISTS (SELECT 1 FROM user_messages m4 WHERE m4.thread_id = t.id AND m4.id > $cleared)" . $deepWhere . "
-      ORDER BY t.last_message_at DESC LIMIT 200");
-$st->execute(array_merge([$uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid], $deepParams));
 $threads = [];
-foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
+foreach (pmListThreads($db, $uid, $view, $deepIds) as $t) {
     // A PREVIEW, not the message: the markup is rendered when a conversation is opened, and an
     // inbox line is a plain-text reminder of what was said.
     $preview = trim(preg_replace('/\s+/u', ' ', strip_tags((string)($t['last_body'] ?? '')))) ?: '';
-    $threads[] = [
+    $row = [
         'with'    => (string)$t['other_name'],
         'avatar'  => $pmFace(['username' => $t['other_name'], 'avatar_sha' => $t['other_avatar_sha']]),
-        'unread'  => (int)$t['unread'],
-        'last_at' => (string)$t['last_message_at'],
+        'unread'  => (int)($t['unread'] ?? 0),
+        'last_at' => (string)($view === 'trash' ? $t['last_at'] : $t['last_message_at']),
+        'last_time' => pmReaderTime($view === 'trash' ? ($t['last_ts'] ?? null) : ($t['last_message_ts'] ?? null), $readerTz),
         'mine'    => (int)$t['last_sender'] === $uid,
         'preview' => mb_substr($preview, 0, 140),
+        // The last message of the part listed: what a Delete from this row moves into the Trash, and no further.
+        'last_id' => (int)$t['last_id'],
     ];
+    if ($view === 'trash') {
+        $row['n'] = (int)$t['n'];
+        $row['trashed_at'] = (string)$t['trashed_at'];
+        $row['until'] = pmTrashUntil($cfg, $t['trashed_at']);
+        $tts = is_numeric($t['trashed_ts'] ?? null) ? (int)$t['trashed_ts'] : null;
+        $row['trashed_time'] = pmReaderTime($tts, $readerTz);
+        $row['until_time'] = pmReaderTime($tts !== null ? $tts + pmTrashDays($cfg) * 86400 : null, $readerTz);
+    }
+    $threads[] = $row;
 }
 // The stamp goes out with the list itself: the baseline the poll compares against has to be the
 // moment THIS list was built, or everything that arrives before the first tick is never drawn.
-jsonResponse(['success' => true, 'threads' => $threads, 'deep' => $deep, 'live' => pmLiveSeconds($cfg),
+jsonResponse(['success' => true, 'view' => $view, 'threads' => $threads, 'deep' => $deep, 'live' => pmLiveSeconds($cfg),
               'stamp' => pmInboxStamp($db, $uid), 'unread' => pmUnreadCount($db, $uid),
+              'counts' => pmBoxCounts($db, $uid), 'trash_days' => pmTrashDays($cfg),
+              'archive_returns' => pmArchiveReturns($cfg),
               'max_chars' => pmMaxChars($cfg), 'max_per_day' => pmMaxPerDay($cfg),
               'sent_today' => pmSentToday($db, $uid)]);

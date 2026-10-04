@@ -265,9 +265,14 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
             if ($n === false || $n !== strlen($buf)) { $writeFailed = true; return false; }
             $bytes += $n; return true;
         };
-        // probe_status: a submission that has not proved itself yet is not served. 'none' covers
-        // every row registered before the feature existed, and every row when it is switched off —
-        // so turning it on never retroactively unpublishes anything.
+        // probe_status: a submission that FAILED to prove itself is not served. One that is still proving
+        // itself ('probing') IS (1.73.0): its proof is a peer announcing to THIS tracker, and in whitelist
+        // mode opentracker refuses the announces of a hash its list does not carry — so a probe whose hash
+        // is not served can never pass. The add path always appended it; this query used to drop it, so any
+        // full regeneration in the probe's minutes (another probe passing, a ban, the append threshold)
+        // withdrew it and the probe then failed for a reason that was not the torrent's. 'none' covers every
+        // row registered before the feature existed, and every row when it is switched off — so turning it on
+        // never retroactively unpublishes anything.
         // review_status: a partner submission waiting for a person, or one a person turned down, is
         // not served. 'none' covers every row registered before this column existed and every row
         // from a key allowed to publish directly — so switching the feature on never retroactively
@@ -277,7 +282,7 @@ function whitelistRegenerate(PDO $db, array $cfg): array {
         // The guard against a zero-row result further down is why: a WHERE that accidentally matches
         // nothing must not be written out as an empty accesslist.
         $stmt = $db->prepare("SELECT info_hash FROM whitelist
-                               WHERE banned = 0 AND probe_status IN ('none','passed')
+                               WHERE banned = 0 AND probe_status IN ('none','probing','passed')
                                  AND review_status IN ('none','approved') AND info_hash > ?
                                ORDER BY info_hash LIMIT 50000");
         while (!$writeFailed) {
@@ -479,10 +484,8 @@ function whitelistJanitor(PDO $db, array $cfg): void {
                 if (@filemtime($tmp) < time() - WL_TMP_MAX_AGE) @unlink($tmp);
             }
         }
-        // expired API bans retention (rarely)
-        if (mt_rand(1, 50) === 1) {
-            try { $db->exec("DELETE FROM api_bans WHERE expires_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 500"); } catch (\Throwable $e) {}
-        }
+        // The expired API bans' retention moved to the janitor in 1.73.0 (includes/retention.php → apiBansPrune()):
+        // here it ran only in whitelist mode and on one request in fifty.
     } catch (\Throwable $e) {
         error_log('[whitelist janitor] ' . $e->getMessage());
     }
@@ -738,9 +741,17 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
     $reload = null;
     // Whitelist mode: append + lazy reload. Blacklist mode under a SCHEDULE: keep the (unserved) file
     // current too, but never mark dirty / reload — the switch to whitelist regenerates and restarts.
+    //
+    // ONLY WHAT THE GENERATOR WOULD WRITE (1.73.0). A row held for a person (`review_status = 'pending'`, a
+    // partner key that does not publish directly) is not served — whitelistRegenerate() leaves it out — but
+    // this fast path appended every added hash, so a held submission was served from the second it arrived
+    // until the next full regeneration: the opposite of what the review queue promises. A batch shares one
+    // review state, so it is all or nothing here. (A submission that has to PROVE itself is appended: it is
+    // served while it proves itself — see includes/wlprobe.php for why it has to be.)
     $wlLive = trackerMode($cfg) === 'whitelist';
-    if ($addedHashes && ($wlLive || (function_exists('scheduleEnabled') && scheduleEnabled($cfg)))) {
-        $file = whitelistAppendHashes($db, $cfg, $addedHashes);
+    $serveNow = $review === 'pending' ? [] : $addedHashes;
+    if ($serveNow && ($wlLive || (function_exists('scheduleEnabled') && scheduleEnabled($cfg)))) {
+        $file = whitelistAppendHashes($db, $cfg, $serveNow);
         if ($wlLive) {
             whitelistMarkDirty(false);
             $reload = whitelistMaybeReload($cfg);

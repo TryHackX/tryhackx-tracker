@@ -7,22 +7,29 @@
   # whitelist scope (forum sync):
   python3 api_client_example.py ping
   python3 api_client_example.py submit magnet:?xt=urn:btih:... 0123456789abcdef0123456789abcdef01234567
+  python3 api_client_example.py status 0123456789abcdef0123456789abcdef01234567
 
-  # users scope (shop / sales integration — see README "Selling group access"):
+  # shop scope (selling a group — lookup, grant and revoke; a users key may do the same — see
+  # README "Selling group access"). Send YOUR order id with every grant: a webhook that fires twice
+  # then sells one month, not two, and a refund with the same id takes back exactly that order:
   python3 api_client_example.py user-lookup alice
-  python3 api_client_example.py user-grant alice vip 1m "order #123"
-  python3 api_client_example.py user-revoke alice vip
-  python3 api_client_example.py user-provision alice alice@example.org vip 1m
+  python3 api_client_example.py user-grant alice premium 1m SHOP-2026-000412 "order #412"
+  python3 api_client_example.py user-revoke alice premium SHOP-2026-000412
+
+  # users scope only (creating accounts; the sign-in bridge is v1/auth/*, see ?action=apidocs):
+  python3 api_client_example.py user-provision alice alice@example.org premium 1m
 
   # federation scope (peer metadata exchange — normally worker/federation.py does this):
   python3 api_client_example.py fed-ping
   python3 api_client_example.py fed-export 0
 
-The key's SCOPE (set at creation) decides which endpoints it may call: whitelist | users |
-federation | all.
+The key's SCOPE (set at creation) decides which endpoints it may call: whitelist | abuse | users |
+shop | federation | all. `premium` is the group a default install seeds for selling; the slug is the
+operator's choice. A grant without a duration is PERMANENT.
 
-WARNING: a wrong key bans your IP for `api_ban_days` (30 by default) unless the IP is in the
-admin's "API ban exempt IPs" list. Test from an exempt IP first.
+WARNING: a malformed, unknown or wrong key bans your address for `api_ban_days` (30 by default)
+unless it is in the admin's "API ban exempt IPs" list — and then the right key is refused from it
+too. Test from an exempt IP first; never retry a 403 in a loop.
 """
 import json, os, sys, urllib.request, urllib.error
 
@@ -60,13 +67,20 @@ def main():
         status, js = call("v1/whitelist/submit", "POST", {"items": items, "source": "api"})
     elif cmd == "user-lookup" and len(a) >= 1:
         status, js = call("v1/users/lookup", "POST", {"login": a[0]})
+    elif cmd == "status" and a:
+        status, js = call("v1/whitelist/status", "POST", {"items": a})
     elif cmd == "user-grant" and len(a) >= 2:
         body = {"login": a[0], "group": a[1], "duration": a[2] if len(a) > 2 else "permanent"}
         if len(a) > 3:
-            body["note"] = a[3]
+            body["order_id"] = a[3]
+        if len(a) > 4:
+            body["note"] = a[4]
         status, js = call("v1/users/grant", "POST", body)
     elif cmd == "user-revoke" and len(a) >= 2:
-        status, js = call("v1/users/revoke", "POST", {"login": a[0], "group": a[1]})
+        body = {"login": a[0], "group": a[1]}
+        if len(a) > 2:
+            body["order_id"] = a[2]   # take back only that order's time; without it the whole membership goes
+        status, js = call("v1/users/revoke", "POST", body)
     elif cmd == "user-provision" and len(a) >= 1:
         body = {"username": a[0], "email": a[1] if len(a) > 1 else ""}
         if len(a) > 2:

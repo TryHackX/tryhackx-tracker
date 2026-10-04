@@ -24,19 +24,19 @@
         // Empty means EVERYTHING, and that is the reading the confirmation has to say out loud —
         // an empty number box is exactly how somebody wipes a room by accident.
         const days = raw === '' ? null : Math.max(0, Math.min(3650, parseInt(raw, 10) || 0));
-        const title = t('js.shoutadmin.purge_title');
-        const what = days === null ? t('js.shoutadmin.purge_all') : t('js.shoutadmin.purge_older', { days: days });
-        if (!await confirmAction(title, what, { okLabel: t('js.shoutadmin.purge_ok'), danger: true })) return;
-        const pw = await promptPassword(title, t('js.shoutadmin.purge_password'));
+        const title = t.key('js.shoutadmin.purge_title');
+        const what = days === null ? t.key('js.shoutadmin.purge_all') : t.key('js.shoutadmin.purge_older', { days: days });
+        if (!await confirmAction(title, what, { okLabel: t.key('js.shoutadmin.purge_ok'), danger: true })) return;
+        const pw = await promptPassword(title, t.key('js.shoutadmin.purge_password'));
         if (!pw) return;
         btn.disabled = true;
         try {
             const r = await apiCall('admin/shout_purge', 'POST', { password: pw, older_than_days: days });
-            showToast(r.success ? (r.message || t('js.shoutadmin.purge_done', { n: r.deleted || 0 }))
-                                : (r.error || t('js.shoutadmin.purge_failed')), r.success ? 'success' : 'error');
+            showToast(r.success ? (r.message || t.key('js.shoutadmin.purge_done', { n: r.deleted || 0 }))
+                                : (r.error || t.key('js.shoutadmin.purge_failed')), r.success ? 'success' : 'error');
             if (r.success && daysIn) daysIn.value = '';
         } catch {
-            showToast(t('js.shoutadmin.purge_failed'), 'error');
+            showToast(t.key('js.shoutadmin.purge_failed'), 'error');
         } finally {
             btn.disabled = false;
         }
@@ -108,6 +108,7 @@
     const drop = document.getElementById('admin-emote-drop');
     const maxKb = Number(root.dataset.maxKb) || 64;
     const addLabel = btn ? btn.textContent.trim() : '';
+    const restingFace = btn ? [...btn.childNodes] : [];   // the server's own nodes, put back after a busy spell (1.73.0)
 
     // What the sniffed type is CALLED. "image/svg+xml" is the honest answer to a question nobody asked.
     const TYPES = { 'image/svg+xml': 'SVG', 'image/png': 'PNG', 'image/gif': 'GIF', 'image/webp': 'WebP' };
@@ -142,8 +143,8 @@
     }
     /** The two rules the owner can break without leaving the page. includes/shout.php checks them again. */
     function checkName(name, exceptId) {
-        if (name.length < NAME_MIN) { showToast(t('js.shoutadmin.emote_name_short'), 'warning'); return false; }
-        if (nameTaken(name, exceptId)) { showToast(t('js.shoutadmin.emote_name_taken', { name: name }), 'warning'); return false; }
+        if (name.length < NAME_MIN) { showToast(t.key('js.shoutadmin.emote_name_short'), 'warning'); return false; }
+        if (nameTaken(name, exceptId)) { showToast(t.key('js.shoutadmin.emote_name_taken', { name: name }), 'warning'); return false; }
         return true;
     }
 
@@ -157,8 +158,8 @@
         main.textContent = '';
         if (file) main.appendChild(document.createTextNode(file.name + ' · ' + Math.max(1, Math.round(file.size / 1024)) + ' KB'));
         else {
-            main.appendChild(el('u', { text: t('js.shoutadmin.emote_drop_choose') }));
-            main.appendChild(document.createTextNode(' ' + t('js.shoutadmin.emote_drop_or')));
+            main.appendChild(el('u', { text: t.key('js.shoutadmin.emote_drop_choose') }));
+            main.append(' ', t.key('js.shoutadmin.emote_drop_or'));
         }
         if (file && codeIn && !codeIn.value.trim()) codeIn.value = slug(file.name);
     }
@@ -182,10 +183,10 @@
     async function op(body, okKey) {
         let j;
         try { j = await apiCall('admin/shout_emotes', 'POST', body); }
-        catch (e) { showToast(t('js.shoutadmin.emote_failed'), 'danger'); return null; }
-        if (!j.success) { showToast(j.error || t('js.shoutadmin.emote_failed'), 'danger'); return null; }
+        catch (e) { showToast(t.key('js.shoutadmin.emote_failed'), 'danger'); return null; }
+        if (!j.success) { showToast(j.error || t.key('js.shoutadmin.emote_failed'), 'danger'); return null; }
         render(j.emotes || []);
-        showToast(j.message || t(okKey), 'success');
+        showToast(j.message || t.key(okKey), 'success');
         return j;
     }
 
@@ -212,7 +213,7 @@
     }
     /** Who put it there: a link to the profile, or the site for one that belongs to nobody. */
     function who(r) {
-        if (!r.uploader) return el('td', { className: 'text-muted small' }, t('js.shoutadmin.emote_site'));
+        if (!r.uploader) return el('td', { className: 'text-muted small' }, t.key('js.shoutadmin.emote_site'));
         const base = document.body.dataset.apiBase || '';
         // apiBase is "<base>api.php?endpoint=" — the site root is everything before the file name.
         const site = base.replace(/api\.php.*$/, '');
@@ -226,11 +227,11 @@
     }
 
     function delButton(r) {
-        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger' }, t('js.shoutadmin.emote_delete'));
+        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger' }, t.key('js.shoutadmin.emote_delete'));
         del.addEventListener('click', async () => {
             // `code` is the modal's own slot for an identifier the reader is meant to CHECK —
             // the token, not a sentence with the token buried in it.
-            if (!(await confirmAction(t('js.shoutadmin.emote_delete_title'), t('js.shoutadmin.emote_delete_confirm'),
+            if (!(await confirmAction(t.key('js.shoutadmin.emote_delete_title'), t.key('js.shoutadmin.emote_delete_confirm'),
                                       { code: ':' + r.code + ':', danger: true }))) return;
             op({ op: 'delete', id: r.id }, 'js.shoutadmin.emote_deleted');
         });
@@ -239,7 +240,7 @@
 
     // ── the queue: a member's upload nobody else can see yet ─────────────────
     function waitingRow(r) {
-        const yes = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success me-1' }, t('js.shoutadmin.emote_approve'));
+        const yes = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success me-1' }, t.key('js.shoutadmin.emote_approve'));
         yes.addEventListener('click', () => op({ op: 'enable', id: r.id }, 'js.shoutadmin.emote_approved'));
         return el('tr', {}, [
             el('td', { className: 'admin-emote-shot' }, [preview(r)]),
@@ -257,8 +258,8 @@
         waitBox.hidden = pending.length === 0;
         if (!pending.length) return;
         waitBox.appendChild(el('h6', { className: 'admin-emotes-waiting-title' },
-            [el('i', { className: 'bi bi-hourglass-split' }), t('js.shoutadmin.emote_waiting_head', { n: pending.length })]));
-        waitBox.appendChild(el('small', { className: 'admin-emotes-waiting-hint' }, t('js.shoutadmin.emote_waiting_hint')));
+            [el('i', { className: 'bi bi-hourglass-split' }), t.key('js.shoutadmin.emote_waiting_head', { n: pending.length })]));
+        waitBox.appendChild(el('small', { className: 'admin-emotes-waiting-hint' }, t.key('js.shoutadmin.emote_waiting_hint')));
         const table = el('table', { className: 'table table-dark table-sm align-middle mb-0 admin-emotes-table' });
         const body = el('tbody');
         pending.forEach((r) => body.appendChild(waitingRow(r)));
@@ -269,21 +270,21 @@
     // ── the table ────────────────────────────────────────────────────────────
     function rowFor(r) {
         const onoff = el('button', { type: 'button', className: 'btn btn-sm me-1 ' + (r.enabled ? 'btn-outline-secondary' : 'btn-outline-success') },
-                         t(r.enabled ? 'js.shoutadmin.emote_disable' : 'js.shoutadmin.emote_enable'));
+                         t.key(r.enabled ? 'js.shoutadmin.emote_disable' : 'js.shoutadmin.emote_enable'));
         onoff.addEventListener('click', () => op({ op: r.enabled ? 'disable' : 'enable', id: r.id }, 'js.shoutadmin.emote_saved'));
 
-        const stick = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info me-1', title: t('js.shoutadmin.emote_sticker_hint') },
-                         t(r.sticker ? 'js.shoutadmin.emote_make_emote' : 'js.shoutadmin.emote_make_sticker'));
+        const stick = el('button', { type: 'button', className: 'btn btn-sm btn-outline-info me-1', title: t.key('js.shoutadmin.emote_sticker_hint') },
+                         t.key(r.sticker ? 'js.shoutadmin.emote_make_emote' : 'js.shoutadmin.emote_make_sticker'));
         stick.addEventListener('click', () => op({ op: 'sticker', id: r.id, on: !r.sticker }, 'js.shoutadmin.emote_saved'));
 
-        const ren = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary me-1' }, t('js.shoutadmin.emote_rename'));
+        const ren = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary me-1' }, t.key('js.shoutadmin.emote_rename'));
         ren.addEventListener('click', () => rename(r));
 
         // What the row IS. The buttons above say what they will DO to it, so this is the only place
         // that has to answer "is this one live, and is it big or inline".
         const state = el('td', {}, [
-            chip(t(r.enabled ? 'js.shoutadmin.emote_state_on' : 'js.shoutadmin.emote_state_off'), r.enabled ? 'on' : 'off'),
-            chip(t(r.sticker ? 'js.shoutadmin.emote_kind_sticker' : 'js.shoutadmin.emote_kind_emote'), 'kind'),
+            chip(t.key(r.enabled ? 'js.shoutadmin.emote_state_on' : 'js.shoutadmin.emote_state_off'), r.enabled ? 'on' : 'off'),
+            chip(t.key(r.sticker ? 'js.shoutadmin.emote_kind_sticker' : 'js.shoutadmin.emote_kind_emote'), 'kind'),
         ]);
 
         return el('tr', { className: r.enabled ? '' : 'admin-emote-off' }, [
@@ -300,7 +301,7 @@
     function paintCount(shown) {
         if (!countEl) return;
         countEl.hidden = shown.length === 0;
-        countEl.textContent = t('js.shoutadmin.count', { n: shown.filter((r) => r.enabled).length, max: shown.length });
+        countEl.textContent = t.key('js.shoutadmin.count', { n: shown.filter((r) => r.enabled).length, max: shown.length });
     }
 
     function render(listing) {
@@ -314,16 +315,16 @@
         paintWaiting(pending);
         list.textContent = '';
         paintCount(rest);
-        if (!rest.length) { list.appendChild(el('div', { className: 'text-muted small' }, t('js.shoutadmin.emote_none'))); return; }
+        if (!rest.length) { list.appendChild(el('div', { className: 'text-muted small' }, t.key('js.shoutadmin.emote_none'))); return; }
         const table = el('table', { className: 'table table-dark table-sm align-middle mb-0 admin-emotes-table' }, [
             el('thead', {}, [el('tr', {}, [
-                el('th', { scope: 'col' }, [el('span', { className: 'visually-hidden' }, t('js.shoutadmin.col_emote'))]),
-                el('th', { scope: 'col' }, t('js.shoutadmin.col_code')),
-                el('th', { scope: 'col' }, t('js.shoutadmin.col_state')),
-                el('th', { scope: 'col' }, t('js.shoutadmin.col_file')),
-                el('th', { scope: 'col' }, t('js.shoutadmin.col_who')),
-                el('th', { scope: 'col' }, t('js.shoutadmin.col_added')),
-                el('th', { scope: 'col', className: 'text-end' }, [el('span', { className: 'visually-hidden' }, t('js.shoutadmin.col_actions'))]),
+                el('th', { scope: 'col' }, [el('span', { className: 'visually-hidden' }, t.key('js.shoutadmin.col_emote'))]),
+                el('th', { scope: 'col' }, t.key('js.shoutadmin.col_code')),
+                el('th', { scope: 'col' }, t.key('js.shoutadmin.col_state')),
+                el('th', { scope: 'col' }, t.key('js.shoutadmin.col_file')),
+                el('th', { scope: 'col' }, t.key('js.shoutadmin.col_who')),
+                el('th', { scope: 'col' }, t.key('js.shoutadmin.col_added')),
+                el('th', { scope: 'col', className: 'text-end' }, [el('span', { className: 'visually-hidden' }, t.key('js.shoutadmin.col_actions'))]),
             ])]),
         ]);
         const body = el('tbody');
@@ -339,9 +340,9 @@
      * offer one.
      */
     async function rename(r) {
-        const v = await promptModal({ title: t('js.shoutadmin.emote_rename_title'), label: t('js.shoutadmin.emote_rename_label'),
-                                      value: r.name, maxlength: 60, hint: t('js.shoutadmin.emote_rename_hint'),
-                                      okLabel: t('js.shoutadmin.emote_rename') });
+        const v = await promptModal({ title: t.key('js.shoutadmin.emote_rename_title'), label: t.key('js.shoutadmin.emote_rename_label'),
+                                      value: r.name, maxlength: 60, hint: t.key('js.shoutadmin.emote_rename_hint'),
+                                      okLabel: t.key('js.shoutadmin.emote_rename') });
         if (v === null) return;
         const name = String(v).trim();
         if (name === r.name) return;
@@ -357,9 +358,11 @@
         if (!btn) return;
         btn.disabled = on;
         [codeIn, nameIn, fileIn].forEach((n) => { if (n) n.disabled = on; });
-        btn.textContent = '';
-        btn.appendChild(el('i', { className: on ? 'bi bi-hourglass-split' : 'bi bi-plus-lg' }));
-        btn.appendChild(document.createTextNode(' ' + (on ? t('js.shoutadmin.emote_adding') : addLabel)));
+        // Busy: the hourglass and a keyed word; done: the button's OWN nodes back, the ones the server wrote — the live
+        // language switch translates those where they stand (a copy of their words would stay in the old language).
+        if (on) btn.replaceChildren(el('i', { className: 'bi bi-hourglass-split' }), ' ', t.key('js.shoutadmin.emote_adding'));
+        else if (restingFace.length) btn.replaceChildren(...restingFace);
+        else btn.replaceChildren(el('i', { className: 'bi bi-plus-lg' }), ' ', addLabel);
     }
     const readFile = (f) => new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -371,10 +374,10 @@
     async function add() {
         if (busy) return;
         const f = chosen();
-        if (!f) { showToast(t('js.shoutadmin.emote_pick_file'), 'warning'); if (drop) drop.focus(); return; }
-        if (f.size > maxKb * 1024) { showToast(t('js.shoutadmin.emote_too_large', { kb: maxKb }), 'danger'); return; }
+        if (!f) { showToast(t.key('js.shoutadmin.emote_pick_file'), 'warning'); if (drop) drop.focus(); return; }
+        if (f.size > maxKb * 1024) { showToast(t.key('js.shoutadmin.emote_too_large', { kb: maxKb }), 'danger'); return; }
         const code = (codeIn && codeIn.value.trim().toLowerCase()) || slug(f.name);
-        if (!/^[a-z0-9_]{2,32}$/.test(code)) { showToast(t('js.shoutadmin.emote_bad_code'), 'danger'); if (codeIn) codeIn.focus(); return; }
+        if (!/^[a-z0-9_]{2,32}$/.test(code)) { showToast(t.key('js.shoutadmin.emote_bad_code'), 'danger'); if (codeIn) codeIn.focus(); return; }
         // An empty name box means the prettified code, here and on the server — so the collision is
         // checked against the name that would actually be stored rather than against nothing.
         const typed = (nameIn && nameIn.value.trim()) || '';
@@ -382,7 +385,7 @@
         setBusy(true);
         let data, j;
         try { data = await readFile(f); }
-        catch (e) { setBusy(false); showToast(t('js.shoutadmin.emote_failed'), 'danger'); return; }
+        catch (e) { setBusy(false); showToast(t.key('js.shoutadmin.emote_failed'), 'danger'); return; }
         j = await op({ op: 'upload', code: code, name: typed, data: data, sticker: !!(stickIn && stickIn.checked) },
                      'js.shoutadmin.emote_added');
         setBusy(false);
@@ -404,8 +407,8 @@
 
     async function load() {
         let j;
-        try { j = await apiCall('admin/shout_emotes'); } catch (e) { showToast(t('js.shoutadmin.emote_failed'), 'danger'); return; }
-        if (!j.success) { showToast(j.error || t('js.shoutadmin.emote_failed'), 'danger'); return; }
+        try { j = await apiCall('admin/shout_emotes'); } catch (e) { showToast(t.key('js.shoutadmin.emote_failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.shoutadmin.emote_failed'), 'danger'); return; }
         render(j.emotes || []);
     }
 
@@ -481,7 +484,7 @@
         // be a column of dots that never changes.
         const keys = IDS.filter((k) => permList[k] !== undefined);
         if (!groups.length || !keys.length) return;
-        const hr = el('tr', {}, [el('th', { text: t('js.shoutadmin.matrix_permission') })]);
+        const hr = el('tr', {}, [el('th', { text: t.key('js.shoutadmin.matrix_permission') })]);
         groups.forEach((g) => {
             const th = el('th', { className: 'gr-matrix-g', title: g.slug }, [g.name]);
             if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) th.style.color = g.color;
@@ -490,11 +493,14 @@
         tbl.appendChild(el('thead', {}, [hr]));
         const tbody = el('tbody', {});
         keys.forEach((key) => {
-            const tr = el('tr', {}, [el('td', { title: permList[key] || '' }, [el('code', { text: key })])]);
+            // What the id allows, said by the id (perm.<id>; the Settings page's bundle carries `perm.`), so the tooltip
+            // follows the live language switch (1.73.0); the server's words for an id the bundle does not know.
+            const words = t.has('perm.' + key) ? t.key('perm.' + key) : (permList[key] || '');
+            const tr = el('tr', {}, [el('td', { title: words }, [el('code', { text: key })])]);
             groups.forEach((g) => {
                 const on = !!(g.permissions && g.permissions[key]);
                 tr.appendChild(el('td', { className: 'gr-matrix-c' + (on ? ' on' : '') }, [
-                    on ? el('i', { className: 'bi bi-check-lg', title: t('js.shoutadmin.matrix_has', { group: g.name, key: key }) })
+                    on ? el('i', { className: 'bi bi-check-lg', title: t.key('js.shoutadmin.matrix_has', { group: g.name, key: key }) })
                        : el('i', { className: 'bi bi-dot gr-matrix-off', 'aria-hidden': 'true' })]));
             });
             tbody.appendChild(tr);

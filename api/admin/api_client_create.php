@@ -36,5 +36,8 @@ jsonResponse([
     'required_fields' => $fields,
     // The address of the instructions to send with the key. It carries no secret — only which
     // choices were made — so it is safe in the same mail as the key without being the key.
-    'docs_url' => apiClientDocsUrl((string)$c['scope'], $autoApprove === 1, $fields),
+    // Each chapter's own answer (1.73.0): the registrations' approval and the reports' blocking — an abuse key's
+    // guide used to describe its reports with this key's auto_approve (1 unless unticked) and promise a block on
+    // arrival to a key that holds them for review.
+    'docs_url' => apiClientDocsUrl((string)$c['scope'], $autoApprove === 1, $fields, $autoBlock === 1),
 ]);

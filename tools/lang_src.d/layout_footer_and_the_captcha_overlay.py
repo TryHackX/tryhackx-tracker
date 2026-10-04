@@ -22,7 +22,8 @@ add('footer', {
     'powered_by':  ('Powered by', 'Napędzane przez'),
     'by_author':   ('by', 'autorstwa'),
     'since':       ('since', 'od'),
-    'cc0':         ('Content rights waived via CC0', 'Prawa do treści zrzeczone przez CC0'),
+    # 1.73.0: the project's licence, as LICENSE says it (it was a CC0 waiver the LICENSE never made).
+    'license_mit': ('Released under the MIT License', 'Udostępnione na licencji MIT'),
 })
 add('captcha', {
     'verify_human': ('Please verify you are human', 'Potwierdź, że jesteś człowiekiem'),

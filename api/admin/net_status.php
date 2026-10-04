@@ -50,14 +50,16 @@ $out = [
     'error'         => null,
 ];
 
+// In the reader's language (1.73.0: these three were English on every page); the card finds them back by key
+// (t.find(…, 'api.'): the traffic page's bundle carries api.net.), so they follow the live language switch.
 if (!$cmdSet) {
-    $out['error'] = 'No rate-limit helper command is configured.';
+    $out['error'] = __('api.net.no_helper_2');
 } elseif (!trackerExecAvailable()) {
-    $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the firewall helper.';
+    $out['error'] = __('api.net.exec_disabled');
 } else {
     $status = netlimitStatus($cfg);
     if (empty($status['ok'])) {
-        $out['error'] = (string)($status['error'] ?? 'The firewall helper did not answer.');
+        $out['error'] = (string)($status['error'] ?? __('api.net.helper_no_answer'));
         $out['helper_output'] = mb_substr((string)($status['output'] ?? ''), 0, 1000);
     } else {
         $out['firewall'] = $status;
@@ -122,7 +124,10 @@ try {
     $out['recommend_days'] = $days;
     // In a flood the number worth quoting is what is GETTING THROUGH, not what is arriving.
     $passedNow = (int)(($out['live']['pps']['in_passed'] ?? 0));
-    $rec['text'] = netlimitRecommendText($rec, $flood, $passedNow);
+    // The paragraph in the reader's language, and its sentences as keys and numbers (`parts`), which the card writes
+    // as words that keep their keys — they follow the live language switch (1.73.0).
+    $rec['parts'] = netlimitRecommendParts($rec, $flood, $passedNow);
+    $rec['text'] = netlimitSayParts($rec['parts']);
     $rec['flood'] = $flood;
     // A bucket too small for the limit (includes/netlimit.php netlimitBurstHintFrom()): the last hour
     // against the burst the firewall reports, or the saved one while it has not answered.

@@ -898,13 +898,14 @@ function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): arra
  *   ['samples'=>int, 'buckets'=>[['pps'=>int,'load'=>float,'n'=>int], …],
  *    'busy_pps'=>int|null,     the lowest rate whose bucket is at or above the busy threshold
  *    'peak_load'=>float|null, 'quiet_load'=>float|null,
- *    'confident'=>bool, 'why'=>string]   'why' explains a null in words the card can print
+ *    'confident'=>bool, 'why'=>string,  'why' explains a null in words the card can print (the reader's language)
+ *    'why_part'=>['key','vars']|null]   … and the same sentence as its dictionary key and numbers (1.73.0)
  */
 function netlimitLoadCurve(PDO $db, array $cfg, int $days = 7, ?int $now = null): array {
     $now = $now ?? time();
     $days = max(1, min(netlimitKeepDays($cfg), $days));
     $out = ['samples' => 0, 'buckets' => [], 'busy_pps' => null, 'peak_load' => null,
-            'quiet_load' => null, 'confident' => false, 'why' => ''];
+            'quiet_load' => null, 'confident' => false, 'why' => '', 'why_part' => null];
 
     $st = $db->prepare("SELECT pps_passed, load_x100 FROM `" . NET_SAMPLE_TABLE . "`
                         WHERE ts >= ? AND load_x100 IS NOT NULL AND pps_passed > 0");
@@ -912,18 +913,22 @@ function netlimitLoadCurve(PDO $db, array $cfg, int $days = 7, ?int $now = null)
     $rows = $st->fetchAll(PDO::FETCH_NUM);
     $st->closeCursor();
 
+    // `why` in the reader's language, and as its key and numbers (`why_part`: the card writes it as a word that keeps
+    // its key, so it follows the live language switch — 1.73.0; it was English on every page).
+    $why = static function (array &$out, string $key, array $vars): void {
+        $out['why_part'] = ['key' => 'api.net.' . $key, 'vars' => $vars];
+        $out['why'] = netlimitSayParts([$out['why_part']]);
+    };
     $out['samples'] = count($rows);
     if ($out['samples'] < NET_LOAD_MIN_SAMPLES) {
-        $out['why'] = 'not enough readings yet — the load study needs at least ' . NET_LOAD_MIN_SAMPLES
-                    . ' samples with a load recorded, and there are ' . $out['samples'] . '.';
+        $why($out, 'load_few', ['min' => NET_LOAD_MIN_SAMPLES, 'n' => $out['samples']]);
         return $out;
     }
 
     $rates = array_map(static fn($r) => (int)$r[0], $rows);
     $lo = min($rates); $hi = max($rates);
     if ($hi <= 0 || ($hi - $lo) < $hi * NET_LOAD_MIN_SPREAD) {
-        $out['why'] = 'the traffic barely varied over this window (' . number_format($lo) . '–'
-                    . number_format($hi) . ' pps), so there is nothing to compare a busy machine against.';
+        $why($out, 'load_flat', ['lo' => $lo, 'hi' => $hi]);
         return $out;
     }
 
@@ -954,8 +959,9 @@ function netlimitLoadCurve(PDO $db, array $cfg, int $days = 7, ?int $now = null)
         }
     }
     if ($out['busy_pps'] === null) {
-        $out['why'] = 'this machine never reached a load of ' . NET_LOAD_BUSY . ' per core at any rate seen so far'
-                    . ' (busiest median ' . number_format(max(array_column($out['buckets'], 'load')), 2) . ') — there is no ceiling to warn about yet.';
+        // the loads as decimals with a point, as the card writes the busy threshold (a string: said as it is)
+        $why($out, 'load_never', ['busy' => (string)NET_LOAD_BUSY,
+                                  'max' => number_format(max(array_column($out['buckets'], 'load')), 2, '.', '')]);
     }
     $out['confident'] = $out['busy_pps'] !== null;
     return $out;
@@ -1136,13 +1142,23 @@ function netlimitRecommend(PDO $db, array $cfg, int $days = 7, ?int $now = null)
  * much they are willing to hand OpenTracker, so say that instead of implying the peak is a target.
  */
 function netlimitRecommendText(array $rec, bool $flood = false, int $passed = 0): string {
-    if (!$rec['samples']) {
-        return 'No traffic has been recorded yet. Start counting and come back in an hour — the suggestion needs measurements, not guesses.';
-    }
-    $s = sprintf('Last %d day%s: median %s pps, P95 %s pps, peak %s pps.',
-        (int)($rec['days'] ?? 7), ((int)($rec['days'] ?? 7)) === 1 ? '' : 's',
-        number_format($rec['median']), number_format($rec['p95']), number_format($rec['peak']));
-    if (!$rec['enough']) return $s . ' That is fewer than 60 samples — treat the numbers as a first impression, not a recommendation.';
+    return netlimitSayParts(netlimitRecommendParts($rec, $flood, $passed));
+}
+
+/**
+ * The sentences of that paragraph, each as its dictionary key and its numbers: [['key' => …, 'vars' => […]], …]
+ * (1.73.0 — the paragraph was English on every page). netlimitRecommendText() says them in the reader's language;
+ * admin/net_status answers them beside it (`parts`), so the card writes each sentence as a word that keeps its key and
+ * follows the live language switch — the anti-spam layer's way (includes/antispam.php `key` / `vars`). The words are
+ * the dictionary's (api.net.rec_*, tools/lang_src.d/traffic_words.py); the numbers stay numbers until they are said.
+ */
+function netlimitRecommendParts(array $rec, bool $flood = false, int $passed = 0): array {
+    $part = static fn(string $key, array $vars = []): array => ['key' => 'api.net.' . $key, 'vars' => $vars];
+    if (!$rec['samples']) return [$part('rec_none')];
+    $days = (int)($rec['days'] ?? 7);
+    $out = [$part($days === 1 ? 'rec_stats_day' : 'rec_stats',
+                  ['days' => $days, 'median' => (int)$rec['median'], 'p95' => (int)$rec['p95'], 'peak' => (int)$rec['peak']])];
+    if (!$rec['enough']) { $out[] = $part('rec_few'); return $out; }
 
     // Which sentence comes FIRST decides what the admin reads. When arrivals are not demand — the
     // counting mode drops nothing, or somebody else's rule drops it further down — leading with
@@ -1150,23 +1166,29 @@ function netlimitRecommendText(array $rec, bool $flood = false, int $passed = 0)
     // caveat afterwards arrives too late to stop them using it. So in that state the caveat leads,
     // and the P95 figure is demoted to what it actually is: a description of the flood.
     if ($flood) {
-        $s .= ' Those are ARRIVALS, not demand — a tracker whose old swarm keeps calling receives far more than'
-            . ' it serves, so a limit anywhere near them would never fire.';
-        if ($passed > 0) {
-            $s .= sprintf(' What is actually getting through right now is %s pps, and THAT is the number to pick from:'
-                . ' choose what you are willing to hand OpenTracker, with some headroom. Packets above it cost you'
-                . ' nothing, because the firewall drops them before the tracker ever sees them.',
-                number_format($passed));
-        } else {
-            $s .= ' Pick the number you are willing to hand OpenTracker, not one taken from the arrivals above.'
-                . ' Packets over it cost you nothing, because the firewall drops them before the tracker ever sees them.';
-        }
-        $s .= sprintf(' (For reference, a limit above the arrivals would be around %s pps.)', number_format($rec['suggested']));
-        return $s;
+        $out[] = $part('rec_flood');
+        $out[] = $passed > 0 ? $part('rec_flood_passed', ['passed' => $passed]) : $part('rec_flood_pick');
+        $out[] = $part('rec_flood_ref', ['n' => (int)$rec['suggested']]);
+        return $out;
     }
-    $s .= sprintf(' A limit at %s pps (P95 + 5 %%) would essentially never trigger; below roughly %s pps you start dropping packets that are currently arriving.',
-        number_format($rec['suggested']), number_format($rec['floor']));
-    return $s;
+    $out[] = $part('rec_normal', ['suggested' => (int)$rec['suggested'], 'floor' => (int)$rec['floor']]);
+    return $out;
+}
+
+/** Sentences as [key, vars] (netlimitRecommendParts(), the load study's `why`) said in the reader's language, one paragraph. */
+function netlimitSayParts(array $parts): string {
+    $said = [];
+    foreach ($parts as $p) {
+        $vars = [];
+        foreach ((array)($p['vars'] ?? []) as $k => $v) $vars[$k] = is_int($v) ? netlimitNum($v) : (string)$v;
+        $said[] = __((string)$p['key'], $vars);
+    }
+    return implode(' ', $said);
+}
+
+/** A whole number written the reader's way: 40,000 in English, 40 000 in Polish (a no-break space, as Settings writes them). */
+function netlimitNum(int $n): string {
+    return number_format($n, 0, '.', (function_exists('langCurrent') && langCurrent() === 'pl') ? "\u{00A0}" : ',');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -818,7 +818,9 @@
 .msgrep-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem; }
 .msgrep-closed { opacity: 0.75; }
 .msgrep-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; margin-bottom: 0.4rem; }
-.msgrep-who { font-weight: 600; }
+/* min-width 0 and anywhere (1.73.0): a reported comment on a torrent the site knows by no name is "on <its 40-char
+   hash>" — one unbreakable word, and on a phone it ran 12.5px out of the card. */
+.msgrep-who { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .msgrep-when { font-size: 0.75rem; color: #768390; }
 .msgrep-reason { font-size: 0.85rem; margin-bottom: 0.6rem; }
 .msgrep-msg { border: 1px solid #30363d; border-radius: 6px; padding: 0.5rem 0.7rem; margin-bottom: 0.5rem; }
@@ -882,13 +884,15 @@
     .msgrep-reason-in { flex-basis: 100%; }
 }
 
-/* Which partner filed a report, beside the name they filed it under. Quiet on purpose: it is
-   provenance, not a status — the row's own status badge is the one to read first. */
-.badge-api {
-    background: rgba(74, 158, 255, 0.15);
-    color: #4a9eff;
-    margin-left: 0.35rem;
-}
+/* Which partner filed a report, under the name they filed it under. Quiet on purpose: it is provenance, not a
+   status — the row's own status badge is the one to read first.
+   1.73.0: a line of its own, not a badge after the name. A partner's label is a NAME (up to 100 characters) and it
+   stood in the name cell's single line: with a long name or a long label the cell's "…" cut the badge, or hid it
+   whole — 89 to 379px of it in table_fit_check.js. Now it is the line the Whitelist has had since 1.63.1 ("via
+   <partner>" under the name): `.cell-sub`, a second line of a cell that ellipsises on its own with its full value in
+   its title, like the name above it. */
+.cell-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.75rem; color: #9aa4b2; }
+.cell-sub-api { color: #79b4ff; }
 
 .report-message-block {
     margin-top: 0.75rem;
@@ -1138,6 +1142,11 @@
 
 .col-badge {
     text-align: center;
+}
+/* A badge cell that reads as text — a member's groups, an API ban's reason with its detail under it — starts at the
+   left like the text round it (1.73.0). */
+.col-badge.col-start {
+    text-align: left;
 }
 
 .col-desc {
@@ -1439,10 +1448,14 @@ input[type="number"] {
    1440 wide and "COMPANY" with its sort arrow needs 98, the Polish "ZGŁASZAJĄCY" 122 — the arrow was cut
    off, and the whole label in Polish. The name column is pinned at 130 (its Polish header is the longest
    single word), the hash takes 150 until the page has room for all 40 characters, and the reports'
-   floor below (1200, the other tables that borrow this class keep 1180) leaves every shared column at
-   least 101px. */
+   floor below (1200, 1224 since 1.73.0; the other tables that borrow this class keep 1180) leaves every
+   shared column at least 101px. */
 .admin-wide .dash-table { table-layout: fixed; width: 100%; min-width: 1180px; margin-bottom: 0; }
-.admin-wide #reports-table { min-width: 1200px; }
+/* 1224, not 1200 (1.73.0): the status column grew 22px (below) and the four shared columns keep their 102. The appeals
+   (admin.js sets .dash-appeals with their columns) pin two more columns and share what is left between two: 1244 is
+   what leaves each of those the 102 "DESCRIPTION" needs — at 1200 it was cut by 1.3px (91px columns). */
+.admin-wide #reports-table { min-width: 1224px; }
+.admin-wide #reports-table.dash-appeals { min-width: 1244px; }
 .admin-wide .dash-table th,
 .admin-wide .dash-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .admin-wide .dash-table td { padding: 0.45rem 0.5rem; }
@@ -1456,7 +1469,10 @@ input[type="number"] {
 .dash-c-name    { width: 130px; }
 .dash-c-hash    { width: 150px; }
 .dash-c-ip      { width: 128px; }
-.dash-c-status  { width: 96px; }
+/* 118, not 96 (1.73.0): as wide as the longest status badge in either language plus the cell's 16px and 1.69.0's
+   4px for a wider system font — measured, the Polish "Zaakceptowane" (an appeal accepted) is 97px, "Zablokowane"
+   85.6, "Sprawdzone" and "Oczekujące" less; at 96 the cell's 80px cut both. The reports and the appeals share it. */
+.dash-c-status  { width: 118px; }
 /* 112, not 84 (1.69.0): the column is as wide as its longest badge in either language plus the cell's
    16px of padding — measured in the browser, the Polish "Odblokowanie" badge is 91.3px ("Blokada" 58.3,
    "Unblock" 59.5, "Block" 58), so 108 at the least, and at 84 it was cut at the cell's edge. The last
@@ -1499,11 +1515,27 @@ input[type="number"] {
 .wl-page .wl-table th { white-space: normal; text-overflow: clip; text-wrap: pretty; }
 .admin-wide .dash-table td:is(.wl-actions, .th-actions, .td-actions),
 .wl-page .wl-table td:is(.wl-actions, .th-actions, .td-actions) { white-space: normal; overflow: visible; text-overflow: clip; }
+/* A third (1.73.0): a cell of BADGES. The owner's screenshot — the Reports' Archive in Polish, the STATUS cell's red
+   "Zablokowane" wider than its cell and the cell's own "…" standing in the badge's right corner; table_fit_check.js
+   found the same in every table of the panel that holds badges (a status, a source, a scope, a failed action, a
+   member's groups). A badge is a word that says what a row IS: shown whole, or it says something else. Every badge
+   cell carries `.col-badge` — the class its header already had — and is never ellipsised: its badges wrap between
+   them, and a badge of several words between its words ("Wstrzymaj do / przeglądu"), never inside one. The column
+   is as wide as its longest WORD in the longer language (the widths below and with each table's columns, measured);
+   what one ever lacks it draws past its edge rather than cut — and the check sees that too. */
+.admin-wide .dash-table td.col-badge,
+.wl-page .wl-table td.col-badge { white-space: normal; overflow: visible; text-overflow: clip; }
+.admin-wide .dash-table td.col-badge :is(.badge-table, .wl-badge, .au-badge, .us-group-badge),
+.wl-page .wl-table td.col-badge :is(.badge-table, .wl-badge, .au-badge, .us-group-badge) { white-space: normal; }
 /* The min-widths keep the flexible column usable and hand overflow to .table-responsive instead of
    squashing it to 0. The whitelist's own (#wl-table) are with its column widths, further down. */
-.wl-page #ab-table { min-width: 1240px; }
-.wl-page #cl-table { min-width: 1160px; }   /* 1120 until its actions column grew by 36 (1.68.1) */
-.wl-page #bn-table { min-width: 900px; }
+/* 1.73.0: the API bans' REASON (a flexible column) holds the "UNKNOWN_KEY" badge, 104.8px — at 1240 the two flexible
+   columns had 104 each and cut it; the API clients' SCOPE is a column of its own (.wl-c-scope, below) 24px wider
+   than the 84 it borrowed from Enabled, and the label keeps its 114. */
+.wl-page #ab-table { min-width: 1284px; }
+.wl-page #cl-table { min-width: 1184px; }   /* 1120 until its actions column grew by 36 (1.68.1), 1160 until 1.73.0 */
+/* 936, not 900 (1.73.0): the source column grew 36px (.wl-c-source, below) and the name and the reason keep their 132. */
+.wl-page #bn-table { min-width: 936px; }
 .wl-page .wl-name { max-width: none; }
 .wl-page .wl-name .wl-small { color: #9aa4b2; }
 .wl-page .wl-hash-cell code { font-family: SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.76rem; letter-spacing: 0; white-space: nowrap; }
@@ -1521,12 +1553,15 @@ input[type="number"] {
 /* Backups (colgroup in backups.php). The actions column has to fit four buttons, so it is pinned
    wider than the whitelist's; the min-width hands overflow to .table-responsive instead of letting
    the fixed layout squash a column to nothing. */
-.wl-page #bk-table { min-width: 860px; }
+/* 1.73.0, measured with the archives a helper reports (table_fit_check.js): the size's ratio line, "≈8× compressed",
+   was cut 1.7px at 100 (a two-digit ratio needs 120 and the 4px for a wider font), and "zweryfikowane" with the
+   padlock after it 132px in 124 — the padlock under the cell's "…"; the floor keeps the contents 134px. */
+.wl-page #bk-table { min-width: 900px; }
 .bk-c-when      { width: 190px; }
 .bk-c-profile   { width: 150px; }
-.bk-c-size      { width: 100px; }
+.bk-c-size      { width: 124px; }
 .bk-c-flex      { width: auto; min-width: 180px; }
-.bk-c-integrity { width: 140px; }
+.bk-c-integrity { width: 152px; }
 .bk-c-actions   { width: 150px; }
 .wl-page #bk-table td.th-actions { overflow: visible; }
 
@@ -1535,7 +1570,12 @@ input[type="number"] {
 .wl-c-id       { width: 64px; }
 .wl-c-hash     { width: 316px; }
 .wl-c-size     { width: 82px; }
-.wl-c-source   { width: 96px; }
+/* 132, not 96 (1.73.0): a source is a badge, and the longest in either language is the Polish "ADMINISTRATOR" —
+   110.4px measured, the Whitelist's source since the sources became words of the dictionary ("Admin" in English, 56.4)
+   and the banned list's "administrator #<id>" (its id wraps under it; "ODWOŁANIE" 87.1 is the next longest) — plus the
+   cell's 16px and 1.69.0's 4px for a wider system font. At 96 (84 in the Whitelist's narrow set) it stood 22–33px past
+   the cell's edge. The banned list and the Whitelist's wide set take this one; the narrow set its own, below. */
+.wl-c-source   { width: 132px; }
 .wl-c-ip       { width: 142px; }
 .wl-c-meta     { width: 86px; }
 .wl-c-sl       { width: 80px; }
@@ -1552,6 +1592,11 @@ input[type="number"] {
 .wl-c-keyid    { width: 140px; }
 .wl-c-secret   { width: 96px; }
 .wl-c-enabled  { width: 84px; }
+/* An API key's scope and what it is held to (1.73.0): up to three badges and the required fields, one under another,
+   a badge of several words wrapping between them ("Wstrzymaj do / przeglądu") — so the column is as wide as the
+   longest single word a badge there has, the scope "FEDERATION". It sat in Enabled's 84px, where every badge after
+   the first, and "WHITELIST" itself, went under the cell's "…". */
+.wl-c-scope    { width: 108px; }
 .wl-c-num      { width: 92px; }
 .wl-c-ipv6     { width: 176px; }
 .wl-c-bucket   { width: 168px; }
@@ -1566,28 +1611,39 @@ input[type="number"] {
    widest cell needs in English and Polish, plus a few pixels: Size 92/96 for "ROZMIAR", Date 128/132
    for "23.09.2026, 22:11", the actions 168/176 for five buttons. The min-widths are the pinned sum plus a
    floor for NAME, so a page too narrow for both scrolls sideways instead of squashing it; and the wide set
-   waits until 1830, where it leaves NAME 150px. */
-@media (max-width: 1829.98px) {
-    .wl-page #wl-table { min-width: 1120px; }
+   waits until 1830, where it leaves NAME 150px.
+   1.73.0, measured with every metadata state and the busiest torrents' counts (table_fit_check.js): Meta 100/104
+   for the Polish "POBIERANIE" badge (83.8px; it was cut at 80 — "oczekuje", "nieudane" and the English "fetching"
+   too), S/L 102/106 for "23456 / 12345" (85.1px, ellipsised with nothing to read it in), Date 148/152 for a reader
+   whose browser writes "09/30/2026, 03:03 PM" (130.2px — 128 was measured with a Polish one). The narrow set's floor
+   keeps NAME its 96px (1196); the wide set, 63px wider, waits until 1910, where it leaves NAME 150px again.
+   Then Source 128/132 (1.73.0, the same measuring): the Polish source badge "ADMINISTRATOR", 110.4px, stood 33px out of
+   the narrow set's 84 (22 out of the wide set's 96) — the sources became words of the dictionary after the widths
+   above were measured. The narrow set's floor keeps NAME its 96px (1240); the wide set, 36px wider again, waits until
+   1955, where it leaves NAME 151.6px (1374 pinned in 1525.6) — at 1910 it would have left 115. */
+@media (max-width: 1954.98px) {
+    .wl-page #wl-table { min-width: 1240px; }
     .wl-page #wl-table .wl-c-check   { width: 32px; }
     .wl-page #wl-table .wl-c-id      { width: 56px; }
     .wl-page #wl-table .wl-c-hash    { width: 130px; }
     .wl-page #wl-table .wl-c-size    { width: 92px; }
     .wl-page #wl-table .wl-c-files   { width: 68px; }
-    .wl-page #wl-table .wl-c-source  { width: 84px; }
+    .wl-page #wl-table .wl-c-source  { width: 128px; }
     .wl-page #wl-table .wl-c-ip      { width: 120px; }
-    .wl-page #wl-table .wl-c-meta    { width: 80px; }
-    .wl-page #wl-table .wl-c-sl      { width: 66px; }
-    .wl-page #wl-table .wl-c-date    { width: 128px; }
+    .wl-page #wl-table .wl-c-meta    { width: 100px; }
+    .wl-page #wl-table .wl-c-sl      { width: 102px; }
+    .wl-page #wl-table .wl-c-date    { width: 148px; }
     .wl-page #wl-table .wl-c-actions { width: 168px; }
     .wl-page #wl-table td { padding-left: 0.4rem; padding-right: 0.4rem; }
     .wl-page #wl-table th { padding-left: 0.4rem; padding-right: 0.4rem; }
 }
-@media (min-width: 1830px) {
-    .wl-page #wl-table { min-width: 1400px; }
+@media (min-width: 1955px) {
+    .wl-page #wl-table { min-width: 1524px; }
     .wl-page #wl-table .wl-c-hash    { width: 290px; }
     .wl-page #wl-table .wl-c-size    { width: 96px; }
-    .wl-page #wl-table .wl-c-date    { width: 132px; }
+    .wl-page #wl-table .wl-c-meta    { width: 104px; }
+    .wl-page #wl-table .wl-c-sl      { width: 106px; }
+    .wl-page #wl-table .wl-c-date    { width: 152px; }
 }
 @media (max-width: 768px) {
     .admin-container.admin-wide,
@@ -1632,9 +1688,12 @@ input[type="number"] {
 /* Size 96 and Seen 100, not 90 and 74: the Polish "ROZMIAR" and "WIDZIANE" with their arrows need 94 and
    98 (1.68.1). The headers wrap between words like every panel table's; `#idx-table th { nowrap }`
    used to forbid it here, and "PIERWSZE / OSTATNIE" lost its arrow. */
+/* S/L 106 and Meta 104, not 90 and 80 (1.73.0, measured): the busiest torrents' "23456 / 12345" is 85.1px and was
+   ellipsised in 74 with no title to read it in; the state is a badge now (the Whitelist's, admin-index.js) and the
+   Polish "POBIERANIE" one is 83.8px — each with the cell's 16px and 4 for a wider font. The name pays for both. */
 .idx-c-check { width: 34px; } .idx-c-hash { width: 160px; } .idx-c-size { width: 96px; }
-.idx-c-sl { width: 90px; } .idx-c-seen { width: 100px; } .idx-c-dates { width: 150px; }
-.idx-c-meta { width: 80px; } .idx-c-actions { width: 126px; } .idx-c-files { width: 78px; }
+.idx-c-sl { width: 106px; } .idx-c-seen { width: 100px; } .idx-c-dates { width: 150px; }
+.idx-c-meta { width: 104px; } .idx-c-actions { width: 126px; } .idx-c-files { width: 78px; }
 .idx-th-check { text-align: center; }
 #idx-table td, #idx-table th { vertical-align: middle; }
 #idx-table .idx-dates { font-size: 0.72rem; line-height: 1.25; }
@@ -1749,6 +1808,23 @@ input[type="number"] {
 .us-email > .bi { flex: none; }
 .us-group-badge { display: inline-block; padding: 0.1em 0.55em; margin: 0.1em 0.25em 0.1em 0; border-radius: 999px; border: 1px solid #3a3a4c; background: #23232f; font-size: 0.72rem; white-space: nowrap; }
 .us-group-badge.us-inactive { opacity: 0.5; text-decoration: line-through; }
+/* The users table (1.73.0, a colgroup in users.php). It had none: nine equal shares of the table (127px at 1440),
+   and every badge after the first in a member's groups, the owner's shield and a bridge after a long name, an address
+   and the dates of a reader whose browser writes "09/30/2026, 03:03 PM" went under the cells' "…". Pinned: the pick
+   and the id as everywhere, the status (its badge and the warnings beside it), the dates (152 for that 12-hour date,
+   131.3px, with the cell's 16 and 4 for a wider font) and the four buttons; the name, the address and the groups
+   share the rest — 174px each at the table's floor. The groups' pills wrap (a `.col-badge` cell) and a long group
+   name breaks between its words like any badge there; the name row is the Index's (1.72.1): the name shrinks and
+   takes the ellipsis, the shield keeps its room, and where the account signs in from stands on a line under it. */
+.us-c-flex     { width: auto; }
+.us-c-status   { width: 120px; }
+.us-c-date     { width: 152px; }
+.us-c-actions  { width: 144px; }
+.us-name-row { display: flex; align-items: baseline; min-width: 0; }
+.us-name-row > .av-who { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.us-name-row > .bi { flex: none; }
+.us-bridges { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.2rem; white-space: normal; }
+.us-bridges > .us-bridge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .ge-perms { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.25rem 1rem; margin-bottom: 0.5rem; }
 .ge-perms .form-check-label { font-size: 0.85rem; }
 .ge-perms code { font-size: 0.75rem; color: #8ab4ff; }
@@ -2200,7 +2276,10 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .au-filters-end { margin-right: 0.5rem; }
 .au-c-when { width: 12rem; white-space: nowrap; }
 .au-c-who  { width: 10rem; }
-.au-c-what { width: 15rem; }
+/* 15.5rem, not 15 (1.73.0): the longest action the panel writes, 'panel.' and its longest endpoint
+   ("panel.whitelist_import_blacklist", 32 characters), is a 224.4px badge, and 15rem left it 224. A failed action's
+   second badge goes under it (the cell is a `.col-badge` one) — beside it, the cell's "…" had cut it at every width. */
+.au-c-what { width: 15.5rem; }
 .au-c-ip   { width: 11rem; }
 .au-badge { display: inline-block; padding: 0.08rem 0.45rem; border-radius: 3px; font-size: 0.74rem;
             font-family: SFMono-Regular, Menlo, Consolas, monospace; border: 1px solid; margin-right: 0.3rem; }
@@ -2665,6 +2744,12 @@ textarea.pc-text {
     .hl-row { grid-template-columns: auto 1fr; }
     .hl-acts { grid-column: 1 / -1; justify-content: flex-start; }
 }
+
+/* The tracker's week (Settings → Tracker, #sched-table): a floor (1.73.0). Its header gives each column a width in rem
+   and the rule's select fills its own, so on a phone the table shrank to the screen and every select with it —
+   46–50px, the chosen rule ("Blacklista (otwarty) cały dzień") cut to its first letters. At 46rem it keeps the widths
+   its header asks for, the note gets the rest, and a narrow screen scrolls the table instead. */
+.sched-table { min-width: 46rem; }
 
 /* ── Languages ──────────────────────────────────────────────────────────────── */
 

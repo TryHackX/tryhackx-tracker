@@ -231,32 +231,32 @@ async function loadReports() {
     const totalEl = document.getElementById('total-count');
 
     if (!json.reports || json.reports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t('js.reports.no_reports_found')) + '</td></tr>';
-        totalEl.textContent = t('js.reports.total', {n: 0});
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t.key('js.reports.no_reports_found')) + '</td></tr>';
+        totalEl.textContent = t.key('js.reports.total', {n: 0});
         document.getElementById('pagination').innerHTML = '';
         return;
     }
 
-    totalEl.textContent = t('js.reports.total', {n: json.total});
+    totalEl.textContent = t.key('js.reports.total', {n: json.total});
 
     tbody.innerHTML = json.reports.map(r => {
         let statusBadge;
         if (r.blocked) {
-            statusBadge = '<span class="badge-table badge-blocked">' + esc(t('js.reports.status_blocked')) + '</span>';
+            statusBadge = '<span class="badge-table badge-blocked">' + esc(t.key('js.reports.status_blocked')) + '</span>';
         } else if (r.checked) {
-            statusBadge = '<span class="badge-table badge-reviewed">' + esc(t('js.reports.status_reviewed')) + '</span>';
+            statusBadge = '<span class="badge-table badge-reviewed">' + esc(t.key('js.reports.status_reviewed')) + '</span>';
         } else {
-            statusBadge = '<span class="badge-table badge-pending">' + esc(t('js.reports.status_pending')) + '</span>';
+            statusBadge = '<span class="badge-table badge-pending">' + esc(t.key('js.reports.status_pending')) + '</span>';
         }
         return `
         <tr>
             <td class="dash-id">${r.id}</td>
-            <td title="${escAttr(r.name)}">${esc(r.name)}${r.api_client_label ? ' <span class="badge-table badge-api" title="' + escAttr(t('js.reports.via_api_title')) + '">' + esc(r.api_client_label) + '</span>' : ''}</td>
+            <td title="${escAttr(r.name)}">${esc(r.name)}${r.api_client_label ? '<span class="cell-sub cell-sub-api"' + t.ah('title', 'js.reports.partner_title', {partner: t.key('js.wl.partner', {name: r.api_client_label}), why: t.key('js.reports.via_api_title')}) + '>' + esc(t.key('js.wl.partner', {name: r.api_client_label})) + '</span>' : ''}</td>
             <td title="${escAttr(r.email)}"><small>${esc(r.email)}</small></td>
             <td class="editable-cell" title="${escAttr(r.company)}" data-edit-id="${r.id}" data-edit-field="company">${esc(r.company)}</td>
             <td class="editable-cell" title="${escAttr(r.representative)}" data-edit-id="${r.id}" data-edit-field="representative">${esc(r.representative)}</td>
             <td title="${escAttr(r.objectTitle)}">${esc(r.objectTitle)}</td>
-            <td class="hash-cell hash-copy" title="${escAttr(t('js.reports.click_to_copy', {hash: r.infoHash}))}" data-copy-hash="${r.infoHash}">${r.infoHash}</td>
+            <td class="hash-cell hash-copy"${t.ah('title', 'js.reports.click_to_copy', {hash: r.infoHash})} data-copy-hash="${r.infoHash}">${r.infoHash}</td>
             <td title="${escAttr(r.ip)}"><small>${esc(r.ip)}</small></td>
             <td class="col-badge">${statusBadge}</td>
             <td class="dash-date"><small>${r.timestamp}</small></td>
@@ -276,9 +276,9 @@ function renderPagination(total, page, pages) {
     }
     if (pages <= 1) { el.innerHTML = ''; return; }
     el.innerHTML = `
-        <button ${page <= 1 ? 'disabled' : ''} data-page="${page - 1}"><i class="bi bi-chevron-left"></i> ${esc(t('js.reports.prev'))}</button>
-        <span>${esc(t('js.reports.page_of', {page: page, pages: pages}))}</span>
-        <button ${page >= pages ? 'disabled' : ''} data-page="${page + 1}">${esc(t('js.reports.next'))} <i class="bi bi-chevron-right"></i></button>
+        <button ${page <= 1 ? 'disabled' : ''} data-page="${page - 1}"><i class="bi bi-chevron-left"></i> ${esc(t.key('js.reports.prev'))}</button>
+        <span>${esc(t.key('js.reports.page_of', {page: page, pages: pages}))}</span>
+        <button ${page >= pages ? 'disabled' : ''} data-page="${page + 1}">${esc(t.key('js.reports.next'))} <i class="bi bi-chevron-right"></i></button>
     `;
 }
 
@@ -318,22 +318,22 @@ async function openModal(id) {
     const isArchive = source === 'archives';
 
     const messageHtml = r.add_message
-        ? `<div class="report-message-block"><p class="msg-block-header">${esc(t('js.reports.message'))}</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
+        ? `<div class="report-message-block"><p class="msg-block-header">${esc(t.key('js.reports.message'))}</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
         : '';
 
     document.getElementById('modal-report-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>${esc(t('js.reports.col_id'))}:</strong> ${r.id}</p>
-            <p><strong>${esc(t('js.reports.col_name'))}:</strong> ${esc(r.name)}</p>
-            <p><strong>${esc(t('js.reports.col_email'))}:</strong> ${esc(r.email)}</p>
-            <p><strong>${esc(t('js.reports.col_company'))}:</strong> ${esc(r.company)}</p>
-            <p><strong>${esc(t('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
-            ${r.api_client_label ? '<p><strong>' + esc(t('js.reports.via_api')) + ':</strong> ' + esc(r.api_client_label) + '</p>' : ''}
-            <p><strong>${esc(t('js.reports.col_object'))}:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>${esc(t('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
-            <p><strong>${esc(t('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>' + esc(t('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet_link')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
-            <p><strong>${esc(t('js.reports.col_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t('js.reports.col_date'))}:</strong> ${r.timestamp}</p>
+            <p><strong>${esc(t.key('js.reports.col_id'))}:</strong> ${r.id}</p>
+            <p><strong>${esc(t.key('js.reports.col_name'))}:</strong> ${esc(r.name)}</p>
+            <p><strong>${esc(t.key('js.reports.col_email'))}:</strong> ${esc(r.email)}</p>
+            <p><strong>${esc(t.key('js.reports.col_company'))}:</strong> ${esc(r.company)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
+            ${r.api_client_label ? '<p><strong>' + esc(t.key('js.reports.via_api')) + ':</strong> ' + esc(r.api_client_label) + '</p>' : ''}
+            <p><strong>${esc(t.key('js.reports.col_object'))}:</strong> ${esc(r.objectTitle)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
+            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
+            ${r.magnet_link ? '<p><strong>' + esc(t.key('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn"' + t.ah('title', 'js.reports.copy_magnet_link') + '><i class="bi bi-clipboard"></i></button></div>' : ''}
+            <p><strong>${esc(t.key('js.reports.col_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t.key('js.reports.col_date'))}:</strong> ${r.timestamp}</p>
         </div>
         ${messageHtml}
     `;
@@ -375,7 +375,7 @@ async function openModal(id) {
             if (res.success) {
                 if (res.marked_reviewed) loadReports();
                 if (!res.already_sent && !res.skipped) {
-                    showToast('success', t('js.reports.review_notification_sent'));
+                    showToast('success', t.key('js.reports.review_notification_sent'));
                 }
             }
         });
@@ -386,15 +386,15 @@ async function handleBlock() {
     if (!currentReport) return;
     const isArchive = source === 'archives';
     const msg = isArchive
-        ? t('js.reports.confirm_block_archive')
-        : t('js.reports.confirm_block_and_archive');
+        ? t.key('js.reports.confirm_block_archive')
+        : t.key('js.reports.confirm_block_and_archive');
     if (!await confirmAction(msg)) return;
     const endpoint = isArchive ? 'admin/block_archived' : 'admin/block_hash';
     const json = await apiCall(endpoint, 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-        let toastMsg = json.message || t('js.reports.hash_blocked');
-        if (json.auto_closed > 0) toastMsg += json.auto_closed > 1 ? t('js.reports.auto_closed_many', {n: json.auto_closed}) : t('js.reports.auto_closed_one');
+        let toastMsg = json.message || t.key('js.reports.hash_blocked');
+        if (json.auto_closed > 0) toastMsg += json.auto_closed > 1 ? t.key('js.reports.auto_closed_many', {n: json.auto_closed}) : t.key('js.reports.auto_closed_one');
         showToast('success', toastMsg);
         if (json.blacklist_warning) {
             showToast('error', json.blacklist_warning);
@@ -402,17 +402,17 @@ async function handleBlock() {
         loadReports();
         refreshTrackerWarnings();
     } else {
-        showModalAlert('error', json.error || t('js.reports.error'));
+        showModalAlert('error', json.error || t.key('js.reports.error'));
     }
 }
 
 async function handleUnblock() {
     if (!currentReport) return;
-    if (!await confirmAction(t('js.reports.confirm_unblock'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_unblock'))) return;
     const json = await apiCall('admin/unblock_hash', 'POST', { id: currentReport.id });
     if (json.success) {
-        let unblockMsg = json.message || t('js.reports.hash_unblocked');
-        if (json.auto_closed > 0) unblockMsg += json.auto_closed > 1 ? t('js.reports.auto_closed_many', {n: json.auto_closed}) : t('js.reports.auto_closed_one');
+        let unblockMsg = json.message || t.key('js.reports.hash_unblocked');
+        if (json.auto_closed > 0) unblockMsg += json.auto_closed > 1 ? t.key('js.reports.auto_closed_many', {n: json.auto_closed}) : t.key('js.reports.auto_closed_one');
         showToast('success', unblockMsg);
         currentReport.blocked = 0;
         document.getElementById('modal-block').style.display = '';
@@ -423,34 +423,34 @@ async function handleUnblock() {
         loadReports();
         refreshTrackerWarnings();
     } else {
-        showModalAlert('error', json.error || t('js.reports.error'));
+        showModalAlert('error', json.error || t.key('js.reports.error'));
     }
 }
 
 async function handleArchive() {
     if (!currentReport) return;
-    if (!await confirmAction(t('js.reports.confirm_archive'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_archive'))) return;
     const json = await apiCall('admin/delete_report', 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-        showToast('success', t('js.reports.report_archived'));
+        showToast('success', t.key('js.reports.report_archived'));
         loadReports();
     } else {
-        showModalAlert('error', json.error || t('js.reports.error'));
+        showModalAlert('error', json.error || t.key('js.reports.error'));
     }
 }
 
 async function handleRestore() {
     if (!currentReport) return;
-    if (!await confirmAction(t('js.reports.confirm_restore'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_restore'))) return;
     const json = await apiCall('admin/restore_report', 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
-        showToast('success', t('js.reports.report_restored'));
+        showToast('success', t.key('js.reports.report_restored'));
         loadReports();
         refreshTrackerWarnings();
     } else {
-        showModalAlert('error', json.error || t('js.reports.error'));
+        showModalAlert('error', json.error || t.key('js.reports.error'));
     }
 }
 
@@ -458,7 +458,7 @@ async function handleSendEmail() {
     if (!currentReport) return;
     const msg = document.getElementById('modal-email-msg').value.trim();
     if (!msg) {
-        showModalAlert('error', t('js.reports.enter_message'));
+        showModalAlert('error', t.key('js.reports.enter_message'));
         return;
     }
     const json = await apiCall('admin/send_email', 'POST', {
@@ -466,18 +466,18 @@ async function handleSendEmail() {
         message: msg,
     });
     if (json.success) {
-        showToast('success', t('js.reports.email_sent'));
+        showToast('success', t.key('js.reports.email_sent'));
         document.getElementById('modal-email-msg').value = '';
     } else {
-        showModalAlert('error', json.error || t('js.reports.email_failed'));
+        showModalAlert('error', json.error || t.key('js.reports.email_failed'));
     }
 }
 
 async function handleArchiveAll() {
-    if (!await confirmAction(t('js.reports.confirm_archive_all'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_archive_all'))) return;
     const json = await apiCall('admin/delete_all', 'POST');
     if (json.success) {
-        showToast('success', t('js.reports.archived_count', {n: json.archived || 0}));
+        showToast('success', t.key('js.reports.archived_count', {n: json.archived || 0}));
         loadReports();
     }
 }
@@ -561,34 +561,37 @@ function updateTableHeaders(src) {
             ? '<col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-type"><col class="dash-c-report"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">'
             : '<col class="dash-c-id"><col class="dash-c-name"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-flex"><col class="dash-c-hash"><col class="dash-c-ip"><col class="dash-c-status"><col class="dash-c-date"><col class="dash-c-actions">';
     }
+    // …and a floor of their own (1.73.0): the appeals share what the pinned columns leave between two columns, not four.
+    const table = document.getElementById('reports-table');
+    if (table) table.classList.toggle('dash-appeals', isAppeal);
 
     if (isAppeal) {
         thead.innerHTML = `
-            <th class="sortable" data-sort="id">${esc(t('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="name">${esc(t('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="email">${esc(t('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th>${esc(t('js.reports.col_description'))}</th>
-            <th class="sortable col-badge" data-sort="type">${esc(t('js.reports.col_type'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="report">${esc(t('js.reports.col_report'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="hash">${esc(t('js.reports.col_info_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="ip">${esc(t('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable col-badge" data-sort="status">${esc(t('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="date">${esc(t('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
-            <th class="th-actions">${esc(t('js.reports.col_actions'))}</th>
+            <th class="sortable" data-sort="id">${esc(t.key('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="name">${esc(t.key('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="email">${esc(t.key('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th>${esc(t.key('js.reports.col_description'))}</th>
+            <th class="sortable col-badge" data-sort="type">${esc(t.key('js.reports.col_type'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="report">${esc(t.key('js.reports.col_report'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="hash">${esc(t.key('js.reports.col_info_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="ip">${esc(t.key('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable col-badge" data-sort="status">${esc(t.key('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="date">${esc(t.key('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
+            <th class="th-actions">${esc(t.key('js.reports.col_actions'))}</th>
         `;
     } else {
         thead.innerHTML = `
-            <th class="sortable" data-sort="id">${esc(t('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="name">${esc(t('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="email">${esc(t('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="company">${esc(t('js.reports.col_company'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="representative">${esc(t('js.reports.col_entity'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="object">${esc(t('js.reports.col_object'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="hash">${esc(t('js.reports.col_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="ip">${esc(t('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable col-badge" data-sort="blocked">${esc(t('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="date">${esc(t('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
-            <th class="th-actions">${esc(t('js.reports.col_actions'))}</th>
+            <th class="sortable" data-sort="id">${esc(t.key('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="name">${esc(t.key('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="email">${esc(t.key('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="company">${esc(t.key('js.reports.col_company'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="representative">${esc(t.key('js.reports.col_entity'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="object">${esc(t.key('js.reports.col_object'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="hash">${esc(t.key('js.reports.col_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="ip">${esc(t.key('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable col-badge" data-sort="blocked">${esc(t.key('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
+            <th class="sortable" data-sort="date">${esc(t.key('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
+            <th class="th-actions">${esc(t.key('js.reports.col_actions'))}</th>
         `;
     }
 
@@ -619,21 +622,21 @@ function updateFilterOptions(src) {
     filter.value = 'all';
 
     const reportOptions = [
-        { value: 'all', text: t('js.reports.filter_all_statuses') },
-        { value: 'pending', text: t('js.reports.filter_awaiting_review') },
-        { value: 'reviewed', text: t('js.reports.status_reviewed') },
-        { value: 'blocked', text: t('js.reports.status_blocked') },
+        { value: 'all', text: t.key('js.reports.filter_all_statuses') },
+        { value: 'pending', text: t.key('js.reports.filter_awaiting_review') },
+        { value: 'reviewed', text: t.key('js.reports.status_reviewed') },
+        { value: 'blocked', text: t.key('js.reports.status_blocked') },
     ];
     const appealOptions = [
-        { value: 'all', text: t('js.reports.filter_all_statuses') },
-        { value: 'pending', text: t('js.reports.status_pending') },
-        { value: 'accepted', text: t('js.reports.status_accepted') },
-        { value: 'rejected', text: t('js.reports.status_rejected') },
+        { value: 'all', text: t.key('js.reports.filter_all_statuses') },
+        { value: 'pending', text: t.key('js.reports.status_pending') },
+        { value: 'accepted', text: t.key('js.reports.status_accepted') },
+        { value: 'rejected', text: t.key('js.reports.status_rejected') },
     ];
     const appealArchiveOptions = [
-        { value: 'all', text: t('js.reports.filter_all_statuses') },
-        { value: 'accepted', text: t('js.reports.status_accepted') },
-        { value: 'rejected', text: t('js.reports.status_rejected') },
+        { value: 'all', text: t.key('js.reports.filter_all_statuses') },
+        { value: 'accepted', text: t.key('js.reports.status_accepted') },
+        { value: 'rejected', text: t.key('js.reports.status_rejected') },
     ];
 
     let options;
@@ -659,7 +662,10 @@ function updateBadge(id, count) {
     }
 }
 
+// A t.key() word comes out as markup that keeps its key (t.html(), assets/js/i18n.js, 1.73.0): the live language switch
+// says it again where a template put it. Text content only — an attribute takes escAttr(), which writes the words.
 function esc(str) {
+    if (t.isKey(str)) return t.html(str);
     if (!str) return '';
     const d = document.createElement('div');
     d.textContent = str;
@@ -669,13 +675,13 @@ function esc(str) {
 // For double-quoted attribute values (title="..."): esc() leaves quotes alone (innerHTML serialisation only
 // escapes & < >), so a value containing a quote could otherwise close the attribute.
 function escAttr(str) {
-    return esc(str).replace(/"/g, '&quot;');
+    return esc(t.isKey(str) ? String(str) : str).replace(/"/g, '&quot;');
 }
 
 function copyHash(td, hash) {
     navigator.clipboard.writeText(hash).then(() => {
         const orig = td.textContent;
-        td.textContent = t('js.reports.copied');
+        td.textContent = t.key('js.reports.copied');
         td.style.color = '#4caf50';
         setTimeout(() => { td.textContent = orig; td.style.color = ''; }, 1200);
     });
@@ -723,10 +729,10 @@ function inlineEdit(td, id, field) {
         });
         if (json.success) {
             td.textContent = json.value;
-            showToast('success', t('js.reports.field_updated', {field: field.charAt(0).toUpperCase() + field.slice(1)}));
+            showToast('success', t.key('js.reports.field_updated', {field: field.charAt(0).toUpperCase() + field.slice(1)}));
         } else {
             td.textContent = original;
-            showToast('error', json.error || t('js.reports.update_failed'));
+            showToast('error', json.error || t.key('js.reports.update_failed'));
         }
     }
 
@@ -765,21 +771,21 @@ async function loadAppeals() {
     updateBadge('appeals-badge', json.pending_count);
 
     if (!json.appeals || json.appeals.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + t('js.reports.no_appeals') + '</td></tr>';
-        totalEl.textContent = t('js.reports.total', {n: 0});
+        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t.key('js.reports.no_appeals')) + '</td></tr>';
+        totalEl.textContent = t.key('js.reports.total', {n: 0});
         document.getElementById('pagination').innerHTML = '';
         return;
     }
 
-    totalEl.textContent = t('js.reports.total', {n: json.total});
+    totalEl.textContent = t.key('js.reports.total', {n: json.total});
 
     tbody.innerHTML = json.appeals.map(a => {
         const statusMap = { pending: 'badge-pending', accepted: 'badge-reviewed', rejected: 'badge-blocked', reviewed: 'badge-reviewed' };
-        const labelMap = { pending: t('js.reports.status_pending'), accepted: t('js.reports.status_accepted'), rejected: t('js.reports.status_rejected'), reviewed: t('js.reports.status_reviewed') };
-        const badge = `<span class="badge-table ${statusMap[a.status] || 'badge-pending'}">${labelMap[a.status] || a.status}</span>`;
+        const labelMap = { pending: t.key('js.reports.status_pending'), accepted: t.key('js.reports.status_accepted'), rejected: t.key('js.reports.status_rejected'), reviewed: t.key('js.reports.status_reviewed') };
+        const badge = `<span class="badge-table ${statusMap[a.status] || 'badge-pending'}">${esc(labelMap[a.status] || a.status)}</span>`;
         const typeBadge = a.appeal_type === 'block'
-            ? '<span class="badge-table badge-type-block">' + t('js.reports.type_block') + '</span>'
-            : '<span class="badge-table badge-type-unblock">' + t('js.reports.type_unblock') + '</span>';
+            ? '<span class="badge-table badge-type-block">' + esc(t.key('js.reports.type_block')) + '</span>'
+            : '<span class="badge-table badge-type-unblock">' + esc(t.key('js.reports.type_unblock')) + '</span>';
         const shortMsg = a.message ? (a.message.length > 50 ? esc(a.message.substring(0, 50)) + '...' : esc(a.message)) : '';
         return `
         <tr>
@@ -789,7 +795,7 @@ async function loadAppeals() {
             <td class="col-desc" title="${escAttr(a.message)}"><small>${shortMsg}</small></td>
             <td class="col-badge">${typeBadge}</td>
             <td>${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</td>
-            <td class="hash-cell hash-copy" title="${t('js.reports.click_to_copy', {hash: a.infoHash})}" data-copy-hash="${a.infoHash}">${a.infoHash}</td>
+            <td class="hash-cell hash-copy"${t.ah('title', 'js.reports.click_to_copy', {hash: a.infoHash})} data-copy-hash="${a.infoHash}">${a.infoHash}</td>
             <td title="${escAttr(a.ip)}"><small>${esc(a.ip)}</small></td>
             <td class="col-badge">${badge}</td>
             <td class="dash-date"><small>${a.timestamp}</small></td>
@@ -814,7 +820,7 @@ async function openReportFromAppeal(reportId, infoHash) {
         reportSource = 'archives';
     }
     if (!json.report) {
-        showToast('error', t('js.reports.report_not_found', {id: reportId}));
+        showToast('error', t.key('js.reports.report_not_found', {id: reportId}));
         return;
     }
 
@@ -826,21 +832,21 @@ async function openReportFromAppeal(reportId, infoHash) {
     const isArchive = reportSource === 'archives';
 
     const messageHtml = r.add_message
-        ? `<div class="report-message-block"><p class="msg-block-header">${t('js.reports.lbl_message')}</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
+        ? `<div class="report-message-block"><p class="msg-block-header">${esc(t.key('js.reports.lbl_message'))}</p><div class="report-message-content">${renderMessage(r.add_message)}</div></div>`
         : '';
 
     document.getElementById('modal-report-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>${t('js.reports.lbl_id')}:</strong> ${r.id}${isArchive ? ' <span class="badge bg-secondary badge-archived-sm">' + t('js.reports.archived') + '</span>' : ''}</p>
-            <p><strong>${t('js.reports.lbl_name')}:</strong> ${esc(r.name)}</p>
-            <p><strong>${t('js.reports.lbl_email')}:</strong> ${esc(r.email)}</p>
-            <p><strong>${t('js.reports.lbl_company')}:</strong> ${esc(r.company)}</p>
-            <p><strong>${t('js.reports.lbl_representative')}:</strong> ${esc(r.representative)}</p>
-            <p><strong>${t('js.reports.lbl_object')}:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>${t('js.reports.lbl_link')}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
-            <p><strong>${t('js.reports.lbl_hash')}:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>' + t('js.reports.lbl_magnet') + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn" title="' + escAttr(t('js.reports.copy_magnet')) + '"><i class="bi bi-clipboard"></i></button></div>' : ''}
-            <p><strong>${t('js.reports.lbl_ip')}:</strong> ${r.ip} &nbsp; <strong>${t('js.reports.lbl_date')}:</strong> ${r.timestamp}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_id'))}:</strong> ${r.id}${isArchive ? ' <span class="badge bg-secondary badge-archived-sm">' + esc(t.key('js.reports.archived')) + '</span>' : ''}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_name'))}:</strong> ${esc(r.name)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_email'))}:</strong> ${esc(r.email)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_company'))}:</strong> ${esc(r.company)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_object'))}:</strong> ${esc(r.objectTitle)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
+            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
+            ${r.magnet_link ? '<p><strong>' + esc(t.key('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn"' + t.ah('title', 'js.reports.copy_magnet') + '><i class="bi bi-clipboard"></i></button></div>' : ''}
+            <p><strong>${esc(t.key('js.reports.lbl_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t.key('js.reports.lbl_date'))}:</strong> ${r.timestamp}</p>
         </div>
         ${messageHtml}
     `;
@@ -875,25 +881,25 @@ async function openAppealModal(id) {
 
     const appealType = a.appeal_type || 'unblock';
     const typeBadge = appealType === 'block'
-        ? '<span class="badge-table badge-type-block badge-type-lg">' + t('js.reports.block_request') + '</span>'
-        : '<span class="badge-table badge-type-unblock badge-type-lg">' + t('js.reports.unblock_request') + '</span>';
-    const statusLabels = { pending: t('js.reports.status_pending'), accepted: t('js.reports.status_accepted'), rejected: t('js.reports.status_rejected'), reviewed: t('js.reports.status_reviewed') };
+        ? '<span class="badge-table badge-type-block badge-type-lg">' + esc(t.key('js.reports.block_request')) + '</span>'
+        : '<span class="badge-table badge-type-unblock badge-type-lg">' + esc(t.key('js.reports.unblock_request')) + '</span>';
+    const statusLabels = { pending: t.key('js.reports.status_pending'), accepted: t.key('js.reports.status_accepted'), rejected: t.key('js.reports.status_rejected'), reviewed: t.key('js.reports.status_reviewed') };
 
     document.getElementById('appeal-modal-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>${t('js.reports.lbl_appeal_id')}:</strong> ${a.id} ${typeBadge}</p>
-            <p><strong>${t('js.reports.lbl_name')}:</strong> ${esc(a.name)}</p>
-            <p><strong>${t('js.reports.lbl_email')}:</strong> ${esc(a.email)}</p>
-            <p><strong>${t('js.reports.lbl_report_no')}:</strong> ${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</p>
-            <p><strong>${t('js.reports.lbl_hash')}:</strong> <code class="text-info">${a.infoHash}</code></p>
-            <p><strong>${t('js.reports.lbl_ip')}:</strong> ${a.ip} &nbsp; <strong>${t('js.reports.lbl_date')}:</strong> ${a.timestamp}</p>
-            <p><strong>${t('js.reports.lbl_status')}:</strong> ${statusLabels[a.status] || a.status}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_appeal_id'))}:</strong> ${a.id} ${typeBadge}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_name'))}:</strong> ${esc(a.name)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_email'))}:</strong> ${esc(a.email)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_report_no'))}:</strong> ${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${a.infoHash}</code></p>
+            <p><strong>${esc(t.key('js.reports.lbl_ip'))}:</strong> ${a.ip} &nbsp; <strong>${esc(t.key('js.reports.lbl_date'))}:</strong> ${a.timestamp}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_status'))}:</strong> ${esc(statusLabels[a.status] || a.status)}</p>
         </div>
         <div class="report-message-block">
-            <p class="msg-block-header">${t('js.reports.appeal_message')}</p>
+            <p class="msg-block-header">${esc(t.key('js.reports.appeal_message'))}</p>
             <div class="report-message-content">${renderMessage(a.message)}</div>
         </div>
-        ${a.admin_response ? '<div class="report-message-block admin-response"><p class="msg-block-header admin-response">' + t('js.reports.admin_response') + '</p><div class="report-message-content">' + renderMessage(a.admin_response) + '</div></div>' : ''}
+        ${a.admin_response ? '<div class="report-message-block admin-response"><p class="msg-block-header admin-response">' + esc(t.key('js.reports.admin_response')) + '</p><div class="report-message-content">' + renderMessage(a.admin_response) + '</div></div>' : ''}
     `;
 
     const isPending = a.status === 'pending';
@@ -937,7 +943,7 @@ async function openAppealModal(id) {
 
 async function handleResolveAppeal(status) {
     if (!currentAppeal) return;
-    const confirmMsg = status === 'accepted' ? t('js.reports.confirm_accept_appeal') : t('js.reports.confirm_reject_appeal');
+    const confirmMsg = status === 'accepted' ? t.key('js.reports.confirm_accept_appeal') : t.key('js.reports.confirm_reject_appeal');
     if (!await confirmAction(confirmMsg)) return;
 
     const appealType = currentAppeal.appeal_type || 'unblock';
@@ -960,33 +966,33 @@ async function handleResolveAppeal(status) {
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('appealModal')).hide();
         let extra = '';
-        if (json.unblocked) extra += t('js.reports.extra_hash_unblocked');
-        if (json.blocked) extra += t('js.reports.extra_hash_blocked');
-        if (json.auto_closed > 0) extra += t('js.reports.extra_auto_closed', {n: json.auto_closed});
+        if (json.unblocked) extra += t.key('js.reports.extra_hash_unblocked');
+        if (json.blocked) extra += t.key('js.reports.extra_hash_blocked');
+        if (json.auto_closed > 0) extra += t.key('js.reports.extra_auto_closed', {n: json.auto_closed});
         showToast('success', json.message + extra);
         loadAppeals();
         loadAppealsBadge();
         refreshTrackerWarnings();
     } else {
         const el = document.getElementById('appeal-modal-alert');
-        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.error'))}</div>`;
+        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t.key('js.reports.error'))}</div>`;
         setTimeout(() => el.innerHTML = '', 5000);
     }
 }
 
 async function handleRestoreAppeal() {
     if (!currentAppeal) return;
-    if (!await confirmAction(t('js.reports.confirm_restore_appeal'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_restore_appeal'))) return;
 
     const json = await apiCall('admin/restore_appeal', 'POST', { id: currentAppeal.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('appealModal')).hide();
-        showToast('success', json.message || t('js.reports.appeal_restored'));
+        showToast('success', json.message || t.key('js.reports.appeal_restored'));
         loadAppeals();
         loadAppealsBadge();
     } else {
         const el = document.getElementById('appeal-modal-alert');
-        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.error'))}</div>`;
+        el.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t.key('js.reports.error'))}</div>`;
         setTimeout(() => el.innerHTML = '', 5000);
     }
 }
@@ -1022,7 +1028,7 @@ async function handleDeletePermSubmit(e) {
     const btn = e.target.querySelector('button[type="submit"]');
     const origHtml = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.reports.deleting');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.reports.deleting');
 
     const payload = {
         id: currentReport.id,
@@ -1039,8 +1045,8 @@ async function handleDeletePermSubmit(e) {
             if (!token) {
                 // a widget/loader failure needs different advice than "you cancelled it"
                 const msg = captchaUnavailable()
-                    ? t('js.reports.captcha_could_not_load')
-                    : t('js.reports.captcha_required');
+                    ? t.key('js.reports.captcha_could_not_load')
+                    : t.key('js.reports.captcha_required');
                 alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(msg)}</div>`;
                 setTimeout(() => {
                     const alertDiv = alertEl.querySelector('.modal-alert-sm');
@@ -1058,11 +1064,11 @@ async function handleDeletePermSubmit(e) {
             const deletePermModalEl = document.getElementById('deletePermModal');
             const deletePermModal = bootstrap.Modal.getInstance(deletePermModalEl);
             if (deletePermModal) deletePermModal.hide();
-            showToast('success', json.message || t('js.reports.report_deleted_permanently'));
+            showToast('success', json.message || t.key('js.reports.report_deleted_permanently'));
             loadReports();
             refreshTrackerWarnings();
         } else {
-            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.error'))}</div>`;
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t.key('js.reports.error'))}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1070,7 +1076,7 @@ async function handleDeletePermSubmit(e) {
             setTimeout(() => alertEl.innerHTML = '', 5000);
         }
     } catch (err) {
-        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t('js.reports.network_error_unexpected'))}</div>`;
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t.key('js.reports.network_error_unexpected'))}</div>`;
         setTimeout(() => {
             const alertDiv = alertEl.querySelector('.modal-alert-sm');
             if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1158,17 +1164,18 @@ function applyTrackerWarnings(json) {
     if (level === 'warn') restartBtn.classList.add('tracker-glow-warn');
     else if (level === 'danger') restartBtn.classList.add('tracker-glow-danger');
     restartBtn.disabled = json.exec_available === false;
+    // Whole sentences, the service a placeholder (1.73.0): a word glued to a value keeps no key for the live switch.
     restartBtn.title = restartBtn.disabled
-        ? t('js.reports.restart_unavailable')
-        : (t('js.reports.restart_tracker_title') + (json.service ? ' (' + json.service + ')' : ''));
+        ? t.key('js.reports.restart_unavailable')
+        : (json.service ? t.key('js.reports.restart_tracker_title_svc', { service: json.service }) : t.key('js.reports.restart_tracker_title'));
 
     // The Reload button shares the same exec-availability gate.
     const reloadBtn = document.getElementById('btn-reload-tracker');
     if (reloadBtn) {
         reloadBtn.disabled = json.exec_available === false;
         reloadBtn.title = reloadBtn.disabled
-            ? t('js.reports.reload_unavailable')
-            : (t('js.reports.reload_tracker_title') + (json.service ? ' — ' + json.service : ''));
+            ? t.key('js.reports.reload_unavailable')
+            : (json.service ? t.key('js.reports.reload_tracker_title_svc', { service: json.service }) : t.key('js.reports.reload_tracker_title'));
     }
 
     // Only rebuild the chip + popover when something actually changed, so a background refresh
@@ -1190,7 +1197,7 @@ function applyTrackerWarnings(json) {
 
     trackerWarnPopover = new bootstrap.Popover(badge, {
         html: true,
-        title: t('js.reports.restart_recommendations'),
+        title: t.key('js.reports.restart_recommendations'),
         content: trackerWarnListHtml(items),
         trigger: 'hover focus',
         placement: 'bottom',
@@ -1232,7 +1239,7 @@ async function handleRestartTracker(e) {
     const btn = e.target.querySelector('button[type="submit"]');
     const orig = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.reports.restarting');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.reports.restarting');
 
     try {
         const json = await apiCall('admin/restart_tracker', 'POST', { password: pw });
@@ -1240,10 +1247,10 @@ async function handleRestartTracker(e) {
             const modalEl = document.getElementById('restartTrackerModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
-            showToast('success', json.message || t('js.reports.tracker_restarted'));
+            showToast('success', json.message || t.key('js.reports.tracker_restarted'));
             refreshTrackerWarnings();
         } else {
-            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.restart_failed'))}</div>`;
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t.key('js.reports.restart_failed'))}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1251,7 +1258,7 @@ async function handleRestartTracker(e) {
             setTimeout(() => alertEl.innerHTML = '', 7000);
         }
     } catch {
-        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t('js.reports.network_error'))}</div>`;
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t.key('js.reports.network_error'))}</div>`;
         setTimeout(() => alertEl.innerHTML = '', 5000);
     } finally {
         btn.disabled = false;
@@ -1268,7 +1275,7 @@ async function handleReloadTracker(e) {
     const btn = e.target.querySelector('button[type="submit"]');
     const orig = btn.innerHTML;
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.reports.reloading');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.reports.reloading');
 
     try {
         const json = await apiCall('admin/reload_tracker', 'POST', { password: pw });
@@ -1276,10 +1283,10 @@ async function handleReloadTracker(e) {
             const modalEl = document.getElementById('reloadTrackerModal');
             const modal = bootstrap.Modal.getInstance(modalEl);
             if (modal) modal.hide();
-            showToast('success', json.message || t('js.reports.tracker_blacklist_reloaded'));
+            showToast('success', json.message || t.key('js.reports.tracker_blacklist_reloaded'));
             refreshTrackerWarnings();
         } else {
-            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t('js.reports.reload_failed'))}</div>`;
+            alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(json.error || t.key('js.reports.reload_failed'))}</div>`;
             setTimeout(() => {
                 const alertDiv = alertEl.querySelector('.modal-alert-sm');
                 if (alertDiv) alertDiv.classList.add('alert-fade');
@@ -1287,7 +1294,7 @@ async function handleReloadTracker(e) {
             setTimeout(() => alertEl.innerHTML = '', 7000);
         }
     } catch {
-        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t('js.reports.network_error'))}</div>`;
+        alertEl.innerHTML = `<div class="alert alert-danger py-1 px-2 modal-alert-sm">${esc(t.key('js.reports.network_error'))}</div>`;
         setTimeout(() => alertEl.innerHTML = '', 5000);
     } finally {
         btn.disabled = false;

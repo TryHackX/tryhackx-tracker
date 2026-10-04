@@ -151,6 +151,20 @@ function tzOffsetLabel(DateTimeZone $tz, ?int $at = null): string {
 }
 
 /**
+ * A time-zone region in the reader's language (1.73.0: "Europe", "America" … were English on a Polish page) — the
+ * optgroup label of all four zone selects: the account page, Settings → Site, and the schedule's and the backups' zone.
+ * `$region` is what the selects group by: the IANA name's first part, or 'Other' for a zone without one (UTC) — the
+ * keys of tzChoices() below. The zone names under it stay IANA's own, and a region the dictionary does not know (a
+ * later tz database's) is written as it is.
+ */
+function tzRegionLabel(string $region): string {
+    $id = strtolower($region);
+    if (!function_exists('__') || preg_match('/^[a-z]+$/', $id) !== 1) return $region;
+    $said = __('tz.region_' . $id);
+    return $said === 'tz.region_' . $id ? $region : $said;
+}
+
+/**
  * Every zone, grouped by its region, each with its current offset: [region => [name => label]].
  *
  * One list for the two selects that offer it — Settings → Site and the account page — so the two can
@@ -164,7 +178,8 @@ function tzOffsetLabel(DateTimeZone $tz, ?int $at = null): string {
  * out of, on every screen, for every reader. The prefix is not information at that point — the
  * optgroup above the option is already saying "America" — and the underscores are a filename
  * convention rather than a place name. So: "Argentina / Buenos Aires (UTC-03:00)", filed under
- * America. A zone with no region ("UTC") has nothing to strip and is written as it is.
+ * America. A zone with no region ("UTC") has nothing to strip and is written as it is. The region
+ * is the KEY (English, IANA's); what the select prints over it is tzRegionLabel()'s.
  */
 function tzChoices(?int $at = null, bool $short = false): array {
     $at = $at ?? time();

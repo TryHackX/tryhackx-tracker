@@ -265,7 +265,8 @@
             if (!status) return;
             status.textContent = msg;
             clearTimeout(sayTimer);
-            if (!keep) sayTimer = setTimeout(() => { if (status.textContent === msg) status.textContent = ''; }, 3500);
+            // As words: `msg` may be a t.key() word (an object that knows its key, assets/js/i18n.js 1.73.0).
+            if (!keep) sayTimer = setTimeout(() => { if (status.textContent === String(msg)) status.textContent = ''; }, 3500);
         };
         const byId = {};
         data.library.forEach((s) => { byId[s.id] = s; });
@@ -276,8 +277,8 @@
             if (!sel) return;
             const defId = data.defaults[k] || '';
             sel.textContent = '';
-            sel.appendChild(opt('default', t('js.sounds.site_default', { name: defId && byId[defId] ? byId[defId].name : t('js.sounds.none') })));
-            sel.appendChild(opt('off', t('js.sounds.off')));
+            sel.appendChild(opt('default', t.key('js.sounds.site_default', { name: defId && byId[defId] ? byId[defId].name : t.key('js.sounds.none') })));
+            sel.appendChild(opt('off', t.key('js.sounds.off')));
             data.library.forEach((s) => sel.appendChild(opt(s.id, label(s))));
             const v = data.prefs.ev ? data.prefs.ev[k] : null;
             sel.value = v === null || v === undefined ? 'default' : (v === '' ? 'off' : v);
@@ -301,10 +302,10 @@
             const choice = p.ev[k];
             const id = choice === null ? (data.defaults[k] || '') : choice;
             const s = id ? byId[id] : null;
-            if (!s) { say(t('js.sounds.nothing_to_play')); return; }
-            say(t('js.sounds.testing'), true);
+            if (!s) { say(t.key('js.sounds.nothing_to_play')); return; }
+            say(t.key('js.sounds.testing'), true);
             const r = await play(k, { url: s.url, vol: p.vol, pre: p.pre, pre_kind: p.pre_kind });
-            say(t('js.sounds.test_' + r));
+            say(t.key('js.sounds.test_' + r));
         }));
         $('snd-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -314,10 +315,10 @@
             const r = typeof postJson === 'function' && typeof window.csrfToken === 'function'
                 ? await postJson('user_sound_prefs', { csrf_token: window.csrfToken(), prefs: current() }) : null;
             btn.disabled = false;
-            if (!r || !r.success) { say((r && r.error) || t('js.sounds.save_failed')); return; }
+            if (!r || !r.success) { say((r && r.error) || t.key('js.sounds.save_failed')); return; }
             data.prefs = r.prefs;
             cfg = r.client || null;
-            say(t('js.sounds.saved'));
+            say(t.key('js.sounds.saved'));
         });
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initPane);

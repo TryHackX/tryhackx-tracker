@@ -107,7 +107,9 @@ if ($op === 'preview') {
     if (strlen($body) > PAGECONTENT_MAX) {
         jsonResponse(['error' => __('api.pages.body_too_long', ['max' => number_format(PAGECONTENT_MAX)])], 400);
     }
-    $err = trim($body) === '' ? null : richtextValidate($body, $format, $cfg);
+    // The rules saving applies (pageContentSave()): a page is not held to a description's length, so
+    // the preview of the built-in Info (19 000 characters) does not warn about a limit the save ignores.
+    $err = trim($body) === '' ? null : pageContentValidate($body, $format, $cfg);
     // Resolved the way the public page resolves them, so the preview is the page. A marker nobody
     // knows is worth saying out loud: it is far more likely a typo than a request to show nothing.
     $unknown = [];
@@ -134,8 +136,9 @@ if ($op === 'reset') {
     // This language only. "Restore" while editing Polish must not delete an English page somebody
     // spent an afternoon writing.
     if (!pageContentReset($db, $page, $lang)) jsonResponse(['error' => __('api.pages.restore_failed')], 500);
+    // the audit log in English whoever reads it (pageContentLabel()'s $english); the answer in the reader's language
     auditNote(['target_id' => $page . '/' . $lang,
-               'summary' => 'restored the built-in ' . pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ')']);
+               'summary' => 'restored the built-in ' . pageContentLabel($page, $cfg, true) . ' (' . strtoupper($lang) . ')']);
     jsonResponse(['success' => true, 'stored' => false, 'enabled' => false, 'lang' => $lang,
                   'body' => pageContentDefault($cfg, $page, $format, $baseUrl, $lang),
                   'message' => __('api.pages.page_restored', ['page' => pageContentLabel($page, $cfg), 'lang' => strtoupper($lang)])]);
@@ -146,7 +149,7 @@ $r = pageContentSave($db, $cfg, $page, $lang, $format, $body, !empty($input['ena
 if (isset($r['error'])) jsonResponse(['error' => $r['error']], 400);
 auditNote(['target_id' => $page . '/' . $lang,
            'summary' => (!empty($input['enabled']) ? 'published' : 'saved a draft of')
-                      . ' ' . pageContentLabel($page, $cfg) . ' (' . strtoupper($lang) . ')']);
+                      . ' ' . pageContentLabel($page, $cfg, true) . ' (' . strtoupper($lang) . ')']);
 jsonResponse(['success' => true, 'stored' => true, 'enabled' => !empty($input['enabled']), 'lang' => $lang,
               'message' => !empty($input['enabled'])
                   ? __('api.pages.page_published', ['page' => pageContentLabel($page, $cfg), 'lang' => strtoupper($lang)])

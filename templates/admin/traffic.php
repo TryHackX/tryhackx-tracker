@@ -9,7 +9,11 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl) ?>
+    <?php /* + the helpers' own sentences (a helper that did not answer), found back by key so they follow the live
+             language switch (t.find(), 1.73.0); + the UDP card's server sentences (api.net.: the recommendation and
+             the load study, which net_status names by key, and the card's failures) and the OpenTracker card's
+             (api.ot.: its failures) */ ?>
+    <?= langJsBridge($baseUrl, ['js.', 'api.helper.', 'api.net.', 'api.ot.']) ?>
     <?php
     // Both charts are drawn by the same vendored uPlot; either one on is enough to need it.
     $tlOn  = statsTimelineEnabled($cfg);
@@ -617,6 +621,8 @@
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 
+    <?php /* What the server wrote, marked before any script of the page runs (1.73.0, assets/js/lang-swap.js). */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-traffic.js<?= assetVer('assets/js/admin-traffic.js') ?>"></script>

@@ -77,74 +77,75 @@
 
         // 1. can this machine make a backup at all, and of what
         if (j.error && !chk.mode) {
-            grid.appendChild(kv(t('js.backups.label_backups'), [badge(t('js.backups.unavailable'), 'wl-b-bad'), ' ',
-                el('span', { className: 'wl-small text-muted', text: j.error })]));
+            grid.appendChild(kv(t.key('js.backups.label_backups'), [badge(t.key('js.backups.unavailable'), 'wl-b-bad'), ' ',
+                el('span', { className: 'wl-small text-muted', text: t.find(j.error, 'api.') })]));   // the server's sentence by key (1.73.0)
         } else if (chk.mode === 'script') {
-            grid.appendChild(kv(t('js.backups.label_covers'), [badge(t('js.backups.covers_db_files'), 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: t('js.backups.via_script') }),
-                el('div', { className: 'wl-small text-muted', text: t('js.backups.covers_script_desc') })]));
+            grid.appendChild(kv(t.key('js.backups.label_covers'), [badge(t.key('js.backups.covers_db_files'), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t.key('js.backups.via_script') }),
+                el('div', { className: 'wl-small text-muted', text: t.key('js.backups.covers_script_desc') })]));
         } else if (chk.mariadb_dump) {
             // Not a degraded state: backing up the whole server is a different job, done by a
             // different tool. Say what this covers, and do not nag about what it deliberately is not.
-            grid.appendChild(kv(t('js.backups.label_covers'), [badge(t('js.backups.db_only'), 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: t('js.backups.covers_tracker_db') }),
-                el('div', { className: 'wl-small text-muted', text: t('js.backups.covers_db_only_desc') })]));
+            grid.appendChild(kv(t.key('js.backups.label_covers'), [badge(t.key('js.backups.db_only'), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t.key('js.backups.covers_tracker_db') }),
+                el('div', { className: 'wl-small text-muted', text: t.key('js.backups.covers_db_only_desc') })]));
         } else {
-            grid.appendChild(kv(t('js.backups.label_mode'), [badge(t('js.backups.nothing_available'), 'wl-b-bad'),
-                el('div', { className: 'wl-small text-muted', text: (chk.error || t('js.backups.no_tools')) })]));
+            grid.appendChild(kv(t.key('js.backups.label_mode'), [badge(t.key('js.backups.nothing_available'), 'wl-b-bad'),
+                el('div', { className: 'wl-small text-muted', text: (chk.error || t.key('js.backups.no_tools')) })]));
         }
 
-        grid.appendChild(kv(t('js.backups.label_profile'), [
-            el('span', { text: cfg.profile_label || cfg.profile || '—' }),
+        grid.appendChild(kv(t.key('js.backups.label_profile'), [
+            el('span', { text: cfg.profile_label ? t.find(cfg.profile_label, 'api.backup.profile_') : (cfg.profile || '—') }),
             el('div', { className: 'wl-small text-muted', text: cfg.items || '' }),
         ]));
 
         // 2. the schedule
         const sc = j.schedule || {};
         const schedParts = cfg.enabled
-            ? [sc.valid ? badge(t('js.backups.on'), 'wl-b-ok') : badge(t('js.backups.off'), 'wl-b-muted'), ' ',
+            ? [sc.valid ? badge(t.key('js.backups.on'), 'wl-b-ok') : badge(t.key('js.backups.off'), 'wl-b-muted'), ' ',
                el('span', { className: 'text-muted', text: sc.describe || '' })]
-            : [badge(t('js.backups.off'), 'wl-b-muted'), ' ',
-               el('span', { className: 'wl-small text-muted', text: t('js.backups.sched_off_desc') })];
+            : [badge(t.key('js.backups.off'), 'wl-b-muted'), ' ',
+               el('span', { className: 'wl-small text-muted', text: t.key('js.backups.sched_off_desc') })];
         if (cfg.enabled && sc.next) {
-            schedParts.push(el('div', { className: 'wl-small text-muted', text: t('js.backups.next_run', { when: when(sc.next) }) }));
+            schedParts.push(el('div', { className: 'wl-small text-muted', text: t.key('js.backups.next_run', { when: when(sc.next) }) }));
         }
-        grid.appendChild(kv(t('js.backups.label_schedule'), schedParts));
+        grid.appendChild(kv(t.key('js.backups.label_schedule'), schedParts));
 
         // 3. the last run
         if (st.state && st.state !== 'idle') {
             const okRun = st.state === 'done';
-            const parts = [badge(okRun ? t('js.backups.status_ok') : (st.state === 'running' ? t('js.backups.status_running') : t('js.backups.status_failed')),
+            const parts = [badge(okRun ? t.key('js.backups.status_ok') : (st.state === 'running' ? t.key('js.backups.status_running') : t.key('js.backups.status_failed')),
                                  okRun ? 'wl-b-ok' : (st.state === 'running' ? 'wl-b-pending' : 'wl-b-bad')), ' ',
-                el('span', { className: 'text-muted', text: st.finished_at ? t('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - st.finished_at)) }) : (st.started_at ? t('js.backups.started_ago', { t: fmtAgo(Math.floor(j.server_time - st.started_at)) }) : '') })];
-            if (st.bytes) parts.push(el('div', { className: 'wl-small text-muted', text: bytes(st.bytes) + (st.encrypted ? t('js.backups.encrypted_suffix') : '') }));
+                el('span', { className: 'text-muted', text: st.finished_at ? t.key('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - st.finished_at)) }) : (st.started_at ? t.key('js.backups.started_ago', { t: fmtAgo(Math.floor(j.server_time - st.started_at)) }) : '') })];
+            if (st.bytes) parts.push(el('div', { className: 'wl-small text-muted' }, [bytes(st.bytes), st.encrypted ? t.key('js.backups.encrypted_suffix') : '']));
             if (st.error) parts.push(el('div', { className: 'wl-small text-danger', text: st.error }));
-            if (st.pruned) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.backups.rotation_removed', { n: st.pruned }) }));
-            grid.appendChild(kv(t('js.backups.label_last_run'), parts));
+            if (st.pruned) parts.push(el('div', { className: 'wl-small text-muted', text: t.key('js.backups.rotation_removed', { n: st.pruned }) }));
+            grid.appendChild(kv(t.key('js.backups.label_last_run'), parts));
         } else {
-            grid.appendChild(kv(t('js.backups.label_last_run'), [el('span', { className: 'text-muted', text: t('js.backups.never_run') })]));
+            grid.appendChild(kv(t.key('js.backups.label_last_run'), [el('span', { className: 'text-muted', text: t.key('js.backups.never_run') })]));
         }
 
         // 4. where the archives are and how much room is left
-        grid.appendChild(kv(t('js.backups.label_directory'), [
+        grid.appendChild(kv(t.key('js.backups.label_directory'), [
             el('code', { className: 'wl-path', text: cfg.dir || '—' }),
-            el('div', { className: 'wl-small text-muted', text:
-                t('js.backups.usage', { n: (j.archives || []).length, used: bytes(j.total_bytes || 0) }) +
-                (j.free_bytes ? t('js.backups.free', { free: bytes(j.free_bytes) }) : '') }),
+            // Pieces, not one string (1.73.0): each a t.key() word that keeps its key for the live language switch.
+            el('div', { className: 'wl-small text-muted' }, [
+                t.key('js.backups.usage', { n: (j.archives || []).length, used: bytes(j.total_bytes || 0) }),
+                j.free_bytes ? t.key('js.backups.free', { free: bytes(j.free_bytes) }) : '' ]),
         ]));
-        grid.appendChild(kv(t('js.backups.label_retention'), [
-            el('span', { text: (cfg.keep ? t('js.backups.keep_n', { n: cfg.keep }) : t('js.backups.no_count_limit'))
-                + ' · ' + (cfg.keep_days ? t('js.backups.n_days', { n: cfg.keep_days }) : t('js.backups.no_age_limit'))
-                + ' · ' + (cfg.max_gb ? t('js.backups.max_gb', { n: cfg.max_gb }) : t('js.backups.no_size_limit')) }),
-            el('div', { className: 'wl-small text-muted', text: t('js.backups.retention_desc') }),
+        grid.appendChild(kv(t.key('js.backups.label_retention'), [
+            el('span', {}, [cfg.keep ? t.key('js.backups.keep_n', { n: cfg.keep }) : t.key('js.backups.no_count_limit'),
+                ' · ', cfg.keep_days ? t.key('js.backups.n_days', { n: cfg.keep_days }) : t.key('js.backups.no_age_limit'),
+                ' · ', cfg.max_gb ? t.key('js.backups.max_gb', { n: cfg.max_gb }) : t.key('js.backups.no_size_limit')]),
+            el('div', { className: 'wl-small text-muted', text: t.key('js.backups.retention_desc') }),
         ]));
-        grid.appendChild(kv(t('js.backups.label_encryption'), cfg.gpg
+        grid.appendChild(kv(t.key('js.backups.label_encryption'), cfg.gpg
             ? [badge('gpg', 'wl-b-ok'), ' ', el('span', { className: 'text-muted', text: cfg.gpg })]
-            : [badge(t('js.backups.none'), 'wl-b-warn'), ' ', el('span', { className: 'wl-small text-muted', text: t('js.backups.encryption_none_desc') })]));
+            : [badge(t.key('js.backups.none'), 'wl-b-warn'), ' ', el('span', { className: 'wl-small text-muted', text: t.key('js.backups.encryption_none_desc') })]));
 
         $('bk-dir-label').textContent = cfg.dir || '';
-        $('bk-total').textContent = t('js.backups.total', { n: (j.archives || []).length, size: bytes(j.total_bytes || 0) });
-        $('bk-status-updated').textContent = t('js.backups.updated_at', { time: new Date().toLocaleTimeString() });
+        $('bk-total').textContent = t.key('js.backups.total', { n: (j.archives || []).length, size: bytes(j.total_bytes || 0) });
+        $('bk-status-updated').textContent = t.key('js.backups.updated_at', { time: new Date().toLocaleTimeString() });
         renderNotes(j);
     }
 
@@ -157,11 +158,12 @@
         if (j.error && chk.mode) box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [el('i', { className: 'bi bi-exclamation-triangle' }), ' ' + j.error]));
         if (j.last_error) box.appendChild(el('div', { className: 'nl-note nl-note-bad' }, [
             el('i', { className: 'bi bi-x-octagon' }),
-            el('span', { text: ' ' + t('js.backups.last_failure', { error: j.last_error }) + (j.last_error_at ? ' (' + t('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - j.last_error_at)) }) + ')' : '') }),
+            el('span', {}, [' ', t.key('js.backups.last_failure', { error: j.last_error })]
+                .concat(j.last_error_at ? [' (', t.key('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - j.last_error_at)) }), ')'] : [])),
         ]));
         if (!(j.archives || []).length && (chk.mode)) box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
             el('i', { className: 'bi bi-hdd-stack' }),
-            el('span', { text: ' ' + t('js.backups.no_backup_yet') }),
+            el('span', {}, [' ', t.key('js.backups.no_backup_yet')]),
         ]));
     }
 
@@ -169,10 +171,10 @@
         const box = $('bk-progress');
         box.classList.toggle('d-hidden', !running);
         if (!running) return;
-        $('bk-progress-step').textContent = st.step || t('js.backups.working');
+        $('bk-progress-step').textContent = st.step || t.key('js.backups.working');
         const bits = [];
         if (st.id) bits.push(st.id);
-        if (st.started_at) bits.push(t('js.backups.started_at', { when: when(st.started_at) }));
+        if (st.started_at) bits.push(t.key('js.backups.started_at', { when: when(st.started_at) }));
         if (st.bytes) bits.push(bytes(st.bytes));
         $('bk-progress-meta').textContent = bits.join(' · ');
         $('bk-progress-log').textContent = st.log_tail || '';
@@ -191,7 +193,7 @@
     let lastCheck = null;     // the empty-table wording depends on it, so keep it for a repaint
     const SORT_KEYS = {
         when:      a => a.ts || 0,
-        profile:   a => (a.profile || (a.mode === 'builtin' ? t('js.backups.db_only') : '')).toLowerCase(),
+        profile:   a => (a.profile || (a.mode === 'builtin' ? t.key('js.backups.db_only') : '')).toLowerCase(),
         size:      a => a.size || 0,
         // three states, ordered worst-first so one click surfaces what needs attention
         integrity: a => (a.verified === false ? 0 : a.verified === true ? 2 : 1),
@@ -221,47 +223,48 @@
         const list = sortList(lastList);
         if (!list.length) {
             tb.appendChild(el('tr', {}, [el('td', { colspan: '6', className: 'text-center text-muted py-4',
-                text: (j.check && j.check.mode) ? t('js.backups.no_archives') : t('js.backups.not_available_here') })]));
+                text: (j.check && j.check.mode) ? t.key('js.backups.no_archives') : t.key('js.backups.not_available_here') })]));
             return;
         }
         list.forEach(a => {
             const acts = el('div', { className: 'wl-actions' });
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-info wl-act', type: 'button', title: t('js.backups.verify_title'),
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-info wl-act', type: 'button', title: t.key('js.backups.verify_title'),
                 onclick: () => ask('verify', { id: a.id }) }, [el('i', { className: 'bi bi-patch-check' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-secondary wl-act', type: 'button', title: t('js.backups.download_title'),
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-secondary wl-act', type: 'button', title: t.key('js.backups.download_title'),
                 onclick: () => ask('token', { id: a.id }) }, [el('i', { className: 'bi bi-download' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-warning wl-act', type: 'button', title: t('js.backups.restore_title'),
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-warning wl-act', type: 'button', title: t.key('js.backups.restore_title'),
                 onclick: () => openRestore(a) }, [el('i', { className: 'bi bi-arrow-counterclockwise' })]));
-            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-danger wl-act', type: 'button', title: t('js.backups.delete_title'),
+            acts.appendChild(el('button', { className: 'btn btn-sm btn-outline-danger wl-act', type: 'button', title: t.key('js.backups.delete_title'),
                 onclick: () => ask('delete', { id: a.id }) }, [el('i', { className: 'bi bi-trash' })]));
 
-            const integrity = a.verified === true ? [badge(t('js.backups.verified'), 'wl-b-ok')]
-                : a.verified === false ? [badge(t('js.backups.status_failed'), 'wl-b-bad')]
-                : [badge(t('js.backups.not_checked'), 'wl-b-muted')];
-            if (a.encrypted) integrity.push(' ', el('i', { className: 'bi bi-lock-fill text-info', title: t('js.backups.encrypted_gpg') }));
+            const integrity = a.verified === true ? [badge(t.key('js.backups.verified'), 'wl-b-ok')]
+                : a.verified === false ? [badge(t.key('js.backups.status_failed'), 'wl-b-bad')]
+                : [badge(t.key('js.backups.not_checked'), 'wl-b-muted')];
+            if (a.encrypted) integrity.push(' ', el('i', { className: 'bi bi-lock-fill text-info', title: t.key('js.backups.encrypted_gpg') }));
 
             tb.appendChild(el('tr', {}, [
                 el('td', {}, [el('span', { text: when(a.ts) }),
-                              el('div', { className: 'wl-small text-muted', text: a.ts ? t('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - a.ts)) }) : '' })]),
-                el('td', {}, [el('span', { text: a.profile || (a.mode === 'builtin' ? t('js.backups.db_only') : '—') }),
+                              el('div', { className: 'wl-small text-muted', text: a.ts ? t.key('js.backups.ago', { t: fmtAgo(Math.floor(j.server_time - a.ts)) }) : '' })]),
+                // The profile's name and the archive's items ellipsise with their full value in their titles (1.73.0).
+                el('td', {}, [el('span', { text: a.profile || (a.mode === 'builtin' ? t.key('js.backups.db_only') : '—'), title: a.profile || '' }),
                     // The built-in dump names every file tracker-db-*, whatever profile made it, so
                     // the filename contradicts the choice. The items are the truth and are shown here.
                     a.items ? el('div', { className: 'wl-small text-muted', title: a.items,
-                                          text: includesFullDb(a) ? t('js.backups.full_db_files') : t('js.backups.n_items', { n: String(a.items).split(',').length }) }) : '',
-                              a.mode === 'builtin' ? el('div', { className: 'wl-small text-warning', text: t('js.backups.builtin_dump') }) : null]),
+                                          text: includesFullDb(a) ? t.key('js.backups.full_db_files') : t.key('js.backups.n_items', { n: String(a.items).split(',').length }) }) : '',
+                              a.mode === 'builtin' ? el('div', { className: 'wl-small text-warning', text: t.key('js.backups.builtin_dump') }) : null]),
                 el('td', {}, [
                     el('span', { text: bytes(a.size || 0) }),
                     // An archive that holds the whole database looks alarmingly small next to it, so
                     // the ratio is shown rather than left for the reader to doubt.
                     (a.size && state.status && state.status.db_bytes && includesFullDb(a))
                         ? el('div', { className: 'wl-small text-muted',
-                                      title: t('js.backups.db_size_title', { size: bytes(state.status.db_bytes) })
-                                           + '',
-                                      text: t('js.backups.compressed', { n: Math.round(state.status.db_bytes / a.size) }) })
+                                      title: t.key('js.backups.db_size_title', { size: bytes(state.status.db_bytes) }),
+                                      text: t.key('js.backups.compressed', { n: Math.round(state.status.db_bytes / a.size) }) })
                         : '',
                 ]),
-                el('td', {}, [el('span', { className: 'wl-small text-muted', text: a.items || (a.mode === 'builtin' ? t('js.backups.tracker_db') : '—') })]),
-                el('td', {}, integrity),
+                el('td', {}, [el('span', { className: 'wl-small text-muted', text: a.items || (a.mode === 'builtin' ? t.key('js.backups.tracker_db') : '—'), title: a.items || '' })]),
+                // A cell of badges (admin.css, `.col-badge`): the padlock goes under the state when both do not fit.
+                el('td', { className: 'col-badge' }, integrity),
                 el('td', { className: 'th-actions' }, [acts]),
             ]));
         });
@@ -276,35 +279,36 @@
 
     const COPY = {
         run: {
-            title: t('js.backups.run_title'), ok: t('js.backups.run_ok'), cls: 'btn-outline-success',
+            title: t.key('js.backups.run_title'), ok: t.key('js.backups.run_ok'), cls: 'btn-outline-success',
             text: () => {
                 const c = (state.status && state.status.configured) || {};
-                return t('js.backups.run_text', { dir: c.dir || t('js.backups.backup_dir') }) +
-                       (c.nice !== undefined ? t('js.backups.run_nice', { n: c.nice }) : '') +
-                       t('js.backups.run_text_tail');
+                // Pieces (1.73.0): the modal's words keep their keys (`dir` may be a t.key() word too — a key in a key).
+                return [t.key('js.backups.run_text', { dir: c.dir || t.key('js.backups.backup_dir') }),
+                        c.nice !== undefined ? t.key('js.backups.run_nice', { n: c.nice }) : '',
+                        t.key('js.backups.run_text_tail')];
             },
         },
-        cancel: { title: t('js.backups.cancel_title'), ok: t('js.backups.cancel_ok'), cls: 'btn-outline-warning',
-                  text: () => t('js.backups.cancel_text') },
-        verify: { title: t('js.backups.verify_modal_title'), ok: t('js.backups.verify_ok'), cls: 'btn-outline-info',
-                  text: () => t('js.backups.verify_text') },
-        prune:  { title: t('js.backups.prune_title'), ok: t('js.backups.prune_ok'), cls: 'btn-outline-secondary',
+        cancel: { title: t.key('js.backups.cancel_title'), ok: t.key('js.backups.cancel_ok'), cls: 'btn-outline-warning',
+                  text: () => t.key('js.backups.cancel_text') },
+        verify: { title: t.key('js.backups.verify_modal_title'), ok: t.key('js.backups.verify_ok'), cls: 'btn-outline-info',
+                  text: () => t.key('js.backups.verify_text') },
+        prune:  { title: t.key('js.backups.prune_title'), ok: t.key('js.backups.prune_ok'), cls: 'btn-outline-secondary',
                   text: () => {
                       const c = (state.status && state.status.configured) || {};
-                      const limits = [c.keep ? t('js.backups.keep_n', { n: c.keep }) : null, c.keep_days ? t('js.backups.n_days', { n: c.keep_days }) : null,
-                                      c.max_gb ? t('js.backups.max_gb', { n: c.max_gb }) : null].filter(Boolean).join(', ');
-                      return t('js.backups.prune_text') + (limits ? ' (' + limits + ')' : '') +
-                             t('js.backups.prune_text_tail');
+                      const limits = [c.keep ? t.key('js.backups.keep_n', { n: c.keep }) : null, c.keep_days ? t.key('js.backups.n_days', { n: c.keep_days }) : null,
+                                      c.max_gb ? t.key('js.backups.max_gb', { n: c.max_gb }) : null].filter(Boolean)
+                                      .reduce((out, x, i) => (i ? out.push(', ', x) : out.push(x), out), []);
+                      return [t.key('js.backups.prune_text')].concat(limits.length ? [' ('].concat(limits, [')']) : [], [t.key('js.backups.prune_text_tail')]);
                   } },
-        delete: { title: t('js.backups.delete_title'), ok: t('js.backups.delete_ok'), cls: 'btn-outline-danger',
-                  text: () => t('js.backups.delete_text') },
-        token:  { title: t('js.backups.token_title'), ok: t('js.backups.token_ok'), cls: 'btn-outline-secondary',
-                  text: () => t('js.backups.token_text') },
-        restore: { title: t('js.backups.restore_files_title'), ok: t('js.backups.restore_ok'), cls: 'btn-outline-warning',
-                   text: () => t('js.backups.restore_text') },
+        delete: { title: t.key('js.backups.delete_title'), ok: t.key('js.backups.delete_ok'), cls: 'btn-outline-danger',
+                  text: () => t.key('js.backups.delete_text') },
+        token:  { title: t.key('js.backups.token_title'), ok: t.key('js.backups.token_ok'), cls: 'btn-outline-secondary',
+                  text: () => t.key('js.backups.token_text') },
+        restore: { title: t.key('js.backups.restore_files_title'), ok: t.key('js.backups.restore_ok'), cls: 'btn-outline-warning',
+                   text: () => t.key('js.backups.restore_text') },
         'restore-db': {
-            title: t('js.backups.restore_db_title'), ok: t('js.backups.restore_db_ok'), cls: 'btn-outline-danger', needsName: true,
-            text: () => t('js.backups.restore_db_text', { db: state.dbName }),
+            title: t.key('js.backups.restore_db_title'), ok: t.key('js.backups.restore_db_ok'), cls: 'btn-outline-danger', needsName: true,
+            text: () => t.key('js.backups.restore_db_text', { db: state.dbName }),
         },
     };
 
@@ -313,13 +317,14 @@
         if (!c) return;
         state.pending = Object.assign({ op: op }, opts || {});
         $('bk-modal-title').textContent = c.title;
-        $('bk-modal-text').textContent = c.text();
+        const said = c.text();
+        $('bk-modal-text').replaceChildren(...(Array.isArray(said) ? said : [said]));   // pieces keep their keys (1.73.0)
         const extra = $('bk-modal-extra');
         extra.textContent = '';
         if (state.pending.id) extra.appendChild(el('div', { className: 'wl-small text-muted mb-2' }, [
-            el('span', { text: t('js.backups.archive_label') }), el('code', { text: state.pending.id })]));
+            el('span', { text: t.key('js.backups.archive_label') }), el('code', { text: state.pending.id })]));
         if (state.pending.items) extra.appendChild(el('div', { className: 'wl-small text-muted mb-2' }, [
-            el('span', { text: t('js.backups.items_label') }), el('code', { text: state.pending.items })]));
+            el('span', { text: t.key('js.backups.items_label') }), el('code', { text: state.pending.items })]));
         // The profile picker appears for a manual run only. Every other operation acts on an archive
         // that already exists, where "what to back up" is a question about the past.
         const profRow = $('bk-confirm-profile-row');
@@ -329,8 +334,11 @@
             const cfgNow = (state.status && state.status.configured) || {};
             const list = (state.status && state.status.profiles) || [];
             profSel.textContent = '';
+            // An <option> holds text only: one word each — the profile's name found back by key (the bridge carries
+            // api.backup.profile_), "— configured" said with it as one sentence (1.73.0).
             list.forEach(pr => profSel.appendChild(el('option', {
-                value: pr.id, text: pr.label + (pr.id === cfgNow.profile ? t('js.backups.configured_suffix') : '') })));
+                value: pr.id, text: pr.id === cfgNow.profile ? t.key('js.backups.profile_configured', { label: t.find(pr.label, 'api.backup.profile_') })
+                                                             : t.find(pr.label, 'api.backup.profile_') })));
             profSel.value = cfgNow.profile || (list[0] && list[0].id) || '';
             const hint = $('bk-confirm-profile-hint');
             const describe = () => {
@@ -362,7 +370,7 @@
         const btn = $('bk-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.backups.working');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.backups.working');
         alert.textContent = '';
 
         const body = { op: p.op, password: $('bk-confirm-password').value };
@@ -383,13 +391,13 @@
                 bootstrap.Modal.getOrCreateInstance($('bkConfirmModal')).hide();
                 if (p.op === 'token' && r.url) {
                     // Navigating starts the download; the token is burned by the first request.
-                    showToast(t('js.backups.download_starting'), 'success');
+                    showToast(t.key('js.backups.download_starting'), 'success');
                     window.location.href = r.url;
                 } else if (p.op === 'verify') {
                     // a verification result is the answer, not a side effect — say which way it went
-                    showToast(r.message || t('js.backups.checked'), 'success');
+                    showToast(r.message || t.key('js.backups.checked'), 'success');
                 } else {
-                    showToast(r.message || t('js.backups.done'), 'success');
+                    showToast(r.message || t.key('js.backups.done'), 'success');
                 }
                 // a restore (dry run or not) reports inside the restore modal, which stays open
                 if (p.op === 'restore') {
@@ -402,7 +410,7 @@
                 state.pending = null;
                 load();
             } else {
-                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.backups.failed') }));
+                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t.key('js.backups.failed') }));
                 if (r.output) alert.appendChild(el('pre', { className: 'bk-log', text: r.output }));
             }
             if (p.op === 'restore' && !r.success) {
@@ -411,7 +419,7 @@
                 outEl.classList.remove('d-hidden');
             }
         } catch {
-            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t('js.backups.network_error') }));
+            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t.key('js.backups.network_error') }));
         }
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -432,8 +440,8 @@
         const dbItems = items.filter(i => /-db(-lekka)?$/.test(i));
         if (!fileItems.length) {
             box.appendChild(el('div', { className: 'wl-small text-muted', text:
-                a.mode === 'builtin' ? t('js.backups.builtin_no_files')
-                                     : t('js.backups.no_file_items') }));
+                a.mode === 'builtin' ? t.key('js.backups.builtin_no_files')
+                                     : t.key('js.backups.no_file_items') }));
         } else {
             fileItems.forEach(i => {
                 const id = 'bk-it-' + i;
@@ -455,7 +463,7 @@
         const items = selectedItems();
         const alert = $('bk-restore-alert');
         alert.textContent = '';
-        if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: t('js.backups.tick_one') })); return; }
+        if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: t.key('js.backups.tick_one') })); return; }
         // The dry run changes nothing, but it still runs a privileged command — so it asks for the
         // password like everything else on this page.
         ask('restore', { id: state.restoreId, items: items, dry_run: true });
@@ -485,7 +493,7 @@
             const items = selectedItems();
             const alert = $('bk-restore-alert');
             alert.textContent = '';
-            if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: t('js.backups.tick_one') })); return; }
+            if (!items) { alert.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small', text: t.key('js.backups.tick_one') })); return; }
             ask('restore', { id: state.restoreId, items: items });
         });
         $('btn-bk-restore-db').addEventListener('click', () => ask('restore-db', { id: state.restoreId }));

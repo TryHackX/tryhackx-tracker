@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 89;  // 89 = the Admin group's stored list says what its blanket holds (includes/users.php, 1.72.0): every registered CAPABILITY written into the admin group's permissions — schemaAdminGrant(), on every data-migration pass and by every schemaGrantOnce(), idempotent, never a consent id (userConsentPermissions(): content.public, favourites.public, lists.public, rating.public, uploads.public — what others may see of an administrator stays a grant somebody gives, tools/groups.php --consent or the panel's tick), never a removal — so the Users page's matrix is true on every install; and the moderator's fresh-install seed is the moderator every existing install has (without index.files_all, favourites.use/.public/.view_others and uploads.public, which the INSERT text gained at v42/v47 for new installs only — a moderator is a member too); no table changes; 88 = replies to comments, as a tree (includes/comments.php): `hash_comments`.parent_id (the comment answered; NULL = top level), root_id (the thread's top-level comment; NULL for it) and depth (0 for the top level, a reply its parent's + 1) + KEY idx_hc_thread (info_hash, root_id, id, status) — the page's top-level comments and one thread's replies, each one keyed range; users.comment_notify's fifth bit, 16 = a reply to one of my comments, ON for every account (guarded on the column's live DEFAULT 15, which becomes 31); the settings `comments_reply_depth` (3: the deepest reply level — 0 = no replies, at most 8) and `sound_default_comment_reply` (''); and granted once (v88_replies) comment.reply to member and moderator — the guest group nothing; 87 = who sees a list (includes/lists.php): `user_lists.visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private' in place of the boolean `is_public` (a public list stays public, every other one private — none loses its meaning) and KEY idx_list_visibility in place of idx_list_public; 'friends' = the owner and the members they are friends with (schemaListVisibilityMigration(): guarded on the old column, a NULL while unconverted, so a stop anywhere is safe); 86 = where the Info panel's comments stand and whether they open folded (includes/comments.php): `comments_position` ('after_files' — the panel's very end —, 'before_files', or 'after_rating', 1.71.0's place) and `comments_expanded` ('0': folded until opened) — settings only; 85 = one anti-spam layer for everything people write (includes/antispam.php): `antispam_state` (a row per context and subject — the account, or a guest's address group: the ladder's level, the last write and the earliest next one as unix seconds by the database's clock, the hits at the top of the ladder and whether a CAPTCHA is due, the refusals in a row, the last correction, the fingerprints of the last words, a revision counter; '*' rows throttle the audit), the settings antispam_enabled (1) / antispam_captcha_after (3) / antispam_guest_captcha (1) / antispam_staff_exempt (1) / antispam_new_days (3) / antispam_new_factor (2) / antispam_new_links (1) / antispam_dup_seconds (600) / antispam_pm_new_hour (8) / _day (20) / _hour_new (2) / _day_new (4) / antispam_pm_spread (2) and per context (shout, message, comment, description, report, list, bio, emote, vote) antispam_<context>_burst / _steps / _reset, rate_limit_pm (240: messages' own address ceiling instead of the favourites' one), and — defaults at last — the five recaptcha_on_<form> switches the Settings page always showed (report 1, login / status / appeal / block_check 0); 84 = reports of what people write in public, and warnings (includes/reports.php): `content_reports` (a comment, a torrent's description or a shout — kind, target id, the torrent's hash, whose words they were, the reporter and their reason, the words AS REPORTED and their format, open | closed with `open_slot` 1 / NULL so a UNIQUE key allows one OPEN report per member per target, what closed it, who and when, the note for the log and the answer to the reporter), `user_warnings` (the member, the moderator's reason, what it was about — kind, id, torrent —, what came with it, who gave it, when), and granted once (v84_reports) content.report to member and panel.reports.{comments,descriptions,shouts}.{view,handle} to moderator — the message queue (panel.messages.*) still to nobody, the guest group nothing; 83 = comments on a torrent (includes/comments.php): `hash_comments` (by info hash; the source as typed + its format, a guest's tag and address group, status visible | pending — a guest's, held for a moderator — | deleted, and who edited, let through or took it down, when and why; keys for a thread's page and count, a member's comments, the guest queue), users.comment_notify (15: the four kinds of news a member is told of), user_notifications.link (where a notification happened, site-relative), the settings comments_enabled (1) / comment_max_chars (500) / comment_links (1) / comment_edit_minutes (15) / comment_delete_own_minutes (60) / comments_per_page (20) / comment_rate_per_hour (30) / captcha_pts_comment (1) / comments_guest_review (1) and the two sound defaults sound_default_comment / sound_default_comment_mention (''), and granted once (v83_comments) comment.view + comment.post + comment.edit_own + comment.delete_own to member and comment.view + comment.post + comment.moderate to moderator — the guest group nothing; 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+const TRACKER_SCHEMA_VERSION = 91;  // 91 = what a deleted account left behind, and one missing default (1.73.0): once (schemaOnce 'v91_account_orphans', schemaAccountOrphans()) the `user_twofa` rows (TOTP secret, recovery hashes) and `message_typing` rows whose account is gone deleted, a bulk mail still QUEUED for a gone account skipped ('account deleted'), and a vote of a gone account (`hash_votes` voter_type 'user', from before 1.42.0's cascade) deleted with the stored totals of its hashes counted again (repRecount()) — userDeleteCascade() covers all four from now on; and the setting `transparency_enabled` ('1' — the nav link and the page's text read a missing row as on, the page's data endpoint as off) — no table changes; 90 = a messages' Archive and Trash, per side (includes/people.php, 1.73.0): `message_threads`.u_low_trash_upto / u_high_trash_upto (BIGINT UNSIGNED, the last message id that side put in its Trash, 0 = an empty trash) and u_low_trashed_at / u_high_trashed_at (DATETIME, when — NULL exactly when the trash is empty) + KEY idx_thread_trash_low / idx_thread_trash_high (the janitor's purge, oldest first), every existing row an empty trash (schemaPmTrashMigration(): one ALTER of only what is missing) — the Archive is u_*_hidden under its new name, the watermark u_*_cleared_id stays what deletes for good; and the settings `pm_archive_returns` (1: a new message brings an archived conversation back to the inbox, as hiding did) and `pm_trash_days` (30, 0-365; 0 = no Trash, Delete deletes at once); 89 = the Admin group's stored list says what its blanket holds (includes/users.php, 1.72.0): every registered CAPABILITY written into the admin group's permissions — schemaAdminGrant(), on every data-migration pass and by every schemaGrantOnce(), idempotent, never a consent id (userConsentPermissions(): content.public, favourites.public, lists.public, rating.public, uploads.public — what others may see of an administrator stays a grant somebody gives, tools/groups.php --consent or the panel's tick), never a removal — so the Users page's matrix is true on every install; and the moderator's fresh-install seed is the moderator every existing install has (without index.files_all, favourites.use/.public/.view_others and uploads.public, which the INSERT text gained at v42/v47 for new installs only — a moderator is a member too); no table changes; 88 = replies to comments, as a tree (includes/comments.php): `hash_comments`.parent_id (the comment answered; NULL = top level), root_id (the thread's top-level comment; NULL for it) and depth (0 for the top level, a reply its parent's + 1) + KEY idx_hc_thread (info_hash, root_id, id, status) — the page's top-level comments and one thread's replies, each one keyed range; users.comment_notify's fifth bit, 16 = a reply to one of my comments, ON for every account (guarded on the column's live DEFAULT 15, which becomes 31); the settings `comments_reply_depth` (3: the deepest reply level — 0 = no replies, at most 8) and `sound_default_comment_reply` (''); and granted once (v88_replies) comment.reply to member and moderator — the guest group nothing; 87 = who sees a list (includes/lists.php): `user_lists.visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private' in place of the boolean `is_public` (a public list stays public, every other one private — none loses its meaning) and KEY idx_list_visibility in place of idx_list_public; 'friends' = the owner and the members they are friends with (schemaListVisibilityMigration(): guarded on the old column, a NULL while unconverted, so a stop anywhere is safe); 86 = where the Info panel's comments stand and whether they open folded (includes/comments.php): `comments_position` ('after_files' — the panel's very end —, 'before_files', or 'after_rating', 1.71.0's place) and `comments_expanded` ('0': folded until opened) — settings only; 85 = one anti-spam layer for everything people write (includes/antispam.php): `antispam_state` (a row per context and subject — the account, or a guest's address group: the ladder's level, the last write and the earliest next one as unix seconds by the database's clock, the hits at the top of the ladder and whether a CAPTCHA is due, the refusals in a row, the last correction, the fingerprints of the last words, a revision counter; '*' rows throttle the audit), the settings antispam_enabled (1) / antispam_captcha_after (3) / antispam_guest_captcha (1) / antispam_staff_exempt (1) / antispam_new_days (3) / antispam_new_factor (2) / antispam_new_links (1) / antispam_dup_seconds (600) / antispam_pm_new_hour (8) / _day (20) / _hour_new (2) / _day_new (4) / antispam_pm_spread (2) and per context (shout, message, comment, description, report, list, bio, emote, vote) antispam_<context>_burst / _steps / _reset, rate_limit_pm (240: messages' own address ceiling instead of the favourites' one), and — defaults at last — the five recaptcha_on_<form> switches the Settings page always showed (report 1, login / status / appeal / block_check 0); 84 = reports of what people write in public, and warnings (includes/reports.php): `content_reports` (a comment, a torrent's description or a shout — kind, target id, the torrent's hash, whose words they were, the reporter and their reason, the words AS REPORTED and their format, open | closed with `open_slot` 1 / NULL so a UNIQUE key allows one OPEN report per member per target, what closed it, who and when, the note for the log and the answer to the reporter), `user_warnings` (the member, the moderator's reason, what it was about — kind, id, torrent —, what came with it, who gave it, when), and granted once (v84_reports) content.report to member and panel.reports.{comments,descriptions,shouts}.{view,handle} to moderator — the message queue (panel.messages.*) still to nobody, the guest group nothing; 83 = comments on a torrent (includes/comments.php): `hash_comments` (by info hash; the source as typed + its format, a guest's tag and address group, status visible | pending — a guest's, held for a moderator — | deleted, and who edited, let through or took it down, when and why; keys for a thread's page and count, a member's comments, the guest queue), users.comment_notify (15: the four kinds of news a member is told of), user_notifications.link (where a notification happened, site-relative), the settings comments_enabled (1) / comment_max_chars (500) / comment_links (1) / comment_edit_minutes (15) / comment_delete_own_minutes (60) / comments_per_page (20) / comment_rate_per_hour (30) / captcha_pts_comment (1) / comments_guest_review (1) and the two sound defaults sound_default_comment / sound_default_comment_mention (''), and granted once (v83_comments) comment.view + comment.post + comment.edit_own + comment.delete_own to member and comment.view + comment.post + comment.moderate to moderator — the guest group nothing; 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
                                     // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
                                     // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
@@ -1092,6 +1092,11 @@ function trackerSchemaStatements(): array {
         // own watermark — so the thread disappears for them and stays whole for the other person,
         // and a NEW message (a higher id) brings it back showing only what has arrived since.
         // Nothing is deleted: a reported message has to stay readable to the panel.
+        // v90 (1.73.0): the Archive is `u_*_hidden` under its own name, and each side has a TRASH:
+        // `u_*_trash_upto` is the last message id this side put there (0 = an empty trash) and
+        // `u_*_trashed_at` when (NULL exactly when the trash is empty). What lies above the watermark
+        // and up to trash_upto is in the Trash — restorable until the janitor, pm_trash_days later,
+        // moves the watermark over it (includes/people.php, pmTrashPurgeExpired(), by these two keys).
         "CREATE TABLE IF NOT EXISTS `message_threads` (
             `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `u_low` INT UNSIGNED NOT NULL,
@@ -1102,9 +1107,15 @@ function trackerSchemaStatements(): array {
             `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
             `u_low_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
             `u_high_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_low_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_high_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_low_trashed_at` DATETIME DEFAULT NULL,
+            `u_high_trashed_at` DATETIME DEFAULT NULL,
             UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
             KEY `idx_thread_low` (`u_low`, `last_message_at`),
-            KEY `idx_thread_high` (`u_high`, `last_message_at`)
+            KEY `idx_thread_high` (`u_high`, `last_message_at`),
+            KEY `idx_thread_trash_low` (`u_low_trashed_at`),
+            KEY `idx_thread_trash_high` (`u_high_trashed_at`)
         ) $engine",
 
         // `read_at` belongs to the MESSAGE and not to a per-person table: a thread has exactly two
@@ -1742,9 +1753,15 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
         `u_low_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
         `u_high_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_low_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_high_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_low_trashed_at` DATETIME DEFAULT NULL,
+        `u_high_trashed_at` DATETIME DEFAULT NULL,
         UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
         KEY `idx_thread_low` (`u_low`, `last_message_at`),
-        KEY `idx_thread_high` (`u_high`, `last_message_at`)
+        KEY `idx_thread_high` (`u_high`, `last_message_at`),
+        KEY `idx_thread_trash_low` (`u_low_trashed_at`),
+        KEY `idx_thread_trash_high` (`u_high_trashed_at`)
     ) $engine";
     // v70: "delete this conversation, for me" — see the CREATE above. 0 for every existing row,
     // which is "I have deleted nothing", so an upgrade hides nothing from anybody.
@@ -1755,6 +1772,10 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         }
     }
     if ($mtParts) $out[] = "ALTER TABLE `message_threads` " . implode(', ', $mtParts);
+    // v90: the Trash, per side — see the CREATE above. An empty trash on every existing row (0, NULL), so an
+    // upgrade moves nothing anywhere: today's hidden conversations ARE the Archive, today's deleted ones stay
+    // deleted. One helper, so tests/pm_trash_test.php can run it against a table of the old shape.
+    foreach (schemaPmTrashMigration($db) as $mtSql) $out[] = $mtSql;
     $out[] = "CREATE TABLE IF NOT EXISTS `user_messages` (
         `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         `thread_id` INT UNSIGNED NOT NULL,
@@ -2930,6 +2951,12 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         error_log('[tracker schema] v89 admin capabilities: ' . $e->getMessage());
     }
 
+    // v91 (1.73.0): what userDeleteCascade() left behind before it knew about these tables — once
+    // (schemaAccountOrphans() below says what and why).
+    if (schemaOnce($db, 'v91_account_orphans')) {
+        schemaAccountOrphans($db, $cfg);
+    }
+
     // panel admin → users row (username from settings, hash from config/app.php, email = the
     // site contact address — verified, it is the owner's own)
     $adminUser = trim((string)($cfg['admin_username'] ?? ''));
@@ -2988,6 +3015,10 @@ function trackerSchemaDefaultSettings(): array {
         'api_enabled'                 => '0',
         'api_ban_days'                => '30',
         'api_ban_exempt_ips'          => implode(', ', array_unique($selfIps)),
+        // v91 (1.73.0): the Transparency page, ON as the installer has always written it. Without the row the
+        // menu link and the page's text read it as on (`?? '1'`) while the page's own data (api/transparency.php)
+        // read it as off and answered 403 — a link to a page that could not load its table.
+        'transparency_enabled'        => '1',
         // schema v3: scheduled tracker mode (includes/schedule.php)
         'tracker_schedule_enabled'    => '0',
         'tracker_schedule'            => '{"mon":"none","tue":"none","wed":"none","thu":"none","fri":"none","sat":"none","sun":"none"}',
@@ -3628,6 +3659,13 @@ function trackerSchemaDefaultSettings(): array {
         'pm_who'                      => 'friends', // all | friends | nobody — the site default
         'pm_max_per_day'              => '50',  // clamped [1, 1000]
         'pm_max_chars'                => '4000',// clamped [200, 20000]
+        // ── The Archive and the Trash (v90, 1.73.0, includes/people.php) ─────────────────────
+        // Whether a new message brings an archived conversation back to the inbox: 1 is what hiding did
+        // until 1.73.0; 0 keeps it in the Archive, marked unread there (and counted on the badge). And how
+        // many days a conversation stays in the Trash before it is deleted for the member who put it there
+        // — 0 = no Trash, Delete deletes at once (the 1.64.0 behaviour).
+        'pm_archive_returns'          => '1',
+        'pm_trash_days'               => '30',  // clamped [0, 365]
         'friends_enabled'             => '0',   // following and friendship
         'directory_enabled'           => '0',   // a browsable list of the people who asked to be on it
         'wl_submitter_public'         => '0',   // does the per-row visibility flag apply anywhere
@@ -3691,6 +3729,57 @@ function trackerSchemaDefaultSettings(): array {
         // Does a sign-out on one side end the session on the other.
         'auth_bridge_logout'          => '1',
     ];
+}
+
+/**
+ * v91 (1.73.0): what userDeleteCascade() left behind before it knew about these tables. Each statement touches only
+ * rows whose account no longer exists (a LEFT JOIN to `users` that finds nothing), so a live account loses nothing
+ * and the step is safe to meet twice (the local bootstrap wipes its once-marker; tests/account_delete_test.php
+ * calls it directly).
+ *   * the second factor of a gone account: its TOTP secret and its recovery hashes (user_twofa);
+ *   * its "…is typing" rows (they expire by themselves, but they are its rows);
+ *   * a bulk mail still QUEUED for it: skipped, never sent — the janitor would have mailed a deleted person;
+ *   * its votes, from before 1.42.0 put hash_votes in the cascade — they still counted, live and in the totals
+ *     stored on the catalogue rows, which are counted again (repRecount(), in the site's mode) for exactly the
+ *     hashes they touched.
+ * Returns what each step changed.
+ */
+function schemaAccountOrphans(PDO $db, array $cfg): array {
+    $out = ['user_twofa' => 0, 'message_typing' => 0, 'mail_queue' => 0, 'hash_votes' => 0, 'recounted' => 0];
+    $steps = [
+        'user_twofa'     => "DELETE t FROM user_twofa t LEFT JOIN users u ON u.id = t.user_id WHERE u.id IS NULL",
+        'message_typing' => "DELETE y FROM message_typing y LEFT JOIN users u ON u.id = y.user_id WHERE u.id IS NULL",
+        'mail_queue'     => "UPDATE mail_queue q LEFT JOIN users u ON u.id = q.user_id
+                                SET q.status = 'skipped', q.last_error = 'account deleted'
+                              WHERE q.status = 'queued' AND q.user_id IS NOT NULL AND u.id IS NULL",
+    ];
+    foreach ($steps as $table => $sql) {
+        try {
+            if (schemaTableExists($db, $table)) $out[$table] = (int)$db->exec($sql);
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v91 ' . $table . ': ' . $e->getMessage());
+        }
+    }
+    try {
+        if (schemaTableExists($db, 'hash_votes')) {
+            // voter_key is the account id as text for a member's vote (an address bucket for a guest's).
+            $hashes = $db->query("SELECT DISTINCT v.info_hash FROM hash_votes v
+                                    LEFT JOIN users u ON u.id = CAST(v.voter_key AS UNSIGNED)
+                                   WHERE v.voter_type = 'user' AND u.id IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+            if ($hashes) {
+                $out['hash_votes'] = (int)$db->exec("DELETE v FROM hash_votes v
+                                                       LEFT JOIN users u ON u.id = CAST(v.voter_key AS UNSIGNED)
+                                                      WHERE v.voter_type = 'user' AND u.id IS NULL");
+                if (!function_exists('repRecount') && is_file(__DIR__ . '/reputation.php')) require_once __DIR__ . '/reputation.php';
+                if (function_exists('repRecount')) {
+                    foreach ($hashes as $h) { repRecount($db, (string)$h, $cfg); $out['recounted']++; }
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v91 hash_votes: ' . $e->getMessage());
+    }
+    return $out;
 }
 
 function schemaColumnExists(PDO $db, string $table, string $column): bool {
@@ -3837,6 +3926,33 @@ function schemaListVisibilityMigration(PDO $db, string $table = 'user_lists'): a
     if (!schemaIndexExists($db, $table, 'idx_list_visibility')) $last[] = "ADD KEY `idx_list_visibility` (`visibility`, `updated_at`)";
     $out[] = "ALTER TABLE `$table` " . implode(', ', $last);
     return $out;
+}
+
+/**
+ * v90 (1.73.0): a Trash on each side of a conversation — the four columns and the janitor's two keys that
+ * `message_threads` gains (see its CREATE), for a table made before them. ONE ALTER, and only what is missing,
+ * so a second run is nothing and a run that stopped half way does the rest.
+ *
+ * Every existing row gets an EMPTY trash — 0 and NULL, the pair includes/people.php keeps together (trashed_at
+ * is NULL exactly when trash_upto is 0) — so the upgrade moves no conversation anywhere: a conversation hidden
+ * until today is in the Archive (the same column, its new name), one deleted until today stays deleted (the
+ * watermark, untouched), and nothing is in anybody's Trash until they put it there.
+ *
+ * $table is for tests/pm_trash_test.php, which walks this upgrade on a scratch table of the old shape.
+ */
+function schemaPmTrashMigration(PDO $db, string $table = 'message_threads'): array {
+    if (!preg_match('/^[a-z0-9_]{1,64}$/', $table) || !schemaTableExists($db, $table)) return [];
+    $parts = [];
+    foreach (['u_low', 'u_high'] as $side) {
+        if (!schemaColumnExists($db, $table, $side . '_trash_upto')) $parts[] = "ADD COLUMN `{$side}_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+    }
+    foreach (['u_low', 'u_high'] as $side) {
+        if (!schemaColumnExists($db, $table, $side . '_trashed_at')) $parts[] = "ADD COLUMN `{$side}_trashed_at` DATETIME DEFAULT NULL";
+    }
+    foreach (['low', 'high'] as $side) {
+        if (!schemaIndexExists($db, $table, 'idx_thread_trash_' . $side)) $parts[] = "ADD KEY `idx_thread_trash_{$side}` (`u_{$side}_trashed_at`)";
+    }
+    return $parts ? ["ALTER TABLE `$table` " . implode(', ', $parts)] : [];
 }
 
 /**

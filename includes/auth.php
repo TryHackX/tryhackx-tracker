@@ -309,6 +309,32 @@ function clearLoginFailures(string $ip): void {
     });
 }
 
+/**
+ * The janitor's half (1.73.0): every address's failures older than the lockout window go, and every address
+ * left with none. recordLoginFailure() trims only the FAILING address's own list, so an address that failed
+ * once and never came back stayed in config/login_attempts.json — the raw address and its times — for ever.
+ * Under the file's own lock (loginAttemptsUpdate()), rewritten only when something went. Returns the number
+ * of failures dropped. $now is for the tests (a clock passed in).
+ */
+function loginAttemptsPrune(array $cfg, ?int $now = null): int {
+    if (!is_file(loginAttemptsFile())) return 0;
+    $cut = ($now ?? time()) - loginLockWindowSec($cfg);
+    $dropped = 0;
+    loginAttemptsUpdate(function (array &$data) use ($cut, &$dropped) {
+        $changed = false;
+        foreach ($data as $ip => $times) {
+            $keep = array_values(array_filter((array)$times, fn($t) => (int)$t >= $cut));
+            if ($keep && count($keep) === count((array)$times)) continue;
+            $dropped += count((array)$times) - count($keep);
+            $changed = true;
+            if ($keep) $data[$ip] = $keep;
+            else unset($data[$ip]);
+        }
+        return $changed;
+    });
+    return $dropped;
+}
+
 /* ── re-confirming the password, and what happens when it keeps being wrong ──
  *
  * Every dangerous action in the panel asks for the password again. That check sat inline at fourteen

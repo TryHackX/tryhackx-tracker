@@ -164,6 +164,33 @@ check('flood mode quotes what is getting through', str_contains($floodP, '39,800
 check('flood mode names it as the number to choose from', str_contains($floodP, 'the number to pick from'), $floodP);
 check('flood mode without a live rate still gives direction',
       !str_contains($flood, 'the number to pick from') && str_contains($flood, 'not one taken from the arrivals'), $flood);
+// 1.73.0: the paragraph was English on every page. Its sentences are dictionary keys (api.net.rec_*) said in the reader's
+// language — and answered as keys and numbers, so the card writes each as a word that keeps its key (the live switch).
+$partsP = netlimitRecommendParts($rec, true, 39800);
+check('the recommendation is its sentences as keys and numbers — the caveat first, what gets through, the reference last',
+      array_column($partsP, 'key') === ['api.net.rec_stats', 'api.net.rec_flood', 'api.net.rec_flood_passed', 'api.net.rec_flood_ref']
+      && $partsP[0]['vars'] === ['days' => 7, 'median' => 22000, 'p95' => 38000, 'peak' => 61000]
+      && $partsP[2]['vars'] === ['passed' => 39800] && $partsP[3]['vars'] === ['n' => 40000] && netlimitSayParts($partsP) === $floodP, json_encode($partsP));
+check('… one day has a sentence of its own (never "Last 1 days"), and no samples one more',
+      netlimitRecommendParts(['days' => 1] + $rec)[0]['key'] === 'api.net.rec_stats_day'
+      && array_column(netlimitRecommendParts(netlimitRecommendFrom([])), 'key') === ['api.net.rec_none']);
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl'], null);
+$textPl = netlimitRecommendText($rec);
+$floodPl = netlimitRecommendText($rec, true, 39800);
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'en'], null);
+check('… said in the reader\'s language: Polish words and Polish numbers (40 000, a no-break space)',
+      str_contains($textPl, 'Ostatnie 7 dni') && str_contains($textPl, "40\u{00A0}000 pps") && !str_contains($textPl, 'never trigger')
+      && str_contains($floodPl, 'PRZYCHODZĄCE') && str_contains($floodPl, "39\u{00A0}800 pps") && netlimitRecommendText($rec) === $text, $textPl);
+$nlJs = (string)file_get_contents($root . '/assets/js/admin-netlimit.js');
+$nsSrc = (string)file_get_contents($root . '/api/admin/net_status.php');
+check('… net_status answers the parts beside the text, the card writes them as keyed words, the traffic page\'s bundle carries api.net.',
+      str_contains($nsSrc, "\$rec['parts'] = netlimitRecommendParts(\$rec, \$flood, \$passedNow);")
+      && str_contains($nlJs, 'box.appendChild(el(\'span\', {}, adviceWords(r)));') && str_contains($nlJs, 'return t.key(p.key, vars);')
+      && str_contains($nlJs, 'saidPart(lc2.why_part) || lc2.why')
+      && str_contains((string)file_get_contents($root . '/templates/admin/traffic.php'), "langJsBridge(\$baseUrl, ['js.', 'api.helper.', 'api.net.'"));
+check('… and the card\'s own failures are the dictionary\'s, not English (net_status)',
+      str_contains($nsSrc, "__('api.net.no_helper_2')") && str_contains($nsSrc, "__('api.net.exec_disabled')") && str_contains($nsSrc, "__('api.net.helper_no_answer')")
+      && !str_contains($nsSrc, "= 'No rate-limit helper") && !str_contains($nsSrc, "'The firewall helper did not answer.'"));
 
 // ── 4b. a burst too small for the limit (1.72.0) ─────────────────────────────
 // Production 2026-09-29: a limit of 90 000 with a burst of 100 passed ~80 000 on average while a third of
@@ -269,7 +296,8 @@ $GLOBALS['__lang'] = $langWas;
 $ns = (string)file_get_contents($root . '/api/admin/net_status.php');
 $nj = (string)file_get_contents($root . '/assets/js/admin-netlimit.js');
 check('sources: net_status sends the words beside the code', str_contains($ns, "'words' => netlimitSourceWords(\$src)") && str_contains($ns, "'source' => \$src"));
-check('sources: the card prints the words (and the code only when there are none)', str_contains($nj, 'la.words || la.source') && str_contains($nj, "t('js.net.set_by', {src: src"));
+// 1.73.0: the card writes its words as t.key() words — they keep their keys for the live language switch
+check('sources: the card prints the words (and the code only when there are none)', str_contains($nj, 'la.words || la.source') && str_contains($nj, "t.key('js.net.set_by', {src: src"));
 
 // ── 4d. handshakes per announce (1.72.0) ─────────────────────────────────────
 $hrs = static function (int $n, int $t0, float $cps, float $aps, int $uptime0 = 100000): array {
@@ -293,10 +321,10 @@ check('handshakes: too little history for a window says nothing (17 h is not a d
 check('handshakes: one row, or no announces, say nothing', netlimitHandshakesFrom(array_slice($day, 0, 1), 3600) === null
       && netlimitHandshakesFrom($hrs(2, 1800000000, 100, 0), 3600) === null);
 check('handshakes: the card shows them with one sentence on what a high value means',
-      str_contains($nj, "t('js.net.handshakes_note')") && str_contains($enL['js.net.handshakes_note'] ?? '', 'repeating the handshake')
+      str_contains($nj, "t.key('js.net.handshakes_note')") && str_contains($enL['js.net.handshakes_note'] ?? '', 'repeating the handshake')
       && str_contains($enL['js.net.handshakes_note'] ?? '', 'dropped') && str_contains($ns, 'netlimitHandshakes($db, $cfg, $now)'));
 check('handshakes: … and the burst hint travels in the recommendation', str_contains($ns, "\$rec['burst_hint'] = netlimitBurstHint(\$db, \$cfg, \$now,")
-      && str_contains($nj, 'const bh = r.burst_hint;') && str_contains($nj, "t('js.net.burst_hint'"));
+      && str_contains($nj, 'const bh = r.burst_hint;') && str_contains($nj, "t.key('js.net.burst_hint'"));
 
 // ── 5. bucketing ─────────────────────────────────────────────────────────────
 check('bucket: 24 h of 60 s samples stays raw', netlimitBucketFor(86400, 60) === 0);
@@ -1022,6 +1050,9 @@ if ($db !== null) {
     $lc = netlimitLoadCurve($db, $cfgS, 7);
     check('load study: refuses with too few samples', $lc['busy_pps'] === null && $lc['confident'] === false);
     check('load study: … and says why in words', str_contains($lc['why'], 'not enough readings'), $lc['why']);
+    check('load study: … and names that sentence by its key and numbers (the card writes it so — 1.73.0)',
+          ($lc['why_part']['key'] ?? '') === 'api.net.load_few' && ($lc['why_part']['vars']['n'] ?? null) === 30
+          && $lc['why'] === netlimitSayParts([$lc['why_part']]), json_encode($lc['why_part'] ?? null));
 
     // plenty of readings but the rate never varied — a busy hour is not a busy machine
     $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');

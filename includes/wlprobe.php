@@ -21,8 +21,19 @@
  *
  * The row is inserted immediately, marked `probing`, and given priority in the metadata queue that
  * already exists. The worker resolves it because it is an ordinary whitelist row; the janitor
- * scrapes it and decides. The only thing that changes is that the accesslist generator SKIPS rows
- * that have not passed, so the tracker does not serve a swarm the panel has not confirmed.
+ * scrapes it and decides.
+ *
+ * ── served WHILE it proves itself, withdrawn when it fails (1.73.0) ─────────
+ *
+ * The second half of the proof is a peer announcing to THIS tracker, and a tracker in whitelist mode
+ * refuses the announces of a hash its accesslist does not carry: a probe whose hash is not served can
+ * never see a peer. So a row being probed IS served — for at most wl_probe_timeout_minutes — and the
+ * accesslist generator leaves out only the rows that FAILED. Written down because the code had it
+ * both ways: the add path appended the hash at once while the generator dropped 'probing' rows, so a
+ * full regeneration in the middle of a probe (another probe passing, a ban) withdrew it and the probe
+ * failed for a reason that was not the torrent's; and a failure was never withdrawn until some
+ * unrelated regeneration came along. wlProbeTick() now regenerates the moment anything fails.
+ * A row a PERSON must approve (a partner key's review) is a different promise: never served first.
  *
  * That is deliberately not a separate queue: a second queue would need its own worker, its own
  * failure modes and its own way of getting stuck, to do a job the first one already does. What it
@@ -163,9 +174,11 @@ function wlProbeTick(PDO $db, array $cfg): array {
         }
     }
 
-    // A row that just passed belongs in the accesslist, and until it is regenerated the tracker is
-    // not serving something it has now accepted.
-    if ($out['passed'] > 0) {
+    // A row that FAILED leaves the accesslist now (1.73.0): it was served while it tried — see the header —
+    // and a failure that waited for some unrelated regeneration went on being served, deleted or kept. A
+    // pass changes nothing in the file (a row being probed is already in it), but it is regenerated then too:
+    // the file stays what the table says, whatever path wrote it.
+    if ($out['passed'] > 0 || $out['failed'] > 0) {
         whitelistMarkDirty(true);
         whitelistRegenerate($db, $cfg);
         whitelistMaybeReload($cfg);

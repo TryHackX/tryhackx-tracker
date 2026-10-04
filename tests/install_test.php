@@ -200,6 +200,21 @@ try {
     $marks = $fresh->query("SELECT `key` FROM settings WHERE `key` LIKE 'schema_grant_%'")->fetchAll(PDO::FETCH_COLUMN);
     check('the grant markers are recorded on a fresh install too', count($marks) >= 3, implode(', ', $marks));
 
+    /* ── v91: the Transparency page's switch is a default row (1.73.0) ────── */
+    // The menu link and the page's text read a missing row as on; the page's own data (api/transparency.php)
+    // read it as off and answered 403 — on every install whose settings came from the migration.
+    $tv = fn(PDO $db) => $db->query("SELECT `value` FROM settings WHERE `key` = 'transparency_enabled'")->fetchColumn();
+    check('an upgraded install has the Transparency page\'s switch, on', $tv($up) === '1', var_export($tv($up), true));
+    check('… and so does a fresh one', $tv($fresh) === '1', var_export($tv($fresh), true));
+    // Never overwriting a stored value: an operator's "off" survives the next migration.
+    $up->exec("UPDATE settings SET `value` = '0' WHERE `key` = 'transparency_enabled'");
+    $up->exec("UPDATE settings SET `value` = '90' WHERE `key` = 'schema_version'");
+    $cfgU2 = [];
+    foreach ($up->query("SELECT `key`,`value` FROM settings")->fetchAll() as $r) $cfgU2[$r['key']] = $r['value'];
+    ensureSchema($up, $cfgU2);
+    check('… and an operator\'s "off" survives the migration to 91', $tv($up) === '0' && $ver($up) === TRACKER_SCHEMA_VERSION,
+          var_export($tv($up), true) . ' / ' . $ver($up));
+
 } finally {
     try { $adm->exec("DROP DATABASE IF EXISTS `$nameFresh`"); } catch (\Throwable $e) { /* leave it for a person */ }
     try { $adm->exec("DROP DATABASE IF EXISTS `$nameUp`"); } catch (\Throwable $e) { /* same */ }

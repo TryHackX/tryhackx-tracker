@@ -34,9 +34,14 @@ const HOME_CUSTOM_MAX = 6;
  *
  * `gate` names the setting that can switch the whole section off elsewhere — surfaced in the editor
  * so that "hidden here" and "turned off there" are never confused.
+ *
+ * `label` and `about` — what Settings → Home page layout and the page editor call a section and say it is — are in
+ * the READER'S language (1.73.0: they were English on every page): a.home.sec_name_<key> / a.home.sec_line_<key>,
+ * whose English is the words below (tests/homelayout_test.php holds them together). `$english` keeps these words,
+ * for the audit log, which is written in English whoever reads it.
  */
-function homeSectionCatalog(): array {
-    return [
+function homeSectionCatalog(bool $english = false): array {
+    $cat = [
         'header' => [
             'label' => 'Title and tagline',
             'heading' => null,
@@ -92,6 +97,15 @@ function homeSectionCatalog(): array {
             'about' => 'The report call-to-action and the contact address.',
         ],
     ];
+    if ($english || !function_exists('__')) return $cat;
+    foreach ($cat as $key => &$meta) {
+        foreach (['label' => 'a.home.sec_name_', 'about' => 'a.home.sec_line_'] as $field => $prefix) {
+            $said = __($prefix . $key);
+            if ($said !== $prefix . $key) $meta[$field] = $said;
+        }
+    }
+    unset($meta);
+    return $cat;
 }
 
 /** Every section key, in the shipped order. */
@@ -168,9 +182,9 @@ function homeSectionIsCustom(string $key): bool {
     return (bool)preg_match('/^custom_[1-9][0-9]?$/', $key);
 }
 
-/** The label of any section — the catalogue's, or the custom section's own. */
-function homeSectionLabel(array $cfg, string $key): string {
-    $cat = homeSectionCatalog();
+/** The label of any section — the catalogue's (in the reader's language, or English for the audit log), or the custom section's own. */
+function homeSectionLabel(array $cfg, string $key, bool $english = false): string {
+    $cat = homeSectionCatalog($english);
     if (isset($cat[$key])) return $cat[$key]['label'];
     foreach (homeLayout($cfg)['custom'] as $c) if ($c['key'] === $key) return $c['label'];
     return $key;

@@ -309,8 +309,9 @@ check('the picker takes them (prepFa()) and draws each chip from the catalogue i
       && str_contains($pjs, 'return faGlyph(fa, n, cat.byName[n].v[0], true);'));
 check('… a chip is its icon, named for a screen reader (aria-label: the category) and explained in the site\'s tooltip (data-tip: the name and the count) — no browser title, no words beside the icon',
       str_contains($pjs, "'aria-pressed': on ? 'true' : 'false', 'aria-label': c.l, tabindex: on ? '0' : '-1',")
-      && str_contains($pjs, "dataset: { c: c.id, tip: t('js.shout.fa_cat_title', { name: c.l, n: c.n }) } }, g.length ? g : c.l);")
-      && !str_contains($pjs, "title: t('js.shout.fa_cat_title'"));
+      // 1.73.0: the tip is a t.key() word (it keeps its key for the live language switch)
+      && str_contains($pjs, "dataset: { c: c.id, tip: t.key('js.shout.fa_cat_title', { name: c.l, n: c.n }) } }, g.length ? g : c.l);")
+      && !str_contains($pjs, "title: t('js.shout.fa_cat_title'") && !str_contains($pjs, "title: t.key('js.shout.fa_cat_title'"));
 check('… the chosen chip filled with the accent, the others an edge; a run a longer pill; on a phone about a cell\'s height',
       str_contains($css0 = (string)file_get_contents($root . '/assets/css/style.css'), '.shout-picker-cat.active { color: var(--bg-card); background: var(--accent); border-color: var(--accent); }')
       && str_contains($css0, '.shout-picker .shout-picker-cat .fai { display: block; font-size: 0.95rem;')

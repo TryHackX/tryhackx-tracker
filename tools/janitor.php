@@ -7,8 +7,9 @@
  * It first applies the scheduled tracker mode (whitelist hours → blacklist/whitelist switch via the
  * configured root helper; see includes/schedule.php — this is the ONLY place the switch runs, never a
  * web request), then fires any due whitelist file regeneration / tracker reload (SIGHUP) that the
- * request-driven janitor could not run because nobody visited the site, removes stale temp files and
- * prunes old API bans. Then the statistics timeline tick (includes/stats_timeline.php): one sample per
+ * request-driven janitor could not run because nobody visited the site, and removes stale temp files
+ * (old API bans are pruned by the retention step near the end, in every mode — includes/retention.php).
+ * Then the statistics timeline tick (includes/stats_timeline.php): one sample per
  * configured interval (from the shared stats cache when fresh, otherwise from the tracker), 5-minute /
  * hourly roll-ups and retention. Then the observed-hash index, the inbound UDP traffic sample
  * (includes/netlimit.php — also where an expired "throttle hard" window is undone and where the
@@ -50,6 +51,7 @@ require_once $root . '/includes/digest.php';
 require_once $root . '/includes/people.php';
 require_once $root . '/includes/shout.php';
 require_once $root . '/includes/antispam.php';
+require_once $root . '/includes/retention.php';
 
 /**
  * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
@@ -293,11 +295,37 @@ try {
         if ($tp > 0 && in_array('-v', $argv ?? [], true)) echo "[pm] pruned $tp stale typing rows\n";
     }
 
+    // The messages' Trash (1.73.0, includes/people.php): a conversation that has been there pm_trash_days is
+    // deleted for good for the member who put it there — their watermark moves over it; the other side's copy and
+    // every row stay. A bounded pass (per side one UPDATE a batch, oldest first by its key); logged when it did
+    // something, because a member asking "where did my conversation go" deserves a line in the journal.
+    if (function_exists('pmTrashPurgeExpired')) {
+        $pt = pmTrashPurgeExpired($db, $cfg);
+        if ($pt['purged'] > 0 || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[pm] trash purged=%d (older than %d days, %d statements)', $pt['purged'], pmTrashDays($cfg), $pt['batches']), "\n";
+        }
+    }
+
     // The anti-spam layer's state (1.71.0, includes/antispam.php): a row nobody touched for two days holds
     // nothing any rule still reads — every ladder has reset and every window has closed long before.
     if (function_exists('antispamPrune')) {
         $ap = antispamPrune($db);
         if ($ap > 0 && in_array('-v', $argv ?? [], true)) echo "[antispam] pruned $ap idle rows\n";
+    }
+
+    // The retention of what nothing else comes back to (1.73.0, includes/retention.php): API bans expired 90 days
+    // ago, the sign-in bridge's spent and expired tickets, the panel's failed sign-ins past the lockout window and
+    // the forms' limits past the longest window — in every tracker mode (the bans were pruned only in whitelist
+    // mode, by one request in fifty; the rest only when the same address or action came back). Bounded; the two
+    // files under their own locks. Routine, so a line only with -v or when a step failed.
+    if (function_exists('retentionTick')) {
+        $rt = retentionTick($db, $cfg);
+        if ($rt['errors'] || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[retention] api_bans=%d bridge_tickets=%d login_attempts=%d rate_limits=%d%s',
+                $rt['api_bans'], $rt['bridge_tickets'], $rt['login_attempts'], $rt['rate_limits'],
+                $rt['errors'] ? ' errors=' . implode(' | ', array_map(fn($k, $v) => $k . ': ' . $v,
+                    array_keys($rt['errors']), $rt['errors'])) : ''), "\n";
+        }
     }
 
     // The shoutbox's retention, both halves at once: older than shout_keep_days, and beyond

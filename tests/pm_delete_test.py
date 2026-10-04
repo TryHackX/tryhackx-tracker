@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """
-"Delete this conversation" means FOR ME (api/user_messages.php, 1.64.0, schema 70):
+"Delete this conversation" means FOR ME (api/user_messages.php, 1.64.0, schema 70) — and since 1.73.0
+(schema 90) it means INTO MY TRASH first, and for good only when I say so or the Trash runs out:
     python tests/pm_delete_test.py        (needs the local server and a bootstrapped database)
 
 `message_threads` holds one row per pair, so a conversation cannot be deleted without deleting
-somebody else's copy of it. What each side gets instead is a watermark — the id of the last message
-they had when they pressed delete — and every read path shows only what is above their own.
+somebody else's copy of it. What each side gets instead is a Trash edge (`u_*_trash_upto`, 1.73.0) and a
+watermark (`u_*_cleared_id`, v70) of its own, and every read path of the Inbox shows only what is above
+both.
 
-This drives both accounts over HTTP and asks, after A has deleted:
-  · A's inbox does not list the thread, A's window is empty, A's unread count is 0;
+This drives both accounts over HTTP and asks, after A has pressed Delete (op `trash`):
+  · A's inbox does not list the thread, A's window is empty, A's unread count is 0 — while A's Trash
+    lists it, whole, and opens it;
   · B's inbox lists it, whole, with its own unread count — nothing of B's has moved;
   · B writes once more: the thread is back for A, showing ONLY that message, and the preview and
-    the unread count are about that message alone;
-  · a word that appears only in the deleted half is not a deep-search hit for A and still is for B;
+    the unread count are about that message alone — the older part still in A's Trash;
+  · a word that appears only in the deleted half is not an Inbox deep-search hit for A, is a Trash one,
+    and still is an Inbox one for B;
+  · the explicit operations answer as they should over HTTP: a stale Undo (restore from an edge that is
+    no longer the Trash's) changes nothing; `purge` moves A's watermark over the Trash — for good; the
+    old name `delete` is `trash`; `empty_trash`; each needs the CSRF token;
   · nothing was removed from `user_messages` — a reported message has to stay readable to the panel.
 
 Self-cleaning: the two accounts, their thread and its messages go in the finally, and every setting
@@ -123,7 +130,8 @@ try:
     clear_throttles()
     # Every switch this test relies on, said out loud.
     for k, v in (("users_enabled", "1"), ("pm_enabled", "1"), ("pm_who", "all"),
-                 ("pm_live_seconds", "0"), ("pm_max_per_day", "50")):
+                 ("pm_live_seconds", "0"), ("pm_max_per_day", "50"), ("antispam_enabled", "0"),
+                 ("pm_trash_days", "30"), ("pm_archive_returns", "1")):
         was[k] = php("echo (string)($cfg['" + k + "'] ?? '');")
         php("setSetting($db, '" + k + "', '" + v + "');")
     member_before = php("$st = $db->query(\"SELECT permissions FROM user_groups WHERE slug = 'member'\"); echo (string)$st->fetchColumn();")
@@ -153,24 +161,41 @@ try:
     s, j = ca.api("user_messages", "POST", {"op": "report", "message": reported, "reason": "for the record"})
     check("A reports one of B's lines", s == 200 and j.get("success"), (s, j))
 
-    # ── A deletes ─────────────────────────────────────────────────────────────────────────────
-    s, j = ca.api("user_messages", "POST", {"op": "delete", "with": B})
-    check("A deletes the conversation", s == 200 and j.get("success"), (s, j))
-    mark = php("$st = $db->prepare('SELECT u_low_cleared_id, u_high_cleared_id FROM message_threads t"
-               " JOIN users a ON a.username = ? JOIN users b ON b.username = ?"
-               " WHERE (t.u_low = a.id AND t.u_high = b.id) OR (t.u_low = b.id AND t.u_high = a.id)');"
-               "$st->execute(['" + A + "', '" + B + "']); $r = $st->fetch(PDO::FETCH_ASSOC);"
-               "echo (int)$r['u_low_cleared_id'], ',', (int)$r['u_high_cleared_id'];")
-    lo, hi = [int(x) for x in mark.split(",")]
-    check("exactly ONE side's watermark moved, to the last message there is",
-          (lo == max(ids_before) and hi == 0) or (hi == max(ids_before) and lo == 0), (mark, max(ids_before)))
+    def marks():
+        """A's and B's side of the thread: [cleared_id, trash_upto, trashed_at is set] each."""
+        out = php("$st = $db->prepare('SELECT t.*, a.id AS aid FROM message_threads t"
+                  " JOIN users a ON a.username = ? JOIN users b ON b.username = ?"
+                  " WHERE (t.u_low = a.id AND t.u_high = b.id) OR (t.u_low = b.id AND t.u_high = a.id)');"
+                  "$st->execute(['" + A + "', '" + B + "']); $r = $st->fetch(PDO::FETCH_ASSOC);"
+                  "$sa = (int)$r['u_low'] === (int)$r['aid'] ? 'u_low' : 'u_high'; $sb = $sa === 'u_low' ? 'u_high' : 'u_low';"
+                  "echo json_encode(['a' => [(int)$r[$sa . '_cleared_id'], (int)$r[$sa . '_trash_upto'], $r[$sa . '_trashed_at'] !== null],"
+                  " 'b' => [(int)$r[$sb . '_cleared_id'], (int)$r[$sb . '_trash_upto'], $r[$sb . '_trashed_at'] !== null]]);")
+        return json.loads(out)
+
+    # ── A presses Delete: into A's Trash ──────────────────────────────────────────────────────
+    s, j = ca.api("user_messages", "POST", {"op": "trash", "with": B})
+    check("A deletes the conversation — into the Trash", s == 200 and j.get("success") and j.get("changed") and not j.get("final")
+          and j.get("upto") == max(ids_before) and j.get("was") == 0, (s, j))
+    check("… the answer says where it is now and what the tabs hold",
+          (j.get("state") or {}).get("place") == "trash" and (j.get("counts") or {}).get("trash") == 1 and int(j.get("unread") or 0) == 0, j)
+    mk = marks()
+    check("exactly ONE side's Trash moved, to the last message there is — no watermark, nothing deleted",
+          mk["a"] == [0, max(ids_before), True] and mk["b"] == [0, 0, False], (mk, max(ids_before)))
+    s, j2 = ca.api("user_messages", "POST", {"op": "trash", "with": B})
+    check("… and Delete again changes nothing (explicit, not a toggle)", s == 200 and j2.get("success") and not j2.get("changed"), j2)
 
     s, inbox_a = ca.api("user_messages")
     check("A's inbox does not list it any more", thread_of(inbox_a, B) is None, inbox_a.get("threads"))
     check("… and A's unread count is nothing", int(inbox_a.get("unread") or 0) == 0, inbox_a.get("unread"))
+    s, trash_a = ca.api("user_messages&view=trash")
+    tt = thread_of(trash_a, B)
+    check("… A's Trash lists it, whole: five messages, the last one previewed",
+          s == 200 and trash_a.get("view") == "trash" and tt is not None and tt.get("n") == 5 and WORD in (tt.get("preview") or "")
+          and tt.get("until"), trash_a.get("threads"))
     s, view_a = ca.api("user_messages&with=" + B)
-    check("… and opening it shows an empty conversation, not an error",
-          s == 200 and view_a.get("success") and (view_a.get("rows") or []) == [], (s, view_a))
+    check("… and opening it from anywhere shows what lies in the Trash, saying so",
+          s == 200 and view_a.get("success") and view_a.get("part") == "trash" and len(view_a.get("rows") or []) == 5
+          and (view_a.get("state") or {}).get("place") == "trash", (s, view_a.get("part"), view_a.get("state")))
 
     s, inbox_b = cb.api("user_messages")
     tb = thread_of(inbox_b, A)
@@ -192,6 +217,9 @@ try:
     rows_a2 = view_a2.get("rows") or []
     check("… and A's window holds that one message and nothing before it",
           len(rows_a2) == 1 and "after the deletion" in rows_a2[0]["html"], [r["html"] for r in rows_a2])
+    check("… while the older five wait in A's Trash (the window says how many)",
+          view_a2.get("part") == "live" and (view_a2.get("state") or {}).get("trash") == 5
+          and thread_of(ca.api("user_messages&view=trash")[1], B) is not None, view_a2.get("state"))
 
     # ── the poll agrees with the window it polls for ──────────────────────────────────────────
     php("setSetting($db, 'pm_live_seconds', '5');")
@@ -202,10 +230,36 @@ try:
 
     # ── the deep search ───────────────────────────────────────────────────────────────────────
     s, deep_a = ca.api("user_messages&deep=1&search=" + WORD)
-    check("a word said only in the deleted half is not a hit for A",
+    check("a word said only in the deleted half is not a hit in A's Inbox",
           s == 200 and deep_a.get("deep") and thread_of(deep_a, B) is None, deep_a.get("threads"))
+    s, deep_at = ca.api("user_messages&view=trash&deep=1&search=" + WORD)
+    check("… it is one in A's Trash, where that half is", s == 200 and thread_of(deep_at, B) is not None, deep_at.get("threads"))
     s, deep_b = cb.api("user_messages&deep=1&search=" + WORD)
-    check("… and still is for B", s == 200 and thread_of(deep_b, A) is not None, deep_b.get("threads"))
+    check("… and still is in B's Inbox", s == 200 and thread_of(deep_b, A) is not None, deep_b.get("threads"))
+
+    # ── the explicit operations, over HTTP ────────────────────────────────────────────────────
+    s, j = ca.api("user_messages", "POST", {"op": "restore", "with": B, "to": 0, "from": max(ids_before) - 1})
+    check("an Undo from an edge that is no longer the Trash's is a no-op, not an error",
+          s == 200 and j.get("success") and not j.get("changed") and marks()["a"][1] == max(ids_before), (s, j))
+    s, j = ca.api("user_messages", "POST", {"op": "purge", "with": B})
+    mk = marks()
+    check("purge: for good — A's watermark over the Trash, the Trash empty (edge 0, no moment)",
+          s == 200 and j.get("success") and j.get("changed") and j.get("final") and mk["a"] == [max(ids_before), 0, False]
+          and mk["b"] == [0, 0, False], (j, mk))
+    s, j = ca.api("user_messages", "POST", {"op": "purge", "with": B})
+    check("… purge again: nothing to do, no error", s == 200 and j.get("success") and not j.get("changed"), j)
+    s, j = ca.api("user_messages", "POST", {"op": "restore", "with": B})
+    check("… and nothing of it can be restored any more", s == 200 and not j.get("changed") and marks()["a"][0] == max(ids_before), j)
+    # The old name (a page loaded before the update) is the Trash; then the Trash is emptied in one go.
+    s, j = ca.api("user_messages", "POST", {"op": "delete", "with": B})
+    check("the old name `delete` is `trash` now: restorable", s == 200 and j.get("op") == "trash" and j.get("changed") and not j.get("final"), j)
+    s, j = ca.api("user_messages", "POST", {"op": "empty_trash"})
+    check("empty_trash: one conversation deleted for good, the Trash empty", s == 200 and j.get("purged") == 1
+          and (j.get("counts") or {}).get("trash") == 0 and marks()["a"][1] == 0, j)
+    s, j = ca.api("user_messages", "POST", {"op": "archive", "with": B, "csrf_token": "nope"})
+    check("… and every one of them needs the page's CSRF token", s == 403 and not j.get("success"), (s, j))
+    s, j = ca.api("user_messages", "POST", {"op": "toggle", "with": B})
+    check("… and an operation that does not exist is refused, not guessed", s == 400 and j.get("error") == "unknown_op", (s, j))
 
     # ── nothing was destroyed ─────────────────────────────────────────────────────────────────
     left = php("$st = $db->prepare('SELECT COUNT(*) FROM user_messages WHERE id IN ("

@@ -73,6 +73,13 @@ function statsTimelineRangeButtons(): array {
     return ['24h' => '24h', '7d' => '7d', '14d' => '2w', '30d' => '1m', '90d' => '3m', 'all' => 'All'];
 }
 
+/** A range button's label in the page's language: the chart's own words (js.timeline.range_*, 1.73.0 — Settings
+ *  showed the English list above on every page). */
+function statsTimelineRangeLabel(string $key): string {
+    $k = ['24h' => 'range_24h', '7d' => 'range_7d', '14d' => 'range_2w', '30d' => 'range_1m', '90d' => 'range_3m', 'all' => 'range_all'][$key] ?? null;
+    return ($k !== null && function_exists('__')) ? __('js.timeline.' . $k) : (statsTimelineRangeButtons()[$key] ?? $key);
+}
+
 /** Enabled range buttons (always at least one; unknown keys dropped, display order kept). */
 function statsTimelineEnabledRanges(array $cfg): array {
     $all = array_keys(statsTimelineRangeButtons());

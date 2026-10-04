@@ -67,7 +67,7 @@ function captchaUnavailable() {
 async function fetchWithCaptcha(endpoint, data, solveFirst) {
     if (solveFirst && !data['captcha_token']) {
         const pre = await requestCaptchaToken(endpoint);
-        if (!pre) return { error: captchaUnavailable() ? t('js.app.captcha_unavailable') : t('js.app.captcha_cancelled') };
+        if (!pre) return { error: captchaUnavailable() ? t.key('js.app.captcha_unavailable') : t.key('js.app.captcha_cancelled') };
         data['captcha_token'] = pre;
         data['g-recaptcha-response'] = pre;
     }
@@ -81,14 +81,14 @@ async function fetchWithCaptcha(endpoint, data, solveFirst) {
         });
         json = await res.json();
     } catch {
-        return { error: t('js.app.invalid_response') };
+        return { error: t.key('js.app.invalid_response') };
     }
 
     if (json.captcha_required) {
         const token = await requestCaptchaToken(endpoint);
         // No token: either the visitor closed the box, or the widget itself failed (bad site key,
         // domain not allow-listed, provider blocked) — those two need different advice.
-        if (!token) return { error: captchaUnavailable() ? t('js.app.captcha_unavailable') : t('js.app.captcha_cancelled') };
+        if (!token) return { error: captchaUnavailable() ? t.key('js.app.captcha_unavailable') : t.key('js.app.captcha_cancelled') };
         // Send under both names: `captcha_token` (generic) and the legacy reCAPTCHA field name.
         data['captcha_token'] = token;
         data['g-recaptcha-response'] = token;
@@ -105,7 +105,7 @@ async function fetchWithCaptcha(endpoint, data, solveFirst) {
                 });
                 last = await res2.json();
             } catch {
-                last = { error: t('js.app.invalid_response_after_captcha') };
+                last = { error: t.key('js.app.invalid_response_after_captcha') };
             }
             const failed = last && typeof last.error === 'string' && last.error.indexOf('CAPTCHA verification failed') !== -1;
             if (!failed) return last;
@@ -116,19 +116,27 @@ async function fetchWithCaptcha(endpoint, data, solveFirst) {
     return json;
 }
 
+// The seconds drawn over the button by the anti-spam layer's own rule (1.73.0: `as-waiting` + data-as-wait,
+// assets/css/style.css) — never written into the button: its label is the server's, and the live language switch
+// translates it in place, also during the wait (the label used to be captured and written back after it, in the
+// language the page had when the wait began).
 function startCooldown(btn, seconds) {
-    const originalText = btn.textContent;
     let remaining = seconds;
     btn.disabled = true;
-    btn.textContent = t('js.app.wait_seconds', {n: remaining});
+    const draw = () => btn.setAttribute('data-as-wait', t.key('js.app.wait_seconds', {n: remaining}));
+    btn.classList.add('as-waiting');
+    draw();
+    document.addEventListener('langswap', draw);
     const interval = setInterval(() => {
         remaining--;
         if (remaining <= 0) {
             clearInterval(interval);
+            document.removeEventListener('langswap', draw);
+            btn.classList.remove('as-waiting');
+            btn.removeAttribute('data-as-wait');
             btn.disabled = false;
-            btn.textContent = originalText;
         } else {
-            btn.textContent = t('js.app.wait_seconds', {n: remaining});
+            draw();
         }
     }, 1000);
 }
@@ -137,12 +145,12 @@ function startCooldown(btn, seconds) {
 // identically here). `messages` maps error codes to friendly text; `rate_limit` has a default.
 // Highlights any `fields` the server flagged and starts the resubmit cooldown.
 function showFormSubmitError(form, alert, btn, json, messages = {}) {
-    const map = { rate_limit: t('js.app.rate_limit'), ...messages };
+    const map = { rate_limit: t.key('js.app.rate_limit'), ...messages };
     const code = json && json.error;
     alert.className = 'alert alert-error show';
     // A code this form has words for; else the sentence the server already wrote (the anti-spam layer's answers
     // carry one, 1.71.0); else the code itself.
-    alert.textContent = (code && map[code]) ? map[code] : ((json && typeof json.message === 'string' && json.message) || code || t('js.app.error_occurred'));
+    alert.textContent = (code && map[code]) ? map[code] : ((json && typeof json.message === 'string' && json.message) || code || t.key('js.app.error_occurred'));
     if (json && Array.isArray(json.fields)) {
         json.fields.forEach(f => {
             const input = form.querySelector(`[name="${f}"]`);
@@ -155,7 +163,7 @@ function showFormSubmitError(form, alert, btn, json, messages = {}) {
 // Shared handling for a network/transport failure on form submit.
 function showFormNetworkError(alert, btn) {
     alert.className = 'alert alert-error show';
-    alert.textContent = t('js.app.network_error_retry');
+    alert.textContent = t.key('js.app.network_error_retry');
     startCooldown(btn, 5);
 }
 
@@ -186,13 +194,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!v) { hashHint.textContent = ''; hashHint.style.color = ''; return; }
             const nonHex = v.replace(/[a-fA-F0-9]/g, '');
             if (nonHex.length > 0) {
-                hashHint.textContent = t('js.app.hash_non_hex');
+                hashHint.textContent = t.key('js.app.hash_non_hex');
                 hashHint.style.color = 'var(--error)';
             } else if (v.length < 40) {
-                hashHint.textContent = t('js.app.hash_length', {n: v.length});
+                hashHint.textContent = t.key('js.app.hash_length', {n: v.length});
                 hashHint.style.color = 'var(--warning)';
             } else {
-                hashHint.textContent = t('js.app.hash_valid');
+                hashHint.textContent = t.key('js.app.hash_valid');
                 hashHint.style.color = 'var(--success)';
             }
             validateMagnetCross();
@@ -331,7 +339,7 @@ function copyText(btn, sourceId) {
             i.className = 'bi bi-check-lg';
         }
         btn.classList.add('copied');
-        if (typeof window.pubTip === 'function') window.pubTip(btn, t('js.common.copied'));
+        if (typeof window.pubTip === 'function') window.pubTip(btn, t.key('js.common.copied'));
         clearTimeout(btn.__copyTimer);
         btn.__copyTimer = setTimeout(() => {
             const j = btn.querySelector(':scope > .bi');
@@ -389,20 +397,20 @@ function validateMagnetCross() {
     }
 
     if (!magnet.startsWith('magnet:?')) {
-        magnetHint.textContent = t('js.app.magnet_prefix');
+        magnetHint.textContent = t.key('js.app.magnet_prefix');
         magnetHint.style.color = 'var(--error)';
         return;
     }
 
     if (!/[?&]xt=urn:btih:/i.test(magnet)) {
-        magnetHint.textContent = t('js.app.magnet_missing_xt');
+        magnetHint.textContent = t.key('js.app.magnet_missing_xt');
         magnetHint.style.color = 'var(--error)';
         return;
     }
 
     const extractedHash = extractHashFromMagnet(magnet);
     if (!extractedHash) {
-        magnetHint.textContent = t('js.app.magnet_invalid_hash');
+        magnetHint.textContent = t.key('js.app.magnet_invalid_hash');
         magnetHint.style.color = 'var(--error)';
         return;
     }
@@ -410,14 +418,14 @@ function validateMagnetCross() {
     const currentHash = hashInput.value.trim().toLowerCase();
     if (currentHash && currentHash.length === 40 && /^[a-f0-9]{40}$/.test(currentHash)) {
         if (extractedHash === currentHash) {
-            magnetHint.textContent = t('js.app.magnet_hash_matches');
+            magnetHint.textContent = t.key('js.app.magnet_hash_matches');
             magnetHint.style.color = 'var(--success)';
         } else {
-            magnetHint.textContent = t('js.app.magnet_hash_mismatch');
+            magnetHint.textContent = t.key('js.app.magnet_hash_mismatch');
             magnetHint.style.color = 'var(--error)';
         }
     } else {
-        magnetHint.textContent = t('js.app.magnet_hash_extracted', {hash: extractedHash.substring(0, 8)});
+        magnetHint.textContent = t.key('js.app.magnet_hash_extracted', {hash: extractedHash.substring(0, 8)});
         magnetHint.style.color = 'var(--text-muted)';
     }
 }
@@ -502,10 +510,10 @@ async function handleReportSubmit(e) {
 
         if (json.success) {
             alert.className = 'alert alert-success show';
-            alert.textContent = t('js.app.report_submitted', {id: json.id});
+            alert.textContent = t.key('js.app.report_submitted', {id: json.id});
             // Whitelist mode: the reported hash may not even be registered here (nothing to serve).
             if (json.whitelisted === false) {
-                alert.textContent += ' ' + t('js.app.report_not_registered_note');
+                alert.replaceChildren(t.key('js.app.report_submitted', {id: json.id}), ' ', t.key('js.app.report_not_registered_note'));
             }
             form.reset();
             const mc = document.getElementById('msg-counter');
@@ -517,7 +525,7 @@ async function handleReportSubmit(e) {
             btn.disabled = false;
         } else {
             showFormSubmitError(form, alert, btn, json, {
-                duplicate: t('js.app.report_duplicate'),
+                duplicate: t.key('js.app.report_duplicate'),
             });
         }
     } catch {
@@ -549,7 +557,7 @@ async function handleStatusCheck(e) {
         if (!extracted) {
             form.querySelector('[name="search_query"]').closest('.form-group').classList.add('has-error');
             alert.className = 'alert alert-error show';
-            alert.textContent = t('js.app.magnet_extract_failed');
+            alert.textContent = t.key('js.app.magnet_extract_failed');
             return;
         }
         query = extracted;
@@ -560,7 +568,7 @@ async function handleStatusCheck(e) {
     if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
         emailField.closest('.form-group').classList.add('has-error');
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.status_email_required');
+        alert.textContent = t.key('js.app.status_email_required');
         return;
     }
 
@@ -607,20 +615,21 @@ async function handleStatusCheck(e) {
             }
             document.getElementById('res-date').textContent = json.timestamp;
 
-            const statusLabels = { pending: t('js.app.status_pending'), checked: t('js.app.status_checked'), blocked: t('js.app.status_blocked'), archived: t('js.app.status_archived') };
+            const statusLabels = { pending: 'js.app.status_pending', checked: 'js.app.status_checked', blocked: 'js.app.status_blocked', archived: 'js.app.status_archived' };
             const statusEl = document.getElementById('res-status');
             let badges = '';
             if (json.blocked) {
-                badges += '<span class="status-badge blocked">' + escHtml(t('js.app.status_blocked')) + '</span> ';
+                badges += '<span class="status-badge blocked">' + t.html('js.app.status_blocked') + '</span> ';
             }
             if (json.checked && !json.blocked && json.archived) {
-                badges += '<span class="status-badge checked">' + escHtml(t('js.app.status_checked')) + '</span> ';
+                badges += '<span class="status-badge checked">' + t.html('js.app.status_checked') + '</span> ';
             }
             if (json.archived) {
-                badges += '<span class="status-badge archived">' + escHtml(t('js.app.status_archived')) + '</span>';
+                badges += '<span class="status-badge archived">' + t.html('js.app.status_archived') + '</span>';
             }
             if (!badges) {
-                badges = '<span class="status-badge ' + json.status + '">' + (statusLabels[json.status] || json.status) + '</span>';
+                badges = '<span class="status-badge ' + escAttr(json.status) + '">'
+                    + (statusLabels[json.status] ? t.html(statusLabels[json.status]) : escHtml(json.status)) + '</span>';
             }
             statusEl.innerHTML = badges;
 
@@ -632,7 +641,7 @@ async function handleStatusCheck(e) {
                     document.getElementById('status-appeal-hash').value = json.infoHash;
                     document.getElementById('status-appeal-type').value = 'block';
                     document.getElementById('status-appeal-report-id').value = json.id;
-                    document.getElementById('status-appeal-desc').textContent = t('js.app.status_appeal_desc');
+                    document.getElementById('status-appeal-desc').textContent = t.key('js.app.status_appeal_desc');
                 } else {
                     statusAppealSection.style.display = 'none';
                 }
@@ -641,11 +650,11 @@ async function handleStatusCheck(e) {
             result.style.display = 'block';
         } else {
             alert.className = 'alert alert-error show';
-            alert.textContent = json.error === 'not_found' ? t('js.app.status_not_found') : (json.error || t('js.app.error'));
+            alert.textContent = json.error === 'not_found' ? t.key('js.app.status_not_found') : (json.error || t.key('js.app.error'));
         }
     } catch {
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.network_error');
+        alert.textContent = t.key('js.app.network_error');
     }
 }
 
@@ -673,7 +682,7 @@ async function handleBlockCheck(e) {
         hash = extractHashFromMagnet(query);
         if (!hash) {
             alert.className = 'alert alert-error show';
-            alert.textContent = t('js.app.magnet_extract_failed');
+            alert.textContent = t.key('js.app.magnet_extract_failed');
             return;
         }
     }
@@ -681,7 +690,7 @@ async function handleBlockCheck(e) {
     if (!/^[a-fA-F0-9]{40}$/.test(hash)) {
         form.querySelector('[name="block_query"]').closest('.form-group').classList.add('has-error');
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.block_enter_valid_hash');
+        alert.textContent = t.key('js.app.block_enter_valid_hash');
         return;
     }
 
@@ -692,9 +701,9 @@ async function handleBlockCheck(e) {
             document.getElementById('bc-hash').textContent = json.infoHash;
             const statusEl = document.getElementById('bc-status');
             if (json.blocked) {
-                statusEl.innerHTML = '<span class="status-badge blocked">' + escHtml(t('js.app.status_blocked')) + '</span>';
+                statusEl.innerHTML = '<span class="status-badge blocked">' + t.html('js.app.status_blocked') + '</span>';
             } else {
-                statusEl.innerHTML = '<span class="status-badge checked">' + escHtml(t('js.app.status_not_blocked')) + '</span>';
+                statusEl.innerHTML = '<span class="status-badge checked">' + t.html('js.app.status_not_blocked') + '</span>';
             }
             // Whitelist mode: a second badge — registered (served) / not registered — independent of blocks
             const wlRow = document.getElementById('bc-row-whitelist');
@@ -704,9 +713,9 @@ async function handleBlockCheck(e) {
                     wlEl.textContent = '';
                     const badge = document.createElement('span');
                     badge.className = 'status-badge ' + (json.whitelisted ? 'checked' : 'blocked');
-                    badge.textContent = json.whitelisted ? t('js.app.whitelisted') : t('js.app.not_whitelisted');
+                    badge.textContent = json.whitelisted ? t.key('js.app.whitelisted') : t.key('js.app.not_whitelisted');
                     wlEl.appendChild(badge);
-                    wlEl.appendChild(document.createTextNode(json.whitelisted ? t('js.app.whitelisted_desc') : t('js.app.not_whitelisted_desc')));
+                    wlEl.append(json.whitelisted ? t.key('js.app.whitelisted_desc') : t.key('js.app.not_whitelisted_desc'));
                     wlRow.style.display = '';
                 } else {
                     wlRow.style.display = 'none';
@@ -727,11 +736,11 @@ async function handleBlockCheck(e) {
             result.style.display = 'block';
         } else {
             alert.className = 'alert alert-error show';
-            alert.textContent = json.error || t('js.app.error');
+            alert.textContent = json.error || t.key('js.app.error');
         }
     } catch {
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.network_error');
+        alert.textContent = t.key('js.app.network_error');
     }
 }
 
@@ -775,7 +784,7 @@ async function handleAppealSubmit(e) {
 
         if (json.success) {
             alert.className = 'alert alert-success show';
-            alert.textContent = t('js.app.appeal_submitted');
+            alert.textContent = t.key('js.app.appeal_submitted');
             form.reset();
             document.getElementById('appeal-hash').value = document.getElementById('bc-hash').textContent;
             const counter = document.getElementById('appeal-counter');
@@ -829,7 +838,7 @@ async function handleStatusAppealSubmit(e) {
 
         if (json.success) {
             alert.className = 'alert alert-success show';
-            alert.textContent = t('js.app.appeal_submitted');
+            alert.textContent = t.key('js.app.appeal_submitted');
             form.querySelector('[name="name"]').value = '';
             form.querySelector('[name="email"]').value = '';
             form.querySelector('[name="message"]').value = '';
@@ -863,22 +872,23 @@ async function loadTransparency(page) {
         document.getElementById('transparency-content').style.display = 'block';
 
         if (!json.success || !json.data.length) {
-            document.getElementById('trans-body').innerHTML = '<tr><td colspan="7" class="transparency-empty">' + t('js.app.trans_no_data') + '</td></tr>';
-            document.getElementById('trans-summary').innerHTML = '<p>' + t('js.app.trans_no_data_yet') + '</p>';
+            document.getElementById('trans-body').innerHTML = '<tr><td colspan="7" class="transparency-empty">' + t.html('js.app.trans_no_data') + '</td></tr>';
+            document.getElementById('trans-summary').innerHTML = '<p>' + t.html('js.app.trans_no_data_yet') + '</p>';
             document.getElementById('trans-pagination').innerHTML = '';
             return;
         }
 
         const a = json.aggregates || {};
         const pct = (n) => a.total_requests ? ' (' + Math.round(n / a.total_requests * 100) + '%)' : '';
+        // The labels keep their keys (t.html, 1.73.0): the live language switch says them again in place.
         document.getElementById('trans-summary').innerHTML =
             '<div class="trans-stats">' +
-            '<div class="trans-stat-accent"><strong>' + (a.total_entities || 0) + '</strong><br><small>' + t('js.app.trans_organizations') + '</small></div>' +
-            '<div class="trans-stat-accent"><strong>' + (a.total_groups || json.total) + '</strong><br><small>' + t('js.app.trans_groups') + '</small></div>' +
-            '<div class="trans-stat-text"><strong>' + (a.total_requests || 0) + '</strong><br><small>' + t('js.app.trans_total_requests') + '</small></div>' +
-            '<div class="trans-stat-success"><strong>' + (a.total_reviewed || 0) + pct(a.total_reviewed || 0) + '</strong><br><small>' + t('js.app.trans_reviewed') + '</small></div>' +
-            '<div class="trans-stat-error"><strong>' + (a.total_blocked || 0) + pct(a.total_blocked || 0) + '</strong><br><small>' + t('js.app.trans_blocked') + '</small></div>' +
-            '<div class="trans-stat-warning"><strong>' + (a.total_pending || 0) + pct(a.total_pending || 0) + '</strong><br><small>' + t('js.app.trans_awaiting_review') + '</small></div>' +
+            '<div class="trans-stat-accent"><strong>' + (a.total_entities || 0) + '</strong><br><small>' + t.html('js.app.trans_organizations') + '</small></div>' +
+            '<div class="trans-stat-accent"><strong>' + (a.total_groups || json.total) + '</strong><br><small>' + t.html('js.app.trans_groups') + '</small></div>' +
+            '<div class="trans-stat-text"><strong>' + (a.total_requests || 0) + '</strong><br><small>' + t.html('js.app.trans_total_requests') + '</small></div>' +
+            '<div class="trans-stat-success"><strong>' + (a.total_reviewed || 0) + pct(a.total_reviewed || 0) + '</strong><br><small>' + t.html('js.app.trans_reviewed') + '</small></div>' +
+            '<div class="trans-stat-error"><strong>' + (a.total_blocked || 0) + pct(a.total_blocked || 0) + '</strong><br><small>' + t.html('js.app.trans_blocked') + '</small></div>' +
+            '<div class="trans-stat-warning"><strong>' + (a.total_pending || 0) + pct(a.total_pending || 0) + '</strong><br><small>' + t.html('js.app.trans_awaiting_review') + '</small></div>' +
             '</div>';
 
         // json.data.length is the size of THIS page, and the last page is short — using it
@@ -904,13 +914,13 @@ async function loadTransparency(page) {
             pagEl.innerHTML = '';
         } else {
             pagEl.innerHTML = `
-                <button ${json.page <= 1 ? 'disabled' : ''} data-trans-page="${json.page - 1}">${t('js.app.prev')}</button>
-                <span>${t('js.app.page_of', {page: json.page, pages: json.pages})}</span>
-                <button ${json.page >= json.pages ? 'disabled' : ''} data-trans-page="${json.page + 1}">${t('js.app.next')}</button>
+                <button ${json.page <= 1 ? 'disabled' : ''} data-trans-page="${json.page - 1}">${t.html('js.app.prev')}</button>
+                <span>${t.html('js.app.page_of', {page: json.page, pages: json.pages})}</span>
+                <button ${json.page >= json.pages ? 'disabled' : ''} data-trans-page="${json.page + 1}">${t.html('js.app.next')}</button>
             `;
         }
     } catch {
-        document.getElementById('transparency-loading').textContent = t('js.app.load_failed');
+        document.getElementById('transparency-loading').textContent = t.key('js.app.load_failed');
     }
 }
 
@@ -938,7 +948,10 @@ function updateTransSortIcons() {
     });
 }
 
+// A t.key() word comes out as markup that keeps its key (t.html(), assets/js/i18n.js, 1.73.0): the live language switch
+// says it again where a template put it. Text content only — an attribute takes escAttr(), which writes the words.
 function escHtml(str) {
+    if (t.isKey(str)) return t.html(str);
     if (!str) return '';
     const d = document.createElement('div');
     d.textContent = str;
@@ -988,7 +1001,11 @@ function initWhitelistPage() {
         const max = parseInt(ta.dataset.max || '20', 10);
         const refresh = () => {
             const c = wlCountInput(ta.value);
-            counter.textContent = t('js.app.wl_count_valid', {n: c.valid}) + (c.invalid ? ' / ' + t('js.app.wl_count_invalid', {n: c.invalid}) : '') + (c.valid > max ? ' — ' + t('js.app.wl_count_max', {n: max}) : '');
+            // Each part a word that keeps its key (1.73.0): the counter follows the live language switch.
+            const parts = [t.key('js.app.wl_count_valid', {n: c.valid})];
+            if (c.invalid) parts.push(' / ', t.key('js.app.wl_count_invalid', {n: c.invalid}));
+            if (c.valid > max) parts.push(' — ', t.key('js.app.wl_count_max', {n: max}));
+            counter.replaceChildren(...parts);
             counter.style.color = (c.valid > max) ? 'var(--error)' : (c.invalid ? 'var(--warning)' : '');
         };
         ta.addEventListener('input', refresh);
@@ -1013,12 +1030,16 @@ async function handleWhitelistSubmit(e) {
     if (c.valid === 0) { group.classList.add('has-error'); return; }
     if (c.valid > max) {
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.wl_too_many', {n: max});
+        alert.textContent = t.key('js.app.wl_too_many', {n: max});
         return;
     }
     btn.disabled = true;
-    const orig = btn.textContent;
-    btn.textContent = t('js.app.wl_registering');
+    // "Registering…" over the button, not in it (1.73.0): its own words are the server's and follow the live switch.
+    const busy = (on) => {
+        btn.classList.toggle('as-waiting', on);
+        if (on) btn.setAttribute('data-as-wait', t.key('js.app.wl_registering')); else btn.removeAttribute('data-as-wait');
+    };
+    busy(true);
     try {
         // The optional fields only make sense for a single torrent: one description cannot describe
         // twelve of them, and silently attaching it to all twelve would be worse than refusing.
@@ -1038,46 +1059,49 @@ async function handleWhitelistSubmit(e) {
             alert.className = 'alert alert-success show';
             const s = json.summary || {};
             const parts = [];
-            if (s.added) parts.push(t('js.app.wl_sum_added', {n: s.added}));
-            if (s.exists) parts.push(t('js.app.wl_sum_exists', {n: s.exists}));
+            if (s.added) parts.push(t.key('js.app.wl_sum_added', {n: s.added}));
+            if (s.exists) parts.push(t.key('js.app.wl_sum_exists', {n: s.exists}));
             // The one sentence that settles the fairness question: the first person to register a
             // hash owns it, so a duplicate does not move it onto the second person's profile.
-            if (s.exists && pubEl && pubEl.checked) parts.push(t('js.app.wl_exists_not_yours'));
-            if (s.banned) parts.push(t('js.app.wl_sum_banned', {n: s.banned}));
-            if (s.invalid) parts.push(t('js.app.wl_sum_invalid', {n: s.invalid}));
-            let msg = parts.join(', ') + '.';
+            if (s.exists && pubEl && pubEl.checked) parts.push(t.key('js.app.wl_exists_not_yours'));
+            if (s.banned) parts.push(t.key('js.app.wl_sum_banned', {n: s.banned}));
+            if (s.invalid) parts.push(t.key('js.app.wl_sum_invalid', {n: s.invalid}));
+            // The sentence as words that keep their keys (1.73.0), the punctuation between them as it was.
+            const msg = [];
+            parts.forEach((p, i) => { if (i) msg.push(', '); msg.push(p); });
+            msg.push('.');
             if (s.added) {
                 const secs = parseInt(json.active_in_seconds || 0, 10);
-                msg += secs > 0 ? ' ' + t('js.app.wl_active_within', {n: secs}) : ' ' + t('js.app.wl_active_now');
+                msg.push(' ', secs > 0 ? t.key('js.app.wl_active_within', {n: secs}) : t.key('js.app.wl_active_now'));
             }
-            if (json.file_ok === false) msg += ' ' + t('js.app.wl_file_warning');
+            if (json.file_ok === false) msg.push(' ', t.key('js.app.wl_file_warning'));
             // When the tracker checks submissions, "registered" is not the end of the story yet.
             if (json.probe && json.probe.on && (json.probe.hashes || []).length) {
-                msg += ' ' + t('js.app.wl_probe_checking');
+                msg.push(' ', t.key('js.app.wl_probe_checking'));
                 if (window.wlWatchProbe) window.wlWatchProbe(json.probe.hashes, json.probe.timeout_minutes);
             }
             if (json.content_proposed) {
-                msg += ' ' + t('js.app.wl_content_proposed');
+                msg.push(' ', t.key('js.app.wl_content_proposed'));
             } else if (json.content_pending) {
-                msg += ' ' + t('js.app.wl_content_pending');
+                msg.push(' ', t.key('js.app.wl_content_pending'));
             }
-            alert.textContent = msg;
+            alert.replaceChildren(...msg);
             renderWhitelistResults(json);
             ta.value = '';
-            document.getElementById('wl-counter').textContent = t('js.app.wl_count_valid', {n: 0});
-            btn.textContent = orig;
+            document.getElementById('wl-counter').textContent = t.key('js.app.wl_count_valid', {n: 0});
+            busy(false);
             startCooldown(btn, 10);
         } else {
-            btn.textContent = orig;
+            busy(false);
             const messages = {
-                rate_limit: t('js.app.wl_err_rate_limit'),
-                daily_cap: t('js.app.wl_err_daily_cap'),
-                too_many: t('js.app.wl_too_many', {n: max}),
-                no_valid: t('js.app.wl_err_no_valid'),
-                registration_disabled: t('js.app.wl_err_disabled'),
-                registration_unavailable: t('js.app.wl_err_unavailable'),
-                'CAPTCHA cancelled': t('js.app.captcha_cancelled_2'),
-                'CAPTCHA verification failed': t('js.app.captcha_failed'),
+                rate_limit: t.key('js.app.wl_err_rate_limit'),
+                daily_cap: t.key('js.app.wl_err_daily_cap'),
+                too_many: t.key('js.app.wl_too_many', {n: max}),
+                no_valid: t.key('js.app.wl_err_no_valid'),
+                registration_disabled: t.key('js.app.wl_err_disabled'),
+                registration_unavailable: t.key('js.app.wl_err_unavailable'),
+                'CAPTCHA cancelled': t.key('js.app.captcha_cancelled_2'),
+                'CAPTCHA verification failed': t.key('js.app.captcha_failed'),
             };
             showFormSubmitError(form, alert, btn, json, messages);
             // The anti-spam layer's wait (1.71.0 — a description attached too soon after the last): the button
@@ -1088,7 +1112,7 @@ async function handleWhitelistSubmit(e) {
             if (json && Array.isArray(json.results)) renderWhitelistResults(json);
         }
     } catch {
-        btn.textContent = orig;
+        busy(false);
         showFormNetworkError(alert, btn);
     }
 }
@@ -1101,7 +1125,7 @@ function renderWhitelistResults(json) {
     list.textContent = '';
     const results = Array.isArray(json.results) ? json.results : [];
     if (!results.length) { box.hidden = true; return; }
-    const labels = { added: t('js.app.wl_label_added'), exists: t('js.app.wl_label_exists'), banned: t('js.app.wl_label_banned'), invalid: t('js.app.wl_label_invalid') };
+    const labels = { added: t.key('js.app.wl_label_added'), exists: t.key('js.app.wl_label_exists'), banned: t.key('js.app.wl_label_banned'), invalid: t.key('js.app.wl_label_invalid') };
     results.forEach(r => {
         const row = document.createElement('div');
         row.className = 'wl-row wl-' + (r.status || 'invalid');
@@ -1131,8 +1155,8 @@ function renderWhitelistResults(json) {
             const b = document.createElement('button');
             b.type = 'button';
             b.className = 'copy-btn wl-copy ic-btn';
-            b.setAttribute('aria-label', t('js.app.copy_magnet'));
-            b.dataset.tip = t('js.app.copy_magnet');
+            b.setAttribute('aria-label', t.key('js.app.copy_magnet'));
+            b.setAttribute('data-tip', t.key('js.app.copy_magnet'));
             const bi = document.createElement('i');
             bi.className = 'bi bi-copy';
             bi.setAttribute('aria-hidden', 'true');
@@ -1141,7 +1165,7 @@ function renderWhitelistResults(json) {
                 navigator.clipboard.writeText(magnet).then(() => {
                     bi.className = 'bi bi-check-lg';
                     b.classList.add('copied');
-                    if (typeof window.pubTip === 'function') window.pubTip(b, t('js.common.copied'));
+                    if (typeof window.pubTip === 'function') window.pubTip(b, t.key('js.common.copied'));
                     setTimeout(() => { bi.className = 'bi bi-copy'; b.classList.remove('copied'); }, 1500);
                 });
             });
@@ -1167,7 +1191,7 @@ async function handleWhitelistCheck(e) {
     const h = wlParseToken(raw);
     if (!h) {
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.wl_check_enter');
+        alert.textContent = t.key('js.app.wl_check_enter');
         return;
     }
     btn.disabled = true;
@@ -1177,21 +1201,22 @@ async function handleWhitelistCheck(e) {
         if (json.success) {
             if (json.banned) {
                 alert.className = 'alert alert-error show';
-                alert.textContent = t('js.app.wl_check_banned', {hash: json.hash});
+                alert.textContent = t.key('js.app.wl_check_banned', {hash: json.hash});
             } else if (json.whitelisted) {
                 alert.className = 'alert alert-success show';
-                alert.textContent = t('js.app.wl_check_registered', {hash: json.hash}) + (json.added_at ? ' ' + t('js.app.wl_check_since', {date: json.added_at}) : '') + '.';
+                alert.replaceChildren(...[t.key('js.app.wl_check_registered', {hash: json.hash})]
+                    .concat(json.added_at ? [' ', t.key('js.app.wl_check_since', {date: json.added_at})] : [], ['.']));
             } else {
                 alert.className = 'alert alert-error show';
-                alert.textContent = json.mode === 'whitelist' ? t('js.app.wl_check_not_registered', {hash: json.hash}) : t('js.app.wl_check_open', {hash: json.hash});
+                alert.textContent = json.mode === 'whitelist' ? t.key('js.app.wl_check_not_registered', {hash: json.hash}) : t.key('js.app.wl_check_open', {hash: json.hash});
             }
         } else {
             alert.className = 'alert alert-error show';
-            alert.textContent = json.error || t('js.app.lookup_failed');
+            alert.textContent = json.error || t.key('js.app.lookup_failed');
         }
     } catch {
         alert.className = 'alert alert-error show';
-        alert.textContent = t('js.app.network_error_2');
+        alert.textContent = t.key('js.app.network_error_2');
     } finally {
         startCooldown(btn, 3);
     }
@@ -1229,10 +1254,10 @@ const SYNCING_UI_DEFER_MS = 400;
 // Honest, generic progress messages (cycled while genuinely waiting on the upstream fetch).
 // Kept accurate on purpose — they describe what's actually happening, not invented "steps".
 let statsLoadingTexts = [
-    { title: t('js.app.stats_load1_title'), sub: t('js.app.stats_load1_sub') },
-    { title: t('js.app.stats_load2_title'), sub: t('js.app.stats_load2_sub') },
-    { title: t('js.app.stats_load3_title'), sub: t('js.app.stats_load3_sub') },
-    { title: t('js.app.stats_load4_title'), sub: t('js.app.stats_load4_sub') }
+    { title: t.key('js.app.stats_load1_title'), sub: t.key('js.app.stats_load1_sub') },
+    { title: t.key('js.app.stats_load2_title'), sub: t.key('js.app.stats_load2_sub') },
+    { title: t.key('js.app.stats_load3_title'), sub: t.key('js.app.stats_load3_sub') },
+    { title: t.key('js.app.stats_load4_title'), sub: t.key('js.app.stats_load4_sub') }
 ];
 let statsLoadingCycleIndex = 0;
 let statsLoadingCycleTimer = null;
@@ -1311,7 +1336,7 @@ function initTrackerStats() {
             const beacon = homeWidget.querySelector('.home-stat-beacon');
             if (beacon) {
                 beacon.classList.remove('syncing');
-                beacon.title = t('js.app.stats_live');
+                beacon.title = t.key('js.app.stats_live');
             }
             clearTimeout(statsHomePollTimer);
             statsHomePollTimer = setTimeout(() => {
@@ -1380,10 +1405,10 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             countdownBar.style.width = '100%';
             countdownBar.classList.add('syncing');
         }
-        if (countdownText) countdownText.textContent = t('js.app.stats_syncing');
+        if (countdownText) countdownText.textContent = t.key('js.app.stats_syncing');
         if (!isFirstLoad && badge) {
             badge.classList.add('syncing');
-            if (beaconText) beaconText.textContent = t('js.app.stats_syncing');
+            if (beaconText) beaconText.textContent = t.key('js.app.stats_syncing');
         }
     }, SYNCING_UI_DEFER_MS);
 
@@ -1408,7 +1433,7 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
         if (e.name === 'AbortError') return;
         stopStatsLoadingAnimation();
         // Retry after a longer pause on transport-level errors.
-        showStatsError(t('js.app.stats_net_error'));
+        showStatsError(t.key('js.app.stats_net_error'));
         clearTimeout(statsPollTimer);
         statsPollTimer = setTimeout(() => {
             document.getElementById('stats-error')?.classList.add('hidden');
@@ -1430,7 +1455,7 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
 
         if (!json || !json.success) {
             // Server returned a non-success payload (e.g. 503 with no cache). Wait, then retry.
-            const errMsg = (json && json.error) ? json.error : t('js.app.stats_server_error');
+            const errMsg = (json && json.error) ? json.error : t.key('js.app.stats_server_error');
             if (json && (json.syncing_in_background || json.sync_required)) {
                 // The server is busy but answering — fall back to polling rather than an error UI.
                 const d = syncPollDelayMs(statsSyncBackoff);
@@ -1461,14 +1486,14 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             if (badge) {
                 badge.classList.remove('hidden');
                 badge.classList.add('syncing');
-                if (beaconText) beaconText.textContent = t('js.app.stats_syncing');
+                if (beaconText) beaconText.textContent = t.key('js.app.stats_syncing');
             }
             if (countdownBar) {
                 countdownBar.style.transition = 'none';
                 countdownBar.style.width = '100%';
                 countdownBar.classList.add('syncing');
             }
-            if (countdownText) countdownText.textContent = t('js.app.stats_syncing');
+            if (countdownText) countdownText.textContent = t.key('js.app.stats_syncing');
 
             const d = syncPollDelayMs(statsSyncBackoff);
             statsSyncBackoff++;
@@ -1481,14 +1506,14 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             if (badge) {
                 badge.classList.remove('hidden');
                 badge.classList.add('syncing');
-                if (beaconText) beaconText.textContent = t('js.app.stats_syncing');
+                if (beaconText) beaconText.textContent = t.key('js.app.stats_syncing');
             }
             if (countdownBar) {
                 countdownBar.style.transition = 'none';
                 countdownBar.style.width = '100%';
                 countdownBar.classList.add('syncing');
             }
-            if (countdownText) countdownText.textContent = t('js.app.stats_syncing');
+            if (countdownText) countdownText.textContent = t.key('js.app.stats_syncing');
             // Fire a blocking sync. statsInFlight guard prevents re-entry; the call schedules
             // its own next poll/countdown on completion.
             loadStatsFull(true, false);
@@ -1498,7 +1523,7 @@ async function loadStatsFull(forceSync = false, isFirstLoad = false) {
             if (badge) {
                 badge.classList.remove('hidden');
                 badge.classList.remove('syncing');
-                if (beaconText) beaconText.textContent = t('js.app.stats_live');
+                if (beaconText) beaconText.textContent = t.key('js.app.stats_live');
             }
             const remainingSec = json.remaining_seconds !== undefined ? parseInt(json.remaining_seconds) : intervalSec;
             startStatsCountdown(remainingSec);
@@ -1559,16 +1584,16 @@ function renderStatsDashboard(res) {
     const subLeechEl = document.getElementById('sub-leechers');
     const subPeersEl = document.getElementById('sub-peers');
     if (peerStyle === 'percent') {
-        if (subSeedsEl) subSeedsEl.textContent = t('js.app.pct_of_total_peers', {pct: seedPct});
-        if (subLeechEl) subLeechEl.textContent = t('js.app.pct_of_total_peers', {pct: leechPct});
+        if (subSeedsEl) subSeedsEl.textContent = t.key('js.app.pct_of_total_peers', {pct: seedPct});
+        if (subLeechEl) subLeechEl.textContent = t.key('js.app.pct_of_total_peers', {pct: leechPct});
     } else {
-        if (subSeedsEl) subSeedsEl.textContent = t('js.app.of_peers', {peers: peersFmt});
-        if (subLeechEl) subLeechEl.textContent = t('js.app.of_peers', {peers: peersFmt});
+        if (subSeedsEl) subSeedsEl.textContent = t.key('js.app.of_peers', {peers: peersFmt});
+        if (subLeechEl) subLeechEl.textContent = t.key('js.app.of_peers', {peers: peersFmt});
     }
-    if (subPeersEl) subPeersEl.textContent = t('js.app.leech_seed_summary', {leechers: leechFmt, seeds: seedsFmt});
+    if (subPeersEl) subPeersEl.textContent = t.key('js.app.leech_seed_summary', {leechers: leechFmt, seeds: seedsFmt});
     
     document.getElementById('val-uptime').textContent = res.uptime_string;
-    document.getElementById('val-tracker-id').textContent = res.tracker_id || t('js.app.na');
+    document.getElementById('val-tracker-id').textContent = res.tracker_id || t.key('js.app.na');
     
     const versionEl = document.getElementById('val-version');
     // res.version comes from the upstream tracker XML — treat it as untrusted. Only render it as
@@ -1582,10 +1607,10 @@ function renderStatsDashboard(res) {
         a.rel = 'noopener noreferrer';
         a.className = 'status-link font-mono';
         a.style.fontSize = '0.75rem';
-        a.innerHTML = escHtml(t('js.app.git_commit')) + ' <i class="bi bi-box-arrow-up-right"></i>';
+        a.innerHTML = t.html('js.app.git_commit') + ' <i class="bi bi-box-arrow-up-right"></i>';
         versionEl.appendChild(a);
     } else {
-        versionEl.textContent = res.version || t('js.app.na');
+        versionEl.textContent = res.version || t.key('js.app.na');
     }
     
     const udpCount = res.connections.udp.connect + res.connections.udp.announce + res.connections.udp.scrape;
@@ -1623,20 +1648,20 @@ function renderStatsDashboard(res) {
             debugPanel.classList.remove('hidden');
             errorsBody.innerHTML = res.http_errors.map(err => {
                 let badgeClass = 'status-badge-sm status-badge ';
-                let severity = t('js.app.severity_low');
+                let severity = 'js.app.severity_low';
                 if (err.code.startsWith('5')) {
                     badgeClass += 'blocked';
-                    severity = t('js.app.severity_critical');
+                    severity = 'js.app.severity_critical';
                 } else if (err.code.startsWith('400')) {
                     badgeClass += 'pending';
-                    severity = t('js.app.severity_moderate');
+                    severity = 'js.app.severity_moderate';
                 } else {
                     badgeClass += 'archived';
                 }
                 return `<tr>
                     <td class="font-mono text-white">${escHtml(err.code)}</td>
                     <td class="font-mono">${err.count.toLocaleString()}</td>
-                    <td><span class="${badgeClass}">${severity}</span></td>
+                    <td><span class="${badgeClass}">${t.html(severity)}</span></td>
                 </tr>`;
             }).join('');
         } else {
@@ -1650,7 +1675,7 @@ function renderRenewHeatmap(intervals) {
     if (!container) return;
     
     if (intervals.length === 0) {
-        container.innerHTML = '<div class="text-center text-muted w-100 py-3">' + escHtml(t('js.app.no_heat_profile')) + '</div>';
+        container.innerHTML = '<div class="text-center text-muted w-100 py-3">' + t.html('js.app.no_heat_profile') + '</div>';
         return;
     }
     
@@ -1668,9 +1693,8 @@ function renderRenewHeatmap(intervals) {
         
         // item.interval comes from upstream XML — escape before interpolating into markup.
         const label = escHtml(item.interval);
-        const tooltipText = escAttr(t('js.app.interval_tooltip', {interval: item.interval, count: item.count.toLocaleString()}));
-
-        return `<div class="heat-block level-${level}" data-tooltip="${tooltipText}">
+        // The tooltip keeps its key (t.ah(), 1.73.0), so the live language switch says it again.
+        return `<div class="heat-block level-${level}"${t.ah('data-tooltip', 'js.app.interval_tooltip', {interval: item.interval, count: item.count.toLocaleString()})}>
             <span>${label}</span>
         </div>`;
     }).join('');
@@ -1724,7 +1748,7 @@ function startStatsCountdown(seconds) {
     }
 
     if (seconds <= 0) {
-        if (text) text.textContent = t('js.app.syncing_swarms');
+        if (text) text.textContent = t.key('js.app.syncing_swarms');
         if (bar) {
             bar.style.transition = 'none';
             bar.style.width = '100%';
@@ -1746,7 +1770,7 @@ function startStatsCountdown(seconds) {
         bar.style.width = '0%';
     }
 
-    if (text) text.textContent = t('js.app.next_update_in', {n: seconds});
+    if (text) text.textContent = t.key('js.app.next_update_in', {n: seconds});
 
     // The TEXT label still ticks down — but it only changes the textContent, no layout work.
     const totalTime = seconds * 1000;
@@ -1755,7 +1779,7 @@ function startStatsCountdown(seconds) {
     statsCountdownTimer = setInterval(() => {
         const elapsed = performance.now() - startTime;
         const currentRemaining = Math.max(0, Math.ceil(seconds - (elapsed / 1000)));
-        if (text) text.textContent = t('js.app.next_update_in', {n: currentRemaining});
+        if (text) text.textContent = t.key('js.app.next_update_in', {n: currentRemaining});
 
         if (elapsed >= totalTime) {
             clearInterval(statsCountdownTimer);
@@ -1764,7 +1788,7 @@ function startStatsCountdown(seconds) {
                 bar.style.width = '100%';
                 bar.classList.add('syncing');
             }
-            if (text) text.textContent = t('js.app.syncing_swarms');
+            if (text) text.textContent = t.key('js.app.syncing_swarms');
             loadStatsFull(true, false);
         }
     }, 250);
@@ -1811,7 +1835,7 @@ async function loadStatsHome(forceSync = false) {
     statsHomeSyncingUiTimer = setTimeout(() => {
         if (beacon) {
             beacon.classList.add('syncing');
-            beacon.title = t('js.app.syncing_swarms');
+            beacon.title = t.key('js.app.syncing_swarms');
         }
     }, SYNCING_UI_DEFER_MS);
 
@@ -1833,7 +1857,7 @@ async function loadStatsHome(forceSync = false) {
         statsHomeInFlight = false;
         clearTimeout(statsHomeSyncingUiTimer);
         if (e.name === 'AbortError') return;
-        if (beacon) { beacon.classList.remove('syncing'); beacon.title = t('js.app.sync_failed'); }
+        if (beacon) { beacon.classList.remove('syncing'); beacon.title = t.key('js.app.sync_failed'); }
         clearTimeout(statsHomePollTimer);
         statsHomePollTimer = setTimeout(() => loadStatsHome(false), 15000);
         return;
@@ -1846,7 +1870,7 @@ async function loadStatsHome(forceSync = false) {
 
         if (json.syncing_in_background) {
             // Wait for the existing sync to finish — exponential backoff, not fixed 2s.
-            if (beacon) { beacon.classList.add('syncing'); beacon.title = t('js.app.syncing_swarms'); }
+            if (beacon) { beacon.classList.add('syncing'); beacon.title = t.key('js.app.syncing_swarms'); }
             const d = syncPollDelayMs(statsHomeSyncBackoff);
             statsHomeSyncBackoff++;
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), d);
@@ -1857,7 +1881,7 @@ async function loadStatsHome(forceSync = false) {
         } else {
             // Fresh cache. Schedule the next poll at the home interval (not the server cache TTL).
             statsHomeSyncBackoff = 0;
-            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t('js.app.live_syncing'); }
+            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t.key('js.app.live_syncing'); }
             const remainingSec = json.remaining_seconds !== undefined ? parseInt(json.remaining_seconds) : intervalSec;
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), Math.max(1, remainingSec) * 1000);
         }
@@ -1868,7 +1892,7 @@ async function loadStatsHome(forceSync = false) {
             statsHomeSyncBackoff++;
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), d);
         } else {
-            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t('js.app.sync_failed'); }
+            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t.key('js.app.sync_failed'); }
             statsHomePollTimer = setTimeout(() => loadStatsHome(false), 15000);
         }
     }
@@ -2016,27 +2040,30 @@ const escLayer = (box, close) => {
  *   · WHILE IT IS OPEN the row's other controls are hidden (`opts.host` gets `shout-asking`) —
  *     the shoutbox's pin button is drawn on hover exactly where "No" lands, so declining to delete
  *     a line pinned it instead.
- *   · IT EXPIRES: after `opts.life` (five seconds by default), on a press anywhere outside it, on
- *     Esc, and when the language starts changing — the question is built by a script and the live
- *     switch has no counterpart for it in the fetched page, so it would sit there in the old
- *     language. Closing it puts the button back BEFORE the walk, where the walk translates it.
- *   · ONE WAY OUT. finish() takes down the timer and all three listeners whichever exit was taken.
+ *   · IT EXPIRES: after `opts.life` (five seconds by default), on a press anywhere outside it and on
+ *     Esc. NOT when the language changes (1.73.0): the question and its Yes / No are written with
+ *     t.key() (assets/js/i18n.js), so the live switch says them in the other language where they
+ *     stand, and the button waits beside them, hidden — never out of the page, where the switch could
+ *     not reach it (it used to be swapped out, and the question closed itself on every switch).
+ *     So `question` is a t.key() word; a plain string still works and stays as it was written.
+ *   · ONE WAY OUT. finish() takes down the timer and both listeners whichever exit was taken.
  *
  * `onYes()` returns false to say "put the button back" — anything else means the caller has taken
  * the row away itself. The timer stops the moment Yes is pressed; the request is asynchronous and
  * nothing may pull the question out from under it.
  *
- * opts: { host, relabel(btn), life }
+ * opts: { host, life }   (`relabel`, which re-read the button's words on its way back, is no longer needed)
  */
 const askInPlace = (btn, question, onYes, opts) => {
     opts = opts || {};
     const mk = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; if (text !== undefined) n.textContent = text; return n; };
     const ask = mk('span', 'shout-confirm');
     ask.appendChild(mk('span', 'shout-confirm-q', question));
-    const yes = mk('button', 'shout-yes', t('js.shout.yes'));
-    const no = mk('button', 'shout-no', t('js.shout.no'));
+    const yes = mk('button', 'shout-yes', t.key('js.shout.yes'));
+    const no = mk('button', 'shout-no', t.key('js.shout.no'));
     yes.type = 'button'; no.type = 'button';
     let timer = 0, open = true;
+    const wasHidden = btn.hidden;
 
     const finish = (putBack) => {
         if (!open) return;
@@ -2044,18 +2071,15 @@ const askInPlace = (btn, question, onYes, opts) => {
         clearTimeout(timer);
         document.removeEventListener('pointerdown', onOutside, true);
         document.removeEventListener('keydown', onEsc, true);
-        document.removeEventListener('langswap:begin', onSwap);
         if (opts.host) opts.host.classList.remove('shout-asking');
         if (putBack && ask.parentNode) {
-            // The button has been out of the page while the language may have changed under it, so
-            // its words are re-read from the dictionary on the way back in.
-            if (typeof opts.relabel === 'function') opts.relabel(btn);
-            ask.replaceWith(btn);
+            ask.remove();
+            btn.hidden = wasHidden;
         }
     };
-    function onOutside(e) { if (!ask.contains(e.target)) finish(true); }
+    // The language switcher translates the question where it stands (1.73.0): pressing it is not a "no".
+    function onOutside(e) { if (!ask.contains(e.target) && !(window.LangSwap && window.LangSwap.isSwitch(e.target))) finish(true); }
     function onEsc(e) { if (e.key === 'Escape') { e.preventDefault(); finish(true); btn.focus(); } }
-    function onSwap() { finish(true); }
 
     yes.addEventListener('click', async () => {
         yes.disabled = true;
@@ -2069,18 +2093,166 @@ const askInPlace = (btn, question, onYes, opts) => {
     ask.appendChild(yes);
     ask.appendChild(no);
     if (opts.host) opts.host.classList.add('shout-asking');
-    btn.replaceWith(ask);
+    btn.after(ask);
+    btn.hidden = true;
     yes.focus();
     // Capture, so a control that stops the press from travelling still closes the question.
     document.addEventListener('pointerdown', onOutside, true);
     document.addEventListener('keydown', onEsc, true);
-    document.addEventListener('langswap:begin', onSwap);
     timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);
     return ask;
 };
 // On window as well as in scope: assets/js/shoutbox.js and assets/js/people.js are separate files
 // and a named dependency reads better in them than a bare identifier from somewhere else.
 window.askInPlace = askInPlace;
+
+/**
+ * "It is done — Undo", at the foot of the window (1.73.0).
+ *
+ * The site had no toast on its public pages (favourites.js has long called a `showToastPub` that never existed),
+ * and the messages' Archive and Trash needed one: the owner's "it vanishes at once and I cannot bring it back —
+ * give me three to five seconds to take it back". So a small one, for any page that wants it:
+ *
+ *   siteToast({ text, args, key, undo, life, home }) → { close() }
+ *     text   a dictionary KEY, never a sentence: the toast says it with t.key(), and says it again in the other
+ *            language when the live switch changes it (a script-made node has no counterpart in the fetched
+ *            page, so the switch itself cannot — assets/js/lang-swap.js); `args` are its placeholders
+ *     key    a toast with the same key takes the place of the one before it (the same thing moved twice)
+ *     undo   a function, called once when Undo is pressed; the toast goes then (the caller says how it went)
+ *     life   how long it stays, 5 s by default — PAUSED while the pointer rests on it or the reader's own focus
+ *            is in it, so somebody reading it or tabbing to Undo is never raced by the clock (WCAG 2.2.1)
+ *     home   where the keyboard's focus goes back to if the toast leaves while holding it (a function or a node)
+ *
+ * KEYBOARD: Undo and the × are ordinary buttons. When the thing that was pressed has gone from the page (a row
+ * that moved away, a conversation that closed) the focus would fall to <body>, so it lands on Undo instead — a
+ * focus the TOAST gave, which does not hold its clock (a mouse's click that took a row away would otherwise
+ * leave a toast that never went); Tab onwards, and it is the reader's. Esc inside a toast dismisses it. When a
+ * toast holding the focus goes, the focus goes `home`, or to the toast below it. STACKING: newest at the
+ * bottom, three at most — a fourth pushes the oldest out. A SCREEN READER hears each one from the region, which
+ * is made before the first line is put in it. Its words are `js.common.toast_*`, the bundle every public page has.
+ */
+const siteToast = (() => {
+    const MAX = 3;
+    let box = null;
+    const open = [];
+    const region = () => {
+        if (box && box.isConnected) return box;
+        box = document.createElement('div');
+        box.className = 'site-toasts';
+        box.setAttribute('role', 'region');
+        box.setAttribute('aria-live', 'polite');
+        box.setAttribute('aria-label', t.key('js.common.toast_region'));
+        document.body.appendChild(box);
+        return box;
+    };
+    const say = (entry) => {
+        entry.msg.textContent = t.key(entry.text, entry.args || undefined);
+        if (entry.undoBtn) entry.undoBtn.textContent = t.key('js.common.toast_undo');
+        entry.x.setAttribute('aria-label', t.key('js.common.toast_close'));
+        entry.x.setAttribute('data-tip', t.key('js.common.toast_close'));
+    };
+    document.addEventListener('langswap', () => {
+        if (box) box.setAttribute('aria-label', t.key('js.common.toast_region'));
+        open.forEach(say);
+    });
+    function show(opts) {
+        opts = opts || {};
+        if (opts.key) open.filter((e) => e.key === opts.key).forEach((e) => e.close(true));
+        while (open.length >= MAX) open[0].close(true);
+        const host = region();
+        const el = document.createElement('div');
+        el.className = 'site-toast';
+        const msg = document.createElement('span');
+        msg.className = 'site-toast-text';
+        el.appendChild(msg);
+        const entry = { el, msg, key: opts.key || null, text: String(opts.text || ''), args: opts.args || null,
+                        undoBtn: null, x: null, timer: 0, left: Math.max(1500, Number(opts.life) || 5000), since: 0,
+                        hover: false, focus: false, given: false, paused: false, gone: false };
+        if (typeof opts.undo === 'function') {
+            const u = document.createElement('button');
+            u.type = 'button';
+            u.className = 'site-toast-undo';
+            u.addEventListener('click', async () => {
+                if (u.disabled) return;
+                u.disabled = true;
+                entry.close(true);
+                try { await opts.undo(); } catch (e) { /* the caller's answer, or its silence */ }
+            });
+            entry.undoBtn = u;
+            el.appendChild(u);
+        }
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'site-toast-x ic-btn';
+        const xi = document.createElement('i');
+        xi.className = 'bi bi-x-lg';
+        xi.setAttribute('aria-hidden', 'true');
+        x.appendChild(xi);
+        x.addEventListener('click', () => entry.close());
+        entry.x = x;
+        el.appendChild(x);
+        say(entry);
+        const tick = () => {
+            clearTimeout(entry.timer);
+            if (entry.paused || entry.gone) return;
+            entry.since = Date.now();
+            entry.timer = setTimeout(() => entry.close(), entry.left);
+        };
+        // Paused while the pointer is on it OR the focus is in it; what was left of its time resumes after both go.
+        const sync = () => {
+            const held = entry.hover || entry.focus;
+            if (held && !entry.paused) {
+                entry.paused = true;
+                clearTimeout(entry.timer);
+                entry.left = Math.max(1500, entry.left - (Date.now() - entry.since));
+            } else if (!held && entry.paused) {
+                entry.paused = false;
+                tick();
+            }
+        };
+        el.addEventListener('pointerenter', () => { entry.hover = true; sync(); });
+        el.addEventListener('pointerleave', () => { entry.hover = false; sync(); });
+        // The focus the toast gave itself (below) is not the reader's hand on it; a focus they move holds it.
+        el.addEventListener('focusin', () => { if (entry.given) { entry.given = false; return; } entry.focus = true; sync(); });
+        el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget)) { entry.focus = false; sync(); } });
+        el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); entry.close(); } });
+        entry.close = (quiet) => {
+            if (entry.gone) return;
+            entry.gone = true;
+            clearTimeout(entry.timer);
+            const had = el.contains(document.activeElement);
+            const i = open.indexOf(entry);
+            if (i !== -1) open.splice(i, 1);
+            el.classList.remove('show');
+            // A toast taken away under the keyboard's focus hands it on — home, or the toast below it — never to <body>.
+            if (had && !quiet) {
+                const home = typeof opts.home === 'function' ? opts.home() : opts.home;
+                const next = open[open.length - 1];
+                if (home && home.isConnected && typeof home.focus === 'function') home.focus({ preventScroll: true });
+                else if (next) (next.undoBtn || next.x).focus({ preventScroll: true });
+            }
+            setTimeout(() => el.remove(), 200);
+        };
+        open.push(entry);
+        // Into the region on the next frame: a live region that received its first line in the same moment it was
+        // made is one some screen readers never read.
+        requestAnimationFrame(() => {
+            if (entry.gone) return;
+            host.appendChild(el);
+            requestAnimationFrame(() => el.classList.add('show'));
+            const a = document.activeElement;
+            if ((!a || a === document.body || !a.isConnected) && entry.undoBtn) {
+                entry.given = true;
+                entry.undoBtn.focus({ preventScroll: true });
+                entry.given = false;
+            }
+            tick();
+        });
+        return { close: () => entry.close(), el };
+    }
+    return show;
+})();
+window.siteToast = siteToast;
 
 // === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
 // All rendering uses textContent — usernames, group names, notification titles and torrent names
@@ -2113,9 +2285,11 @@ window.askInPlace = askInPlace;
     const iconEl = (cls) => { const i = document.createElement('i'); i.className = cls; i.setAttribute('aria-hidden', 'true'); return i; };
 
 
+    // `msg` a word, a t.key() word, or a list of them (1.73.0: sentences made of several keys keep every key).
     function showAlert(el, msg, ok) {
         el.className = 'alert show ' + (ok ? 'alert-success' : 'alert-error');
-        el.textContent = msg;
+        if (Array.isArray(msg)) el.replaceChildren(...msg);
+        else el.textContent = msg;
     }
     // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB)
     function fmtBytesPub(n) {
@@ -2128,13 +2302,13 @@ window.askInPlace = askInPlace;
     }
     // ── password policy (mirrors userPasswordIssues() server-side) + live checklist UI ──
     const PW_REQS = [
-        [t('js.app.pw_min_len'), (p) => p.length >= 8 && p.length <= 200],
-        [t('js.app.pw_lower'), (p) => /[a-z]/.test(p)],
-        [t('js.app.pw_upper'), (p) => /[A-Z]/.test(p)],
-        [t('js.app.pw_special'), (p) => /[^a-zA-Z0-9]/.test(p)],
-        [t('js.app.pw_digit'), (p) => /[0-9]/.test(p)],
+        [t.key('js.app.pw_min_len'), (p) => p.length >= 8 && p.length <= 200],
+        [t.key('js.app.pw_lower'), (p) => /[a-z]/.test(p)],
+        [t.key('js.app.pw_upper'), (p) => /[A-Z]/.test(p)],
+        [t.key('js.app.pw_special'), (p) => /[^a-zA-Z0-9]/.test(p)],
+        [t.key('js.app.pw_digit'), (p) => /[0-9]/.test(p)],
     ];
-    const pwValid = (p) => PW_REQS.every(([, t]) => t(p));
+    const pwValid = (p) => PW_REQS.every(([, test]) => test(p));
     /** Requirement checklist under a password box; optional=true hides it while the box is empty. */
     function bindPwChecklist(input, box, optional) {
         if (!input || !box) return;
@@ -2142,7 +2316,7 @@ window.askInPlace = askInPlace;
             const li = document.createElement('div');
             li.className = 'pw-req';
             li.appendChild(iconEl('bi bi-x-lg pw-req-ic'));
-            li.appendChild(document.createTextNode(' ' + label));
+            li.append(' ', label);
             box.appendChild(li);
             return li;
         });
@@ -2199,6 +2373,7 @@ window.askInPlace = askInPlace;
         const GAP = 6, EDGE = 8;
         const place = () => {
             if (!tip.isConnected) return;
+            if (!target.isConnected) { drop(); return; }   // its button is gone (a list drawn again): so is the tip
             const a = target.getBoundingClientRect();
             const vw = document.documentElement.clientWidth || window.innerWidth;
             // Measured at the left edge first, where the whole viewport is available to it, so the
@@ -2229,14 +2404,18 @@ window.askInPlace = askInPlace;
             clearTimeout(hideTimer); clearTimeout(goneTimer);
             window.removeEventListener('scroll', onMove, true);
             window.removeEventListener('resize', onMove);
+            document.removeEventListener('langswap', onMove);
             tip.remove();
             if (pubTips.get(target) === entry) pubTips.delete(target);
         };
-        const entry = { tip, drop };
+        // say(): new words for a tip that is showing (the tooltip below, when the language changed under it).
+        const entry = { tip, drop, say: (s) => { tip.textContent = s; place(); } };
         pubTips.set(target, entry);
         place();
         window.addEventListener('scroll', onMove, true);
         window.addEventListener('resize', onMove);
+        // A tip written with t.key() is said again by the live language switch (assets/js/i18n.js) — at another width.
+        document.addEventListener('langswap', onMove);
         requestAnimationFrame(() => tip.classList.add('show'));
         if (!opts.hold) hideTimer = setTimeout(() => { tip.classList.remove('show'); goneTimer = setTimeout(drop, 250); }, 1800);
         return entry;
@@ -2299,6 +2478,16 @@ window.askInPlace = askInPlace;
         document.addEventListener('focusout', (e) => { if (cur && tipEl(e.target) === cur.el) hide(); });
         document.addEventListener('pointerdown', hide, true);
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') hide(); }, true);
+        // The language changed while a tip was showing (1.73.0): the button's data-tip has been said again by
+        // then (the server's by the walk, a script's by its key), so the tip reads it again — it used to stay in
+        // the language it was opened in.
+        document.addEventListener('langswap', () => {
+            if (!cur || !cur.entry) return;
+            // its button drawn again meanwhile (a search's rows re-run): the tip of a button that is gone goes too
+            if (!cur.el.isConnected) { hide(); return; }
+            const text = textOf(cur.el);
+            if (text) cur.entry.say(text);
+        });
     }
     tipOnHover();
 
@@ -2306,13 +2495,14 @@ window.askInPlace = askInPlace;
      * An icon-only button (1.71.0): the library's glyph (Bootstrap's markup, mapped to Font Awesome when
      * that is the site's library), its NAME for a screen reader and its EXPLANATION for the tooltip above
      * (the name again when there is nothing more to say). `tag` 'a' for a link that looks like one.
+     * Both are t.key() words (1.73.0): they keep their keys and follow the live language switch.
      */
     function iconButton(tag, cls, icon, name, tip) {
         const b = document.createElement(tag);
         if (tag === 'button') b.type = 'button';
         b.className = cls + ' ic-btn';
         b.setAttribute('aria-label', name);
-        b.dataset.tip = tip || name;
+        b.setAttribute('data-tip', tip || name);
         b.appendChild(iconEl('bi ' + icon));
         return b;
     }
@@ -2410,19 +2600,19 @@ window.askInPlace = askInPlace;
                 code: codeEl ? codeEl.value.trim() : '',
             }, form.dataset.captchaFirst === '1');
             if (json && json.success) {
-                showAlert(alert, t('js.app.signed_in_loading'), true);
+                showAlert(alert, t.key('js.app.signed_in_loading'), true);
                 window.location.href = APP_BASE + '?action=account';
             } else if (json && json.twofa) {
                 // The password was right. Show the code field and say which of the two things
                 // happened — "wrong code" and "now I need a code" are different sentences.
                 const group = $id('login-2fa-group');
                 if (group) group.hidden = false;
-                showAlert(alert, t(json.error === 'twofa_invalid' ? 'js.app.twofa_bad' : 'js.app.twofa_ask'),
+                showAlert(alert, t.key(json.error === 'twofa_invalid' ? 'js.app.twofa_bad' : 'js.app.twofa_ask'),
                           json.error !== 'twofa_invalid');
                 if (codeEl) { codeEl.value = ''; codeEl.focus(); }
                 btn.disabled = false;
             } else {
-                showAlert(alert, (json && json.error) || t('js.app.signin_failed'), false);
+                showAlert(alert, (json && json.error) || t.key('js.app.signin_failed'), false);
                 btn.disabled = false;
             }
         });
@@ -2464,10 +2654,10 @@ window.askInPlace = askInPlace;
                 terms_accepted: 1,
             });
             if (json && json.success) {
-                showAlert(alert, t('js.app.account_created') + (json.verify_sent ? ' ' + t('js.app.verify_link_sent') : ''), true);
+                showAlert(alert, [t.key('js.app.account_created')].concat(json.verify_sent ? [' ', t.key('js.app.verify_link_sent')] : []), true);
                 window.location.href = APP_BASE + '?action=account';
             } else {
-                showAlert(alert, (json && json.error) || t('js.app.register_failed'), false);
+                showAlert(alert, (json && json.error) || t.key('js.app.register_failed'), false);
                 btn.disabled = false;
             }
         });
@@ -2477,12 +2667,12 @@ window.askInPlace = askInPlace;
     async function loadAccount() {
         const groupsBox = $id('acc-groups');
         const me = await getJson('user_me');
-        if (!me || !me.success) { groupsBox.textContent = t('js.app.groups_load_failed'); return; }
+        if (!me || !me.success) { groupsBox.textContent = t.key('js.app.groups_load_failed'); return; }
         groupsBox.textContent = '';
         if (!me.groups.length) {
             const none = document.createElement('span');
             none.className = 'text-muted';
-            none.textContent = t('js.app.no_groups');
+            none.textContent = t.key('js.app.no_groups');
             groupsBox.appendChild(none);
         } else {
             me.groups.forEach(g => {
@@ -2494,7 +2684,7 @@ window.askInPlace = askInPlace;
                 div.appendChild(name);
                 const until = document.createElement('span');
                 until.className = 'text-muted';
-                until.textContent = ' — ' + (g.expires_at ? t('js.app.group_until', {date: fmtDatePub(g.expires_at)}) : t('js.app.group_permanent'));
+                until.replaceChildren(' — ', g.expires_at ? t.key('js.app.group_until', {date: fmtDatePub(g.expires_at)}) : t.key('js.app.group_permanent'));
                 div.appendChild(until);
                 if (g.description) {
                     const d = document.createElement('div');
@@ -2511,7 +2701,7 @@ window.askInPlace = askInPlace;
         window.NavUnread.set('pm', me.unread_pm);
         if (window.Sounds) window.Sounds.observe(me);
         const accBadge = $id('acc-unread-badge');
-        if (accBadge) { accBadge.textContent = t('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
+        if (accBadge) { accBadge.textContent = t.key('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
     }
     let notifPage = 1;
     async function loadNotifications(page) {
@@ -2519,13 +2709,13 @@ window.askInPlace = askInPlace;
         const box = $id('acc-notifications');
         const pag = $id('acc-notif-pagination');
         const json = await getJson('user_notifications&page=' + notifPage);
-        if (!json || !json.success) { box.textContent = t('js.app.notif_load_failed'); return; }
+        if (!json || !json.success) { box.textContent = t.key('js.app.notif_load_failed'); return; }
         box.textContent = '';
         if (pag) pag.textContent = '';
         if (!json.notifications.length) {
             const none = document.createElement('span');
             none.className = 'text-muted';
-            none.textContent = t('js.common.nothing_here');
+            none.textContent = t.key('js.common.nothing_here');
             box.appendChild(none);
             return;
         }
@@ -2542,8 +2732,10 @@ window.askInPlace = askInPlace;
             strongEl.append(n.title);
             head.appendChild(strongEl);
             const when = document.createElement('span');
-            when.className = 'text-muted';
-            when.textContent = fmtDatePub(n.created_at);
+            when.className = 'text-muted acc-notif-time';
+            // On the reader's clock (1.73.0 part E): the server says it in the zone they chose (`created_time`);
+            // the raw DATETIME read by the browser was the database session's clock taken for the browser's own.
+            when.textContent = n.created_time || fmtDatePub(n.created_at);
             head.appendChild(when);
             item.appendChild(head);
             if (n.body) {
@@ -2565,7 +2757,7 @@ window.askInPlace = askInPlace;
                 const go = document.createElement('a');
                 go.className = 'btn btn-secondary btn-small acc-notif-go';
                 go.href = '#' + tab;
-                go.textContent = t('js.app.notif_go_' + tab);
+                go.textContent = t.key('js.app.notif_go_' + tab);
                 acts.appendChild(go);
             } else if (typeof n.link === 'string' && /^\?action=[A-Za-z0-9_-]+(?:&[A-Za-z0-9_-]+=[A-Za-z0-9_.%-]*)*(?:#[A-Za-z0-9_-]+)?$/.test(n.link)) {
                 // Where it happened (1.71.0, user_notifications.link — a comment, and where to read it): the
@@ -2573,7 +2765,7 @@ window.askInPlace = askInPlace;
                 const go = document.createElement('a');
                 go.className = 'btn btn-secondary btn-small acc-notif-go acc-notif-link';
                 go.href = n.link;
-                go.textContent = t('js.app.notif_go_link');
+                go.textContent = t.key('js.app.notif_go_link');
                 // Going to read it is reading it: marked on the way out (keepalive, so the page leaving does not
                 // cancel the request), and the badge is not left counting what the reader went to see.
                 go.addEventListener('click', () => {
@@ -2590,7 +2782,7 @@ window.askInPlace = askInPlace;
                 const mark = document.createElement('button');
                 mark.type = 'button';
                 mark.className = 'btn btn-secondary btn-small';
-                mark.textContent = t('js.app.mark_read');
+                mark.textContent = t.key('js.app.mark_read');
                 mark.addEventListener('click', async () => {
                     await postJson('user_notifications', { csrf_token: csrfToken(), ids: [n.id] });
                     loadNotifications(); loadAccount();
@@ -2609,11 +2801,11 @@ window.askInPlace = askInPlace;
                 b.addEventListener('click', () => loadNotifications(target));
                 return b;
             };
-            pag.appendChild(mk([iconEl('bi bi-chevron-left'), ' ' + t('js.app.pg_prev')], json.page - 1, json.page <= 1));
+            pag.appendChild(mk([iconEl('bi bi-chevron-left'), ' ', t.key('js.app.pg_prev')], json.page - 1, json.page <= 1));
             const info = document.createElement('span');
-            info.textContent = t('js.app.page_of_total', {page: json.page, pages: json.pages, total: json.total});
+            info.textContent = t.key('js.app.page_of_total', {page: json.page, pages: json.pages, total: json.total});
             pag.appendChild(info);
-            pag.appendChild(mk([t('js.app.pg_next') + ' ', iconEl('bi bi-chevron-right')], json.page + 1, json.page >= json.pages));
+            pag.appendChild(mk([t.key('js.app.pg_next'), ' ', iconEl('bi bi-chevron-right')], json.page + 1, json.page >= json.pages));
         }
     }
     /**
@@ -2752,14 +2944,14 @@ window.askInPlace = askInPlace;
         $id('acc-mark-all').addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             const r = await postJson('user_notifications', { csrf_token: csrfToken(), all: 1 });
-            pubTip(btn, r && r.success ? (r.marked > 0 ? t('js.app.marked_read', {n: r.marked}) : t('js.app.nothing_unread')) : t('js.app.failed'));
+            pubTip(btn, r && r.success ? (r.marked > 0 ? t.key('js.app.marked_read', {n: r.marked}) : t.key('js.app.nothing_unread')) : t.key('js.app.failed'));
             loadNotifications(); loadAccount();
         });
         const delRead = $id('acc-delete-read');
         if (delRead) delRead.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             const r = await postJson('user_notifications', { csrf_token: csrfToken(), delete_read: 1 });
-            pubTip(btn, r && r.success ? (r.deleted > 0 ? t('js.app.deleted_n', {n: r.deleted}) : t('js.app.nothing_to_delete')) : t('js.app.failed'));
+            pubTip(btn, r && r.success ? (r.deleted > 0 ? t.key('js.app.deleted_n', {n: r.deleted}) : t.key('js.app.nothing_to_delete')) : t.key('js.app.failed'));
             if (r && r.success) loadNotifications(1);
         });
         const cancelEc = $id('acc-cancel-echange');
@@ -2778,19 +2970,19 @@ window.askInPlace = askInPlace;
             const bulkLabel = $id('acc-bulk-pref-label');
             getJson('user_email_prefs').then(r => {
                 if (!r || !r.success) {
-                    if (label) label.textContent = t('js.app.pref_unavailable');
-                    if (bulkLabel) bulkLabel.textContent = t('js.app.pref_unavailable');
+                    if (label) label.textContent = t.key('js.app.pref_unavailable');
+                    if (bulkLabel) bulkLabel.textContent = t.key('js.app.pref_unavailable');
                     return;
                 }
-                if (mailPref) { mailPref.checked = !!r.enabled; label.textContent = r.enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled'); }
-                if (bulkPref) { bulkPref.checked = !!r.bulk_enabled; bulkLabel.textContent = r.bulk_enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled'); }
+                if (mailPref) { mailPref.checked = !!r.enabled; label.textContent = r.enabled ? t.key('js.app.pref_enabled') : t.key('js.app.pref_disabled'); }
+                if (bulkPref) { bulkPref.checked = !!r.bulk_enabled; bulkLabel.textContent = r.bulk_enabled ? t.key('js.app.pref_enabled') : t.key('js.app.pref_disabled'); }
             });
             const bind = (box, lab, type) => {
                 if (!box) return;
                 box.addEventListener('change', async () => {
                     const r = await postJson('user_email_prefs', {
                         csrf_token: csrfToken(), enabled: box.checked ? 1 : 0, type });
-                    if (r && r.success) lab.textContent = r.enabled ? t('js.app.pref_enabled') : t('js.app.pref_disabled');
+                    if (r && r.success) lab.textContent = r.enabled ? t.key('js.app.pref_enabled') : t.key('js.app.pref_disabled');
                     else { box.checked = !box.checked; }
                 });
             };
@@ -2821,17 +3013,17 @@ window.askInPlace = askInPlace;
                 tzSel.disabled = true;
                 const r = await postJson('user_update', { csrf_token: csrfToken(), timezone: tzSel.value });
                 tzSel.disabled = false;
-                if (r && r.success) { tzWas = tzSel.value; pubTip(wrap, t('js.app.saved')); return; }
+                if (r && r.success) { tzWas = tzSel.value; pubTip(wrap, t.key('js.app.saved')); return; }
                 tzSel.value = tzWas;
-                pubTip(wrap, (r && r.error) || t('js.app.update_failed'));
+                pubTip(wrap, (r && r.error) || t.key('js.app.update_failed'));
             });
         }
         const verifyBtn = $id('acc-verify-send');
         if (verifyBtn) verifyBtn.addEventListener('click', async () => {
             verifyBtn.disabled = true;
             const r = await postJson('user_verify_send', { csrf_token: csrfToken() });
-            if (r && r.success && r.sent) { verifyBtn.textContent = t('js.app.verify_sent') + ' '; verifyBtn.appendChild(iconEl('bi bi-check-lg')); }
-            else { verifyBtn.textContent = t('js.app.failed'); verifyBtn.title = (r && (r.message || r.error)) || t('js.app.verify_could_not_send'); setTimeout(() => { verifyBtn.textContent = t('js.app.verify_resend'); verifyBtn.disabled = false; }, 4000); }
+            if (r && r.success && r.sent) verifyBtn.replaceChildren(t.key('js.app.verify_sent'), ' ', iconEl('bi bi-check-lg'));
+            else { verifyBtn.textContent = t.key('js.app.failed'); verifyBtn.title = (r && (r.message || r.error)) || t.key('js.app.verify_could_not_send'); setTimeout(() => { verifyBtn.textContent = t.key('js.app.verify_resend'); verifyBtn.disabled = false; }, 4000); }
         });
         $id('account-logout').addEventListener('click', async () => {
             await postJson('user_logout', { csrf_token: csrfToken() });
@@ -2875,25 +3067,25 @@ window.askInPlace = askInPlace;
             // an emptied box removes the address; anything different from the current one changes it
             if (newEmail !== (hadEmail ? curEmail : '')) body.email = newEmail;
             if (passIn.value !== '') body.new_password = passIn.value;
-            if (body.email === undefined && body.new_password === undefined) { showAlert(alert, t('js.app.nothing_to_change'), false); return; }
+            if (body.email === undefined && body.new_password === undefined) { showAlert(alert, t.key('js.app.nothing_to_change'), false); return; }
             btn.disabled = true;
             const json = await postJson('user_update', body);
             btn.disabled = false;
             if (json && json.success) {
-                let msg = t('js.app.saved');
-                if (json.changed.includes('password')) msg += ' ' + t('js.app.acc_use_new_password');
-                if (json.email_stage === 'old') msg += ' ' + t('js.app.acc_email_change_started');
-                else if (json.email_stage === 'done_direct') msg += ' ' + (json.verify_sent ? t('js.app.acc_verify_link_sent') : t('js.app.acc_email_saved'));
+                const msg = [t.key('js.app.saved')];
+                if (json.changed.includes('password')) msg.push(' ', t.key('js.app.acc_use_new_password'));
+                if (json.email_stage === 'old') msg.push(' ', t.key('js.app.acc_email_change_started'));
+                else if (json.email_stage === 'done_direct') msg.push(' ', json.verify_sent ? t.key('js.app.acc_verify_link_sent') : t.key('js.app.acc_email_saved'));
                 showAlert(alert, msg, true);
                 $id('acc-cur-pass').value = ''; passIn.value = ''; pass2In.value = ''; pass2Group.hidden = true;
                 email2In.value = ''; email2Group.hidden = true; $id('acc-pw-checklist').hidden = true;
                 if (json.email_stage === 'done_direct') {
-                    $id('acc-email').textContent = body.email || t('js.app.acc_email_none');
+                    $id('acc-email').textContent = body.email || t.key('js.app.acc_email_none');
                 } else if (json.email_stage === 'old') {
                     setTimeout(() => location.reload(), 2500);   // show the pending-change banner
                 }
             } else {
-                showAlert(alert, (json && json.error) || t('js.app.update_failed'), false);
+                showAlert(alert, (json && json.error) || t.key('js.app.update_failed'), false);
             }
         });
     }
@@ -2910,8 +3102,8 @@ window.askInPlace = askInPlace;
                     csrf_token: csrfOf(reqForm), login: $id('reset-login').value.trim(),
                 });
                 btn.disabled = false;
-                if (json && json.success) showAlert(alert, json.message || t('js.app.reset_check_inbox'), true);
-                else showAlert(alert, (json && json.error) || t('js.app.request_failed'), false);
+                if (json && json.success) showAlert(alert, json.message || t.key('js.app.reset_check_inbox'), true);
+                else showAlert(alert, (json && json.error) || t.key('js.app.request_failed'), false);
             });
         }
         const confForm = $id('reset-confirm-form');
@@ -2921,15 +3113,15 @@ window.askInPlace = askInPlace;
                 e.preventDefault();
                 const alert = $id('resetc-alert'), btn = $id('resetc-submit');
                 const p1 = $id('resetc-password'), p2 = $id('resetc-password2');
-                if (!pwValid(p1.value)) { showAlert(alert, t('js.app.pw_requirements'), false); return; }
-                if (p1.value !== p2.value) { showAlert(alert, t('js.app.pw_mismatch'), false); return; }
+                if (!pwValid(p1.value)) { showAlert(alert, t.key('js.app.pw_requirements'), false); return; }
+                if (p1.value !== p2.value) { showAlert(alert, t.key('js.app.pw_mismatch'), false); return; }
                 btn.disabled = true;
                 const json = await postJson('user_reset_confirm', { csrf_token: csrfOf(confForm), token: $id('resetc-token').value, password: p1.value });
                 btn.disabled = false;
                 if (json && json.success) {
-                    showAlert(alert, t('js.app.pw_changed_sign_in'), true);
+                    showAlert(alert, t.key('js.app.pw_changed_sign_in'), true);
                     setTimeout(() => { window.location.href = APP_BASE + '?action=login'; }, 1200);
-                } else showAlert(alert, (json && json.error) || t('js.app.reset_failed'), false);
+                } else showAlert(alert, (json && json.error) || t.key('js.app.reset_failed'), false);
             });
         }
     }
@@ -2965,10 +3157,11 @@ window.askInPlace = askInPlace;
     function dropAllShareBoxes() {
         document.querySelectorAll('.share-url').forEach(box => { box.hidden = true; box.value = ''; });
     }
-    // The label is read off the button at click time — but a language swap can land inside the
-    // 1.5 s flash, and writing the captured English word back onto a page that is now Polish is
-    // the very bug this was supposed to avoid. So the restore is cancelled by `langswap`: the
-    // swap has already put the right text in that node, and there is nothing left to put back.
+    // The button's own label is TAKEN OUT for the 1.5 s flash and put back afterwards — the very nodes the
+    // server wrote, never a copy of their words (a copy would be put back in the language it was taken in). A
+    // language swap that starts inside the flash puts them back at once, before its walk (`langswap:begin`), so
+    // the walk finds the server's words where the server wrote them and translates them (1.73.0; the flash used
+    // to write the captured text back and, on a swap, leave "Copied!" standing for good).
     let flashTimer = 0;
     function flashShared(btn) {
         // An icon button (1.71.0 — the Info panel's Share and Copy) keeps its box: its glyph turns into the
@@ -2978,23 +3171,23 @@ window.askInPlace = askInPlace;
             swapGlyph(btn, 'bi-check-lg', 1500);
             btn.classList.add('copied');
             setTimeout(() => btn.classList.remove('copied'), 1500);
-            pubTip(btn, t('js.common.copied'));
+            pubTip(btn, t.key('js.common.copied'));
             return;
         }
         if (btn.dataset.flashing === '1') return;
-        const orig = btn.textContent;
+        const kept = [...btn.childNodes];
         btn.dataset.flashing = '1';
-        btn.textContent = t('js.app.copied');
+        btn.replaceChildren(t.key('js.app.copied'));
         btn.classList.add('copied');
-        const done = () => {
+        const restore = () => {
             clearTimeout(flashTimer);
-            document.removeEventListener('langswap', cancel);
+            document.removeEventListener('langswap:begin', restore);
+            btn.replaceChildren(...kept);
             btn.classList.remove('copied');
             delete btn.dataset.flashing;
         };
-        const cancel = () => done();                       // the swap wrote the label already
-        document.addEventListener('langswap', cancel, { once: true });
-        flashTimer = setTimeout(() => { btn.textContent = orig; done(); }, 1500);
+        document.addEventListener('langswap:begin', restore);
+        flashTimer = setTimeout(restore, 1500);
     }
     function share(btn, url, label) {
         const reveal = () => {
@@ -3059,7 +3252,7 @@ window.askInPlace = askInPlace;
         l.textContent = label;
         const v = document.createElement('span');
         v.className = 'info-kv-value';
-        if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : String(value);
+        if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : (t.isKey(value) ? value : String(value));
         if (action) {
             const head = document.createElement('span');
             head.className = 'info-kv-head';
@@ -3126,12 +3319,12 @@ window.askInPlace = askInPlace;
                     hit.type = 'button';
                     hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
                     const value = i + part;
-                    const words = value === 1 ? t('js.app.stars_one') : t('js.app.stars_many', {n: value});
+                    const words = value === 1 ? t.key('js.app.stars_one') : t.key('js.app.stars_many', {n: value});
                     // Your own rating: pressed, and a second press takes it back (the server is asked to
                     // remove it, not to cast the same value again).
                     const pressed = value === mine;
-                    hit.title = pressed ? t('js.app.stars_mine_title', {stars: words}) : words;
-                    hit.setAttribute('aria-label', t('js.app.rate_aria', {n: value}));
+                    hit.title = pressed ? t.key('js.app.stars_mine_title', {stars: words}) : words;
+                    hit.setAttribute('aria-label', t.key('js.app.rate_aria', {n: value}));
                     hit.setAttribute('aria-pressed', pressed ? 'true' : 'false');
                     if (pressed) hit.classList.add('star-hit-mine');
                     hit.addEventListener('mouseenter', () => paint(value));
@@ -3154,18 +3347,19 @@ window.askInPlace = askInPlace;
         if (r.stars === null) {
             label.classList.add('text-muted');
             label.textContent = r.total === 0
-                ? t('js.app.stars_nobody_yet')
-                : t('js.app.stars_needed', {n: r.total, min: r.min_votes});
+                ? t.key('js.app.stars_nobody_yet')
+                : t.key('js.app.stars_needed', {n: r.total, min: r.min_votes});
         } else {
-            label.textContent = r.stars.toFixed(1) + ' / 5 · '
-                + (r.total === 1 ? t('js.app.ratings_one') : t('js.app.ratings_many', {n: r.total}))
-                + (mine ? ' · ' + t('js.app.stars_yours', {n: mine}) : '');
+            label.replaceChildren(r.stars.toFixed(1) + ' / 5 · ',
+                r.total === 1 ? t.key('js.app.ratings_one') : t.key('js.app.ratings_many', {n: r.total}),
+                ...(mine ? [' · ', t.key('js.app.stars_yours', {n: mine})] : []));
         }
         wrap.appendChild(label);
         row.title = r.stars === null
-            ? t('js.app.stars_so_far', {n: r.total, min: r.min_votes})
-            : (r.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.stars.toFixed(1)}) : t('js.app.rep_stars_title_many', {stars: r.stars.toFixed(1), n: r.total}));
-        if (!json.can_vote && json.vote_refusal) row.title += ' — ' + json.vote_refusal;
+            ? t.key('js.app.stars_so_far', {n: r.total, min: r.min_votes})
+            : (r.total === 1 ? t.key('js.app.rep_stars_title_one', {stars: r.stars.toFixed(1)}) : t.key('js.app.rep_stars_title_many', {stars: r.stars.toFixed(1), n: r.total}));
+        // Why this reader cannot rate is said under the stars (the Info panel's .rep-why line), in words that follow
+        // the language; the tooltip no longer repeats the server's sentence after the count (1.73.0).
         return wrap;
     }
 
@@ -3205,12 +3399,12 @@ window.askInPlace = askInPlace;
         if (wait > 0) {
             // Too fast: the buttons rest for the time the server named, the line under them counting it down.
             const why = whyLine();
-            const tpl = r.antispam && r.antispam.tpl;
             const until = Date.now() + wait * 1000;
             const tick = () => {
                 const left = Math.ceil((until - Date.now()) / 1000);
                 if (left <= 0 || !holder.isConnected) { clearInterval(timer); release(); if (why.isConnected) why.textContent = ''; return; }
-                why.textContent = tpl ? tpl.split('{time}').join(window.Antispam.timeText(left)) : (r.message || '');
+                // The layer's sentence by its key (a t.key() word: it follows a language switch), else the server's template.
+                why.textContent = window.Antispam.sentence(r, left) || r.message || '';
             };
             const timer = setInterval(tick, 500);
             tick();
@@ -3218,7 +3412,7 @@ window.askInPlace = askInPlace;
         }
         if (!r || !r.success) {
             release();
-            whyLine().textContent = (r && (r.message || r.error)) || t('js.app.vote_failed');
+            whyLine().textContent = (r && (r.message || r.error)) || t.key('js.app.vote_failed');
             return;
         }
         // Redraw from the server's answer, never from an optimistic guess: the whole value of a
@@ -3254,9 +3448,9 @@ window.askInPlace = askInPlace;
             rejected: 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z',
         };
         const TITLES = {
-            pending:  t('js.app.cs_pending'),
-            approved: t('js.app.cs_approved'),
-            rejected: t('js.app.cs_rejected'),
+            pending:  t.key('js.app.cs_pending'),
+            approved: t.key('js.app.cs_approved'),
+            rejected: t.key('js.app.cs_rejected'),
         };
         const NS = 'http://www.w3.org/2000/svg';
         const svg = document.createElementNS(NS, 'svg');
@@ -3288,26 +3482,26 @@ window.askInPlace = askInPlace;
         const csKeepOpen = !!(csWas && csWas.open && csWas.dataset.hash === hash && !infoOverlay.hidden);
         infoHash = hash;
         if (infoOnOpen) infoOnOpen();
-        title.textContent = name || t('js.app.details');
-        body.textContent = t('js.common.loading');
+        title.textContent = name || t.key('js.app.details');
+        body.textContent = t.key('js.common.loading');
         infoOverlay.hidden = false;
         if (infoLayer) infoLayer.on();
         const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
         if (infoOverlay.hidden || infoHash !== hash) return;
         body.textContent = '';
         if (!json || !json.success) {
-            body.textContent = (json && json.error) || t('js.app.details_load_failed');
+            body.textContent = (json && json.error) || t.key('js.app.details_load_failed');
             return;
         }
-        title.textContent = json.name || name || t('js.app.details');
+        title.textContent = json.name || name || t.key('js.app.details');
         // Registered here, not merely seen in the swarm. The search row has carried this badge since
         // the catalogue and the whitelist were folded into one list; the panel that opens FROM that
         // row did not, so the one place with room to say it said nothing.
         if (json.whitelisted === true) {
             const wl = document.createElement('span');
             wl.className = 'search-wl-badge';
-            wl.title = t('js.app.wl_badge_title');
-            wl.textContent = t('js.app.wl_badge');
+            wl.title = t.key('js.app.wl_badge_title');
+            wl.textContent = t.key('js.app.wl_badge');
             title.appendChild(document.createTextNode(' '));
             title.appendChild(wl);
         }
@@ -3329,7 +3523,7 @@ window.askInPlace = askInPlace;
                 // "the first button that is not the star" stopped being a description of it.
                 // An icon since 1.71.0 — the people who have it — in a head of icons: the words took
                 // the width the torrent's name needs, three letters a line on a phone.
-                const w = iconButton('button', 'search-share fav-who-open', 'bi-people', t('js.fav.who'), t('js.fav.who_title'));
+                const w = iconButton('button', 'search-share fav-who-open', 'bi-people', t.key('js.fav.who'), t.key('js.fav.who_title'));
                 w.addEventListener('click', () => window.openWhoFavourited(hash));
                 infoActs.appendChild(w);
             }
@@ -3363,11 +3557,11 @@ window.askInPlace = askInPlace;
         const leechV = document.createElement('span');
         leechV.id = 'info-sl-leech';
         leechV.textContent = st.leechers == null ? '—' : Number(st.leechers).toLocaleString();
-        strip.appendChild(statCell(seedV, t('js.app.stat_seeders'), 'info-stat-seed'));
-        strip.appendChild(statCell(leechV, t('js.app.stat_leechers'), 'info-stat-leech'));
-        if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), t('js.app.stat_completed')));
-        if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t('js.app.stat_size')));
-        if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? t('js.app.stat_file') : t('js.app.stat_files')));
+        strip.appendChild(statCell(seedV, t.key('js.app.stat_seeders'), 'info-stat-seed'));
+        strip.appendChild(statCell(leechV, t.key('js.app.stat_leechers'), 'info-stat-leech'));
+        if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), t.key('js.app.stat_completed')));
+        if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t.key('js.app.stat_size')));
+        if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? t.key('js.app.stat_file') : t.key('js.app.stat_files')));
         body.appendChild(strip);
 
         // 2. the two chips that qualify those numbers, on one line with the refresh control.
@@ -3376,26 +3570,25 @@ window.askInPlace = askInPlace;
         if (json.whitelisted) {
             const chip = document.createElement('span');
             chip.className = 'info-chip info-chip-ok';
-            chip.textContent = t('js.app.chip_registered');
-            chip.title = t('js.app.chip_registered_title');
+            chip.textContent = t.key('js.app.chip_registered');
+            chip.title = t.key('js.app.chip_registered_title');
             chips.appendChild(chip);
         }
         if (st.last_seen) {
             const chip = document.createElement('span');
             chip.className = 'info-chip';
-            chip.textContent = t('js.app.last_seen', {date: fmtDatePub(st.last_seen)});
+            chip.textContent = t.key('js.app.last_seen', {date: fmtDatePub(st.last_seen)});
             chips.appendChild(chip);
         }
         if (json.can_refresh) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn btn-secondary btn-small info-refresh';
-            btn.textContent = t('js.app.refresh');
-            btn.title = t('js.app.refresh_title');
+            btn.textContent = t.key('js.app.refresh');
+            btn.title = t.key('js.app.refresh_title');
             btn.addEventListener('click', async () => {
                 btn.disabled = true;
-                const prev = btn.textContent;
-                btn.textContent = t('js.app.asking');
+                btn.textContent = t.key('js.app.asking');
                 // The page's token, whichever page the panel is on (it read #search-csrf alone, and
                 // on a profile or the account page the refresh was refused like the votes were).
                 const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
@@ -3403,11 +3596,11 @@ window.askInPlace = askInPlace;
                 if (r && r.success) {
                     seedV.textContent = Number(r.seeders).toLocaleString();
                     leechV.textContent = Number(r.leechers).toLocaleString();
-                    btn.textContent = t('js.app.refreshed');
+                    btn.textContent = t.key('js.app.refreshed');
                 } else {
-                    btn.textContent = (r && r.error) || t('js.app.no_answer');
+                    btn.textContent = (r && r.error) || t.key('js.app.no_answer');
                 }
-                setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 4000);
+                setTimeout(() => { btn.textContent = t.key('js.app.refresh'); btn.disabled = false; }, 4000);
             });
             chips.appendChild(btn);
         }
@@ -3418,7 +3611,7 @@ window.askInPlace = askInPlace;
             const row = document.createElement('div');
             row.className = 'rt-src-row info-section';
             const lab = document.createElement('strong');
-            lab.textContent = t('js.app.source_label');
+            lab.textContent = t.key('js.app.source_label');
             const a = document.createElement('a');
             a.className = 'rt-src-url';
             a.href = json.source_url;
@@ -3433,8 +3626,9 @@ window.askInPlace = askInPlace;
                 // between "the uploader vouched for this link" and "this is where we found it".
                 const tag = document.createElement('span');
                 tag.className = 'info-chip info-chip-auto';
-                tag.textContent = t('js.app.source_auto');
-                tag.title = json.source_auto_note || t('js.app.source_auto_title');
+                tag.textContent = t.key('js.app.source_auto');
+                // The server's sentence, found back in the page's bundle (api.index.source_auto_*) so it keeps its key.
+                tag.title = t.find(json.source_auto_note, 'api.index.source_auto_') || t.key('js.app.source_auto_title');
                 row.appendChild(lab); row.appendChild(a); row.appendChild(tag);
             } else {
                 row.appendChild(lab); row.appendChild(a);
@@ -3453,7 +3647,7 @@ window.askInPlace = askInPlace;
         } else if (!json.source_url && !json.content_hidden) {
             const none = document.createElement('p');
             none.className = 'text-muted info-section';
-            none.textContent = t('js.app.no_description');
+            none.textContent = t.key('js.app.no_description');
             body.appendChild(none);
         }
         // 2b. who wrote it, whether the reader is being kept from it, and what they may do about it
@@ -3475,7 +3669,7 @@ window.askInPlace = askInPlace;
                 const bar = document.createElement('div');
                 bar.className = 'rep-bar';
                 bar.setAttribute('role', 'img');
-                bar.setAttribute('aria-label', t('js.app.rating_aria', {percent: r.percent, total: r.total}));
+                bar.setAttribute('aria-label', t.key('js.app.rating_aria', {percent: r.percent, total: r.total}));
                 const up = document.createElement('span');
                 up.className = 'rep-bar-up';
                 up.style.width = r.percent + '%';
@@ -3483,14 +3677,14 @@ window.askInPlace = askInPlace;
                 rep.appendChild(bar);
                 const label = document.createElement('div');
                 label.className = 'rep-label';
-                label.textContent = t('js.app.rating_label', {percent: r.percent, up: r.up, down: r.down});
+                label.textContent = t.key('js.app.rating_label', {percent: r.percent, up: r.up, down: r.down});
                 rep.appendChild(label);
             } else {
                 const label = document.createElement('div');
                 label.className = 'rep-label text-muted';
                 label.textContent = r.total === 0
-                    ? t('js.app.no_ratings')
-                    : t('js.app.ratings_needed', {total: r.total, min: r.min_votes});
+                    ? t.key('js.app.no_ratings')
+                    : t.key('js.app.ratings_needed', {total: r.total, min: r.min_votes});
                 rep.appendChild(label);
             }
 
@@ -3506,18 +3700,19 @@ window.askInPlace = askInPlace;
                     b.type = 'button';
                     b.className = 'btn btn-secondary btn-small rep-btn rep-btn-' + (dir > 0 ? 'up' : 'down') + (mine ? ' rep-mine' : '');
                     b.setAttribute('aria-pressed', mine ? 'true' : 'false');
-                    b.append(iconEl(mine ? icon + '-fill' : icon), ' ' + label);
-                    b.title = mine ? t('js.app.vote_mine_title') : title;
+                    b.append(iconEl(mine ? icon + '-fill' : icon), ' ', label);
+                    b.title = mine ? t.key('js.app.vote_mine_title') : title;
                     b.addEventListener('click', () => castVote(hash, dir, rep, mine));
                     return b;
                 };
-                acts.appendChild(mk(1, 'bi bi-hand-thumbs-up', t('js.app.vote_good'), t('js.app.vote_good_title')));
-                acts.appendChild(mk(-1, 'bi bi-hand-thumbs-down', t('js.app.vote_bad'), t('js.app.vote_bad_title')));
+                acts.appendChild(mk(1, 'bi bi-hand-thumbs-up', t.key('js.app.vote_good'), t.key('js.app.vote_good_title')));
+                acts.appendChild(mk(-1, 'bi bi-hand-thumbs-down', t.key('js.app.vote_bad'), t.key('js.app.vote_bad_title')));
                 rep.appendChild(acts);
             } else if (!json.can_vote && json.vote_refusal) {
                 const why = document.createElement('div');
                 why.className = 'rep-label text-muted';
-                why.textContent = json.vote_refusal;
+                // The server's sentence (repVoteRefusal()), found back in the page's bundle (api.rep.*): it keeps its key.
+                why.textContent = t.find(json.vote_refusal, 'api.rep.');
                 rep.appendChild(why);
             }
             body.appendChild(rep);
@@ -3540,9 +3735,9 @@ window.askInPlace = askInPlace;
         //    strip above rather than as another list of equally important facts.
         const grid = document.createElement('div');
         grid.className = 'info-grid';
-        if (st.peak_seeders != null) grid.appendChild(infoRow(t('js.app.row_peak_seeders'), Number(st.peak_seeders).toLocaleString()));
-        if (st.first_seen) grid.appendChild(infoRow(t('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
-        if (st.seen_count != null) grid.appendChild(infoRow(t('js.app.row_times_seen'), Number(st.seen_count).toLocaleString()));
+        if (st.peak_seeders != null) grid.appendChild(infoRow(t.key('js.app.row_peak_seeders'), Number(st.peak_seeders).toLocaleString()));
+        if (st.first_seen) grid.appendChild(infoRow(t.key('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
+        if (st.seen_count != null) grid.appendChild(infoRow(t.key('js.app.row_times_seen'), Number(st.seen_count).toLocaleString()));
         const hashEl = document.createElement('code');
         hashEl.className = 'info-hash';
         hashEl.textContent = json.info_hash;
@@ -3551,7 +3746,7 @@ window.askInPlace = askInPlace;
         const hashWrap = document.createElement('span');
         hashWrap.className = 'info-copyable';
         hashWrap.appendChild(hashEl);
-        grid.appendChild(infoRow(t('js.app.row_info_hash'), hashWrap, 'info-kv-wide', copyButton(json.info_hash, t('js.app.copy_hash'))));
+        grid.appendChild(infoRow(t.key('js.app.row_info_hash'), hashWrap, 'info-kv-wide', copyButton(json.info_hash, t.key('js.app.copy_hash'))));
         // The magnet is built by the server out of its own announce URLs (buildMagnet() in
         // includes/whitelist.php — the same function the panel's rows use) and sent only to a reader
         // with index.magnet, the gate the search rows already obey. Nothing here assembles a URL of
@@ -3564,13 +3759,13 @@ window.askInPlace = askInPlace;
             mLink.href = json.magnet;
             mLink.textContent = json.magnet;
             mWrap.appendChild(mLink);
-            grid.appendChild(infoRow(t('js.app.row_magnet'), mWrap, 'info-kv-wide', copyButton(json.magnet, t('js.app.copy_magnet'))));
+            grid.appendChild(infoRow(t.key('js.app.row_magnet'), mWrap, 'info-kv-wide', copyButton(json.magnet, t.key('js.app.copy_magnet'))));
         }
         const det = document.createElement('div');
         det.className = 'info-section';
         const detH = document.createElement('div');
         detH.className = 'info-sub';
-        detH.textContent = t('js.app.record_heading');
+        detH.textContent = t.key('js.app.record_heading');
         det.appendChild(detH);
         det.appendChild(grid);
         body.appendChild(det);
@@ -3591,12 +3786,12 @@ window.askInPlace = askInPlace;
             // numbers as pages arrive rather than promising a count nothing can deliver.
             const totalFiles = Number(st.files_count) || 0;
             const sumText = document.createElement('span');
-            sumText.textContent = t('js.app.files_count', {n: totalFiles.toLocaleString()});
+            sumText.textContent = t.key('js.app.files_count', {n: totalFiles.toLocaleString()});
             sum.append(iconEl('bi bi-chevron-right disc-chev'), sumText);
             det.appendChild(sum);
             const holder = document.createElement('div');
             holder.className = 'rt-body';
-            holder.textContent = t('js.common.loading');
+            holder.textContent = t.key('js.common.loading');
             det.appendChild(holder);
             body.appendChild(det);
             // 6. the comments after the files — the panel's very end (1.72.0, the default): placed now, before the
@@ -3637,9 +3832,9 @@ window.askInPlace = askInPlace;
             // of every page as well as at the end of it.
             const chrome = () => {
                 sumText.textContent = (totalFiles && allFiles.length < totalFiles)
-                    ? t('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
-                    : t('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
-                btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                    ? t.key('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
+                    : t.key('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
+                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
                 btn.disabled = loading;
                 foot.hidden = !more;
             };
@@ -3654,7 +3849,7 @@ window.askInPlace = askInPlace;
                 loading = false;
                 if (infoOverlay.hidden || infoHash !== hash) return false;
                 if (!fj || !fj.success) {
-                    if (next === 0) { holder.textContent = t('js.app.no_file_list'); return false; }
+                    if (next === 0) { holder.textContent = t.key('js.app.no_file_list'); return false; }
                     // Leave `more` alone: the reader may still press the button. It is the
                     // unattended asking that stops, and render() puts the button back to
                     // "Load more" instead of leaving it stuck on "Loading…" for ever.
@@ -3668,18 +3863,18 @@ window.askInPlace = askInPlace;
                 // the grant the list stops here and says so. A capped reply never claims
                 // truncation, so this is already false when the site's own total ended the list.
                 more = !!fj.truncated && !!fj.can_more;
-                if (next === 0 || !allFiles.length) { holder.textContent = t('js.app.no_file_list'); return false; }
+                if (next === 0 || !allFiles.length) { holder.textContent = t.key('js.app.no_file_list'); return false; }
                 // The notes hang below the tree and are written AFTER the holder is emptied of
                 // its "Loading…". They used to be appended before that line, so the one message
                 // the reader needed was wiped by the same call that attached the list.
                 if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); holder.appendChild(notes); }
-                if (fj.truncated && !fj.can_more) note(t('js.app.files_truncated'));
+                if (fj.truncated && !fj.can_more) note(t.key('js.app.files_truncated'));
                 // Not an error and not a permission: the list simply ends short of the count in
                 // the heading, because that is all the catalogue ever stored for this torrent.
-                if (fj.stored_short) note(t('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
+                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
                 // The site's own ceiling, not a permission and not the worker's storage cap:
                 // there are more rows and this page is not going to fetch them.
-                if (fj.capped) note(t('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
+                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
                 render();
                 return true;
             };
@@ -3782,7 +3977,7 @@ window.askInPlace = askInPlace;
         const cutRow = () => {
             const d = document.createElement('div');
             d.className = 'ftree-file ftree-cut';
-            d.title = t('js.app.files_cut_title');
+            d.title = t.key('js.app.files_cut_title');
             d.textContent = '…';
             return d;
         };
@@ -3813,7 +4008,7 @@ window.askInPlace = askInPlace;
                 if (subNode.hit) {
                     const dot = document.createElement('span');
                     dot.className = 'ftree-dot';
-                    dot.title = t('js.app.files_folder_hit');
+                    dot.title = t.key('js.app.files_folder_hit');
                     dot.setAttribute('aria-hidden', 'true');
                     sum.appendChild(dot);
                 }
@@ -3843,7 +4038,7 @@ window.askInPlace = askInPlace;
         if (skipped) {
             const cut = document.createElement('p');
             cut.className = 'text-muted';
-            cut.textContent = t('js.app.files_tree_cap', {n: drawn.toLocaleString(), rest: skipped.toLocaleString()});
+            cut.textContent = t.key('js.app.files_tree_cap', {n: drawn.toLocaleString(), rest: skipped.toLocaleString()});
             container.appendChild(cut);
         }
         return container;
@@ -3907,7 +4102,9 @@ window.askInPlace = askInPlace;
         const by = document.createElement('p');
         by.className = 'info-desc-by text-muted info-section';
         const many = credits.length > 1;
-        by.appendChild(document.createTextNode(t(many ? 'js.app.desc_by_many' : 'js.app.desc_by') + ' '));
+        // The head ("Description by") and the space after it stay; draw() redraws what follows them.
+        const headEnd = document.createTextNode(' ');
+        by.append(t.key(many ? 'js.app.desc_by_many' : 'js.app.desc_by'), headEnd);
         const entry = (c) => {
             const shown = c.state === 'shown' && c.name;
             // `.av-who`: the picture and the name are one unit that a line never breaks inside.
@@ -3920,14 +4117,14 @@ window.askInPlace = askInPlace;
                 if (pic) who.appendChild(pic);
                 who.appendChild(document.createTextNode(c.name));
             } else {
-                who.appendChild(document.createTextNode(c.state === 'hidden'
-                    ? t(c.you ? 'js.app.credit_hidden_you' : 'js.app.credit_hidden') : t('js.app.credit_deleted')));
+                who.append(c.state === 'hidden'
+                    ? t.key(c.you ? 'js.app.credit_hidden_you' : 'js.app.credit_hidden') : t.key('js.app.credit_deleted'));
             }
             const one = document.createElement('span');
             one.className = 'info-credit';
             one.appendChild(who);
-            const role = c.kind === 'edit' ? t('js.app.credit_edit', { pct: c.pct }) : (many ? t('js.app.credit_first') : '');
-            if (role) one.appendChild(document.createTextNode(' (' + role + ')'));
+            const role = c.kind === 'edit' ? t.key('js.app.credit_edit', { pct: c.pct }) : (many ? t.key('js.app.credit_first') : '');
+            if (role) one.append(' (', role, ')');
             return one;
         };
         const sep = () => {
@@ -3945,7 +4142,7 @@ window.askInPlace = askInPlace;
             return s;
         };
         const draw = (all) => {
-            while (by.childNodes.length > 1) by.removeChild(by.lastChild);
+            while (by.lastChild && by.lastChild !== headEnd) by.removeChild(by.lastChild);
             const fold = !all && credits.length > 4;
             const list = fold ? [credits[0], null].concat(credits.slice(-3)) : credits;
             list.forEach((c, k) => {
@@ -3955,7 +4152,7 @@ window.askInPlace = askInPlace;
                 more.type = 'button';
                 more.className = 'info-credit-more';
                 more.textContent = '+' + (credits.length - 4);
-                more.title = t('js.app.credit_more_title');
+                more.title = t.key('js.app.credit_more_title');
                 more.addEventListener('click', () => draw(true));
                 by.appendChild(more);
             });
@@ -3981,7 +4178,7 @@ window.askInPlace = askInPlace;
         const note = (key, vars, cls) => {
             const p = document.createElement('p');
             p.className = 'info-desc-note info-section ' + (cls || 'text-muted');
-            p.textContent = t(key, vars || {});
+            p.textContent = t.key(key, vars);
             body.appendChild(p);
         };
         if (json.content_hidden) note('js.app.content_hidden');
@@ -4003,13 +4200,13 @@ window.askInPlace = askInPlace;
             return b;
         };
         if ((canAdd || canPropose) && tpl) {
-            button('info-desc-open', canAdd ? 'bi-pen' : 'bi-vector-pen', canAdd ? t('js.app.desc_add') : t('js.app.desc_propose'),
-                   canAdd ? t('js.app.desc_add_title') : t('js.app.desc_propose_title'))
+            button('info-desc-open', canAdd ? 'bi-pen' : 'bi-vector-pen', canAdd ? t.key('js.app.desc_add') : t.key('js.app.desc_propose'),
+                   canAdd ? t.key('js.app.desc_add_title') : t.key('js.app.desc_propose_title'))
                 .addEventListener('click', () => openContentEditor(json, row, hash, canAdd ? 'add' : 'rewrite'));
         }
         // Edit (1.70.0), beside Propose a rewrite: the same editor, opened with the text as it stands.
         if (canEdit && tpl) {
-            button('info-desc-edit', 'bi-pencil-square', t('js.app.desc_edit'), t('js.app.desc_edit_title'))
+            button('info-desc-edit', 'bi-pencil-square', t.key('js.app.desc_edit'), t.key('js.app.desc_edit_title'))
                 .addEventListener('click', () => openContentEditor(json, row, hash, 'edit'));
         }
         // Delete (1.70.0): two clicks, no dialog — the second is the confirmation, and the button says so in
@@ -4017,7 +4214,7 @@ window.askInPlace = askInPlace;
         // colour, and with "Click again to delete" in the site's tooltip for as long as it stays armed — its
         // name for a screen reader turns into the same words.
         if (del) {
-            const delName = t('js.app.desc_delete'), delTip = t(del === 'own' ? 'js.app.desc_delete_title_own' : 'js.app.desc_delete_title_any');
+            const delName = t.key('js.app.desc_delete'), delTip = t.key(del === 'own' ? 'js.app.desc_delete_title_own' : 'js.app.desc_delete_title_any');
             const d = button('info-desc-delete', 'bi-trash', delName, delTip);
             const say = document.createElement('span');
             say.className = 'text-muted info-desc-msg info-desc-delete-msg';
@@ -4030,7 +4227,7 @@ window.askInPlace = askInPlace;
                 d.classList.remove('is-armed');
                 glyph('bi-trash');
                 d.setAttribute('aria-label', delName);
-                d.dataset.tip = delTip;
+                d.setAttribute('data-tip', delTip);
                 if (armTip) { armTip.drop(); armTip = null; }
             };
             d.addEventListener('click', async () => {
@@ -4038,9 +4235,9 @@ window.askInPlace = askInPlace;
                     d.dataset.armed = '1';
                     d.classList.add('is-armed');
                     glyph('bi-trash-fill');
-                    d.setAttribute('aria-label', t('js.app.desc_delete_sure'));
-                    d.dataset.tip = t('js.app.desc_delete_sure');
-                    armTip = pubTip(d, t('js.app.desc_delete_sure'), { hold: true });
+                    d.setAttribute('aria-label', t.key('js.app.desc_delete_sure'));
+                    d.setAttribute('data-tip', t.key('js.app.desc_delete_sure'));
+                    armTip = pubTip(d, t.key('js.app.desc_delete_sure'), { hold: true });
                     armTimer = setTimeout(disarm, 4000);
                     return;
                 }
@@ -4051,10 +4248,10 @@ window.askInPlace = askInPlace;
                 if (!r || !r.success) {
                     d.disabled = false;
                     disarm();
-                    say.textContent = !r ? t('js.app.desc_failed') : (r.error === 'rate_limit' ? t('js.app.desc_rate_limited') : (r.error || t('js.app.desc_failed')));
+                    say.textContent = !r ? t.key('js.app.desc_failed') : (r.error === 'rate_limit' ? t.key('js.app.desc_rate_limited') : (r.error || t.key('js.app.desc_failed')));
                     return;
                 }
-                say.textContent = r.message || t('js.app.desc_deleted');
+                say.textContent = r.message || t.key('js.app.desc_deleted');
                 // The words are gone: draw the panel again as it is now.
                 setTimeout(() => openInfo(hash, json.name), 900);
             });
@@ -4082,7 +4279,12 @@ window.askInPlace = askInPlace;
         if (!tpl) return;
         // The row's buttons step aside while the editor is open, and come back with Cancel.
         const opened = Array.prototype.filter.call(host.children, (n) => n.tagName === 'BUTTON' && !n.hidden);
-        host.appendChild(tpl.content.cloneNode(true));
+        const copy = tpl.content.cloneNode(true);
+        const copied = [...copy.childNodes];
+        host.appendChild(copy);
+        // The copy follows its template through the live language switch (assets/js/lang-swap.js, 1.73.0): its
+        // labels, options and placeholders are the template's — the server's words — until a script writes there.
+        if (window.LangSwap) window.LangSwap.adopt(copied, 'info-desc-tpl');
         opened.forEach((b) => { b.hidden = true; });
         const ta = $id('info-desc');
         const src = $id('info-desc-source');
@@ -4112,7 +4314,7 @@ window.askInPlace = askInPlace;
             if (send.disabled) return;
             const text = ta ? ta.value.trim() : '';
             const sUrl = src ? src.value.trim() : '';
-            if (!text && !sUrl) { msg.textContent = t('js.app.desc_empty'); return; }
+            if (!text && !sUrl) { msg.textContent = t.key('js.app.desc_empty'); return; }
             send.disabled = true;
             // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for — a
             // guest's every time — is solved in the site's box and the same words sent again; a wait counts down
@@ -4127,13 +4329,13 @@ window.askInPlace = askInPlace;
             if (!(window.Antispam && window.Antispam.waiting(send))) send.disabled = false;
             if (!r || !r.success) {
                 if (r && (r.antispam || r.error === 'captcha_cancelled')) {
-                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t('js.app.desc_failed');
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t.key('js.app.desc_failed');
                     return;
                 }
-                msg.textContent = !r ? t('js.app.desc_failed') : (r.error === 'rate_limit' ? t('js.app.desc_rate_limited') : (r.error || t('js.app.desc_failed')));
+                msg.textContent = !r ? t.key('js.app.desc_failed') : (r.error === 'rate_limit' ? t.key('js.app.desc_rate_limited') : (r.error || t.key('js.app.desc_failed')));
                 return;
             }
-            msg.textContent = r.message || (r.proposed ? t('js.app.desc_sent_proposed') : (r.pending ? t('js.app.desc_sent_pending') : t('js.app.desc_sent_published')));
+            msg.textContent = r.message || (r.proposed ? t.key('js.app.desc_sent_proposed') : (r.pending ? t.key('js.app.desc_sent_pending') : t.key('js.app.desc_sent_published')));
             send.hidden = true; cancel.hidden = true;
             if (ta) ta.readOnly = true;
             // Published at once: draw the panel again with the words on it.
@@ -4169,7 +4371,7 @@ window.askInPlace = askInPlace;
             OWNED.forEach(k => u.searchParams.delete(k));
             if (infoHash) u.searchParams.set('hash', infoHash);
             u.hash = '';
-            share(shareOneBtn, u.href, t('js.app.share_link_one'));
+            share(shareOneBtn, u.href, t.key('js.app.share_link_one'));
         });
         // The panel is the answer to "what IS this?", and that question is asked from the search
         // results, from a favourites list and from a profile's lists. One implementation, one
@@ -4431,7 +4633,8 @@ window.askInPlace = askInPlace;
             const table = $id('search-table');
             table.classList.toggle('search-loading', on);
             const tot = $id('search-total');
-            if (on) { tot.dataset.prev = tot.textContent; tot.textContent = t('js.app.searching'); }
+            // (It kept the old count in data-prev, which nothing read back: words in an attribute no switch translates.)
+            if (on) tot.textContent = t.key('js.app.searching');
         }
         async function run(page, urlMode) {
             curPage = page;
@@ -4454,7 +4657,7 @@ window.askInPlace = askInPlace;
                 if (shareBtn) shareBtn.hidden = true;
                 $id('search-total').textContent = '';
                 renderPager(1, 1, 0);
-                showHint(t('js.app.search_too_short'));
+                showHint(t.key('js.app.search_too_short'));
                 return;
             }
             showHint('');
@@ -4479,11 +4682,11 @@ window.askInPlace = askInPlace;
                 // The server applying the same rule (a stale page, or a hex floor that moved on one
                 // side first) is the hint line, not a red alert: the message is the one the box
                 // would have shown before sending, in the language the server rendered it in.
-                if (json && json.code === 'search_too_short') { showHint(json.error || t('js.app.search_too_short')); return; }
+                if (json && json.code === 'search_too_short') { showHint(json.error || t.key('js.app.search_too_short')); return; }
                 const code = json && json.error;
-                showAlert(alert, code === 'rate_limit' ? t('js.app.search_rate_limit')
-                    : code === 'login_required' ? t('js.app.search_login_required')
-                    : code || t('js.app.search_failed'), false);
+                showAlert(alert, code === 'rate_limit' ? t.key('js.app.search_rate_limit')
+                    : code === 'login_required' ? t.key('js.app.search_login_required')
+                    : code || t.key('js.app.search_failed'), false);
                 return;
             }
             lastTokens = q ? queryTokens(q) : [];
@@ -4496,13 +4699,14 @@ window.askInPlace = askInPlace;
                 nameTd.className = 'search-name';
                 const nameSpan = document.createElement('span');
                 nameSpan.title = r.name || '';
-                if (lastTokens.length) markInto(nameSpan, r.name || t('js.app.no_name'), lastTokens);
-                else nameSpan.textContent = r.name || t('js.app.no_name');
+                if (!r.name) nameSpan.textContent = t.key('js.app.no_name');
+                else if (lastTokens.length) markInto(nameSpan, r.name, lastTokens);
+                else nameSpan.textContent = r.name;
                 nameTd.appendChild(nameSpan);
                 if (r.src === 'whitelist') {
                     const wb = document.createElement('span');
                     wb.className = 'search-wl-badge';
-                    wb.title = t('js.app.wl_badge_title');
+                    wb.title = t.key('js.app.wl_badge_title');
                     wb.textContent = 'WL';
                     nameTd.appendChild(wb);
                 }
@@ -4514,10 +4718,10 @@ window.askInPlace = askInPlace;
                 if (r.files_count) {
                     const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
                     fc.className = 'search-files-chip' + (lastFilesSearch ? ' chip-hit' : '');
-                    fc.textContent = r.files_count === 1 ? t('js.app.files_one') : t('js.app.files_many', {n: r.files_count});
+                    fc.textContent = r.files_count === 1 ? t.key('js.app.files_one') : t.key('js.app.files_many', {n: r.files_count});
                     if (canFiles && r.info_hash) {
                         fc.type = 'button';
-                        fc.title = lastFilesSearch ? t('js.app.show_files_matched') : t('js.app.show_files');
+                        fc.title = lastFilesSearch ? t.key('js.app.show_files_matched') : t.key('js.app.show_files');
                         fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
                     }
                     nameTd.appendChild(fc);
@@ -4540,17 +4744,17 @@ window.askInPlace = askInPlace;
                         repTd.className += ' search-rep-stars';
                         repTd.textContent = r.rep.stars.toFixed(1) + ' ';
                         repTd.appendChild(iconEl('bi bi-star-fill'));
-                        repTd.title = r.rep.total === 1 ? t('js.app.rep_stars_title_one', {stars: r.rep.stars.toFixed(1)})
-                                    : t('js.app.rep_stars_title_many', {stars: r.rep.stars.toFixed(1), n: r.rep.total});
+                        repTd.title = r.rep.total === 1 ? t.key('js.app.rep_stars_title_one', {stars: r.rep.stars.toFixed(1)})
+                                    : t.key('js.app.rep_stars_title_many', {stars: r.rep.stars.toFixed(1), n: r.rep.total});
                     } else if (r.rep) {
                         // The count comes with the percentage, always. A column that shows only
                         // "100%" makes one vote look like four hundred.
                         repTd.className += r.rep.pct >= 50 ? ' search-rep-up' : ' search-rep-down';
                         repTd.textContent = r.rep.pct + '%';
-                        repTd.title = r.rep.total === 1 ? t('js.app.ratings_one') : t('js.app.ratings_many', {n: r.rep.total});
+                        repTd.title = r.rep.total === 1 ? t.key('js.app.ratings_one') : t.key('js.app.ratings_many', {n: r.rep.total});
                     } else {
                         repTd.textContent = '—';
-                        repTd.title = t('js.app.rep_too_few');
+                        repTd.title = t.key('js.app.rep_too_few');
                     }
                     tr.appendChild(repTd);
                 }
@@ -4570,10 +4774,10 @@ window.askInPlace = askInPlace;
                         // pages had no icon font until 1.68.0. Magnet stays the primary one: the filled
                         // accent box, the other two the quiet secondary ones. Each is named for a screen
                         // reader and explained in the site's tooltip (iconButton()).
-                        const a = iconButton('a', 'btn btn-small search-act-btn search-act-magnet', 'bi-magnet', t('js.app.magnet'), t('js.app.magnet_title'));
+                        const a = iconButton('a', 'btn btn-small search-act-btn search-act-magnet', 'bi-magnet', t.key('js.app.magnet'), t.key('js.app.magnet_title'));
                         a.href = magnetFor(r.info_hash, r.name);
                         actWrap.appendChild(a);
-                        const copy = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-copy', 'bi-copy', t('js.app.copy'), t('js.app.copy_magnet_title'));
+                        const copy = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-copy', 'bi-copy', t.key('js.app.copy'), t.key('js.app.copy_magnet_title'));
                         copy.addEventListener('click', () => {
                             if (!navigator.clipboard) return;
                             navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
@@ -4581,12 +4785,12 @@ window.askInPlace = askInPlace;
                                     swapGlyph(copy, 'bi-check-lg', 1200);
                                     copy.classList.add('copied');
                                     setTimeout(() => copy.classList.remove('copied'), 1200);
-                                    pubTip(copy, t('js.common.copied'));
+                                    pubTip(copy, t.key('js.common.copied'));
                                 })
                                 .catch(() => {});
                         });
                         actWrap.appendChild(copy);
-                        const info = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-info', 'bi-info-circle', t('js.app.info'), t('js.app.info_title'));
+                        const info = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-info', 'bi-info-circle', t.key('js.app.info'), t.key('js.app.info_title'));
                         info.addEventListener('click', () => openInfo(r.info_hash, r.name));
                         actWrap.appendChild(info);
                         if (canFav && window.Favourites) actWrap.appendChild(window.Favourites.makeStar(r.info_hash, !!r.fav));
@@ -4602,9 +4806,9 @@ window.askInPlace = askInPlace;
             if (json.rows.length === 0 && json.total > 0 && json.page > json.pages) { run(json.pages, 'replace'); return; }
             table.hidden = json.rows.length === 0;
             if (shareBtn) shareBtn.hidden = json.rows.length === 0;
-            $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t('js.app.results_one') : t('js.app.results_many', {n: json.total.toLocaleString()}));
+            $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t.key('js.app.results_one') : t.key('js.app.results_many', {n: json.total.toLocaleString()}));
             note.hidden = json.total !== 0;
-            note.textContent = json.total === 0 ? t('js.app.nothing_found') : '';
+            note.textContent = json.total === 0 ? t.key('js.app.nothing_found') : '';
             renderPager(json.page, json.pages, json.total);
         }
         // First / Prev / Page [n] of M · X rows / Next / Last — same pattern as the admin tables, and the
@@ -4624,29 +4828,29 @@ window.askInPlace = askInPlace;
                 b.addEventListener('click', () => go(target));
                 return b;
             };
-            box.appendChild(mk([iconEl('bi bi-chevron-double-left'), ' ' + t('js.app.pg_first')], 1, page <= 1, 'pg-edge'));
-            box.appendChild(mk([iconEl('bi bi-chevron-left'), ' ' + t('js.app.pg_prev')], page - 1, page <= 1));
+            box.appendChild(mk([iconEl('bi bi-chevron-double-left'), ' ', t.key('js.app.pg_first')], 1, page <= 1, 'pg-edge'));
+            box.appendChild(mk([iconEl('bi bi-chevron-left'), ' ', t.key('js.app.pg_prev')], page - 1, page <= 1));
             const jump = document.createElement('span');
             jump.className = 'pg-jump';
-            jump.appendChild(document.createTextNode(t('js.app.pg_page') + ' '));
+            jump.append(t.key('js.app.pg_page'), ' ');
             const inp = document.createElement('input');
             inp.type = 'number'; inp.min = '1'; inp.max = String(pages); inp.value = String(page);
-            inp.className = 'pg-input'; inp.title = t('js.app.pg_goto');
+            inp.className = 'pg-input'; inp.title = t.key('js.app.pg_goto');
             const jumpTo = () => { const n = Number(String(inp.value).trim()); if (isFinite(n) && n >= 1) go(n); else inp.value = String(page); };
             inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
             inp.addEventListener('change', jumpTo);
             inp.addEventListener('focus', () => inp.select());
             jump.appendChild(inp);
-            jump.appendChild(document.createTextNode(' ' + t('js.app.pg_of', {pages: pages})));
+            jump.append(' ', t.key('js.app.pg_of', {pages: pages}));
             box.appendChild(jump);
             if (total) {
                 const tot = document.createElement('span');
                 tot.className = 'pg-total';
-                tot.textContent = '· ' + t('js.app.pg_rows', {n: total.toLocaleString()});
+                tot.append('· ', t.key('js.app.pg_rows', {n: total.toLocaleString()}));
                 box.appendChild(tot);
             }
-            box.appendChild(mk([t('js.app.pg_next') + ' ', iconEl('bi bi-chevron-right')], page + 1, page >= pages));
-            box.appendChild(mk([t('js.app.pg_last') + ' ', iconEl('bi bi-chevron-double-right')], pages, page >= pages, 'pg-edge'));
+            box.appendChild(mk([t.key('js.app.pg_next'), ' ', iconEl('bi bi-chevron-right')], page + 1, page >= pages));
+            box.appendChild(mk([t.key('js.app.pg_last'), ' ', iconEl('bi bi-chevron-double-right')], pages, page >= pages, 'pg-edge'));
         }
         // ── file-list modal: collapsible folder tree; matches marked when searching file names ──
         const overlay = $id('files-overlay');
@@ -4703,7 +4907,7 @@ window.askInPlace = askInPlace;
         // reader is looking at. The helpers themselves live at the top of this file — the profile
         // page has a Share button too, and initSearch() returns before its first line.
         const shareViewBtn = $id('search-share');
-        if (shareViewBtn) shareViewBtn.addEventListener('click', () => share(shareViewBtn, location.href, t('js.app.share_link')));
+        if (shareViewBtn) shareViewBtn.addEventListener('click', () => share(shareViewBtn, location.href, t.key('js.app.share_link')));
 
         async function openFiles(hash, name) {
             if (!overlay) return;
@@ -4711,8 +4915,8 @@ window.askInPlace = askInPlace;
             const mine = ++filesSeq;
             const ours = () => mine === filesSeq && !overlay.hidden;
             if (filesObserver) { filesObserver.disconnect(); filesObserver = null; }
-            title.textContent = name || t('js.app.files');
-            body.textContent = t('js.common.loading');
+            title.textContent = name || t.key('js.app.files');
+            body.textContent = t.key('js.common.loading');
             overlay.hidden = false;
             document.addEventListener('keydown', escFiles);
             // An entry of its own, so Back shuts the list (1.64.0). The address does not change —
@@ -4730,10 +4934,10 @@ window.askInPlace = askInPlace;
             if (!ours()) return;
             body.textContent = '';
             if (!json || !json.success) {
-                body.textContent = (json && json.error) || t('js.app.files_load_failed');
+                body.textContent = (json && json.error) || t.key('js.app.files_load_failed');
                 return;
             }
-            if (!json.files.length) { title.textContent = (json.name || name || t('js.app.files')); body.textContent = t('js.app.no_file_list'); return; }
+            if (!json.files.length) { title.textContent = (json.name || name || t.key('js.app.files')); body.textContent = t.key('js.app.no_file_list'); return; }
             // The same paging as the info overlay: the first page now, the next when the reader
             // reaches the end of the list or presses the button — only with index.files_all.
             const allFiles = json.files.slice();
@@ -4769,15 +4973,15 @@ window.askInPlace = askInPlace;
             // the folder somebody had just opened folded itself twice per page.
             const chrome = () => {
                 const head = (totalFiles && allFiles.length < totalFiles)
-                    ? t('js.app.files_n_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
-                    : t('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
-                title.textContent = (json.name || name || t('js.app.files')) + ' — ' + head;
+                    ? t.key('js.app.files_n_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
+                    : t.key('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
+                title.replaceChildren(json.name || name || t.key('js.app.files'), ' — ', head);
                 matchNote.hidden = !beyond && !json.matches_more;
-                matchNote.textContent = [
-                    beyond ? t('js.app.files_matches_beyond', {n: beyond.toLocaleString()}) : '',
-                    json.matches_more ? t('js.app.files_matches_more', {n: matches.length.toLocaleString()}) : '',
-                ].filter(Boolean).join(' ');
-                btn.textContent = loading ? t('js.common.loading') : t('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                const bits = [];
+                if (beyond) bits.push(t.key('js.app.files_matches_beyond', {n: beyond.toLocaleString()}));
+                if (json.matches_more) bits.push(...(bits.length ? [' '] : []), t.key('js.app.files_matches_more', {n: matches.length.toLocaleString()}));
+                matchNote.replaceChildren(...bits);
+                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
                 btn.disabled = loading; foot.hidden = !more;
             };
             const render = () => {
@@ -4800,8 +5004,8 @@ window.askInPlace = askInPlace;
                 }
                 stalled = false;
                 (fj.files || []).forEach(f => allFiles.push(f)); next = typeof fj.next === 'number' ? fj.next : allFiles.length; more = !!fj.truncated && !!fj.can_more;
-                if (fj.stored_short) note(t('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
-                if (fj.capped) note(t('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
+                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
+                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
                 render();
                 return true;
             };
@@ -4825,12 +5029,12 @@ window.askInPlace = askInPlace;
                 filesObserver.observe(sentinel);
             }
             body.appendChild(tree); body.appendChild(foot); body.appendChild(matchNote); body.appendChild(notes);
-            if (json.truncated && !json.can_more) note(t('js.app.files_truncated'));
+            if (json.truncated && !json.can_more) note(t.key('js.app.files_truncated'));
             // The list ends here and ends short: the rest was never written, so there is nothing to
             // load and nothing wrong — say it once, quietly, under the tree.
-            if (json.stored_short) note(t('js.app.files_stored_cap', {n: Number(json.stored_total || allFiles.length).toLocaleString()}));
+            if (json.stored_short) note(t.key('js.app.files_stored_cap', {n: Number(json.stored_total || allFiles.length).toLocaleString()}));
             // The first page can already stand on the site's total when the two numbers are equal.
-            if (json.capped) note(t('js.app.files_cap_reached', {n: Number(json.max || allFiles.length).toLocaleString()}));
+            if (json.capped) note(t.key('js.app.files_cap_reached', {n: Number(json.max || allFiles.length).toLocaleString()}));
             render();
             if (filesMode === 'all') await loadAll();
         }
@@ -4873,17 +5077,11 @@ window.askInPlace = askInPlace;
         // one thing it must not do is show an empty box and no reason.
         if (startState.hash) openInfo(startState.hash, null);
 
-        // EVERYTHING ON THIS PAGE THAT A SCRIPT DREW STAYS IN THE OLD LANGUAGE OTHERWISE.
-        //
-        // lang-swap.js skips live nodes with no counterpart in the fetched document, and the
-        // containers PHP renders for the results, the total, the pager and the Info panel are all
-        // EMPTY, so the alignment has nothing to pair them with. t() itself is already reloaded by
-        // then, so redrawing is all it takes. The panel does the same thing in admin-settings.js and
-        // admin-common.js; this is the public page's share of it.
-        document.addEventListener('langswap', () => {
-            run(curPage, 'none');
-            if (infoHash) openInfo(infoHash, null);
-        });
+        // The live language switch needs nothing from this page (1.73.0). It used to run the search again
+        // and open the Info panel again on `langswap` — two requests more per switch, and an open description
+        // editor, its typed words, a comment being written and a report box were thrown away with the panel.
+        // Every word drawn here is written with t.key() now and keeps its key (assets/js/i18n.js), so the
+        // switch says the results, the total, the pager and the panel again where they stand.
     }
 
     /**
@@ -4906,7 +5104,7 @@ window.askInPlace = askInPlace;
                 u.hash = '';
                 u.searchParams.set('action', 'u');
                 u.searchParams.set('name', name);
-                share(btn, u.href, t('js.app.share_link_profile'));
+                share(btn, u.href, t.key('js.app.share_link_profile'));
             });
         });
     }
@@ -4968,11 +5166,11 @@ window.askInPlace = askInPlace;
         inner.className = 'leave-box';
 
         const h = document.createElement('h3');
-        h.textContent = t('js.app.leave_title');
+        h.textContent = t.key('js.app.leave_title');
         inner.appendChild(h);
 
         const p1 = document.createElement('p');
-        p1.textContent = t('js.app.leave_body');
+        p1.textContent = t.key('js.app.leave_body');
         inner.appendChild(p1);
 
         // textContent, never innerHTML: the URL is the untrusted part of this dialog, and a dialog
@@ -4987,14 +5185,14 @@ window.askInPlace = askInPlace;
         const cancel = document.createElement('button');
         cancel.type = 'button';
         cancel.className = 'btn btn-secondary';
-        cancel.textContent = t('js.app.leave_stay');
+        cancel.textContent = t.key('js.app.leave_stay');
         cancel.addEventListener('click', () => { closeLeave(box); openBox = null; });
         const go = document.createElement('a');
         go.className = 'btn';
         go.href = url;
         go.target = '_blank';
         go.rel = 'nofollow noopener noreferrer ugc';
-        go.textContent = t('js.app.leave_open');
+        go.textContent = t.key('js.app.leave_open');
         go.addEventListener('click', () => { closeLeave(box); openBox = null; });
         acts.appendChild(cancel);
         acts.appendChild(go);
@@ -5116,8 +5314,8 @@ window.askInPlace = askInPlace;
         },
     };
     const HINT = {
-        markdown: t('js.app.hint_markdown'),
-        bbcode:   t('js.app.hint_bbcode'),
+        markdown: t.key('js.app.hint_markdown'),
+        bbcode:   t.key('js.app.hint_bbcode'),
     };
     const fmt = () => (fmtEl && fmtEl.value === 'markdown') ? 'markdown' : 'bbcode';
 
@@ -5171,24 +5369,24 @@ window.askInPlace = askInPlace;
         if (!text.trim()) {
             box.textContent = '';
             box.appendChild(Object.assign(document.createElement('p'), {
-                className: 'text-muted', textContent: t('js.app.nothing_to_preview') }));
+                className: 'text-muted', textContent: t.key('js.app.nothing_to_preview') }));
             lastShown = { key, ok: true };
             return;
         }
-        box.textContent = t('js.app.rendering');
+        box.textContent = t.key('js.app.rendering');
         const r = await postJson('richtext_preview', {
             text, format: f, for: previewFor, csrf_token: csrfOfEditor() });
-        if (!r) { box.textContent = t('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
-        if (!r.success) { box.textContent = r.error || t('js.app.render_failed'); lastShown = { key, ok: false }; return; }
+        if (!r) { box.textContent = t.key('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
+        if (!r.success) { box.textContent = r.error || t.key('js.app.render_failed'); lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist
         // (includes/richtext.php). It is the same string the public page will show.
         box.innerHTML = r.html;
         lastShown = { key, ok: true };
         if (counter) {
-            const bits = [t('js.app.count_characters', {used: r.length, limit: r.limit})];
-            if (r.images.limit > 0 || r.images.used) bits.push(t('js.app.count_images', {used: r.images.used, limit: r.images.limit}));
-            if (r.links.limit > 0 || r.links.used) bits.push(t('js.app.count_links', {used: r.links.used, limit: r.links.limit}));
-            counter.textContent = bits.join(' · ');
+            const bits = [t.key('js.app.count_characters', {used: r.length, limit: r.limit})];
+            if (r.images.limit > 0 || r.images.used) bits.push(' · ', t.key('js.app.count_images', {used: r.images.used, limit: r.images.limit}));
+            if (r.links.limit > 0 || r.links.used) bits.push(' · ', t.key('js.app.count_links', {used: r.links.used, limit: r.links.limit}));
+            counter.replaceChildren(...bits);
         }
         if (help) {
             help.textContent = r.problem || '';
@@ -5201,9 +5399,9 @@ window.askInPlace = askInPlace;
         if (!counter) return;
         if (measure) {
             const m = measure(ta.value, fmt()) || {};
-            counter.textContent = t('js.app.count_characters', {used: Number(m.used) || 0, limit: Number(m.limit) || 0});
+            counter.textContent = t.key('js.app.count_characters', {used: Number(m.used) || 0, limit: Number(m.limit) || 0});
         } else if (ta.maxLength > 0) {
-            counter.textContent = t('js.app.count_characters', {used: ta.value.length, limit: ta.maxLength});
+            counter.textContent = t.key('js.app.count_characters', {used: ta.value.length, limit: ta.maxLength});
         }
     }
 
@@ -5307,11 +5505,11 @@ window.askInPlace = askInPlace;
     let started = 0;
 
     const LABEL = {
-        probing: [t('js.app.probe_checking'), 'wl-probe-wait'],
-        passed:  [t('js.app.probe_passed'), 'wl-probe-ok'],
-        failed:  [t('js.app.probe_failed'), 'wl-probe-bad'],
-        none:    [t('js.app.chip_registered'), 'wl-probe-ok'],
-        unknown: [t('js.app.probe_failed'), 'wl-probe-bad'],
+        probing: [t.key('js.app.probe_checking'), 'wl-probe-wait'],
+        passed:  [t.key('js.app.probe_passed'), 'wl-probe-ok'],
+        failed:  [t.key('js.app.probe_failed'), 'wl-probe-bad'],
+        none:    [t.key('js.app.chip_registered'), 'wl-probe-ok'],
+        unknown: [t.key('js.app.probe_failed'), 'wl-probe-bad'],
     };
 
     function draw(items) {
@@ -5337,16 +5535,16 @@ window.askInPlace = askInPlace;
             detail.className = 'wl-probe-detail';
             if (it.state === 'passed' || it.state === 'none') {
                 const bits = [];
-                if (it.seeders != null) bits.push(t('js.app.probe_swarm', {seeders: it.seeders, leechers: it.leechers || 0}));
-                if (it.files != null) bits.push(it.files === 1 ? t('js.app.probe_one_file') : t('js.app.probe_files', {n: it.files}));
-                detail.textContent = bits.join(' · ');
+                if (it.seeders != null) bits.push(t.key('js.app.probe_swarm', {seeders: it.seeders, leechers: it.leechers || 0}));
+                if (it.files != null) bits.push(...(bits.length ? [' · '] : []), it.files === 1 ? t.key('js.app.probe_one_file') : t.key('js.app.probe_files', {n: it.files}));
+                detail.replaceChildren(...bits);
             } else if (it.state === 'failed' || it.state === 'unknown') {
                 // The reason, verbatim from the server. It is the whole point of the line.
-                detail.textContent = it.error || t('js.app.probe_not_passed');
+                detail.textContent = it.error || t.key('js.app.probe_not_passed');
             } else {
                 detail.textContent = it.meta === 'done'
-                    ? t('js.app.probe_meta_done')
-                    : t('js.app.probe_meta_wait');
+                    ? t.key('js.app.probe_meta_done')
+                    : t.key('js.app.probe_meta_wait');
             }
             li.appendChild(detail);
             list.appendChild(li);
@@ -5359,24 +5557,24 @@ window.askInPlace = askInPlace;
         // The timeout in the sentence is the timeout of the loop too. A hash that stays "probing"
         // past it (a stalled worker) used to keep this tab asking every three seconds for ever.
         if (timeoutMinutes > 0 && Date.now() - started > (timeoutMinutes + 1) * 60000) {
-            note.textContent = t('js.app.probe_timed_out', {timeout: timeoutMinutes});
+            note.textContent = t.key('js.app.probe_timed_out', {timeout: timeoutMinutes});
             return;
         }
         const r = await getJson('whitelist_probe&hashes=' + encodeURIComponent(hashes.join(',')));
         if (!r || !r.success) {
-            note.textContent = (r && r.error) || t('js.app.probe_progress_failed');
+            note.textContent = (r && r.error) || t.key('js.app.probe_progress_failed');
             return;
         }
         draw(r.items);
         const waiting = Object.keys(r.items).filter(h => r.items[h].state === 'probing').length;
         if (waiting === 0) {
-            note.textContent = t('js.app.done');
+            note.textContent = t.key('js.app.done');
             clearTimeout(timer);
             return;
         }
         const mins = Math.round((Date.now() - started) / 60000);
-        note.textContent = t('js.app.probe_waiting', {n: waiting, timeout: timeoutMinutes})
-            + (mins >= 1 ? ' ' + t('js.app.probe_so_far', {mins: mins}) : '');
+        note.replaceChildren(t.key('js.app.probe_waiting', {n: waiting, timeout: timeoutMinutes}),
+            ...(mins >= 1 ? [' ', t.key('js.app.probe_so_far', {mins: mins})] : []));
         // Every three seconds. Faster tells nobody anything: the worker polls its queue on its own
         // schedule and the answer cannot change in between.
         timer = setTimeout(() => poll(hashes, timeoutMinutes), 3000);
@@ -5386,7 +5584,7 @@ window.askInPlace = askInPlace;
         if (!hashes || !hashes.length) return;
         started = Date.now();
         box.hidden = false;
-        note.textContent = hashes.length === 1 ? t('js.app.probe_start_one') : t('js.app.probe_start_many', {n: hashes.length});
+        note.textContent = hashes.length === 1 ? t.key('js.app.probe_start_one') : t.key('js.app.probe_start_many', {n: hashes.length});
         clearTimeout(timer);
         poll(hashes, timeoutMinutes || 10);
     };
@@ -5423,17 +5621,17 @@ window.askInPlace = askInPlace;
         const hash = document.createElement('code');
         hash.className = 'hc-hash';
         hash.textContent = j.hash;
-        out.appendChild(row(t('js.app.hc_hash'), hash));
+        out.appendChild(row(t.key('js.app.hc_hash'), hash));
         if (!j.known) {
             const p = document.createElement('p');
             p.className = 'hc-unknown';
-            p.textContent = t('js.app.hc_unknown');
+            p.textContent = t.key('js.app.hc_unknown');
             out.appendChild(p);
             out.hidden = false;
             return;
         }
         const name = (j.meta && j.meta.name) || (j.seen && j.seen.name) || (j.registered && j.registered.name) || '';
-        if (name) out.appendChild(row(t('js.app.hc_name'), name));
+        if (name) out.appendChild(row(t.key('js.app.hc_name'), name));
 
         // A section the reader may not be told about (no index.view, no whitelist.view, no
         // content.view) arrives withheld — and a withheld section is not a "no", so its row is not drawn.
@@ -5441,43 +5639,43 @@ window.askInPlace = askInPlace;
         // registered here, and in what state
         const reg = j.registered;
         if (!off.has('registered')) {
-        const regText = !reg ? t('js.app.hc_reg_no')
-            : t('js.app.hc_reg_' + (['live', 'review', 'probing', 'rejected', 'failed', 'banned'].includes(reg.state) ? reg.state : 'live'),
+        const regText = !reg ? t.key('js.app.hc_reg_no')
+            : t.key('js.app.hc_reg_' + (['live', 'review', 'probing', 'rejected', 'failed', 'banned'].includes(reg.state) ? reg.state : 'live'),
                 {date: when(reg.since)});
-        out.appendChild(row(t('js.app.hc_registered'), regText, !reg ? 'hc-no' : (reg.state === 'live' ? 'hc-yes' : (reg.state === 'banned' || reg.state === 'rejected' ? 'hc-bad' : 'hc-wait'))));
+        out.appendChild(row(t.key('js.app.hc_registered'), regText, !reg ? 'hc-no' : (reg.state === 'live' ? 'hc-yes' : (reg.state === 'banned' || reg.state === 'rejected' ? 'hc-bad' : 'hc-wait'))));
         }
         // the words about it, from either home: published, waiting, or turned down
         if (j.content && j.content.status && j.content.status !== 'none') {
             const cs = j.content.status;
-            out.appendChild(row(t('js.app.hc_description'),
-                t(cs === 'approved' ? 'js.app.hc_description_yes' : (cs === 'pending' ? 'js.app.hc_description_pending' : 'js.app.hc_description_rejected')),
+            out.appendChild(row(t.key('js.app.hc_description'),
+                t.key(cs === 'approved' ? 'js.app.hc_description_yes' : (cs === 'pending' ? 'js.app.hc_description_pending' : 'js.app.hc_description_rejected')),
                 cs === 'approved' ? 'hc-yes' : (cs === 'pending' ? 'hc-wait' : 'hc-no')));
         }
 
         // banned — the ban list is the accesslist in blacklist mode, a veto on top of it in whitelist mode
-        const banLabel = j.mode === 'blacklist' ? t('js.app.hc_blacklisted') : t('js.app.hc_banned');
-        out.appendChild(row(banLabel, j.banned ? t('js.app.hc_banned_yes', {date: when(j.banned.since)}) : t('js.app.hc_banned_no'),
+        const banLabel = j.mode === 'blacklist' ? t.key('js.app.hc_blacklisted') : t.key('js.app.hc_banned');
+        out.appendChild(row(banLabel, j.banned ? t.key('js.app.hc_banned_yes', {date: when(j.banned.since)}) : t.key('js.app.hc_banned_no'),
                             j.banned ? 'hc-bad' : 'hc-no'));
 
         // seen in the swarm
         const seen = j.seen;
-        if (!off.has('seen')) out.appendChild(row(t('js.app.hc_seen'), seen
-            ? t('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: Number(seen.times).toLocaleString(),
+        if (!off.has('seen')) out.appendChild(row(t.key('js.app.hc_seen'), seen
+            ? t.key('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: Number(seen.times).toLocaleString(),
                                        s: Number(seen.seeders).toLocaleString(), l: Number(seen.leechers).toLocaleString()})
-            : t('js.app.hc_seen_no'), seen ? 'hc-yes' : 'hc-no'));
+            : t.key('js.app.hc_seen_no'), seen ? 'hc-yes' : 'hc-no'));
 
         // metadata and files
         const ms = (j.meta && j.meta.status) || 'none';
         const mKey = ['done', 'pending', 'fetching', 'failed'].includes(ms) ? ms : 'none';
-        out.appendChild(row(t('js.app.hc_meta'), t('js.app.hc_meta_' + mKey), mKey === 'done' ? 'hc-yes' : (mKey === 'failed' ? 'hc-bad' : 'hc-no')));
+        out.appendChild(row(t.key('js.app.hc_meta'), t.key('js.app.hc_meta_' + mKey), mKey === 'done' ? 'hc-yes' : (mKey === 'failed' ? 'hc-bad' : 'hc-no')));
         const f = j.files || {};
         const fetched = Number(f.fetched) || 0;
         const total = f.total === null || f.total === undefined ? null : Number(f.total);
         let filesText;
-        if (!fetched) filesText = total ? t('js.app.hc_files_known_only', {total: total.toLocaleString()}) : t('js.app.hc_files_none');
-        else if (total && total > fetched) filesText = t('js.app.hc_files_partial', {n: fetched.toLocaleString(), total: total.toLocaleString()});
-        else filesText = t('js.app.hc_files_all', {n: fetched.toLocaleString()});
-        out.appendChild(row(t('js.app.hc_files'), filesText, fetched ? 'hc-yes' : 'hc-no'));
+        if (!fetched) filesText = total ? t.key('js.app.hc_files_known_only', {total: total.toLocaleString()}) : t.key('js.app.hc_files_none');
+        else if (total && total > fetched) filesText = t.key('js.app.hc_files_partial', {n: fetched.toLocaleString(), total: total.toLocaleString()});
+        else filesText = t.key('js.app.hc_files_all', {n: fetched.toLocaleString()});
+        out.appendChild(row(t.key('js.app.hc_files'), filesText, fetched ? 'hc-yes' : 'hc-no'));
         out.hidden = false;
     }
 
@@ -5494,8 +5692,8 @@ window.askInPlace = askInPlace;
         btn.disabled = false;
         if (!j || !j.success) {
             alertBox.className = 'alert alert-error show';
-            alertBox.textContent = !j ? t('js.app.hc_failed')
-                : (j.error === 'rate_limit' ? t('js.app.hc_rate_limited') : (j.error || t('js.app.hc_failed')));
+            alertBox.textContent = !j ? t.key('js.app.hc_failed')
+                : (j.error === 'rate_limit' ? t.key('js.app.hc_rate_limited') : (j.error || t.key('js.app.hc_failed')));
             return;
         }
         render(j);

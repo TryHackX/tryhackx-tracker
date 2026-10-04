@@ -63,9 +63,10 @@ function otValidCommand(string $cmd): bool {
 function otRun(array $cfg, array $args): array {
     $out = ['ok' => false, 'json' => null, 'output' => '', 'code' => null, 'error' => null];
     $cmd = otPerfCommand($cfg);
-    if ($cmd === '') { $out['error'] = 'No OpenTracker helper command is configured (Settings → OpenTracker performance).'; return $out; }
-    if (!otValidCommand($cmd)) { $out['error'] = 'The helper command contains characters that are not allowed.'; return $out; }
-    if (!trackerExecAvailable()) { $out['error'] = 'PHP exec() is disabled on this server — the panel cannot reach the helper.'; return $out; }
+    // the reader's language (1.73.0: these were English on every page — the netlimit helper's twins already were not)
+    if ($cmd === '') { $out['error'] = __('api.ot.no_helper'); return $out; }
+    if (!otValidCommand($cmd)) { $out['error'] = __('api.ot.bad_command'); return $out; }
+    if (!trackerExecAvailable()) { $out['error'] = __('api.ot.exec_disabled'); return $out; }
 
     $full = $cmd;
     foreach ($args as $a) $full .= ' ' . escapeshellarg((string)$a);
@@ -84,12 +85,12 @@ function otRun(array $cfg, array $args): array {
     }
     if ($out['json'] === null) {
         $out['error'] = $out['output'] !== ''
-            ? 'The helper did not answer with JSON: ' . mb_substr($out['output'], 0, 300)
-            : 'The helper produced no output (exit ' . (int)$rc . '). Check the sudoers rule.';
+            ? __('api.helper.no_json', ['out' => mb_substr($out['output'], 0, 300)])
+            : __('api.helper.no_output', ['code' => (int)$rc]);
         return $out;
     }
     $out['ok'] = !empty($out['json']['ok']) && $out['code'] === 0;
-    if (!$out['ok'] && $out['error'] === null) $out['error'] = (string)($out['json']['error'] ?? ('Helper exited with code ' . (int)$rc));
+    if (!$out['ok'] && $out['error'] === null) $out['error'] = (string)($out['json']['error'] ?? __('api.helper.exit_code', ['code' => (int)$rc]));
     return $out;
 }
 
@@ -166,32 +167,29 @@ function otTick(array $cfg): array {
  * to lose an announce — worse than the firewall dropping it, which costs nothing.
  */
 function otAdvice(array $st): array {
+    // In the reader's language (1.73.0: English on every page, while the DB memory and sysctl cards' advice beside it
+    // was not) — api.ot.adv_*, with the numbers written the reader's way.
+    $num = static fn(int $n): string => number_format($n, 0, '.', (function_exists('langCurrent') && langCurrent() === 'pl') ? "\u{00A0}" : ',');
     $out = [];
     $cpus = max(1, (int)($st['cpus'] ?? 1));
     $workers = (int)($st['workers'] ?? 0);
     if ($workers > 0 && $workers < $cpus) {
-        $out[] = ['level' => 'info', 'text' => 'opentracker runs ' . $workers . ' UDP worker threads on ' . $cpus
-            . ' cores. More threads help only while packets are actually queueing — check the dropped count below before raising it.'];
+        $out[] = ['level' => 'info', 'text' => __('api.ot.adv_workers_few', ['workers' => $workers, 'cpus' => $cpus])];
     } elseif ($workers > $cpus) {
-        $out[] = ['level' => 'warn', 'text' => 'There are more UDP workers (' . $workers . ') than cores (' . $cpus
-            . '). Past one per core the threads mostly compete with each other.'];
+        $out[] = ['level' => 'warn', 'text' => __('api.ot.adv_workers_many', ['workers' => $workers, 'cpus' => $cpus])];
     }
     if (empty($st['workers_consistent'])) {
-        $out[] = ['level' => 'warn', 'text' => 'The whitelist and blacklist config files disagree about the worker count, '
-            . 'so it would change when the tracker switches mode. Applying a value from here writes both.'];
+        $out[] = ['level' => 'warn', 'text' => __('api.ot.adv_workers_disagree')];
     }
     $rmem = (int)($st['rmem_max'] ?? 0);
     $drops = (int)($st['socket_drops'] ?? 0);
     if ($rmem > 0 && $rmem < 1048576) {
-        $out[] = ['level' => $drops > 0 ? 'warn' : 'info', 'text' =>
-            'The kernel caps every socket buffer at ' . number_format($rmem) . ' bytes (net.core.rmem_max)'
-            . ($drops > 0 ? ', and this socket has already discarded ' . number_format($drops) . ' packets because its queue was full. ' : '. ')
-            . 'A packet dropped there cost the machine everything except the answer — unlike one the firewall drops, which costs nothing. '
-            . 'Raising it is a system-wide sysctl, so the panel does not do it for you: sudo sysctl -w net.core.rmem_max=8388608'];
+        $out[] = ['level' => $drops > 0 ? 'warn' : 'info', 'text' => $drops > 0
+            ? __('api.ot.adv_rmem_drops', ['bytes' => $num($rmem), 'drops' => $num($drops)])
+            : __('api.ot.adv_rmem', ['bytes' => $num($rmem)])];
     }
     if (!empty($st['other_dropins'])) {
-        $out[] = ['level' => 'info', 'text' => 'Other drop-ins are present and are never touched by the panel: '
-            . implode(', ', array_map('strval', (array)$st['other_dropins'])) . '. systemd merges them, and the highest-numbered file wins a conflict.'];
+        $out[] = ['level' => 'info', 'text' => __('api.ot.adv_dropins', ['files' => implode(', ', array_map('strval', (array)$st['other_dropins']))])];
     }
     return $out;
 }

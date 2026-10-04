@@ -34,10 +34,10 @@
     const NL_BUSY_LOAD = 0.85;
     const RANGES = [['1h', '1h'], ['6h', '6h'], ['24h', '24h'], ['7d', '7d'], ['14d', '2w'], ['30d', '1m']];
     const SERIES = [
-        { key: 'pps_total',  label: t('js.net.series_arriving'),  color: '#4a9eff', on: true },
-        { key: 'pps_passed', label: t('js.net.series_served'),    color: '#66bb6a', on: true },
-        { key: 'pps_capped', label: t('js.net.series_dropped'),   color: '#ff5252', on: true },
-        { key: 'limit_pps',  label: t('js.net.series_limit'),     color: '#ffb74d', on: true, dash: [6, 4] },
+        { key: 'pps_total',  label: t.key('js.net.series_arriving'),  color: '#4a9eff', on: true },
+        { key: 'pps_passed', label: t.key('js.net.series_served'),    color: '#66bb6a', on: true },
+        { key: 'pps_capped', label: t.key('js.net.series_dropped'),   color: '#ff5252', on: true },
+        { key: 'limit_pps',  label: t.key('js.net.series_limit'),     color: '#ffb74d', on: true, dash: [6, 4] },
     ];
     const STORE_RANGE = 'tracker_net_range';
     const STORE_COLLAPSE = 'tracker_net_collapsed';
@@ -54,7 +54,7 @@
     };
     const badge = (text, cls) => el('span', { className: 'wl-badge ' + (cls || 'wl-b-muted'), text: text });
     const kv = (label, value) => el('div', { className: 'wl-kv-item' }, [
-        el('div', { className: 'wl-kv-label', text: label }),
+        el('div', { className: 'wl-kv-label' }, Array.isArray(label) ? label : [label]),   // pieces keep their keys (1.73.0)
         el('div', { className: 'wl-kv-value' }, value),
     ]);
 
@@ -121,7 +121,7 @@
         } catch (e) {
             // Returning quietly here is indistinguishable, on screen, from a server that never
             // answers: the loading state stays up and the admin has no idea anything went wrong.
-            if (seq > statusPainted) { statusPainted = seq; renderFatal(t('js.net.status_unreachable', {err: (e && e.message ? e.message : t('js.net.network_error'))}), true); }
+            if (seq > statusPainted) { statusPainted = seq; renderFatal(t.key('js.net.status_unreachable', {err: (e && e.message ? e.message : t.key('js.net.network_error'))}), true); }
             return;
         } finally {
             if (statusBusy === seq) { statusBusy = 0; clearWatchdog(); }
@@ -151,7 +151,7 @@
         watchdog = setTimeout(() => {
             watchdog = null;
             if (statusPainted) return;
-            renderFatal(t('js.net.status_timeout'), true);
+            renderFatal(t.key('js.net.status_timeout'), true);
         }, 15000);
     }
     function clearWatchdog() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
@@ -159,20 +159,20 @@
     function renderFatal(msg, retry) {
         const grid = $('net-grid');
         grid.textContent = '';
-        const parts = [badge(t('js.net.unavailable'), 'wl-b-bad'), ' ',
-            el('span', { className: 'wl-small text-muted', text: msg || t('js.net.status_no_answer') })];
+        const parts = [badge(t.key('js.net.unavailable'), 'wl-b-bad'), ' ',
+            el('span', { className: 'wl-small text-muted', text: t.find(msg, 'api.') || t.key('js.net.status_no_answer') })];
         if (retry) parts.push(el('div', {}, [el('button', {
             className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
             onclick: () => { statusPainted = 0; statusBusy = 0; renderLoading(); loadStatus(true); },
-        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.net.try_again')])]));
-        grid.appendChild(kv(t('js.net.firewall'), parts));
+        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ', t.key('js.net.try_again')])]));
+        grid.appendChild(kv(t.key('js.net.firewall'), parts));
     }
 
     function renderLoading() {
         const grid = $('net-grid');
         grid.textContent = '';
         grid.appendChild(el('div', { className: 'wl-status-loading' }, [
-            el('span', { className: 'spinner-border spinner-border-sm', role: 'status' }), ' ' + t('js.net.reading_firewall')]));
+            el('span', { className: 'spinner-border spinner-border-sm', role: 'status' }), ' ', t.key('js.net.reading_firewall')]));
     }
 
     // "Not persistent" has three different causes and only one of them is the admin's to fix, so
@@ -183,16 +183,16 @@
         if (fw.dir_writable === false || j.persist_deferred) {
             return el('div', { className: 'wl-small text-muted' }, [
                 el('i', { className: 'bi bi-clock-history' }),
-                ' ' + t('js.net.persist_deferred', {path: (fw.file_path || '/etc/nftables.d')})]);
+                ' ', t.key('js.net.persist_deferred', {path: (fw.file_path || '/etc/nftables.d')})]);
         }
         if (fw.include_ok === false) {
-            return el('div', { className: 'wl-small text-warning', text: t('js.net.persist_no_include') });
+            return el('div', { className: 'wl-small text-warning', text: t.key('js.net.persist_no_include') });
         }
         if (fw.file_matches === false && fw.file_present) {
             return el('div', { className: 'wl-small text-warning', text:
-                t('js.net.persist_differs', {what: (fw.file_mode === 'count' ? t('js.net.counting_only') : t('js.net.pps_value', {n: num(fw.file_pps)}))}) });
+                t.key('js.net.persist_differs', {what: (fw.file_mode === 'count' ? t.key('js.net.counting_only') : t.key('js.net.pps_value', {n: num(fw.file_pps)}))}) });
         }
-        return el('div', { className: 'wl-small text-warning', text: t('js.net.persist_not_saved') });
+        return el('div', { className: 'wl-small text-warning', text: t.key('js.net.persist_not_saved') });
     }
 
     function renderStatus(j) {
@@ -206,46 +206,46 @@
 
         // 1. what the firewall is doing right now
         if (j.error) {
-            grid.appendChild(kv(t('js.net.firewall'), [badge(t('js.net.unavailable'), 'wl-b-bad'), ' ',
-                el('span', { className: 'wl-small text-muted', text: j.error })]));
+            grid.appendChild(kv(t.key('js.net.firewall'), [badge(t.key('js.net.unavailable'), 'wl-b-bad'), ' ',
+                el('span', { className: 'wl-small text-muted', text: t.find(j.error, 'api.') })]));   // the server's sentence by key (1.73.0)
         } else if (!fw.nft) {
-            grid.appendChild(kv(t('js.net.firewall'), [badge(t('js.net.no_nftables'), 'wl-b-bad'), ' ',
-                el('span', { className: 'wl-small text-muted', text: t('js.net.nft_missing') })]));
+            grid.appendChild(kv(t.key('js.net.firewall'), [badge(t.key('js.net.no_nftables'), 'wl-b-bad'), ' ',
+                el('span', { className: 'wl-small text-muted', text: t.key('js.net.nft_missing') })]));
         } else if (fw.table && fw.mode === 'count') {
             // counters loaded, no drop rule: measuring, not throttling — say so unambiguously
-            const parts = [badge(t('js.net.counting_only'), 'wl-b-pending'), ' ',
-                el('span', { className: 'text-muted', text: t('js.net.port_nothing_dropped', {port: fw.port}) }),
-                el('div', { className: 'wl-small text-muted', text: t('js.net.counting_rules_note') })];
+            const parts = [badge(t.key('js.net.counting_only'), 'wl-b-pending'), ' ',
+                el('span', { className: 'text-muted', text: t.key('js.net.port_nothing_dropped', {port: fw.port}) }),
+                el('div', { className: 'wl-small text-muted', text: t.key('js.net.counting_rules_note') })];
             if (!fw.persistent) parts.push(persistNote(fw, j));
-            grid.appendChild(kv(t('js.net.inbound_limit'), parts));
+            grid.appendChild(kv(t.key('js.net.inbound_limit'), parts));
         } else if (fw.table) {
-            const parts = [badge(t('js.net.pps_value', {n: num(fw.pps)}), 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: t('js.net.burst_port', {burst: num(fw.burst), port: fw.port}) })];
+            const parts = [badge(t.key('js.net.pps_value', {n: num(fw.pps)}), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t.key('js.net.burst_port', {burst: num(fw.burst), port: fw.port}) })];
             if (!fw.persistent) parts.push(persistNote(fw, j));
             // Who loaded it, in words (net_status: netlimitSourceWords()) — "lists-off" was a code, and
             // read like a limit somebody had named. An unknown code arrives as itself.
             const la = j.last_apply || null;
             const src = la && (la.words || la.source);
             if (src) {
-                const line = la.at ? t('js.net.set_by', {src: src, ago: t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - la.at))})})
-                                   : t('js.net.set_by_noago', {src: src});
+                const line = la.at ? t.key('js.net.set_by', {src: src, ago: t.key('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - la.at))})})
+                                   : t.key('js.net.set_by_noago', {src: src});
                 parts.push(el('div', { className: 'wl-small text-muted nl-set-by', text: line }));
             }
-            grid.appendChild(kv(t('js.net.inbound_limit'), parts));
+            grid.appendChild(kv(t.key('js.net.inbound_limit'), parts));
         } else {
-            grid.appendChild(kv(t('js.net.inbound_limit'), [badge(t('js.net.not_loaded'), 'wl-b-muted'), ' ',
-                el('span', { className: 'wl-small text-muted', text: cfg.limit ? t('js.net.settings_say_on') : t('js.net.panel_drops_nothing') })]));
+            grid.appendChild(kv(t.key('js.net.inbound_limit'), [badge(t.key('js.net.not_loaded'), 'wl-b-muted'), ' ',
+                el('span', { className: 'wl-small text-muted', text: cfg.limit ? t.key('js.net.settings_say_on') : t.key('js.net.panel_drops_nothing') })]));
         }
 
         // 2. the three numbers this whole card exists for
         const hasLive = Object.keys(pps).length > 0;
-        const stale = live.stale ? ' ' + t('js.net.last_known') : '';
         // "Arriving" is the honest word for it: our chain runs before everything else on this port,
-        // so this is the raw arrival rate, whatever anybody else drops afterwards.
-        grid.appendChild(kv(t('js.net.arriving') + stale, hasLive
+        // so this is the raw arrival rate, whatever anybody else drops afterwards. (Its label in pieces, 1.73.0:
+        // each word keeps its key for the live language switch.)
+        grid.appendChild(kv(live.stale ? [t.key('js.net.arriving'), ' ', t.key('js.net.last_known')] : t.key('js.net.arriving'), hasLive
             ? [el('strong', { text: num(pps.in_total) }), el('span', { className: 'nl-unit', text: ' pps' }),
-               el('div', { className: 'wl-small text-muted', text: t('js.net.measured_over', {s: (live.span || 0)}) })]
-            : [el('span', { className: 'text-muted', text: t('js.net.measuring') })]));
+               el('div', { className: 'wl-small text-muted', text: t.key('js.net.measured_over', {s: (live.span || 0)}) })]
+            : [el('span', { className: 'text-muted', text: t.key('js.net.measuring') })]));
         // Our chain sits at `priority filter - 5`, i.e. BEFORE the distribution's filter table. So this
         // is what got past OUR rules — if somebody else's rule limits the same port downstream, the
         // tracker receives less than this, and saying "served to the tracker" would overstate it.
@@ -253,14 +253,14 @@
         const passedParts = hasLive
             ? [el('strong', { text: num(pps.in_passed) }), el('span', { className: 'nl-unit', text: ' pps' })]
             : [el('span', { className: 'text-muted', text: '—' })];
-        if (hasLive && foreign) passedParts.push(el('div', { className: 'wl-small text-warning', text: t('js.net.foreign_rule_less') }));
-        grid.appendChild(kv(foreign ? t('js.net.past_our_rules') : t('js.net.served_to_tracker'), passedParts));
+        if (hasLive && foreign) passedParts.push(el('div', { className: 'wl-small text-warning', text: t.key('js.net.foreign_rule_less') }));
+        grid.appendChild(kv(foreign ? t.key('js.net.past_our_rules') : t.key('js.net.served_to_tracker'), passedParts));
         const dropped = hasLive ? (pps.in_capped || 0) : null;
-        grid.appendChild(kv(t('js.net.dropped_by_limit'), hasLive
+        grid.appendChild(kv(t.key('js.net.dropped_by_limit'), hasLive
             ? [el('strong', { className: dropped > 0 ? 'text-warning' : '', text: num(dropped) }), el('span', { className: 'nl-unit', text: ' pps' }),
                el('div', { className: 'wl-small text-muted', text: dropped > 0
-                   ? t('js.net.pct_never_reaches', {pct: Math.round((dropped / Math.max(1, pps.in_total)) * 100)})
-                   : t('js.net.nothing_dropped_now') })]
+                   ? t.key('js.net.pct_never_reaches', {pct: Math.round((dropped / Math.max(1, pps.in_total)) * 100)})
+                   : t.key('js.net.nothing_dropped_now') })]
             : [el('span', { className: 'text-muted', text: '—' })]));
 
         // What the drops cost in repeats: handshakes (UDP connects) per announce, from the statistics
@@ -270,13 +270,13 @@
         const hs = j.handshakes;
         if (hs && (hs.hour || hs.day)) {
             const vals = [];
-            if (hs.hour) vals.push(t('js.net.handshakes_hour', {v: hs.hour.ratio.toFixed(2)}));
-            if (hs.day) vals.push(t('js.net.handshakes_day', {v: hs.day.ratio.toFixed(2)}));
+            if (hs.hour) vals.push(t.key('js.net.handshakes_hour', {v: hs.hour.ratio.toFixed(2)}));
+            if (hs.day) vals.push(t.key('js.net.handshakes_day', {v: hs.day.ratio.toFixed(2)}));
             const w = hs.hour || hs.day;
-            const tileHs = kv(t('js.net.handshakes'), [
+            const tileHs = kv(t.key('js.net.handshakes'), [
                 el('span', { className: w.ratio >= 2 ? 'text-warning' : '', text: vals.join(' · '),
-                             title: t('js.net.handshakes_title', {c: num(w.connects), a: num(w.announces)}) }),
-                el('div', { className: 'wl-small text-muted', text: t('js.net.handshakes_note') }),
+                             title: t.key('js.net.handshakes_title', {c: num(w.connects), a: num(w.announces)}) }),
+                el('div', { className: 'wl-small text-muted', text: t.key('js.net.handshakes_note') }),
             ]);
             tileHs.dataset.tile = 'handshakes';
             grid.appendChild(tileHs);
@@ -286,36 +286,36 @@
         const eg = fw.egress || {};
         if (eg.table) {
             const hasE = Object.keys(epps).length > 0;
-            grid.appendChild(kv(t('js.net.outbound_budget'), [
-                badge(t('js.net.pps_value', {n: num(eg.pps)}), 'wl-b-ok'), ' ',
-                el('span', { className: 'wl-small text-muted', text: hasE ? t('js.net.out_capped', {out: num((epps.announce_ok || 0) + (epps.passed_good || 0)), capped: num(epps.capped)}) : t('js.net.measuring') }),
-                el('div', { className: 'wl-small text-muted', text: t('js.net.egress_note') }),
+            grid.appendChild(kv(t.key('js.net.outbound_budget'), [
+                badge(t.key('js.net.pps_value', {n: num(eg.pps)}), 'wl-b-ok'), ' ',
+                el('span', { className: 'wl-small text-muted', text: hasE ? t.key('js.net.out_capped', {out: num((epps.announce_ok || 0) + (epps.passed_good || 0)), capped: num(epps.capped)}) : t.key('js.net.measuring') }),
+                el('div', { className: 'wl-small text-muted', text: t.key('js.net.egress_note') }),
             ]));
         }
 
         // 4. automatic mode
         if (cfg.auto) {
             const a = j.auto_state || {};
-            const parts = [badge(t('js.net.on'), 'wl-b-ok'), ' ',
-                el('span', { className: 'text-muted', text: t('js.net.auto_target', {target: num(cfg.auto_target), min: num(cfg.auto_min), max: num(cfg.auto_max)}) })];
-            if (a.over || a.under) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.net.for_samples', {dir: (a.over ? t('js.net.above_target') : t('js.net.below_target')), n: Math.max(a.over, a.under), h: a.hysteresis}) }));
-            if (a.last_move_at) parts.push(el('div', { className: 'wl-small text-muted', text: t('js.net.last_move', {move: (a.last_move || '?'), ago: t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - a.last_move_at))}), note: (a.note ? ' — ' + a.note : '')}) }));
-            grid.appendChild(kv(t('js.net.automatic_mode'), parts));
+            const parts = [badge(t.key('js.net.on'), 'wl-b-ok'), ' ',
+                el('span', { className: 'text-muted', text: t.key('js.net.auto_target', {target: num(cfg.auto_target), min: num(cfg.auto_min), max: num(cfg.auto_max)}) })];
+            if (a.over || a.under) parts.push(el('div', { className: 'wl-small text-muted', text: t.key('js.net.for_samples', {dir: (a.over ? t.key('js.net.above_target') : t.key('js.net.below_target')), n: Math.max(a.over, a.under), h: a.hysteresis}) }));
+            if (a.last_move_at) parts.push(el('div', { className: 'wl-small text-muted', text: t.key('js.net.last_move', {move: (a.last_move || '?'), ago: t.key('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - a.last_move_at))}), note: (a.note ? ' — ' + a.note : '')}) }));
+            grid.appendChild(kv(t.key('js.net.automatic_mode'), parts));
         }
 
         // 5. panic countdown
         if (j.panic) {
-            grid.appendChild(kv(t('js.net.emergency_throttle'), [
-                badge(t('js.net.min_left', {n: Math.ceil(j.panic.seconds_left / 60)}), 'wl-b-warn'), ' ',
-                el('span', { className: 'wl-small text-muted', text: j.panic.restore_enabled ? t('js.net.then_back_to', {n: num(j.panic.restore_pps)}) : t('js.net.then_removed') }),
-                el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button', onclick: () => ask('restore') }, [el('i', { className: 'bi bi-arrow-counterclockwise' }), ' ' + t('js.net.undo_now')]),
+            grid.appendChild(kv(t.key('js.net.emergency_throttle'), [
+                badge(t.key('js.net.min_left', {n: Math.ceil(j.panic.seconds_left / 60)}), 'wl-b-warn'), ' ',
+                el('span', { className: 'wl-small text-muted', text: j.panic.restore_enabled ? t.key('js.net.then_back_to', {n: num(j.panic.restore_pps)}) : t.key('js.net.then_removed') }),
+                el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button', onclick: () => ask('restore') }, [el('i', { className: 'bi bi-arrow-counterclockwise' }), ' ', t.key('js.net.undo_now')]),
             ]));
         }
 
         if (typeof j.load_per_core === 'number') {
-            grid.appendChild(kv(t('js.net.machine_load'), [
-                el('span', { text: t('js.net.per_core', {n: j.load_per_core.toFixed(2)}) }), ' ',
-                el('span', { className: 'wl-small text-muted', text: j.cpus ? t('js.net.cores', {n: j.cpus}) : '' }),
+            grid.appendChild(kv(t.key('js.net.machine_load'), [
+                el('span', { text: t.key('js.net.per_core', {n: j.load_per_core.toFixed(2)}) }), ' ',
+                el('span', { className: 'wl-small text-muted', text: j.cpus ? t.key('js.net.cores', {n: j.cpus}) : '' }),
             ]));
             // The processes behind the load: CPU of one core (like top) and resident memory, from
             // /proc, over the interval since the previous poll. Nothing here is a setting; it is the
@@ -325,13 +325,13 @@
                 Object.keys(j.procs).forEach(k => {
                     const p = j.procs[k];
                     if (!p.procs) return;
-                    wrap.appendChild(el('span', { className: 'nl-proc', title: t('js.net.proc_title', { n: p.procs }) }, [
+                    wrap.appendChild(el('span', { className: 'nl-proc', title: t.key('js.net.proc_title', { n: p.procs }) }, [
                         el('span', { className: 'nl-proc-name', text: p.label }),
                         el('span', { className: 'nl-proc-cpu', text: p.cpu_pct === null || p.cpu_pct === undefined ? '—' : p.cpu_pct.toFixed(p.cpu_pct < 10 ? 1 : 0) + ' %' }),
                         el('span', { className: 'nl-proc-rss', text: window.AdminCommon.fmtBytes(p.rss_bytes || 0) }),
                     ]));
                 });
-                grid.appendChild(kv(t('js.net.procs'), [wrap]));
+                grid.appendChild(kv(t.key('js.net.procs'), [wrap]));
             }
         }
 
@@ -351,27 +351,27 @@
         if (wcpu !== null) lastWorkerCpu = wcpu;
         const shown = wcpu || lastWorkerCpu;
         if (shown) {
-            grid.appendChild(kv(t('js.net.metadata_worker'), [
+            grid.appendChild(kv(t.key('js.net.metadata_worker'), [
                 el('span', { className: shown.core > 90 ? 'text-warning' : '',
-                             text: t('js.net.pct_of_core', {n: shown.core.toFixed(0)}) }), ' ',
+                             text: t.key('js.net.pct_of_core', {n: shown.core.toFixed(0)}) }), ' ',
                 el('span', { className: 'wl-small text-muted',
-                             text: t('js.net.pct_of_box', {box: shown.box.toFixed(1), s: shown.window}) }),
+                             text: t.key('js.net.pct_of_box', {box: shown.box.toFixed(1), s: shown.window}) }),
             ]));
         } else if (j.worker_cpu) {
             // First reading of the session: there is genuinely nothing to show yet, and a row that
             // appears from nowhere a moment later is worse than a row that says what it is waiting for.
-            grid.appendChild(kv(t('js.net.metadata_worker'), [
-                el('span', { className: 'wl-small text-muted', text: t('js.net.worker_first_reading') }),
+            grid.appendChild(kv(t.key('js.net.metadata_worker'), [
+                el('span', { className: 'wl-small text-muted', text: t.key('js.net.worker_first_reading') }),
             ]));
         } else if (j.worker_cpu === null) {
             lastWorkerCpu = null;
-            grid.appendChild(kv(t('js.net.metadata_worker'), [
-                el('span', { className: 'wl-small text-muted', text: t('js.net.worker_not_here') }),
+            grid.appendChild(kv(t.key('js.net.metadata_worker'), [
+                el('span', { className: 'wl-small text-muted', text: t.key('js.net.worker_not_here') }),
             ]));
         }
 
         renderNotes(j);
-        $('net-updated').textContent = t('js.net.port_updated', {port: (fw.port || cfg.port), time: new Date().toLocaleTimeString()});
+        $('net-updated').textContent = t.key('js.net.port_updated', {port: (fw.port || cfg.port), time: new Date().toLocaleTimeString()});
     }
 
     /** Warnings that need a sentence, not a tile: foreign rules on the same port, persistence, errors. */
@@ -423,21 +423,22 @@
                     el('code', { text: r.family + ' ' + r.table + ' / ' + r.chain }), ' ',
                     el('span', { className: 'text-muted', text: r.rule }),
                     el('div', { className: 'wl-small' }, [
-                        el('span', { className: 'text-muted', text: t('js.net.remove_yourself') + ' ' }),
+                        el('span', { className: 'text-muted', text: t.key('js.net.remove_yourself') }), ' ',
                         el('code', { text: r.undo }),
                     ]),
                 ]));
             });
             box.appendChild(el('div', { className: 'nl-note nl-note-info' }, [
-                el('div', {}, [el('i', { className: 'bi bi-info-circle' }), el('strong', { text: ' ' + t('js.net.foreign_rule_title') }),
-                    el('span', { text: ' ' + t('js.net.foreign_rule_body') })]),
+                el('div', {}, [el('i', { className: 'bi bi-info-circle' }), ' ', el('strong', { text: t.key('js.net.foreign_rule_title') }),
+                    ' ', el('span', { text: t.key('js.net.foreign_rule_body') })]),
                 list,
             ]));
         }
         if (j.last_error) {
             box.appendChild(el('div', { className: 'nl-note nl-note-bad' }, [
                 el('i', { className: 'bi bi-exclamation-triangle' }),
-                el('span', { text: ' ' + t('js.net.last_failure', {err: j.last_error, ago: (j.last_error_at ? ' (' + t('js.net.ago', {t: fmtAgo(Math.floor(j.server_time - j.last_error_at))}) + ')' : '')}) }),
+                // pieces, the "(… ago)" a word of its own inside the sentence: both keep their keys (1.73.0)
+                el('span', {}, [' ', t.key('js.net.last_failure', {err: j.last_error, ago: (j.last_error_at ? t.key('js.net.ago_paren', {t: fmtAgo(Math.floor(j.server_time - j.last_error_at))}) : '')})]),
             ]));
         }
         // The counters live in the firewall: with no table of ours there is nothing to count, so the
@@ -446,16 +447,16 @@
         if (j.configured && j.configured.monitor && fw.nft && !fw.table && !j.error) {
             box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
                 el('div', {}, [el('i', { className: 'bi bi-exclamation-triangle' }),
-                    el('strong', { text: ' ' + t('js.net.monitor_not_counting_title') }),
-                    el('span', { text: ' ' + t('js.net.monitor_not_counting_body') })]),
+                    ' ', el('strong', { text: t.key('js.net.monitor_not_counting_title') }),
+                    ' ', el('span', { text: t.key('js.net.monitor_not_counting_body') })]),
                 el('button', { className: 'btn btn-sm btn-outline-info mt-2', type: 'button',
-                               onclick: () => ask('monitor') }, [el('i', { className: 'bi bi-activity' }), ' ' + t('js.net.start_counting')]),
+                               onclick: () => ask('monitor') }, [el('i', { className: 'bi bi-activity' }), ' ', t.key('js.net.start_counting')]),
             ]));
         }
         if (j.configured && j.configured.monitor && j.last_tick_at && (j.server_time - j.last_tick_at) > 300) {
             box.appendChild(el('div', { className: 'nl-note nl-note-warn' }, [
                 el('i', { className: 'bi bi-clock-history' }),
-                el('span', { text: ' ' + t('js.net.janitor_stale', {t: fmtAgo(Math.floor(j.server_time - j.last_tick_at))}) }),
+                ' ', el('span', { text: t.key('js.net.janitor_stale', {t: fmtAgo(Math.floor(j.server_time - j.last_tick_at))}) }),
             ]));
         }
     }
@@ -490,9 +491,9 @@
         const r = state.recommend;
         if (!r || !r.samples) return;
         const defs = [
-            [t('js.net.mark_median'), r.median, 'nl-mark-median', t('js.net.mark_median_title')],
-            ['P95', r.p95, 'nl-mark-p95', t('js.net.mark_p95_title')],
-            [t('js.net.mark_peak'), r.peak, 'nl-mark-peak', t('js.net.mark_peak_title')],
+            [t.key('js.net.mark_median'), r.median, 'nl-mark-median', t.key('js.net.mark_median_title')],
+            ['P95', r.p95, 'nl-mark-p95', t.key('js.net.mark_p95_title')],
+            [t.key('js.net.mark_peak'), r.peak, 'nl-mark-peak', t.key('js.net.mark_peak_title')],
         ].filter(d => d[1]).map(([label, value, cls, title]) => ({
             label, value, cls, title, pct: ppsToPct(value),
         })).sort((a, b) => a.pct - b.pct);
@@ -518,10 +519,10 @@
         if (lc && lc.busy_pps) {
             const pctB = ppsToPct(lc.busy_pps);
             const b = el('span', { className: 'nl-mark nl-mark-busy' + (pctB > 72 ? ' nl-mark-flip' : ''),
-                title: t('js.net.busy_title', {load: NL_BUSY_LOAD, n: num(lc.busy_pps)}) });
+                title: t.key('js.net.busy_title', {load: NL_BUSY_LOAD, n: num(lc.busy_pps)}) });
             b.style.left = pctB + '%';
             b.style.setProperty('--nl-tick-h', '2.6rem');
-            b.appendChild(el('span', { className: 'nl-mark-label', text: t('js.net.busy') }));
+            b.appendChild(el('span', { className: 'nl-mark-label', text: t.key('js.net.busy') }));
             b.querySelector('.nl-mark-label').style.top = (0.15 + 3 * MARK_ROW_REM) + 'rem';
             marks.appendChild(b);
         }
@@ -543,12 +544,33 @@
         });
     }
 
+    /**
+     * A sentence the server named by its key (net_status's `parts`, the load study's `why_part` — 1.73.0, the anti-spam
+     * layer's way): a t.key() word when the page's bundle has it (templates/admin/traffic.php carries api.net.), so it
+     * follows the live language switch, with its whole numbers written as the card writes every number (num()); null
+     * when the bundle does not know it — the caller shows the server's own words then.
+     */
+    function saidPart(p) {
+        if (!p || !p.key || !t.has(p.key)) return null;
+        const vars = {};
+        Object.keys(p.vars || {}).forEach((k) => { const v = p.vars[k]; vars[k] = Number.isInteger(v) ? num(v) : v; });
+        return t.key(p.key, vars);
+    }
+    /** The recommendation: its sentences as keyed words, or the server's paragraph when one of them is not known here. */
+    function adviceWords(r) {
+        const said = (Array.isArray(r.parts) ? r.parts : []).map(saidPart);
+        if (!said.length || said.some((w) => w === null)) return [r.text || ''];
+        const out = [];
+        said.forEach((w, i) => { if (i) out.push(' '); out.push(w); });
+        return out;
+    }
+
     function renderAdvice() {
         const box = $('net-advice');
         box.textContent = '';
         const r = state.recommend;
         if (!r) return;
-        box.appendChild(el('span', { text: r.text || '' }));
+        box.appendChild(el('span', {}, adviceWords(r)));
         if (r.samples && r.suggested) {
             const cur = state.pps;
             // `r.floor` is derived from ARRIVALS. In a flood that is the swarm, not the traffic the
@@ -561,23 +583,24 @@
             const lc2 = (state.status && state.status.load_curve) || null;
             if (lc2 && lc2.busy_pps && cur > lc2.busy_pps) {
                 box.appendChild(el('div', { className: 'text-warning wl-small', text:
-                    t('js.net.advice_busy', {load: NL_BUSY_LOAD, busy: num(lc2.busy_pps), cur: num(cur)}) }));
+                    t.key('js.net.advice_busy', {load: NL_BUSY_LOAD, busy: num(lc2.busy_pps), cur: num(cur)}) }));
             } else if (lc2 && !lc2.busy_pps && lc2.why) {
-                box.appendChild(el('div', { className: 'wl-small text-muted', text: t('js.net.load_study', {why: lc2.why}) }));
+                // the reason by its key when the server named it (a keyed word inside a keyed sentence follows the switch)
+                box.appendChild(el('div', { className: 'wl-small text-muted', text: t.key('js.net.load_study', {why: saidPart(lc2.why_part) || lc2.why}) }));
             }
             const ref = inboundReference();
             if (ref > 0) {
                 if (cur < ref) {
-                    box.appendChild(el('div', { className: 'text-danger wl-small', text: t('js.net.advice_cutting', {cur: num(cur), ref: num(ref)}) }));
+                    box.appendChild(el('div', { className: 'text-danger wl-small', text: t.key('js.net.advice_cutting', {cur: num(cur), ref: num(ref)}) }));
                 } else if (cur < ref * ZONE_HEADROOM) {
-                    box.appendChild(el('div', { className: 'text-warning wl-small', text: t('js.net.advice_headroom', {cur: num(cur), ref: num(ref)}) }));
+                    box.appendChild(el('div', { className: 'text-warning wl-small', text: t.key('js.net.advice_headroom', {cur: num(cur), ref: num(ref)}) }));
                 } else if (cur > r.peak * 2 && r.peak > 0) {
-                    box.appendChild(el('div', { className: 'text-muted wl-small', text: t('js.net.advice_far_above', {cur: num(cur)}) }));
+                    box.appendChild(el('div', { className: 'text-muted wl-small', text: t.key('js.net.advice_far_above', {cur: num(cur)}) }));
                 }
             } else if (cur < r.floor) {
-                box.appendChild(el('div', { className: 'text-warning wl-small', text: t('js.net.adv_dropping_arriving', {n: num(cur)}) }));
+                box.appendChild(el('div', { className: 'text-warning wl-small', text: t.key('js.net.adv_dropping_arriving', {n: num(cur)}) }));
             } else if (cur > r.peak * 2 && r.peak > 0) {
-                box.appendChild(el('div', { className: 'text-muted wl-small', text: t('js.net.adv_never_trigger', {n: num(cur)}) }));
+                box.appendChild(el('div', { className: 'text-muted wl-small', text: t.key('js.net.adv_never_trigger', {n: num(cur)}) }));
             }
         }
         // A bucket too small for the limit: under 95 % of it got through while over 5 % was dropped
@@ -586,9 +609,9 @@
         const bh = r.burst_hint;
         if (bh) {
             box.appendChild(el('div', { className: 'nl-burst-hint wl-small text-warning', dataset: { hint: 'burst' } }, [
-                el('span', { text: t('js.net.burst_hint', {served: num(bh.served), limit: num(bh.limit), served_pct: bh.served_pct,
+                el('span', { text: t.key('js.net.burst_hint', {served: num(bh.served), limit: num(bh.limit), served_pct: bh.served_pct,
                     dropped_pct: bh.dropped_pct, burst: num(bh.burst), suggested: num(bh.suggested), ms: bh.ms}) }), ' ',
-                el('a', { href: '?action=settings#section-netlimit-throttle', text: t('js.net.burst_open') }),
+                el('a', { href: '?action=settings#section-netlimit-throttle', text: t.key('js.net.burst_open') }),
             ]));
         }
     }
@@ -690,7 +713,7 @@
             const adv = $('net-eadvice');
             if (adv) {
                 adv.textContent = '';
-                adv.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.net.egress_no_rule') }));
+                adv.appendChild(el('div', { className: 'nl-note nl-note-info', text: t.key('js.net.egress_no_rule') }));
             }
             return;
         }
@@ -726,10 +749,10 @@
         if (!eState.ref) return;
         const pctE = ppsToPct(eState.ref);
         const m = el('span', { className: 'nl-mark nl-mark-median' + (pctE > 72 ? ' nl-mark-flip' : ''),
-                               title: t('js.net.egress_measured_title', {n: num(eState.ref)}) });
+                               title: t.key('js.net.egress_measured_title', {n: num(eState.ref)}) });
         m.style.left = pctE + '%';
         m.style.setProperty('--nl-tick-h', '0.5rem');
-        m.appendChild(el('span', { className: 'nl-mark-label', text: t('js.net.egress_sending_now') }));
+        m.appendChild(el('span', { className: 'nl-mark-label', text: t.key('js.net.egress_sending_now') }));
         marks.appendChild(m);
     }
 
@@ -739,22 +762,22 @@
         box.textContent = '';
         const inForce = parseInt(eg.pps, 10) || 0;
         const lines = [];
-        lines.push(el('div', { text: t('js.net.egress_in_force', {n: num(inForce)}) }));
+        lines.push(el('div', { text: t.key('js.net.egress_in_force', {n: num(inForce)}) }));
         // A budget that is live but missing from the file is gone at the next reboot, and there is
         // no way to find that out except by rebooting. So say it here instead.
         if (eg.file === false) {
-            lines.push(el('div', { className: 'text-warning', text: t('js.net.egress_no_file') }));
+            lines.push(el('div', { className: 'text-warning', text: t.key('js.net.egress_no_file') }));
         } else if (eg.file_matches === false) {
-            lines.push(el('div', { className: 'text-warning', text: t('js.net.egress_file_mismatch', {n: num(eg.file_pps || 0)}) }));
+            lines.push(el('div', { className: 'text-warning', text: t.key('js.net.egress_file_mismatch', {n: num(eg.file_pps || 0)}) }));
         }
         if (!eState.ref) {
-            lines.push(el('div', { className: 'text-muted', text: t('js.net.egress_no_rate') }));
+            lines.push(el('div', { className: 'text-muted', text: t.key('js.net.egress_no_rate') }));
         } else {
-            lines.push(el('div', { text: t('js.net.egress_measured_now', {n: num(eState.ref)}) }));
+            lines.push(el('div', { text: t.key('js.net.egress_measured_now', {n: num(eState.ref)}) }));
             if (eState.pps < eState.ref) {
-                lines.push(el('div', { className: 'text-danger', text: t('js.net.egress_too_low', {n: num(eState.pps)}) }));
+                lines.push(el('div', { className: 'text-danger', text: t.key('js.net.egress_too_low', {n: num(eState.pps)}) }));
             } else if (eState.pps < eState.ref * ZONE_HEADROOM) {
-                lines.push(el('div', { className: 'text-warning', text: t('js.net.egress_tight', {n: num(eState.pps)}) }));
+                lines.push(el('div', { className: 'text-warning', text: t.key('js.net.egress_tight', {n: num(eState.pps)}) }));
             }
         }
         lines.forEach(l => box.appendChild(l));
@@ -807,7 +830,7 @@
         const host = $('net-chart');
         const w = Math.max(200, host.clientWidth || card.clientWidth || 800);
         const axisBase = () => ({ stroke: '#8a8a9a', font: '11px system-ui, -apple-system, Segoe UI, sans-serif', ticks: { stroke: '#2a2a3a', width: 1 }, grid: { stroke: 'rgba(255,255,255,0.06)', width: 1 } });
-        const series = [{ label: t('js.net.chart_time'), value: (u, v) => v == null ? '—' : fmtTime(v) }];
+        const series = [{ label: t.key('js.net.chart_time'), value: (u, v) => v == null ? '—' : fmtTime(v) }];
         /**
          * Draw a marker ONLY where the line cannot show the value on its own.
          *
@@ -883,9 +906,10 @@
         state.chart.setData(data);
         const empty = !(s.t && s.t.length);
         $('net-chart').classList.toggle('nl-chart-empty', empty);
-        $('net-chart').dataset.empty = empty
-            ? (j.monitor ? t('js.net.chart_no_samples') : t('js.net.chart_monitor_off'))
-            : '';
+        // setAttribute, which keeps the t.key() word's key (dataset writes its words only — 1.73.0)
+        $('net-chart').setAttribute('data-empty', empty
+            ? (j.monitor ? t.key('js.net.chart_no_samples') : t.key('js.net.chart_monitor_off'))
+            : '');
     }
 
     function renderRanges() {
@@ -901,50 +925,50 @@
     // ── actions ──────────────────────────────────────────────────────────────
     const MODAL_COPY = {
         apply: {
-            title: t('js.net.modal_apply_title'),
-            ok: t('js.net.modal_apply_ok'),
+            title: t.key('js.net.modal_apply_title'),
+            ok: t.key('js.net.modal_apply_ok'),
             okClass: 'btn-outline-success',
-            text: () => t('js.net.modal_apply_text', {pps: num(state.pps), port: state.port, burst: num(state.burst)}),
-            undo: () => t('js.net.modal_apply_undo'),
+            text: () => t.key('js.net.modal_apply_text', {pps: num(state.pps), port: state.port, burst: num(state.burst)}),
+            undo: () => t.key('js.net.modal_apply_undo'),
             undoCode: () => 'sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft',
         },
         off: {
-            title: t('js.net.modal_off_title'),
-            ok: t('js.net.modal_off_ok'),
+            title: t.key('js.net.modal_off_title'),
+            ok: t.key('js.net.modal_off_ok'),
             okClass: 'btn-outline-warning',
-            text: () => t('js.net.modal_off_text'),
-            undo: () => t('js.net.modal_off_undo'),
+            text: () => t.key('js.net.modal_off_text'),
+            undo: () => t.key('js.net.modal_off_undo'),
             undoCode: () => '',
         },
         panic: {
-            title: t('js.net.modal_panic_title'),
-            ok: t('js.net.modal_panic_ok'),
+            title: t.key('js.net.modal_panic_title'),
+            ok: t.key('js.net.modal_panic_ok'),
             okClass: 'btn-outline-danger',
-            text: () => t('js.net.modal_panic_text', {port: state.port}),
-            undo: () => t('js.net.modal_panic_undo'),
+            text: () => t.key('js.net.modal_panic_text', {port: state.port}),
+            undo: () => t.key('js.net.modal_panic_undo'),
             undoCode: () => '',
         },
         egress: {
-            title: t('js.net.modal_egress_title'),
-            ok: t('js.net.modal_egress_ok'),
+            title: t.key('js.net.modal_egress_title'),
+            ok: t.key('js.net.modal_egress_ok'),
             okClass: 'btn-outline-success',
-            text: () => t('js.net.modal_egress_text', {n: num(eState.pps)}),
-            undo: () => t('js.net.modal_egress_undo'),
+            text: () => t.key('js.net.modal_egress_text', {n: num(eState.pps)}),
+            undo: () => t.key('js.net.modal_egress_undo'),
             undoCode: () => 'sudo nft -f /etc/nftables.d/ottrack.nft',
         },
         monitor: {
-            title: t('js.net.modal_monitor_title'),
-            ok: t('js.net.modal_monitor_ok'),
+            title: t.key('js.net.modal_monitor_title'),
+            ok: t.key('js.net.modal_monitor_ok'),
             okClass: 'btn-outline-info',
-            text: () => t('js.net.modal_monitor_text', {port: state.port}),
-            undo: () => t('js.net.modal_apply_undo'),
+            text: () => t.key('js.net.modal_monitor_text', {port: state.port}),
+            undo: () => t.key('js.net.modal_apply_undo'),
             undoCode: () => 'sudo nft delete table inet ottrack_in && sudo rm /etc/nftables.d/ottrack-in.nft',
         },
         restore: {
-            title: t('js.net.modal_restore_title'),
-            ok: t('js.net.modal_restore_ok'),
+            title: t.key('js.net.modal_restore_title'),
+            ok: t.key('js.net.modal_restore_ok'),
             okClass: 'btn-outline-success',
-            text: () => t('js.net.modal_restore_text'),
+            text: () => t.key('js.net.modal_restore_text'),
             undo: () => '',
             undoCode: () => '',
         },
@@ -983,7 +1007,7 @@
         const btn = $('net-confirm-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.net.working');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.net.working');
         alert.textContent = '';
         const body = { op: op, password: $('net-confirm-password').value };
         if (op === 'apply') { body.pps = state.pps; body.burst = state.burst; body.port = state.port; }
@@ -993,18 +1017,18 @@
             const r = await apiCall('admin/net_apply', 'POST', body);
             if (r.success) {
                 bootstrap.Modal.getOrCreateInstance($('netConfirmModal')).hide();
-                showToast(r.message || t('js.net.done'), 'success');
+                showToast(r.message || t.key('js.net.done'), 'success');
                 if ((op === 'apply' || op === 'monitor') && r.persistent === false) {
-                    showToast(t('js.net.not_persistent'), 'warning');
+                    showToast(t.key('js.net.not_persistent'), 'warning');
                 }
                 state.pending = null;
                 loadStatus();
             } else {
-                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t('js.net.failed') }));
+                alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t.key('js.net.failed') }));
                 if (r.output) alert.appendChild(el('pre', { className: 'nl-preview nl-preview-sm', text: r.output }));
             }
         } catch {
-            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t('js.net.network_error_2') }));
+            alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t.key('js.net.network_error_2') }));
         }
         btn.disabled = false;
         btn.innerHTML = orig;
@@ -1014,7 +1038,7 @@
         const btn = $('btn-net-preview');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.net.rendering');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.net.rendering');
         try {
             const r = await apiCall('admin/net_apply', 'POST', { op: 'preview', pps: state.pps, burst: state.burst, port: state.port });
             if (r.success) {
@@ -1022,9 +1046,9 @@
                 $('net-preview-body').textContent = r.ruleset || '';
                 bootstrap.Modal.getOrCreateInstance($('netPreviewModal')).show();
             } else {
-                showToast(r.error || t('js.net.preview_failed'), 'error');
+                showToast(r.error || t.key('js.net.preview_failed'), 'error');
             }
-        } catch { showToast(t('js.net.network_error_2'), 'error'); }
+        } catch { showToast(t.key('js.net.network_error_2'), 'error'); }
         btn.disabled = false;
         btn.innerHTML = orig;
     }
@@ -1040,7 +1064,7 @@
         const btn = $('btn-net-toggle');
         btn.setAttribute('aria-expanded', v ? 'false' : 'true');
         const label = btn.querySelector('span'), icon = btn.querySelector('i');
-        if (label) label.textContent = v ? t('js.net.expand') : t('js.net.collapse');
+        if (label) label.textContent = v ? t.key('js.net.expand') : t.key('js.net.collapse');
         if (icon) icon.className = v ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
         try { localStorage.setItem(STORE_COLLAPSE, v ? '1' : '0'); } catch (e) {}
         if (!v && !booting) { loadStatus(true); loadChart(true); }
@@ -1065,9 +1089,9 @@
         });
         $('btn-net-suggest').addEventListener('click', () => {
             const r = state.recommend;
-            if (!r || !r.suggested) { showToast(t('js.net.toast_no_measurements'), 'warning'); return; }
+            if (!r || !r.suggested) { showToast(t.key('js.net.toast_no_measurements'), 'warning'); return; }
             setPps(r.suggested);
-            showToast(t('js.net.toast_suggested', {n: num(r.suggested)}), 'success');
+            showToast(t.key('js.net.toast_suggested', {n: num(r.suggested)}), 'success');
         });
         const eRange = $('net-epps-range'), eInput = $('net-epps-input');
         if (eRange) eRange.addEventListener('input', (e) => setEpps(posToPps(parseInt(e.target.value, 10))));
@@ -1077,11 +1101,11 @@
         }
         const eSuggest = $('btn-net-esuggest');
         if (eSuggest) eSuggest.addEventListener('click', () => {
-            if (!eState.ref) { showToast(t('js.net.toast_egress_none'), 'warning'); return; }
+            if (!eState.ref) { showToast(t.key('js.net.toast_egress_none'), 'warning'); return; }
             // Twice what is going out: clear of the amber band, and still a real cap.
             const v = Math.min(PPS_MAX, Math.max(PPS_MIN, Math.round(eState.ref * 2 / 1000) * 1000));
             setEpps(v);
-            showToast(t('js.net.toast_egress_suggested', {n: num(v)}), 'success');
+            showToast(t.key('js.net.toast_egress_suggested', {n: num(v)}), 'success');
         });
         const eApply = $('btn-net-eapply');
         if (eApply) eApply.addEventListener('click', () => ask('egress'));

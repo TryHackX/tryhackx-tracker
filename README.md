@@ -2,11 +2,15 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![PHP](https://img.shields.io/badge/PHP-8.0%2B-777bb4.svg)
-![MySQL / MariaDB](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-supported-00758f.svg)
+![MariaDB](https://img.shields.io/badge/MariaDB-10.6%2B-00758f.svg)
 ![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
 [![Donate: XMR · BTC · ETH](https://img.shields.io/badge/donate-XMR%20%C2%B7%20BTC%20%C2%B7%20ETH-f26822.svg)](#support-the-project)
 
-A self-hosted BitTorrent tracker information and DMCA/abuse report management system. Built with PHP and MySQL — no frameworks, no dependencies, no build step.
+A self-hosted BitTorrent tracker website: the tracker's public pages, a DMCA/abuse report system, a
+whitelist and an observed-hash catalogue, optional member accounts with a whole community around the
+torrents (profiles, lists, friends, messages, comments, a shoutbox), and an admin panel that drives the
+tracker and the machine it runs on. Built with PHP and MariaDB — no frameworks, no dependencies, no build
+step. **Installing: [INSTALL.md](INSTALL.md).** Version history: [CHANGELOG.md](CHANGELOG.md).
 
 Compatible with [erdgeist OpenTracker](https://erdgeist.org/arts/software/opentracker/) and any other tracker software that uses a newline-separated text file for black- or whitelisting info hashes. Two modes (setting **Tracker mode**):
 
@@ -47,61 +51,190 @@ source before you send.
 
 ## Features
 
-### Public Pages
-- **Home** — tracker announce URLs, features overview, donation links, contact info
-- **Submit a Report** — DMCA/abuse report form with info hash extraction from magnet links, optional additional message
-- **Check Report Status** — look up report status by report number or info hash + email (privacy-safe: requires email match)
-- **Block Check** — verify if an info hash is currently blocked on the tracker (never reveals whether reports exist)
-- **Appeal System** — submit appeals to request blocking or unblocking of info hashes
-- **Transparency Page** — public statistics showing aggregated block counts per organization
-- **Terms of Service** — configurable ToS page
-- **Editable Terms and Info (1.30.0)** — both pages can be rewritten from the panel in Markdown or
-  BBCode with a live server-rendered preview; *Restore* hands back the built-in page written for how
-  the tracker is configured at that moment. See [Site pages](#site-pages-terms--info)
-- **Interface languages (1.31.0)** — English and Polish ship, more can be installed from a JSON file;
-  a switcher in the nav, a per-account preference, and a site default that can be *Automatic*
-  (`Accept-Language`). See [Languages](#languages)
-- **Terms and Info per language (1.32.0)** — one version of each page per language, with a fallback
-  order that never drops back to the built-in boilerplate once anything has been written
+Everything below is in the code of this version. **Needs:** says what switches a feature on — the
+setting (its name in the database, and the default in brackets), the group permission (Users →
+Groups; the seeded group that holds it), and anything outside the panel. Almost everything about
+members also needs **`users_enabled`** [0], which is off as shipped: every feature that touches privacy
+or trust starts off. The built-in Info and Terms pages describe exactly the features that are on.
 
-### Admin Panel
-- **Dashboard** — sortable tables with multi-level sorting, search, filtering, pagination
-- **Report Workflow** — pending → reviewed → blocked/archived, with inline editing for company/entity fields
-- **Appeal Management** — accept/reject appeals with optional admin response, auto-close related appeals
-- **Blacklist Integration** — block/unblock info hashes via newline-separated blacklist file, with path validation
-- **Tracker Reload / Restart + Smart Recommendations** — automatically reload the tracker's blacklist (SIGHUP via `systemctl reload`, no downtime) after every block/unblock/restore, plus one-click **Reload** and **Restart** buttons (password-confirmed), permission **Test** buttons, and orange/red hints that surface when a restart is due after blacklist changes or a long uptime — see [OpenTracker service reload & restart](#opentracker-service-reload--restart)
-- **Email Notifications** — professional dark-themed HTML emails for all status changes, with per-type unsubscribe
-- **Auto-Archiving** — automatically archive old reviewed reports and resolved appeals after configurable days
-- **Settings** — all configuration via web UI (site info, CAPTCHA provider + tuning, whitelist, API, lists, donations, footer, etc.)
-- **Home page layout (1.31.0)** — drag the front page's seven sections into any order, hide them, and
-  rename their headings. See [Home page layout](#home-page-layout)
+### The tracker and its lists
+- **Two modes** (`tracker_mode` [blacklist]) — *blacklist*: every torrent is served except banned
+  hashes; *whitelist*: **only registered hashes are served**. The database is the source of truth; the
+  accesslist file is appended for additions and **regenerated atomically** (temp file + rename) for
+  removals, the tracker reloaded with SIGHUP, debounced; an empty whitelist is never written (whitelist
+  mode is fail-closed). The mode is switched on the Whitelist page (**Switch the tracker now**).
+  *Needs:* the opentracker builds (INSTALL §5), `tracker-mode.sh` for the switch.
+- **Scheduled mode** (`tracker_schedule_enabled` [0]) — whitelist hours on a weekly schedule, open outside
+  them; registration stays open. *Needs:* the janitor timer and `tracker-mode.sh`.
+- **Registration page** (`?action=whitelist`, `whitelist_public_enabled` [1]) — magnet links or info
+  hashes, for free: in `whitelist_submit_mode` *public* [public] anyone, with a CAPTCHA every time (no
+  provider configured = no public registration); in *users* signed-in members holding `whitelist.add`,
+  without one. Hourly, per-submission, daily and global caps; the registrant's address is kept with the
+  row. *Needs:* a CAPTCHA provider (public mode).
+- **Submissions that prove themselves** (`wl_probe_required` [0]) and **whitelist upkeep**
+  (`wl_dead_after_days` [0]) — a registration stays only once the swarm answers here (it is served while
+  it tries, at most `wl_probe_timeout_minutes`, and leaves the list the moment it fails); dead rows are
+  marked or removed.
+- **Mode-aware moderation** — in whitelist mode "block" means ban (removed from the list, never
+  registrable again); the report and appeal flows, the status page and the public texts follow the mode.
+- **OpenTracker service** — Reload (SIGHUP) and Restart from the panel, automatic reload after list
+  changes, permission tests. *Needs:* `opentracker_service_name` ['' — set it], two sudoers lines.
+- **OpenTracker — performance** (workers, open files, CPU scheduling), **extra instances** on ports of
+  their own (`ot_cluster_enabled` [0]) and **live peer sync** with a second machine (`livesync_enabled`
+  [0]). *Needs:* `tracker-instance.sh`, `tracker-cluster.sh`, `tracker-livesync.sh` (+ a
+  `-DWANT_SYNC_LIVE` build and WireGuard).
 
-### Whitelist mode (1.2.0)
-- **Registration page** (`?action=whitelist`) — anyone can register magnet links / info hashes for free (CAPTCHA always required, per-IP hourly + daily caps, global daily cap, duplicate / banned checks, registrant IP stored for abuse detection); shows a generated magnet with the tracker's announce URLs and a "check status" form
-- **Whitelist file service** — DB is the source of truth; the accesslist file is appended for additions and **regenerated atomically** (temp file + rename) for removals; the tracker is reloaded via SIGHUP with debounce (adds ≥ 45 s apart, removals/bans promptly, capped per 5 min); refuses to write an empty file (OpenTracker whitelist mode is fail-closed); a systemd timer runs the janitor so pending reloads fire even without web traffic
-- **Partner submissions a person approves** (1.42.0) — per key: publish straight to the tracker or
-  hold everything for review, and which fields every item must carry. A held submission is **not in
-  the accesslist** until somebody approves it; the review queue names the partner who sent each row.
-  The integration guide is generated per key (`?action=apidocs&…`) and carries no secret.
-- **Sign-in bridge** (1.42.0, off by default) — a forum holding a `users` key can sign its members in
-  here (making the account the first time) and a member signed in here can be sent to the forum
-  signed in. One-time tickets, two-way sign-out, no password crosses, and never account-matching by
-  email. Where an account signs in from is shown to the person and to the operator.
-- **Server-to-server API** (`v1/whitelist/submit`, `v1/whitelist/ping`, `v1/blacklist/submit`) — `Authorization: Bearer key_id.secret` (only the secret's SHA-256 is stored), additive-only, idempotent; **any failed authentication attempt bans the source IP (v4 exact / v6 /64) for 30 days**, storing the whole offending request for review; exempt-IP list (seeded with the server's own addresses); admin panel to create/disable/delete clients and to view/lift bans
-- **Admin Whitelist page** — status card (mode, file health, DB counts, pending reload, last reload, worker heartbeat, warnings), table with multi-column sort, hash-prefix / IP / name / file-name search (FULLTEXT), source & metadata filters, **Group by IP**, bulk delete/ban/fetch-metadata, details modal (magnet generator, name/size/file tree, seeders/leechers via live scrape, source & forum reference), Banned hashes, API clients, API bans (pretty-printed request snapshot)
-- **Metadata worker** — optional `python3-libtorrent` daemon (systemd, unprivileged, column-level MySQL grants) that resolves name / size / file list through DHT + trackers in upload mode; the panel queues rows and polls
-- **Mode-aware moderation** — in whitelist mode "block" = ban (removed from the served list, can never be re-registered) and the report/appeal flows, status page and public copy adapt automatically
-- **CAPTCHA provider** — Google reCAPTCHA v2 or v3, Cloudflare Turnstile or hCaptcha (one shared modal, fail-closed verification with timeouts)
-- **UDP traffic monitor + inbound rate limit** (1.11.0, off by default) — measure the swarm hitting the tracker port (arriving / served / dropped packets per second, charted), then set a limit from those measurements instead of guessing: the slider is annotated with the median, P95 and peak of the last week and the panel says which value it suggests and below which one you start dropping real traffic. Applied through one root helper into its **own** nftables table and file, so your existing firewall is untouched and undoing it is one click — see [UDP traffic monitor + inbound rate limit](#7-udp-traffic-monitor--inbound-rate-limit-optional-1110)
-- **Backups from the panel** (1.11.0, off by default) — make, schedule, rotate, verify, download and restore database/configuration archives from **Admin → Backups**. The panel steers `Backup-serwera.sh` through a root helper rather than reimplementing it (with a built-in database-only fallback where that toolkit is absent), runs everything detached with a live log, and splits restoring files from restoring the database — the latter asks for the exact database name and dumps the current one first — see [Backups](#8-backups-from-the-panel-optional-1110)
+### The observed-hash catalogue
+- **Index** (`index_enabled` [0]) — the janitor polls the tracker's own full scrape
+  (`index_source_url` [http://127.0.0.1:6969/scrape], every `index_poll_minutes` [30]) and keeps every hash
+  with at least `index_min_seeders` [1] seeder: counts, first and last seen. An entry whose name never
+  arrives lives `index_grace_days` [3]; one with a name lives `index_protect_days` [10] after the last
+  scrape with a seeder; `index_max_rows` [200 000] caps the table; `index_keep_saved` [off] can spare
+  what members starred or listed. *Needs:* PHP `curl`, the janitor timer (its slow half: INSTALL §8).
+- **Metadata worker** — names, sizes and file lists over DHT, `index_meta_daily_budget` [500] a day for
+  the index, the whitelist first or by share (Settings → Index → *Metadata fetch order*), file lists
+  loaded page by page (`index_files_batch` / `index_files_max`). *Needs:* `worker/worker.py`,
+  python3-libtorrent + python3-pymysql, its database user (worker/README.md).
+- **Member search** (`?action=search`, `index_search_enabled` [1]) — relevance-ranked live search over
+  the catalogue (the whitelist folded in with `whitelist.view`), file lists, magnet links, an address for
+  every search and a Share button (`search_share_enabled` [1]). *Needs:* accounts, `index.view` (member),
+  `index.files` / `index.files_all` / `index.magnet` for the parts.
+- **"What does this tracker know about a hash?"** on the status page — `status.hash_check` (member).
+- **Federation** (`fed_enabled` [0], `fed_export_enabled` [0]) — pull resolved metadata from peer
+  trackers and share yours (a cursor-paged gzip or NDJSON export). *Needs:* the API, `federation.py` on
+  its timer — see [Federation / cluster](#federation--cluster--a-shared-metadata-catalogue-160).
 
-### User accounts & federation (1.6.0, both off by default)
-- **User accounts** — registration/login with CAPTCHA (selectable sign-in duration, email verification), groups with per-feature permissions (`guest` = anonymous visitors; a signed-in user gets exactly the union of their own groups; system `admin` group passes everything — 1.7.0 semantics), timed memberships (1 d … 1 y / custom from–to, extend-on-repurchase), in-app + email notifications, an account page and an admin Users page — see [User accounts, groups & permissions](#user-accounts-groups--permissions-160)
-- **Member search** (`?action=search`) — a permission-gated, relevance-ranked live search over the resolved observed-hash index (whitelist folded in with `whitelist.view`) with magnet links and file-list modals
-- **Sales API** (`v1/users/*`, key scope `users`) — automate selling timed group access from an external shop
-- **Federation** — exchange resolved index metadata with peer trackers (cursor-paged gzip export + a Python importer on a systemd timer) to build one big shared catalogue — see [Federation / cluster](#federation--cluster--a-shared-metadata-catalogue-160)
+### Public pages
+- **Home** — the tracker's announce URLs, live statistics, About, Features, donations, contact, the
+  shoutbox, and up to six sections of your own; eight built-in sections in any order, hidden or renamed,
+  each one's text replaceable per language — see [Home page layout](#home-page-layout).
+- **Info and Terms** — built in, written for this version: every paragraph about an optional feature is
+  shown only while that feature is on, and every retention period the Info page quotes is read from the
+  setting that decides it. Replaceable per language, in Markdown or BBCode, with the same conditions as
+  markers — see [Site pages](#site-pages-terms--info).
+- **Submit a Report** — DMCA/abuse report form with info-hash extraction from magnet links; **Check
+  Report Status**, **Block Check** and **Appeals** on the status page; the **Transparency** page
+  (`transparency_enabled` [1]) counts the reports per organisation.
+- **Statistics** (`tracker_stats_enabled` [0]) and the **swarm timeline** (`stats_timeline_enabled` [0]).
+  *Needs:* the tracker's `/stats` (`tracker_stats_url`, INSTALL §7); `stats.view`, `stats.timeline`,
+  `home.stats` (every seeded group).
+- **The integration guide** (`?action=apidocs&scope=…`) — generated per API key; unlisted, carries no
+  secret.
+- **Interface languages** — English and Polish ship, more install from a JSON file; the switcher changes
+  the page in place (`lang_swap_enabled` [1]), a member can save a preference, and the site default can be
+  *Automatic* (`Accept-Language`) — see [Languages](#languages).
+- **Health check** (`?action=health`) — one JSON answer for an uptime monitor. *Needs:* `health_token`
+  [''] of 16+ characters.
+
+### Accounts (all need `users_enabled`)
+- **Registration and sign-in** (`users_registration_enabled` [1]) with CAPTCHA, e-mail verification
+  (`users_require_email_verify` [1] — until confirmed an account has a guest's rights), a chosen sign-in
+  duration, password reset, a two-step e-mail change with a cool-down (`users_email_change_cooldown_days`
+  [30]).
+- **A second factor for members** (`user_2fa_enabled` [0], `user_2fa_required` [off]) — TOTP with
+  recovery codes; **signed-in devices** listed on the account page, "sign out everywhere else".
+- **Groups and permissions** — `guest` for anonymous visitors, the union of a member's own groups
+  otherwise, the `admin` group passes everything except the consent grants (a member's own yes: their
+  favourites, lists, likes, descriptions or uploads shown to others); timed memberships with expiry
+  notices; seeded groups (guest, member, moderator, premium, admin) with a **recommended permission
+  set** each, applied in Users → Groups or with `tools/groups.php`. Moderators get panel permissions of
+  their own. See [User accounts, groups & permissions](#user-accounts-groups--permissions-160).
+- **Profiles** (`?action=u`, `profiles_enabled` [0]) — shown to signed-in members holding
+  `favourites.view_others`; what a profile lists is each member's own choice (all off at first):
+  - a **picture and a cover** (`avatars_enabled` [1], `covers_enabled` [1]) — `profile.avatar` (member),
+    `profile.cover` (premium); re-encoded to WebP in the database. *Needs:* PHP GD with WebP; upload limits
+    (INSTALL §2);
+  - a **description** (`profile_bio_enabled` [1], `profile_bio_max` [300]) — `profile.bio` (member);
+  - **likes / ratings** (`profile_votes_enabled` [1] + `rep_enabled`) — `rating.public`;
+  - **descriptions written** (`profile_descriptions_enabled` [1]) — `content.public`;
+  - **favourites** and **registered torrents** (`fav_public_enabled`, `wl_submitter_public` [0]) —
+    `favourites.public`, `uploads.public`.
+- **Favourites and the star** (`fav_enabled` [0], `fav_max_per_user` [500]) — `favourites.use`; "who has
+  this in favourites" (`fav_who_enabled` [0]).
+- **Lists** (`lists_enabled` [0], `lists_public_enabled` [0]) — private, for friends, or public, with a
+  description; `lists.use`, `lists.public`; a public list can be handed to somebody as an address.
+- **People** (Settings → User accounts → *People*) — **private messages** (`pm_enabled` [0], `pm.send`,
+  `pm_who` [friends], a daily cap), with read receipts, live refresh (`pm_live_seconds` [0]), a typing
+  line (`pm_typing_enabled` [0]), an **Archive** and a **Trash** (`pm_archive_returns` [1],
+  `pm_trash_days` [30] — 1.73.0), a confirmation and an undo; **following, friends and blocks**
+  (`friends_enabled` [0], `friends.use`); a **member directory** (`directory_enabled` [0],
+  `directory.view`). A reported message reaches a moderator as that message and the one before it
+  (`pm.report`; the queue needs `panel.messages.view` — nobody's as shipped).
+- **Notifications and sounds** — in-app notifications (read ones kept 90 days, any one a year), the live
+  badge (`site_live_seconds` [60]), a sound per kind of event (`sounds_enabled` [1], `sounds.use`) — none
+  plays until a member picks one. Times in each reader's own zone (`site_timezone`, the account's own).
+- **Sign-in bridge** (`auth_bridge_enabled` [0]) — a forum holding a `users` key signs its members in
+  here (and back), with one-time tickets and two-way sign-out. *Needs:* the API.
+
+### What people write
+- **Comments and replies** on a torrent's Info panel (`comments_enabled` [1], `comments_reply_depth` [3])
+  — `comment.view` / `.post` / `.reply` / `.edit_own` / `.delete_own` (member), `comment.moderate`
+  (moderator: remove with a reason the author is shown, edit, release a guest's comment). Guests only
+  where the guest group is granted `comment.post`, with a CAPTCHA every time and a moderator's review
+  (`comments_guest_review` [1]). Removal is soft: the words are kept with who, when and why.
+- **Descriptions and source links** for any torrent the tracker knows (`wl_allow_description`,
+  `wl_allow_source_url` [0]) — `content.submit`, `.propose`, `.view`, `.delete_own` (member),
+  `.delete_any` (moderator); a review queue (`wl_content_review` [1], `panel.whitelist.content`), proposed
+  rewrites and edits credited to their co-authors, the ten newest replaced versions kept.
+- **Ratings** (`rep_enabled` [0], thumbs or stars) — `rating.vote`; a vote pressed again is taken back.
+- **The shoutbox** (`shout_enabled` [0]) — on the home page, a page of its own (`shout_page_action`
+  [shoutbox]) or both (`shout_placement` [home]), in the navigation (`shout_nav` [0]); pinned lines, lines
+  the site says itself, @mentions, corrections for a while; `shout.view` / `.post` / `.edit_own` /
+  `.delete_own` (member), `shout.moderate` / `.edit_any` (moderator). Lines are kept `shout_keep_days`
+  [30] / `shout_keep_rows` [2000].
+- **Emoji, emotes and stickers** in every editor (`emotes_everywhere` [1]; the emotes need the shoutbox):
+  every emoji with a search and the variants, Font Awesome icons as the picker offers them
+  (`shout_emoji_fa`), members' own emotes with `shout.upload_emote` (premium) and the operator's approval
+  (`shout_emote_approval` [1]).
+- **Reports of words and warnings** — a flag on a comment, a description or a shout (`content.report`,
+  member); the Reports page's queues per kind (`panel.reports.comments|descriptions|shouts.view|handle`,
+  moderator); close, remove, warn, silence or suspend — each silently or as a warning the author receives.
+- **One anti-spam layer** for everything people write (`antispam_enabled` [1]) — a free burst, growing
+  pauses, a duplicate rule, stricter pacing and plain-text links for new accounts, a CAPTCHA for whoever
+  keeps pushing. *Needs:* a CAPTCHA provider for the CAPTCHA half.
+- **"Who has this"** — the favourites, the likes and ratings and the lists a torrent is in, twenty at a
+  time, from each member's own consent.
+
+### Admin panel
+- **Reports** — pending → reviewed → blocked / archived, inline editing, e-mails to the reporter, appeals,
+  auto-archiving; the message and content report queues.
+- **Whitelist** and **Index** pages — status cards, multi-column sort, IP grouping, name and file-name
+  search, bulk actions, a details modal with a live scrape, bans, the review queue, API clients and bans,
+  scrape coverage.
+- **Users** — accounts, groups, notices, warnings, pictures; **Log** — the audit log (`audit_enabled`
+  [1], `audit_keep_days` [180]); **Backups**; **Traffic** — the UDP monitor and inbound limit, address
+  lists, the stability probe, kernel buffers, the database's memory.
+- **Settings** — every setting from the web, eighteen groups with a search that knows synonyms; the
+  **icon library** for the whole site (`icon_library` [bootstrap]: Bootstrap Icons or Font Awesome 6/7,
+  Free from jsDelivr or your own Pro package, `fa_source` [cdn6]); the **operator's digest**
+  (`digest_enabled` [0]); the build line (`version_display` [panel]).
+- **Moderators** — a panel session opened from a member account reaches exactly what its groups grant
+  (`panel.*` permissions); settings, backups, groups and the machine stay with the owner.
+- **The panel's own security** — a movable sign-in address, a second factor, the owner's password asked
+  again for everything that changes the machine.
+
+### Network and the machine (each off until you switch it on, each through one root helper)
+- **UDP traffic monitor and inbound rate limit** (`net_monitor_enabled`, `net_limit_enabled` [0]) — see
+  [UDP traffic monitor + inbound rate limit](#7-udp-traffic-monitor--inbound-rate-limit-optional-1110).
+  *Needs:* `tracker-netlimit.sh`, nftables.
+- **Address lists** (`net_lists_enabled` [0]) — whole networks and countries allowed, blocked or softened.
+- **Stability probe** (`tuner_enabled` [0]), **kernel network buffers** (`sysctl_enabled` [0]),
+  **database memory** (`dbmem_enabled` [0]) — *Needs:* `tools/tuner.py`, `tracker-sysctl.sh`,
+  `tracker-dbmem.sh`.
+- **Backups** (`backup_enabled` [0]) — make, schedule, rotate, verify, download and restore — see
+  [Backups](#8-backups-from-the-panel-optional-1110). *Needs:* `tracker-backup.sh`.
+
+### Integrations
+- **Server-to-server API** (`api_enabled` [0]) — `Authorization: Bearer key_id.secret`; scopes
+  `whitelist` (`v1/whitelist/submit`, `/status`, `/ping`), `abuse` (`v1/blacklist/submit`), `users`
+  (accounts and the sign-in bridge), `shop` (lookup, grant and revoke a group, idempotent on the shop's
+  `order_id`), `federation` (`v1/federation/ping`, `/export`) and `all`; per key: publish or hold for
+  review, required fields. A malformed, unknown or wrong key bans the address it came from for
+  `api_ban_days` [30]; a key has a per-minute and a daily byte budget. The Flarum extension uses the
+  `whitelist` scope to register every posted magnet link.
 
 ### Email System
+Mail goes out through PHP's `mail()` — the machine needs an MTA (INSTALL §1).
 - **Submission Confirmation** — sent when a report is filed
 - **Under Review** — sent when an admin first opens a report
 - **Status Updates** — sent on every status change (reviewed, blocked, archived, restored)
@@ -109,30 +242,34 @@ source before you send.
 - **Appeal Confirmation** — sent when an appeal is submitted
 - **Appeal Decision** — sent when an appeal is accepted/rejected, with colored status and object title
 - **Notification Preferences** — users can manage per-type email preferences via HMAC-secured link
-- **One-Click Unsubscribe** — RFC 8058 compliant `List-Unsubscribe-Post` header for Gmail/Yahoo
+- **One-Click Unsubscribe** — RFC 8058 compliant `List-Unsubscribe-Post` header for Gmail/Yahoo; the
+  unsubscribe page records the client's one-click POST (1.73.0 — it used to render the page and record nothing)
+- **Member mail** — verification, password reset, e-mail change, group expiry and security notices, the
+  operator's announcements to members (bulk mail, `bulk_mail_enabled` [0])
 
 ### Security
-- **Smart CAPTCHA** — point-based reCAPTCHA v2 system with modal overlay; CAPTCHA only appears after configurable activity threshold, with grace period after solving
+- **Smart CAPTCHA** — point-based CAPTCHA with a modal overlay; it appears only after a configurable
+  activity threshold, with a grace period after solving
 - **CSRF Protection** — token validation on all public form submissions and on every admin write (via the `X-CSRF-Token` header); every public page publishes the session's token once (`<meta name="csrf-token">`) and every public script reads it through one helper, so a button works on whichever page it turns up (1.71.0)
-- **Login Hardening** — per-IP brute-force lockout on admin login (attempts + window now admin-configurable) + constant-time username/password comparison
+- **Login Hardening** — per-IP brute-force lockout on admin login (attempts + window admin-configurable) + constant-time username/password comparison
 - **Admin Session Timeouts** — idle timeout and absolute lifetime cap; an expired session is destroyed server-side so a stale cookie can't be reused
 - **Rate Limiting** — per-IP throttling on report submission **and** on status checks, block lookups and appeal submissions (all admin-tunable, `0` = off), plus a duplicate-appeal guard
 - **Prepared Statements** — all database queries use PDO with parameterized queries; dynamic `ORDER BY`/table names are whitelisted
 - **Input Sanitization** — `htmlspecialchars` on all output, server-side validation on all input; untrusted upstream stats data is escaped before it touches the DOM
 - **Password Hashing** — bcrypt via `password_hash()`
 - **HMAC Tokens** — SHA-256 signed unsubscribe links with timing-safe comparison
-- **No Secrets in Source** — DB credentials are injected by the installer or via `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASS` environment variables; nothing sensitive is committed
+- **No Secrets in Source** — the database credentials are written by the installer into `config/database.php`, which is never committed (and never touched by an upgrade)
 - **Generic Error Responses** — raw database/exception messages are logged server-side, never returned to clients
-- **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, `sql/`, `tests/`; `assets/` blocks server-side script execution and directory listing (see [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for non-Apache servers)
+- **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, dotfiles and `*.sql|log|bak|old|ini|sh|env|lock`; `assets/` blocks server-side script execution and directory listing. `.git/`, `tests/`, `tools/`, `worker/` and `lang/` are **not** denied by the shipped files — the vhost does that (INSTALL §4; [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for nginx)
 - **Security Headers** — `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
-- **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'`, a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported
+- **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'`, a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported. On Apache the `.htaccess` fallback policy is enforced beside it — see [Content-Security-Policy](#content-security-policy)
 - **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons or Font Awesome) loaded with `integrity` hashes
 - **Reverse-Proxy Aware** — optional trusted-proxy allow-list (single addresses **or CIDR ranges**, so a CDN's published ranges can be pasted in) + configurable client-IP header so per-IP limits work correctly behind Cloudflare / nginx without opening a spoofing hole; a block wider than /8 (v4) or /16 (v6) is refused and ignored
 - **Transport security** — `Secure` on the session, language and remember-me cookies, decided once for all of them (automatic detection, or forced on/off), plus optional HSTS with its own `max-age`, `includeSubDomains` and `preload` switches, off by default and never sent over plain HTTP
 - **Information Leak Prevention** — generic responses for not-found queries, email always required for status checks
 
 ### Donations
-- **Custom Fields** — up to 15 donation fields with custom labels
+- **Custom Fields** — up to 15 donation fields with custom labels (`donations_enabled` [0])
 - **Smart Display** — URLs (http/https) render as clickable links; wallet addresses/hashes render as copyable code blocks
 - **Backward Compatible** — auto-migrates from legacy BTC/ETH/XMR fields
 
@@ -203,7 +340,7 @@ the smoke-test accounts) — nothing from production appears in them.*
   </tr>
   <tr>
     <td align="center"><em>Home page layout — drag sections, rename headings, add your own, edit any section's text.</em></td>
-    <td align="center"><em>Page editor — Terms/Info per language, Markdown/BBCode/HTML, conditional markers, live preview.</em></td>
+    <td align="center"><em>Page editor — Terms/Info per language, Markdown or BBCode, conditional markers, live preview.</em></td>
   </tr>
 </table>
 
@@ -211,11 +348,23 @@ the smoke-test accounts) — nothing from production appears in them.*
 
 ## Requirements
 
-- **PHP 8.0+** with extensions: `pdo_mysql`, `json`, `openssl`, `mbstring`
-- **MySQL 5.7+** or **MariaDB 10.3+**
-- **Apache** with `mod_rewrite` enabled (for Nginx see [Reverse proxy / Nginx notes](#reverse-proxy--nginx-notes))
-- **PHP `mail()` function** — for email notifications (or configure a local MTA)
-- *(Optional)* **APCu** — if the `apcu` extension is present, site settings are cached across requests to avoid a settings query on every hit; the app works fine without it
+- **PHP 8.0+** (tested on 8.4 and 8.5) with `pdo_mysql`, `mbstring`, `curl` (the index's full scrape,
+  the address lists), `gd` **with WebP** (pictures and profile covers), `xml`/SimpleXML (the tracker
+  statistics), `json`, `zlib`, `ctype`; optional: `zip` (Font Awesome package import), `exif`
+  (uploaded photos turned upright), `intl`, `apcu` (settings cached across requests). `exec`,
+  `proc_open` and `shell_exec` must not be disabled — the root helpers, backups and the probe use them.
+- **MariaDB 10.6+** (tested on 11.4 and 11.8). MySQL is not supported: a fresh install fails on it, and
+  the site uses MariaDB's `max_statement_time`.
+- **Apache 2.4** with `mod_rewrite` (required), `mod_headers`, `mod_setenvif`, and php-fpm through
+  `mod_proxy_fcgi` — or nginx (see [Reverse proxy / Nginx notes](#reverse-proxy--nginx-notes)).
+- **A local MTA** — mail leaves through PHP's `mail()`.
+- **The janitor timer** (`tools/janitor.php` every minute) — the schedule, the index, the statistics
+  timeline, backups, the mail queue, the digest and every retention period depend on it.
+- *(Optional)* **Python 3.7+** with `python3-libtorrent` and `python3-pymysql` (the metadata worker and
+  the federation importer); **nftables**, `systemd-run`, `mariadb-dump`, `gpg`, `tc` for the features
+  that drive the machine; **sudo** for the root helpers.
+
+The full list, and the path from a bare server: [INSTALL.md](INSTALL.md).
 
 ---
 
@@ -281,24 +430,25 @@ Or download and extract the ZIP from GitHub releases.
 
 Upload all files to your web server document root or a subdirectory.
 
-> **Do not upload runtime state.** The app writes several files into `config/` while running —
-> `stats_cache.json`, `stats_fetch.lock`, `rate_limits.json`, `login_attempts.json`, `*.marker`.
-> These are machine-local; never copy them from a dev machine to production (a stale
-> `stats_fetch.lock` will wedge the stats endpoint on "Syncing Swarms…" — see Troubleshooting).
-> They are already in `.gitignore`, so a `git`-based deploy skips them automatically; if you upload
-> by FTP, exclude them. Also delete any `*.orig`/`*.bak` backups (e.g. `hash.txt.orig` leaks the
-> admin password hash).
+> **Do not upload runtime state.** The app writes its state into `config/` while running — the
+> database credentials, the admin password hash, caches, locks, rate-limit and sign-in-throttle state,
+> `*.marker` files, installed icon packages (`config/iconpacks/`). These are machine-local; never copy
+> them from a dev machine to production (a stale `stats_fetch.lock` will wedge the stats endpoint on
+> "Syncing Swarms…" — see Troubleshooting). They are in `.gitignore`, so a `git`-based deploy skips
+> them automatically; if you upload by FTP, upload `config/` with only `.htaccess` and `app.php` in it.
+> Also delete any `*.orig`/`*.bak` backups (e.g. `hash.txt.orig` leaks the admin password hash).
 
 ### 3. Set Permissions
 
-The `config/` directory **must be writable by the web-server user** — the app persists the shared
-stats cache, its fetch lock, and rate-limit/login-throttle state there at runtime. If it isn't
-writable, stats never refresh and rate limiting silently fails open.
+The `config/` and `lang/` directories **must be writable by the web-server user** — the app persists
+its credentials, caches, locks and rate-limit/login-throttle state in `config/`, and writes a language
+installed from the panel into `lang/`. If `config/` isn't writable, stats never refresh and rate
+limiting silently fails open.
 
 ```bash
 # Linux with Apache/Nginx + php-fpm (adjust user:group to your PHP process, often www-data)
-sudo chown -R www-data:www-data config/
-sudo chmod 775 config/
+sudo chown -R www-data:www-data config/ lang/
+sudo chmod 775 config/ lang/
 ```
 
 Find out which user PHP runs as with `<?php echo exec('whoami'); ?>` or check your php-fpm pool
@@ -322,32 +472,37 @@ RewriteBase /tracker/
 Navigate to `https://your-domain.com/install.php` in your browser.
 
 **Step 1 — Environment Check**
-- Verifies PHP version, required extensions, and directory permissions
+- Shows the PHP version, `pdo_mysql`, `json`, `openssl` and whether `config/` is writable (shown, not
+  enforced — it does not check `mbstring`, `curl` or `gd`; see [Requirements](#requirements))
 
 **Step 2 — Database**
-- Enter MySQL credentials (database will be created automatically if it doesn't exist)
-- Creates all required tables
+- Enter the MariaDB credentials (the database is created if it doesn't exist, `utf8mb4_unicode_ci`)
+- Creates the base tables
 
 **Step 3 — Site & Admin Settings**
-- Admin username and password (min 10 characters, must include upper- and lower-case letters, a digit and a symbol)
-- Site name, URL, and contact email
+- Admin username (3+ characters) and password (min 10 characters, must include upper- and lower-case letters, a digit and a symbol)
+- Site name, URL, and contact email; an optional From address on the site's own domain
 - Tracker announce URLs (HTTP/S and UDP)
-- reCAPTCHA v2 keys (optional — get them from [Google reCAPTCHA](https://www.google.com/recaptcha/admin))
+- CAPTCHA: reCAPTCHA v2 or v3, Cloudflare Turnstile or hCaptcha, and its two keys (optional — CAPTCHA is switched on only when both are given)
 - Blacklist file path (with Test button to verify permissions)
+- It then builds the schema by running the ordinary migration from version zero, and writes
+  `config/installed.lock` only when the schema is complete
 
 **Step 4 — Complete**
-- Click **"Delete install.php"** to remove the installer for security
-- If you skip this step, delete `install.php` manually from the server
+- Click **"Delete install.php"** to remove the installer for security — it cannot when the files are
+  owned by root, so check that it is gone, and delete it by hand if not
+- Once `config/installed.lock` exists the installer refuses to run again
 
 ### 6. Configure Your Tracker
 
-Point your tracker software's blacklist file to the path configured in step 3. For OpenTracker, this is the `-b` flag:
+Point your tracker at the list files the panel writes — for opentracker, in its config file
+(`access.blacklist /path/to/blacklist`, or `access.whitelist …` for the whitelist build), and set both
+paths in *Settings → Tracker & whitelist → Tracker mode & the accesslist file*. INSTALL.md §5 has the
+whole opentracker setup: the two builds, their config files, the symlinks and the systemd unit the
+helpers expect.
 
-```bash
-opentracker -b /path/to/blacklist
-```
-
-The application writes one info hash per line (lowercase hex, 40 characters). When you block a hash through the admin panel, it's appended to this file. When you unblock, it's removed.
+The application writes one info hash per line (lowercase hex, 40 characters). When you block a hash
+through the admin panel, it's appended to the blacklist. When you unblock, it's removed.
 
 ---
 
@@ -377,20 +532,44 @@ section ids did not change, so every `#section-…` link still opens — and sin
 anything inside a section (a sub-heading, a block such as `#admin-emotes`) opens that section too.
 
 
+**Every group and its sections** (the section titles as the page shows them; the rows after this table
+say more about the older ones):
+
+| Group | Sections |
+|---|---|
+| **Site & pages** | Site Configuration (site name, URL, announce URLs, GitHub URL, time zone `site_timezone`, the icon library `icon_library` and Font Awesome's source and packages) · Donation Fields · Transparency Page · Home page layout · Site pages (Terms and Info) · Footer (incl. the build line, `version_display`) |
+| **Contact & email** | Contact & Email · Operator digest |
+| **Security & CAPTCHA** | CAPTCHA · Smart CAPTCHA · Anti-spam (and its ladders, new accounts, messages, duplicates) · Rate & length limits · Admin Access & Sessions · Transport security (cookies & HSTS) · Content-Security-Policy (what a page may load) |
+| **User accounts** | User Accounts · Two-factor authentication for accounts · People: messages, friends, directory (the messages' Archive and Trash since 1.73.0) · Sign-in bridge |
+| **Profiles** | Favourites and profiles · Pictures and profile covers · Profile description · Likes and ratings on profiles · Descriptions on profiles · Lists |
+| **Tracker & whitelist** | Tracker mode & the accesslist file · Submissions must prove themselves · Whitelist upkeep · Scheduled tracker mode |
+| **OpenTracker service** | OpenTracker Service · Live peer sync · OpenTracker — performance · OpenTracker instances |
+| **Network & limits** | UDP traffic & rate limit (and its throttle and automatic limit) · Address lists (allow / block) · Stability probe · Kernel network buffers · Database memory (MariaDB / MySQL) |
+| **Statistics** | Tracker Statistics · Statistics Timeline |
+| **Descriptions, comments & ratings** | Descriptions & source links · Comments · Ratings |
+| **Shoutbox** | Shoutbox (and its place in the navigation) |
+| **Emoji & emotes** | Emoji in the picker · Emotes and stickers |
+| **Sounds** | Sounds |
+| **Index** | Index (observed hashes) · Metadata fetch order · Index file lists · File list loading |
+| **API & federation** | Server-to-server API · Federation / Cluster |
+| **Backups & maintenance** | Backups (what, when, how long, the tools) · Archiving & the e-mail log · Health check · Audit log |
+| **Languages** | Languages |
+| **Admin credentials** | Security & Credentials · Two-factor authentication |
+
 | Section | Settings |
 |---------|----------|
 | **Site Configuration** | Site name, URL, announce URLs (HTTP/S + UDP), GitHub URL (point it at the project **repository** — it is the footer's GitHub link) |
 | **Contact & Email** | Site email, **sender address** (local part + a domain picked from the Site-URL host and its parents — nothing else can align with SPF/DKIM/DMARC), contact visibility, email obfuscation, HMAC secret |
-| **CAPTCHA** | Provider (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile / hCaptcha) — **only the selected provider's keys are shown** (the others keep their values and reappear when selected, or when the search matches them), enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page always requires a CAPTCHA |
-| **Tracker Mode & Whitelist** | `blacklist` / `whitelist`, whitelist file path (+ Test), blacklist file path (+ Test; under Security until 1.69.0), public registration on/off, max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
-| **Server-to-server API** | Enable, ban length (days), exempt IPs — clients and bans are managed on the Whitelist page |
+| **CAPTCHA** | Provider (reCAPTCHA v2 / reCAPTCHA v3 / Turnstile / hCaptcha) — **only the selected provider's keys are shown** (the others keep their values and reappear when selected, or when the search matches them), enable globally and per-context (report, login, status, appeals, block check); the whitelist registration page requires a CAPTCHA every time while registration is public (`whitelist_submit_mode` *public*) |
+| **Tracker mode & the accesslist file** | `blacklist` / `whitelist`, whitelist file path (+ Test), blacklist file path (+ Test; under Security until 1.69.0), public registration on/off and who may register (`whitelist_submit_mode`: anyone with a CAPTCHA, or signed-in members holding `whitelist.add`), max hashes per submission, submissions per hour, per-IP and global daily caps, minimum seconds between tracker reloads, OpenTracker scrape URL, **require our tracker** (public registration accepts only magnets whose `tr=` list includes one of *Our tracker hosts* / the announce hosts; bare hashes refused) — see [Whitelist mode](#whitelist-mode) |
+| **Server-to-server API** | Enable, ban length (days), exempt IPs, each key's requests a minute (`api_rate_limit_per_min`) and bytes a day (`api_rate_limit_bytes_day`) — clients and bans are managed on the Whitelist page |
 | **Smart CAPTCHA** | Point threshold, grace period, points per action type |
 | **Anti-spam** (Security & CAPTCHA, 1.71.0) | One layer for everything people write: on/off, a CAPTCHA after so many hits at a ladder's top, guests' CAPTCHA, staff exempt; per place (room, messages, comments, descriptions, reports, lists, profile description, emotes, votes) the free burst, the pauses and the quiet spell; new accounts (days, factor, links as words); new conversations an hour / a day; the duplicate window — see [One anti-spam layer](#one-anti-spam-layer-for-everything-people-write-1710) |
 | **Archiving & the e-mail log** (Backups & maintenance; "Public Pages" before 1.69.0) | Auto-archive days for reports and appeals, how long the sent-mail log is kept |
 | **Rate & length limits** (Security & CAPTCHA; "Rate Limits & Blacklist" before 1.69.0) | Reports/status-checks/block-lookups/appeals per hour (per IP), items per page, message length limits |
 | **Admin Access & Sessions** | **Admin sign-in address** (the `?action=` value that shows the sign-in form &mdash; move it off `admin` to keep bots off the form), **what other admin URLs answer when signed out** (redirect to the front page / show the form / 404), session idle timeout, absolute session cap, login lockout attempts/window, trusted proxy IPs, client IP header &mdash; see [Moving the admin sign-in address](#moving-the-admin-sign-in-address-1100) |
 | **Donation Fields** | Enable/disable, custom label+value fields (max 15), auto-detects URLs vs addresses |
-| **Transparency** | Enable/disable, results per page |
+| **Transparency Page** | Enable/disable, results per page |
 | **Tracker Statistics** | Enable, source URL, home/page refresh intervals, **cache lifetime (TTL)**, request timeout, loading delays, peer-label style — see [Tracker statistics & caching](#tracker-statistics--caching) |
 | **Statistics Timeline** | Enable, sample interval, retention (raw / 5-min roll-ups), public or admins-only, **which range buttons the chart offers**, **which range opens by default** and an optional **free "Custom" span slider** — see [Statistics timeline](#statistics-timeline--the-swarm-chart-150) |
 | **OpenTracker Service** | systemd unit name, sudo toggle, blacklist auto-reload (SIGHUP), permission test buttons, restart-recommendation thresholds — see [OpenTracker service reload & restart](#opentracker-service-reload--restart) |
@@ -459,7 +638,7 @@ no CDN) on the public `/?action=stats` page (under the counters) and on the admi
 (collapsible card under the status card). Two synced panels: seeds / leechers / peers (left axis) with
 torrents and whitelisted torrents (right axis), and request rates (UDP / HTTP announces, connects,
 scrapes per second, derived from OpenTracker's cumulative counters; `null` across a restart or a gap).
-Hours in OPEN (blacklist) mode are shaded, so a [scheduled mode](#5b-scheduled-mode--whitelist-hours-optional-140)
+Hours in OPEN (blacklist) mode are shaded, so a [scheduled mode](#5d-scheduled-mode--whitelist-hours-optional-140)
 shows up as day/night bands. The same chart is mounted on the admin **Index** page. Ranges
 **24h / 7d / 2w / 1m / 3m / All** (All = the whole recorded history, hourly rows thinned to
 ≤ ~5000 points) — since 1.10.0 the admin picks **which of those buttons exist** and **which one
@@ -722,8 +901,11 @@ default — with it off, everything behaves exactly like the classic single-admi
   two-step** (1.9.0): confirmed from the OLD mailbox first, then the NEW one (24 h links,
   `?action=emailchange`); nothing is written until the second click, the new address arrives
   verified, and `users_email_change_cooldown_days` (default 30) blocks rapid flip-flopping.
-  Account mails carry a CTA button + raw link and a working preferences link; the account page has
-  an **Account emails** toggle (`user_email_prefs`). The menu links can be hidden
+  Account mails carry a CTA button + raw link. The account page's **Account mail** toggle
+  (`user_email_prefs`) governs the groups' notices (access granted, about to end) and the copies of the
+  operator's notices — those carry a preferences link and a one-click `List-Unsubscribe`; the password
+  reset, an e-mail change's mails and the verification are transactional: always sent, whatever the
+  address unsubscribed from, and with no unsubscribe at all (1.73.0). The menu links can be hidden
   (`users_links_visible=0`; the nav shows one **Account** entry). Signing in as an `admin`-group
   member also opens the **admin panel session** (no second login; the panel's own idle/absolute
   limits still apply, and panel logout leaves the site session alone). The mirrored owner account
@@ -743,8 +925,9 @@ default — with it off, everything behaves exactly like the classic single-admi
   user list with it once (the two passwords do not stay in sync afterwards).
 - **Presets and the matrix (1.34.0)**: the group editor offers *Start from:* **Moderator**
   (reports + whitelist), **Content reviewer** (descriptions and rewrites), **Whitelist curator**
-  (hashes, bans, metadata), **Read-only auditor** (every page and the log, nothing writable) and
-  **Site member** (the public features). A preset fills the checkboxes and every one of them stays
+  (hashes, bans, metadata), **Read-only auditor** (every page and the log, nothing writable),
+  **Guest (anonymous visitors)**, **Site member** (the public features) and **Premium** (the paid
+  extras). A preset fills the checkboxes and every one of them stays
   visible and editable — it is a starting point, not a lock — and the presets live next to the
   permission registry in `includes/users.php`, so one cannot name an id the other does not have.
   Under the groups table, a collapsible **permission matrix** shows groups across and permissions
@@ -785,10 +968,14 @@ default — with it off, everything behaves exactly like the classic single-admi
   `index.magnet`). A reader who is not shown hashes does not search by one either (1.69.0): without
   `index.magnet` a hex term is searched as a name, here and on a profile's favourites, registered
   torrents and lists — a prefix matched first and blanked afterwards spelt the hidden hash out.
-- **Selling group access**: create an API key with the **users** scope and call
-  `v1/users/lookup | grant | revoke | provision` from your shop after a purchase — see
-  [tools/api_client_example.py](tools/api_client_example.py). Grants made through the API notify the
-  user in-app (and optionally by email) and extend like admin grants.
+- **Selling group access** (1.65.0): create an API key with the **shop** scope — it opens exactly
+  `v1/users/lookup`, `grant` and `revoke` — and call them from your shop after a purchase, with your
+  own `order_id` on every grant: a repeated order id changes nothing and answers with the stored
+  result (`user_group_orders`), and a refund with the same id takes back exactly that order's time.
+  A `users` key can do the same and also create accounts (`v1/users/provision`) and run the sign-in
+  bridge. The integration guide (`?action=apidocs&scope=shop`) and
+  [tools/api_client_example.py](tools/api_client_example.py) show the calls. Grants made through the
+  API notify the user in-app (and optionally by email) and extend like admin grants.
 - **People** (1.45.0, `pm_enabled` / `friends_enabled` / `directory_enabled`, all off by default):
   private **messages** between accounts (the same BBCode/Markdown the descriptions use, per-day and
   per-message limits, an inbox with unread counts), **following and friendship** — one row, read two
@@ -976,12 +1163,12 @@ hours ago, that the metadata worker died with a queue behind it, or that the pan
 while the tracker is actually running open. Each of those is a tracker that looks healthy from
 outside and is not doing its job.
 
-**Settings → Health check** sets `health_token` (16 characters minimum — a shorter one counts as
+**Settings → Backups & maintenance → Health check** sets `health_token` (16 characters minimum — a shorter one counts as
 empty, because a guessable token is not a smaller secret but a public endpoint). Then:
 
 ```
 GET /?action=health&token=<token>            # or the X-Health-Token header, which keeps it out of the access log
-→ 200 {"ok":true,"status":"ok","version":"1.46.0","schema":{"version":52,"expected":52,"ok":true},
+→ 200 {"ok":true,"status":"ok","version":"1.73.0","schema":{"version":91,"expected":91,"ok":true},
        "mode":{"panel":"whitelist","actual":"whitelist","match":true},
        "accesslist":{"entries":159,"file_bytes":6519,"written_age":48,"regen_needed":false,
                      "pending_reload":false,"last_reload_ok":true,"fail_count":0},
@@ -1108,7 +1295,7 @@ first. `shout_live_seconds_guest` gives readers with no account their own refres
 `shout_system_lines` (off) lets the tracker announce a registration itself, one line per batch,
 naming the submitter only where `wl_submitter_public` says they are public; those lines belong to
 nobody, count as nobody's unread and make no sound. Settings → Shoutbox also shows a read-only
-matrix of the five `shout.*` permissions across your groups, and **Shoutbox** and **Sounds** are now
+matrix of the six `shout.*` permissions of the room (view, post, edit_own, delete_own, edit_any, moderate) across your groups, and **Shoutbox** and **Sounds** are now
 chips of their own on the settings page.
 
 ### Emoji, emotes and stickers in the shoutbox (1.59.0)
@@ -1135,7 +1322,7 @@ more events while the shoutbox is on. Emoji, stickers and the navigation counter
 
 ### The audit of 1.45–1.56 closed, and the charts without gaps (1.57.0)
 
-Every finding of the audit in `deploy/AUDIT-1.45-1.56.md` is fixed (see CHANGELOG 1.57.0). The
+Every finding of the internal audit of 1.45–1.56 (not shipped) is fixed (see CHANGELOG 1.57.0). The
 janitor's slow half — the index poll and prune, the whitelist upkeep and probes — runs as a
 transient unit of its own (`tracker-janitor-heavy`, through the root helper's `janitor-heavy-start`
 verb), so the minute tick that samples the timeline and the traffic never waits behind it; the
@@ -1152,7 +1339,7 @@ earlier with silence or a quiet low tone, for amplifiers and HDMI receivers that
 second of a stream or stand by until they sense a signal. The library is the clips shipped under
 `assets/sounds/` plus the owner's uploads from **Settings → Sounds** (MP3/Ogg/WAV, 512 KB, 15 s, 40
 at most; kept in the database, sniffed by their bytes). Browsers allow a sound only after a click:
-a small 🔇 note beside the account link says so until then. Permission: `sounds.use` (members).
+a small muted-speaker chip beside the account link says so until then. Permission: `sounds.use` (members).
 
 ### The number on the account link stays current (1.55.0)
 
@@ -1416,10 +1603,14 @@ your own site. It never passed this queue, and an API client is not necessarily 
 
 ### Making a submission prove itself (1.18.0)
 
-**Settings → Make submissions prove themselves.** A new registration must show that its metadata
+**Settings → Tracker & whitelist → Submissions must prove themselves.** A new registration must show that its metadata
 resolves *and* that a scrape finds at least one peer — the torrent exists, is alive, and names this
-tracker. Until then the accesslist skips it. Existing rows count as already accepted, so turning it
-on never unpublishes anything.
+tracker. **It is served while it tries** — a tracker in whitelist mode refuses the announces of a hash its
+list does not carry, so a peer could not show up here otherwise — for at most the probe's timeout, and it
+leaves the accesslist the moment it fails, deleted or kept (1.73.0: until then a full regeneration in the
+probe's minutes dropped it, and a failure stayed served until the next one). Existing rows count as
+already accepted, so turning it on never unpublishes anything. A partner's submission held for a
+person's review is different: never served before it is approved.
 
 It reuses the metadata worker rather than adding a second queue, but jumps the queue: somebody is
 watching this one. The form shows a line per hash, and a failure says which half failed, because
@@ -1435,7 +1626,7 @@ when the scrape path is broken.
 
 ### Source links and descriptions on registered torrents (1.17.0)
 
-**Settings → Tracker Mode & Whitelist → Source link & description.** Two optional fields on the
+**Settings → Descriptions, comments & ratings → Descriptions & source links.** Two optional fields on the
 registration form: where the torrent came from, and what it is. They show on the Whitelist and Index
 detail panels and in the public search. **Both off by default.**
 
@@ -1893,26 +2084,27 @@ outbound peer-list traffic disappears. (It does **not** reduce the inbound UDP s
 
 #### 1. Build OpenTracker with whitelist support
 
-Black- and whitelist are compile-time exclusive. Build from source with:
+Black- and whitelist are compile-time exclusive. The package ships both builds
+(`tools/opentracker/bin/opentracker.white` / `.black`, with all four patches); to build them yourself,
+the canonical recipe — the pinned upstream commit, libowfat with its patch, the three opentracker
+patches, the flags — is INSTALL.md §5 and **[tools/opentracker/README.md](tools/opentracker/README.md)**:
 
 ```bash
-sudo apt install -y build-essential git zlib1g-dev wget xz-utils
-mkdir -p ~/build && cd ~/build
+P=/path/to/tryhackx-tracker/tools/opentracker
 wget http://www.fefe.de/libowfat/libowfat-0.34.tar.xz && tar -xf libowfat-0.34.tar.xz && mv libowfat-0.34 libowfat
-make -C libowfat -j$(nproc)
-git clone git://erdgeist.org/opentracker && cd opentracker
-git apply /path/to/tryhackx-tracker/tools/opentracker/sighup-udp-workers.patch   # see below
-patch -p1 < /path/to/tryhackx-tracker/tools/opentracker/udp-reject-interval.patch # see below (optional)
-COMMON="-DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_FULLSCRAPE -DWANT_MODEST_FULLSCRAPES -DWANT_SPOT_WOODPECKER"
-make -j$(nproc) opentracker FEATURES="-DWANT_ACCESSLIST_WHITE $COMMON" && cp opentracker ../opentracker.white
-make clean && make -j$(nproc) opentracker FEATURES="-DWANT_ACCESSLIST_BLACK $COMMON" && cp opentracker ../opentracker.black
+(cd libowfat && patch -p1 --forward < $P/libowfat-no-zerocopy.patch) && make -C libowfat
+git clone git://erdgeist.org/opentracker && cd opentracker && git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
+for p in sighup-udp-workers udp-reject-interval opentracker-review-fixes; do patch -p1 --forward < $P/$p.patch; done
+F="-DWANT_FULLSCRAPE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_MODEST_FULLSCRAPES"
+make clean && make FEATURES="$F -DWANT_ACCESSLIST_WHITE" LIBOWFAT_HEADERS=../libowfat LIBOWFAT_LIBRARY=../libowfat && cp opentracker ../opentracker.white
+make clean && make FEATURES="$F -DWANT_ACCESSLIST_BLACK" LIBOWFAT_HEADERS=../libowfat LIBOWFAT_LIBRARY=../libowfat && cp opentracker ../opentracker.black
 strings ../opentracker.white | grep -E 'access\.whitelist|deflate|access\.stats_path'   # all three must appear
 ```
 
-Black- and whitelist are compile-time exclusive, so keep **both** binaries around
-(`/home/tracker/opentracker` = the active one, `/home/tracker/opentracker.black` = the other):
-switching **Tracker mode** in the panel only switches the web app — to really switch you also swap
-the binary, use the matching `access.whitelist` / `access.blacklist` line and restart the service.
+Keep **both** binaries around (`/home/tracker/opentracker` is a symlink to the active one, and
+`opentracker.conf` to its config): the Whitelist page's **Switch the tracker now** swaps both links and
+restarts the service through `tracker-mode.sh`. The *Tracker mode* setting alone only tells the web
+app what to believe — the page says loudly when the two disagree.
 
 > `make FEATURES=...` on the command line **overrides** the Makefile's `include Makefile.gzip`,
 > so `-DWANT_COMPRESSION_GZIP` must be listed explicitly. Keep `-DWANT_RESTRICT_STATS` — without it
@@ -1952,7 +2144,7 @@ OpenTracker (user `tracker`) only needs to read it:
 sudo install -d -o tracker -g www-data -m 2770 /home/tracker/accesslist
 ```
 
-Set **Settings → Tracker Mode & Whitelist → Whitelist file path** to
+Set **Settings → Tracker & whitelist → Tracker mode & the accesslist file → Whitelist file path** to
 `/home/tracker/accesslist/whitelist` and press **Test**. Do not create the file by hand — the panel's
 **Regenerate file** (or the first addition) creates it as `www-data`, mode 0644. The path is
 validated: absolute, outside the web root, no `.php`/`.htaccess` names, no symlinks.
@@ -1960,7 +2152,7 @@ validated: absolute, outside the web root, no `.php`/`.htaccess` names, no symli
 #### 3. Switch over (zero-downtime order)
 
 1. Deploy the app (schema upgrades itself on the first request: tables `whitelist`,
-   `whitelist_files`, `banned_hashes`, `api_clients`, `api_bans`; `settings.schema_version = 2`).
+   `whitelist_files`, `banned_hashes`, `api_clients`, `api_bans`; it was `settings.schema_version = 2` then — 91 in 1.73.0).
 2. Bootstrap the whitelist while still in blacklist mode, e.g. from a file of hashes:
    `sudo -u www-data php tools/whitelist_cli.php add --source=forum < hashes.txt`
    (or paste them into **Whitelist → Add hashes**).
@@ -2158,7 +2350,7 @@ sudo chmod 0440 /etc/sudoers.d/tracker-mode && sudo visudo -c -f /etc/sudoers.d/
 sudo /usr/local/sbin/tracker-mode.sh status     # white | black
 ```
 
-Then **Settings → Tracker Mode & Whitelist → Scheduled mode**: On, timezone, the switch command
+Then **Settings → Tracker & whitelist → Scheduled tracker mode**: On, timezone, the switch command
 (`sudo -n /usr/local/sbin/tracker-mode.sh`; leave empty to only flip the web setting), and one row
 per weekday: *Whitelist all day* / *Whitelist window from–to* (`to ≤ from` = ends the next day) /
 *Blacklist (open) all day*. Settings keys: `tracker_schedule_enabled`, `tracker_schedule` (JSON
@@ -2180,7 +2372,7 @@ Without a schedule everything behaves as before (blacklist mode hides the whitel
 See [`worker/README.md`](worker/README.md): a small `python3-libtorrent` daemon that resolves torrent
 name / size / file list for whitelisted hashes (DHT + trackers, upload mode — never downloads
 payload) into `whitelist` / `whitelist_files`, where the panel shows and searches them. Runs as the
-`tracker` user with column-level MySQL grants; the panel shows its heartbeat.
+`tracker` user with column-level database grants (worker/README.md); the panel shows its heartbeat.
 
 #### CLI
 
@@ -2227,7 +2419,7 @@ torrent keeps sending `connect` + `announce` (measured on tryhackx.org: **90–2
 The egress budget above protects the *machine*. The other half of the same problem is the **CPU** the
 tracker burns answering a swarm it will refuse anyway — and a packet dropped by the firewall costs
 nothing at all. **Admin → Traffic → UDP traffic** measures both and can set the inbound limit,
-**Settings → Tracker & whitelist → UDP traffic & rate limit** configures it. Off by default: a fresh
+**Settings → Network & limits → UDP traffic & rate limit** configures it. Off by default: a fresh
 install never calls the helper, never writes a firewall rule and renders no extra card.
 
 ```bash
@@ -2420,7 +2612,8 @@ collides with a public page falls back to `admin`), and decides what a signed-ou
 | `404` | a site-styled **404 Not Found** page with a 404 status |
 
 Once signed in, the panel keeps its classic addresses (`?action=admin`, `?action=settings`,
-`?action=admin-index`, `?action=admin-traffic`, `?action=admin-users`, `?action=admin-whitelist`), so bookmarks, in-panel links
+`?action=admin-index`, `?action=admin-traffic`, `?action=admin-users`, `?action=admin-whitelist`, `?action=admin-backups`,
+`?action=admin-audit`), so bookmarks, in-panel links
 and the **Logout** button keep working; the sign-in address itself just redirects to the dashboard.
 
 What this does and does not buy you: it keeps crawlers and drive-by bots away from the form, and while
@@ -2435,12 +2628,13 @@ The bundled `.htaccess` files (URL rewriting, directory `deny`, security headers
 On **Nginx** you must replicate two things in your server config:
 
 ```nginx
-# 1. Never serve the private directories (equivalent of the deny-all .htaccess files)
-location ~ ^/(config|includes|templates|api|sql|tests)/ { deny all; return 404; }
-location ~* \.(orig|bak|sql|log|lock|marker)$ { deny all; return 404; }
+# 1. Never serve the private directories (the deny-all .htaccess files, plus what Apache leaves to the vhost)
+location ^~ /api/ { rewrite ^/api/(.*)$ /api.php?endpoint=$1 last; }   # ^~: before the deny regex below
+location ~ ^/(config|includes|templates|api|tests|tools|worker|lang|scratchpad)/ { deny all; return 404; }
+location ~ /\. { deny all; return 404; }                                     # .git, .htaccess, .env …
+location ~* \.(orig|bak|old|sql|log|lock|marker|sh|ini|env)$ { deny all; return 404; }
 
 # 2. Front-controller routing
-location /api/ { rewrite ^/api/(.*)$ /api.php?endpoint=$1 last; }
 location / { try_files $uri $uri/ /index.php?action=$request_uri; }
 
 # 3. TELL PHP THE REQUEST WAS ENCRYPTED. Without these two lines $_SERVER['HTTPS'] is unset in
@@ -2451,17 +2645,20 @@ fastcgi_param HTTPS $https if_not_empty;
 fastcgi_param REQUEST_SCHEME $scheme;
 ```
 
-Also port the security headers from `.htaccess` into an `add_header` block, and **delete
-`install.php`** after setup. Two of them are exceptions and must **not** be added there:
+Also port the security headers from `.htaccess` into an `add_header … always;` block —
+`X-Content-Type-Options nosniff`, `X-Frame-Options SAMEORIGIN`, `Referrer-Policy
+strict-origin-when-cross-origin`, `Permissions-Policy "geolocation=(), microphone=(), camera=()"`: PHP
+sends only the policy and HSTS itself — and **delete `install.php`** after setup. Two of them are
+exceptions and must **not** be added there:
 
 * **`Strict-Transport-Security`** — manage HSTS from the panel (below), or the two would both fire.
 * **`Content-Security-Policy`** — the app sends this itself now, with a per-request nonce a static
   `add_header` cannot mint. A second copy is not an override: a browser **intersects** every policy
   on a response and applies the strictest of each directive, so an `add_header` here would silently
   narrow (or, with `always`, duplicate) what the panel sends. If you already have one in your vhost,
-  delete it, and use *Settings → Security → Content-Security-Policy* instead.
+  delete it, and use *Settings → Security & CAPTCHA → Content-Security-Policy* instead.
 
-*Settings → Security → Transport security* prints, for the request rendering that page, whether PHP
+*Settings → Security & CAPTCHA → Transport security* prints, for the request rendering that page, whether PHP
 sees it as HTTPS and **which** signal said so. If it says plain HTTP while your site address is
 `https://`, the two `fastcgi_param` lines above are what is missing.
 
@@ -2485,7 +2682,7 @@ names any entry it is ignoring.
 
 #### Secure cookies
 
-**Settings → Security → Transport security → Secure cookies** adds `Secure` to the session, language
+**Settings → Security & CAPTCHA → Transport security → Secure cookies** adds `Secure` to the session, language
 and remember-me cookies.
 
 | Value | What it does |
@@ -2510,7 +2707,7 @@ works.
 
 #### HSTS
 
-**Settings → Security → Transport security → HSTS** sends `Strict-Transport-Security`, telling every
+**Settings → Security & CAPTCHA → Transport security → HSTS** sends `Strict-Transport-Security`, telling every
 browser that has once seen this site to refuse plain HTTP to this hostname. It is **off by default**,
 it is never sent over a plain-HTTP request (RFC 6797 §7.2), and it cannot be switched on from a
 request that is not itself HTTPS.
@@ -2534,7 +2731,7 @@ request that is not itself HTTPS.
 
 #### Content-Security-Policy
 
-**Settings → Security → Content-Security-Policy.** The policy is built per request in
+**Settings → Security & CAPTCHA → Content-Security-Policy.** The policy is built per request in
 `includes/csp.php` and sent by PHP. That is not where it used to live, and the move fixed something
 real: the old policy was a line in `.htaccess`, **which nginx never reads** — so unless the operator
 had hand-copied it into the server block, production was serving no policy at all. It is also the
@@ -2592,61 +2789,96 @@ audit log as `csp.clear`.
 
 ## Site pages (Terms & Info)
 
-**Settings → Site pages.** `?action=tos` and `?action=info` ship as written pages and can be
-replaced with your own text, in the same editor the whitelist descriptions use — Markdown or
-BBCode, with a preview rendered **by the server** through the very `richtextRender()` call the
-public page makes.
+**The built-in pages (1.73.0).** `?action=info` and `?action=tos` ship written for this version: what
+the tracker does with an announce (peers in memory only, dropped 45 minutes after their last announce,
+never logged, never in the site's database), the whitelist, its hours and how to register, the
+catalogue and how long an entry lives, accounts, devices and groups, profiles, favourites and lists,
+friends, blocks and messages, comments, descriptions and ratings, the shoutbox, reports and what
+moderation can do, the anti-spam layer, **everything the site keeps and for how long**, the cookies and
+what the browser loads from elsewhere — and in Terms the rules for what people write, what moderators
+may do (remove, warn, silence, suspend — silently or as a warning) and the anti-spam rules. Every
+paragraph about an optional feature stands under that feature's own condition, so an install with a
+feature off never promises it, and every retention period is read from the setting that decides it.
+The home page's **Features** list follows the same conditions.
 
-Both shipped pages contain conditionals (`trackerMode()` decides whether the whitelist paragraphs
-appear, `usersEnabled()` whether the account terms do), so the default text is **generated from the
-configuration the tracker is running under** rather than stored as a frozen copy. Press *Restore
-built-in* in whitelist mode and you get the page with the whitelist clause and the list renumbered
-to close over it; press it in blacklist mode and you get the page without.
+Both pages are **data**: `pageContentSpec()` in `includes/pagecontent.php` lists their blocks — a
+heading, a paragraph of parts, a list, a question — each under an optional condition; the templates
+print that list (`pageContentHtml()`), and the editor's *Restore built-in* writes the same list out as
+text with the conditions as markers (`pageContentDefault()`). The words are
+`tools/lang_src.d/info.py` and `terms_of_service.py`, in English and Polish. `tests/pagecontent_test.php`
+holds the two renderings together: every block the spec shows is in both, in as many lists, and every
+condition, value and key the spec names exists in both languages.
 
-A saved page stops following mode changes — the dialog says so, because that is a real consequence
-of editing. A page can be kept as a **draft** (stored but not live), an empty page can never be
-published, and *Restore* is a delete so the shipped template comes back by itself.
+**Settings → Site & pages → Site pages** replaces either page with your own text, in the same editor
+the descriptions use — Markdown or BBCode, with a preview rendered **by the server** through the very
+`richtextRender()` call the public page makes. A page can be kept as a **draft** (stored but not
+live), an empty page can never be published, and *Restore* is a delete so the shipped page comes back
+by itself.
 
 **One version per language (1.32.0).** The editor has a language rail with a dot per language —
 live, draft, or nothing written — and *Restore* only touches the language you are editing. A visitor
 gets, in order: their language → the site's default language → English → any other version that
 exists → and only if *nothing* is written at all, the built-in page. Terms somebody actually wrote
-must never be quietly replaced by boilerplate because one translation is missing.
+must never be quietly replaced by boilerplate because one translation is missing. The default text is
+built from the same dictionary keys the pages render, so *Restore* while editing Polish gives back
+Polish — and there is one source for the wording rather than two. Its links to the site's own pages
+are absolute (from `site_url`): the renderer keeps only `http(s)` links.
 
-The default text is built from the same dictionary keys the templates render, so *Restore* while
-editing Polish gives back Polish — and there is one source for the wording rather than two.
+**Conditional markers (1.34.0, 1.73.0).** The built-in text is not flattened when it reaches the
+editor: a clause that only applies in whitelist mode arrives as `[[if:whitelist]] … [[/if]]`, one that
+only applies without accounts as `[[ifnot:users]] … [[/if]]` (both close with `[[/if]]`), and a block
+may nest another. The markers are resolved against the live configuration just before rendering — for
+the built-in page and for a saved one alike — so a page you have edited **keeps following the
+settings** instead of freezing the clauses that were true the day you saved it. The editor lists every
+name with its current state, the preview resolves them the same way the page does, and an unknown name
+is reported rather than silently dropped (an unknown condition is false). A hidden block that stands on
+lines of its own takes its line break with it, so a hidden list item leaves neither an empty number nor
+a blank line that would split the list in two.
 
-**Conditional markers (1.34.0).** The built-in text is not flattened when it reaches the editor: a
-clause that only applies in whitelist mode arrives as `[[if:whitelist]] … [[/if]]`, one that only
-applies without accounts as `[[ifnot:users]] … [[/ifnot]]`, and so on. The markers are resolved
-against the live configuration just before rendering — for the built-in page and for a saved one
-alike — so a page you have edited **keeps following the tracker mode** instead of freezing the
-clauses that were true the day you saved it. Names: `whitelist`, `open`, `schedule`,
-`registration`, `users`, `signup`, `email_verify`, `index`, `search`, `stats`, `donations`,
-`contact`, `transparency`, `languages`, `ratings`, `descriptions`; the editor lists them with their
-current state, the preview resolves them the same way the page does, and an unknown name is
-reported rather than silently dropped. Numbered clauses hidden by a marker do not leave an empty
-number behind — the whole item is wrapped.
+The names (`pageContentConditions()`), each asking the feature's own switch:
+`whitelist`, `open`, `schedule`, `whitelist_or_schedule`, `registration` (public registration open),
+`registration_members` (only signed-in members may register), `users`, `signup`, `email_verify`,
+`twofa`, `email_cooldown` (a wait between two e-mail changes), `index`, `index_kept`, `search`, `stats`,
+`donations`, `contact`, `transparency`, `languages`,
+`profiles`, `pictures`, `bio`, `favourites`, `lists`, `lists_public`, `lists_friends`, `saved`
+(favourites or lists), `friends`, `directory`, `messages`, `trash`, `archive_returns`, `people` (friends, the directory or
+messages), `comments`, `guest_comments`, `descriptions`, `ratings`, `writing` (comments, descriptions or
+ratings), `shoutbox`, `sounds`, `community` (anything members write that others read), `reportable`,
+`report_words`, `antispam`, `antispam_new`, `api`, `bridge`, `federation`, `audit`, `audit_members`,
+`backups`, `backup_days`, `csp_reports`, `captcha`, `icons_cdn`, `images`.
+
+**Values (1.73.0).** `[[value:name]]` is replaced by what a setting holds when the page is shown, read
+through the helper its feature clamps with (`pageContentValues()`). A number of days comes **with its
+noun** in the reader's language — `[[value:pm_trash_days]]` is "30 days" / "30 dni", and "1 day" /
+"1 dzień" the day it is one — so write "kept for [[value:pm_trash_days]]", not "… days": `index_grace_days`,
+`index_protect_days`, `shout_keep_days`, `pm_trash_days`, `antispam_new_days`, `audit_keep_days`,
+`backup_keep_days`, `email_change_days`. `shout_keep_rows` is a bare number, and `schedule_hours` the
+whitelist hours in words, in the reader's language. An unknown name is removed and reported like an
+unknown condition.
 
 Markdown is offered first for these two and not by taste: the renderer has real headings in
 Markdown and **no heading tag at all** in BBCode, where a heading can only be a larger bold line.
 
-Saving runs `richtextValidate()` — the same link rules and image limits as every other
-author-written text. Owner-only: there is no permission id, so an existing admin does not silently
+Saving and the preview check what the renderer makes of the text (`pageContentValidate()`) — its link
+rules, the operator's image limit, at most 100 links — but not a description's length: a page's own
+limit is 60 000 bytes (the built-in Info alone is about 19 000 characters). Owner-only: there is no permission id, so an existing admin does not silently
 gain the ability to rewrite the terms.
 
 ---
 
 ## Home page layout
 
-**Settings → Home page layout.** The front page is built from seven sections — title and tagline,
+**Settings → Home page layout.** The front page is built from eight sections — title and tagline, the shoutbox,
 live statistics, announce URLs, About, Features, donations, contact. They can be dragged into any
 order, hidden, and their headings renamed; the line under the site name is editable too.
 
 Every section still renders where it always did, into a buffer; `includes/homelayout.php` only
 decides which order the buffers are emitted in. That is why the sections keep their own logic —
 tracker mode still rewrites About and Features, the statistics widget still needs its setting, its
-permission and its cache file.
+permission and its cache file. Since 1.73.0 every Features bullet stands under the same condition
+Terms and Info use for that feature (`pageContentConditions()`), and About's "running on … since …"
+is the footer's own two settings (`footer_os_name`, `footer_os_since_year`) — absent when the footer
+does not show them.
 
 **Hiding a section is not switching its feature off**, and dragging one back does not switch it on.
 A section whose own setting is off says so on its row, and names the setting.
@@ -2661,7 +2893,7 @@ absent from the settings allow-list, so an unrelated settings save cannot blank 
 
 **Your own sections, and your own text in the built-in ones (1.34.0).** *Add a section* creates a
 custom section (up to six; keys are assigned server-side, removing one deletes its text), and every
-row has a **Text** button that opens the page editor — Markdown, BBCode or HTML, one version per
+row has a **Text** button that opens the page editor — Markdown or BBCode, one version per
 language, the same conditional markers as Terms and Info — for that section only. A saved text
 replaces the section's built-in body under the section's heading; an empty one brings the built-in
 body back. Inside the text, **placeholders** are filled at render time, after the markup has been
@@ -2727,29 +2959,28 @@ The two shipped languages are never replaced by an upload (a partial file would 
 fallback for every other translation) — copy one to a free code and edit that.
 
 `lang/` must be writable by the php-fpm user for installs to work; the panel says so if it is not.
-On Debian: `sudo chown www-data lang`. `deploy/deploy.py` does this on every tracker deploy.
+On Debian: `sudo chown www-data lang` (INSTALL.md §4).
 
 **Editing the shipped two.** They are generated from one source so a key cannot exist in one
-language and be missing from the other:
+language and be missing from the other. The source is split into one module per area under
+`tools/lang_src.d/` — every string an (English, Polish) pair; adding an area is adding a file, and
+nothing lists them, so two people can work on different areas without touching the same file:
 
 ```bash
-python tools/lang_src.py .
+python tools/lang_src.py .            # rebuild lang/en.php and lang/pl.php
+python tools/lang_src.py --check .    # exit 1 if the files on disk differ from the sources
 ```
 
 `tests/lang_test.php` checks the two files still agree — same keys, same `:name` placeholders,
-nothing blank.
-
-**Editing the shipped two.** The source is split into one module per area under
-`tools/lang_src.d/` — adding an area is adding a file, and nothing lists them, so two people can
-work on different areas without touching the same file. `python tools/lang_src.py .` rebuilds both
-languages; `tests/lang_test.php` fails if they stop agreeing.
+nothing blank — and that they match the sources, so a string written into the generated files alone
+fails the same day.
 
 **What is translated (1.35.0).** Everything: the public site, every admin template including the
-3 900-line settings page, and every browser script. Scripts get their strings through a small
+settings page (nearly 6 000 lines), and every browser script. Scripts get their strings through a small
 bridge — `langJsBridge()` in `includes/lang.php` writes a JSON bundle of every `js.*` key for the
 active language into the page head, and `assets/js/i18n.js` defines `t('js.area.key', {n: 5})`,
-which reads it and replaces `:n` placeholders the way `__()` does. Only the `js.` prefix is sent, and a public page only the four areas its own scripts read
-(`LANG_JS_PUBLIC`), so a visitor never downloads the panel's dictionary; a script string lives under `js.` by
+which reads it and replaces `:n` placeholders the way `__()` does. Only the `js.` prefix is sent, and a public page only the areas its own scripts read (the nineteen
+prefixes of `LANG_JS_PUBLIC`), so a visitor never downloads the panel's dictionary; a script string lives under `js.` by
 definition; the source module is `tools/lang_src.d/js.py`. The settings sub-menu group names come
 from the catalogue in `includes/settings_catalog.php` and are translated at the output point
 (`settingsGroupTitle()`), so the keyword index and the tests keep the English source.
@@ -2757,132 +2988,74 @@ A missing key falls back to English, so a partial translation reads as English r
 blanks — which is also what happens to any language installed from a JSON file that is not yet
 complete.
 
+**Switching without a reload (1.40.0).** With `lang_swap_enabled`
+[1] the switcher fetches the same page in the other language and rewrites the text of the living page
+(`assets/js/lang-swap.js`) — nothing typed is lost, and a plain navigation is the fallback whenever the
+swap cannot be planned. The place on the page is kept either way (by the element nearest the top, not
+by pixels), in `sessionStorage` for the one navigation.
+
 ---
 
 ## Project Structure
 
 ```
 tracker/
-├── index.php                  # Main router (public pages)
-├── api.php                    # API router (all endpoints)
-├── install.php                # Installation wizard (delete after setup)
-├── .htaccess                  # URL rewriting, security headers, directory protection
-├── .gitignore
-├── LICENSE                     # MIT
-├── README.md
+├── index.php           # the page router: public pages, the panel's pages, ?action=health, the sign-in bridge
+├── api.php             # the API router: every endpoint name → its file, and each admin endpoint's permission
+├── install.php         # the web installer (delete it after setup)
+├── csp-report.php      # where browsers send Content-Security-Policy violation reports (when collection is on)
+├── iconpack.php        # serves an installed Font Awesome package from config/iconpacks/
+├── .htaccess           # URL rewriting, security headers, the fallback CSP, what the web may not reach
+├── README.md · INSTALL.md · CHANGELOG.md · LICENSE (MIT)
 │
-├── api/                       # API endpoint handlers
-│   ├── submit_report.php      # POST — submit abuse report
-│   ├── check_status.php       # POST — check report status (requires email)
-│   ├── check_block.php        # POST/GET — check if hash is blocked
-│   ├── submit_appeal.php      # POST — submit block/unblock appeal
-│   ├── unsubscribe.php        # GET/POST — unsubscribe (supports one-click)
-│   ├── save_email_preferences.php  # POST — save per-type email preferences
-│   ├── transparency.php       # GET — transparency data
-│   └── admin/                 # Admin-only endpoints (session-authenticated)
-│       ├── login.php          # POST — admin login
-│       ├── logout.php         # POST — admin logout
-│       ├── fetch_reports.php  # GET — paginated report list
-│       ├── fetch_appeals.php  # GET — paginated appeal list
-│       ├── change_status.php  # POST — change report status
-│       ├── block_hash.php     # POST — block info hash
-│       ├── unblock_hash.php   # POST — unblock info hash
-│       ├── block_archived.php # POST — block hash from archives
-│       ├── delete_report.php  # POST — archive/delete report
-│       ├── delete_all.php     # POST — bulk archive reports
-│       ├── restore_report.php # POST — restore archived report
-│       ├── resolve_appeal.php # POST — accept/reject appeal
-│       ├── restore_appeal.php # POST — restore archived appeal
-│       ├── notify_review.php  # POST — send under-review notification
-│       ├── send_email.php     # POST — send custom email to reporter
-│       ├── update_field.php   # POST — inline edit report field
-│       ├── save_settings.php  # POST — save admin settings
-│       ├── change_password.php # POST — change admin credentials
-│       ├── check_blacklist.php # GET — test blacklist file permissions
-│       ├── tracker_service_status.php # GET — restart recommendations for the dashboard
-│       ├── restart_tracker.php # POST — restart the tracker service (password-confirmed)
-│       ├── reload_tracker.php  # POST — reload the tracker blacklist via SIGHUP (password-confirmed)
-│       ├── test_tracker_permission.php # GET — test sudo perms for restart/reload (read-only)
-│       ├── net_status.php     # GET — firewall state + live packets/second + measured suggestion
-│       ├── net_samples.php    # GET — the packets/second series behind the UDP traffic chart
-│       ├── index_polls.php    # GET — the scrape polls read as passes, behind the coverage chart
-│       ├── ip_lists.php       # GET — the address lists and what the firewall is carrying
-│       ├── ip_list_action.php # POST — create / import / refresh / enable / delete / push (owner only)
-│       ├── net_apply.php      # POST — load/remove/throttle-hard/restore the inbound limit (password)
-│       ├── net_test.php       # GET — can this machine run the inbound limit at all (read-only)
-│       ├── backup_status.php  # GET — what this machine can back up, the run state, the archives
-│       ├── backup_action.php  # POST — run/cancel/verify/prune/delete/restore/token (admin password)
-│       ├── backup_test_path.php # POST — test the backup directory + the tooling (read-only)
-│       └── backup_download.php # GET — stream one archive (single-use token)
-│
+├── api/                # one file per endpoint, reachable only through api.php (api/.htaccess denies them)
+│   ├── *.php           # public and member endpoints (reports, status, whitelist, search, the account, people,
+│   │                   #   messages, lists, favourites, comments, descriptions, the shoutbox, sounds, pictures…)
+│   ├── admin/          # the panel's endpoints (each with its permission in api.php)
+│   └── v1/             # the server-to-server API (bearer keys): whitelist, blacklist, users, auth, federation
+├── includes/           # the code — one file per area (users, people, comments, shout, index, whitelist,
+│                       #   netlimit, backup, pagecontent, lang, csp, schema…); web-denied
+├── templates/          # layout.php, nav.php, footer.php, maintenance.php; pages/ (public), admin/ (panel),
+│                       #   partials/ (the Info panel, the shoutbox widget, lists, votes, descriptions); web-denied
 ├── assets/
-│   ├── css/
-│   │   ├── style.css          # Public site styles (dark theme)
-│   │   └── admin.css          # Admin panel styles
-│   ├── js/
-│   │   ├── app.js             # Public site JavaScript
-│   │   ├── admin.js           # Admin panel JavaScript
-│   │   ├── admin-index.js     # Observed-hash index page (?action=admin-index)
-│   │   ├── admin-netlimit.js  # UDP traffic card: live counters, chart, throttle slider
-│   │   ├── admin-iplists.js   # Address lists card: import, enable/disable, push to the firewall
-│   │   ├── admin-index-coverage.js  # Scrape coverage card: each pass (its polls stacked) vs the tracker's count
-│   │   ├── admin-backups.js   # Backups page: run/verify/restore/download, live progress
-│   │   ├── admin-traffic.js   # Traffic page (?action=admin-traffic) — page furniture only
-│   │   └── stats-timeline.js  # Swarm timeline chart (public stats page + admin whitelist page)
-│   ├── vendor/uplot/          # uPlot (MIT) — vendored, no CDN
-│   └── img/
-│       ├── favicon.ico
-│       ├── favicon.svg
-│       └── screenshots/       # README screenshots (15, from a local bootstrap instance)
-│
-├── config/                    # Generated + runtime state (mostly gitignored, web-denied)
-│   ├── app.php                # Bootstrap config (loads password hash)
-│   ├── database.php           # PDO connection (generated; creds via installer or env vars)
-│   ├── hash.txt               # Bcrypt password hash (generated)
-│   ├── installed.lock         # Installation lock file (generated)
-│   ├── stats_cache.json       # Shared tracker-stats cache (runtime)
-│   ├── stats_fetch.lock       # Exclusive lock for the in-flight stats fetch (runtime)
-│   ├── login_attempts.json    # Per-IP login throttle state (runtime)
-│   ├── rate_limits.json       # Per-IP/action rate-limit state (runtime)
-│   ├── blacklist_changes.json # Blacklist add/remove log since last tracker start (runtime)
-│   ├── net_state.json         # UDP monitor state: last counters, automatic mode, panic window (runtime)
-│   ├── backup_state.json      # Backups: last run, schedule bookkeeping, spent download tokens (runtime)
-│   └── .htaccess              # Deny all access
-│
-├── includes/                  # Core PHP libraries (protected)
-│   ├── functions.php          # Helper functions (CSRF, sanitize, blacklist, archiving)
-│   ├── auth.php               # Authentication (login, session, attempt checking)
-│   ├── mail.php               # Email system (sending, templates, preferences)
-│   ├── settings.php           # Database settings management (getSettings, setSettings)
-│   ├── netlimit.php           # UDP traffic monitor + inbound rate limit (drives the root helper)
-│   ├── iplist.php             # address lists: allow / block / block-under-pressure, file + URL import
-│   ├── backup.php             # Panel-driven backups (drives Backup-serwera.sh via the root helper)
-│   └── .htaccess              # Deny all access
-│
-├── templates/                 # PHP templates (protected)
-    ├── layout.php             # Main HTML layout wrapper
-    ├── nav.php                # Navigation bar
-    ├── admin/
-    │   ├── dashboard.php      # Admin dashboard (reports/appeals tables)
-    │   └── settings.php       # Admin settings page (group sub-menu + search)
-    ├── pages/
-    │   ├── home.php           # Homepage (announce URLs, features, donations, contact)
-    │   ├── adminlogin.php     # Admin sign-in form (site look; address configurable)
-    │   ├── notfound.php       # 404 page (hidden-panel mode)
-    │   ├── report.php         # Report submission form
-    │   ├── status.php         # Report status check + block check + appeal forms
-    │   ├── transparency.php   # Public transparency report
-    │   ├── info.php           # Info page
-    │   ├── tos.php            # Terms of service
-    │   └── unsubscribe.php    # Email notification preferences
-    └── .htaccess              # Deny all access
+│   ├── css/            # style.css (public), admin.css (panel), detail-panel.css (the three hash panels),
+│   │                   #   media-editor.css (the picture and cover editor)
+│   ├── js/             # vanilla JS, no build step: app.js, people.js, comments.js, shoutbox.js, lang-swap.js,
+│   │                   #   i18n.js, icons.js, emoji-picker.js, and admin-*.js for the panel
+│   ├── vendor/uplot/   # uPlot (MIT) — vendored, no CDN
+│   ├── emoji/          # the picker's emoji data (generated by tools/emoji_data.php; see its LICENSE.txt)
+│   ├── emotes/         # the example emotes seeded once into the database
+│   ├── sounds/         # the shipped notification sounds (see assets/sounds/README.md)
+│   └── img/            # favicons, screenshots for this README
+├── config/             # generated and runtime state — credentials, the admin hash, caches, locks, state files,
+│                       #   installed icon packages; only app.php and .htaccess are in git; web-denied
+├── lang/               # en.php and pl.php (GENERATED from tools/lang_src.d/), and any language installed from the panel
+├── tools/
+│   ├── janitor.php     # the minute timer's work (and, with --heavy, its slow half)
+│   ├── groups.php · iconpack.php · whitelist_cli.php · twofa_cli.php · backfill_fetched.php   # CLI tools (INSTALL §15)
+│   ├── tuner.py        # the stability probe's engine
+│   ├── api_client_example.py  # an example partner client
+│   ├── lang_src.py + lang_src.d/  # the dictionary's source, one module per area
+│   ├── emoji_data.php  # regenerates assets/emoji/
+│   └── opentracker/    # the shipped builds (bin/), the four patches, the root helpers (tracker-*.sh),
+│                       #   egress-budget/, and the build notes (README.md, UPSTREAM-REPORT.md)
+├── worker/             # worker.py (metadata over DHT), federation.py (the peer importer), their systemd
+│                       #   units and the example conf — see worker/README.md
+└── tests/              # PHP and Python tests against a local database — never on a production box
 ```
+
+Runtime files in `config/` (all regenerated as needed): `database.php`, `hash.txt`, `installed.lock`,
+`admin_2fa.json`, `stats_cache.json`, `stats_fetch.lock`, `rate_limits.json`, `login_attempts.json`,
+`blacklist_changes.json`, the whitelist, index, statistics-timeline, network, backup, database-memory,
+probe and accounts state files (`*_state.json`), `proc_usage.json`, caches and locks, `*.marker` files
+and `iconpacks/`.
 
 ---
 
 ## Database Schema
 
-The installer creates the following tables:
+The installer builds every table by running the migrations from version zero — the same path an
+upgrade takes (`includes/schema.php`, schema **91** in 1.73.0):
 
 | Table | Purpose |
 |-------|---------|
@@ -2891,7 +3064,7 @@ The installer creates the following tables:
 | `archives` | Archived (closed) reports |
 | `appeals` | Active appeals (block/unblock requests) |
 | `appeal_archives` | Archived (resolved) appeals |
-| `sent_emails` | Log of all sent email notifications |
+| `sent_emails` | Log of the report e-mails sent (`sent_emails_retention_days`, 0 = kept) |
 | `unsubscribed_emails` | Legacy full-unsubscribe list |
 | `email_preferences` | Per-email, per-type notification preferences |
 | `whitelist` | Whitelisted info hashes (source, IP, metadata, scrape cache, ban flag, partner review state) — schema v2/v48 |
@@ -2903,13 +3076,36 @@ The installer creates the following tables:
 | `stats_samples_5m` / `stats_samples_1h` | 5-minute / hourly roll-ups (avg/min/max, last counter value, whitelist share) |
 | `index_hashes` | Observed-hash index: hashes seen on the tracker (S/L, seen count, grace/protect, metadata, `meta_source`, `meta_origin_at`) — schema v6/v7/v15 |
 | `index_files` | File lists for indexed hashes (keyed by info_hash, FULLTEXT searchable) |
-| `users` | User accounts (username, optional email, password hash, status) — schema v7 |
+| `index_polls` | One row per full-scrape poll (what it saw, how far it got) — the scrape-coverage chart; kept `index_poll_keep_days` |
+| `hash_content` | A description and source link for a torrent that is not on the whitelist (1.53.0) |
+| `wl_content_edits` | Proposed rewrites and edits of descriptions, and the replaced versions kept |
+| `hash_votes` | Ratings: one vote per account (or, for guests, per address group) |
+| `hash_comments` | Comments and replies on a torrent (soft-deleted, with who, when and why) — schema v83 |
+| `content_reports` | Reports of comments, descriptions and shouts, each with a copy of the words as reported — schema v84 |
+| `user_warnings` | Warnings a moderator gave, with the reason — schema v84 |
+| `users` | User accounts (username, optional email, password hash, status, privacy switches, language, time zone, sound choices, silence / ban dates) — schema v7 onward |
 | `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `premium` = the paid extras (`profile.cover`, `shout.upload_emote`) granted by hand or bought, `moderator`, `admin` = passes every check, and since v89 stores every capability too — never a consent id unless somebody gives it) — schema v8 semantics, matrix v71, recommended sets 1.72.0 |
 | `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
 | `user_group_orders` | What a shop asked for: `UNIQUE(client_id, order_id)` is what makes a retried purchase webhook grant one month instead of two, and what a refund of one order is recomputed from — schema v71 |
-| `user_notifications` | In-app notifications (grants, expiry warnings, admin messages) |
-| `user_tokens` | Remember-me + password-reset tokens (sha256 only) |
+| `user_notifications` | In-app notifications (grants, expiry warnings, replies, warnings, admin messages) |
+| `user_tokens` | Remember-me + password-reset tokens (sha256 only), with each device's address and browser |
+| `user_twofa` | A member's second factor: the TOTP secret and hashed recovery codes — schema v53 |
+| `user_media` | Pictures and covers, re-encoded, as rows — schema v69 |
 | `user_favourites` | A member's favourite hashes — schema v47 |
+| `user_lists` / `user_list_items` | Lists (private / friends / public, a description) and what is on them — schema v51 |
+| `user_friends` / `user_blocks` | Follows and friendships (one row read two ways); blocks with their note and "hide my profile" — schema v52 |
+| `message_threads` / `user_messages` | Conversations (per side: archived, the delete-for-me watermark, the Trash) and their messages — schema v52/v70/v90 |
+| `message_typing` | The typing line's expiring rows — schema v54 |
+| `message_reports` | Reported messages: the message, the one before it, the reason, the outcome, the answer — schema v52/v59 |
+| `shouts` / `shout_mentions` | The shoutbox's lines (pinned, corrected, the site's own) and their @mentions — schema v63 |
+| `shout_emotes` | Emotes and stickers, as rows, with their approval — schema v64/v65 |
+| `sounds` | Notification sounds the owner uploaded — schema v61 |
+| `antispam_state` | The anti-spam layer: per place and account (or guest address group) the streak, the CAPTCHA state and the fingerprints of recent words — schema v85 |
+| `page_content` | Your own Terms, Info and home-page texts, per page and language — schema v41 |
+| `audit_log` | The panel's log (who, what, the address) — `audit_keep_days` |
+| `csp_reports` | Collected Content-Security-Policy violations (the directive, the blocked origin, the page) |
+| `mail_queue` | Bulk mail to members, sent by the janitor |
+| `ip_lists` / `ip_list_entries` | Address lists for the firewall (allow / block / soft) and their networks — schema v34 |
 | `user_identities` | Sign-in bridge: which partner key vouches for which account, and the name it knows them by — schema v49 |
 | `auth_handoffs` | Sign-in bridge: one-time tickets (sha256 only), in either direction — schema v49 |
 | `fed_peers` | Federation peers (base URL, outbound bearer, inbound API client, pull cursor/status) |
@@ -2932,20 +3128,21 @@ instead of within the minute.
 ## Tech Stack
 
 - **Backend:** PHP 8.x — no framework, single entry point routing (`index.php` for pages, `api.php` for API)
-- **Database:** MySQL/MariaDB with PDO (prepared statements, FETCH_ASSOC mode)
+- **Database:** MariaDB 10.6+ with PDO (prepared statements, FETCH_ASSOC mode)
 - **Frontend:** Vanilla JavaScript (no build step), Bootstrap 5 (CDN) for admin panel, custom dark theme CSS for public pages
 - **Email:** PHP `mail()` with multipart MIME (HTML + plain text), dark-themed templates
 - **Icons:** Bootstrap Icons 1.11.3 or Font Awesome — Free 6.7.2 / 7.3.1 from the CDN, or a package uploaded in Settings → Site or imported with `tools/iconpack.php`, Pro included (1.69.0) — chosen for the whole site in Settings → Site (`icon_library`); every icon is written in Bootstrap's markup and Font Awesome is mapped over it (`includes/icons.php`, `assets/js/icons.js`); with a Pro package whose duotone style is loaded the Magnet is Pro's duotone magnet (1.72.0)
 - **Emoji:** Unicode's own, drawn by the reader's device, from `assets/emoji/` (generated from emojibase-data / CLDR by `tools/emoji_data.php`, see [License](#license)); with a Font Awesome Pro package, its faces too (1.69.0)
-- **CAPTCHA:** Google reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha (explicit render mode, one shared modal — `assets/js/captcha.js`; every provider host must stay allow-listed in the CSP in `.htaccess`)
-- **Metadata worker (optional):** Python 3 + `python3-libtorrent` (see `worker/`)
+- **CAPTCHA:** Google reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha (explicit render mode, one shared modal — `assets/js/captcha.js`; the policy PHP sends allows only the configured provider's hosts — `captchaCspHosts()` — and the `.htaccess` fallback lists all four)
+- **Metadata worker (optional):** Python 3 + `python3-libtorrent` + `python3-pymysql` (see `worker/`)
+- **Also inside:** vendored uPlot for the charts, the project's own TOTP and QR code, the GD image pipeline for pictures and covers (WebP), Web Audio for the sounds, emojibase data for the picker
 - **Federation importer (optional):** Python 3 + `python3-pymysql`, systemd timer (`worker/federation.py`)
 
 ---
 
 ## API Reference
 
-All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` with URL rewriting). Public endpoints accept POST with JSON body. Admin endpoints require an active session.
+All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` with the shipped `.htaccess`; see the nginx notes for nginx). Public endpoints take JSON (a write also the session's CSRF token in `X-CSRF-Token`); what a member endpoint answers depends on the account's permissions. Admin endpoints require a panel session and their permission. The route map is `api.php` itself — every name below is a key in it.
 
 ### Public Endpoints
 
@@ -2959,8 +3156,7 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `save_email_preferences` | POST | Save per-type notification preferences |
 | `transparency` | GET | Get transparency page data |
 | `tracker_stats` | GET | Shared-cache tracker statistics (`source=home|stats`, `stale_ok=1`) |
-| `stats_timeline` | GET | Timeline series (`range=24h|7d|14d|30d|60d`, optional `series=`); public while `stats_timeline_public=1`, else admins |
-| `admin/fetch_index`, `admin/index_*` | GET/POST | Observed-hash index list / item / poll / scrape / meta / promote / delete (admin) |
+| `stats_timeline` | GET | Timeline series (`range=24h|7d|14d|30d|60d|90d|all`, the aliases `2w`/`1m`/`2m`/`3m`, or `range=custom&span=…`; optional `series=`); public while `stats_timeline_public=1`, else admins |
 | `whitelist_submit` | POST | Register magnet links / hashes (CSRF + CAPTCHA + rate limits) |
 | `whitelist_check` | GET/POST | Is a hash registered / banned? |
 | `user_register` / `user_login` / `user_logout` | POST | Account registration / sign-in / sign-out (CSRF + CAPTCHA + rate limits; 1.6.0) |
@@ -2971,15 +3167,28 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 | `user_email_prefs` | GET/POST | The signed-in user's account-mail preference (expiry warnings, security notices) |
 | `index_search` | GET | Member search over the resolved index + whitelist (`search`, `search_files`, `sort` incl. `relevance`, `page`; gated by `index.*` / `whitelist.view` permissions) |
 | `index_files` | GET | File list of one catalogue entry for the search page (`hash`; needs `index.view` + `index.files`) |
+| `comment_list` / `comment_post` / `comment_edit` / `comment_delete` / `comment_approve` / `comment_prefs` | GET / POST | Comments on a torrent (1.71.0): the thread, writing and replying, a correction, taking back or removing (with a reason), letting a held guest comment through, the member's comment-notification choices |
+| `content_submit` / `content_delete` / `content_report` | POST | A torrent's description and source link (submit, propose a rewrite, delete); reporting a comment, a description or a shout |
+| `index_info` / `hash_check` / `hash_favourites` / `hash_who` / `rate_hash` | GET / POST | The Info panel's data; the status page's "what does this tracker know about a hash"; the star; "who has this"; a vote (the same vote again takes it back) |
+| `richtext_preview` | POST | The server-rendered preview of every editor |
+| `shout_list` / `shout_post` / `shout_edit` / `shout_delete` / `shout_pin` / `shout_seen` / `shout_mentions` / `shout_emoji` / `shout_emotes` / `shout_emote` / `shout_emote_upload` / `shout_emote_delete` | GET / POST | The shoutbox (1.58.0): lines, writing, corrections, pins, read marks, @-suggestions, the picker's emoji data, emotes and stickers (the list, one image, upload, delete) |
+| `sound` / `sounds` / `user_sound_prefs` | GET / POST | Notification sounds: one file, the list, the member's choices |
+| `user_2fa` / `user_sessions` / `user_language` / `user_privacy` / `user_pulse` | GET / POST | The account: the second factor, signed-in devices (sign out everywhere else), the saved language, the privacy switches, the badge's two numbers |
+| `user_avatar` / `user_avatar_default` / `user_cover` / `user_media` / `profile_bio` | GET / POST | Pictures and covers (the image streams and the editor), the default picture, the profile description |
+| `user_favourites` / `user_lists` / `user_list_items` / `user_uploads` / `user_votes` / `user_descriptions` | GET / POST | Favourites, lists and their items, registered torrents, likes / ratings, descriptions written — one's own, or somebody else's as far as they allow |
+| `user_messages` / `user_people` / `user_directory` | GET / POST | Private messages (threads, sending, archive, trash, reports), follows / friends / blocks, the member directory |
+| `whitelist_probe` | POST | A registration's proof step (metadata and peers) |
 | `v1/whitelist/submit` | POST | Server-to-server registration (bearer key, scope `whitelist`; see [Whitelist mode](#whitelist-mode)) |
+| `v1/whitelist/status` | GET / POST | What became of submitted hashes — the decision and a moderator's note (scope `whitelist`) |
+| `v1/blacklist/submit` | POST | Abuse reports from a partner (scope `abuse`; held for review unless the key blocks on arrival) |
 | `v1/whitelist/ping` | GET | Server-to-server health check (scope `whitelist`) |
-| `v1/users/lookup` / `grant` / `revoke` / `provision` | POST | Sales/shop integration (scope `users`): look up a user, grant/extend or revoke a timed group, create an account |
+| `v1/users/lookup` / `grant` / `revoke` / `provision` | POST | Sales/shop integration (scope `shop` for lookup, grant and revoke; `users` for all four): look up a user, grant/extend or revoke a timed group (idempotent on `order_id`), create an account |
 | `v1/federation/ping` / `export` | GET / POST | Federation peers (scope `federation`): health check / cursor-paged metadata export |
 | `v1/auth/login` / `logout` / `verify` / `merge` / `status` | POST | The sign-in bridge (scope `users`): sign a partner's member in here, end that session, redeem a ticket this tracker minted, link or detach an account, ask what we currently think |
 
 ### Admin Endpoints
 
-All require active admin session. Prefix: `admin/`
+Prefix: `admin/`. Each needs a panel session **and** that endpoint's own panel permission (`adminEndpointPermission()` in `api.php` maps one to each; an endpoint missing from the map is owner-only), and every write is recorded in the audit log.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -3022,6 +3231,20 @@ All require active admin session. Prefix: `admin/`
 | `admin/fetch_groups` / `group_save` / `group_delete` | GET / POST | Group CRUD with the permission matrix |
 | `admin/group_recommended` | GET / POST | A seeded group's recommended set: `?id=` previews what is missing and what a reset would remove; POST `{id, mode: add\|reset, consent, expect}` applies exactly the preview shown (409 when the group changed since) — owner-only (1.72.0) |
 | `admin/fetch_fed_peers` / `fed_peer_save` / `fed_peer_delete` / `fed_peer_test` | GET / POST | Federation peers (inbound bearer shown once; test = outbound ping) |
+| `admin/fed_review` / `fed_purge` | GET / POST | Hashes a peer offered, held for review; removing what one peer gave |
+| `admin/fetch_index` / `index_status` / `index_item` / `index_polls` / `index_poll_now` / `index_scrape` / `index_scrape_bulk` / `index_fetch_meta` / `index_promote` / `index_delete` | GET / POST | The Index page: the catalogue, its status and scrape coverage, one entry, polls, live scrapes, metadata, promote to the whitelist, delete |
+| `admin/whitelist_review` / `whitelist_meta_queue` / `whitelist_scrape_bulk` / `wl_content` / `notify_review` | GET / POST | The review queues — partner registrations, metadata, descriptions and rewrites — and review notifications |
+| `admin/fetch_message_reports` / `message_report_action` / `content_reports` / `content_report_action` | GET / POST | The reported messages and the reported words (comments, descriptions, shouts): close, remove, warn, silence, ban — silently or as a warning |
+| `admin/delete_report` / `delete_permanently` / `delete_all` / `restore_report` / `restore_appeal` / `block_archived` / `update_field` | POST | Report housekeeping: archive and restore, delete for good, block from the archive, inline edits |
+| `admin/audit_log` / `csp_reports` | GET | The panel's log; the collected Content-Security-Policy reports |
+| `admin/bulk_send` | POST | Mail to members: queue, cancel, test copy (owner, password) |
+| `admin/change_password` / `login_2fa` / `twofa` | POST | The owner's password; the second factor at sign-in; setting it up |
+| `admin/user_create` / `user_media` / `user_bio` | POST | Create an account; remove a member's picture or cover; clear a profile description |
+| `admin/home_layout` / `page_content` / `languages` / `iconpacks` / `sounds` / `shout_emotes` / `shout_purge` | GET / POST | Home page layout, the page editor, languages, icon packages, sounds, the emote manager, emptying the shoutbox |
+| `admin/tracker_mode` | POST | Switch the tracker's mode now (through the mode helper) |
+| `admin/ot_status` / `ot_test` / `ot_apply` / `ot_cluster_status` / `ot_cluster_test` / `ot_cluster_apply` / `livesync_test` / `livesync_apply` | GET / POST | OpenTracker performance, extra instances, live peer sync |
+| `admin/sysctl_status` / `sysctl_test` / `sysctl_apply` / `dbmem_status` / `dbmem_test` / `dbmem_apply` / `tuner` | GET / POST | Kernel network buffers, the database's memory, the stability probe |
+| `admin/ip_lists` / `ip_list_action` | GET / POST | Address lists (allow / block / soft) |
 
 ---
 
@@ -3055,7 +3278,7 @@ raw `api.php?endpoint=tracker_stats&source=stats` JSON): `syncing_in_background:
 ### Emails not sending
 - Verify PHP `mail()` is working: `php -r "var_dump(mail('test@example.com', 'Test', 'Test'));"`
 - Check your server's mail queue and MTA logs
-- Ensure `site_email` is set in admin settings (used as From address)
+- Ensure the From address (`mail_from_email`, Settings → Contact & email) is set — `site_email` is only its fallback and the Reply-To
 
 ### Blacklist file not updating
 - Use the **Test** button in admin settings to verify path and permissions
@@ -3072,7 +3295,8 @@ permission** to confirm the sudoers rule, and make sure the unit defines
 
 ### 500 errors or blank pages
 - Check PHP error logs: `tail -f /var/log/apache2/error.log`
-- Ensure all required PHP extensions are installed: `php -m | grep -E "pdo_mysql|json|openssl|mbstring"`
+- Ensure all required PHP extensions are installed: `php -m | grep -Ei "pdo_mysql|mbstring|curl|gd|simplexml|zlib|zip"` (and `php -r 'var_dump(gd_info()["WebP Support"] ?? false);'` for pictures)
+- Look in the PHP error log (`error_log` in php.ini — INSTALL.md §2); a bare 500 on a long search is usually `max_execution_time`
 - Verify `config/database.php` exists and contains valid credentials
 
 ### CAPTCHA not appearing
@@ -3080,11 +3304,18 @@ permission** to confirm the sudoers rule, and make sure the unit defines
   (each provider has its own pair; switching provider does not move the keys)
 - The widget is loaded in a modal overlay — it appears only when the Smart CAPTCHA threshold is reached
 - Check the browser console. `Refused to load … because it violates the Content-Security-Policy`
-  means the provider's host is missing from the CSP header in `.htaccess` (or from your own Nginx
-  copy of it) — the shipped list covers Google, Cloudflare and hCaptcha
+  means the provider's host is missing from a policy: the one PHP sends allows the configured provider
+  (add others in *Security & CAPTCHA → Content-Security-Policy → extra allowed hosts*), and on Apache the
+  `.htaccess` fallback — enforced beside it — lists Google, Cloudflare and hCaptcha
 - Provider errors in the console are almost always the site key: Turnstile `110200` and hCaptcha
   `invalid-site-key` both mean *this hostname is not on the key's allowed-domain list*. The widget
   retries once and then gives up with "CAPTCHA could not load" instead of looping
+
+### A setting changed but nothing happens, or the charts have gaps
+The janitor timer is not running (`systemctl list-timers | grep tracker`), or its slow half is running
+inline because `tracker-netlimit.sh` or its sudoers line is missing — the log then shows a failing
+`sudo` every minute. INSTALL.md §8–9; the full table of symptoms is INSTALL.md → *When something looks
+wrong*.
 
 ---
 

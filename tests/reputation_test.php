@@ -72,10 +72,13 @@ check('a score is not shown from a single vote', repMinVotes([]) > 1, (string)re
 /* ── 2. the probe refuses to change the meaning of old rows ───────────────── */
 
 $wl = (string)file_get_contents($root . '/includes/whitelist.php');
-check('the accesslist skips rows that have not proved themselves',
-      str_contains($wl, "probe_status IN ('none','passed')"));
+// 1.73.0: a row still proving itself is served — its proof is a peer announcing HERE, which a whitelist-mode
+// tracker refuses for a hash it does not carry — and only a row that failed is left out
+// (tests/partner_api_test.php writes the real file and reads it back).
+check('the accesslist skips rows that failed to prove themselves, and serves the ones still proving',
+      str_contains($wl, "probe_status IN ('none','probing','passed')"));
 check("… and 'none' is in that list, so switching the check on never unpublishes anything",
-      str_contains($wl, "'none','passed'"));
+      str_contains($wl, "'none','probing','passed'"));
 
 $pr = (string)file_get_contents($root . '/includes/wlprobe.php');
 check('the probe reuses the metadata queue rather than adding a second one',

@@ -41,9 +41,9 @@
     function markIcon(btn) {
         btn.dataset.reported = '1';
         btn.classList.add('is-reported');
-        btn.setAttribute('aria-label', t('js.report.reported'));
+        btn.setAttribute('aria-label', t.key('js.report.reported'));
         btn.setAttribute('aria-pressed', 'true');
-        btn.dataset.tip = t('js.report.reported_tip');
+        btn.setAttribute('data-tip', t.key('js.report.reported_tip'));   // keeps the word's key (1.73.0)
         const i = btn.querySelector(':scope > .bi');
         if (i) i.className = 'bi bi-flag-fill';
     }
@@ -61,11 +61,11 @@
         i.className = 'bi bi-flag';
         i.setAttribute('aria-hidden', 'true');
         b.appendChild(i);
-        b.setAttribute('aria-label', t('js.report.report'));
-        b.dataset.tip = t('js.report.tip_' + target.kind);
+        b.setAttribute('aria-label', t.key('js.report.report'));
+        b.setAttribute('data-tip', t.key('js.report.tip_' + target.kind));
         if (reported) markIcon(b);
         b.addEventListener('click', () => {
-            if (b.dataset.reported === '1') { tip(b, t('js.report.reported_tip')); return; }
+            if (b.dataset.reported === '1') { tip(b, t.key('js.report.reported_tip')); return; }
             open(b, typeof host === 'function' ? host() : host, target, () => markIcon(b), after);
         });
         return b;
@@ -79,19 +79,19 @@
         if (!host || host.querySelector(':scope > .report-box')) return;
         const box = el('div', 'report-box');
         const id = 'report-in-' + target.kind + '-' + (target.id || target.hash || '') + '-' + Math.random().toString(36).slice(2, 7);
-        const lab = el('label', 'report-label', t('js.report.label'));
+        const lab = el('label', 'report-label', t.key('js.report.label'));
         lab.htmlFor = id;
         const inp = el('input', 'profile-search report-input');
         inp.type = 'text';
         inp.id = id;
         inp.maxLength = REASON_MAX;
-        inp.placeholder = t('js.report.placeholder');
+        inp.placeholder = t.key('js.report.placeholder');
         inp.autocomplete = 'off';
-        const go = el('button', 'btn btn-small report-send', t('js.report.send'));
+        const go = el('button', 'btn btn-small report-send', t.key('js.report.send'));
         go.type = 'button';
-        const no = el('button', 'btn btn-secondary btn-small report-cancel', t('js.common.cancel'));
+        const no = el('button', 'btn btn-secondary btn-small report-cancel', t.key('js.common.cancel'));
         no.type = 'button';
-        const note = el('div', 'report-private text-muted', t('js.report.private'));
+        const note = el('div', 'report-private text-muted', t.key('js.report.private'));
         const msg = el('span', 'report-msg text-muted');
         msg.setAttribute('aria-live', 'polite');
         const row = el('div', 'report-row');
@@ -113,7 +113,7 @@
         go.addEventListener('click', async () => {
             if (go.disabled) return;
             const reason = inp.value.trim();
-            if (!reason) { msg.textContent = t('js.report.need_reason'); inp.focus(); return; }
+            if (!reason) { msg.textContent = t.key('js.report.need_reason'); inp.focus(); return; }
             go.disabled = true;
             const body = { csrf_token: csrfToken(box), kind: target.kind, reason };
             if (target.id) body.id = target.id;
@@ -126,13 +126,13 @@
                            : await post(body);
             if (!(anti && anti.waiting(go))) go.disabled = false;
             if (!j || !j.success) {
-                if (!(anti && anti.waiting(go))) msg.textContent = (j && j.message) || t('js.report.failed');
+                if (!(anti && anti.waiting(go))) msg.textContent = (j && j.message) || t.key('js.report.failed');
                 return;
             }
             if (typeof done === 'function') done(j);
             // Said where the reader is looking, and the box goes: the flag beside it now says "Reported".
             close(false);
-            tip(btn, j.message || t('js.report.sent'));
+            tip(btn, j.message || t.key('js.report.sent'));
         });
     }
 

@@ -43,7 +43,11 @@ $source = (isset($payload['source']) && $payload['source'] === 'forum') ? 'forum
 // accesslist generator withholds `pending`, so nothing is served until a person says so — and the
 // reply says `pending` rather than `added`, so the partner's own system can show the right thing.
 $autoApprove = (int)($client['auto_approve'] ?? 1) === 1;
-$requiredFields = array_values(array_filter(array_map('trim', explode(',', (string)($client['required_fields'] ?? '')))));
+// Only the fields a WHITELIST item can carry (1.73.0). An `all` key's stored list holds both halves — the
+// abuse report's `reporter`, `statement`… beside `name`, `url`, `source_id` — and read raw, an item could never
+// have `reporter`, so every item this key sent was refused as missing_reporter. The same cleaner the report
+// endpoint uses for its half (api/v1/blacklist_submit.php, scope 'abuse').
+$requiredFields = apiClientCleanFields((string)($client['required_fields'] ?? ''), 'whitelist');
 
 $parsed = [];
 foreach ($items as $i => $it) {

@@ -45,6 +45,43 @@ check('a layout that is valid JSON but the wrong shape does too',
 foreach (homeSectionCatalog() as $k => $m) {
     check("$k: the catalogue says what it is", ($m['about'] ?? '') !== '' && ($m['label'] ?? '') !== '');
 }
+// 1.73.0: what a section is called and what it is were English on every page (Settings → Home page layout, the page
+// editor's title and placeholders). They are the dictionary's now (a.home.sec_name_* / sec_line_*), the English word for
+// word the catalogue's own, said in the reader's language — and kept in English for the audit log ($english).
+$enD = include $root . '/lang/en.php';
+$plD = include $root . '/lang/pl.php';
+$secDrift = [];
+foreach (homeSectionCatalog(true) as $k => $m) {
+    if (($enD['a.home.sec_name_' . $k] ?? null) !== $m['label'] || ($enD['a.home.sec_line_' . $k] ?? null) !== $m['about']
+        || trim((string)($plD['a.home.sec_name_' . $k] ?? '')) === '' || trim((string)($plD['a.home.sec_line_' . $k] ?? '')) === '') $secDrift[] = $k;
+}
+check('1.73.0: every section has its name and line in both languages, the English the catalogue\'s own', $secDrift === [], implode(',', $secDrift));
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl']);
+$plCatH = homeSectionCatalog();
+$plLabel = homeSectionLabel([], 'stats');
+$plCustom = homeSectionLabel(cfgOf(['order' => array_merge($keys, ['custom_1']), 'custom' => [['key' => 'custom_1', 'label' => 'Moja sekcja']]]), 'custom_1');
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'en']);
+check('… said in the reader\'s language (Polish here), an operator\'s own section name as they wrote it, and English on request',
+      $plCatH['about']['label'] === $plD['a.home.sec_name_about'] && $plCatH['stats']['about'] === $plD['a.home.sec_line_stats']
+      && $plLabel === $plD['a.home.sec_name_stats'] && $plCustom === 'Moja sekcja'
+      && homeSectionCatalog(true)['about']['label'] === 'About the tracker' && homeSectionLabel([], 'stats', true) === 'Live tracker statistics'
+      && homeSectionCatalog() === homeSectionCatalog(true), json_encode([$plLabel, $plCustom]));
+// The placeholders' lines (homePlaceholderList()) and the home page's live-sync beacon: the dictionary's, by their
+// keys (homeblocks.php is a template and is read, not run, here).
+$hbSrc = (string)file_get_contents($root . '/includes/homeblocks.php');
+$phMiss = [];
+foreach (['block', 'site_name', 'site_url', 'announce_http', 'announce_udp', 'torrent_count', 'peer_count', 'seed_count',
+          'whitelist_count', 'year', 'register_button', 'report_link', 'contact_email'] as $ph) {
+    if (!isset($enD['a.home.ph_' . $ph], $plD['a.home.ph_' . $ph])) $phMiss[] = $ph;
+}
+check('… the page editor\'s placeholder lines are the dictionary\'s (a.home.ph_*), the names in braces never words',
+      $phMiss === [] && str_contains($hbSrc, "\$out['block:' . \$key] = \$say('block', 'The built-in \":section\" section', ['section' => \$meta['label']]);")
+      && str_contains($hbSrc, '$out[$k] = $say($k, $v);'), implode(',', $phMiss));
+check('… and the home page\'s live-sync beacon says the dictionary\'s words (the ones app.js writes when it takes the title over)',
+      str_contains($hbSrc, "\$beaconTitle = \$isCacheFresh ? _h('home.beacon_live') : _h('home.beacon_syncing');")
+      && !str_contains($hbSrc, "'Live Syncing'") && !str_contains($hbSrc, "'Syncing Swarms...'")
+      && ($enD['home.beacon_live'] ?? '') === ($enD['js.app.live_syncing'] ?? '?') && ($plD['home.beacon_live'] ?? '') === ($plD['js.app.live_syncing'] ?? '?')
+      && ($enD['home.beacon_syncing'] ?? '') === ($enD['js.app.syncing_swarms'] ?? '?') && ($plD['home.beacon_syncing'] ?? '') === ($plD['js.app.syncing_swarms'] ?? '?'));
 
 // ── the headings ────────────────────────────────────────────────────────────
 // The bug this pins down: the built-in wording used to be literal English, so a Polish visitor got

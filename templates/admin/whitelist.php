@@ -9,7 +9,9 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl) ?>
+    <?php /* + the status card's server sentences (its warnings, a helper's failure), found back by key so they follow
+             the live language switch (t.find(), 1.73.0) */ ?>
+    <?= langJsBridge($baseUrl, ['js.', 'api.wl.warn_', 'api.schedule.helper_failed']) ?>
     <!-- the same detail-panel primitives the public Info panel uses -->
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/detail-panel.css<?= assetVer('assets/css/detail-panel.css') ?>">
 </head>
@@ -108,10 +110,10 @@
                         </div>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-source" title="<?= _h('a.wl.col_source') ?>">
                             <option value=""><?= _h('a.wl.src_all') ?></option>
-                            <option value="web">Web</option>
-                            <option value="api">API</option>
-                            <option value="admin">Admin</option>
-                            <option value="forum">Forum</option>
+                            <option value="web"><?= _h('a.wl.src_web') ?></option>
+                            <option value="api"><?= _h('a.wl.src_api') ?></option>
+                            <option value="admin"><?= _h('a.wl.src_admin') ?></option>
+                            <option value="forum"><?= _h('a.wl.src_forum') ?></option>
                         </select>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-meta" title="<?= _h('a.wl.f_meta_title') ?>">
                             <option value=""><?= _h('a.wl.meta_all') ?></option>
@@ -295,11 +297,11 @@
             <div class="table-responsive">
                 <table class="table table-dark table-hover wl-table" id="cl-table">
                     <colgroup>
-                        <col class="wl-c-flex"><col class="wl-c-enabled"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-3">
+                        <col class="wl-c-flex"><col class="wl-c-scope"><col class="wl-c-keyid"><col class="wl-c-secret"><col class="wl-c-enabled"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-ip"><col class="wl-c-num"><col class="wl-c-actions-3">
                     </colgroup>
                     <thead><tr>
                         <th><?= _h('a.wl.col_label') ?></th>
-                        <th title="<?= _h('a.wl.col_scope_title') ?>"><?= _h('a.wl.col_scope') ?></th>
+                        <th class="col-badge" title="<?= _h('a.wl.col_scope_title') ?>"><?= _h('a.wl.col_scope') ?></th>
                         <th><?= _h('a.wl.col_keyid') ?></th>
                         <th><?= _h('a.wl.col_secret') ?></th>
                         <th class="col-badge"><?= _h('a.wl.col_enabled') ?></th>
@@ -657,6 +659,8 @@
     <!-- Toast container -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 
+    <?php /* What the server wrote, marked before any script of the page runs (1.73.0, assets/js/lang-swap.js). */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <?php /* The picture beside an author's name on a review card (1.63.0). */ ?>

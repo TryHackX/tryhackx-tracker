@@ -104,6 +104,9 @@
         if (!slot || !src || !header || !('IntersectionObserver' in window)) return;
         slot.appendChild(src.cloneNode(true));
         slot.removeAttribute('aria-hidden');
+        // After a live language switch the clone is taken again from the header, which the switch has translated
+        // where it stands (1.73.0: the clone is a script's copy and kept the old words — its aria-label).
+        document.addEventListener('langswap', () => { slot.replaceChildren(src.cloneNode(true)); });
         new IntersectionObserver((entries) => {
             const headerVisible = entries.some(e => e.isIntersecting);
             slot.classList.toggle('show', !headerVisible);
@@ -156,10 +159,22 @@
 
     // ── catalogue (hidden keywords + group keywords) ────────────────────────
     const apiBase = document.body.dataset.apiBase || 'api.php?endpoint=';
+    // The last answer, kept for a live language switch: its keywords are the same in every language, and the one
+    // translated thing in it — a group's title — is read off the group's button, which the switch translates
+    // (1.73.0: the catalogue used to be asked for again on every switch).
+    let lastCat = null;
+    const chipTitle = (id) => {
+        const b = groupBar && groupBar.querySelector('.settings-group-btn[data-group="' + id + '"]');
+        if (!b) return '';
+        const c = b.cloneNode(true);
+        c.querySelectorAll('.settings-group-count').forEach(x => x.remove());
+        return (c.textContent || '').trim();
+    };
     function applyCatalogue(cat) {
+        if (cat) lastCat = cat;
         const kw = (cat && cat.keywords) || {};
         const groupKw = {};
-        ((cat && cat.groups) || []).forEach(g => { groupKw[g.id] = norm(g.title + ' ' + (g.keywords || '')); });
+        ((cat && cat.groups) || []).forEach(g => { groupKw[g.id] = norm((chipTitle(g.id) || g.title) + ' ' + (g.keywords || '')); });
         sections.forEach(sec => {
             sec.groupText = groupKw[sec.group] || '';
             sec.items.forEach(item => { item.keywords = norm(item.names.map(n => kw[n] || '').join(' ')); });
@@ -230,7 +245,7 @@
         const jump = document.createElement('button');
         jump.type = 'button';
         jump.className = 'btn btn-sm btn-outline-secondary settings-where-jump';
-        jump.textContent = t('js.settings.show_me_where');
+        jump.textContent = t.key('js.settings.show_me_where');
         jump.addEventListener('click', () => {
             // Clear the search, switch to the section's own group, and scroll it into view with the
             // same highlight the #hash links use. This is the "…and now where was it?" button.
@@ -250,6 +265,9 @@
     function showWhere(sec, on) {
         const bc = breadcrumbFor(sec);
         bc.classList.toggle('d-hidden', !on);
+        // A hidden breadcrumb keeps no words: they are written when it shows, in the language of that moment (1.73.0 —
+        // a hidden one kept the language it was last drawn in through a live switch).
+        if (!on) bc.querySelector('.settings-where-path').textContent = '';
         if (on) {
             // Group, a chevron (an icon since 1.68.0), section.
             const chev = document.createElement('i');
@@ -382,7 +400,7 @@
             ranked.forEach(({ sec, score }) => {
                 if (!sec.inForm) return;
                 if (!dividerPlaced && score <= GROUP_BONUS && ranked.some(r => r.score > GROUP_BONUS)) {
-                    divider.textContent = t('js.settings.other_sections');
+                    divider.textContent = t.key('js.settings.other_sections');
                     show(divider, true);
                     mark.parentNode.insertBefore(divider, mark);
                     dividerPlaced = true;
@@ -393,11 +411,12 @@
         }
 
         const groups = new Set(ranked.map(r => r.sec.group));
-        countEl.textContent = ranked.length
-            ? (fields ? t(fields === 1 ? 'js.settings.n_setting' : 'js.settings.n_settings', {n: fields}) + ' · ' : '') +
-              t(ranked.length === 1 ? 'js.settings.n_section' : 'js.settings.n_sections', {n: ranked.length}) +
-              ' ' + t(groups.size === 1 ? 'js.settings.in_n_group' : 'js.settings.in_n_groups', {n: groups.size})
-            : '';
+        // pieces, each t.key() word keeping its key for the live language switch (1.73.0)
+        countEl.replaceChildren(...(ranked.length
+            ? [fields ? t.key(fields === 1 ? 'js.settings.n_setting' : 'js.settings.n_settings', {n: fields}) : '', fields ? ' · ' : '',
+               t.key(ranked.length === 1 ? 'js.settings.n_section' : 'js.settings.n_sections', {n: ranked.length}),
+               ' ', t.key(groups.size === 1 ? 'js.settings.in_n_group' : 'js.settings.in_n_groups', {n: groups.size})]
+            : []));
         emptyQ.textContent = input.value.trim();
         show(emptyEl, ranked.length === 0);
         [...groupBar.querySelectorAll('.settings-group-btn')].forEach(b => {
@@ -519,12 +538,12 @@
     // for a Polish word would find nothing while the Polish words are on the screen. Restarting
     // this module instead would be worse: `sections` holds comment anchors placed in the document
     // and a second set of them would leave the first behind, and every listener would be bound
-    // twice. So: re-read the text of the elements we already know about, re-fetch the catalogue
-    // (its keywords are translated too), and re-run whatever search is on screen.
+    // twice. So: re-read the text of the elements we already know about, index the catalogue again from
+    // the answer it gave (its keywords are one list for every language; the groups' titles are read off
+    // their buttons, which the switch has just translated — 1.73.0, no second request), and re-run whatever
+    // search is on screen. The breadcrumb and its "show me where" button are this file's: their words are
+    // t.key() words that keep their keys (assets/js/i18n.js) and the switch says them again itself.
     document.addEventListener('langswap', () => {
-        // The breadcrumb and its "show me where" button are built by this file, so the swap skips
-        // them; showWhere() rewrites the path line but never the button's own label.
-        document.querySelectorAll('.settings-where-jump').forEach(b => { b.textContent = t('js.settings.show_me_where'); });
         sections.forEach(sec => {
             sec.title = norm(sec.el.dataset.title || textOf(sec.el.querySelector('h5')));
             sec.label = (sec.el.dataset.title || textOf(sec.el.querySelector('h5')) || '').trim();
@@ -533,11 +552,8 @@
                 item.hint = textOf(item.el).slice(0, 600);
             });
         });
-        fetch(apiBase + 'admin/settings_catalog', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-            .then(r => r.json())
-            .then(j => { if (j && j.success) applyCatalogue(j); })
-            .catch(() => { /* labels + hints only — still useful */ })
-            .finally(() => { if (norm(input.value)) runSearch(); else applyGroup(); });
+        applyCatalogue(lastCat);
+        if (norm(input.value)) runSearch(); else applyGroup();
     });
 })();
 
@@ -573,7 +589,7 @@
         seen:      ['idx_index_meta_seen', 'meta_priority DESC, seen_count DESC'],
         completed: ['idx_index_meta_completed', 'meta_priority DESC, last_completed DESC'],
         random:    ['PRIMARY', 'info_hash >= (random point), ORDER BY info_hash'],
-        whitelist: ['—', t('js.settings.plan_whitelist')],
+        whitelist: ['—', t.key('js.settings.plan_whitelist')],
     };
 
     const val = f => Math.max(0, Math.min(100, parseInt(f.value, 10) || 0));
@@ -592,14 +608,15 @@
             const live = fields.filter(f => val(f) > 0)
                 .sort((a, b) => val(b) - val(a))
                 .map(f => val(f) + '% ' + f.dataset.share);
-            liveEl.innerHTML = '<span class="settings-hint">' + t('js.settings.rotating_over') + ' <strong>' +
-                (live.length ? live.join(' · ') : t('js.settings.no_share_set')) + '</strong>. ' +
-                t('js.settings.slot_falls_through') + '</span>';
+            // The words as keyed markup (t.html(), 1.73.0): the live language switch says them again where they stand.
+            liveEl.innerHTML = '<span class="settings-hint">' + t.html('js.settings.rotating_over') + ' <strong>' +
+                (live.length ? live.join(' · ') : t.html('js.settings.no_share_set')) + '</strong>. ' +
+                t.html('js.settings.slot_falls_through') + '</span>';
             return;
         }
         const p = PLAN[mode.value] || ['—', '—'];
-        liveEl.innerHTML = '<span class="settings-hint">' + t('js.settings.runs_on') + ' <code>' + p[0] + '</code> ' + t('js.settings.runs_as') + ' ' +
-            '<code>' + p[1] + '</code>. ' + t('js.settings.whitelist_still_first') + '</span>';
+        liveEl.innerHTML = '<span class="settings-hint">' + t.html('js.settings.runs_on') + ' <code>' + p[0] + '</code> ' + t.html('js.settings.runs_as') + ' ' +
+            '<code>' + (t.isKey(p[1]) ? t.html(p[1]) : p[1]) + '</code>. ' + t.html('js.settings.whitelist_still_first') + '</span>';
     }
 
     function paint() {
@@ -607,7 +624,7 @@
         let total = 0;
         fields.forEach(f => { total += val(f); });
         if (sumEl) {
-            sumEl.textContent = total === 100 ? t('js.settings.adds_up_ok') : t('js.settings.adds_up_bad', {n: total});
+            sumEl.textContent = total === 100 ? t.key('js.settings.adds_up_ok') : t.key('js.settings.adds_up_bad', {n: total});
             sumEl.classList.toggle('text-warning', total !== 100);
         }
         notes.forEach(n => {
@@ -618,17 +635,17 @@
             if (p === 0) {
                 // Zero means two different things, and saying which one matters: for the whitelist
                 // it is not "never" but "absolute priority", which is the default and the safe case.
-                n.textContent = f.dataset.share === 'whitelist' ? t('js.settings.whitelist_drains_default') : t('js.settings.share_off');
+                n.textContent = f.dataset.share === 'whitelist' ? t.key('js.settings.whitelist_drains_default') : t.key('js.settings.share_off');
                 n.classList.remove('text-warning');
                 return;
             }
             const perWave = (p * c) / 100;
             if (perWave >= 1) {
-                n.textContent = t('js.settings.per_wave', {n: (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)), c: c});
+                n.textContent = t.key('js.settings.per_wave', {n: (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)), c: c});
                 n.classList.remove('text-warning');
             } else {
                 // Not forbidden — but this is the case worth naming out loud.
-                n.textContent = t('js.settings.thin_share', {n: Math.round(1 / perWave), c: c});
+                n.textContent = t.key('js.settings.thin_share', {n: Math.round(1 / perWave), c: c});
                 n.classList.add('text-warning');
                 f.classList.add('is-thin');
             }
@@ -701,7 +718,7 @@
         if (!needs || isNaN(raw)) return;
         const budget = Math.max(lo, Math.min(hi, raw));
         const polls = Math.max(1, Math.ceil(needs / budget));
-        line.textContent = t(polls > 1 ? 'js.settings.poll_estimate_many' : 'js.settings.poll_estimate_one', {
+        line.textContent = t.key(polls > 1 ? 'js.settings.poll_estimate_many' : 'js.settings.poll_estimate_one', {
             rate: line.dataset.rate, scrape: line.dataset.scrape, needs: line.dataset.needsText, budget: budget, polls: polls,
         });
     }

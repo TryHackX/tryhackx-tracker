@@ -981,8 +981,11 @@ require $a["file"];
     $fj = $src('assets/js/favourites.js');
     $djFrom = (int)strpos($fj, 'function initDescs(');
     $dj = $djFrom > 0 ? substr($fj, $djFrom, (int)strpos($fj, '"who has this in favourites"', $djFrom) - $djFrom) : '';
-    check('the list\'s script: built with textContent only, redrawn on a live language switch, started with the others; the router knows the pane; the switches post their flags',
-          $dj !== '' && !str_contains($dj, 'innerHTML') && str_contains($dj, "document.addEventListener('langswap'") && str_contains($fj, "        initDescs();\n")
+    // 1.73.0: the live language switch no longer needs a listener here — every word the rows say is a t.key() word that
+    // keeps its key on the element (assets/js/i18n.js), and nothing else in a row is the page language's (ISO dates, the
+    // browser's digits). The listener it had redrew the rows under the reader and, holding no answer, asked again.
+    check('the list\'s script: built with textContent only, its words t.key() words (they follow a live language switch), started with the others; the router knows the pane; the switches post their flags',
+          $dj !== '' && !str_contains($dj, 'innerHTML') && str_contains($dj, "t.key('js.descs.") && str_contains($fj, "        initDescs();\n")
           && str_contains($fj, "'sounds', 'descriptions'];") && str_contains($fj, "['acc-descs-public', 'descriptions_public'], ['acc-credit-public', 'content_credit_public']"));
     $aj = $src('assets/js/app.js');
     check('the Info panel\'s script: the chain with the icon library\'s arrow, Edit and Delete beside Propose (classes of their own), the kind sent',

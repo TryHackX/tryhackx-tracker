@@ -266,7 +266,8 @@ check('the panel draws a table, keeps "Used as" honest from the selects themselv
 // The panel's own strings live under a prefix LANG_JS_PUBLIC does not carry, so none of this rides
 // along on every public page — the reason js.shoutadmin. exists, for the same reason.
 check('… and asks for its own strings, not from a prefix every public page carries',
-      str_contains($adminJs, "t('js.sndadmin.") && !str_contains((string)file_get_contents($root . '/includes/lang.php'), "'js.sndadmin.'"));
+      // 1.73.0: written as t.key() words (they keep their keys for the live language switch)
+      str_contains($adminJs, "t.key('js.sndadmin.") && !str_contains((string)file_get_contents($root . '/includes/lang.php'), "'js.sndadmin.'"));
 $js = (string)file_get_contents($root . '/assets/js/sounds.js');
 check('the script has the pre-roll, the hum, the idle suspend and the honest note',
       str_contains($js, 'createOscillator') && str_contains($js, 'suspend()') && str_contains($js, 'sound-chip') && str_contains($js, "'blocked'"));

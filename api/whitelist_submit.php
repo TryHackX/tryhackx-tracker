@@ -200,8 +200,9 @@ if ($sourceUrl !== '' || $descText !== '') {
 }
 
 // Everything that was just added has to prove itself: metadata in, and at least one peer announcing
-// to this tracker. Until then the accesslist generator skips it, so nothing is served on the
-// strength of somebody having typed it.
+// to this tracker. It is served while it tries — the peers have to be able to announce here — for at
+// most the probe's timeout, and withdrawn the moment it fails (includes/wlprobe.php, 1.73.0), so
+// nothing STAYS served on the strength of somebody having typed it.
 $probing = [];
 if (wlProbeEnabled($cfg)) {
     foreach ($r['results'] as $res) {

@@ -83,9 +83,9 @@
     const pct = (v) => (v === null || v === undefined) ? '—' : (v >= 99.95 ? '100' : Number(v).toFixed(1)) + ' %';
     const dur = (s) => {
         const n = Math.max(0, Math.round(Number(s) || 0));
-        return n >= 60 ? t('js.coverage.dur_ms', {m: Math.floor(n / 60), s: n % 60}) : t('js.coverage.dur_s', {s: n});
+        return n >= 60 ? t.key('js.coverage.dur_ms', {m: Math.floor(n / 60), s: n % 60}) : t.key('js.coverage.dur_s', {s: n});
     };
-    const pollsText = (n) => n === 1 ? t('js.coverage.polls_one') : t('js.coverage.polls_n', {n: fmt(n)});
+    const pollsText = (n) => n === 1 ? t.key('js.coverage.polls_one') : t.key('js.coverage.polls_n', {n: fmt(n)});
     const pad2 = (n) => (n < 10 ? '0' : '') + n;
     const when = (ts) => { const d = new Date(ts * 1000); return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
     const nowTs = () => Math.floor(Date.now() / 1000);
@@ -97,12 +97,16 @@
     // the tiles came out as bare dark boxes with the text welded to the border and the label in body
     // type. The card next to this one on Traffic uses `.wl-kv-item` / `.wl-kv-label` /
     // `.wl-kv-value`, which is where the padding, the border and the small-caps label live.
+    // `value` and `note` may be lists of pieces (1.73.0): a t.key() word among them keeps its key, so the live language
+    // switch says it again — glued into one string it could not (assets/js/i18n.js). joined() makes such a list.
+    const joined = (list, sep) => list.filter(Boolean).reduce((out, x, i) => (i ? out.push(sep, x) : out.push(x), out), []);
+    const pieces = (v) => (Array.isArray(v) ? v : [v]);
     function tile(label, value, cls, note, id) {
         return el('div', { className: 'wl-kv-item', dataset: id ? { tile: id } : undefined }, [
             el('div', { className: 'wl-kv-label', text: label }),
             el('div', { className: 'wl-kv-value' }, [
-                el('span', { className: cls || '', text: value }),
-                note ? el('div', { className: 'wl-small text-muted', text: note }) : '',
+                el('span', { className: cls || '' }, pieces(value)),
+                note ? el('div', { className: 'wl-small text-muted' }, pieces(note)) : '',
             ]),
         ]);
     }
@@ -119,7 +123,7 @@
         // since", in the card's own dd.mm hh:mm, the axis's format.
         const now = d.now || nowTs();
         const lastWords = (ts, recent) => !ts ? null
-            : recent ? t('js.coverage.last_ago', {ago: fmtAgo(Math.max(0, now - ts))}) : t('js.coverage.last_old', {when: when(ts)});
+            : recent ? t.key('js.coverage.last_ago', {ago: fmtAgo(Math.max(0, now - ts))}) : t.key('js.coverage.last_old', {when: when(ts)});
 
         // The headline is coverage, because that is the question: did we see the whole tracker? Per
         // PASS — a pass counts every poll that continues it.
@@ -130,39 +134,39 @@
         // An average over one pass is not an average, and colouring it red says something the
         // number cannot support. Below three finished passes the figures are shown plainly.
         const thin = counted < 3;
-        box.appendChild(tile(t('js.coverage.avg_coverage'), pct(s.avg_coverage), thin ? '' : covCls,
-            !counted ? t('js.coverage.no_finished_pass')
-                : thin ? t('js.coverage.over_passes_thin', {n: fmt(counted)}) : t('js.coverage.over_passes', {n: fmt(counted)}), 'avg'));
+        box.appendChild(tile(t.key('js.coverage.avg_coverage'), pct(s.avg_coverage), thin ? '' : covCls,
+            !counted ? t.key('js.coverage.no_finished_pass')
+                : thin ? t.key('js.coverage.over_passes_thin', {n: fmt(counted)}) : t.key('js.coverage.over_passes', {n: fmt(counted)}), 'avg'));
         // The worst pass says when it began; its colour is a warning only while it is recent (1.72.1).
         const worstLow = !thin && s.min_coverage !== null && s.min_coverage !== undefined && s.min_coverage < 70;
-        box.appendChild(tile(t('js.coverage.worst_pass'), pct(s.min_coverage), (worstLow && s.worst_recent) ? 'text-warning' : '',
+        box.appendChild(tile(t.key('js.coverage.worst_pass'), pct(s.min_coverage), (worstLow && s.worst_recent) ? 'text-warning' : '',
             (s.worst_ts && s.min_coverage !== null && s.min_coverage !== undefined && s.min_coverage < 99.95)
-                ? t('js.coverage.worst_when', {when: when(s.worst_ts)}) : null, 'worst'));
-        box.appendChild(tile(t('js.coverage.passes_in_window'), fmt(s.passes), '',
-            t('js.coverage.passes_polls_note', {n: fmt(s.polls)}), 'passes'));
+                ? t.key('js.coverage.worst_when', {when: when(s.worst_ts)}) : null, 'worst'));
+        box.appendChild(tile(t.key('js.coverage.passes_in_window'), fmt(s.passes), '',
+            t.key('js.coverage.passes_polls_note', {n: fmt(s.polls)}), 'passes'));
         // A cut is the budget doing its job, not a fault: muted, and said as what it is.
-        box.appendChild(tile(t('js.coverage.arrived_truncated'), fmt(s.cut), 'text-muted',
-            s.cut ? t('js.coverage.truncated_note') : null, 'cut'));
+        box.appendChild(tile(t.key('js.coverage.arrived_truncated'), fmt(s.cut), 'text-muted',
+            s.cut ? t.key('js.coverage.truncated_note') : null, 'cut'));
         // A download that really ended short keeps a word of its own, and only appears when it happened —
         // a warning while it is recent, a date once it is not.
         if (s.short) {
             const recent = (s.short_recent || 0) > 0;
-            box.appendChild(tile(t('js.coverage.ended_early'), fmt(s.short), recent ? 'text-warning' : 'text-muted',
-                recent ? [t('js.coverage.ended_early_note'), lastWords(s.short_last, true)].filter(Boolean).join(' · ')
+            box.appendChild(tile(t.key('js.coverage.ended_early'), fmt(s.short), recent ? 'text-warning' : 'text-muted',
+                recent ? joined([t.key('js.coverage.ended_early_note'), lastWords(s.short_last, true)], ' · ')
                        : lastWords(s.short_last, false), 'short'));
         }
         const failRecent = (s.failed_recent || 0) > 0;
-        box.appendChild(tile(t('js.coverage.failed'), fmt(s.failed), (s.failed && failRecent) ? 'text-danger' : 'text-muted',
+        box.appendChild(tile(t.key('js.coverage.failed'), fmt(s.failed), (s.failed && failRecent) ? 'text-danger' : 'text-muted',
             s.failed ? lastWords(s.failed_last, failRecent) : null, 'failed'));
         const lp = s.last_pass;
         if (lp) {
             if (lp.status === 'in_progress') {
-                box.appendChild(tile(t('js.coverage.last_pass'), t('js.coverage.in_progress_value', {n: fmt(lp.walked)}), 'text-info',
-                    t('js.coverage.in_progress_note', {n: fmt(lp.walked)}), 'last'));
+                box.appendChild(tile(t.key('js.coverage.last_pass'), t.key('js.coverage.in_progress_value', {n: fmt(lp.walked)}), 'text-info',
+                    t.key('js.coverage.in_progress_note', {n: fmt(lp.walked)}), 'last'));
             } else {
-                box.appendChild(tile(t('js.coverage.last_pass'),
-                    fmt(lp.walked) + (lp.rows_total ? ' ' + t('js.coverage.of_total', {n: fmt(lp.rows_total)}) : ''), '',
-                    [pct(lp.coverage), pollsText(lp.polls), t('js.coverage.poll_time', {t: dur(lp.seconds)})].join(' · '), 'last'));
+                box.appendChild(tile(t.key('js.coverage.last_pass'),
+                    [fmt(lp.walked)].concat(lp.rows_total ? [' ', t.key('js.coverage.of_total', {n: fmt(lp.rows_total)})] : []), '',
+                    joined([pct(lp.coverage), pollsText(lp.polls), t.key('js.coverage.poll_time', {t: dur(lp.seconds)})], ' · '), 'last'));
             }
         }
 
@@ -171,7 +175,7 @@
         note.textContent = '';
         if (d.unavailable) {
             note.appendChild(el('p', { className: 'wl-small text-muted mb-0',
-                text: d.message || t('js.coverage.no_history') }));
+                text: d.message || t.key('js.coverage.no_history') }));
             return;
         }
         const alerts = [];
@@ -179,28 +183,28 @@
             // "If it keeps happening…" only while it does: in the last day. Before that it is history,
             // said plainly with its date.
             if ((s.short_recent || 0) > 0 && s.short_last) {
-                alerts.push(['alert-warning', 'short', t('js.coverage.ended_early_alert', {n: fmt(s.short), ago: fmtAgo(Math.max(0, now - s.short_last))})]);
+                alerts.push(['alert-warning', 'short', t.key('js.coverage.ended_early_alert', {n: fmt(s.short), ago: fmtAgo(Math.max(0, now - s.short_last))})]);
             } else {
-                alerts.push(['alert-secondary', 'short', t('js.coverage.ended_early_old_alert', {n: fmt(s.short), when: s.short_last ? when(s.short_last) : '—'})]);
+                alerts.push(['alert-secondary', 'short', t.key('js.coverage.ended_early_old_alert', {n: fmt(s.short), when: s.short_last ? when(s.short_last) : '—'})]);
             }
         }
         // Every finished pass took more than one poll: the budget is shorter than the scrape. Said as
         // what it is — nothing lost — with the measured estimate of what a longer budget would do.
         if (counted && s.min_polls > 1) {
-            let text = t('js.coverage.all_truncated_alert', {budget: s.budget, max: s.budget_max});
+            const text = [t.key('js.coverage.all_truncated_alert', {budget: s.budget, max: s.budget_max})];
             const e = s.estimate;
             if (e) {
-                text += ' ' + t(e.polls > 1 ? 'js.coverage.estimate_many' : 'js.coverage.estimate_one',
-                    {rate: fmt(e.rate), scrape: fmt(e.scrape), needs: fmt(e.needs), budget: e.budget, polls: e.polls});
-                if (e.polls > 1 && s.budget_max && e.needs <= s.budget_max) text += ' ' + t('js.coverage.estimate_at_max', {max: s.budget_max});
+                text.push(' ', t.key(e.polls > 1 ? 'js.coverage.estimate_many' : 'js.coverage.estimate_one',
+                    {rate: fmt(e.rate), scrape: fmt(e.scrape), needs: fmt(e.needs), budget: e.budget, polls: e.polls}));
+                if (e.polls > 1 && s.budget_max && e.needs <= s.budget_max) text.push(' ', t.key('js.coverage.estimate_at_max', {max: s.budget_max}));
             }
             alerts.push(['alert-info', 'multi', text]);
         }
         if (s.avg_coverage !== null && s.avg_coverage !== undefined && s.avg_coverage < 70 && counted > 2) {
-            alerts.push(['alert-info', 'low', t('js.coverage.low_coverage_alert', {pct: pct(s.avg_coverage)})]);
+            alerts.push(['alert-info', 'low', t.key('js.coverage.low_coverage_alert', {pct: pct(s.avg_coverage)})]);
         }
         alerts.forEach(([cls, id, text], i) => note.appendChild(el('div', {
-            className: 'alert ' + cls + ' py-2 wl-small ' + (i < alerts.length - 1 ? 'mb-2' : 'mb-0'), dataset: { alert: id }, text: text })));
+            className: 'alert ' + cls + ' py-2 wl-small ' + (i < alerts.length - 1 ? 'mb-2' : 'mb-0'), dataset: { alert: id } }, pieces(text))));
     }
 
     // ── the chart ────────────────────────────────────────────────────────────
@@ -265,10 +269,10 @@
         return Math.floor(d.getTime() / 1000);
     }
     function spanName(step) {
-        if (step < 86400) return t('js.coverage.span_hours', {n: step / 3600});
-        if (step === 86400) return t('js.coverage.span_day');
-        if (step === 172800) return t('js.coverage.span_two_days');
-        return t('js.coverage.span_week');
+        if (step < 86400) return t.key('js.coverage.span_hours', {n: step / 3600});
+        if (step === 86400) return t.key('js.coverage.span_day');
+        if (step === 172800) return t.key('js.coverage.span_two_days');
+        return t.key('js.coverage.span_week');
     }
     function spanWords(b0, b1, step) {
         const day = (ts) => { const d = new Date(ts * 1000); return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1); };
@@ -281,38 +285,39 @@
     /** The words for one part: what the poll did, and what its pass came to. */
     function partWords(p, pass, soFar) {
         const lines = [];
-        lines.push(pass.polls > 1 ? t('js.coverage.tip_head', {when: when(p.ts), pos: p.pos, of: pass.polls})
-                                  : t('js.coverage.tip_head_one', {when: when(p.ts)}));
+        lines.push(pass.polls > 1 ? t.key('js.coverage.tip_head', {when: when(p.ts), pos: p.pos, of: pass.polls})
+                                  : t.key('js.coverage.tip_head_one', {when: when(p.ts)}));
         if (p.kind === 'error') {
-            lines.push(t('js.coverage.tip_error', {err: p.error || '?'}));
+            lines.push(t.key('js.coverage.tip_error', {err: p.error || '?'}));
         } else if (p.kind === 'short') {
-            lines.push(t('js.coverage.tip_short', {n: fmt(p.entries), reason: p.partial || '?'}));
+            lines.push(t.key('js.coverage.tip_short', {n: fmt(p.entries), reason: p.partial || '?'}));
         } else if (p.kind === 'start') {
-            lines.push(p.cut ? t('js.coverage.tip_start_cut', {n: fmt(p.entries)}) : t('js.coverage.tip_start_full', {n: fmt(p.entries)}));
+            lines.push(p.cut ? t.key('js.coverage.tip_start_cut', {n: fmt(p.entries)}) : t.key('js.coverage.tip_start_full', {n: fmt(p.entries)}));
         } else if (p.delivered === 0 && !p.cut) {
-            lines.push(t('js.coverage.tip_resume_empty', {from: fmt(p.start), pct: pct(pass.coverage)}));
+            lines.push(t.key('js.coverage.tip_resume_empty', {from: fmt(p.start), pct: pct(pass.coverage)}));
         } else if (p.cut) {
-            lines.push(t('js.coverage.tip_resume_cut', {from: fmt(p.start), pct: pct(soFar)}));
+            lines.push(t.key('js.coverage.tip_resume_cut', {from: fmt(p.start), pct: pct(soFar)}));
         } else {
-            lines.push(t('js.coverage.tip_resume', {from: fmt(p.start), pct: pct(pass.coverage)}));
+            lines.push(t.key('js.coverage.tip_resume', {from: fmt(p.start), pct: pct(pass.coverage)}));
         }
         // Old ground walked a second time (a short download restarting inside an open pass): it adds
         // nothing to the bar but what was new in it, and says so.
         if (p.again > 0) {
-            lines.push(p.new > 0 ? t('js.coverage.tip_again', {n: fmt(p.entries), m: fmt(p.new)}) : t('js.coverage.tip_again_none', {n: fmt(p.entries)}));
+            lines.push(p.new > 0 ? t.key('js.coverage.tip_again', {n: fmt(p.entries), m: fmt(p.new)}) : t.key('js.coverage.tip_again_none', {n: fmt(p.entries)}));
         }
-        lines.push(t('js.coverage.tip_numbers', {d: fmt(p.delivered), k: fmt(p.kept), t: dur(p.ms / 1000)}));
-        const state = pass.began_before ? t('js.coverage.pass_began_before')
-            : t('js.coverage.pass_' + (pass.status === 'in_progress' ? 'in_progress' : pass.status));
-        const passPct = pass.status === 'in_progress' ? t('js.coverage.in_progress_value', {n: fmt(pass.walked)})
+        lines.push(t.key('js.coverage.tip_numbers', {d: fmt(p.delivered), k: fmt(p.kept), t: dur(p.ms / 1000)}));
+        const state = pass.began_before ? t.key('js.coverage.pass_began_before')
+            : t.key('js.coverage.pass_' + (pass.status === 'in_progress' ? 'in_progress' : pass.status));
+        const passPct = pass.status === 'in_progress' ? t.key('js.coverage.in_progress_value', {n: fmt(pass.walked)})
             : pass.began_before ? '—' : pct(pass.coverage);
-        lines.push(t('js.coverage.tip_pass', {pct: passPct, state: state}));
+        lines.push(t.key('js.coverage.tip_pass', {pct: passPct, state: state}));
         return lines;
     }
 
     /** The words for one bucket: its time, what it holds, and how the passes in it did — the tiles' words. */
     function bucketWords(b, step) {
         const lines = [spanWords(b.b0, b.b1, step)];
+        // Glued lines are plain words (t()): the chart draws itself again on `langswap` from the answer it holds.
         lines.push(t('js.coverage.bucket_passes', {n: fmt(b.passes.length)}) + ' · ' + t('js.coverage.passes_polls_note', {n: fmt(b.polls)}));
         lines.push(t('js.coverage.avg_coverage') + ': ' + pct(b.avg)
             + (b.worst ? ' · ' + t('js.coverage.worst_pass') + ': ' + pct(b.worst.coverage) : ''));
@@ -320,7 +325,7 @@
         if (b.short) lines.push(t('js.coverage.ended_early') + ': ' + fmt(b.short));
         lines.push(t('js.coverage.failed') + ': ' + fmt(b.failed));
         if (b.hi) lines.push(t('js.coverage.legend_tracker') + ': ' + (b.lo < b.hi * 0.99 ? fmt(b.lo) + ' – ' + fmt(b.hi) : fmt(b.hi)));
-        if (b.open) lines.push(t('js.coverage.in_progress_note', {n: fmt(b.open.walked)}));
+        if (b.open) lines.push(t.key('js.coverage.in_progress_note', {n: fmt(b.open.walked)}));
         return lines;
     }
 
@@ -360,20 +365,20 @@
         box.textContent = '';
         const one = points[0] || null;
         const pass = one ? passes[one.pass] : null;
-        let line = '';
+        const line = [];   // pieces, each t.key() word keeping its key (1.73.0)
         if (one) {
-            line = t('js.coverage.one_poll_line', {when: new Date(one.ts * 1000).toLocaleString(),
-                delivered: fmt(one.delivered), kept: fmt(one.kept)});
+            line.push(t.key('js.coverage.one_poll_line', {when: new Date(one.ts * 1000).toLocaleString(),
+                delivered: fmt(one.delivered), kept: fmt(one.kept)}));
             if (pass && pass.status !== 'in_progress' && !pass.began_before && pass.coverage !== null) {
-                line += ' · ' + t('js.coverage.one_poll_coverage', {pct: pct(pass.coverage)});
+                line.push(' · ', t.key('js.coverage.one_poll_coverage', {pct: pct(pass.coverage)}));
             }
-            if (one.partial) line += ' · ' + t('js.index.ended_early_badge');
-            else if (one.cut) line += ' · ' + t('js.coverage.one_poll_truncated');
+            if (one.partial) line.push(' · ', t.key('js.index.ended_early_badge'));
+            else if (one.cut) line.push(' · ', t.key('js.coverage.one_poll_truncated'));
         }
         box.appendChild(el('div', { className: 'idx-cov-empty' }, [
-            el('div', { text: points.length ? t('js.coverage.one_poll_so_far') : t('js.coverage.no_polls_yet') }),
-            one ? el('div', { className: 'idx-cov-empty-one', text: line }) : '',
-            points.length ? el('div', { className: 'idx-cov-empty-hint', text: t('js.coverage.wider_range_hint') }) : '',
+            el('div', { text: points.length ? t.key('js.coverage.one_poll_so_far') : t.key('js.coverage.no_polls_yet') }),
+            one ? el('div', { className: 'idx-cov-empty-one' }, line) : '',
+            points.length ? el('div', { className: 'idx-cov-empty-hint', text: t.key('js.coverage.wider_range_hint') }) : '',
         ]));
     }
 
@@ -589,8 +594,8 @@
 
         const root = svg('svg', { class: 'idx-cov-svg', width: W, height: H, viewBox: '0 0 ' + W + ' ' + H,
             role: 'group', 'data-mode': step ? 'bucket' : 'pass', 'data-step': step || null, 'data-ymax': yMax,
-            'aria-label': step ? t('js.coverage.chart_aria_buckets', {p: fmt(passes.length), n: fmt(points.length), span: spanName(step)})
-                               : t('js.coverage.chart_aria', {p: fmt(passes.length), n: fmt(points.length)}) });
+            'aria-label': step ? t.key('js.coverage.chart_aria_buckets', {p: fmt(passes.length), n: fmt(points.length), span: spanName(step)})
+                               : t.key('js.coverage.chart_aria', {p: fmt(passes.length), n: fmt(points.length)}) });
 
         // grid + y axis
         const gy = svg('g', { class: 'idx-cov-axis' });
@@ -662,13 +667,13 @@
             el('span', { className: 'idx-cov-sw idx-cov-sw-' + k, 'aria-hidden': 'true' }), text]));
         if (facts && facts.step) {
             // one bar per bucket: what a bar is, and the marks it can carry
-            item('bucket', t('js.coverage.legend_bucket', {span: spanName(facts.step)}));
-            item('kept', t('js.coverage.legend_kept'));
-            if (facts.worst) item('worst', t('js.coverage.legend_worst', {pct: WORST_MARK}));
-            if (facts.short) item('short', t('js.coverage.legend_short'));
-            if (facts.failed) item('error', t('js.coverage.legend_error'));
-            item('tracker', t('js.coverage.legend_tracker'));
-            if (facts.progress) item('rest', t('js.coverage.legend_progress'));
+            item('bucket', t.key('js.coverage.legend_bucket', {span: spanName(facts.step)}));
+            item('kept', t.key('js.coverage.legend_kept'));
+            if (facts.worst) item('worst', t.key('js.coverage.legend_worst', {pct: WORST_MARK}));
+            if (facts.short) item('short', t.key('js.coverage.legend_short'));
+            if (facts.failed) item('error', t.key('js.coverage.legend_error'));
+            item('tracker', t.key('js.coverage.legend_tracker'));
+            if (facts.progress) item('rest', t.key('js.coverage.legend_progress'));
             return;
         }
         const kinds = new Set((d.points || []).concat(d.lead || []).map(p => p.kind));
@@ -677,7 +682,7 @@
         if (kinds.has('error')) items.push(['error', 'legend_error']);
         items.push(['kept', 'legend_kept'], ['tracker', 'legend_tracker']);
         if ((d.passes || []).some(x => x.status === 'in_progress')) items.push(['rest', 'legend_progress']);
-        items.forEach(([k, key]) => item(k, t('js.coverage.' + key)));
+        items.forEach(([k, key]) => item(k, t.key('js.coverage.' + key)));
     }
 
     async function load() {
@@ -694,12 +699,12 @@
         if (r.error) {
             $('idx-cov-note').textContent = '';
             $('idx-cov-note').appendChild(el('p', { className: 'wl-small text-danger mb-0',
-                text: t('js.coverage.load_failed', {error: r.error}) }));
+                text: t.key('js.coverage.load_failed', {error: r.error}) }));
             return;
         }
         last = r;
         const u = $('idx-cov-updated');
-        if (u) u.textContent = t('js.coverage.updated_line', {p: fmt((r.passes || []).length), n: fmt((r.points || []).length), range: range});
+        if (u) u.textContent = t.key('js.coverage.updated_line', {p: fmt((r.passes || []).length), n: fmt((r.points || []).length), range: range});
         renderSummary(r);
         draw(r);
     }
@@ -722,6 +727,10 @@
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => { if (last) draw(last); }, 150);
     });
+    // A live language switch (1.73.0): the chart's bars carry whole sentences for a screen reader (each a pass, its
+    // polls, its coverage), made from the answer — drawn again from that answer, no request. The tiles and notes
+    // above it keep their keys and follow by themselves (assets/js/i18n.js).
+    document.addEventListener('langswap', () => { if (last) draw(last); });
 
     load();
     setInterval(load, POLL_MS);

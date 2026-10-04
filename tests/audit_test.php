@@ -237,10 +237,21 @@ check('the retention window is clamped to something sane',
       && auditKeepDays([]) === AUDIT_KEEP_DAYS_DEFAULT);
 
 $db->prepare("UPDATE audit_log SET at = NOW() - INTERVAL 400 DAY WHERE actor_name = 'audit-test'")->execute();
+// The prune removes EVERY line past the window, not only this test's — and a checkout used for a month has lines of
+// its own that old (1.73.0: 390 of them on 2026-10-01, the day the first September runs turned 31 days old, and the
+// count read 393). They wait in a temporary table of this connection while the prune runs and go back with their own
+// ids, so the test neither depends on the history it finds nor eats it.
+$db->exec("CREATE TEMPORARY TABLE audit_keep_aside AS SELECT * FROM audit_log
+           WHERE at < (NOW() - INTERVAL 30 DAY) AND actor_name <> 'audit-test'");
+$aside = (int)$db->query("SELECT COUNT(*) FROM audit_keep_aside")->fetchColumn();
 $removed = auditPrune($db, ['audit_keep_days' => '30']);
+$db->exec("INSERT INTO audit_log SELECT * FROM audit_keep_aside");
+$db->exec("DROP TEMPORARY TABLE audit_keep_aside");
 // Three rows: the oversized-detail one, the ban and the failed sign-in. The two calls with nothing
 // usable wrote nothing, which is the point of the check above them.
-check('pruning removes what is past the window', $removed === 3, (string)$removed);
+check('pruning removes what is past the window', $removed === min(5000, 3 + $aside), $removed . ' removed, ' . $aside . ' older lines of the checkout set aside');
+check('… and the older lines that were not the test\'s are back, every one',
+      (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE at < (NOW() - INTERVAL 30 DAY) AND actor_name <> 'audit-test'")->fetchColumn() === $aside);
 check('and leaves nothing of the test behind',
       (int)$db->query("SELECT COUNT(*) FROM audit_log WHERE actor_name = 'audit-test'")->fetchColumn() === 0);
 

@@ -330,12 +330,16 @@ function antispamRefusal(array $cfg, string $kind, string $ctx, array $vars = []
             $status = 503;
             break;
     }
+    // `key` + `vars` (1.73.0): the sentence's dictionary key and its other placeholders, so a page that carries the
+    // key (LANG_JS_PUBLIC, includes/lang.php) counts down in its OWN words — which then follow the live language switch.
+    $plain = array_filter($vars, fn($x) => is_scalar($x));
     $body = [
         'success'     => false,
         'error'       => $error,
         'message'     => $t($key, $v),
         'antispam'    => ['kind' => $kind, 'context' => $ctx, 'seconds' => $seconds,
-                          'tpl' => $seconds > 0 ? $t($key, ['time' => '{time}'] + $vars) : ''],
+                          'tpl' => $seconds > 0 ? $t($key, ['time' => '{time}'] + $vars) : '',
+                          'key' => $key, 'vars' => (object)$plain],
     ];
     if ($seconds > 0) $body['retry_after'] = $seconds;
     if ($kind === 'captcha') {

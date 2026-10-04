@@ -27,7 +27,8 @@
     function el(tag, cls, text) {
         var n = document.createElement(tag);
         if (cls) n.className = cls;
-        if (text !== undefined && text !== null) n.textContent = String(text);
+        // as it comes: a t.key() word keeps its key (String() would leave its words only — 1.73.0)
+        if (text !== undefined && text !== null) n.textContent = t.isKey(text) ? text : String(text);
         return n;
     }
 
@@ -65,7 +66,7 @@
         if (typeof window.userAvatarPhrase !== 'function') {
             var plain = {};
             names.forEach(function (k) { plain[k] = slots[k].name; });
-            span.textContent = t(key, plain);
+            span.textContent = t.key(key, plain);
             return span;
         }
         var vars = {}, people = [];
@@ -74,7 +75,7 @@
             people.push([window.userAvatarImg({ username: slots[k].name, avatar: String(slots[k].avatar || '') }, 20, 'avatar msgrep-av'),
                          slots[k].name]);
         });
-        span.appendChild(window.userAvatarPhrase(t(key, vars), people));
+        span.appendChild(window.userAvatarPhrase(t.key(key, vars), people));
         return span;
     }
 
@@ -86,34 +87,35 @@
             reported: { name: rep.reported, avatar: rep.reported_avatar },
         }));
         head.appendChild(el('span', 'msgrep-when text-muted', rep.created_at));
-        if (rep.status === 'closed') head.appendChild(el('span', 'badge-table badge-reviewed', t('js.msgrep.closed')));
+        if (rep.status === 'closed') head.appendChild(el('span', 'badge-table badge-reviewed', t.key('js.msgrep.closed')));
         c.appendChild(head);
 
         // What the reported account already is. A report read without this looks like a first
         // offence whether it is the first or the fifth.
         var st0 = rep.state || {};
         var facts = [];
-        if (st0.reports > 1) facts.push(t('js.msgrep.seen_before', { n: st0.reports }));
-        if (st0.muted_until) facts.push(t('js.msgrep.is_muted', { date: st0.muted_until.slice(0, 16) }));
-        if (st0.banned) facts.push(st0.banned_until ? t('js.msgrep.is_banned_until', { date: st0.banned_until.slice(0, 16) })
-                                                    : t('js.msgrep.is_banned'));
-        if (st0.staff) facts.push(t('js.msgrep.is_staff'));
+        if (st0.reports > 1) facts.push(t.key('js.msgrep.seen_before', { n: st0.reports }));
+        if (st0.muted_until) facts.push(t.key('js.msgrep.is_muted', { date: st0.muted_until.slice(0, 16) }));
+        if (st0.banned) facts.push(st0.banned_until ? t.key('js.msgrep.is_banned_until', { date: st0.banned_until.slice(0, 16) })
+                                                    : t.key('js.msgrep.is_banned'));
+        if (st0.staff) facts.push(t.key('js.msgrep.is_staff'));
         // The warnings this account has had (1.71.0) — from this card, the reported comments', descriptions' and
         // shouts' cards, anywhere a moderator chose to be loud.
-        if (st0.warnings > 0) facts.push(t('js.creport.warned_n', { n: st0.warnings }));
-        if (facts.length) c.appendChild(el('div', 'msgrep-state', facts.join(' · ')));
+        if (st0.warnings > 0) facts.push(t.key('js.creport.warned_n', { n: st0.warnings }));
+        // pieces, each fact a t.key() word that keeps its key (1.73.0: joined into one string they kept none)
+        if (facts.length) { var fl = el('div', 'msgrep-state'); facts.forEach(function (f, i) { if (i) fl.append(' · '); fl.append(f); }); c.appendChild(fl); }
         if (st0.latest_warnings && st0.latest_warnings.length) {
             var wl = el('ul', 'msgrep-warnings');
-            wl.setAttribute('aria-label', t('js.creport.latest_warnings'));
+            wl.setAttribute('aria-label', t.key('js.creport.latest_warnings'));
             st0.latest_warnings.forEach(function (w) {
-                wl.appendChild(el('li', null, t('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' })));
+                wl.appendChild(el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' })));
             });
-            c.appendChild(el('div', 'msgrep-warn-head text-muted', t('js.creport.latest_warnings')));
+            c.appendChild(el('div', 'msgrep-warn-head text-muted', t.key('js.creport.latest_warnings')));
             c.appendChild(wl);
         }
         // What was already said about it: the answer the reporter was given, and the note for the log.
-        if (rep.reply) c.appendChild(el('div', 'msgrep-answer', t('js.msgrep.answered', { text: rep.reply })));
-        if (rep.note) c.appendChild(el('div', 'msgrep-answer text-muted', t('js.msgrep.noted', { text: rep.note })));
+        if (rep.reply) c.appendChild(el('div', 'msgrep-answer', t.key('js.msgrep.answered', { text: rep.reply })));
+        if (rep.note) c.appendChild(el('div', 'msgrep-answer text-muted', t.key('js.msgrep.noted', { text: rep.note })));
 
         if (rep.reason) c.appendChild(el('div', 'msgrep-reason', rep.reason));
 
@@ -129,18 +131,18 @@
             ctx.appendChild(el('div', 'msgrep-when text-muted', rep.context.at));
             c.appendChild(ctx);
         } else {
-            c.appendChild(el('div', 'msgrep-label text-muted', t('js.msgrep.none_context')));
+            c.appendChild(el('div', 'msgrep-label text-muted', t.key('js.msgrep.none_context')));
         }
 
         var box = el('div', 'msgrep-msg msgrep-reported');
-        box.appendChild(el('div', 'msgrep-label text-muted', t('js.msgrep.reported_line')));
+        box.appendChild(el('div', 'msgrep-label text-muted', t.key('js.msgrep.reported_line')));
         if (rep.message) {
             var mb = el('div', 'msgrep-body richtext');
             mb.innerHTML = rep.message.html;
             box.appendChild(mb);
             box.appendChild(el('div', 'msgrep-when text-muted', rep.message.at));
         } else {
-            box.appendChild(el('div', 'msgrep-gone text-muted', t('js.msgrep.gone')));
+            box.appendChild(el('div', 'msgrep-gone text-muted', t.key('js.msgrep.gone')));
         }
         c.appendChild(box);
 
@@ -150,7 +152,7 @@
             var note = document.createElement('input');
             note.type = 'text';
             note.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-note-in';
-            note.placeholder = t('js.msgrep.note_ph');
+            note.placeholder = t.key('js.msgrep.note_ph');
             note.maxLength = 500;
             acts.appendChild(note);
             // The answer to the reporter. A second box rather than a checkbox on the first: the two
@@ -159,7 +161,7 @@
             var reply = document.createElement('input');
             reply.type = 'text';
             reply.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reply-in';
-            reply.placeholder = t('js.msgrep.reply_ph');
+            reply.placeholder = t.key('js.msgrep.reply_ph');
             reply.maxLength = 500;
             acts.appendChild(reply);
 
@@ -170,7 +172,7 @@
              * nothing, or a warning in their own language with the reason typed here — which a warning
              * needs, and which is kept on the account. Silent is where the choice starts. */
             var modeRow = el('div', 'msgrep-acts msgrep-mode');
-            modeRow.appendChild(el('span', 'msgrep-mode-label', t('js.creport.mode_label')));
+            modeRow.appendChild(el('span', 'msgrep-mode-label', t.key('js.creport.mode_label')));
             var radio = function (value, label, on) {
                 var lab = el('label', 'msgrep-mode-opt');
                 var r = document.createElement('input');
@@ -179,26 +181,26 @@
                 r.value = value;
                 r.checked = !!on;
                 lab.appendChild(r);
-                lab.appendChild(document.createTextNode(' ' + label));
+                lab.append(' ', label);   // the word as a piece: a t.key() word keeps its key (1.73.0)
                 modeRow.appendChild(lab);
                 return r;
             };
-            radio('silent', t('js.creport.mode_silent'), true);
-            var loudRadio = radio('loud', t('js.creport.mode_loud'), false);
+            radio('silent', t.key('js.creport.mode_silent'), true);
+            var loudRadio = radio('loud', t.key('js.creport.mode_loud'), false);
             var reasonIn = document.createElement('input');
             reasonIn.type = 'text';
             reasonIn.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reason-in';
-            reasonIn.placeholder = t('js.creport.reason_ph');
-            reasonIn.setAttribute('aria-label', t('js.creport.reason_ph'));
+            reasonIn.placeholder = t.key('js.creport.reason_ph');
+            reasonIn.setAttribute('aria-label', t.key('js.creport.reason_ph'));
             reasonIn.maxLength = 500;
             modeRow.appendChild(reasonIn);
-            modeRow.title = t('js.creport.mode_hint');
+            modeRow.title = t.key('js.creport.mode_hint');
 
             /** One action, posted with whatever is in the note field. */
             var run = async function (action, days, btn) {
                 var loud = action === 'warn' || loudRadio.checked;
                 if (loud && action !== 'close' && action !== 'reopen' && !reasonIn.value.trim()) {
-                    say.textContent = t('js.creport.err_reason');
+                    say.textContent = t.key('js.creport.err_reason');
                     reasonIn.focus();
                     return;
                 }
@@ -210,7 +212,7 @@
                 if (r && r.success) { load(page); return; }
                 // The refusals a moderator can actually hit, said in words rather than left as
                 // a button that did nothing.
-                say.textContent = t(r && r.error === 'target_is_staff' ? 'js.msgrep.err_staff'
+                say.textContent = t.key(r && r.error === 'target_is_staff' ? 'js.msgrep.err_staff'
                                   : r && r.error === 'target_is_you' ? 'js.msgrep.err_you'
                                   : r && r.error === 'reason_required' ? 'js.creport.err_reason'
                                   : r && r.error === 'ban_is_permanent' ? 'js.creport.err_permanent'
@@ -234,23 +236,23 @@
                 return button(label, cls, function (b) {
                     var row = el('span', 'msgrep-confirm');
                     row.appendChild(el('span', 'msgrep-confirm-q', question));
-                    var yes = button(t('js.msgrep.yes'), 'btn-danger', function (yb) { go(yb); });
-                    var no = button(t('js.msgrep.no'), 'btn-outline-secondary', function () { row.replaceWith(b); });
+                    var yes = button(t.key('js.msgrep.yes'), 'btn-danger', function (yb) { go(yb); });
+                    var no = button(t.key('js.msgrep.no'), 'btn-outline-secondary', function () { row.replaceWith(t.relabel(b)); });
                     row.appendChild(yes); row.appendChild(no);
                     b.replaceWith(row);
                 });
             };
 
-            acts.appendChild(button(rep.status === 'closed' ? t('js.msgrep.reopen') : t('js.msgrep.close'),
+            acts.appendChild(button(rep.status === 'closed' ? t.key('js.msgrep.reopen') : t.key('js.msgrep.close'),
                                     'btn-outline-secondary',
                                     function (b) { run(rep.status === 'closed' ? 'reopen' : 'close', 0, b); }));
             if (rep.message) {
-                acts.appendChild(confirmThen(acts, t('js.msgrep.delete_q'), t('js.msgrep.delete'), 'btn-outline-danger',
+                acts.appendChild(confirmThen(acts, t.key('js.msgrep.delete_q'), t.key('js.msgrep.delete'), 'btn-outline-danger',
                                              function (b) { run('delete_message', 0, b); }));
             }
             // A warning and nothing else (1.71.0) — always told, so it asks the reason; never to staff.
             if (!st.staff) {
-                acts.appendChild(confirmThen(acts, t('js.creport.warn_q', { user: rep.reported }), t('js.creport.warn'), 'btn-outline-warning',
+                acts.appendChild(confirmThen(acts, t.key('js.creport.warn_q', { user: rep.reported }), t.key('js.creport.warn'), 'btn-outline-warning',
                                              function (b) { run('warn', 0, b); }));
             }
             c.appendChild(acts);
@@ -261,7 +263,7 @@
              * that was the only answer this page had. */
             var pun = el('div', 'msgrep-acts msgrep-punish');
             if (st.staff) {
-                pun.appendChild(el('span', 'text-muted', t('js.msgrep.staff_note')));
+                pun.appendChild(el('span', 'text-muted', t.key('js.msgrep.staff_note')));
             } else {
                 var pick = document.createElement('select');
                 pick.className = 'form-select form-select-sm bg-dark text-light border-secondary msgrep-pick';
@@ -269,22 +271,22 @@
                  ['ban:7', 'ban_7'], ['ban:30', 'ban_30'], ['ban:0', 'ban_forever']].forEach(function (o) {
                     var op = document.createElement('option');
                     op.value = o[0];
-                    op.textContent = t('js.msgrep.' + o[1]);
+                    op.textContent = t.key('js.msgrep.' + o[1]);
                     pick.appendChild(op);
                 });
                 pun.appendChild(pick);
-                pun.appendChild(button(t('js.msgrep.apply'), 'btn-outline-warning', function (b) {
+                pun.appendChild(button(t.key('js.msgrep.apply'), 'btn-outline-warning', function (b) {
                     var parts = pick.value.split(':');
-                    var q = t('js.msgrep.sure_' + parts[0], { user: rep.reported });
+                    var q = t.key('js.msgrep.sure_' + parts[0], { user: rep.reported });
                     var row = el('span', 'msgrep-confirm');
                     row.appendChild(el('span', 'msgrep-confirm-q', q));
-                    row.appendChild(button(t('js.msgrep.yes'), 'btn-danger', function (yb) { run(parts[0], Number(parts[1]), yb); }));
-                    row.appendChild(button(t('js.msgrep.no'), 'btn-outline-secondary', function () { row.replaceWith(b); }));
+                    row.appendChild(button(t.key('js.msgrep.yes'), 'btn-danger', function (yb) { run(parts[0], Number(parts[1]), yb); }));
+                    row.appendChild(button(t.key('js.msgrep.no'), 'btn-outline-secondary', function () { row.replaceWith(t.relabel(b)); }));
                     b.replaceWith(row);
                 }));
-                if (st.muted_until) pun.appendChild(button(t('js.msgrep.unmute'), 'btn-outline-success', function (b) { run('unmute', 0, b); }));
+                if (st.muted_until) pun.appendChild(button(t.key('js.msgrep.unmute'), 'btn-outline-success', function (b) { run('unmute', 0, b); }));
                 // Only a ban this card can lift: one with a date. A dateless ban is the owner's, from the Users page.
-                if (st.banned && st.banned_until) pun.appendChild(button(t('js.msgrep.unban'), 'btn-outline-success', function (b) { run('unban', 0, b); }));
+                if (st.banned && st.banned_until) pun.appendChild(button(t.key('js.msgrep.unban'), 'btn-outline-success', function (b) { run('unban', 0, b); }));
             }
             pun.appendChild(say);
             c.appendChild(pun);
@@ -299,13 +301,13 @@
         if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
         var j = await api(qs);
         listEl.textContent = '';
-        if (!j || !j.reports) { listEl.appendChild(el('div', 'text-muted py-3', t('js.msgrep.empty'))); return; }
+        if (!j || !j.reports) { listEl.appendChild(el('div', 'text-muted py-3', t.key('js.msgrep.empty'))); return; }
         mayHandle = !!j.may_handle;
         if (badge) {
             badge.textContent = j.open ? String(j.open) : '';
             badge.classList.toggle('d-hidden', !j.open);
         }
-        if (!j.reports.length) { listEl.appendChild(el('div', 'text-muted py-3', t('js.msgrep.empty'))); return; }
+        if (!j.reports.length) { listEl.appendChild(el('div', 'text-muted py-3', t.key('js.msgrep.empty'))); return; }
         j.reports.forEach(function (r) { listEl.appendChild(card(r)); });
 
         pagerEl.textContent = '';
@@ -322,9 +324,9 @@
                 b.addEventListener('click', function () { load(target); });
                 return b;
             };
-            pagerEl.appendChild(mk('bi bi-chevron-left', t('js.common.pg_prev'), j.page - 1, j.page <= 1));
+            pagerEl.appendChild(mk('bi bi-chevron-left', t.key('js.common.pg_prev'), j.page - 1, j.page <= 1));
             pagerEl.appendChild(el('span', 'pg-total', j.page + ' / ' + j.pages));
-            pagerEl.appendChild(mk('bi bi-chevron-right', t('js.common.pg_next'), j.page + 1, j.page >= j.pages));
+            pagerEl.appendChild(mk('bi bi-chevron-right', t.key('js.common.pg_next'), j.page + 1, j.page >= j.pages));
         }
     }
 

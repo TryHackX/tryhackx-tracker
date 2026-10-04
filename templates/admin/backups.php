@@ -9,7 +9,9 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl) ?>
+    <?php /* + the helpers' own sentences (a helper that did not answer) and the backup profiles' names the status
+             answer gives, found back by key so they follow the live language switch (t.find(), 1.73.0) */ ?>
+    <?= langJsBridge($baseUrl, ['js.', 'api.helper.', 'api.backup.profile_']) ?>
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>"
       data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>"
@@ -180,6 +182,8 @@
     <!-- Toast container -->
     <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container"></div>
 
+    <?php /* What the server wrote, marked before any script of the page runs (1.73.0, assets/js/lang-swap.js). */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-backups.js<?= assetVer('assets/js/admin-backups.js') ?>"></script>

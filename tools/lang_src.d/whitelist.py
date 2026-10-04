@@ -32,8 +32,10 @@ add('whitelist', {
                      '<strong>:mode mode</strong>:next:pending',
                      'Godziny whitelisty: <strong>:hours</strong>. W tej chwili tracker jest w '
                      '<strong>trybie :mode</strong>:next:pending'),
-    'sched_next':  ('; next change at <strong>:at</strong> (:tz).',
-                    '; najbliższa zmiana o <strong>:at</strong> (:tz).'),
+    # :at is the day and the time in the reader's language, "Tue 02:30" / "wt 02:30" (1.73.0,
+    # scheduleFormatLocalText()) — a colon rather than "at"/"o", which a day name cannot follow in Polish.
+    'sched_next':  ('; next change: <strong>:at</strong> (:tz).',
+                    '; najbliższa zmiana: <strong>:at</strong> (:tz).'),
     'sched_pending': (' Registrations made now become active at the start of the next whitelist hours.',
                       ' Rejestracje złożone teraz staną się aktywne wraz z początkiem najbliższych '
                       'godzin whitelisty.'),

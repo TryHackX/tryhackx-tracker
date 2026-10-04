@@ -34,6 +34,7 @@
     const drop = document.getElementById('admin-sound-drop');
     const maxBytes = Number(root.dataset.maxBytes) || 524288;
     const addLabel = btn.textContent.trim();
+    const restingFace = [...btn.childNodes];   // the server's own nodes, put back after a busy spell (1.73.0)
     let maxCount = Number(root.dataset.maxCount) || 40;
 
     // What the sniffed type is CALLED. "audio/mpeg" is the honest answer to a question nobody asked.
@@ -55,7 +56,7 @@
         if (!main) return;
         main.textContent = '';
         if (file) main.appendChild(document.createTextNode(file.name + ' · ' + Math.round(file.size / 1024) + ' KB'));
-        else { main.appendChild(el('u', { text: t('js.sounds.drop_choose') })); main.appendChild(document.createTextNode(' ' + t('js.sounds.drop_or'))); }
+        else { main.appendChild(el('u', { text: t.key('js.sounds.drop_choose') })); main.append(' ', t.key('js.sounds.drop_or')); }
     }
     let dropped = null;          // a file that came by drag rather than through the dialog
     function chosen() { return dropped || (fileIn.files && fileIn.files[0]) || null; }
@@ -94,10 +95,10 @@
     // ── playing one ──────────────────────────────────────────────────────────
     let player = null;
     function preview(url) {
-        if (!url) { showToast(t('js.sounds.nothing_to_play'), 'info'); return; }
+        if (!url) { showToast(t.key('js.sounds.nothing_to_play'), 'info'); return; }
         try { if (player) player.pause(); } catch (e) { /* ignore */ }
         player = new Audio(url);
-        player.play().catch(() => showToast(t('js.sounds.preview_failed'), 'danger'));
+        player.play().catch(() => showToast(t.key('js.sounds.preview_failed'), 'danger'));
     }
 
     // ── names ────────────────────────────────────────────────────────────────
@@ -111,8 +112,8 @@
     }
     /** The two rules the owner can break without leaving the page. includes/sounds.php checks them again. */
     function checkName(name, exceptId) {
-        if (name.length < NAME_MIN) { showToast(t('js.sndadmin.name_short'), 'warning'); return false; }
-        if (nameTaken(name, exceptId)) { showToast(t('js.sndadmin.name_taken', { name: name }), 'warning'); return false; }
+        if (name.length < NAME_MIN) { showToast(t.key('js.sndadmin.name_short'), 'warning'); return false; }
+        if (nameTaken(name, exceptId)) { showToast(t.key('js.sndadmin.name_taken', { name: name }), 'warning'); return false; }
         return true;
     }
 
@@ -120,7 +121,7 @@
     /** The "Your own" group, made on the spot when the first upload needs somewhere to go. */
     function ownGroup(sel) {
         let g = sel.querySelector('optgroup[data-sound-own]');
-        if (!g) { g = el('optgroup', { label: t('js.sndadmin.group_own'), 'data-sound-own': true }); sel.appendChild(g); }
+        if (!g) { g = el('optgroup', { label: t.key('js.sndadmin.group_own'), 'data-sound-own': true }); sel.appendChild(g); }
         return g;
     }
     /** An option into (or back into) its place: inside "Your own", by name. */
@@ -170,18 +171,18 @@
     function paintCount() {
         if (!countEl) return;
         countEl.hidden = false;
-        countEl.textContent = t('js.sndadmin.count', { n: rows.length, max: maxCount });
+        countEl.textContent = t.key('js.sndadmin.count', { n: rows.length, max: maxCount });
         countEl.classList.toggle('is-full', rows.length >= maxCount);
     }
 
     function rowFor(r) {
-        const play = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t('js.sounds.play'), 'aria-label': t('js.sounds.play') },
+        const play = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t.key('js.sounds.play'), 'aria-label': t.key('js.sounds.play') },
                         [el('i', { className: 'bi bi-play-fill' })]);
         play.addEventListener('click', () => preview(r.url));
-        const ren = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t('js.sndadmin.rename'), 'aria-label': t('js.sndadmin.rename') },
+        const ren = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t.key('js.sndadmin.rename'), 'aria-label': t.key('js.sndadmin.rename') },
                        [el('i', { className: 'bi bi-pencil' })]);
         ren.addEventListener('click', () => rename(r));
-        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: t('js.sounds.delete'), 'aria-label': t('js.sounds.delete') },
+        const del = el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', title: t.key('js.sounds.delete'), 'aria-label': t.key('js.sounds.delete') },
                        [el('i', { className: 'bi bi-trash' })]);
         del.addEventListener('click', () => remove(r));
         const facts = [TYPES[r.mime] || r.mime, Math.round(r.bytes / 1024) + ' KB', r.ms ? (r.ms / 1000).toFixed(1) + ' s' : null];
@@ -198,14 +199,14 @@
         rows = Array.isArray(listing) ? listing : [];
         list.textContent = '';
         paintCount();
-        if (!rows.length) { list.appendChild(el('div', { className: 'text-muted small' }, t('js.sounds.no_uploads'))); return; }
+        if (!rows.length) { list.appendChild(el('div', { className: 'text-muted small' }, t.key('js.sounds.no_uploads'))); return; }
         const table = el('table', { className: 'table table-dark table-sm align-middle mb-0 admin-sounds-table' }, [
             el('thead', {}, [el('tr', {}, [
-                el('th', { scope: 'col' }, t('js.sndadmin.col_name')),
-                el('th', { scope: 'col' }, t('js.sndadmin.col_file')),
-                el('th', { scope: 'col' }, t('js.sndadmin.col_added')),
-                el('th', { scope: 'col' }, t('js.sndadmin.col_used')),
-                el('th', { scope: 'col', className: 'text-end' }, [el('span', { className: 'visually-hidden' }, t('js.sndadmin.col_actions'))]),
+                el('th', { scope: 'col' }, t.key('js.sndadmin.col_name')),
+                el('th', { scope: 'col' }, t.key('js.sndadmin.col_file')),
+                el('th', { scope: 'col' }, t.key('js.sndadmin.col_added')),
+                el('th', { scope: 'col' }, t.key('js.sndadmin.col_used')),
+                el('th', { scope: 'col', className: 'text-end' }, [el('span', { className: 'visually-hidden' }, t.key('js.sndadmin.col_actions'))]),
             ])]),
         ]);
         const body = el('tbody');
@@ -217,16 +218,16 @@
 
     // ── what the buttons do ──────────────────────────────────────────────────
     async function rename(r) {
-        const v = await promptModal({ title: t('js.sndadmin.rename_title'), label: t('js.sndadmin.rename_label'), value: r.name,
-                                      maxlength: 60, hint: t('js.sndadmin.rename_hint'), okLabel: t('js.sndadmin.rename') });
+        const v = await promptModal({ title: t.key('js.sndadmin.rename_title'), label: t.key('js.sndadmin.rename_label'), value: r.name,
+                                      maxlength: 60, hint: t.key('js.sndadmin.rename_hint'), okLabel: t.key('js.sndadmin.rename') });
         if (v === null) return;
         const name = String(v).trim();
         if (name === r.name) return;
         if (!checkName(name, r.id)) return;
         let j;
         try { j = await apiCall('admin/sounds', 'POST', { op: 'rename', id: r.id, name: name }); }
-        catch (e) { showToast(t('js.sounds.failed'), 'danger'); return; }
-        if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); return; }
+        catch (e) { showToast(t.key('js.sounds.failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.sounds.failed'), 'danger'); return; }
         retitleOption(j.renamed.sid, j.renamed.name);
         render(j.sounds);
         showToast(j.message || 'OK', 'success');
@@ -234,12 +235,12 @@
 
     async function remove(r) {
         const used = usedBy(r.sid);
-        const opts = used.length ? { after: t('js.sndadmin.delete_clears', { what: used.join(', ') }) } : {};
-        if (!(await confirmAction(t('js.sounds.delete'), t('js.sounds.delete_confirm', { name: r.name }), opts))) return;
+        const opts = used.length ? { after: t.key('js.sndadmin.delete_clears', { what: used.join(', ') }) } : {};
+        if (!(await confirmAction(t.key('js.sounds.delete'), t.key('js.sounds.delete_confirm', { name: r.name }), opts))) return;
         let j;
         try { j = await apiCall('admin/sounds', 'POST', { op: 'delete', id: r.id }); }
-        catch (e) { showToast(t('js.sounds.failed'), 'danger'); return; }
-        if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); return; }
+        catch (e) { showToast(t.key('js.sounds.failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.sounds.failed'), 'danger'); return; }
         dropOption(r.sid);
         delete urls[r.sid];
         render(j.sounds);
@@ -252,9 +253,11 @@
         btn.disabled = on;
         nameIn.disabled = on;
         if (fileIn) fileIn.disabled = on;
-        btn.textContent = '';
-        btn.appendChild(el('i', { className: on ? 'bi bi-hourglass-split' : 'bi bi-plus-lg' }));
-        btn.appendChild(document.createTextNode(' ' + (on ? t('js.sndadmin.adding') : addLabel)));
+        // Busy: the hourglass and a keyed word; done: the button's OWN nodes back, the ones the server wrote — the live
+        // language switch translates those where they stand (a copy of their words would stay in the old language).
+        if (on) btn.replaceChildren(el('i', { className: 'bi bi-hourglass-split' }), ' ', t.key('js.sndadmin.adding'));
+        else if (restingFace.length) btn.replaceChildren(...restingFace);
+        else btn.replaceChildren(el('i', { className: 'bi bi-plus-lg' }), ' ', addLabel);
     }
     const readFile = (f) => new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -266,18 +269,18 @@
     async function add() {
         if (busy) return;
         const f = chosen();
-        if (!f) { showToast(t('js.sounds.pick_file'), 'warning'); if (drop) drop.focus(); return; }
-        if (f.size > maxBytes) { showToast(t('js.sounds.too_large', { kb: Math.round(maxBytes / 1024) }), 'danger'); return; }
+        if (!f) { showToast(t.key('js.sounds.pick_file'), 'warning'); if (drop) drop.focus(); return; }
+        if (f.size > maxBytes) { showToast(t.key('js.sounds.too_large', { kb: Math.round(maxBytes / 1024) }), 'danger'); return; }
         const name = nameIn.value.trim() || prettyFromFile(f.name);
         if (!checkName(name, 0)) { nameIn.value = name; nameIn.focus(); nameIn.select(); return; }
         setBusy(true);
         let data, j;
         try { data = await readFile(f); }
-        catch (e) { setBusy(false); showToast(t('js.sounds.failed'), 'danger'); return; }
+        catch (e) { setBusy(false); showToast(t.key('js.sounds.failed'), 'danger'); return; }
         try { j = await apiCall('admin/sounds', 'POST', { op: 'upload', name: name, data: data }); }
-        catch (e) { setBusy(false); showToast(t('js.sounds.failed'), 'danger'); return; }
+        catch (e) { setBusy(false); showToast(t.key('js.sounds.failed'), 'danger'); return; }
         setBusy(false);
-        if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); nameIn.focus(); return; }
+        if (!j.success) { showToast(j.error || t.key('js.sounds.failed'), 'danger'); nameIn.focus(); return; }
         addOption(j.added.sid, j.added.name);
         fileIn.value = '';
         nameIn.value = '';
@@ -302,8 +305,8 @@
 
     async function load() {
         let j;
-        try { j = await apiCall('admin/sounds'); } catch (e) { showToast(t('js.sounds.failed'), 'danger'); return; }
-        if (!j.success) { showToast(j.error || t('js.sounds.failed'), 'danger'); return; }
+        try { j = await apiCall('admin/sounds'); } catch (e) { showToast(t.key('js.sounds.failed'), 'danger'); return; }
+        if (!j.success) { showToast(j.error || t.key('js.sounds.failed'), 'danger'); return; }
         builtins = j.builtins || [];
         builtins.forEach((b) => { urls[b.id] = b.url; });
         if (j.max_count) maxCount = Number(j.max_count);

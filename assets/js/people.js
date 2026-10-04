@@ -25,12 +25,13 @@
             if (k === 'className') n.className = v;
             else if (k === 'text') n.textContent = v;
             else if (k === 'html') n.innerHTML = v;          // server-rendered, already sanitized
-            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.dataset[d] = v[d]; });
+            // data-* through setAttribute, which keeps a t.key() word's key (dataset would write its words only, 1.73.0)
+            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.setAttribute('data-' + d.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); }), v[d]); });
             else n.setAttribute(k, v === true ? '' : v);
         });
         (Array.isArray(kids) ? kids : kids ? [kids] : []).forEach(function (c) {
             if (c === null || c === undefined || c === false) return;
-            n.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+            n.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key
         });
         return n;
     }
@@ -59,6 +60,54 @@
         } catch (e) { return null; }
     }
     function when(s) { return String(s || '').replace('T', ' ').slice(0, 16); }
+    // The reader's clock (1.73.0 part E): the server sends each moment as 'Y-m-d H:i' in the reader's zone (`time`,
+    // `last_time`, `until_time`, `since_time` — api/user_messages.php, api/user_people.php), the way the shoutbox's
+    // times have been since 1.62.0; the raw DATETIME (the database session's clock) is only the fallback of a reply
+    // from before. Digits, not words: nothing here for the live language switch to say again.
+    function localTime(local, raw) { return local ? String(local) : when(raw); }
+
+    /**
+     * Words this file writes, KEPT WITH THEIR KEYS (1.73.0).
+     *
+     * The live language switch (assets/js/lang-swap.js) rewrites the page from a freshly rendered copy of it, and a
+     * node a script made has no counterpart in that copy. That is why the conversation's archive button (1.71.0)
+     * went on saying "Take this conversation out of your inbox" after a switch to Polish: its tooltip was a t.key() at
+     * creation, and nothing ever asked again. Part A gave this file keys of its own on the nodes it made for the
+     * Archive and the Trash (data-pm-*) and a listener that said them again; part B made it the site's one rule —
+     * every t.key() word keeps its key on the node it is written into (assets/js/i18n.js) — and tr() writes through it:
+     * `text` the node's words, `tip` its data-tip (the site's tooltip, read by tipOnHover() in app.js when it
+     * shows), `aria` its aria-label, `args` the placeholders. `keep`: one placeholder that must not break across
+     * lines (a date — "2026-" at a line's end and "10-30" on the next is no date), set in a span of its own
+     * (.pm-nowrap) inside the sentence — the sentence is then one with a place in it, the way avatar.js writes a
+     * sentence with people in it (t.phraseMark()): the switch writes the new language's pieces round the same span.
+     */
+    function tr(node, spec) {
+        var args = spec.args;
+        if (spec.text && spec.keep && args && args[spec.keep] != null) {
+            var kept = String(args[spec.keep]), place = {};
+            place[spec.keep] = '\u00010\u0001';
+            var w = t.key(spec.text, Object.assign({}, args, place));
+            node.textContent = '';
+            String(w).split(/\u0001(\d+)\u0001/).forEach(function (part, i) {
+                if (i % 2 === 0) { if (part) node.appendChild(document.createTextNode(part)); return; }
+                node.appendChild(el('span', { className: 'pm-nowrap', text: kept, 'data-slot': '0' }));
+            });
+            t.phraseMark(node, w);
+        } else if (spec.text) t.text(node, spec.text, args);
+        if (spec.tip) t.attr(node, 'data-tip', spec.tip, args);
+        if (spec.aria) t.attr(node, 'aria-label', spec.aria, args);
+        return node;
+    }
+    /**
+     * An icon-only button: the glyph, its name (aria-label) and what it does (the site's data-tip), by key. `icon` is
+     * the WHOLE class string ('bi bi-archive'), the site's one icon markup (assets/js/app.js iconEl()), so
+     * tests/icons_test.php finds every name that is used.
+     */
+    function icBtn(cls, icon, nameKey, tipKey, args) {
+        return tr(el('button', { type: 'button', className: cls + ' ic-btn' },
+                     el('i', { className: icon, 'aria-hidden': 'true' })),
+                  { aria: nameKey, tip: tipKey || nameKey, args: args });
+    }
 
     /**
      * The picture beside a person's name (1.63.0), from the ADDRESS the server put in the row — these
@@ -108,6 +157,17 @@
         // overtaken by the next one, which asks with the SAME `after` id and appends the same line
         // twice — visible as a message that arrived in duplicate on a slow connection.
         var polling = false;
+        // The Archive and the Trash (1.73.0). Which of the three places the list shows; how long the Trash keeps a
+        // conversation (0: there is none, and Delete deletes at once — the page's number, then every answer's); the
+        // list's last answer, which a live language switch draws again in the new words without asking; a sequence
+        // number, so an answer for a place the reader has already left is not drawn over the one they went to; and
+        // which part of the open conversation is on the screen — what is not in the Trash, or what is.
+        var viewsEl = document.getElementById('pm-views');
+        var noteArchive = document.getElementById('pm-note-archive');
+        var noteTrash = document.getElementById('pm-note-trash');
+        var emptyBtn = document.getElementById('pm-empty-trash');
+        var view = 'inbox', trashDays = Number(root.dataset.trashDays || 0), lastList = null, listSeq = 0;
+        var openPart = 'live', lastCounts = null;
 
         function badge(n, fromFriends) {
             var b = document.getElementById('pm-unread');
@@ -175,102 +235,287 @@
             return { q: q, deep: deep, key: (deep ? 'deep:' : 'name:') + q };
         }
 
+        /* ── the three places (1.73.0) ────────────────────────────────────────────────────────────
+           The Inbox, the Archive (what "hide" was — nothing deleted, back in one click) and the Trash (Delete:
+           restorable for the site's number of days, then deleted for good — for this reader; the other person's
+           copy is never touched). The tabs are the page's (templates/pages/account.php); their numbers are kept
+           here from every answer: conversations in the Archive and the Trash, and the unread messages in the two
+           places the badge counts — so a number on the account link always has a place on this page to be read. */
+        function paintCounts(c) {
+            if (!c || !viewsEl) return;
+            lastCounts = c;
+            var tab = function (v) { return document.getElementById('pm-view-' + v); };
+            ['archive', 'trash'].forEach(function (v) {
+                var s = tab(v) && tab(v).querySelector('.pm-view-n');
+                if (s) s.textContent = '(' + (Number(c[v]) || 0) + ')';
+            });
+            ['inbox', 'archive'].forEach(function (v) {
+                var p = tab(v) && tab(v).querySelector('.pm-view-unread');
+                if (!p) return;
+                var n = Number(c['unread_' + v]) || 0;
+                var num = p.querySelector('.pm-view-unread-n');
+                if (num) num.textContent = String(n);
+                p.hidden = !n;
+            });
+            // No Trash on this site (pm_trash_days 0) and nothing left in it: no tab for it.
+            var tt = tab('trash');
+            if (tt) {
+                tt.hidden = !(trashDays > 0 || Number(c.trash) > 0);
+                if (tt.hidden && view === 'trash') setView('inbox');
+            }
+            if (emptyBtn) emptyBtn.disabled = !Number(c.trash);
+        }
+
+        function setView(v, andLoad) {
+            view = v;
+            if (viewsEl) viewsEl.querySelectorAll('.rt-tab').forEach(function (b) {
+                var on = b.dataset.view === v;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+                b.tabIndex = on ? 0 : -1;
+            });
+            list.setAttribute('aria-labelledby', 'pm-view-' + v);
+            if (noteArchive) noteArchive.hidden = v !== 'archive';
+            if (noteTrash) noteTrash.hidden = v !== 'trash';
+            if (andLoad !== false) loadInbox();
+        }
+        if (viewsEl) {
+            viewsEl.addEventListener('click', function (e) {
+                var b = e.target.closest ? e.target.closest('.rt-tab') : null;
+                if (!b || b.hidden || b.dataset.view === view) return;
+                setView(b.dataset.view);
+            });
+            // A tab list is walked with the arrows (and Home / End); the focus moves, and the place with it.
+            viewsEl.addEventListener('keydown', function (e) {
+                if (['ArrowRight', 'ArrowLeft', 'Home', 'End'].indexOf(e.key) === -1) return;
+                var tabs = [].slice.call(viewsEl.querySelectorAll('.rt-tab')).filter(function (b) { return !b.hidden; });
+                var i = tabs.indexOf(document.activeElement);
+                if (i === -1) return;
+                e.preventDefault();
+                var n = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1
+                      : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                tabs[n].focus();
+                if (tabs[n].dataset.view !== view) setView(tabs[n].dataset.view);
+            });
+            setView('inbox', false);
+        }
+
         async function loadInbox() {
+            var my = ++listSeq, forView = view;
             list.textContent = '';
-            list.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            list.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
             // Names are filtered here, because the list is already in the browser. Looking inside
             // the messages is the server's job and costs a request, so it only happens when the
             // box beside the filter is ticked and there is something to look for.
             var ask = inboxQuery(), q = ask.q, deep = ask.deep;
             asked = ask.key;
-            var j = await get('user_messages' + (deep ? '&deep=1&search=' + encodeURIComponent(q) : ''));
+            var j = await get('user_messages&view=' + forView + (deep ? '&deep=1&search=' + encodeURIComponent(q) : ''));
+            // A newer question is on its way — another place, another search: this answer is not what is on screen.
+            if (my !== listSeq) return;
             list.textContent = '';
             if (!j || !j.success) {
                 list.appendChild(el('div', { className: 'pf-empty',
-                    text: t(j && j.error === 'rate_limit' ? 'js.pm.search_slow' : 'js.fav.load_failed') }));
+                    text: t.key(j && j.error === 'rate_limit' ? 'js.pm.search_slow' : 'js.fav.load_failed') }));
                 return;
             }
             badge(j.unread, j.unread_friend);
+            if (typeof j.trash_days === 'number') trashDays = j.trash_days;
+            paintCounts(j.counts);
             // An empty inbox has an empty stamp, and that IS a baseline: turning it into null made the
             // first message ever land silently, adopted by the first tick instead of drawn.
             inboxStamp = String(j.stamp || '');
             inboxUnread = Number(j.unread || 0);
             live = Number(j.live || live || 0);
             if (live > 0 && !inboxTimer) inboxTimer = setInterval(inboxPoll, Math.max(4, live) * 1000);
-            var ql = q.toLowerCase();
-            var rows = (j.threads || []).filter(function (x) { return deep || !ql || x.with.toLowerCase().indexOf(ql) !== -1; });
-            if (!rows.length) { list.appendChild(el('div', { className: 'pf-empty', text: t(q ? 'js.pm.no_match' : 'js.pm.no_threads') })); return; }
-            rows.forEach(function (x) {
-                var row = el('button', { type: 'button', className: 'pm-row' + (x.unread ? ' pm-row-unread' : '') });
-                // A stable id, the way every polled row on this site carries one since 1.64.0 (see
-                // templates/partials/shoutbox_widget.php): the live language switch pairs a living
-                // node with the freshly rendered one by `id` first and by POSITION second, and a
-                // list a script filled after the page was drawn is never the list a fresh render
-                // holds. The inbox is written into an empty container, so nothing can be paired
-                // with it today — the id is what keeps that true if the container is ever given a
-                // line of its own. One thread per person, so the name IS the key.
-                row.id = 'pm-th-' + x.with;
-                // The picture takes a column of its own, beside both lines of the row: a person to the
-                // left of what they last said, the way every inbox reads.
-                var pic = face(x.with, x.avatar, 32, 'pm-av');
-                if (pic) { row.classList.add('pm-row-av'); row.appendChild(pic); }
-                row.appendChild(el('span', { className: 'pm-who', text: x.with }));
-                // The count and the time are one cell, on the right of the name. Appended as two
-                // children of the row they were two grid items, and the count — landing in the
-                // column that holds the name — was stretched into a bar the width of the row.
-                var meta = el('span', { className: 'pm-meta' });
-                if (x.unread) meta.appendChild(el('span', { className: 'pm-count', text: String(x.unread) }));
-                meta.appendChild(el('span', { className: 'pm-when text-muted', text: when(x.last_at) }));
-                row.appendChild(meta);
-                row.appendChild(el('span', { className: 'pm-preview text-muted', text: (x.mine ? t('js.pm.you_prefix') : '') + x.preview }));
-                row.addEventListener('click', function () {
-                    // Opening it IS reading it, and the list stands beside the conversation rather
-                    // than being replaced by it — so a row still saying "2 waiting" next to the
-                    // conversation those two are in is simply wrong until the next reload.
-                    row.classList.remove('pm-row-unread');
-                    var c = row.querySelector('.pm-count');
-                    if (c) c.remove();
-                    list.querySelectorAll('.pm-row-open').forEach(function (r) { r.classList.remove('pm-row-open'); });
-                    row.classList.add('pm-row-open');
-                    openThread(x.with);
-                });
-                /* ── taking a conversation away, for me (1.64.0, schema 70) ──────────────────────
-                   The row IS a button, so the cross cannot be inside it — a button inside a button
-                   is not markup a browser will keep. The pair goes in a wrapper instead, and the
-                   cross is its sibling: drawn on hover on a machine with a pointer, always on a
-                   touch screen (the stylesheet's `@media (hover: none)` arm).
+            lastList = { threads: j.threads || [], q: q, deep: deep, view: forView };
+            renderList();
+        }
 
-                   It asks the same in-place question the shoutbox asks, from the same helper in
-                   assets/js/app.js. Nothing is destroyed: the endpoint moves THIS reader's
-                   watermark and the other person's copy is untouched — which is why the question
-                   says "for you". */
-                var wrap = el('div', { className: 'pm-row-wrap' });
-                wrap.appendChild(row);
-                var del = el('button', { type: 'button', className: 'pm-del',
-                                         title: t('js.pm.del_title', { user: x.with }),
-                                         'aria-label': t('js.pm.del_title', { user: x.with }) },
-                              el('i', { className: 'bi bi-trash', 'aria-hidden': 'true' }));
-                del.addEventListener('click', function () {
-                    if (typeof window.askInPlace !== 'function') return;
-                    window.askInPlace(del, t('js.pm.del_q'), async function () {
-                        var r = await post('user_messages', { op: 'delete', with: x.with });
-                        if (!r || !r.success) return false;
-                        // The conversation that was open is the one that has just gone.
-                        if (openWith === x.with) { stopPoll(); openWith = null; pane.textContent = ''; }
-                        badge(Number(r.unread) || 0);
-                        loadInbox();
-                        return true;
-                    }, {
-                        host: wrap,
-                        relabel: function (b) {
-                            b.title = t('js.pm.del_title', { user: x.with });
-                            b.setAttribute('aria-label', t('js.pm.del_title', { user: x.with }));
-                        },
-                    });
-                });
-                wrap.appendChild(del);
-                list.appendChild(wrap);
+        /** The list, from its last answer — also after a live language switch, in the new words, with no request. */
+        function renderList() {
+            if (!lastList) return;
+            list.textContent = '';
+            var ql = lastList.q.toLowerCase(), deep = lastList.deep, v = lastList.view;
+            var rows = lastList.threads.filter(function (x) { return deep || !ql || x.with.toLowerCase().indexOf(ql) !== -1; });
+            if (!rows.length) {
+                list.appendChild(el('div', { className: 'pf-empty', text: t.key(lastList.q ? 'js.pm.no_match'
+                    : v === 'archive' ? 'js.pm.no_archive' : v === 'trash' ? 'js.pm.no_trash' : 'js.pm.no_threads') }));
+                return;
+            }
+            rows.forEach(function (x) { list.appendChild(rowFor(x, v)); });
+        }
+
+        function rowFor(x, v) {
+            var row = el('button', { type: 'button', className: 'pm-row' + (x.unread ? ' pm-row-unread' : '') + (openWith === x.with ? ' pm-row-open' : '') });
+            // A stable id, the way every polled row on this site carries one since 1.64.0 (see
+            // templates/partials/shoutbox_widget.php): the live language switch pairs a living
+            // node with the freshly rendered one by `id` first and by POSITION second, and a
+            // list a script filled after the page was drawn is never the list a fresh render
+            // holds. The inbox is written into an empty container, so nothing can be paired
+            // with it today — the id is what keeps that true if the container is ever given a
+            // line of its own. One thread per person, so the name IS the key.
+            row.id = 'pm-th-' + x.with;
+            // The picture takes a column of its own, beside both lines of the row: a person to the
+            // left of what they last said, the way every inbox reads.
+            var pic = face(x.with, x.avatar, 32, 'pm-av');
+            if (pic) { row.classList.add('pm-row-av'); row.appendChild(pic); }
+            row.appendChild(el('span', { className: 'pm-who', text: x.with }));
+            // The count and the time are one cell, on the right of the name. Appended as two
+            // children of the row they were two grid items, and the count — landing in the
+            // column that holds the name — was stretched into a bar the width of the row.
+            var meta = el('span', { className: 'pm-meta' });
+            if (x.unread) meta.appendChild(el('span', { className: 'pm-count', text: String(x.unread) }));
+            meta.appendChild(el('span', { className: 'pm-when text-muted', text: localTime(x.last_time, x.last_at) }));
+            row.appendChild(meta);
+            row.appendChild(el('span', { className: 'pm-preview text-muted' }, [x.mine ? t.key('js.pm.you_prefix') : '', x.preview]));   // pieces (1.73.0)
+            row.addEventListener('click', function () {
+                // Opening it IS reading it, and the list stands beside the conversation rather
+                // than being replaced by it — so a row still saying "2 waiting" next to the
+                // conversation those two are in is simply wrong until the next reload.
+                row.classList.remove('pm-row-unread');
+                var c = row.querySelector('.pm-count');
+                if (c) c.remove();
+                list.querySelectorAll('.pm-row-open').forEach(function (r) { r.classList.remove('pm-row-open'); });
+                row.classList.add('pm-row-open');
+                // The Trash's rows open what is in the Trash; the others what is not.
+                openThread(x.with, { part: v === 'trash' ? 'trash' : '' });
             });
+            /* ── what can be done with it from here (1.64.0 the bin; 1.73.0 all of them) ─────────────
+               The row IS a button, so its actions cannot be inside it — a button inside a button is not
+               markup a browser will keep. They go in a wrapper instead, beside the row: drawn on hover on a
+               machine with a pointer, always on a touch screen (the stylesheet's `@media (hover: none)` arm).
+               Two per place — Archive and Delete in the Inbox, Move to inbox and Delete in the Archive,
+               Restore and Delete forever in the Trash — each an icon with its name and its tooltip. Delete
+               and Delete forever ask first, in place, with the shoutbox's question; a move says so after, in a
+               toast with Undo. Nothing is destroyed but by Delete forever, and then only for this reader. */
+            var wrap = el('div', { className: 'pm-row-wrap' });
+            wrap.appendChild(row);
+            var acts = el('span', { className: 'pm-row-acts' });
+            var args = { user: x.with };
+            if (v === 'trash') {
+                var rs = icBtn('pm-act pm-restore', 'bi bi-arrow-counterclockwise', 'js.pm.act_restore', 'js.pm.act_restore_tip', args);
+                rs.addEventListener('click', function () { userOp('restore', x.with, {}, rs); });
+                var pg = icBtn('pm-act pm-purge', 'bi bi-trash-fill', 'js.pm.act_purge', 'js.pm.act_purge_tip', args);
+                pg.addEventListener('click', function () {
+                    confirmThen(pg, 'js.pm.q_purge', wrap, function () { return userOp('purge', x.with, {}); });
+                });
+                acts.appendChild(rs);
+                acts.appendChild(pg);
+            } else {
+                var ar = v === 'archive'
+                    ? icBtn('pm-act pm-unarch', 'bi bi-inbox', 'js.pm.act_unarchive', 'js.pm.act_unarchive_tip', args)
+                    : icBtn('pm-act pm-arch', 'bi bi-archive', 'js.pm.act_archive', 'js.pm.act_archive_tip', args);
+                ar.addEventListener('click', function () { userOp(v === 'archive' ? 'unarchive' : 'archive', x.with, {}, ar); });
+                var del = icBtn('pm-act pm-del', 'bi bi-trash', 'js.pm.act_trash', trashDays > 0 ? 'js.pm.act_trash_tip' : 'js.pm.act_trash_final_tip', args);
+                del.addEventListener('click', function () {
+                    // `upto`: the last message this row was drawn with — one that arrived since stays where it is.
+                    confirmThen(del, trashDays > 0 ? 'js.pm.q_trash' : 'js.pm.q_trash_final', wrap,
+                                function () { return userOp('trash', x.with, { upto: x.last_id }); });
+                });
+                acts.appendChild(ar);
+                acts.appendChild(del);
+            }
+            wrap.appendChild(acts);
+            return wrap;
+        }
+
+        /* ── doing it, saying so, taking it back (1.73.0) ────────────────────────────────────────── */
+
+        /** The site's in-place question (assets/js/app.js) before fn; its button back if fn says it failed. */
+        function confirmThen(btn, qKey, host, fn) {
+            if (typeof window.askInPlace !== 'function') { fn(); return; }
+            window.askInPlace(btn, t.key(qKey), async function () { return (await fn()) ? true : false; }, { host: host });
+        }
+        function toast(o) { if (typeof window.siteToast === 'function') window.siteToast(o); }
+
+        /**
+         * One explicit operation (includes/people.php): the tabs' numbers and the badge from its answer, the open
+         * conversation closed when it has left (Archive, Trash, deleted for good) or drawn again where it came back
+         * to, and the list asked for again. Null when it did not go through (and said so).
+         */
+        async function runOp(op, name, extra) {
+            var r = await post('user_messages', Object.assign({ op: op, with: name }, extra || {}));
+            if (!r || !r.success) { toast({ text: 'js.pm.why_failed' }); return null; }
+            if (typeof r.trash_days === 'number') trashDays = r.trash_days;
+            paintCounts(r.counts);
+            badge(Number(r.unread) || 0);
+            if (openWith === name) {
+                if (op === 'archive' || op === 'trash' || op === 'purge') closePane();
+                else openThread(name);
+            }
+            // The list drawn again before anything is said about it: the toast after this looks at where the focus is.
+            await loadInbox();
+            return r;
+        }
+        /** Where the keyboard's focus goes when a toast about this conversation leaves it: its row, else the place's tab. */
+        function homeFor(name) {
+            return function () { return document.getElementById('pm-th-' + name) || document.getElementById('pm-view-' + view); };
+        }
+
+        /**
+         * What a button does: the operation, then a toast saying what happened — with Undo for ~5 s after a move
+         * (Archive, Move to inbox, Delete into the Trash, Restore). The Undo is the explicit opposite operation; a
+         * Trash's Undo names what that Trash did (to = the edge before it, from = the edge it set), so one that comes
+         * too late — the Trash emptied, restored, grown since — changes nothing and says so. Delete forever and a
+         * Delete with no Trash have nothing to undo, and their question said as much before they ran.
+         */
+        async function userOp(op, name, extra, srcBtn) {
+            if (srcBtn) srcBtn.disabled = true;
+            var r = await runOp(op, name, extra);
+            if (srcBtn && srcBtn.isConnected) srcBtn.disabled = false;
+            if (!r) return false;
+            var text = 'js.pm.t_archived', undo = null;
+            if (op === 'archive') {
+                if (r.changed) undo = function () { return undoOp('unarchive', name, {}); };
+            } else if (op === 'unarchive') {
+                text = 'js.pm.t_unarchived';
+                if (r.changed) undo = function () { return undoOp('archive', name, {}); };
+            } else if (op === 'trash') {
+                text = r.final ? 'js.pm.t_deleted' : 'js.pm.t_trashed';
+                if (r.changed && !r.final) undo = function () { return undoOp('restore', name, { to: r.was, from: r.upto }); };
+            } else if (op === 'restore') {
+                text = r.place === 'archive' ? 'js.pm.t_restored_archive' : 'js.pm.t_restored_inbox';
+                if (r.changed) undo = function () { return undoOp('trash', name, { upto: r.was }); };
+            } else {
+                text = 'js.pm.t_deleted';
+            }
+            toast({ text: text, args: { user: name }, key: 'pm:' + name, undo: undo, home: homeFor(name) });
+            return true;
+        }
+        async function undoOp(op, name, extra) {
+            var r = await runOp(op, name, extra);
+            if (!r) return;
+            toast({ text: r.changed ? 'js.pm.t_undone' : 'js.pm.t_stale', key: 'pm:' + name, home: homeFor(name) });
+            // The Undo that had the keyboard's focus is going with its toast: the focus goes to what it brought back.
+            var a = document.activeElement;
+            if (!a || a === document.body || !a.isConnected || (a.closest && a.closest('.site-toast'))) {
+                var h = homeFor(name)();
+                if (h) h.focus({ preventScroll: true });
+            }
+        }
+
+        async function emptyTrash() {
+            var r = await post('user_messages', { op: 'empty_trash' });
+            if (!r || !r.success) { toast({ text: 'js.pm.why_failed' }); return false; }
+            paintCounts(r.counts);
+            badge(Number(r.unread) || 0);
+            if (openWith) { if (openPart === 'trash') closePane(); else openThread(openWith); }
+            toast({ text: 'js.pm.t_emptied', args: { n: Number(r.purged) || 0 }, key: 'pm:empty' });
+            loadInbox();
+            return true;
+        }
+        if (emptyBtn) emptyBtn.addEventListener('click', function () {
+            if (emptyBtn.disabled) return;
+            confirmThen(emptyBtn, 'js.pm.q_empty', noteTrash, async function () { await emptyTrash(); return false; });
+        });
+
+        function closePane() {
+            stopPoll();
+            openWith = null; openPart = 'live';
+            msgsBox = null; typingLine = null;
+            pane.textContent = '';
+            pane.hidden = true;
+            list.querySelectorAll('.pm-row-open').forEach(function (r) { r.classList.remove('pm-row-open'); });
         }
 
         function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; } }
@@ -281,7 +526,7 @@
          */
         function reportFace(btn, reported) {
             btn.replaceChildren(el('i', { className: reported ? 'bi bi-flag-fill' : 'bi bi-flag', 'aria-hidden': 'true' }),
-                                ' ' + (reported ? t('js.pm.reported') : t('js.pm.report')));
+                                ' ', reported ? t.key('js.pm.reported') : t.key('js.pm.report'));   // a piece that keeps its key (1.73.0)
         }
 
         /** One message, as a row. The first draw and every later arrival go through here. */
@@ -292,10 +537,10 @@
             if (m.mine) wrap.dataset.mine = '1';
             wrap.appendChild(el('div', { className: 'pm-body richtext', html: m.html }));
             var foot = el('div', { className: 'pm-msg-foot text-muted' });
-            foot.appendChild(el('span', { text: when(m.created) }));
-            if (m.mine && m.read) foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
+            foot.appendChild(el('span', { className: 'pm-time', text: localTime(m.time, m.created) }));
+            if (m.mine && m.read) foot.appendChild(el('span', { className: 'pm-read', text: t.key('js.pm.read') }));
             if (!m.mine && mayReport) {
-                var rep = el('button', { type: 'button', className: 'pm-report', title: t('js.pm.report_title') });
+                var rep = el('button', { type: 'button', className: 'pm-report', title: t.key('js.pm.report_title') });
                 reportFace(rep, !!m.reported);
                 rep.disabled = !!m.reported;
                 rep.addEventListener('click', function () { reportMessage(m.id, rep); });
@@ -336,6 +581,7 @@
             });
             if ((j.rows || []).length) {
                 badge(j.unread, j.unread_friend);
+                if (j.counts) paintCounts(j.counts);
                 // Only follow the conversation down if they were already at the bottom of it —
                 // scrolling somebody away from the line they are reading is worse than a missed row.
                 if (atBottom) msgsBox.scrollTop = msgsBox.scrollHeight;
@@ -346,58 +592,77 @@
                     if (Number(w.dataset.id) > j.read_upto) return;
                     var foot = w.querySelector('.pm-msg-foot');
                     if (foot && !foot.querySelector('.pm-read')) {
-                        foot.appendChild(el('span', { className: 'pm-read', text: t('js.pm.read') }));
+                        foot.appendChild(el('span', { className: 'pm-read', text: t.key('js.pm.read') }));
                     }
                 });
             }
             if (typingLine) typingLine.hidden = !j.typing;
         }
 
-        async function openThread(name) {
+        async function openThread(name, opts) {
+            opts = opts || {};
             openWith = name;
+            openPart = 'live';
             stopPoll();
             msgsBox = null; typingLine = null; lastId = 0;
             pane.textContent = '';
             pane.hidden = false;
-            pane.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
-            var j = await get('user_messages&with=' + encodeURIComponent(name));
+            pane.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
+            var j = await get('user_messages&with=' + encodeURIComponent(name) + (opts.part === 'trash' ? '&part=trash' : ''));
             if (openWith !== name) return;
             pane.textContent = '';
             if (!j || !j.success) {
                 // "There is no such account" is an answer, not a failure to load one — and it is the
                 // answer somebody typing a name into the box above will get wrong first.
                 pane.appendChild(el('div', { className: 'pf-empty',
-                    text: t(j && j.error === 'not_found' ? 'js.pm.why_not_found' : 'js.fav.load_failed') }));
+                    text: t.key(j && j.error === 'not_found' ? 'js.pm.why_not_found' : 'js.fav.load_failed') }));
                 return;
             }
             badge(j.unread, j.unread_friend);
+            if (typeof j.trash_days === 'number') trashDays = j.trash_days;
+            // Opening it read what it shows: the tab it is in loses that from its unread pill.
+            if (j.counts) paintCounts(j.counts);
+            // Which part is on the screen (1.73.0): what is not in the Trash, or — asked from the Trash, or all
+            // there is — what is. The Trash's part is read, not written in: no live poll, no "…is writing".
+            var part = j.part === 'trash' ? 'trash' : 'live';
+            var st = j.state || {};
+            openPart = part;
+            var args = { user: name };
 
             var head = el('div', { className: 'pm-head' });
             // The picture inside the name's link: one unit the head's wrapping can never split, and
             // one more place to click through to the profile.
             head.appendChild(el('a', { className: 'pm-head-name', href: BASE + '?action=u&name=' + encodeURIComponent(name) },
                                 [face(j.with || name, j.with_avatar, 32, 'pm-head-av'), name]));
-            // Back and Clear as icons (1.71.0): an arrow back to the inbox, the archive box for "off my list"
-            // (nothing is deleted — the next message brings the conversation back). Named for a screen
-            // reader, explained in the site's tooltip (data-tip, assets/js/app.js).
-            var back = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn pm-back',
-                                      'aria-label': t('js.pm.back'), dataset: { tip: t('js.pm.back_title') } },
-                          el('i', { className: 'bi bi-arrow-left', 'aria-hidden': 'true' }));
-            back.addEventListener('click', function () { stopPoll(); pane.hidden = true; openWith = null; loadInbox(); });
+            // The head's icons (1.71.0, 1.73.0): the arrow back to the list; then, for a conversation in the Inbox,
+            // the archive box (into the Archive — nothing is deleted, and the toast's Undo or the Archive tab brings
+            // it back) and the bin (into the Trash, after the in-place question). In the Archive the way back is the
+            // bar's "Move to inbox" below, in the Trash the bar's Restore and Delete forever. Each named for a screen
+            // reader and explained in the site's tooltip, by key (tr(): they follow the live language switch).
+            var back = icBtn('btn btn-secondary btn-small pm-back', 'bi bi-arrow-left', 'js.pm.back', 'js.pm.back_title');
+            back.addEventListener('click', function () { closePane(); loadInbox(); });
             head.appendChild(back);
-            var hide = el('button', { type: 'button', className: 'btn btn-secondary btn-small ic-btn pm-hide',
-                                      'aria-label': t('js.pm.hide'), dataset: { tip: t('js.pm.hide_title') } },
-                          el('i', { className: 'bi bi-archive', 'aria-hidden': 'true' }));
-            hide.addEventListener('click', async function () {
-                await post('user_messages', { op: 'hide', with: name });
-                stopPoll();
-                pane.hidden = true; openWith = null; loadInbox();
-            });
-            head.appendChild(hide);
+            if (part === 'live' && st.place === 'inbox') {
+                var arch = icBtn('btn btn-secondary btn-small pm-arch', 'bi bi-archive', 'js.pm.act_archive', 'js.pm.act_archive_tip', args);
+                arch.addEventListener('click', function () { userOp('archive', name, {}, arch); });
+                head.appendChild(arch);
+            }
+            if (part === 'live' && (st.place === 'inbox' || st.place === 'archive')) {
+                var del = icBtn('btn btn-secondary btn-small pm-trash', 'bi bi-trash', 'js.pm.act_trash',
+                                trashDays > 0 ? 'js.pm.act_trash_tip' : 'js.pm.act_trash_final_tip', args);
+                del.addEventListener('click', function () {
+                    // Up to the last line on the screen: one the poll has not brought yet stays where it is.
+                    confirmThen(del, trashDays > 0 ? 'js.pm.q_trash' : 'js.pm.q_trash_final', head,
+                                function () { return userOp('trash', name, lastId ? { upto: lastId } : {}); });
+                });
+                head.appendChild(del);
+            }
             pane.appendChild(head);
+            var bar = barFor(name, part, st);
+            if (bar) pane.appendChild(bar);
 
             mayReport = !!j.may_report;
-            var body = el('div', { className: 'pm-msgs' });
+            var body = el('div', { className: 'pm-msgs' + (part === 'trash' ? ' pm-msgs-trash' : '') });
             (j.rows || []).forEach(function (m) {
                 if (m.id > lastId) lastId = m.id;
                 body.appendChild(renderMsg(m));
@@ -406,21 +671,72 @@
             msgsBox = body;
             // "…is writing", under the conversation and above the box being written in — which is
             // where it is true.
-            typingLine = el('div', { className: 'pm-typing text-muted', text: t('js.pm.typing', { user: name }) });
+            typingLine = el('div', { className: 'pm-typing text-muted', text: t.key('js.pm.typing', { user: name }) });
             typingLine.hidden = true;
             pane.appendChild(typingLine);
             typingAllowed = !!j.typing_on;
             live = Number(j.live || 0);
 
             if (j.can_write) {
+                // Written from the Trash's part too: the new message starts the conversation again after it, and
+                // what is in the Trash stays there (the bar then says so, with its Restore).
                 mountComposer(pane, name, function () { openThread(name); });
             } else {
-                pane.appendChild(el('div', { className: 'pm-closed', text: t('js.pm.why_' + (j.reason || 'nobody')) }));
+                pane.appendChild(el('div', { className: 'pm-closed', text: t.key('js.pm.why_' + (j.reason || 'nobody')) }));
             }
             body.scrollTop = body.scrollHeight;
             // Only once the conversation is on screen: a timer started before the first draw would
-            // ask about a thread this page has not read yet.
-            if (live > 0) pollTimer = setInterval(pollOnce, live * 1000);
+            // ask about a thread this page has not read yet. Never for the Trash's part.
+            if (live > 0 && part === 'live') pollTimer = setInterval(pollOnce, live * 1000);
+        }
+
+        /**
+         * The bar under a conversation's head (1.73.0): where it is, when that is not simply the Inbox — the owner
+         * wrote to somebody from the members list and found a conversation he had "hidden" with nothing to say so —
+         * and the way back, as words. In the Archive: Move to inbox. In the Trash: when it is deleted for good,
+         * Restore, and Delete forever (asked first). With earlier messages in the Trash while the conversation goes
+         * on: how many, and Restore them. Null when there is nothing to say.
+         */
+        function barFor(name, part, st) {
+            var lines = [];
+            var line = function (textNode, buttons) {
+                var l = el('div', { className: 'pm-bar-line' }, [textNode]);
+                var acts = el('span', { className: 'pm-bar-acts' });
+                buttons.forEach(function (b) { acts.appendChild(b); });
+                l.appendChild(acts);
+                lines.push(l);
+                return l;
+            };
+            var words = function (key, args) { return tr(el('span', { className: 'pm-bar-text' }), { text: key, args: args, keep: args && args.date ? 'date' : '' }); };
+            if (part === 'trash') {
+                var rs = barBtn('pm-bar-restore', 'bi bi-arrow-counterclockwise', 'js.pm.act_restore');
+                rs.addEventListener('click', function () { userOp('restore', name, {}, rs); });
+                var pg = barBtn('pm-bar-purge', 'bi bi-trash-fill', 'js.pm.act_purge');
+                var l1 = line(st.until ? words('js.pm.bar_trash', { date: localTime(st.until_time, st.until) }) : words('js.pm.bar_trash_plain'), [rs, pg]);
+                pg.addEventListener('click', function () {
+                    confirmThen(pg, 'js.pm.q_purge', l1, function () { return userOp('purge', name, {}); });
+                });
+            } else {
+                if (st.place === 'archive') {
+                    var ua = barBtn('pm-bar-unarch', 'bi bi-inbox', 'js.pm.act_unarchive');
+                    ua.addEventListener('click', function () { userOp('unarchive', name, {}, ua); });
+                    line(words('js.pm.bar_archive'), [ua]);
+                }
+                if (Number(st.trash) > 0) {
+                    var ro = barBtn('pm-bar-restore', 'bi bi-arrow-counterclockwise', 'js.pm.bar_restore_older');
+                    ro.addEventListener('click', function () { userOp('restore', name, {}, ro); });
+                    line(words('js.pm.bar_older', { n: Number(st.trash) }), [ro]);
+                }
+            }
+            if (!lines.length) return null;
+            var bar = el('div', { className: 'pm-bar pm-bar-' + (part === 'trash' ? 'trash' : st.place === 'archive' ? 'archive' : 'older') });
+            lines.forEach(function (l) { bar.appendChild(l); });
+            return bar;
+        }
+        /** A button of the bar: an icon (its whole class string) and its words, the words by key. */
+        function barBtn(cls, icon, textKey) {
+            return el('button', { type: 'button', className: 'btn btn-secondary btn-small ' + cls },
+                      [el('i', { className: icon, 'aria-hidden': 'true' }), ' ', tr(el('span'), { text: textKey })]);
         }
 
         /**
@@ -468,9 +784,9 @@
                 if (!(window.Antispam && window.Antispam.waiting(go))) go.disabled = false;
                 if (!r || !r.success) {
                     if (r && (r.antispam || r.error === 'captcha_cancelled')) {
-                        if (!(window.Antispam && window.Antispam.waiting(go))) msg.textContent = r.message || t('js.pm.report_failed');
+                        if (!(window.Antispam && window.Antispam.waiting(go))) msg.textContent = r.message || t.key('js.pm.report_failed');
                     } else {
-                        msg.textContent = t('js.pm.report_failed');
+                        msg.textContent = t.key('js.pm.report_failed');
                     }
                     return;
                 }
@@ -536,9 +852,17 @@
         window.PM = {
             refresh: function (name) {
                 if (name) { openThread(name); return; }
-                if (openWith) openThread(openWith); else loadInbox();
+                if (openWith) openThread(openWith, { part: openPart === 'trash' ? 'trash' : '' }); else loadInbox();
+            },
+            // For the browser checks (1.73.0): which place, which conversation and part, the tabs' last numbers.
+            state: function () {
+                return { view: view, openWith: openWith, part: openPart, counts: lastCounts, trashDays: trashDays,
+                         rows: lastList ? lastList.threads.length : null };
             },
         };
+        // A live language switch needs nothing from here (1.73.0): the rows, the head, the bar and the buttons are
+        // t.key() words that keep their keys (tr() above, assets/js/i18n.js); the three tabs and their notes are the
+        // page's own. (The rows used to be drawn again from the list's last answer.)
         loadInbox();
         // Opening a conversation from somewhere else on the site: ?action=account#messages:name
         var m = /^#messages:(.+)$/.exec(location.hash || '');
@@ -566,15 +890,19 @@
         var rich = !!(tpl && tpl.content);
         var ta;
         if (rich) {
-            wrap.appendChild(tpl.content.cloneNode(true));
+            var copy = tpl.content.cloneNode(true), copied = Array.prototype.slice.call(copy.childNodes);
+            wrap.appendChild(copy);
+            // The copy follows its template through the live language switch (assets/js/lang-swap.js, 1.73.0): its
+            // tabs, its rail's tooltips, its format box — the server's words — are said again where they stand.
+            if (window.LangSwap && window.LangSwap.adopt) window.LangSwap.adopt(copied, 'pm-editor-tpl');
             ta = wrap.querySelector('#pm-body');
         }
         if (!ta) {
             rich = false;
-            ta = el('textarea', { className: 'pm-input', rows: 3, maxlength: 20000, placeholder: t('js.pm.write_ph') });
+            ta = el('textarea', { className: 'pm-input', rows: 3, maxlength: 20000, placeholder: t.key('js.pm.write_ph') });
             wrap.appendChild(ta);
         }
-        var send = el('button', { type: 'button', className: 'btn btn-small', text: t('js.pm.send') });
+        var send = el('button', { type: 'button', className: 'btn btn-small', text: t.key('js.pm.send') });
         var msg = el('span', { className: 'text-muted pm-msg-note' });
         var row = el('div', { className: 'pm-composer-row' });
         row.appendChild(send); row.appendChild(msg);
@@ -612,9 +940,9 @@
             if (!r || !r.success) {
                 // The layer's refusals carry their own sentence; the send's own codes are the dictionary's.
                 if (r && (r.antispam || r.error === 'captcha_cancelled')) {
-                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t('js.pm.why_failed');
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t.key('js.pm.why_failed');
                 } else {
-                    msg.textContent = t('js.pm.why_' + ((r && r.error) || 'failed'));
+                    msg.textContent = t.key('js.pm.why_' + ((r && r.error) || 'failed'));
                 }
                 return;
             }
@@ -652,7 +980,7 @@
         var loadSeq = 0;
         async function load() {
             listEl.textContent = '';
-            listEl.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            listEl.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
             // The view this request is FOR. A click on another tab while it is in flight changes
             // `view`; an answer that arrives afterwards belongs to the old one and would draw those
             // rows with the new tab's buttons — friends offered "Unblock".
@@ -662,9 +990,9 @@
             var j = await get(qs);
             if (my !== loadSeq || forView !== view) return;
             listEl.textContent = '';
-            if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
+            if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t.key('js.fav.load_failed') })); return; }
             counts(j.counts || {});
-            if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.people.empty_' + forView) })); return; }
+            if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t.key('js.people.empty_' + forView) })); return; }
             j.rows.forEach(function (p) { listEl.appendChild(personRow(p, forView, load, !!j.may_message)); });
         }
 
@@ -675,8 +1003,8 @@
             var pic = face(p.username, p.avatar, 32, 'pe-av');
             if (pic) main.appendChild(pic);
             main.appendChild(el('a', { className: 'pf-name', href: BASE + '?action=u&name=' + encodeURIComponent(p.username), text: p.username }));
-            if (p.since) main.appendChild(el('span', { className: 'text-muted pe-since', text: when(p.since) }));
-            if (kind === 'blocks' && p.hide_profile) main.appendChild(el('span', { className: 'pf-badge', text: t('js.people.hidden') }));
+            if (p.since) main.appendChild(el('span', { className: 'text-muted pe-since', text: localTime(p.since_time, p.since) }));
+            if (kind === 'blocks' && p.hide_profile) main.appendChild(el('span', { className: 'pf-badge', text: t.key('js.people.hidden') }));
             row.appendChild(main);
             var acts = el('div', { className: 'pf-acts' });
             var act = function (label, op, extra) {
@@ -696,7 +1024,7 @@
             if (mayMessage && kind !== 'blocks') {
                 var w = el('a', { className: 'btn btn-secondary btn-small',
                                   href: '#messages:' + encodeURIComponent(p.username),
-                                  text: t('js.pm.message') });
+                                  text: t.key('js.pm.message') });
                 // The tab bar reacts to the hash CHANGING. Clicking a link to the hash the page is
                 // already on changes nothing, so that one case is asked for directly.
                 w.addEventListener('click', function () {
@@ -705,13 +1033,13 @@
                 });
                 acts.appendChild(w);
             }
-            if (kind === 'incoming') { acts.appendChild(act(t('js.people.accept'), 'accept')); acts.appendChild(act(t('js.people.decline'), 'decline')); }
-            if (kind === 'pending')  acts.appendChild(act(t('js.people.cancel'), 'unfollow'));
-            if (kind === 'friends')  acts.appendChild(act(t('js.people.unfriend'), 'unfollow'));
+            if (kind === 'incoming') { acts.appendChild(act(t.key('js.people.accept'), 'accept')); acts.appendChild(act(t.key('js.people.decline'), 'decline')); }
+            if (kind === 'pending')  acts.appendChild(act(t.key('js.people.cancel'), 'unfollow'));
+            if (kind === 'friends')  acts.appendChild(act(t.key('js.people.unfriend'), 'unfollow'));
             if (kind === 'blocks') {
-                acts.appendChild(act(p.hide_profile ? t('js.people.show_profile') : t('js.people.hide_profile'),
+                acts.appendChild(act(p.hide_profile ? t.key('js.people.show_profile') : t.key('js.people.hide_profile'),
                                      'block_hide', { value: p.hide_profile ? 0 : 1 }));
-                acts.appendChild(act(t('js.people.unblock'), 'unblock'));
+                acts.appendChild(act(t.key('js.people.unblock'), 'unblock'));
             }
             row.appendChild(acts);
             return row;
@@ -743,7 +1071,7 @@
 
         async function load(page) {
             listEl.textContent = '';
-            listEl.appendChild(el('div', { className: 'pf-loading', text: t('js.common.loading') }));
+            listEl.appendChild(el('div', { className: 'pf-loading', text: t.key('js.common.loading') }));
             var qs = 'user_directory&page=' + (page || 1) + '&per_page=30';
             if (searchEl && searchEl.value.trim()) qs += '&search=' + encodeURIComponent(searchEl.value.trim());
             if (sortEl && sortEl.value) qs += '&sort=' + encodeURIComponent(sortEl.value);
@@ -751,9 +1079,9 @@
             var j = await get(qs);
             if (my !== dirSeq) return;             // a newer request is in flight: this answer is stale
             listEl.textContent = '';
-            if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.fav.load_failed') })); return; }
-            if (totalEl) totalEl.textContent = j.total ? t('js.people.count', { n: j.total.toLocaleString() }) : '';
-            if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t('js.people.dir_empty') })); return; }
+            if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t.key('js.fav.load_failed') })); return; }
+            if (totalEl) totalEl.textContent = j.total ? t.key('js.people.count', { n: j.total.toLocaleString() }) : '';
+            if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t.key('js.people.dir_empty') })); return; }
             j.rows.forEach(function (p) {
                 var row = el('div', { className: 'pf-row pe-row' });
                 row.id = 'dir-row-' + p.username;         // 1.64.0 — see the inbox rows above
@@ -761,20 +1089,20 @@
                 var pic = face(p.username, p.avatar, 32, 'pe-av');
                 if (pic) main.appendChild(pic);
                 main.appendChild(el('a', { className: 'pf-name', href: BASE + '?action=u&name=' + encodeURIComponent(p.username), text: p.username }));
-                main.appendChild(el('span', { className: 'text-muted pe-since', text: t('js.people.since', { date: p.since }) }));
-                if (p.state !== 'none') main.appendChild(el('span', { className: 'pf-badge', text: t('js.people.state_' + p.state) }));
+                main.appendChild(el('span', { className: 'text-muted pe-since', text: t.key('js.people.since', { date: p.since }) }));
+                if (p.state !== 'none') main.appendChild(el('span', { className: 'pf-badge', text: t.key('js.people.state_' + p.state) }));
                 // The reader is in their own directory — they asked to be listed. What they are not
                 // offered is a message to themselves or a friend request to themselves.
-                if (p.self) main.appendChild(el('span', { className: 'pf-badge pf-badge-you', text: t('js.people.you') }));
+                if (p.self) main.appendChild(el('span', { className: 'pf-badge pf-badge-you', text: t.key('js.people.you') }));
                 row.appendChild(main);
                 var acts = el('div', { className: 'pf-acts' });
                 if (j.may_message && !p.self) {
                     acts.appendChild(el('a', { className: 'btn btn-secondary btn-small',
                                                href: BASE + '?action=account#messages:' + encodeURIComponent(p.username),
-                                               text: t('js.pm.message') }));
+                                               text: t.key('js.pm.message') }));
                 }
                 if (j.may_friend && p.state === 'none' && !p.self) {
-                    var f = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.people.follow') });
+                    var f = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t.key('js.people.follow') });
                     f.addEventListener('click', async function () {
                         f.disabled = true;
                         var r = await post('user_people', { op: 'follow', user: p.username });
@@ -795,9 +1123,9 @@
                         b.addEventListener('click', function () { load(target); });
                         return b;
                     };
-                    pager.appendChild(mk(t('js.common.pg_prev'), j.page - 1, j.page <= 1));
-                    pager.appendChild(el('span', { className: 'pg-total', text: t('js.app.page_of', { page: j.page, pages: j.pages }) }));
-                    pager.appendChild(mk(t('js.common.pg_next'), j.page + 1, j.page >= j.pages));
+                    pager.appendChild(mk(t.key('js.common.pg_prev'), j.page - 1, j.page <= 1));
+                    pager.appendChild(el('span', { className: 'pg-total', text: t.key('js.app.page_of', { page: j.page, pages: j.pages }) }));
+                    pager.appendChild(mk(t.key('js.common.pg_next'), j.page + 1, j.page >= j.pages));
                 }
             }
         }
@@ -828,14 +1156,14 @@
             if (box.dataset.pm === '1') {
                 var msg = el('a', { className: 'btn btn-secondary btn-small',
                                     href: BASE + '?action=account#messages:' + encodeURIComponent(name),
-                                    text: t('js.pm.message') });
+                                    text: t.key('js.pm.message') });
                 box.appendChild(msg);
             }
             if (box.dataset.friends === '1' && !blocked) {
                 var label = state === 'friends' ? 'unfriend' : state === 'following' ? 'cancel'
                           : state === 'follower' ? 'accept' : 'follow';
                 var op = label === 'accept' ? 'accept' : (state === 'none' ? 'follow' : 'unfollow');
-                var b = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t('js.people.' + label) });
+                var b = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t.key('js.people.' + label) });
                 b.addEventListener('click', async function () {
                     b.disabled = true;
                     var r = await post('user_people', { op: op, user: name });
@@ -843,11 +1171,11 @@
                     if (r && r.success) { state = r.state || 'none'; draw(); }
                 });
                 box.appendChild(b);
-                if (state !== 'none') box.appendChild(el('span', { className: 'pf-badge', text: t('js.people.state_' + state) }));
+                if (state !== 'none') box.appendChild(el('span', { className: 'pf-badge', text: t.key('js.people.state_' + state) }));
             }
             if (box.dataset.block === '1') {
                 var bb = el('button', { type: 'button', className: 'btn btn-secondary btn-small',
-                                        text: t(blocked ? 'js.people.unblock' : 'js.people.block') });
+                                        text: t.key(blocked ? 'js.people.unblock' : 'js.people.block') });
                 bb.addEventListener('click', function () {
                     if (blocked) {
                         post('user_people', { op: 'unblock', user: name }).then(function (r) {

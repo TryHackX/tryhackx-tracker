@@ -1,4 +1,5 @@
-# /etc/tracker-metadata.conf — owned by root:tracker, mode 0640
+# /etc/tracker-metadata.conf — owned by root:tracker, mode 0640 (it holds the database password)
+# Every key is explained in worker/README.md ("The conf file").
 [db]
 host = localhost
 name = tracker
@@ -13,28 +14,34 @@ concurrency = 4
 timeout_seconds = 180
 poll_interval = 3
 stale_claim_minutes = 10
+# The panel reads the heartbeat from this path and no other — keep it.
 heartbeat_file = /home/tracker/metadata_worker/heartbeat
 listen_port = 6881
-# own tracker first, then a few public trackers to speed up metadata discovery
-trackers = udp://tryhackx.org:6969/announce,udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce
+# YOUR tracker first (the announce URL clients use), then a few public trackers to speed up discovery.
+trackers = udp://tracker.example.org:6969/announce,udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce
 # file paths stored per torrent, in BOTH queues (1-50000). The panel setting `meta_max_files`
 # (Settings → Index file lists) overrides this live, same as `concurrency` above and under the same
 # condition — the worker re-reads it every ~60 s. The torrent's real file count is stored whatever
 # this says, so a torrent past the cap keeps its true count beside a shorter list.
 max_files = 5000
 # Observed-hash index second queue (includes/index.php). Leave index_table empty to keep whitelist-only
-# behaviour. When set, the worker drains index_hashes AFTER the whitelist queue is empty (needs the
-# tracker_meta grants on index_hashes / index_files — see README). index_keep_files=0 skips file lists
-# for index rows (name/size only, smaller DB).
+# behaviour. When set, the worker also drains index_hashes, sharing its fetches with the whitelist as
+# Settings → Index → Metadata fetch order says (needs the tracker_meta grants on index_hashes /
+# index_files — see README). index_keep_files=0 skips file lists for index rows (name/size only,
+# smaller DB); this conf key is what the worker obeys, not the panel's switch.
 # index_table = index_hashes
 # index_files_table = index_files
 # index_keep_files = 1
 # DHT bootstrap nodes (comma-separated host:port); default = the usual public routers
 # dht_routers = router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881,dht.aelitis.com:6881,dht.libtorrent.org:25401
+# libtorrent's own limits: download rate in bytes a second, and connections
+# download_rate_limit = 262144
+# connections_limit = 200
 tmp_dir = /home/tracker/metadata_worker/tmp
 log_level = INFO
 
 # federation.py (the peer-metadata importer) reuses the [db] section above. It needs extra grants for
-# tracker_meta (settings/whitelist/banned_hashes SELECT, fed_peers SELECT+UPDATE — see README.md) and
-# reads everything else (fed_enabled, peers, batch size) live from the web app's settings/fed_peers
-# tables, so there is no [federation] section to configure here.
+# tracker_meta (settings SELECT; whitelist and banned_hashes SELECT on info_hash; fed_peers
+# SELECT+UPDATE; index_hashes SELECT+INSERT+UPDATE; fed_review SELECT+INSERT+DELETE — see README.md)
+# and reads everything else (fed_enabled, peers, batch size) live from the web app's settings and
+# fed_peers tables, so there is no [federation] section to configure here.

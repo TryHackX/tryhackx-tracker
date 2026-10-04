@@ -1,8 +1,10 @@
 # Shipped notification sounds
 
 Short clips a member can pick on the account page's **Sounds** tab (includes/sounds.php lists this
-directory; a file is a sound when its name is a plain slug: `[a-z0-9-]+.mp3|ogg|wav`). The owner adds
-more from Settings → Sounds; those live in the database, not here.
+directory; a file is a sound when its name matches `^[a-z0-9][a-z0-9-]{0,48}\.(mp3|ogg|wav)$`, and it
+is offered as `b:<name>`). The owner adds more from Settings → Sounds; those live in the database, not
+here. As shipped no sound is selected for anything (every `sound_default_*` is empty), and a member
+hears nothing until they pick one.
 
 All of these come from [Pixabay](https://pixabay.com/sound-effects/) under the Pixabay Content
 License (free to use, no attribution required). Three were shortened with a frame-level cut (no
@@ -24,4 +26,5 @@ re-encode) so they end when the sound does:
 | multi-pop.mp3 | floraphonic — "Multi Pop 1" (188165) | |
 | ding.mp3 | user u_31vnwfmzt6 — "Ding" (126626) | |
 
-This README is not deployed (deploy/deploy.py excludes README.md files).
+This README is documentation only. A deployment that copies the whole tree (a `git` checkout, FTP)
+serves it as a static file like any other in `assets/`; it holds nothing private.

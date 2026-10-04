@@ -39,6 +39,22 @@ check('the catalogue names a route and a template for each',
 foreach (pageContentCatalog() as $k => $m) {
     check("$k: the template it claims to replace exists", is_file($root . '/' . $m['template']), $m['template']);
 }
+// 1.73.0: the panel named the pages in English on every page (Settings → Site pages, the editor's title, "… is published
+// now"): each is its own heading in the reader's language now, a home section "Home page — <its name>" — and the audit
+// log keeps English, whoever reads it.
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl']);
+$plCat = pageContentCatalog();
+$plHome = pageContentLabel('home:stats', $cfg);
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'en']);
+check('1.73.0: the pages are named in the reader\'s language — by their own headings (tos.h1, info.h1) — and a home section as "Home page — …"',
+      $plCat['tos']['label'] === langFor('pl', 'tos.h1') && $plCat['info']['label'] === langFor('pl', 'info.h1') && $plCat['tos']['label'] !== 'Terms of Service'
+      && $plHome === langFor('pl', 'a.pages.home_section', ['section' => langFor('pl', 'a.home.sec_name_stats')]),
+      json_encode([$plCat['tos']['label'], $plCat['info']['label'], $plHome], JSON_UNESCAPED_UNICODE));
+$pcApi = (string)file_get_contents($root . '/api/admin/page_content.php');
+check('… and in English for the audit log (pageContentLabel(…, true)), on both of its lines',
+      pageContentLabel('tos', $cfg, true) === 'Terms of Service' && pageContentLabel('info', $cfg, true) === 'Tracker Information'
+      && pageContentLabel('home:stats', $cfg, true) === 'Home page — Live tracker statistics'
+      && substr_count($pcApi, 'pageContentLabel($page, $cfg, true)') === 2 && pageContentCatalog() == pageContentCatalog(true));
 
 // ── the defaults are generated from the configuration, not frozen ───────────
 $wlCfg   = array_merge($cfg, ['tracker_mode' => 'whitelist', 'users_enabled' => '1', 'index_enabled' => '0']);
@@ -64,26 +80,135 @@ check('one level of nesting resolves innermost first',
 $tosWl = $resolved($wlCfg, 'tos');
 $tosOpen = $resolved($openCfg, 'tos');
 check('the whitelist clause is in the terms when the tracker is in whitelist mode',
-      str_contains($tosWl, 'Whitelist registrations are free and anonymous'));
-check('… and is absent when it is not', !str_contains($tosOpen, 'Whitelist registrations are free'));
+      str_contains($tosWl, 'Registering a torrent is free'));
+check('… and is absent when it is not', !str_contains($tosOpen, 'Registering a torrent is free'));
 check('the account terms appear only when accounts are on',
       str_contains($tosWl, 'User accounts') && !str_contains($tosOpen, 'User accounts'));
-// The literal numbers in the source go non-sequential when a marked item is hidden; the RENDERED
-// list is what closes over the gap, because Markdown and [list=1] both renumber from the first item.
-$liWl = substr_count(richtextRender($tosWl, 'markdown', $cfg, true), '<li');
-$liOpen = substr_count(richtextRender($tosOpen, 'markdown', $cfg, true), '<li');
-check('the rendered numbering closes over the clause that came and went (10 items vs 9)',
-      $liWl === 17 && $liOpen === 9, "$liWl / $liOpen");
-check('… and the rendered whitelist-mode list starts at 1 and carries no empty item',
-      !preg_match('/<li[^>]*>\s*<\/li>/', richtextRender($tosWl, 'markdown', $cfg, true)));
+
+// 1.73.0: ONE description of each page (pageContentSpec()), rendered twice — as the template's HTML
+// (pageContentHtml()) and as the editor's default text with markers. The two must say the same thing:
+// as many lists, as many items, and every item where the other has it. The item count is not a literal
+// any more — it is whatever the spec shows under this configuration, and both renderings must reach it.
+$specItems = function (array $c, string $page): array {
+    $conds = pageContentConditions($c, null);
+    $shown = fn($x): bool => !is_array($x) || ((!isset($x['if']) || !empty($conds[$x['if']][0]))
+                                             && (!isset($x['ifnot']) || empty($conds[$x['ifnot']][0])));
+    $lists = 0; $items = 0;
+    $walk = function (array $b) use (&$walk, $shown, &$lists, &$items): void {
+        if (!$shown($b)) return;
+        if ($b[0] === 'group') { foreach (pageContentItems($b) as $i) $walk($i); return; }
+        if ($b[0] !== 'ol' && $b[0] !== 'ul') return;
+        $n = count(array_filter(pageContentItems($b), $shown));
+        if ($n) { $lists++; $items += $n; }
+    };
+    foreach (pageContentSpec($page) as $b) $walk($b);
+    return [$lists, $items];
+};
+foreach (['whitelist' => $wlCfg, 'open' => $openCfg] as $label => $c) {
+    foreach (['tos', 'info'] as $page) {
+        [$lists, $items] = $specItems($c, $page);
+        $md = richtextRender($resolved($c, $page), 'markdown', $cfg, true);
+        $html = pageContentHtml(null, $c, $page, '/');
+        $mdLists = substr_count($md, '<ol') + substr_count($md, '<ul');
+        $htmlLists = substr_count($html, '<ol') + substr_count($html, '<ul');
+        check("$label/$page: the default text has every item the spec shows, in as many lists (no list split in two)",
+              substr_count($md, '<li') === $items && $mdLists === $lists, substr_count($md, '<li') . "/$items items, $mdLists/$lists lists");
+        check("$label/$page: … and so has the page the template prints",
+              substr_count($html, '<li') === $items && $htmlLists === $lists, substr_count($html, '<li') . "/$items items, $htmlLists/$lists lists");
+        check("$label/$page: no empty item, no marker, no untranslated key",
+              !preg_match('/<li[^>]*>\s*<\/li>/', $md . $html) && !str_contains($md . $html, '[[')
+              && !preg_match('/\b(?:info|tos)\.[a-z0-9_]+\b/', strip_tags($html)));
+    }
+}
+// The bug 1.73.0 fixed, on its own: a hidden item on a line of its own used to leave a blank line, and a
+// blank line ends a Markdown list — the rest of the Terms came out as a second list numbered from 1.
+$split = pageContentResolveMarkers("1. a\n[[if:bogus]]\n2. b\n[[/if]]\n3. c\n", $openCfg, null);
+check('a hidden item takes its line break with it — the list stays one list', $split === "1. a\n3. c\n", json_encode($split));
+check('… a shown one keeps its line', pageContentResolveMarkers("1. a\n[[ifnot:bogus]]\n2. b\n[[/if]]\n3. c\n", $openCfg, null) === "1. a\n2. b\n3. c\n");
+check('… a marker inside a sentence still only removes itself',
+      pageContentResolveMarkers("A[[if:bogus]] B[[/if]] C.\nD", $openCfg, null) === "A C.\nD");
+check('… and a shown block with nothing left in it goes like a hidden one',
+      pageContentResolveMarkers("x\n[[ifnot:bogus]]\n[[if:bogus]]\ny\n[[/if]]\n[[/if]]\nz", $openCfg, null) === "x\nz");
+// Numbers that are settings: [[value:name]] (pageContentValues()), read when the page is shown.
+// (email_change_days: its helper, userEmailChangeCooldownDays(), is in includes/users.php, which this test loads.)
+check('a value marker reads the setting when the page is shown — a number of days with its noun',
+      ($v12 = pageContentResolveMarkers('wait [[value:email_change_days]]', ['users_email_change_cooldown_days' => '12'] + $openCfg, null)) === 'wait 12 days', $v12);
+check('… and the noun agrees with the number: one day is "1 day"',
+      ($v1 = pageContentResolveMarkers('wait [[value:email_change_days]]', ['users_email_change_cooldown_days' => '1'] + $openCfg, null)) === 'wait 1 day', $v1);
+// Polish has two forms where the texts use them (accusative: 1 dzień; 2, 5, 22 … dni) — "przez 1 dni" was
+// what a sentence with the noun written after the number said the day an operator chose 1.
+check('… in Polish: 1 dzień, 2 dni, 5 dni, 22 dni; in English 1 day, 30 days',
+      pageContentDays(1, 'pl') === '1 dzień' && pageContentDays(2, 'pl') === '2 dni' && pageContentDays(5, 'pl') === '5 dni'
+      && pageContentDays(22, 'pl') === '22 dni' && pageContentDays(1, 'en') === '1 day' && pageContentDays(30, 'en') === '30 days',
+      implode('|', [pageContentDays(1, 'pl'), pageContentDays(2, 'pl'), pageContentDays(1, 'en'), pageContentDays(30, 'en')]));
+check('… a count that is not days stays a bare number',
+      pageContentResolveMarkers('[[value:shout_keep_rows]]', $openCfg, null) === (string)pageContentValues($openCfg, null)['shout_keep_rows'][0]);
+// No sentence of the shipped pages writes a noun after a value that already carries one ("3 days days").
+$dayVals = array_keys(array_filter(pageContentValues($wlCfg, null), fn($v) => ($v[2] ?? '') === 'days'));
+$doubled = [];
+foreach (['tos', 'info'] as $page) {
+    $walkV = function ($x) use (&$walkV, &$doubled, $dayVals): void {
+        if (!is_array($x)) return;
+        if (isset($x[0]) && in_array($x[0], ['h1', 'h2', 'h3', 'p', 'ol', 'ul', 'faq', 'group'], true)) {
+            foreach (pageContentItems($x) as $i) $walkV($i);
+            return;
+        }
+        foreach (($x['vals'] ?? []) as $param => $name) {
+            if (!in_array($name, $dayVals, true)) continue;
+            foreach (['en', 'pl'] as $l) {
+                $s = langFor($l, (string)$x[0]);
+                if (preg_match('/:' . preg_quote((string)$param, '/') . '\s+(?:days?|dni|dnia|dniach|dzień)\b/u', $s)) $doubled[] = "$l:{$x[0]}";
+            }
+        }
+    };
+    foreach (pageContentSpec($page) as $b) $walkV($b);
+}
+check('no shipped sentence writes "days"/"dni" after a value that carries its noun', !$doubled, implode(',', $doubled));
+check('… an unknown value is removed and reported',
+      pageContentResolveMarkers('a [[value:bogus]] b', $openCfg, null, $unkV) === 'a  b' && $unkV === ['value:bogus']);
+// The whitelist hours in the reader's language (pageContentScheduleText()), without parentheses of their
+// own — the texts hold them in parentheses already. scheduleDescribe() stays English for the panel.
+require_once $root . '/includes/schedule.php';
+$schedCfg = ['tracker_schedule_enabled' => '1', 'tracker_schedule_tz' => 'Europe/Warsaw', 'tracker_mode' => 'whitelist',
+             'tracker_schedule' => json_encode(['mon' => ['from' => '10:00', 'to' => '02:30'], 'tue' => ['from' => '10:00', 'to' => '02:30'],
+                                                'wed' => ['from' => '10:00', 'to' => '02:30'], 'thu' => ['from' => '10:00', 'to' => '02:30'],
+                                                'fri' => ['from' => '10:00', 'to' => '02:30'], 'sat' => 'all', 'sun' => 'all'])];
+check('the whitelist hours in English, grouped as the panel groups them',
+      ($sEn = pageContentScheduleText($schedCfg)) === 'Mon–Fri 10:00–02:30 the next day, Sat–Sun all day, Europe/Warsaw time', $sEn);
+check('… and the value marker carries the same words', pageContentResolveMarkers('[[value:schedule_hours]]', $schedCfg, null) === $sEn);
+check('… with no parenthesis of their own', !str_contains($sEn, '(') && !str_contains($sEn, ')'));
+check('… while the panel\'s scheduleDescribe() is untouched',
+      scheduleDescribe($schedCfg) === 'Mon–Fri 10:00–02:30 (next day), Sat–Sun all day (Europe/Warsaw)', scheduleDescribe($schedCfg));
+check('… and in Polish the same week is Polish words',
+      ($sPl = pageContentScheduleText($schedCfg, 'pl')) === 'pon–pt 10:00–02:30 następnego dnia, sob–niedz cały dzień, czas Europe/Warsaw', $sPl);
+$sameDayCfg = ['tracker_schedule' => json_encode(['mon' => ['from' => '08:00', 'to' => '18:00'], 'tue' => 'none',
+               'wed' => ['from' => '22:00', 'to' => '00:00'], 'thu' => 'none', 'fri' => 'none', 'sat' => 'none', 'sun' => 'none'])] + $schedCfg;
+check('… single days, a same-day window and one past midnight',
+      ($sOne = pageContentScheduleText($sameDayCfg)) === 'Mon 08:00–18:00, Wed 22:00–00:00 the next day, Europe/Warsaw time', $sOne);
+check('… a week with no whitelist hours says so',
+      str_starts_with(pageContentScheduleText(['tracker_schedule' => json_encode(array_fill_keys(SCHEDULE_DAYS, 'none'))] + $schedCfg), 'none'));
+// Every condition, value and dictionary key the two specs name exists — an unknown condition is false,
+// so a misspelt one is a paragraph that silently never appears.
+foreach (['tos', 'info'] as $page) {
+    $names = pageContentSpecNames($page);
+    $condsAll = pageContentConditions($wlCfg, null);
+    $valsAll = pageContentValues($wlCfg, null);
+    $badC = array_values(array_diff($names['conds'], array_keys($condsAll)));
+    $badV = array_values(array_diff($names['vals'], array_keys($valsAll)));
+    $badK = array_values(array_filter($names['keys'], fn($k) => !langHas($k) || !langFor('pl', $k) || langFor('pl', $k) === $k));
+    check("$page: every condition the spec names exists", !$badC, implode(',', $badC));
+    check("$page: every value the spec names exists", !$badV, implode(',', $badV));
+    check("$page: every key the spec names exists in English and Polish", !$badK, implode(',', $badK));
+}
 
 $infoWl = $resolved($wlCfg, 'info');
 $infoOpen = $resolved($openCfg, 'info');
 check('the info page gains its whitelist section in whitelist mode',
       str_contains($infoWl, '## Whitelist mode') && !str_contains($infoOpen, '## Whitelist mode'));
 check('the FAQ answer changes with the mode',
-      str_contains($infoWl, 'in whitelist mode a hash can be removed')
-      && str_contains($infoOpen, 'automatically removes swarms'));
+      str_contains($infoWl, 'In whitelist mode a registration can also simply be removed')
+      && !str_contains($infoOpen, 'In whitelist mode a registration')
+      && str_contains($infoOpen, 'A hash can be banned'));
 
 // ── both formats, and the difference between them stated honestly ───────────
 $md = pageContentDefault($wlCfg, 'tos', 'markdown', '', 'en');
@@ -110,9 +235,18 @@ check('… and bbcode', str_contains($bb, '[b]Connecting to the tracker'), '');
 check('no HTML tag survives into the page source', !preg_match('/<(strong|em|a |code)/', $md . $bb));
 
 // ── both defaults survive the renderer, and produce a real page ─────────────
+// 1.73.0: the validator a page is saved through (pageContentValidate()) is richtextValidate() without
+// its length — a description's 4 000 characters would refuse the shipped Terms (7 000) and Info (19 000)
+// the moment the operator restored and saved them. The Info default is checked too: it is the long one.
+$mdInfo = pageContentDefault($wlCfg, 'info', 'markdown', '', 'en');
+check('the Info default passes the page validator too', pageContentValidate($mdInfo, 'markdown', $cfg) === null,
+      (string)pageContentValidate($mdInfo, 'markdown', $cfg));
+check('… and is longer than a description may be — the case this validator exists for', mb_strlen($mdInfo) > 4000);
+check('a page still keeps the image limit author text has',
+      pageContentValidate(str_repeat("[img]https://example.com/a.png[/img]\n", 200), 'bbcode', $cfg) !== null);
 foreach (['markdown' => $md, 'bbcode' => $bb] as $fmt => $body) {
-    check("$fmt: the default passes the same validator author text does",
-          richtextValidate($body, $fmt, $cfg) === null, (string)richtextValidate($body, $fmt, $cfg));
+    check("$fmt: the default passes the validator a page is saved through",
+          pageContentValidate($body, $fmt, $cfg) === null, (string)pageContentValidate($body, $fmt, $cfg));
     $html = richtextRender($body, $fmt, $cfg, true);
     check("$fmt: it renders to something with the terms in it",
           str_contains($html, 'Commercial organizations require written permission'));
@@ -120,6 +254,14 @@ foreach (['markdown' => $md, 'bbcode' => $bb] as $fmt => $body) {
 }
 $mdHtml = richtextRender($md, 'markdown', $cfg, true);
 check('markdown produces a heading element', (bool)preg_match('/<h[1-6]/', $mdHtml));
+// The renderer drops a relative link as plain words, so the default links to the site's own pages
+// through `site_url` (1.73.0) — before, "Restore built-in" put back a page whose own links were text.
+$absCfg = ['site_url' => 'https://tracker.example.org'] + $wlCfg;
+$absMd = pageContentDefault($absCfg, 'tos', 'markdown', '/', 'en');
+check('the default links to the site\'s own pages with absolute addresses',
+      str_contains($absMd, '](https://tracker.example.org/?action=info)'), substr($absMd, 0, 200));
+check('… which the renderer keeps as links',
+      str_contains(richtextRender(pageContentResolveMarkers($absMd, $absCfg), 'markdown', $absCfg, true), 'href="https://tracker.example.org/?action=info"'));
 
 // ── storing: a draft is not a live page ─────────────────────────────────────
 $db->exec("DELETE FROM page_content WHERE page IN ('tos','info')");

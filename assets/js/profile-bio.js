@@ -159,7 +159,8 @@
     var phEl = document.getElementById('profile-bio-ph');
     var max = parseInt(root.getAttribute('data-max') || '300', 10) || 300;
     var cap = parseInt(root.getAttribute('data-cap') || '1200', 10) || 1200;
-    var T = function (k, v) { return typeof window.t === 'function' ? window.t(k, v) : k; };
+    // Every word here is written into the editor: the t.key() word, which leaves its key on the element (1.73.0).
+    var T = function (k, v) { return typeof window.t === 'function' ? window.t.key(k, v) : k; };
 
     // The five tags, with the icons and shortcuts the other toolbars on the site use.
     var TOOLS = [

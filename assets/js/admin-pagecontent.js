@@ -21,6 +21,21 @@
     const state = { page: null, lang: null, defaults: {}, max: 60000, dirty: false, closing: false, note: '' };
     let previewTimer = null;
 
+    /**
+     * A page's name or a placeholder's line as the server said it — in the reader's language (1.73.0) — found back by
+     * key, so it follows the live language switch: the two written pages by their own headings, "Home page — …" and
+     * "The built-in "…" section" with the section's own name inside, the placeholders' lines (the Settings page's
+     * bundle carries these: tos.h1, info.h1, a.pages., a.home.). An operator's own section name stays as it is.
+     */
+    function serverWords(text) {
+        let w = text || '';
+        for (const prefix of ['tos.h1', 'info.h1', 'a.pages.', 'a.home.ph_']) { if (!t.isKey(w)) w = t.find(w, prefix); }
+        if (t.isKey(w) && w.params && typeof w.params.section === 'string') {
+            w = t.key(w.key, { section: t.find(w.params.section, 'a.home.sec_name_') });
+        }
+        return w;
+    }
+
     function setError(msg) {
         const box = $('pc-error');
         box.textContent = msg || '';
@@ -29,7 +44,7 @@
 
     function count() {
         const n = $('pc-body').value.length;
-        $('pc-count').textContent = t('js.pagecontent.count', { n: n.toLocaleString(), max: state.max.toLocaleString() });
+        $('pc-count').textContent = t.key('js.pagecontent.count', { n: n.toLocaleString(), max: state.max.toLocaleString() });
         $('pc-count').className = 'wl-small ' + (n > state.max ? 'text-danger' : 'text-muted');
     }
 
@@ -94,8 +109,9 @@
             b.appendChild(el('span', { className: 'pc-lang-name', text: l.name }));
             const dot = l.enabled ? 'live' : (l.stored ? 'draft' : 'none');
             b.appendChild(el('span', { className: 'pc-lang-dot pc-dot-' + dot }));
-            b.title = l.name + ' — ' + (l.enabled ? t('js.pagecontent.lang_live')
-                     : l.stored ? t('js.pagecontent.lang_draft') : t('js.pagecontent.lang_none'));
+            // one sentence, the state a word of its own in it: glued, the title kept no key (1.73.0)
+            b.title = t.key('js.pagecontent.lang_title', { name: l.name, state: l.enabled ? t.key('js.pagecontent.lang_live')
+                     : l.stored ? t.key('js.pagecontent.lang_draft') : t.key('js.pagecontent.lang_none') });
             if (l.code !== current) b.addEventListener('click', () => switchLang(l.code));
             rail.appendChild(b);
         });
@@ -103,11 +119,11 @@
         // fallback chain means it is often a version written for a different language.
         const note = $('pc-serving');
         if (!serving) {
-            note.textContent = t('js.pagecontent.serving_builtin');
+            note.textContent = t.key('js.pagecontent.serving_builtin');
         } else if (serving === current) {
-            note.textContent = t('js.pagecontent.serving_this');
+            note.textContent = t.key('js.pagecontent.serving_this');
         } else {
-            note.textContent = t('js.pagecontent.serving_other', { lang: serving.toUpperCase() });
+            note.textContent = t.key('js.pagecontent.serving_other', { lang: serving.toUpperCase() });
         }
     }
 
@@ -123,9 +139,9 @@
         box.textContent = '';
         box.hidden = !list.length;
         if (!list.length) return;
-        box.appendChild(el('span', { className: 'wl-small text-muted me-1', text: t('js.pagecontent.paste_in') }));
+        box.appendChild(el('span', { className: 'wl-small text-muted me-1', text: t.key('js.pagecontent.paste_in') }));
         list.forEach(p => {
-            const b = el('button', { className: 'pc-ph', type: 'button', title: p.what || '' });
+            const b = el('button', { className: 'pc-ph', type: 'button', title: serverWords(p.what) });
             b.appendChild(el('code', { text: '{{' + p.name + '}}' }));
             b.addEventListener('click', () => {
                 const ta = $('pc-body');
@@ -140,9 +156,9 @@
     }
 
     async function switchLang(code) {
-        if (state.dirty && !await confirmAction(t('js.pagecontent.switch_title'),
-                t('js.pagecontent.switch_body'),
-                { okLabel: t('js.pagecontent.switch_ok'), danger: true })) return;
+        if (state.dirty && !await confirmAction(t.key('js.pagecontent.switch_title'),
+                t.key('js.pagecontent.switch_body'),
+                { okLabel: t.key('js.pagecontent.switch_ok'), danger: true })) return;
         state.dirty = false;
         open(state.page, code);
     }
@@ -161,15 +177,15 @@
         state.note = r.note || '';
         renderLangs(r.languages, r.lang, r.serving);
         renderPlaceholders(r.placeholders || []);
-        $('pc-title').textContent = r.label + ' · ' + String(r.lang).toUpperCase()
-            + ' — ' + (r.stored ? (r.enabled ? t('js.pagecontent.title_live') : t('js.pagecontent.title_draft')) : t('js.pagecontent.title_builtin'));
+        $('pc-title').replaceChildren(serverWords(r.label), ' · ' + String(r.lang).toUpperCase() + ' — ',   // pieces (1.73.0)
+            r.stored ? (r.enabled ? t.key('js.pagecontent.title_live') : t.key('js.pagecontent.title_draft')) : t.key('js.pagecontent.title_builtin'));
         $('pc-format').value = r.format || 'markdown';
         $('pc-enabled').checked = !!r.enabled;
         $('pc-body').value = r.body || '';
         $('pc-note').textContent = state.note;
         $('pc-saved').textContent = r.stored && r.updated_at
-            ? (r.updated_by ? t('js.pagecontent.last_saved_by', { at: r.updated_at, by: r.updated_by }) : t('js.pagecontent.last_saved', { at: r.updated_at }))
-            : t('js.pagecontent.never_edited');
+            ? (r.updated_by ? t.key('js.pagecontent.last_saved_by', { at: r.updated_at, by: r.updated_by }) : t.key('js.pagecontent.last_saved', { at: r.updated_at }))
+            : t.key('js.pagecontent.never_edited');
         // A format the operator switched off in Settings must not be offered here.
         const allowed = r.formats || ['bbcode', 'markdown'];
         [...$('pc-format').options].forEach(o => { o.disabled = !allowed.includes(o.value); });
@@ -190,7 +206,7 @@
             });
             if (r.error) { setError(r.error); return; }
             state.dirty = false;
-            showToast(r.message || t('js.pagecontent.saved'), 'success');
+            showToast(r.message || t.key('js.pagecontent.saved'), 'success');
             // The card in Settings carries the badge and the timestamp; re-reading the page is the
             // only way to keep it honest without duplicating the rendering here.
             setTimeout(() => window.location.reload(), 600);
@@ -200,15 +216,15 @@
     }
 
     async function restore() {
-        const ok = await confirmAction(t('js.pagecontent.restore_title'),
-            t('js.pagecontent.restore_body', { lang: String(state.lang).toUpperCase() }),
-            { okLabel: t('js.pagecontent.restore_ok'), danger: true });
+        const ok = await confirmAction(t.key('js.pagecontent.restore_title'),
+            t.key('js.pagecontent.restore_body', { lang: String(state.lang).toUpperCase() }),
+            { okLabel: t.key('js.pagecontent.restore_ok'), danger: true });
         if (!ok) return;
         const r = await apiCall('admin/page_content', 'POST', {
             op: 'reset', page: state.page, lang: state.lang, format: $('pc-format').value,
         });
         if (r.error) { setError(r.error); return; }
-        showToast(r.message || t('js.pagecontent.restored'), 'success');
+        showToast(r.message || t.key('js.pagecontent.restored'), 'success');
         setTimeout(() => window.location.reload(), 600);
     }
 
@@ -243,9 +259,9 @@
     modalEl.addEventListener('hide.bs.modal', (e) => {
         if (!state.dirty || state.closing) return;
         e.preventDefault();
-        confirmAction(t('js.pagecontent.close_title'),
-            t('js.pagecontent.close_body'),
-            { okLabel: t('js.pagecontent.close_ok'), danger: true }).then((ok) => {
+        confirmAction(t.key('js.pagecontent.close_title'),
+            t.key('js.pagecontent.close_body'),
+            { okLabel: t.key('js.pagecontent.close_ok'), danger: true }).then((ok) => {
                 if (!ok) return;
                 state.closing = true;
                 state.dirty = false;

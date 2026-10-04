@@ -750,7 +750,8 @@ check('an account going takes its anti-spam rows with it', str_contains($fnBody(
 $js = $src('assets/js/antispam.js');
 $layout = $src('templates/layout.php');
 check('assets/js/antispam.js: send (a CAPTCHA, the same request again; a wait counted down), countdown, solve, waiting',
-      str_contains($js, 'window.Antispam = { send, countdown, solve, isCaptcha, waitSeconds, waiting, stop, timeText, clock };')
+      // 1.73.0: `sentence` — the refusal's words by the key its answer names (they follow the live language switch)
+      str_contains($js, 'window.Antispam = { send, countdown, solve, isCaptcha, waitSeconds, waiting, stop, timeText, clock, sentence };')
       && str_contains($js, "button.setAttribute('data-as-wait', clock(left));") && !preg_match('/button\.(textContent|innerHTML|appendChild)/', $js));
 $tagAt = fn(string $f): int => (int)strpos($layout, '<script src="<?= $baseUrl ?>assets/js/' . $f . '<?=');
 check('… on every public page, after captcha.js and before app.js', $tagAt('captcha.js') > 0 && $tagAt('captcha.js') < $tagAt('antispam.js')

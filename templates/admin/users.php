@@ -9,7 +9,10 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
     <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
-    <?= langJsBridge($baseUrl) ?>
+    <?php /* + the recommended sets' and the presets' names and lines (the server's), found back by key so they follow
+             the live language switch (t.find(), 1.73.0); + what every permission allows (perm.<id>), which
+             admin-users.js says by the id */ ?>
+    <?= langJsBridge($baseUrl, ['js.', 'a.users.rec_', 'perm.']) ?>
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
     <div class="admin-container admin-wide wl-page">
@@ -63,12 +66,17 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-dark table-hover dash-table wl-table" id="us-table">
+                    <?php /* Pinned columns and three that share the rest (1.73.0, admin.css "The users table"): nine equal
+                             shares had cut the dates, the groups and every badge after a long name. */ ?>
+                    <colgroup>
+                        <col class="us-c-pick"><col class="dash-c-id"><col class="us-c-flex"><col class="us-c-flex"><col class="us-c-status"><col class="us-c-flex"><col class="us-c-date"><col class="us-c-date"><col class="us-c-actions">
+                    </colgroup>
                     <thead><tr>
                         <th class="us-c-pick"><label class="search-check" title="<?= _h('a.users.pick_all_title') ?>"><input type="checkbox" id="us-pick-all"><span class="search-check-box" aria-hidden="true"></span></label></th>
                         <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="username"><?= _h('a.users.username') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="email"><?= _h('a.users.email') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="status"><?= _h('a.users.status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable col-badge" data-sort="status"><?= _h('a.users.status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="group" title="<?= _h('a.users.sort_group_title') ?>"><?= _h('a.users.groups') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="created"><?= _h('a.users.created') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
                         <th class="sortable" data-sort="login"><?= _h('a.users.last_login') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
@@ -198,7 +206,7 @@
                     <?php // 1.72.0: pinned columns (admin.css .gr-c-*), so the actions — Edit, Recommended, Delete — are on screen. ?>
                     <colgroup><col class="gr-c-name"><col class="gr-c-slug"><col class="gr-c-prio"><col class="gr-c-default"><col class="gr-c-members"><col class="gr-c-perms"><col class="gr-c-actions"></colgroup>
                     <thead><tr>
-                        <th><?= _h('a.users.name') ?></th><th><?= _h('a.users.slug') ?></th><th><?= _h('a.users.priority') ?></th><th><?= _h('a.users.default') ?></th><th><?= _h('a.users.members') ?></th><th><?= _h('a.users.permissions') ?></th><th class="th-actions"><?= _h('a.users.actions') ?></th>
+                        <th><?= _h('a.users.name') ?></th><th><?= _h('a.users.slug') ?></th><th><?= _h('a.users.priority') ?></th><th class="col-badge"><?= _h('a.users.default') ?></th><th><?= _h('a.users.members') ?></th><th><?= _h('a.users.permissions') ?></th><th class="th-actions"><?= _h('a.users.actions') ?></th>
                     </tr></thead>
                     <tbody id="gr-body"></tbody>
                 </table>
@@ -501,6 +509,8 @@
     </div>
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
+    <?php /* What the server wrote, marked before any script of the page runs (1.73.0, assets/js/lang-swap.js). */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <?php /* The picture beside every member's name (1.63.0), the same file the public pages draw with. */ ?>

@@ -23,13 +23,16 @@ const USER_RESET_TTL_MIN   = 120;   // password-reset link lifetime (minutes)
 const USER_VERIFY_TTL_H    = 72;    // email-verification link lifetime (hours)
 const USER_ECHANGE_TTL_H   = 24;    // email-change confirmation links (old + new step)
 
-/** Sign-in duration choices (login form "Stay signed in for"): code => [seconds|null (forever), label]. */
+/** Sign-in duration choices (login form "Stay signed in for"): code => [seconds|null (forever), label]. The labels are
+ *  the dictionary's (1.73.0: they were English on every page — the live language switch check found them). */
 function userSessionChoices(): array {
+    // the English words when this file is loaded without the dictionary (a CLI tool, a test)
+    $w = fn(string $k, string $en): string => function_exists('__') ? __($k) : $en;
     return [
-        'forever' => [null, 'Forever (until you sign out)'],
-        '1h'      => [3600, '1 hour'],
-        '1d'      => [86400, '1 day'],
-        '30d'     => [30 * 86400, '30 days'],
+        'forever' => [null, $w('login.session_forever', 'Forever (until you sign out)')],
+        '1h'      => [3600, $w('login.session_1h', '1 hour')],
+        '1d'      => [86400, $w('login.session_1d', '1 day')],
+        '30d'     => [30 * 86400, $w('login.session_30d', '30 days')],
     ];
 }
 
@@ -51,9 +54,18 @@ function siteLiveSeconds(array $cfg): int {
     return $v <= 0 ? 0 : max(10, min(300, $v));
 }
 
-/** Registry of every permission a group can carry. Key => human description (admin UI + docs). */
-function userPermissionList(): array {
-    return [
+/**
+ * Registry of every permission a group can carry: id => what it allows, in the READER'S language (1.73.0) — the
+ * Groups matrix's tooltips, the group editor's boxes, the Recommended window, Settings' matrices (admin/fetch_groups).
+ *
+ * The English below is the registry's own and the dictionary's: each id has `perm.<id>` (tools/lang_src.d/
+ * permissions.py), whose English is these words exactly — tests/groups_matrix_test.php holds the two together, so a
+ * sentence changed here and not there fails. `$english` asks for these words whatever the request's language (a
+ * shell tool, a check); a process without the dictionary gets them too. Only the words change with the language:
+ * the ids, their order and their number never do.
+ */
+function userPermissionList(bool $english = false): array {
+    $list = [
         'index.view'     => 'Search the observed-hash index (the public search page)',
         'index.files'    => 'See file lists in index search results',
         // The first batch comes with index.files; loading the rest of a long list — page after page
@@ -223,8 +235,8 @@ function userPermissionList(): array {
         // access from working the torrent-report queue, and an operator has to hand it out on
         // purpose. `panel.messages.view` shows the queue and the two messages a report carries;
         // `panel.messages.handle` closes a report or deletes the message it names.
-        'panel.messages.view'   => 'See reported private messages (only the reported line and the one before it)',
-        'panel.messages.handle' => 'Close a message report, or delete the message it names',
+        'panel.messages.view'   => 'PANEL — see reported private messages (only the reported line and the one before it)',
+        'panel.messages.handle' => 'PANEL — close a message report, or delete the message it names',
         // v84 (includes/reports.php): the Reports page's queues of PUBLIC words, one pair per kind — reading the
         // queue, and acting on it (close, remove the words, warn, silence or ban the author, each silently or as
         // a warning). Unlike the message queue these ARE the moderator's by default (the v84 grant): the words
@@ -257,6 +269,13 @@ function userPermissionList(): array {
         // should decide whether it is the same person.
         'panel.audit.view'       => 'PANEL — read the audit log (who did what in the panel)',
     ];
+    if ($english || !function_exists('__')) return $list;
+    foreach ($list as $id => $en) {
+        $key = 'perm.' . $id;
+        $said = __($key);
+        if ($said !== $key) $list[$id] = $said;   // an id without words of its own keeps the English
+    }
+    return $list;
 }
 
 /**
@@ -1157,8 +1176,22 @@ function userIsEmailTrusted(PDO $db, int $userId): bool {
  * could have caught because nothing named the invariant.
  *
  * One function, one place to add the next table. Returns what it removed, so the caller can say.
+ *
+ * 1.73.0 checked every account column in the schema against this list, and it had missed three: the second
+ * factor (`user_twofa` — the TOTP secret and the recovery hashes stayed behind), the "…is typing" rows, and a
+ * bulk mail still QUEUED for the account (the janitor would have mailed somebody whose account was gone). The
+ * v91 migration removes what the missing lines left behind (trackerSchemaDataMigrations()). Kept ON PURPOSE,
+ * and why: the audit log (a record of what happened); a partner shop's order rows (`user_group_orders` — the
+ * shop's ledger and its replay guard: an order id must never grant twice); a moderator's stamps on other
+ * people's shouts and the uploader of an emote (raw ids compared, shout.php — a NULL uploader means "the
+ * panel's"); the address-keyed mail preferences (`email_preferences`, `unsubscribed_emails` — the address
+ * holder's choice, which report mails honour too); the whitelist rows and the descriptions, unlinked below.
+ *
+ * $cfg (1.73.0) is for the ratings: the votes go, and the totals stored on the catalogue rows are counted again
+ * in the site's mode (repRecount()) — they went on counting the deleted votes until somebody voted on that hash
+ * again. Without $cfg the settings are read here.
  */
-function userDeleteCascade(PDO $db, int $userId): array {
+function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $gone = [];
     $del = function (string $sql, array $args, string $label) use ($db, &$gone) {
         try {
@@ -1185,6 +1218,10 @@ function userDeleteCascade(PDO $db, int $userId): array {
     // — a conversation with a gap where one side used to be is not a conversation anybody can read
     // — and the reports go with the messages they point at, because a queue whose rows name a
     // message that no longer exists is a queue nobody can work.
+    // "…is typing" (v54): the account's own rows and the other side's in its conversations — before the
+    // threads they are keyed by go. Pure state that expires in seconds, but a row of a deleted account all the same.
+    $del("DELETE FROM message_typing WHERE user_id = ?
+           OR thread_id IN (SELECT id FROM message_threads WHERE u_low = ? OR u_high = ?)", [$userId, $userId, $userId], 'typing');
     $del("DELETE r FROM message_reports r JOIN message_threads t ON t.id = r.thread_id
            WHERE t.u_low = ? OR t.u_high = ?", [$userId, $userId], 'message_reports');
     $del("DELETE m FROM user_messages m JOIN message_threads t ON t.id = m.thread_id
@@ -1193,8 +1230,24 @@ function userDeleteCascade(PDO $db, int $userId): array {
     $del("DELETE FROM user_friends WHERE user_id = ? OR friend_id = ?", [$userId, $userId], 'friends');
     $del("DELETE FROM user_blocks WHERE user_id = ? OR blocked_id = ?", [$userId, $userId], 'blocks');
     // The pair, not an id column: hash_votes identifies a voter as a type plus a key, because an
-    // anonymous vote is keyed by an IP bucket instead.
+    // anonymous vote is keyed by an IP bucket instead. The hashes it voted on are noted first: their stored
+    // totals (what a search listing shows) are counted again once the votes are gone (1.73.0).
+    $votedOn = [];
+    try {
+        $vs = $db->prepare("SELECT DISTINCT info_hash FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?");
+        $vs->execute([(string)$userId]);
+        $votedOn = $vs->fetchAll(PDO::FETCH_COLUMN);
+    } catch (\Throwable $e) { /* a table this install does not have yet */ }
     $del("DELETE FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?", [(string)$userId], 'votes');
+    if ($votedOn) {
+        if (!function_exists('repRecount') && is_file(__DIR__ . '/reputation.php')) require_once __DIR__ . '/reputation.php';
+        if (function_exists('repRecount')) {
+            $repCfg = $cfg ?? (function_exists('getSettings') ? getSettings($db) : []);
+            foreach ($votedOn as $vh) {
+                try { repRecount($db, (string)$vh, $repCfg); } catch (\Throwable $e) { /* the next vote counts it again */ }
+            }
+        }
+    }
     // The bridge links and any ticket still outstanding. Leaving an identity behind would leave a
     // partner able to open a session for an account that no longer exists — the row would point at
     // a gap, and the next bridged sign-in for that external id would find it and fail confusingly
@@ -1236,6 +1289,14 @@ function userDeleteCascade(PDO $db, int $userId): array {
     $del("UPDATE user_warnings SET by_id = NULL WHERE by_id = ?", [$userId], 'warnings_given_unlinked');
     // The anti-spam layer's state for the account (v85, includes/antispam.php): its pace, its last words.
     $del("DELETE FROM antispam_state WHERE subject = ?", ['u:' . $userId], 'antispam');
+    // The second factor (v53, includes/user2fa.php): the TOTP secret and the recovery codes' hashes — the most
+    // sensitive row the schema holds. Missed until 1.73.0.
+    $del("DELETE FROM user_twofa WHERE user_id = ?", [$userId], 'second_factor');
+    // A bulk mail still waiting for this account is not sent (1.73.0): skipped, the way bulkCancelBatch()
+    // stops a batch, so the batch's counts still add up. Sent and failed rows are history the janitor prunes
+    // after a fortnight (bulkPrune()).
+    $del("UPDATE mail_queue SET status = 'skipped', last_error = 'account deleted' WHERE user_id = ? AND status = 'queued'",
+         [$userId], 'mail_skipped');
     $del("DELETE FROM users WHERE id = ?", [$userId], 'user');
     return $gone;
 }
@@ -1521,15 +1582,31 @@ function userNotify(PDO $db, int $userId, string $type, string $title, string $b
 /**
  * Best-effort email copy of a notification (only when mail is set up and the user has an address).
  * $opts: action_url + action_label render a CTA button with the raw link underneath; title
- * overrides the heading. Every account mail carries the recipient's unsubscribe/preferences link.
+ * overrides the heading.
+ *
+ * TWO KINDS OF ACCOUNT MAIL (1.73.0). `transactional` => true is the mail a member must never be able
+ * to switch off by accident: the password reset, every step of an e-mail change and its confirmations
+ * (userResetSend(), userEmailChange*(); the verification mail is userVerifySend()). It is ALWAYS sent —
+ * whatever the account page's "Account mail" says and whatever the address unsubscribed from — and it
+ * carries no unsubscribe link and no List-Unsubscribe header, because there is nothing in it to
+ * unsubscribe from. Until 1.73.0 every account mail asked the preference: switching "Account mail" off,
+ * or the unsubscribe page's master switch reached from ANY mail's footer, silently stopped the reset
+ * mail, and a member who had done that and forgot their password was locked out for good.
+ *
+ * Everything else (the default) is what the preference is for, in the account page's words: the
+ * groups — access granted, access about to end — and copies of the operator's notices. It asks
+ * isUnsubscribed($email, 'account') and carries the preferences link and the List-Unsubscribe header.
  */
 function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, string $bodyText, array $opts = []): void {
     $email = trim((string)($user['email'] ?? ''));
     if ($email === '' || !function_exists('sendEmail')) return;
-    if (function_exists('isUnsubscribed') && isUnsubscribed($db, $email, 'account')) return;
+    $transactional = !empty($opts['transactional']);
+    if (!$transactional && function_exists('isUnsubscribed') && isUnsubscribed($db, $email, 'account')) return;
     try {
         ob_start();
-        $unsub = function_exists('getUnsubscribeUrl') ? getUnsubscribeUrl($email, $cfg) : '';
+        // One address for both the footer's preferences link and the List-Unsubscribe header — and none
+        // at all on a transactional mail (sendEmail() writes the header only for a non-empty address).
+        $unsub = (!$transactional && function_exists('getUnsubscribeUrl')) ? getUnsubscribeUrl($email, $cfg) : '';
         $plain = $bodyText . (!empty($opts['action_url']) ? "\n\n" . $opts['action_url'] : '');
         $html = buildEmailHtml([
             'title' => $opts['title'] ?? $subject,
@@ -1560,6 +1637,22 @@ function userResetCreate(PDO $db, int $userId): string {
     $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'reset', ?, NOW() + INTERVAL " . USER_RESET_TTL_MIN . " MINUTE)")
        ->execute([$userId, hash('sha256', $token)]);
     return $token;
+}
+
+/**
+ * The password-reset mail (1.73.0: out of api/user_reset_request.php, so the endpoint and the tests send the
+ * same mail). TRANSACTIONAL — sent whatever the account's mail preferences say (see userNotifyMail()): a
+ * member who switched "Account mail" off, or unsubscribed from a report mail, must still be able to get back
+ * into their account. Returns false when there is nobody to send it to (no account, not active, no address).
+ */
+function userResetSend(PDO $db, array $cfg, ?array $u): bool {
+    if (!$u || ($u['status'] ?? '') !== 'active' || trim((string)($u['email'] ?? '')) === '') return false;
+    $reset = userResetCreate($db, (int)$u['id']);
+    $link = mailAbsoluteUrl($cfg, '?action=reset&token=' . $reset);
+    userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — password reset',
+        'A password reset was requested for your account. The link below sets a new password and is valid for ' . USER_RESET_TTL_MIN . " minutes.\nIf this was not you, ignore this message — your password stays unchanged.",
+        ['title' => 'Password reset', 'action_url' => $link, 'action_label' => 'Set a new password', 'transactional' => true]);
+    return true;
 }
 
 /** Validate a reset token; returns the user id or null. $burn marks it used (do this on success only). */
@@ -1611,12 +1704,14 @@ function userVerifySend(PDO $db, array $cfg, array $user): bool {
     $site = $cfg['site_name'] ?? 'Tracker';
     $text = "Hello {$user['username']},\n\nConfirm that this address belongs to your $site account by opening:\n$link\n\nThe link is valid for " . USER_VERIFY_TTL_H . " hours. If you did not request this, ignore this message.";
     try {
-        $unsub = function_exists('getUnsubscribeUrl') ? getUnsubscribeUrl($email, $cfg) : '';
+        // Transactional (1.73.0): no preferences link and no List-Unsubscribe header — there is nothing in a
+        // confirmation to unsubscribe from, and a one-click "unsubscribe" offered on it is a way to stop the
+        // mail a member must not miss (userNotifyMail() says which mail is which).
         $html = buildEmailHtml(['title' => 'Confirm your email address', 'greeting' => 'Hello ' . sanitize($user['username']) . ',',
             'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account. The link is valid for ' . USER_VERIFY_TTL_H . ' hours. If you did not request this, simply ignore this message.',
             'action_url' => $link, 'action_label' => 'Confirm email address',
-            'details' => [], 'unsubscribe_url' => $unsub], $cfg);
-        return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg, $unsub);
+            'details' => [], 'unsubscribe_url' => ''], $cfg);
+        return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg, '');
     } catch (\Throwable $e) { return false; }
 }
 
@@ -1694,7 +1789,8 @@ function userEmailChangeStart(PDO $db, array $cfg, array $user, string $newEmail
     userNotifyMail($db, $cfg, $user, ($cfg['site_name'] ?? 'Tracker') . ' — confirm your email change',
         'A change of your account email address was requested' . ($newEmail === '' ? ' (address REMOVAL)' : ' to: ' . $newEmail)
         . ".\nStep 1 of 2: confirm from THIS (current) address. The link is valid for " . USER_ECHANGE_TTL_H . " hours.\nIf this was not you, change your password immediately.",
-        ['title' => 'Confirm your email change', 'action_url' => $link, 'action_label' => 'Yes, continue the change']);
+        ['title' => 'Confirm your email change', 'action_url' => $link, 'action_label' => 'Yes, continue the change',
+         'transactional' => true]);
     return ['stage' => 'old'];
 }
 
@@ -1721,7 +1817,8 @@ function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
         $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $t2);
         userNotifyMail($db, $cfg, ['email' => $pending, 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — confirm your new email address',
             "The change was approved from the previous address.\nStep 2 of 2: confirm that THIS new address is yours. The link is valid for " . USER_ECHANGE_TTL_H . " hours.",
-            ['title' => 'Confirm your new address', 'action_url' => $link, 'action_label' => 'Confirm new address']);
+            ['title' => 'Confirm your new address', 'action_url' => $link, 'action_label' => 'Confirm new address',
+             'transactional' => true]);
         return ['stage' => 'old_ok', 'pending' => $pending];
     }
     // echange_new — finalise (new address arrives already verified; cooldown clock restarts)
@@ -1731,12 +1828,16 @@ function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
         return ['error' => 'email_taken'];
     }
     userNotify($db, (int)$u['id'], 'account', 'Your email address was changed', 'New address: ' . $pending . ' (verified).');
+    // A security notice to the address that just stopped being the account's — the one mail that tells a
+    // member whose mailbox was taken over what happened — so it is transactional, like the steps before it.
     userNotifyMail($db, $cfg, ['email' => (string)$u['email'], 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — your email address was changed',
-        'The email on your account is now: ' . $pending . "\nIf this was not you, reset your password immediately.");
+        'The email on your account is now: ' . $pending . "\nIf this was not you, reset your password immediately.",
+        ['transactional' => true]);
     // …and a written confirmation lands in the NEW mailbox too (the trail used to end with just
     // the browser page — pkt: "na nowym tylko link, nie ma potwierdzenia")
     userNotifyMail($db, $cfg, ['email' => $pending, 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — email change confirmed',
-        'Done! This address is now active and verified on your account. Account notices and password resets arrive here from now on.');
+        'Done! This address is now active and verified on your account. Account notices and password resets arrive here from now on.',
+        ['transactional' => true]);
     return ['stage' => 'done', 'email' => $pending];
 }
 

@@ -31,7 +31,7 @@
             state = await call('status');
         } catch (e) {
             panel.textContent = '';
-            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.twofa.status_failed') }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.twofa.status_failed') }));
             return;
         }
         setup = null;
@@ -59,11 +59,11 @@
         box.appendChild(el('div', { text: heading }));
         box.appendChild(el('pre', { className: 'nl-preview mt-1', text: codes.join('\n') }));
         const btn = el('button', { className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button' },
-            [el('i', { className: 'bi bi-clipboard' }), ' ' + t('js.twofa.copy_them')]);
+            [el('i', { className: 'bi bi-clipboard' }), ' ', t.key('js.twofa.copy_them')]);
         btn.addEventListener('click', () => {
             navigator.clipboard.writeText(codes.join('\n')).then(
-                () => showToast(t('js.twofa.copied'), 'success'),
-                () => showToast(t('js.twofa.copy_failed'), 'error'));
+                () => showToast(t.key('js.twofa.copied'), 'success'),
+                () => showToast(t.key('js.twofa.copy_failed'), 'error'));
         });
         box.appendChild(btn);
         return box;
@@ -72,11 +72,11 @@
     function render() {
         panel.textContent = '';
         if (!state || !state.success) {
-            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.twofa.status_failed') }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.twofa.status_failed') }));
             return;
         }
         if (state.writable === false) {
-            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.twofa.not_writable') }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.twofa.not_writable') }));
         }
 
         /* ── a setup in progress ─────────────────────────────────────────── */
@@ -93,26 +93,26 @@
                 key.appendChild(box);
             }
             key.appendChild(el('div', { className: 'wl-small text-muted' + (setup.qr ? ' mt-1' : ''), text: setup.qr_note }));
-            key.appendChild(el('div', { className: 'wl-small text-muted mt-2', text: t('js.twofa.setup_key') }));
+            key.appendChild(el('div', { className: 'wl-small text-muted mt-2', text: t.key('js.twofa.setup_key') }));
             key.appendChild(el('pre', { className: 'nl-preview mt-1', text: setup.secret_grouped }));
-            key.appendChild(el('div', { className: 'wl-small text-muted', text: t('js.twofa.account_note') }));
-            key.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: t('js.twofa.uri_note') }));
+            key.appendChild(el('div', { className: 'wl-small text-muted', text: t.key('js.twofa.account_note') }));
+            key.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: t.key('js.twofa.uri_note') }));
             key.appendChild(el('pre', { className: 'nl-preview mt-1', text: setup.uri }));
             panel.appendChild(key);
-            panel.appendChild(recoveryBlock(setup.recovery, t('js.twofa.save_codes_now')));
+            panel.appendChild(recoveryBlock(setup.recovery, t.key('js.twofa.save_codes_now')));
 
             const ci = codeInput('tf-confirm-code');
-            panel.appendChild(row(t('js.twofa.code_from_app'), ci));
+            panel.appendChild(row(t.key('js.twofa.code_from_app'), ci));
             const go = el('button', { className: 'btn btn-sm btn-outline-success', type: 'button' },
-                [el('i', { className: 'bi bi-check-lg' }), ' ' + t('js.twofa.turn_on')]);
-            const cancel = el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button' }, [t('js.twofa.cancel')]);
+                [el('i', { className: 'bi bi-check-lg' }), ' ', t.key('js.twofa.turn_on')]);
+            const cancel = el('button', { className: 'btn btn-sm btn-outline-secondary ms-2', type: 'button' }, [t.key('js.twofa.cancel')]);
             go.addEventListener('click', async () => {
                 go.disabled = true;
                 try {
                     const r = await call('confirm', { code: ci.value });
                     if (r.success) { showToast(r.message, 'success'); await load(); }
-                    else { showToast(r.error || t('js.twofa.failed'), 'error'); }
-                } catch { showToast(t('js.twofa.network_error'), 'error'); }
+                    else { showToast(r.error || t.key('js.twofa.failed'), 'error'); }
+                } catch { showToast(t.key('js.twofa.network_error'), 'error'); }
                 go.disabled = false;
             });
             cancel.addEventListener('click', async () => { await call('cancel'); await load(); });
@@ -125,20 +125,20 @@
         /* ── off ─────────────────────────────────────────────────────────── */
         if (!state.enabled) {
             panel.appendChild(el('div', {}, [
-                el('span', { className: 'wl-badge wl-b-muted', text: t('js.twofa.badge_off') }),
-                el('span', { className: 'wl-small text-muted', text: '  ' + t('js.twofa.password_only') }),
+                el('span', { className: 'wl-badge wl-b-muted', text: t.key('js.twofa.badge_off') }),
+                '  ', el('span', { className: 'wl-small text-muted', text: t.key('js.twofa.password_only') }),
             ]));
             const pw = pwInput('tf-begin-pw');
-            panel.appendChild(row(t('js.twofa.admin_password'), pw));
+            panel.appendChild(row(t.key('js.twofa.admin_password'), pw));
             const btn = el('button', { className: 'btn btn-sm btn-outline-success mt-1', type: 'button' },
-                [el('i', { className: 'bi bi-shield-lock' }), ' ' + t('js.twofa.set_it_up')]);
+                [el('i', { className: 'bi bi-shield-lock' }), ' ', t.key('js.twofa.set_it_up')]);
             btn.addEventListener('click', async () => {
                 btn.disabled = true;
                 try {
                     const r = await call('begin', { password: pw.value });
                     if (r.success) { setup = r; render(); }
-                    else showToast(r.error || t('js.twofa.failed'), 'error');
-                } catch { showToast(t('js.twofa.network_error'), 'error'); }
+                    else showToast(r.error || t.key('js.twofa.failed'), 'error');
+                } catch { showToast(t.key('js.twofa.network_error'), 'error'); }
                 btn.disabled = false;
             });
             panel.appendChild(btn);
@@ -147,13 +147,13 @@
 
         /* ── on ──────────────────────────────────────────────────────────── */
         const head = el('div', { className: 'mb-2' });
-        head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: t('js.twofa.badge_on') }));
-        head.appendChild(el('span', { className: 'wl-small text-muted',
-            text: '  ' + t('js.twofa.since_codes_left', { date: (state.confirmed_at ? new Date(state.confirmed_at * 1000).toLocaleString() : '?'),
-                n: state.recovery_left }) }));
+        head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: t.key('js.twofa.badge_on') }));
+        head.appendChild(el('span', { className: 'wl-small text-muted' }, ['  ',   // pieces: the word keeps its key (1.73.0)
+            t.key('js.twofa.since_codes_left', { date: (state.confirmed_at ? new Date(state.confirmed_at * 1000).toLocaleString() : '?'),
+                n: state.recovery_left })]));
         panel.appendChild(head);
         if (state.recovery_left <= 2) {
-            panel.appendChild(el('div', { className: 'nl-note nl-note-warn', text: t('js.twofa.few_codes_left', { n: state.recovery_left }) }));
+            panel.appendChild(el('div', { className: 'nl-note nl-note-warn', text: t.key('js.twofa.few_codes_left', { n: state.recovery_left }) }));
         }
 
         const mk = (title, opName, okLabel, cls, hint) => {
@@ -161,41 +161,41 @@
             wrap.appendChild(el('div', { className: 'wl-kv-k', text: title }));
             if (hint) wrap.appendChild(el('div', { className: 'wl-small text-muted', text: hint }));
             const pw = pwInput('tf-' + opName + '-pw');
-            const ci = codeInput('tf-' + opName + '-code', t('js.twofa.code_placeholder'));
-            wrap.appendChild(row(t('js.twofa.admin_password'), pw));
-            wrap.appendChild(row(t('js.twofa.current_code'), ci));
+            const ci = codeInput('tf-' + opName + '-code', t.key('js.twofa.code_placeholder'));
+            wrap.appendChild(row(t.key('js.twofa.admin_password'), pw));
+            wrap.appendChild(row(t.key('js.twofa.current_code'), ci));
             const btn = el('button', { className: 'btn btn-sm ' + cls, type: 'button' }, [okLabel]);
             btn.addEventListener('click', async () => {
-                if (opName === 'disable' && !await confirmAction(t('js.twofa.disable_title'),
-                    t('js.twofa.disable_body'),
-                    { okLabel: t('js.twofa.disable_ok'), danger: true })) return;
+                if (opName === 'disable' && !await confirmAction(t.key('js.twofa.disable_title'),
+                    t.key('js.twofa.disable_body'),
+                    { okLabel: t.key('js.twofa.disable_ok'), danger: true })) return;
                 btn.disabled = true;
                 try {
                     const r = await call(opName, { password: pw.value, code: ci.value });
                     if (r.success) {
-                        showToast(r.message || t('js.twofa.done'), 'success');
+                        showToast(r.message || t.key('js.twofa.done'), 'success');
                         if (r.recovery) {
                             // New codes replace every old one, so they get the same once-only treatment.
                             panel.textContent = '';
-                            panel.appendChild(recoveryBlock(r.recovery, t('js.twofa.new_codes')));
-                            const done = el('button', { className: 'btn btn-sm btn-outline-secondary mt-2', type: 'button' }, [t('js.twofa.saved_them')]);
+                            panel.appendChild(recoveryBlock(r.recovery, t.key('js.twofa.new_codes')));
+                            const done = el('button', { className: 'btn btn-sm btn-outline-secondary mt-2', type: 'button' }, [t.key('js.twofa.saved_them')]);
                             done.addEventListener('click', load);
                             panel.appendChild(done);
                             return;
                         }
                         await load();
-                    } else showToast(r.error || t('js.twofa.failed'), 'error');
-                } catch { showToast(t('js.twofa.network_error'), 'error'); }
+                    } else showToast(r.error || t.key('js.twofa.failed'), 'error');
+                } catch { showToast(t.key('js.twofa.network_error'), 'error'); }
                 btn.disabled = false;
             });
             wrap.appendChild(btn);
             return wrap;
         };
 
-        panel.appendChild(mk(t('js.twofa.regen_title'), 'regen', t('js.twofa.regen_ok'), 'btn-outline-warning',
-            t('js.twofa.regen_hint')));
-        panel.appendChild(mk(t('js.twofa.disable_section'), 'disable', t('js.twofa.disable_btn'), 'btn-outline-danger',
-            t('js.twofa.disable_hint')));
+        panel.appendChild(mk(t.key('js.twofa.regen_title'), 'regen', t.key('js.twofa.regen_ok'), 'btn-outline-warning',
+            t.key('js.twofa.regen_hint')));
+        panel.appendChild(mk(t.key('js.twofa.disable_section'), 'disable', t.key('js.twofa.disable_btn'), 'btn-outline-danger',
+            t.key('js.twofa.disable_hint')));
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', load); else load();

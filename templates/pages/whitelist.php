@@ -39,11 +39,13 @@ if ($wlReg) {
 $wlSchedNotice = '';
 if ($wlSched) {
     $wlNext = scheduleNextChange($cfg);
+    // The hours and the next change in the reader's language (1.73.0): scheduleDescribe() and
+    // scheduleFormatLocal() printed English day names and "(next day)" on the Polish page.
     $wlSchedNotice = __('whitelist.sched_notice', [
-        'hours'   => sanitize(scheduleDescribe($cfg)),
+        'hours'   => sanitize(scheduleDescribeText($cfg)),
         'mode'    => __($wlMode ? 'home.mode_whitelist' : 'home.mode_open'),
         'next'    => $wlNext ? __('whitelist.sched_next', [
-                        'at' => sanitize(scheduleFormatLocal($cfg, $wlNext)),
+                        'at' => sanitize(scheduleFormatLocalText($cfg, $wlNext)),
                         'tz' => sanitize(scheduleTimezone($cfg)),
                      ]) : '.',
         'pending' => $wlMode ? '' : __('whitelist.sched_pending'),
@@ -134,7 +136,7 @@ if ($wlSched) {
 <form id="wl-form" novalidate>
     <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
     <div class="form-group">
-        <label for="wl-input"><?= _h('whitelist.input_label') ?> <small class="form-hint">— <span id="wl-counter">0 valid</span></small></label>
+        <label for="wl-input"><?= _h('whitelist.input_label') ?> <small class="form-hint">— <span id="wl-counter"><?= _h('js.app.wl_count_valid', ['n' => 0]) ?></span></small></label>
         <textarea id="wl-input" name="input" rows="6" maxlength="<?= $wlMax * 2100 ?>" data-max="<?= $wlMax ?>" placeholder="magnet:?xt=urn:btih:a1b2c3d4e5f6…&#10;a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"></textarea>
         <div class="error-msg"><?= _h('whitelist.input_err') ?></div>
     </div>

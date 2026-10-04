@@ -215,11 +215,63 @@ function scheduleDescribe(array $cfg): string {
     return implode(', ', $parts) . ' (' . $p['tz'] . ')';
 }
 
+/**
+ * The same week as scheduleDescribe(), in the reader's language (1.73.0) — or $lang's: the dictionary's day
+ * names (common.dow_1…7), "the next day" / "następnego dnia", "all day" / "cały dzień", the zone named as a
+ * time ("Europe/Warsaw time" / "czas Europe/Warsaw") and no parentheses of its own, so a sentence may hold it
+ * in its own. Consecutive days with one window are joined and open days left out, exactly as scheduleDescribe()
+ * does; an invalid schedule is scheduleDescribe()'s own words.
+ *   "Mon–Fri 10:00–02:30 the next day, Sat–Sun all day, Europe/Warsaw time"
+ *   "pon–pt 10:00–02:30 następnego dnia, sob–niedz cały dzień, czas Europe/Warsaw"
+ * Every page and the panel print this one (the whitelist page printed scheduleDescribe()'s English on its
+ * Polish page); scheduleDescribe() stays for the CLI and the journal. Written by part C of 1.73.0 for the
+ * texts (pageContentScheduleText(), which now hands over to this).
+ */
+function scheduleDescribeText(array $cfg, ?string $lang = null): string {
+    $p = scheduleParse($cfg, false);
+    if ($p === null) return scheduleDescribe($cfg);   // "invalid schedule", as before
+    $t = fn(string $key, array $params = []): string => ($lang !== null && function_exists('langFor'))
+        ? langFor($lang, $key, $params) : __($key, $params);
+    $ruleOf = function ($v) use ($t): string {
+        if ($v === 'all') return $t('info.sched_all_day');
+        if ($v === 'none') return '';
+        $next = scheduleParseTime($v['to']) <= scheduleParseTime($v['from']);
+        return $t($next ? 'info.sched_window_next' : 'info.sched_window', ['from' => $v['from'], 'to' => $v['to']]);
+    };
+    $days = array_values(SCHEDULE_DAYS);
+    $groups = [];   // [first index, last index, rule]
+    foreach ($days as $i => $d) {
+        $rule = $ruleOf($p['days'][$d] ?? 'none');
+        if ($rule === '') continue;
+        $n = count($groups);
+        if ($n && $groups[$n - 1][2] === $rule && $groups[$n - 1][1] === $i - 1) $groups[$n - 1][1] = $i;
+        else $groups[] = [$i, $i, $rule];
+    }
+    if (!$groups) return $t('info.sched_none', ['tz' => $p['tz']]);
+    $name = fn(int $i): string => $t('common.dow_' . ($i + 1));
+    $parts = [];
+    foreach ($groups as [$a, $b, $rule]) $parts[] = ($a === $b ? $name($a) : $name($a) . '–' . $name($b)) . ' ' . $rule;
+    return $t('info.sched_list', ['list' => implode(', ', $parts), 'tz' => $p['tz']]);
+}
+
 /** Format a moment as "HH:MM Day" (optionally with date) in the schedule timezone, for notices. */
 function scheduleFormatLocal(array $cfg, ?DateTimeImmutable $t, bool $withDate = false): string {
     if ($t === null) return '';
     $l = $t->setTimezone(new DateTimeZone(scheduleTimezone($cfg)));
     return $l->format($withDate ? 'D Y-m-d H:i' : 'H:i D');
+}
+
+/**
+ * The same moment in the reader's language (1.73.0): the dictionary's day name, then the time — "Tue 02:30"
+ * / "wt 02:30", with the date "Tue 2026-08-18 02:30" — in the schedule's zone. scheduleFormatLocal() put PHP's
+ * English 'D' on the Polish whitelist page and in the Polish panel; it stays for the CLI and the tests.
+ */
+function scheduleFormatLocalText(array $cfg, ?DateTimeImmutable $t, bool $withDate = false, ?string $lang = null): string {
+    if ($t === null) return '';
+    $l = $t->setTimezone(new DateTimeZone(scheduleTimezone($cfg)));
+    $key = 'common.dow_' . (int)$l->format('N');   // 1 = Monday … 7 = Sunday, as SCHEDULE_DAYS
+    $day = ($lang !== null && function_exists('langFor')) ? langFor($lang, $key) : __($key);
+    return $day . ' ' . $l->format($withDate ? 'Y-m-d H:i' : 'H:i');
 }
 
 /**
@@ -237,10 +289,14 @@ function scheduleStatus(array $cfg, ?DateTimeImmutable $now = null): array {
         'valid'          => $valid,
         'tz'             => scheduleTimezone($cfg),
         'describe'       => scheduleDescribe($cfg),
+        // The same two in the reader's language (1.73.0): what the panel's Whitelist card and Settings print.
+        // `describe` / `next_change_local` stay the English the CLI and the API's readers already compare.
+        'describe_text'  => scheduleDescribeText($cfg),
         'current'        => function_exists('trackerMode') ? trackerMode($cfg) : ((($cfg['tracker_mode'] ?? 'blacklist') === 'whitelist') ? 'whitelist' : 'blacklist'),
         'desired'        => $desired,
         'next_change'    => $next ? $next->getTimestamp() : null,
         'next_change_local' => $next ? scheduleFormatLocal($cfg, $next, true) : null,
+        'next_change_text'  => $next ? scheduleFormatLocalText($cfg, $next, true) : null,
         'cmd'            => scheduleSwitchCommand($cfg),
         'cmd_set'        => scheduleSwitchCommand($cfg) !== '',
         // What the tracker is REALLY doing, beside what we believe. Cached, so polling is cheap.

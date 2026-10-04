@@ -16,17 +16,10 @@ if (isUnsubscribed($db, $email)) {
     jsonResponse(['success' => true, 'message' => __('api.unsubscribe.already')]);
 }
 
-// One-click unsubscribe (POST from email client) → disable all
+// One-click unsubscribe (POST from email client) → disable all (includes/mail.php unsubscribeAll(), the same
+// as the page's own one-click: templates/pages/unsubscribe.php)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $types = ['submission', 'review', 'status', 'custom', 'appeal'];
-    $stmt = $db->prepare(
-        "INSERT INTO email_preferences (email, type, enabled) VALUES (?, ?, 0)
-         ON DUPLICATE KEY UPDATE enabled = 0"
-    );
-    foreach ($types as $t) {
-        $stmt->execute([$email, $t]);
-    }
-    $db->prepare("INSERT IGNORE INTO unsubscribed_emails (email) VALUES (?)")->execute([$email]);
+    unsubscribeAll($db, $email);
     jsonResponse(['success' => true]);
 }
 

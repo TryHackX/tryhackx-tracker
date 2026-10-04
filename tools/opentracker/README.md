@@ -1,9 +1,14 @@
 # The tracker itself — the two opentracker builds
 
 The panel is an admin interface for [opentracker](https://erdgeist.org/arts/software/opentracker/).
-This directory holds the tracker binaries this project is developed and tested against, the two
-patches applied to them, and everything needed to rebuild them from source instead of trusting the
-binaries.
+This directory holds the tracker binaries this project is developed and tested against, the four
+patches applied to them (three to opentracker, one to libowfat), the root helpers the panel calls,
+and everything needed to rebuild the binaries from source instead of trusting them.
+
+The sections from *A full scrape that loses its own framing* on — all but the short *After the first
+start* — are the project's **internal lab notes** of 2026-09-04 … 06 — the paths are the reference
+VPS's, the scripts lived in `/tmp` — kept because they are the evidence behind two of the patches.
+They are not instructions; the guide is [INSTALL.md](../../INSTALL.md) §5 and §9.
 
 **Tested on Debian 13 (trixie)**, x86-64, gcc 14.2.0, kernel 6.12. They are plain dynamically linked
 ELF executables needing only `libz` and `libc`, so any glibc distribution of that vintage will run
@@ -20,10 +25,18 @@ them; older glibc will not.
 | `sighup-udp-workers.patch` | fixes `systemctl reload` killing the tracker |
 | `libowfat-no-zerocopy.patch` | libowfat: compiles out `MSG_ZEROCOPY` in `iob_send()` — the chunked `/scrape` corruption (round four) |
 | `opentracker-review-fixes.patch` | seven fixes from the 2026-09 source review (connid secret, accesslist reload UAF, /stats task on a dead fd, atomic torrent count, tpbs one-byte write, worker start order, mmap bound) |
-| `UPSTREAM-REPORT.md` | the bug report for libowfat/opentracker, ready to send |
+| `UPSTREAM-REPORT.md` | **internal**: the draft bug report for libowfat/opentracker (not yet sent) |
 | `udp-reject-interval.patch` | adds `access.udp_reject_interval` |
-| `egress-budget/ottrack.nft` | the reply-rate budget (see the Traffic page) |
-| `tracker-*.sh` | the root helpers the panel calls (see [INSTALL.md](../../INSTALL.md)); `tracker-dbmem.sh` (1.37.0) is the database-memory one — seven MariaDB/MySQL keys, live where the engine allows, a drop-in for the rest |
+| `egress-budget/ottrack.nft` | the reply-rate budget: kernel sets of the clients answered in the last 3 h, replies to them first (see the Traffic page); installed by hand |
+| `egress-budget/tracker-egress-prio.sh` / `.service` | traffic control on the uplink for the same budget; installed by hand, if at all |
+| `tracker-mode.sh` | switches the `opentracker` / `opentracker.conf` symlinks white↔black and restarts (`[--all\|--instance N] white\|black\|status`); the schedule and the running-mode check |
+| `tracker-netlimit.sh` | the inbound UDP limit in its own nftables table, address lists, the egress rate, the stability probe (`probe-start`) and the janitor's slow half (`janitor-heavy-start`) |
+| `tracker-instance.sh` | opentracker's workers, open files, CPU scheduling and restart (*OpenTracker — performance*) |
+| `tracker-backup.sh` | backups: run, list, verify, prune, delete, restore, `restore-db` |
+| `tracker-sysctl.sh` | the kernel's network buffers, armed and then confirmed (or reverted after 120 s) |
+| `tracker-cluster.sh` | extra opentracker instances on ports of their own (IPv4 only) |
+| `tracker-dbmem.sh` | (1.37.0) the database's memory — seven MariaDB/MySQL keys, live where the engine allows, a drop-in for the rest |
+| `tracker-livesync.sh` | live peer sync with a second machine (needs a `-DWANT_SYNC_LIVE` build — not these — and WireGuard) |
 
 ```
 sha256  d1a319cd999812a98c4fa2d6fedfee7a8a259b1d0ca0816d58bf2dc5f264fe8d  opentracker.white
@@ -60,6 +73,10 @@ The commit is baked into the binary as `GIT_VERSION`, so a build can always be t
 strings opentracker.white | grep -o '1c7fac4[0-9a-f]*'
 ```
 
+In the shipped builds that string reads `1c7fac4cc23801ac81a2abd7d3110110683831c4811` — 43 digits, the
+commit with three more in the middle: the `GIT_VERSION` given to that build was mistyped. The prefix
+is what identifies it; a rebuild from the recipe below carries whatever its own `git` says.
+
 ---
 
 ## Feature flags
@@ -84,6 +101,12 @@ Deliberately **not** enabled:
 - `WANT_V4_ONLY` — the default build is dual-stack.
 - `WANT_SYSLOGS`, `WANT_LOG_NETWORKS`, `WANT_FULLLOG_NETWORKS` — per-announce logging on a tracker
   serving ~100k packets a second is a disk-filling machine, not a diagnostic.
+- `WANT_SPOT_WOODPECKER` — counting the networks that re-announce within 20 seconds. The first install's
+  recipe (and the main README until 1.73.0) listed it; the shipped builds do not have it. The word
+  `woodpeckers` is in both binaries only because upstream's `/stats` mode table carries it whatever the
+  flags; what the flag adds is code — the `stats_issue_event(EVENT_WOODPECKER, …)` call in
+  `trackerlogic.c` and its case in `ot_stats.c` — and in both builds no call passes that event and the
+  event switch sends it to the same no-op target as `EVENT_READ` (read from the disassembly, 1.73.0).
 
 > ⚠ **`-h` and `/stats` lie about which features are compiled in.** opentracker prints one fixed
 > usage string regardless of build flags, so `-h` advertises `-s livesyncport` on a binary that
@@ -98,9 +121,11 @@ strings opentracker.white | grep -x 'access\.\(whitelist\|blacklist\|stats_path\
 
 ---
 
-## The two patches
+## The patches
 
-Both are small, both are here as unified diffs, and both fix something that bites in production.
+Four, all small, all here as unified diffs, and each fixes something that bites in production. The
+two below are opentracker's oldest; `libowfat-no-zerocopy.patch` is explained in *Round four* and
+`opentracker-review-fixes.patch` in *Round six*.
 
 ### 1. `sighup-udp-workers.patch` — `systemctl reload` killed the tracker
 
@@ -143,34 +168,34 @@ HTTP client is generally a person looking at an error message.
 Nothing here needs the panel; this is the whole recipe.
 
 ```bash
-sudo apt install -y build-essential git zlib1g-dev
+sudo apt install -y build-essential git zlib1g-dev wget xz-utils
 mkdir -p ~/build && cd ~/build
+P=/path/to/tryhackx-tracker/tools/opentracker
 
-# libowfat, opentracker's own support library — WITH the zerocopy patch, or the /scrape framing
+# libowfat 0.34, opentracker's own support library — WITH the zerocopy patch, or the /scrape framing
 # bug comes back (see "Round four" below: iob_send() frees MSG_ZEROCOPY buffers before the kernel
-# has read them). The patch is small and applies to 0.34 as shipped.
-git clone git://git.fefe.de/libowfat
+# has read them). Not Debian's libowfat-dev: that is the unpatched library.
+wget http://www.fefe.de/libowfat/libowfat-0.34.tar.xz && tar -xf libowfat-0.34.tar.xz && mv libowfat-0.34 libowfat
 (cd libowfat && patch -p1 --forward < $P/libowfat-no-zerocopy.patch)
 make -C libowfat
 
-# opentracker at the tested commit
+# opentracker at the tested commit, with its three patches
 git clone git://erdgeist.org/opentracker
 cd opentracker
 git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
-
-P=/path/to/tryhackx-tracker/tools/opentracker   # (set this before the libowfat step above)
 patch -p1 --forward < $P/sighup-udp-workers.patch
 patch -p1 --forward < $P/udp-reject-interval.patch
+patch -p1 --forward < $P/opentracker-review-fixes.patch
 ```
 
 `--forward`, and `patch` rather than `git apply`: the second patch applies with a little fuzz (its
 hunk headers were written by hand), which `patch` accepts and `git apply` refuses.
 
-**This recipe was verified, not assumed.** The two patches were applied to a pristine checkout of the
-commit above and the result compared against the working tree that produced the shipped binaries:
-`opentracker.c`, `trackerlogic.c` and `trackerlogic.h` came out **byte-identical**, and the tree
-built cleanly. So what is published here is exactly what is running — there is no fourth change
-sitting in somebody's editor.
+**This recipe was verified, not assumed.** The first two patches were applied to a pristine checkout
+of the commit above and the result compared against the working tree that produced the binaries of
+that day: `opentracker.c`, `trackerlogic.c` and `trackerlogic.h` came out **byte-identical**, and the
+tree built cleanly. The libowfat patch (round four) and the review fixes (round six) came after and
+are in the recipe above; the shipped binaries carry all four.
 
 Then build each mode into its own binary — `make clean` between them is not optional, because the
 object files carry the accesslist flag:
@@ -215,7 +240,7 @@ sudo ln -sfn /home/tracker/opentracker.conf.black /home/tracker/opentracker.conf
 ```
 
 The two config files, the systemd unit, the accesslist directory and the sudoers line that lets the
-panel switch modes are all in **[INSTALL.md](../../INSTALL.md) § The tracker** — that is the guide to
+panel switch modes are all in **[INSTALL.md](../../INSTALL.md) §5 and §9** — that is the guide to
 follow; this file is the part about the binaries themselves.
 
 A minimal config for either mode:
@@ -224,7 +249,7 @@ A minimal config for either mode:
 # opentracker.conf.white
 listen.udp.workers 4
 access.whitelist /home/tracker/accesslist/whitelist
-access.stats 203.0.113.10
+access.stats 127.0.0.1
 access.stats_path stats-pick-something-unguessable
 tracker.redirect_url https://tracker.example.org/?action=whitelist
 access.udp_reject_interval 86400
@@ -235,7 +260,8 @@ is the point: the panel writes one accesslist file and the tracker's mode decide
 
 > ⚠ `access.stats_path` matters more than it looks. Without it `/stats` sits on a guessable path, and
 > `WANT_RESTRICT_STATS` limits it by IP — so anyone who can reach the tracker from a listed address
-> can read the whole torrent list. Pick something unguessable and keep the IP list short.
+> can read the whole torrent list. Pick something unguessable and keep the IP list short — the panel
+reads `/stats` from this machine itself, so `127.0.0.1` is the address it needs.
 
 ---
 
@@ -278,7 +304,7 @@ Worth writing down, because each of these looked convincing enough to spend an h
 | --- | --- |
 | The `io_batch` split in `http_sendiovecdata` (a stale pointer across `realloc`, and the wrong batch initialised) | **Not it.** Both defects are real and worth fixing, but instrumentation shows the split path never runs during a corrupted transfer. |
 | libowfat freeing buffers as it sends them (`iob_addbuf_free` + autofree) | **Not it.** A build with `-DWANT_NO_AUTO_FREE`, where nothing is freed at all, corrupts identically. |
-| `MSG_ZEROCOPY` — the kernel still reading pages the application has freed | **Not it.** A standalone program driving `iob_send` the same way got **zero** `SO_EE_ORIGIN_ZEROCOPY` completions on `MSG_ERRQUEUE`; the sends are ordinary copies. Patching libowfat to skip zerocopy for autofree batches changes nothing. |
+| `MSG_ZEROCOPY` — the kernel still reading pages the application has freed | **Not it** — so this round concluded; **round four proved it was** (`strace`: 63 of 63 `sendmsg` calls flagged `MSG_ZEROCOPY`, clean once the option is refused), and `libowfat-no-zerocopy.patch` is the fix. A standalone program driving `iob_send` the same way got **zero** `SO_EE_ORIGIN_ZEROCOPY` completions on `MSG_ERRQUEUE`; the sends are ordinary copies. Patching libowfat to skip zerocopy for autofree batches changes nothing. |
 
 Where it does point: the corrupted run is **exactly six bytes** long and sits **exactly** where the
 next chunk's length header belongs — the scrape data immediately after it is intact bencode. Six
@@ -349,7 +375,7 @@ The question is therefore not "what writes garbage" but "who frees this while it
 |---|---|
 | The `io_batch` split at `OT_BATCH_LIMIT` | Instrumented: the split never runs at the offset where framing breaks. |
 | libowfat's autofree | `-DWANT_NO_AUTO_FREE` corrupts identically — `iob_reset` runs cleanups regardless of the flag. |
-| `MSG_ZEROCOPY` | Zero `SO_EE_ORIGIN_ZEROCOPY` completions. |
+| `MSG_ZEROCOPY` | Zero `SO_EE_ORIGIN_ZEROCOPY` completions. *(Superseded: round four found it was the cause.)* |
 | A thread race on the batch | Thread ids logged at queue, send and reset: **one thread** does all three. |
 | Undefined behaviour exposed by optimisation | Built at `-O3` and at `-O0`, fixed and unfixed: 3/3 bad in all four. |
 
@@ -539,8 +565,9 @@ the receiver has to be behind the sender for the freed page to be reused before 
 `strace` on run A: 3 × `setsockopt(SO_ZEROCOPY)`, and **63 of 63** `sendmsg` calls flagged
 `MSG_ZEROCOPY`. The corruption followed the flag.
 
-**The fix** is to compile the zerocopy block out of `iob_send.c` (`#undef MSG_ZEROCOPY`,
-`#undef SO_ZEROCOPY` before the `#ifdef MSG_MORE` section) so the copying `sendmsg(MSG_MORE)` path is
+**The fix** is to compile the zerocopy block out of `iob_send.c` (first tried as `#undef MSG_ZEROCOPY` /
+`#undef SO_ZEROCOPY` before the `#ifdef MSG_MORE` section; the shipped patch turns the guard into
+`#if 0`, below) so the copying `sendmsg(MSG_MORE)` path is
 taken — the path run B used. Handling the completion queue properly would be the "right" fix
 upstream; for a tracker whose scrape is read by one panel on loopback, copying 30 MB is nothing.
 Built as `/tmp/fix/out/opentracker.{white,black}` with the production feature set (`/tmp/fixbuild.sh`),
@@ -562,7 +589,7 @@ swarm rebuilt from empty: 1.56 M torrents and 3.8 M peers four hours later.
 **Every full scrape since has arrived intact.** The 16:55 poll read 1 561 725 of 1 562 173 hashes
 with `truncated=0`; the polls before the swap had failed 10 times in 13. The truncated rows that
 still appear are a different thing entirely: the panel stops reading when its own
-`index_poll_budget` (45 s by default, 120 s cap) runs out, and on a swarm this size a poll takes
+`index_poll_budget` (45 s by default; capped at 120 s then, 5–300 s since 1.72.0) runs out, and on a swarm this size a poll takes
 56–96 s. Those rows have no `partial` marker and no framing error — raising the budget is a
 settings decision, not a tracker bug.
 
@@ -570,8 +597,8 @@ settings decision, not a tracker bug.
 `UPSTREAM-REPORT.md`: seven findings traced by a second reader (the UDP connection-id secret from
 `srandom(time(NULL))`, the accesslist reload use-after-free, the `/stats` task that outlives its
 client, and four low ones), six raised but not confirmed, three refuted. Nothing from it is
-patched here; the zerocopy fix is the only change these binaries carry beyond the two patches
-above.
+patched here at that point: the zerocopy fix was the only change those binaries carried beyond the
+two patches above. Round six patched seven of the findings.
 
 ## Round six: the review fixes (2026-09-06)
 

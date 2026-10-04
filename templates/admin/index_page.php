@@ -166,7 +166,7 @@
                         <th class="sortable" data-sort="seeders"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="seen"><?= _h('a.index.col_seen') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="sortable" data-sort="last"><?= _h('a.index.col_first_last') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
-                        <th class="sortable" data-sort="meta"><?= _h('a.index.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable col-badge" data-sort="meta"><?= _h('a.index.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
                         <th class="th-actions"><?= _h('a.index.col_actions') ?></th>
                     </tr></thead>
                     <tbody id="idx-body"></tbody>
@@ -190,6 +190,8 @@
     </div>
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
+    <?php /* What the server wrote, marked before any script of the page runs (1.73.0, assets/js/lang-swap.js). */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-index.js<?= assetVer('assets/js/admin-index.js') ?>"></script>

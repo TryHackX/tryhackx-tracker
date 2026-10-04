@@ -30,13 +30,13 @@
         try {
             j = await apiCall('admin/ot_cluster_status');
         } catch (e) {
-            if (my > painted) { painted = my; fatal((e && e.message) || t('js.cluster.network_error')); }
+            if (my > painted) { painted = my; fatal((e && e.message) || t.key('js.cluster.network_error')); }
             return;
         } finally { if (busy === my) busy = 0; }
         if (my <= painted) return;
         painted = my;
-        if (!j || j.enabled === false) { fatal(t('js.cluster.helper_off')); return; }
-        if (!j.ok) { fatal(j.error || t('js.cluster.helper_silent')); return; }
+        if (!j || j.enabled === false) { fatal(t.key('js.cluster.helper_off')); return; }
+        if (!j.ok) { fatal(j.error || t.key('js.cluster.helper_silent')); return; }
         state.roster = j.roster || {};
         state.propose = j.propose || {};
         state.announce = j.announce || [];
@@ -49,11 +49,11 @@
     function fatal(msg) {
         const b = $('cl-body');
         b.textContent = '';
-        b.appendChild(el('div', { className: 'nl-note nl-note-bad', text: msg || t('js.cluster.unavailable') }));
+        b.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.find(msg, 'api.') || t.key('js.cluster.unavailable') }));
         b.appendChild(el('div', {}, [el('button', {
             className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
             onclick: () => { painted = 0; busy = 0; load(true); },
-        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ' + t('js.cluster.try_again')])]));
+        }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ', t.key('js.cluster.try_again')])]));
         $('cl-notes').textContent = '';
     }
 
@@ -63,37 +63,37 @@
         const row = el('div', { className: 'sy-row' });
 
         const left = el('div', { className: 'sy-key' });
-        left.appendChild(el('div', { className: 'sy-key-label', text: isPrimary ? t('js.cluster.primary') : String(i.name || '?') }));
+        left.appendChild(el('div', { className: 'sy-key-label', text: isPrimary ? t.key('js.cluster.primary') : String(i.name || '?') }));
         left.appendChild(el('code', { className: 'sy-key-name', text: String(i.unit || '') }));
         left.appendChild(el('div', { className: 'sy-key-what', text: isPrimary
-            ? t('js.cluster.primary_what')
-            : t('js.cluster.extra_what') }));
+            ? t.key('js.cluster.primary_what')
+            : t.key('js.cluster.extra_what') }));
         row.appendChild(left);
 
         const mid = el('div', { className: 'sy-now' });
         const active = String(i.state || '') === 'active';
-        mid.appendChild(el('div', {}, [badge(active ? t('js.cluster.running') : (i.state || t('js.cluster.unknown')), active ? 'wl-b-ok' : 'wl-b-bad')]));
-        mid.appendChild(el('div', { className: 'sy-now-raw',
-            text: t('js.cluster.ports', { udp: i.udp_port || '?', tcp: i.tcp_port || '?' }) + (i.workers ? t('js.cluster.workers', { n: i.workers }) : '') }));
+        mid.appendChild(el('div', {}, [badge(active ? t.key('js.cluster.running') : (i.state || t.key('js.cluster.unknown')), active ? 'wl-b-ok' : 'wl-b-bad')]));
+        mid.appendChild(el('div', { className: 'sy-now-raw' },   // pieces keep their keys (1.73.0)
+            [t.key('js.cluster.ports', { udp: i.udp_port || '?', tcp: i.tcp_port || '?' }), i.workers ? t.key('js.cluster.workers', { n: i.workers }) : '']));
         // The one thing a shared binary symlink cannot prevent: a config symlink that drifted.
         if (!isPrimary && i.running_build && i.conf_mode && i.running_build !== 'unknown'
             && i.conf_mode !== 'unknown' && i.running_build !== i.conf_mode) {
             mid.appendChild(el('div', { className: 'sy-now-base text-warning',
-                text: t('js.cluster.build_drift', { build: i.running_build, mode: i.conf_mode }) }));
+                text: t.key('js.cluster.build_drift', { build: i.running_build, mode: i.conf_mode }) }));
         } else if (!isPrimary && i.conf_mode) {
-            mid.appendChild(el('div', { className: 'sy-now-base', text: t('js.cluster.mode', { mode: i.conf_mode }) }));
+            mid.appendChild(el('div', { className: 'sy-now-base', text: t.key('js.cluster.mode', { mode: i.conf_mode }) }));
         }
         row.appendChild(mid);
 
         const act = el('div', { className: 'sy-ctl' });
         if (isPrimary) {
-            act.appendChild(el('div', { className: 'wl-small text-muted', text: t('js.cluster.managed_by_installer') }));
+            act.appendChild(el('div', { className: 'wl-small text-muted', text: t.key('js.cluster.managed_by_installer') }));
         } else {
             const restart = el('button', { className: 'btn btn-sm btn-outline-warning me-1', type: 'button' },
-                [el('i', { className: 'bi bi-bootstrap-reboot' }), ' ' + t('js.cluster.restart')]);
+                [el('i', { className: 'bi bi-bootstrap-reboot' }), ' ', t.key('js.cluster.restart')]);
             restart.addEventListener('click', () => op('restart', i.name));
             const remove = el('button', { className: 'btn btn-sm btn-outline-danger', type: 'button' },
-                [el('i', { className: 'bi bi-trash' }), ' ' + t('js.cluster.remove')]);
+                [el('i', { className: 'bi bi-trash' }), ' ', t.key('js.cluster.remove')]);
             remove.addEventListener('click', () => op('remove', i.name));
             act.appendChild(restart);
             act.appendChild(remove);
@@ -109,8 +109,8 @@
         const list = (r.instances || []);
         const n = list.length, few = n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20);
         $('cl-updated').textContent = n
-            ? t(n === 1 ? 'js.cluster.extra_one' : (few ? 'js.cluster.extra_few' : 'js.cluster.extra_many'), { n: n })
-            : t('js.cluster.no_extras');
+            ? t.key(n === 1 ? 'js.cluster.extra_one' : (few ? 'js.cluster.extra_few' : 'js.cluster.extra_many'), { n: n })
+            : t.key('js.cluster.no_extras');
 
         const rows = el('div', { className: 'sy-rows' });
         if (r.primary && r.primary.unit) rows.appendChild(instanceRow(r.primary, true));
@@ -118,13 +118,13 @@
         b.appendChild(rows);
 
         if (!list.length) {
-            b.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.cluster.no_extras_note') }));
+            b.appendChild(el('div', { className: 'nl-note nl-note-info', text: t.key('js.cluster.no_extras_note') }));
         }
 
         // The announce URLs, which are the only way a client ever reaches an extra port.
         if (state.announce && state.announce.length) {
             const box = el('div', { className: 'nl-note nl-note-info' });
-            box.appendChild(el('div', { text: t('js.cluster.announce_urls') }));
+            box.appendChild(el('div', { text: t.key('js.cluster.announce_urls') }));
             box.appendChild(el('pre', { className: 'nl-preview mt-1', text: state.announce.join('\n') }));
             b.appendChild(box);
         }
@@ -137,7 +137,7 @@
             }));
         });
         if (state.autoLimiter) {
-            notes.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.cluster.auto_limiter') }));
+            notes.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.cluster.auto_limiter') }));
         }
         if (state.perfNote && list.length) {
             notes.appendChild(el('div', { className: 'nl-note nl-note-warn', text: state.perfNote }));
@@ -147,19 +147,19 @@
     /* ── operations ──────────────────────────────────────────────────────── */
 
     async function op(kind, name) {
-        const title = kind === 'remove' ? t('js.cluster.remove_title', { name: name }) : t('js.cluster.restart_title', { name: name });
+        const title = kind === 'remove' ? t.key('js.cluster.remove_title', { name: name }) : t.key('js.cluster.restart_title', { name: name });
         const what = kind === 'remove'
-            ? t('js.cluster.remove_what')
-            : t('js.cluster.restart_what');
-        if (!await confirmAction(title, what, { okLabel: kind === 'remove' ? t('js.cluster.remove') : t('js.cluster.restart'), danger: true })) return;
+            ? t.key('js.cluster.remove_what')
+            : t.key('js.cluster.restart_what');
+        if (!await confirmAction(title, what, { okLabel: kind === 'remove' ? t.key('js.cluster.remove') : t.key('js.cluster.restart'), danger: true })) return;
         // promptPassword(), not window.prompt(): that one shows the password in clear on screen.
-        const pw = await promptPassword(title, t('js.cluster.password_why'));
+        const pw = await promptPassword(title, t.key('js.cluster.password_why'));
         if (!pw) return;
         try {
             const r = await apiCall('admin/ot_cluster_apply', 'POST', { op: kind, name: name, password: pw });
-            showToast(r.success ? (r.message || t('js.cluster.done')) : (r.error || t('js.cluster.failed')), r.success ? 'success' : 'error');
+            showToast(r.success ? (r.message || t.key('js.cluster.done')) : (r.error || t.key('js.cluster.failed')), r.success ? 'success' : 'error');
             painted = 0; load(true);
-        } catch { showToast(t('js.cluster.network_error'), 'error'); }
+        } catch { showToast(t.key('js.cluster.network_error'), 'error'); }
     }
 
     function openAdd() {
@@ -174,7 +174,7 @@
         const plan = $('cl-plan');
         plan.textContent = '';
         plan.appendChild(el('div', { className: 'wl-small text-muted',
-            text: p.udp ? t('js.cluster.suggested_ports', { why: p.why }) : t('js.cluster.no_port', { why: p.why || t('js.cluster.unknown') }) }));
+            text: p.udp ? t.key('js.cluster.suggested_ports', { why: p.why }) : t.key('js.cluster.no_port', { why: p.why || t.key('js.cluster.unknown') }) }));
         bootstrap.Modal.getOrCreateInstance($('clAddModal')).show();
         setTimeout(() => $('cl-name').focus(), 300);
     }
@@ -189,13 +189,13 @@
             });
             const res = r.result || {};
             if (r.success) {
-                box.appendChild(el('div', { className: 'nl-note nl-note-info', text: t('js.cluster.ports_free') }));
+                box.appendChild(el('div', { className: 'nl-note nl-note-info', text: t.key('js.cluster.ports_free') }));
             } else {
-                box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: res.problems || r.error || t('js.cluster.refused') }));
+                box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: res.problems || r.error || t.key('js.cluster.refused') }));
             }
             // Stated, not implied: neither check can see a daemon that happens to be stopped.
             if (res.warnings) box.appendChild(el('div', { className: 'wl-small text-muted', text: res.warnings }));
-        } catch { box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.cluster.network_error_dot') })); }
+        } catch { box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.cluster.network_error_dot') })); }
     }
 
     async function create(e) {
@@ -204,7 +204,7 @@
         const btn = $('cl-add-ok');
         const orig = btn.innerHTML;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t('js.cluster.creating');
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.cluster.creating');
         alert.textContent = '';
         try {
             const r = await apiCall('admin/ot_cluster_apply', 'POST', {
@@ -218,18 +218,18 @@
             });
             if (r.success) {
                 bootstrap.Modal.getInstance($('clAddModal')).hide();
-                showToast(r.message || t('js.cluster.created'), 'success');
+                showToast(r.message || t.key('js.cluster.created'), 'success');
                 painted = 0; load(true);
             } else {
                 alert.textContent = '';
-                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t('js.cluster.failed') }));
+                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t.key('js.cluster.failed') }));
                 const j = r.result || {};
                 if (j.journal) alert.appendChild(el('pre', { className: 'nl-preview mt-1', text: String(j.journal).slice(0, 800) }));
                 if (r.output) alert.appendChild(el('pre', { className: 'nl-preview mt-1', text: String(r.output).slice(0, 600) }));
             }
         } catch {
             alert.textContent = '';
-            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t('js.cluster.network_error_dot') }));
+            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.cluster.network_error_dot') }));
         } finally {
             btn.disabled = false;
             btn.innerHTML = orig;
@@ -239,9 +239,9 @@
     async function reloadAll() {
         try {
             const r = await apiCall('admin/ot_cluster_apply', 'POST', { op: 'reload' });
-            showToast(r.success ? (r.message || t('js.cluster.reloaded')) : (r.error || t('js.cluster.failed')), r.success ? 'success' : 'error');
+            showToast(r.success ? (r.message || t.key('js.cluster.reloaded')) : (r.error || t.key('js.cluster.failed')), r.success ? 'success' : 'error');
             painted = 0; load(true);
-        } catch { showToast(t('js.cluster.network_error'), 'error'); }
+        } catch { showToast(t.key('js.cluster.network_error'), 'error'); }
     }
 
     function init() {

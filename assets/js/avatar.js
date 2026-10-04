@@ -144,21 +144,29 @@
      * goes there: the picture and the name, as nodes or strings. Nothing is parsed as HTML.
      */
     function slot(i) { return '\u0001' + i + '\u0001'; }
+    // A sentence that is a t.key() word (1.73.0) comes in a <span class="av-phrase"> carrying its key, each person marked
+    // with its place (data-slot): the live language switch writes the new sentence round the same people
+    // (assets/js/i18n.js, t.phraseMark()). Any other text: the pieces as before, straight into the fragment.
     function phrase(text, people) {
         var frag = document.createDocumentFragment();
+        var keyed = !!(window.t && t.isKey && t.isKey(text));
+        var host = frag;
+        if (keyed) { host = document.createElement('span'); host.className = 'av-phrase'; frag.appendChild(host); }
         String(text || '').split(/\u0001(\d+)\u0001/).forEach(function (part, i) {
-            if (i % 2 === 0) { if (part) frag.appendChild(document.createTextNode(part)); return; }
+            if (i % 2 === 0) { if (part) host.appendChild(document.createTextNode(part)); return; }
             // One person is one unit: `.av-who` does not wrap, so a narrow line can never leave a
             // picture at the end of one line and its name at the start of the next.
             var who = document.createElement('span');
             who.className = 'av-who';
+            who.setAttribute('data-slot', part);
             var p = (people || [])[Number(part)];
             (Array.isArray(p) ? p : [p]).forEach(function (n) {
                 if (n === null || n === undefined || n === '') return;
-                who.appendChild(typeof n === 'string' ? document.createTextNode(n) : n);
+                who.appendChild(window.t && t.child ? t.child(n) : (typeof n === 'string' ? document.createTextNode(n) : n));
             });
-            frag.appendChild(who);
+            host.appendChild(who);
         });
+        if (keyed) t.phraseMark(host, text);
         return frag;
     }
     window.userAvatarUrl = url;

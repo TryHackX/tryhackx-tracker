@@ -28,10 +28,10 @@
 
     /** Add a section of the operator's own. It gets its real custom_N key from the server on save. */
     async function addSection() {
-        if (rows.filter(x => x.is_custom).length >= customMax) { showToast(t('js.homelayout.at_most_custom', {n: customMax}), 'info'); return; }
-        const label = await promptModal({ title: t('js.homelayout.new_section'), label: t('js.homelayout.heading'), placeholder: t('js.homelayout.new_section_placeholder'), okLabel: t('js.homelayout.add'), maxlength: 80 });
+        if (rows.filter(x => x.is_custom).length >= customMax) { showToast(t.key('js.homelayout.at_most_custom', {n: customMax}), 'info'); return; }
+        const label = await promptModal({ title: t.key('js.homelayout.new_section'), label: t.key('js.homelayout.heading'), placeholder: t.key('js.homelayout.new_section_placeholder'), okLabel: t.key('js.homelayout.add'), maxlength: 80 });
         if (label === null || !label.trim()) return;
-        rows.push({ key: 'new_' + (++newSeq), label: label.trim(), about: t('js.homelayout.own_section_about'),
+        rows.push({ key: 'new_' + (++newSeq), label: label.trim(), about: t.key('js.homelayout.own_section_about'),
                     fixed: false, is_custom: true, hidden: false, heading: 'custom', value: label.trim(), custom: false,
                     live: true, why: '', content: 'none' });
         dirty = true; render();
@@ -86,16 +86,16 @@
                 el('span', { className: 'hl-label', text: r.label }),
             ]);
             if (!r.live) {
-                head.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: t('js.homelayout.not_showing') }));
+                head.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: t.key('js.homelayout.not_showing') }));
             }
             if (r.fixed) {
-                head.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: t('js.homelayout.always_shown') }));
+                head.appendChild(el('span', { className: 'wl-badge wl-b-muted', text: t.key('js.homelayout.always_shown') }));
             }
             // The text state: a dot like the Site pages card's — live, draft, or none.
             if (r.content && r.content !== 'none') {
-                head.appendChild(el('span', { className: 'pc-lang-dot pc-dot-' + r.content, title: r.content === 'live' ? t('js.homelayout.text_live') : t('js.homelayout.draft_saved') }));
+                head.appendChild(el('span', { className: 'pc-lang-dot pc-dot-' + r.content, title: r.content === 'live' ? t.key('js.homelayout.text_live') : t.key('js.homelayout.draft_saved') }));
             }
-            if (r.is_custom) head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: t('js.homelayout.your_section') }));
+            if (r.is_custom) head.appendChild(el('span', { className: 'wl-badge wl-b-ok', text: t.key('js.homelayout.your_section') }));
             mid.appendChild(head);
             mid.appendChild(el('div', { className: 'hl-about wl-small text-muted', text: r.about }));
             // The distinction the whole dialog turns on: a section can be *hidden here* or *off
@@ -109,14 +109,14 @@
                 inp.maxLength = 80;
                 inp.value = r.value || '';
                 inp.placeholder = r.heading;
-                inp.setAttribute('aria-label', t('js.homelayout.heading_for', {label: r.label}));
+                inp.setAttribute('aria-label', t.key('js.homelayout.heading_for', {label: r.label}));
                 inp.addEventListener('input', () => { r.value = inp.value; dirty = true; });
                 // A drag started inside a text box makes the box unselectable; the row is the
                 // handle, the input is not.
                 inp.addEventListener('mousedown', (e) => { e.stopPropagation(); row.draggable = false; });
                 inp.addEventListener('blur', () => { row.draggable = true; });
                 mid.appendChild(el('div', { className: 'hl-heading-wrap' }, [
-                    el('span', { className: 'wl-small text-muted', text: t('js.homelayout.heading') }), inp,
+                    el('span', { className: 'wl-small text-muted', text: t.key('js.homelayout.heading') }), inp,
                 ]));
             }
             row.appendChild(mid);
@@ -126,34 +126,34 @@
             // is the Site pages one, opened on the 'home:<key>' page, language rail and all.
             if (r.key !== 'header') {
                 const ed = el('button', { className: 'btn btn-sm btn-outline-info hl-content' });
-                ed.type = 'button'; ed.title = r.content === 'none' ? t('js.homelayout.write_text_title') : t('js.homelayout.edit_text_title');
+                ed.type = 'button'; ed.title = r.content === 'none' ? t.key('js.homelayout.write_text_title') : t.key('js.homelayout.edit_text_title');
                 ed.appendChild(el('i', { className: 'bi bi-pencil-square' }));
-                ed.appendChild(document.createTextNode(' ' + t('js.homelayout.text_btn')));
+                ed.append(' ', t.key('js.homelayout.text_btn'));   // a keyed piece (1.73.0)
                 ed.addEventListener('click', () => {
-                    if (!window.PageContentEditor) { showToast(t('js.homelayout.editor_not_loaded'), 'danger'); return; }
+                    if (!window.PageContentEditor) { showToast(t.key('js.homelayout.editor_not_loaded'), 'danger'); return; }
                     // A custom section must be saved into the layout before it has a page to write to.
-                    if (r.is_custom && !/^custom_[1-9][0-9]?$/.test(r.key)) { showToast(t('js.homelayout.save_layout_first'), 'info'); return; }
+                    if (r.is_custom && !/^custom_[1-9][0-9]?$/.test(r.key)) { showToast(t.key('js.homelayout.save_layout_first'), 'info'); return; }
                     window.PageContentEditor.open('home:' + r.key, null);
                 });
                 acts.appendChild(ed);
             }
             if (r.is_custom) {
                 const rm = el('button', { className: 'btn btn-sm btn-outline-danger hl-remove' });
-                rm.type = 'button'; rm.title = t('js.homelayout.remove_title');
+                rm.type = 'button'; rm.title = t.key('js.homelayout.remove_title');
                 rm.appendChild(el('i', { className: 'bi bi-trash' }));
                 rm.addEventListener('click', async () => {
-                    if (!await confirmAction(t('js.homelayout.remove_confirm_title', {label: r.label}), t('js.homelayout.remove_confirm_body'), { okLabel: t('js.homelayout.remove'), danger: true })) return;
+                    if (!await confirmAction(t.key('js.homelayout.remove_confirm_title', {label: r.label}), t.key('js.homelayout.remove_confirm_body'), { okLabel: t.key('js.homelayout.remove'), danger: true })) return;
                     rows = rows.filter(x => x.key !== r.key); dirty = true; render();
                 });
                 acts.appendChild(rm);
             }
             const up = el('button', { className: 'btn btn-sm btn-outline-secondary hl-up' });
-            up.type = 'button'; up.title = t('js.homelayout.move_up'); up.setAttribute('aria-label', t('js.homelayout.move_up_label', {label: r.label}));
+            up.type = 'button'; up.title = t.key('js.homelayout.move_up'); up.setAttribute('aria-label', t.key('js.homelayout.move_up_label', {label: r.label}));
             up.disabled = i === 0;
             up.appendChild(el('i', { className: 'bi bi-arrow-up' }));
             up.addEventListener('click', () => move(r.key, -1));
             const down = el('button', { className: 'btn btn-sm btn-outline-secondary hl-down' });
-            down.type = 'button'; down.title = t('js.homelayout.move_down'); down.setAttribute('aria-label', t('js.homelayout.move_down_label', {label: r.label}));
+            down.type = 'button'; down.title = t.key('js.homelayout.move_down'); down.setAttribute('aria-label', t.key('js.homelayout.move_down_label', {label: r.label}));
             down.disabled = i === rows.length - 1;
             down.appendChild(el('i', { className: 'bi bi-arrow-down' }));
             down.addEventListener('click', () => move(r.key, 1));
@@ -167,7 +167,7 @@
                 cb.checked = !r.hidden;
                 cb.id = 'hl-vis-' + r.key;
                 cb.addEventListener('change', () => { r.hidden = !cb.checked; dirty = true; render(); });
-                const lb = el('label', { className: 'form-check-label wl-small', text: r.hidden ? t('js.homelayout.hidden') : t('js.homelayout.shown') });
+                const lb = el('label', { className: 'form-check-label wl-small', text: r.hidden ? t.key('js.homelayout.hidden') : t.key('js.homelayout.shown') });
                 lb.htmlFor = cb.id;
                 sw.appendChild(cb); sw.appendChild(lb);
                 acts.appendChild(sw);
@@ -202,7 +202,10 @@
         setError('');
         const r = await apiCall('admin/home_layout');
         if (r.error) { showToast(r.error, 'danger'); return; }
-        rows = (r.sections || []).map(s => Object.assign({}, s));
+        // A built-in section's name and line are the server's, in the reader's language (1.73.0: English on every page):
+        // found back by key, so they follow the live language switch (the Settings page's bundle carries a.home.).
+        rows = (r.sections || []).map(s => Object.assign({}, s, s.is_custom ? {}
+            : { label: t.find(s.label, 'a.home.sec_name_'), about: t.find(s.about, 'a.home.sec_line_') }));
         customMax = r.custom_max || 6;
         taglineDefault = r.tagline_default || '';
         $('hl-tagline').value = r.tagline || '';
@@ -232,7 +235,7 @@
             });
             if (res.error) { setError(res.error); return; }
             dirty = false;
-            showToast(res.message || t('js.homelayout.saved'), 'success');
+            showToast(res.message || t.key('js.homelayout.saved'), 'success');
             // The card outside carries the summary line; re-reading is the only way to keep it
             // honest without rendering it twice.
             setTimeout(() => window.location.reload(), 600);
@@ -242,13 +245,13 @@
     }
 
     async function reset() {
-        const ok = await confirmAction(t('js.homelayout.reset_title'),
-            t('js.homelayout.reset_body'),
-            { okLabel: t('js.homelayout.restore'), danger: true });
+        const ok = await confirmAction(t.key('js.homelayout.reset_title'),
+            t.key('js.homelayout.reset_body'),
+            { okLabel: t.key('js.homelayout.restore'), danger: true });
         if (!ok) return;
         const res = await apiCall('admin/home_layout', 'POST', { op: 'reset' });
         if (res.error) { setError(res.error); return; }
-        showToast(res.message || t('js.homelayout.restored'), 'success');
+        showToast(res.message || t.key('js.homelayout.restored'), 'success');
         setTimeout(() => window.location.reload(), 600);
     }
 
@@ -263,9 +266,9 @@
     modalEl.addEventListener('hide.bs.modal', (e) => {
         if (!dirty || closing) return;
         e.preventDefault();
-        confirmAction(t('js.homelayout.close_title'),
-            t('js.homelayout.close_body'),
-            { okLabel: t('js.homelayout.discard_changes'), danger: true }).then((ok) => {
+        confirmAction(t.key('js.homelayout.close_title'),
+            t.key('js.homelayout.close_body'),
+            { okLabel: t.key('js.homelayout.discard_changes'), danger: true }).then((ok) => {
                 if (!ok) return;
                 closing = true;
                 dirty = false;

@@ -60,10 +60,6 @@
     const EARLIER_MAX = 10;             // pages a notification's link may load to find its comment
     const MENTION_MIN = 2, MENTION_WAIT = 250;
     const hooks = [];
-    // What a live language switch carries over when the page draws the whole Info panel again (the search page does:
-    // a NEW section for the same torrent) — the reply composers' words, the one that was open, the folded threads
-    // (1.72.0). Taken by the next section of that torrent, once.
-    let swapCarry = null;
 
     const el = (tag, cls, text) => {
         const n = document.createElement(tag);
@@ -77,7 +73,7 @@
         const b = el('button', cls + ' ic-btn');
         b.type = 'button';
         b.setAttribute('aria-label', name);
-        b.dataset.tip = tip || name;
+        b.setAttribute('data-tip', tip || name);   // setAttribute keeps a t.key() word's key (dataset would not), 1.73.0
         b.appendChild(glyph(icon));
         return b;
     };
@@ -172,9 +168,9 @@
         const wrap = el('div', 'cm-editor-wrap');
         const ed = el('div', 'rt-editor cm-editor');
         const tabs = el('div', 'rt-tabs');
-        const write = el('button', 'rt-tab active', t('js.comments.write'));
+        const write = el('button', 'rt-tab active', t.key('js.comments.write'));
         write.type = 'button'; write.dataset.rt = 'write';
-        const prev = el('button', 'rt-tab', t('js.comments.preview'));
+        const prev = el('button', 'rt-tab', t.key('js.comments.preview'));
         prev.type = 'button'; prev.dataset.rt = 'preview';
         const count = el('span', 'rt-counter');
         count.id = id + '-count';
@@ -184,7 +180,7 @@
         const tools = el('div', 'rt-tools');
         tools.id = id + '-tools';
         tools.setAttribute('role', 'toolbar');
-        tools.setAttribute('aria-label', t('js.comments.toolbar'));
+        tools.setAttribute('aria-label', t.key('js.comments.toolbar'));
         const group = (items) => {
             const g = el('span', 'rt-tool-group');
             items.forEach(([md, icon, title]) => {
@@ -198,11 +194,11 @@
             });
             return g;
         };
-        tools.appendChild(group([['bold', 'bi-type-bold', t('js.comments.tb_bold')], ['italic', 'bi-type-italic', t('js.comments.tb_italic')],
-                                 ['underline', 'bi-type-underline', t('js.comments.tb_underline')], ['strike', 'bi-type-strikethrough', t('js.comments.tb_strike')]]));
+        tools.appendChild(group([['bold', 'bi-type-bold', t.key('js.comments.tb_bold')], ['italic', 'bi-type-italic', t.key('js.comments.tb_italic')],
+                                 ['underline', 'bi-type-underline', t.key('js.comments.tb_underline')], ['strike', 'bi-type-strikethrough', t.key('js.comments.tb_strike')]]));
         const blocks = [];
-        if (me.links) blocks.push(['link', 'bi-link-45deg', t('js.comments.tb_link')]);
-        blocks.push(['quote', 'bi-quote', t('js.comments.tb_quote')], ['spoiler', 'bi-eye-slash', t('js.comments.tb_spoiler')], ['code', 'bi-code-slash', t('js.comments.tb_code')]);
+        if (me.links) blocks.push(['link', 'bi-link-45deg', t.key('js.comments.tb_link')]);
+        blocks.push(['quote', 'bi-quote', t.key('js.comments.tb_quote')], ['spoiler', 'bi-eye-slash', t.key('js.comments.tb_spoiler')], ['code', 'bi-code-slash', t.key('js.comments.tb_code')]);
         tools.appendChild(group(blocks));
         if (me.picker) {
             // The picker (assets/js/emoji-picker.js), with what the server says this reader may use in a comment:
@@ -211,7 +207,7 @@
             const b = el('button', 'rt-emoji-btn');
             b.type = 'button';
             b.id = id + '-emoji';
-            const name = t(me.picker.emotes ? 'js.comments.emoji_emotes' : 'js.comments.emoji');
+            const name = t.key(me.picker.emotes ? 'js.comments.emoji_emotes' : 'js.comments.emoji');
             b.title = name;
             b.setAttribute('aria-label', name);
             b.setAttribute('aria-haspopup', 'dialog');
@@ -294,7 +290,7 @@
             if (sel >= names.length) sel = 0;
             pop = el('div', 'shout-mention-pop cm-mention-pop');
             pop.setAttribute('role', 'listbox');
-            pop.setAttribute('aria-label', t('js.comments.mention_list'));
+            pop.setAttribute('aria-label', t.key('js.comments.mention_list'));
             names.forEach((n) => {
                 const b = el('button', 'shout-mention-item', n);
                 b.type = 'button';
@@ -375,23 +371,23 @@
         const body = el('div', 'cm-section-body');
         sec.appendChild(body);
         let count = Number(info.count) || 0;
-        const drawHead = () => { headText.textContent = count > 0 ? t('js.comments.heading', { n: count }) : t('js.comments.heading_none'); };
+        const drawHead = () => { headText.textContent = count > 0 ? t.key('js.comments.heading', { n: count }) : t.key('js.comments.heading_none'); };
         drawHead();
         if (!info.view) {
             // Words exist that this reader may not read: said, so the space does not read as "nobody said anything".
-            body.appendChild(el('p', 'text-muted cm-hidden-note', t('js.comments.members_only')));
+            body.appendChild(el('p', 'text-muted cm-hidden-note', t.key('js.comments.members_only')));
             return sec;
         }
         const pendingNote = el('p', 'cm-pending-note', '');
         pendingNote.hidden = true;
-        const earlierBtn = el('button', 'btn btn-secondary btn-small cm-earlier', t('js.comments.earlier'));
+        const earlierBtn = el('button', 'btn btn-secondary btn-small cm-earlier', t.key('js.comments.earlier'));
         earlierBtn.type = 'button';
         earlierBtn.hidden = true;
         const list = el('div', 'cm-list');
         list.setAttribute('aria-live', 'polite');
-        const empty = el('p', 'text-muted cm-empty', t('js.comments.none_yet'));
+        const empty = el('p', 'text-muted cm-empty', t.key('js.comments.none_yet'));
         empty.hidden = true;
-        const status = el('p', 'text-muted cm-status', t('js.common.loading'));
+        const status = el('p', 'text-muted cm-status', t.key('js.common.loading'));
         const compose = el('div', 'cm-compose');
         body.append(pendingNote, earlierBtn, list, empty, status, compose);
 
@@ -399,20 +395,11 @@
         // The tree (1.72.0). `nodes`: comment id → {row, node, art, kids, box, level, root, isRoot} — every comment
         // drawn, top-level and reply, tombstones included; `threads`: top-level id → its fold, its "Show more", how
         // far its replies are loaded; `depth`: how deep this site's threads may go (the answer's reply_depth).
-        // Carried across a redraw of the section (the live language switch): the words of every reply composer
-        // (`drafts`), which one was open, and which threads were folded.
+        // `drafts`: the words of every reply composer, `openRp` which one is open, `folded` the threads folded — kept
+        // across a reload of the list. (They were also carried across the search page's redraw of the whole panel on
+        // a language switch; nothing is redrawn on a switch any more, 1.73.0.)
         const nodes = new Map(), threads = new Map(), drafts = new Map(), folded = new Set();
         let depth = 0, openRp = 0;
-        if (swapCarry && swapCarry.hash === hash) {
-            swapCarry.drafts.forEach((v, k) => drafts.set(k, v));
-            swapCarry.folded.forEach((k) => folded.add(k));
-            openRp = swapCarry.open;
-        }
-        swapCarry = null;
-        document.addEventListener('langswap:begin', function carry() {
-            if (!sec.isConnected) { document.removeEventListener('langswap:begin', carry); return; }
-            swapCarry = { hash, drafts: new Map(drafts), folded: new Set(folded), open: openRp };
-        });
 
         const threadsOf = () => [...list.querySelectorAll(':scope > .cm-thread')];
         const setCount = (n) => { count = Math.max(0, Number(n) || 0); drawHead(); };
@@ -429,7 +416,7 @@
             if (!sec.isConnected) return;
             if (!j || !j.success) {
                 status.hidden = false;
-                status.textContent = (j && j.message) || t('js.comments.load_failed');
+                status.textContent = (j && j.message) || t.key('js.comments.load_failed');
                 return;
             }
             status.hidden = true;
@@ -450,7 +437,7 @@
             setCount(j.count);
             if (Number(j.pending) > 0) {
                 pendingNote.hidden = false;
-                pendingNote.textContent = t('js.comments.pending_note', { n: Number(j.pending) });
+                pendingNote.textContent = t.key('js.comments.pending_note', { n: Number(j.pending) });
             } else {
                 pendingNote.hidden = true;
             }
@@ -491,8 +478,8 @@
         /** Who a comment is by, as a reply names it: "@name", "Guest #tag", "a deleted account" — '' for a tombstone. */
         const nameOf = (r) => {
             if (!r || r.tomb) return '';
-            if (r.guest) return t('js.comments.guest') + (r.guest_tag ? ' #' + r.guest_tag : '');
-            if (r.gone || !r.user) return t('js.comments.deleted_account');
+            if (r.guest) return r.guest_tag ? t.key('js.comments.guest_named', { tag: r.guest_tag }) : t.key('js.comments.guest');
+            if (r.gone || !r.user) return t.key('js.comments.deleted_account');
             return '@' + r.user;
         };
 
@@ -573,7 +560,7 @@
             const art = el('article', 'cm-row cm-tomb');
             art.id = 'comment-' + r.id;
             art.dataset.id = String(r.id);
-            art.appendChild(el('span', 'cm-tomb-text', t(r.tomb === 'removed' ? 'js.comments.tomb_removed' : 'js.comments.tomb_deleted')));
+            art.appendChild(el('span', 'cm-tomb-text', t.key(r.tomb === 'removed' ? 'js.comments.tomb_removed' : 'js.comments.tomb_deleted')));
             return art;
         }
 
@@ -636,9 +623,9 @@
             // The icon and its words: the gap between them is the site's buttons' own (a row, style.css), no space.
             th.fold.textContent = '';
             th.fold.append(glyph(th.folded ? 'bi-chevron-down' : 'bi-chevron-up'),
-                           th.folded ? (total === 1 ? t('js.comments.fold_show_one') : t('js.comments.fold_show', { n: total })) : t('js.comments.fold_hide'));
+                           th.folded ? (total === 1 ? t.key('js.comments.fold_show_one') : t.key('js.comments.fold_show', { n: total })) : t.key('js.comments.fold_hide'));
             th.more.hidden = th.folded || th.more_n <= 0;
-            th.more.textContent = th.more_n === 1 ? t('js.comments.more_replies_one') : t('js.comments.more_replies', { n: th.more_n });
+            th.more.textContent = th.more_n === 1 ? t.key('js.comments.more_replies_one') : t.key('js.comments.more_replies', { n: th.more_n });
             th.n.node.classList.toggle('cm-folded', th.folded);
         }
 
@@ -656,7 +643,7 @@
             const j = await getJ('comment_list&hash=' + encodeURIComponent(hash) + '&thread=' + th.root + '&after=' + th.last);
             th.busy = false;
             th.more.disabled = false;
-            if (!j || !j.success) { tip(th.more, (j && j.message) || t('js.comments.load_failed')); return; }
+            if (!j || !j.success) { tip(th.more, (j && j.message) || t.key('js.comments.load_failed')); return; }
             if (j.reply_depth !== undefined) depth = Math.max(0, Number(j.reply_depth) || 0);
             (Array.isArray(j.rows) ? j.rows : []).forEach((x) => placeReply(x));
             th.last = Math.max(th.last, Number(j.last) || 0);
@@ -710,19 +697,19 @@
             box.id = 'cm-rp-box-' + id;
             box.dataset.escLayer = '1';
             const head = el('div', 'cm-reply-head');
-            head.appendChild(el('span', 'cm-reply-to-label', t('js.comments.replying_to', { name: nameOf(r) })));
-            const x = iconBtn('btn btn-secondary btn-small cm-reply-x', 'bi-x-lg', t('js.comments.reply_cancel'));
+            head.appendChild(el('span', 'cm-reply-to-label', t.key('js.comments.replying_to', { name: nameOf(r) })));
+            const x = iconBtn('btn btn-secondary btn-small cm-reply-x', 'bi-x-lg', t.key('js.comments.reply_cancel'));
             head.appendChild(x);
             // What the foot's composer says before anybody types, where it matters here too: a guest's rules, and a
             // new account's links drawn as text.
             let note = null;
-            if (me.guest) note = el('p', 'text-muted cm-as cm-reply-as', t(me.review ? 'js.comments.as_guest_review' : 'js.comments.as_guest'));
-            else if (me.links && me.links_text) note = el('p', 'form-hint cm-hint cm-reply-as', t('js.comments.links_text', { days: me.new_days || '' }));
+            if (me.guest) note = el('p', 'text-muted cm-as cm-reply-as', t.key(me.review ? 'js.comments.as_guest_review' : 'js.comments.as_guest'));
+            else if (me.links && me.links_text) note = el('p', 'form-hint cm-hint cm-reply-as', t.key('js.comments.links_text', { days: me.new_days || '' }));
             const taId = 'cm-rp-' + id;
-            const { wrap, ta } = buildEditor(taId, me, t(me.mentions ? 'js.comments.reply_placeholder' : 'js.comments.reply_placeholder_plain'));
+            const { wrap, ta } = buildEditor(taId, me, t.key(me.mentions ? 'js.comments.reply_placeholder' : 'js.comments.reply_placeholder_plain'));
             ta.rows = 2;
             const foot = el('div', 'cm-reply-foot');
-            const send = el('button', 'btn btn-small cm-reply-send', t('js.comments.reply_send'));
+            const send = el('button', 'btn btn-small cm-reply-send', t.key('js.comments.reply_send'));
             send.type = 'button';
             const msg = el('span', 'text-muted cm-reply-msg');
             msg.setAttribute('aria-live', 'polite');
@@ -745,9 +732,9 @@
             const doSend = async () => {
                 if (send.disabled) return;
                 const body = ta.value.trim();
-                if (!body) { msg.textContent = t('js.comments.empty'); ta.focus(); return; }
+                if (!body) { msg.textContent = t.key('js.comments.empty'); ta.focus(); return; }
                 send.disabled = true;
-                msg.textContent = t('js.comments.sending');
+                msg.textContent = t.key('js.comments.sending');
                 const data = { csrf_token: csrfToken(sec), hash, body, parent: id };
                 // The same door as a comment: the anti-spam layer (a wait counts down on the button), a guest's CAPTCHA
                 // every time, asked first.
@@ -759,7 +746,7 @@
                                                               : await doPost({}));
                 if (!(window.Antispam && window.Antispam.waiting(send))) send.disabled = false;
                 if (!j || !j.success) {
-                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = (j && (j.message || j.error)) || t('js.comments.failed');
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = (j && (j.message || j.error)) || t.key('js.comments.failed');
                     return;
                 }
                 drafts.delete(id);
@@ -808,11 +795,11 @@
             const who = el(r.profile ? 'a' : 'span', 'cm-who av-who');
             if (r.guest) {
                 who.classList.add('cm-guest');
-                who.textContent = t('js.comments.guest') + (r.guest_tag ? ' #' + r.guest_tag : '');
-                who.title = t('js.comments.guest_title');
+                who.textContent = r.guest_tag ? t.key('js.comments.guest_named', { tag: r.guest_tag }) : t.key('js.comments.guest');
+                who.title = t.key('js.comments.guest_title');
             } else if (r.gone || !r.user) {
                 who.classList.add('cm-gone');
-                who.textContent = t('js.comments.deleted_account');
+                who.textContent = t.key('js.comments.deleted_account');
             } else {
                 if (r.profile) who.href = profileHref(r.user);
                 const pic = typeof window.userAvatarImg === 'function' ? window.userAvatarImg({ username: r.user, avatar: String(r.avatar || '') }, 24, 'avatar cm-av') : null;
@@ -823,18 +810,18 @@
             if (r.at) { time.title = r.at; time.dateTime = r.ts ? new Date(r.ts * 1000).toISOString() : ''; }
             head.append(who, time);
             if (r.edited) {
-                const ed = el('span', 'cm-edited', t(r.edited_mod ? 'js.comments.edited_mod' : 'js.comments.edited'));
-                if (r.edited_at) ed.title = t('js.comments.edited_title', { at: r.edited_at });
+                const ed = el('span', 'cm-edited', t.key(r.edited_mod ? 'js.comments.edited_mod' : 'js.comments.edited'));
+                if (r.edited_at) ed.title = t.key('js.comments.edited_title', { at: r.edited_at });
                 head.appendChild(ed);
             }
-            if (r.status === 'pending') head.appendChild(el('span', 'cm-held-badge', t('js.comments.held')));
+            if (r.status === 'pending') head.appendChild(el('span', 'cm-held-badge', t.key('js.comments.held')));
             // A reply drawn beside what it answers rather than under it (deeper than the site's threads may go now,
             // 1.72.0) says whom it answers.
             const self = nodes.get(Number(r.id));
             if (self && !self.isRoot && (Number(r.depth) || 0) > self.level) {
                 const p = nodes.get(Number(r.parent));
                 const pn = p ? nameOf(p.row) : '';
-                head.appendChild(el('span', 'cm-reply-to', pn ? t('js.comments.reply_to', { name: pn }) : t('js.comments.reply_to_gone')));
+                head.appendChild(el('span', 'cm-reply-to', pn ? t.key('js.comments.reply_to', { name: pn }) : t.key('js.comments.reply_to_gone')));
             }
             const acts = el('span', 'cm-acts');
             head.appendChild(acts);
@@ -847,14 +834,14 @@
             if (r.blocked) {
                 // Somebody this reader blocked: folded away, and theirs to open.
                 const fold = el('div', 'cm-blocked');
-                fold.appendChild(el('span', 'text-muted', t('js.comments.blocked')));
-                const show = el('button', 'btn btn-secondary btn-small cm-blocked-show', t('js.comments.show'));
+                fold.appendChild(el('span', 'text-muted', t.key('js.comments.blocked')));
+                const show = el('button', 'btn btn-secondary btn-small cm-blocked-show', t.key('js.comments.show'));
                 show.type = 'button';
                 show.setAttribute('aria-expanded', 'false');
                 show.addEventListener('click', () => {
                     const open = text.hidden;
                     text.hidden = !open;
-                    show.textContent = t(open ? 'js.comments.hide' : 'js.comments.show');
+                    show.textContent = t.key(open ? 'js.comments.hide' : 'js.comments.show');
                     show.setAttribute('aria-expanded', open ? 'true' : 'false');
                 });
                 fold.appendChild(show);
@@ -871,7 +858,7 @@
             // Reply (1.72.0): first among the actions, where the server says this reader may answer this comment — a
             // visible one, not at the thread's limit. The composer opens under it.
             if (r.can_reply) {
-                const b = iconBtn('btn btn-secondary btn-small cm-reply', 'bi-reply', t('js.comments.reply'), t('js.comments.reply_tip'));
+                const b = iconBtn('btn btn-secondary btn-small cm-reply', 'bi-reply', t.key('js.comments.reply'), t.key('js.comments.reply_tip'));
                 b.setAttribute('aria-expanded', openRp === Number(r.id) ? 'true' : 'false');
                 b.setAttribute('aria-controls', 'cm-rp-box-' + r.id);
                 b.addEventListener('click', () => {
@@ -881,11 +868,11 @@
                 acts.appendChild(b);
             }
             if (r.can_approve) {
-                const b = iconBtn('btn btn-secondary btn-small cm-approve', 'bi-check-lg', t('js.comments.approve'), t('js.comments.approve_tip'));
+                const b = iconBtn('btn btn-secondary btn-small cm-approve', 'bi-check-lg', t.key('js.comments.approve'), t.key('js.comments.approve_tip'));
                 b.addEventListener('click', async () => {
                     b.disabled = true;
                     const j = await postJ('comment_approve', { csrf_token: csrfToken(sec), id: r.id });
-                    if (!j || !j.success) { b.disabled = false; tip(b, (j && j.message) || t('js.comments.failed')); return; }
+                    if (!j || !j.success) { b.disabled = false; tip(b, (j && j.message) || t.key('js.comments.failed')); return; }
                     if (j.comment) swapRow(j.comment);
                     setCount(j.count);
                     pendingNote.hidden = true;
@@ -893,15 +880,15 @@
                 acts.appendChild(b);
             }
             if (r.can_edit) {
-                const b = iconBtn('btn btn-secondary btn-small cm-edit', 'bi-pencil-square', t('js.comments.edit'),
-                                  t(r.own ? 'js.comments.edit_tip_own' : 'js.comments.edit_tip_any'));
+                const b = iconBtn('btn btn-secondary btn-small cm-edit', 'bi-pencil-square', t.key('js.comments.edit'),
+                                  t.key(r.own ? 'js.comments.edit_tip_own' : 'js.comments.edit_tip_any'));
                 b.addEventListener('click', () => openEdit(r, row, text, acts));
                 acts.appendChild(b);
             }
             if (r.can_delete) {
                 const own = r.can_delete === 'own';
-                const name = t('js.comments.delete');
-                const dtip = t(own ? 'js.comments.delete_tip_own' : 'js.comments.delete_tip_any');
+                const name = t.key('js.comments.delete');
+                const dtip = t.key(own ? 'js.comments.delete_tip_own' : 'js.comments.delete_tip_any');
                 const b = iconBtn('btn btn-secondary btn-small cm-delete', 'bi-trash', name, dtip);
                 acts.appendChild(b);
                 if (own) {
@@ -914,7 +901,7 @@
                         b.classList.remove('is-armed');
                         if (icon()) icon().className = 'bi bi-trash';
                         b.setAttribute('aria-label', name);
-                        b.dataset.tip = dtip;
+                        b.setAttribute('data-tip', dtip);
                         if (armTip) { armTip.drop(); armTip = null; }
                     };
                     b.addEventListener('click', async () => {
@@ -922,16 +909,16 @@
                             b.dataset.armed = '1';
                             b.classList.add('is-armed');
                             if (icon()) icon().className = 'bi bi-trash-fill';
-                            b.setAttribute('aria-label', t('js.comments.delete_sure'));
-                            b.dataset.tip = t('js.comments.delete_sure');
-                            if (typeof window.pubTip === 'function') armTip = window.pubTip(b, t('js.comments.delete_sure'), { hold: true });
+                            b.setAttribute('aria-label', t.key('js.comments.delete_sure'));
+                            b.setAttribute('data-tip', t.key('js.comments.delete_sure'));
+                            if (typeof window.pubTip === 'function') armTip = window.pubTip(b, t.key('js.comments.delete_sure'), { hold: true });
                             armTimer = setTimeout(disarm, 4000);
                             return;
                         }
                         disarm();
                         b.disabled = true;
                         const j = await postJ('comment_delete', { csrf_token: csrfToken(sec), id: r.id });
-                        if (!j || !j.success) { b.disabled = false; tip(b, (j && j.message) || t('js.comments.failed')); return; }
+                        if (!j || !j.success) { b.disabled = false; tip(b, (j && j.message) || t.key('js.comments.failed')); return; }
                         removeNode(r.id, j.tomb || '');
                         setCount(j.count);
                         syncEmpty();
@@ -948,13 +935,13 @@
             if (row.querySelector('.cm-reason')) return;
             const box = el('div', 'cm-reason');
             const id = 'cm-reason-' + r.id;
-            const lab = el('label', 'cm-reason-label', t('js.comments.reason_label'));
+            const lab = el('label', 'cm-reason-label', t.key('js.comments.reason_label'));
             lab.htmlFor = id;
             const inp = el('input', 'profile-search cm-reason-input');
-            inp.type = 'text'; inp.id = id; inp.maxLength = 255; inp.placeholder = t('js.comments.reason_ph');
-            const go = el('button', 'btn btn-small cm-reason-go', t('js.comments.reason_go'));
+            inp.type = 'text'; inp.id = id; inp.maxLength = 255; inp.placeholder = t.key('js.comments.reason_ph');
+            const go = el('button', 'btn btn-small cm-reason-go', t.key('js.comments.reason_go'));
             go.type = 'button';
-            const no = el('button', 'btn btn-secondary btn-small cm-reason-cancel', t('js.common.cancel'));
+            const no = el('button', 'btn btn-secondary btn-small cm-reason-cancel', t.key('js.common.cancel'));
             no.type = 'button';
             const msg = el('span', 'text-muted cm-reason-msg');
             msg.setAttribute('aria-live', 'polite');
@@ -967,11 +954,11 @@
             inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go.click(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(); } });
             go.addEventListener('click', async () => {
                 const reason = inp.value.trim();
-                if (!reason) { msg.textContent = t('js.comments.reason_needed'); inp.focus(); return; }
+                if (!reason) { msg.textContent = t.key('js.comments.reason_needed'); inp.focus(); return; }
                 go.disabled = true;
                 const j = await postJ('comment_delete', { csrf_token: csrfToken(sec), id: r.id, reason });
                 go.disabled = false;
-                if (!j || !j.success) { msg.textContent = (j && j.message) || t('js.comments.failed'); return; }
+                if (!j || !j.success) { msg.textContent = (j && j.message) || t.key('js.comments.failed'); return; }
                 removeNode(r.id, j.tomb || '');
                 setCount(j.count);
                 syncEmpty();
@@ -982,24 +969,24 @@
         async function openEdit(r, row, text, acts) {
             if (row.querySelector('.cm-edit-box')) return;
             const src = await getJ('comment_edit&id=' + encodeURIComponent(r.id));
-            if (!src || !src.success) { tip(acts, (src && src.message) || t('js.comments.failed')); return; }
+            if (!src || !src.success) { tip(acts, (src && src.message) || t.key('js.comments.failed')); return; }
             const id = 'cm-ed-' + r.id;
             // A moderator's correction of somebody else's words keeps THEIR right to link, and may say why.
             const edMe = Object.assign({}, me || {}, { picker: me && me.picker ? me.picker : null });
-            const { wrap, ta } = buildEditor(id, edMe, t('js.comments.placeholder_edit'));
+            const { wrap, ta } = buildEditor(id, edMe, t.key('js.comments.placeholder_edit'));
             const box = el('div', 'cm-edit-box');
             box.appendChild(wrap);
             let reason = null;
             if (!src.own) {
                 reason = el('input', 'profile-search cm-edit-reason');
-                reason.type = 'text'; reason.maxLength = 255; reason.placeholder = t('js.comments.edit_reason_ph');
-                reason.setAttribute('aria-label', t('js.comments.edit_reason_ph'));
+                reason.type = 'text'; reason.maxLength = 255; reason.placeholder = t.key('js.comments.edit_reason_ph');
+                reason.setAttribute('aria-label', t.key('js.comments.edit_reason_ph'));
                 box.appendChild(reason);
             }
             const foot = el('div', 'cm-edit-foot');
-            const save = el('button', 'btn btn-small cm-edit-save', t('js.comments.save'));
+            const save = el('button', 'btn btn-small cm-edit-save', t.key('js.comments.save'));
             save.type = 'button';
-            const cancel = el('button', 'btn btn-secondary btn-small cm-edit-cancel', t('js.common.cancel'));
+            const cancel = el('button', 'btn btn-secondary btn-small cm-edit-cancel', t.key('js.common.cancel'));
             cancel.type = 'button';
             const msg = el('span', 'text-muted cm-edit-msg');
             msg.setAttribute('aria-live', 'polite');
@@ -1023,7 +1010,7 @@
             const doSave = async () => {
                 if (save.disabled) return;
                 const body = ta.value.trim();
-                if (!body) { msg.textContent = t('js.comments.empty'); return; }
+                if (!body) { msg.textContent = t.key('js.comments.empty'); return; }
                 save.disabled = true;
                 const payload = { csrf_token: csrfToken(sec), id: r.id, body };
                 if (reason && reason.value.trim()) payload.reason = reason.value.trim();
@@ -1035,7 +1022,7 @@
                     : await doPost({});
                 if (!(window.Antispam && window.Antispam.waiting(save))) save.disabled = false;
                 if (!j || !j.success) {
-                    if (!(window.Antispam && window.Antispam.waiting(save))) msg.textContent = (j && j.message) || t('js.comments.failed');
+                    if (!(window.Antispam && window.Antispam.waiting(save))) msg.textContent = (j && j.message) || t.key('js.comments.failed');
                     return;
                 }
                 if (j.comment) swapRow(j.comment); else close();
@@ -1054,16 +1041,16 @@
                 const why = me.why || '';
                 const p = el('p', 'text-muted cm-why cm-why-' + (why || 'none'));
                 if (why === 'login') {
-                    p.appendChild(document.createTextNode(t('js.comments.why_login') + ' '));
-                    const a = el('a', 'cm-sign-in', t('js.comments.sign_in'));
+                    p.append(t.key('js.comments.why_login'), ' ');
+                    const a = el('a', 'cm-sign-in', t.key('js.comments.sign_in'));
                     try { const u = new URL(location.href); u.search = '?action=login'; u.hash = ''; a.href = u.href; } catch (e) { a.href = '?action=login'; }
                     p.appendChild(a);
                 } else if (why === 'muted') {
-                    p.textContent = t('js.comments.why_muted', { until: me.until || '' });
+                    p.textContent = t.key('js.comments.why_muted', { until: me.until || '' });
                 } else if (why === 'guest_captcha') {
-                    p.textContent = t('js.comments.why_guest_captcha');
+                    p.textContent = t.key('js.comments.why_guest_captcha');
                 } else if (why === 'no_permission') {
-                    p.textContent = t('js.comments.why_no_permission');
+                    p.textContent = t.key('js.comments.why_no_permission');
                 } else {
                     return;
                 }
@@ -1072,13 +1059,13 @@
             }
             const id = 'cm-new';
             const who = el('p', 'text-muted cm-as');
-            who.textContent = me.guest ? t(me.review ? 'js.comments.as_guest_review' : 'js.comments.as_guest') : t('js.comments.as_member', { name: me.name || '' });
-            const { wrap, ta } = buildEditor(id, me, t(me.mentions ? 'js.comments.placeholder' : 'js.comments.placeholder_plain'));
-            const hint = el('p', 'form-hint cm-hint', t(me.links ? 'js.comments.hint' : 'js.comments.hint_nolinks'));
+            who.textContent = me.guest ? t.key(me.review ? 'js.comments.as_guest_review' : 'js.comments.as_guest') : t.key('js.comments.as_member', { name: me.name || '' });
+            const { wrap, ta } = buildEditor(id, me, t.key(me.mentions ? 'js.comments.placeholder' : 'js.comments.placeholder_plain'));
+            const hint = el('p', 'form-hint cm-hint', t.key(me.links ? 'js.comments.hint' : 'js.comments.hint_nolinks'));
             // A new account's links are shown as text (1.71.0, the anti-spam layer): said before anybody types one.
-            if (me.links && me.links_text) hint.appendChild(document.createTextNode(' ' + t('js.comments.links_text', { days: me.new_days || '' })));
+            if (me.links && me.links_text) hint.append(' ', t.key('js.comments.links_text', { days: me.new_days || '' }));
             const foot = el('div', 'cm-compose-foot');
-            const send = el('button', 'btn btn-small cm-send', t('js.comments.send'));
+            const send = el('button', 'btn btn-small cm-send', t.key('js.comments.send'));
             send.type = 'button';
             const msg = el('span', 'text-muted cm-send-msg');
             msg.setAttribute('aria-live', 'polite');
@@ -1090,9 +1077,9 @@
             const doSend = async () => {
                 if (send.disabled) return;
                 const body = ta.value.trim();
-                if (!body) { msg.textContent = t('js.comments.empty'); ta.focus(); return; }
+                if (!body) { msg.textContent = t.key('js.comments.empty'); ta.focus(); return; }
                 send.disabled = true;
-                msg.textContent = t('js.comments.sending');
+                msg.textContent = t.key('js.comments.sending');
                 const data = { csrf_token: csrfToken(sec), hash, body };
                 // Through the site's anti-spam layer (1.71.0, assets/js/antispam.js). A guest solves a CAPTCHA
                 // every time, so it is asked for first; a member only when the server says so (428) — at the top
@@ -1105,7 +1092,7 @@
                                                               : await doPost({}));
                 if (!(window.Antispam && window.Antispam.waiting(send))) send.disabled = false;
                 if (!j || !j.success) {
-                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = (j && (j.message || j.error)) || t('js.comments.failed');
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = (j && (j.message || j.error)) || t.key('js.comments.failed');
                     return;
                 }
                 msg.textContent = j.message || '';
@@ -1142,17 +1129,10 @@
             // A notification's link, or a thread asked for straight away: no waiting for the scroll.
             if (target) kick();
         }, 0);
-        // The live language switch cannot reach what this file drew: drawn again, in the new language —
-        // unless the page redraws the whole panel itself (the search page does, and this section goes with it).
-        document.addEventListener('langswap', function redraw() {
-            if (!sec.isConnected) { document.removeEventListener('langswap', redraw); return; }
-            // This section draws itself again (the page kept it): what it carries is its own, nothing to hand on.
-            if (swapCarry && swapCarry.hash === hash) swapCarry = null;
-            drawHead();
-            earlierBtn.textContent = t('js.comments.earlier');
-            empty.textContent = t('js.comments.none_yet');
-            if (loaded) { me = null; load(0); }
-        });
+        // The live language switch needs nothing from here (1.73.0): every word this file draws is a t.key() word that
+        // keeps its key (assets/js/i18n.js), so the switch says it again where it stands — an open reply, the words
+        // in a composer, a folded thread and the place in the list stay as they are. (It used to ask for the whole
+        // list again on every switch and draw it from nothing.)
         return sec;
     }
 
@@ -1168,13 +1148,13 @@
                 cb.disabled = false;
                 if (!j || !j.success) {
                     cb.checked = !cb.checked;
-                    if (status) status.textContent = (j && j.message) || t('js.comments.failed');
+                    if (status) status.textContent = (j && j.message) || t.key('js.comments.failed');
                     return;
                 }
                 if (j.prefs && typeof j.prefs[cb.dataset.pref] === 'boolean') cb.checked = j.prefs[cb.dataset.pref];
                 if (status) {
-                    status.textContent = t('js.comments.prefs_saved');
-                    setTimeout(() => { if (status.textContent === t('js.comments.prefs_saved')) status.textContent = ''; }, 2500);
+                    status.textContent = t.key('js.comments.prefs_saved');
+                    setTimeout(() => { if (status.textContent === t.words('js.comments.prefs_saved')) status.textContent = ''; }, 2500);
                 }
             });
         });

@@ -15,6 +15,8 @@
  */
 
 require_once __DIR__ . '/homelayout.php';
+// The Features list asks the conditions Terms and Info are built with (1.73.0).
+require_once __DIR__ . '/pagecontent.php';
 // The shoutbox's own half. index.php loads it for the page; the editor's preview reaches this file
 // by another road (api/admin/page_content.php), and a block that renders nothing because its
 // functions were not loaded would be a preview that lies about the page. Guarded on the file so
@@ -101,7 +103,9 @@ function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
         </div>
         <?php
         $beaconClass = $isCacheFresh ? '' : 'syncing';
-        $beaconTitle = $isCacheFresh ? 'Live Syncing' : 'Syncing Swarms...';
+        // 1.73.0: the dictionary's (it was English on every page) — the words app.js writes later (js.app.live_syncing /
+        // js.app.syncing_swarms) say the same, so the title does not change language when the script takes it over.
+        $beaconTitle = $isCacheFresh ? _h('home.beacon_live') : _h('home.beacon_syncing');
         ?>
         <div class="home-stat-beacon <?= $beaconClass ?>" title="<?= $beaconTitle ?>">
             <span class="pulse-dot"></span>
@@ -171,60 +175,82 @@ function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
 $homeWhitelist = trackerMode($cfg) === 'whitelist';
 $homeSched     = function_exists('scheduleEnabled') && scheduleEnabled($cfg);   // whitelist hours: registration is always open
 $homePublicReg = ($homeWhitelist || $homeSched) && ($cfg['whitelist_public_enabled'] ?? '1') === '1';
+// "Running on X since Y" is the operator's own statement, and the footer already makes it from two
+// settings (templates/footer.php: footer_os_name, footer_os_since_year, while footer_os_enabled). The
+// About text reads the same two, so the page cannot say one year here and another at its foot — and on
+// an install whose footer says nothing about its machine, neither does this.
+$homeSince = '';
+if (($cfg['footer_os_enabled'] ?? '1') === '1' && !empty($cfg['footer_os_name'])) {   // the footer's own test
+    $homeSince = __('home.about_since', [
+        'os'   => sanitize((string)$cfg['footer_os_name']),
+        'year' => (int)($cfg['footer_os_since_year'] ?? ($cfg['footer_start_year'] ?? date('Y'))),
+    ]);
+}
 ?>
 <?php if ($homeSched): ?>
 <p><?= __('home.about_sched', [
-        'hours' => sanitize(scheduleDescribe($cfg)),
+        'hours' => sanitize(pageContentScheduleText($cfg)),   // in the reader's language (1.73.0)
         'mode'  => __($homeWhitelist ? 'home.mode_whitelist' : 'home.mode_open'),
         'reg'   => $homePublicReg ? __('home.reg_here', ['url' => sanitize($baseUrl . '?action=whitelist')]) : '',
+        'since' => $homeSince,
      ]) ?></p>
 <?php if ($homePublicReg): ?>
 <p class="form-center"><a class="btn" href="<?= $baseUrl ?>?action=whitelist"><?= _h('home.register_btn') ?></a></p>
 <?php endif; ?>
 <?php elseif ($homeWhitelist): ?>
 <p><?= __('home.about_wl', [
-        'reg' => $homePublicReg ? __('home.reg_here', ['url' => sanitize($baseUrl . '?action=whitelist')]) : '',
+        'reg'   => $homePublicReg ? __('home.reg_here', ['url' => sanitize($baseUrl . '?action=whitelist')]) : '',
+        'since' => $homeSince,
      ]) ?></p>
 <?php if ($homePublicReg): ?>
 <p class="form-center"><a class="btn" href="<?= $baseUrl ?>?action=whitelist"><?= _h('home.register_btn') ?></a></p>
 <?php endif; ?>
 <?php else: ?>
-<p><?= __('home.about_open') ?></p>
+<p><?= __('home.about_open', ['since' => $homeSince]) ?></p>
 <?php endif; ?>
 <?php $homeBlocks['about'] = ob_get_clean(); ?>
 
 <?php ob_start(); /* ── features ─────────────────────────────────────────── */ ?>
+<?php
+// 1.73.0: every bullet under the condition of the feature it names, and the conditions are the SAME
+// ones Terms and Info are built with (pageContentConditions(), includes/pagecontent.php) — one answer
+// to "is the shoutbox on" for all three texts, where the list used to test settings of its own. A
+// bullet promising a feature that is switched off is a bullet that teaches visitors the list is
+// decoration. The two claims it used to make that nothing in the code does (random addresses in the
+// peer lists; "no connection logs" beside a list that keeps a registrant's address) are gone.
+$homeCond = pageContentConditions($cfg, $db);
+$homeOn = fn(string $c): bool => !empty($homeCond[$c][0]);
+$homeFeat = [
+    'home.feat_no_host'      => true,
+    // Under a schedule the hours say it; otherwise whitelist mode says it once.
+    'home.feat_sched'        => $homeOn('schedule'),
+    'home.feat_wl'           => $homeOn('whitelist') && !$homeOn('schedule'),
+    'home.feat_memory'       => true,
+    'home.feat_ipv6'         => true,
+    'home.feat_index'        => $homeOn('index'),
+    'home.feat_search'       => $homeOn('search'),
+    'home.feat_accounts'     => $homeOn('users'),
+    'home.feat_twofa'        => $homeOn('twofa'),
+    'home.feat_profiles'     => $homeOn('profiles'),
+    'home.feat_saved'        => $homeOn('saved'),
+    'home.feat_friends'      => $homeOn('friends'),
+    'home.feat_messages'     => $homeOn('messages'),
+    'home.feat_comments'     => $homeOn('comments'),
+    'home.feat_descriptions' => $homeOn('descriptions'),
+    'home.feat_ratings'      => $homeOn('ratings'),
+    'home.feat_shoutbox'     => $homeOn('shoutbox'),
+    'home.feat_antispam'     => $homeOn('antispam'),
+    'home.feat_transparency' => $homeOn('transparency'),
+    'home.feat_languages'    => $homeOn('languages'),
+    'home.feat_free'         => true,
+];
+?>
 <ul class="feature-list">
-    <li><?= _h('home.feat_no_host') ?></li>
-<?php if ($homeSched): ?>
-    <li><?= _h('home.feat_sched') ?></li>
-    <li><?= _h('home.feat_meta') ?></li>
-<?php elseif ($homeWhitelist): ?>
-    <li><?= _h('home.feat_wl') ?></li>
-    <li><?= _h('home.feat_meta') ?></li>
-<?php else: ?>
-    <li><?= _h('home.feat_no_logs') ?></li>
-<?php endif; ?>
-    <li><?= _h('home.feat_random_ip') ?></li>
-    <li><?= _h('home.feat_ipv6') ?></li>
-<?php // The features that arrived later, each only while its setting is on. A bullet promising a
-      // search that is switched off is a bullet that teaches visitors the list is decoration. ?>
-<?php if (function_exists('indexEnabled') && indexEnabled($cfg)): ?>
-    <li><?= _h('home.feat_index') ?></li>
-<?php if (usersEnabled($cfg) && ($cfg['index_search_enabled'] ?? '1') === '1'): ?>
-    <li><?= _h('home.feat_search') ?></li>
-<?php endif; ?>
-<?php endif; ?>
-<?php if (usersEnabled($cfg)): ?>
-    <li><?= _h('home.feat_accounts') ?></li>
-<?php endif; ?>
-<?php if (($cfg['transparency_enabled'] ?? '1') === '1'): ?>
-    <li><?= _h('home.feat_transparency') ?></li>
-<?php endif; ?>
-<?php if (function_exists('langEnabled') && count(langEnabled($cfg)) > 1): ?>
-    <li><?= _h('home.feat_languages') ?></li>
-<?php endif; ?>
-    <li><?= _h('home.feat_free') ?></li>
+<?php foreach ($homeFeat as $homeKey => $homeShown): ?>
+<?php if (!$homeShown) continue; ?>
+    <li><?= _h($homeKey) ?></li>
+<?php endforeach; ?>
+    <li><?= __('home.feat_privacy', ['url' => sanitize($baseUrl . '?action=info')]) ?></li>
 </ul>
 <?php $homeBlocks['features'] = ob_get_clean(); ?>
 
@@ -325,17 +351,29 @@ function homePlaceholders(PDO $db, array $cfg, string $baseUrl, ?array $blocks =
     return $out;
 }
 
-/** The names and descriptions only — for the editor's list. */
+/**
+ * The names and descriptions only — for the editor's list (the placeholder buttons' tooltips), in the reader's
+ * language (1.73.0: English on every page): a.home.ph_*, whose English is the words below; the page editor finds them
+ * back by key, so they follow the live language switch. The names ({{site_name}}) are what an operator types: never
+ * translated.
+ */
 function homePlaceholderList(): array {
+    // the dictionary's words, or these English ones where it is not loaded (a CLI tool, a test)
+    $say = static function (string $key, string $en, array $vars = []): string {
+        $said = function_exists('__') ? __('a.home.ph_' . $key, $vars) : 'a.home.ph_' . $key;
+        if ($said !== 'a.home.ph_' . $key) return $said;
+        foreach ($vars as $k => $v) $en = str_replace(':' . $k, (string)$v, $en);
+        return $en;
+    };
     $out = [];
-    foreach (homeSectionCatalog() as $key => $meta) $out['block:' . $key] = 'The built-in "' . $meta['label'] . '" section';
+    foreach (homeSectionCatalog() as $key => $meta) $out['block:' . $key] = $say('block', 'The built-in ":section" section', ['section' => $meta['label']]);
     foreach (['site_name' => 'The site name', 'site_url' => 'The site URL', 'announce_http' => 'The HTTP(S) announce URL',
               'announce_udp' => 'The UDP announce URL', 'torrent_count' => 'Torrents tracked right now',
               'peer_count' => 'Peers right now', 'seed_count' => 'Seeds right now',
               'whitelist_count' => 'Registered torrents', 'year' => 'The current year',
               'register_button' => 'The register button (only while registration is open)',
               'report_link' => 'A link to the report form', 'contact_email' => 'The site email, as a link'] as $k => $v) {
-        $out[$k] = $v;
+        $out[$k] = $say($k, $v);
     }
     return $out;
 }

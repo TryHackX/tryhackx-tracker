@@ -347,8 +347,13 @@ function langJsBundle(array $prefixes = ['js.']): array {
  * table on the account page and the profile (assets/js/favourites.js, 1.69.0); `js.descs.` the table of
  * descriptions a member wrote beside it (assets/js/favourites.js, 1.70.0); `js.report.` the Report button and its
  * box on a comment, a description and a shout (assets/js/reports.js, 1.71.0).
+ * Three of the SERVER's own sentences ride along (1.73.0), so what a script shows from an answer follows the live
+ * language switch like its own words: `api.antispam.` the anti-spam layer's waits (assets/js/antispam.js counts down
+ * in the dictionary's sentence, by the key its answer names), `api.rep.` why a reader may not rate and
+ * `api.index.source_auto_` where an importer's link came from (the Info panel finds them back with t.find()).
  */
-const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.', 'js.pm.', 'js.people.', 'js.sec.', 'js.sounds.', 'js.shout.', 'js.media.', 'js.bio.', 'js.votes.', 'js.descs.', 'js.who.', 'js.comments.', 'js.report.', 'js.antispam.'];
+const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.', 'js.pm.', 'js.people.', 'js.sec.', 'js.sounds.', 'js.shout.', 'js.media.', 'js.bio.', 'js.votes.', 'js.descs.', 'js.who.', 'js.comments.', 'js.report.', 'js.antispam.',
+    'api.antispam.', 'api.rep.', 'api.index.source_auto_'];
 
 /**
  * The `<script>` pair that puts the bundle and the t() helper on a page — before any other script.

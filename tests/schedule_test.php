@@ -1,6 +1,7 @@
 <?php
 /**
- * Unit test for includes/schedule.php (pure functions, no DB):
+ * Unit test for includes/schedule.php (pure functions, no DB) — and, since 1.73.0, the whitelist page rendered
+ * in Polish and English with a schedule on, when the local database and site are there (SKIP otherwise):
  *   php tests/schedule_test.php
  * Prints PASS/FAIL lines and exits non-zero on failure.
  */
@@ -161,6 +162,100 @@ check('cmd: unset → default', scheduleSwitchCommand([]) === SCHEDULE_DEFAULT_C
 $st = scheduleStatus($cfg, at('2026-08-18 01:00:00'));
 check('status: desired + next change', $st['enabled'] && $st['desired'] === 'whitelist' && $st['next_change'] === at('2026-08-18 02:30:00')->getTimestamp() && $st['next_change_local'] === 'Tue 2026-08-18 02:30', json_encode($st));
 check('scheduleFormatLocal', scheduleFormatLocal($cfg, at('2026-08-18 02:30:00')) === '02:30 Tue');
+
+// ── 1.73.0: the hours in the reader's language ──────────────────────────────────────────────────────
+// The whitelist page printed scheduleDescribe()'s English ("Mon–Fri …", "(next day)") and PHP's English day
+// ("02:30 Tue") on its Polish page, and the panel's Whitelist card and Settings did the same. One function for
+// every page and the panel now; scheduleDescribe() stays for the CLI and the journal (checked above).
+check('the week in English: the dictionary\'s days, "the next day", the zone as a time',
+    ($t = scheduleDescribeText($cfg, 'en')) === 'Mon–Fri 10:00–02:30 the next day, Sat–Sun all day, Europe/Warsaw time', $t);
+check('the week in Polish',
+    ($t = scheduleDescribeText($cfg, 'pl')) === 'pon–pt 10:00–02:30 następnego dnia, sob–niedz cały dzień, czas Europe/Warsaw', $t);
+check('… single days and a window to midnight, in Polish',
+    ($t = scheduleDescribeText($sameDay, 'pl')) === 'pon 08:00–18:00, śr 22:00–00:00 następnego dnia, czas Europe/Warsaw', $t);
+check('… and not one English word in the Polish',
+    !preg_match('/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|next day|all day)\b/', scheduleDescribeText($cfg, 'pl') . ' ' . scheduleDescribeText($sameDay, 'pl')));
+check('… without a language, the current one (English here: nobody chose one in the CLI)',
+    scheduleDescribeText($cfg) === scheduleDescribeText($cfg, 'en'));
+check('… a schedule that is not one is still called that',
+    scheduleDescribeText(['tracker_schedule' => '{oops'] + $cfg, 'pl') === scheduleDescribe(['tracker_schedule' => '{oops'] + $cfg));
+check('a moment in English: the day, then the time', ($t = scheduleFormatLocalText($cfg, at('2026-08-18 02:30:00'), false, 'en')) === 'Tue 02:30', $t);
+check('… in Polish', ($t = scheduleFormatLocalText($cfg, at('2026-08-18 02:30:00'), false, 'pl')) === 'wt 02:30', $t);
+check('… with the date, in Polish', ($t = scheduleFormatLocalText($cfg, at('2026-08-18 02:30:00'), true, 'pl')) === 'wt 2026-08-18 02:30', $t);
+check('… in the schedule\'s own zone (00:30 UTC is 02:30 in Warsaw in August)',
+    ($t = scheduleFormatLocalText($cfg, at('2026-08-18 00:30:00', 'UTC'), false, 'en')) === 'Tue 02:30', $t);
+check('… and Sunday is the seventh day', ($t = scheduleFormatLocalText($cfg, at('2026-08-23 12:00:00'), false, 'pl')) === 'niedz 12:00', $t);
+check('the panel\'s card and Settings get the same words (describe_text, next_change_text)',
+    $st['describe_text'] === scheduleDescribeText($cfg) && $st['next_change_text'] === scheduleFormatLocalText($cfg, at('2026-08-18 02:30:00'), true),
+    json_encode([$st['describe_text'] ?? null, $st['next_change_text'] ?? null]));
+check('… while describe / next_change_local stay the English the CLI and the API\'s readers compare',
+    $st['describe'] === scheduleDescribe($cfg) && $st['next_change_local'] === scheduleFormatLocal($cfg, at('2026-08-18 02:30:00'), true));
+$panelJs = (string)@file_get_contents(__DIR__ . '/../assets/js/admin-whitelist.js');
+$panelSet = (string)@file_get_contents(__DIR__ . '/../templates/admin/settings.php');
+check('the panel prints the reader\'s words: the Whitelist card and Settings',
+    str_contains($panelJs, 'sc.describe_text') && str_contains($panelJs, 'sc.next_change_text')
+    && str_contains($panelSet, "\$schedSt['describe_text']") && str_contains($panelSet, "\$schedSt['next_change_text']"));
+$wlPage = (string)@file_get_contents(__DIR__ . '/../templates/pages/whitelist.php');
+check('the whitelist page prints these, not the English ones',
+    str_contains($wlPage, 'scheduleDescribeText($cfg)') && str_contains($wlPage, 'scheduleFormatLocalText($cfg, $wlNext)')
+    && !preg_match('/scheduleDescribe\(\$cfg\)|scheduleFormatLocal\(\$cfg/', $wlPage));
+
+// ── and the page itself, rendered (needs the local database and the site on :8089; SKIP without) ─────
+// The schedule is switched on for two requests and put back exactly as it was (value and updated_at).
+$site = rtrim(getenv('VERIFY_BASE') ?: 'http://127.0.0.1:8089/', '/') . '/';
+$root = dirname(__DIR__);
+$probe = is_file($root . '/config/database.php')
+    ? @file_get_contents($site . '?action=tos', false, stream_context_create(['http' => ['ignore_errors' => true, 'timeout' => 10]]))
+    : false;
+if ($probe === false || !function_exists('curl_init')) {
+    echo "SKIP the rendered page: no local database or site at $site\n";
+} else {
+    require_once $root . '/config/database.php';
+    require_once $root . '/includes/settings.php';
+    $db = getDb();
+    $keys = ['tracker_schedule_enabled', 'tracker_schedule', 'tracker_schedule_tz'];
+    $was = [];
+    foreach ($keys as $k) {
+        $s = $db->prepare("SELECT `value`, updated_at FROM settings WHERE `key` = ?");
+        $s->execute([$k]);
+        $was[$k] = $s->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+    $set = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)");
+    $set->execute(['tracker_schedule_enabled', '1']);
+    $set->execute(['tracker_schedule', $example]);
+    $set->execute(['tracker_schedule_tz', 'Europe/Warsaw']);
+    try {
+        $get = function (string $lang) use ($site): string {
+            $c = curl_init($site . '?action=whitelist&lang=' . $lang);
+            curl_setopt_array($c, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_COOKIEFILE => '']);
+            $b = (string)curl_exec($c);
+            curl_close($c);
+            return $b;
+        };
+        $notice = function (string $html): string {
+            return preg_match('/<div class="wl-schedule-notice">(.*?)<\/div>/s', $html, $m)
+                ? html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8') : '';
+        };
+        $pl = $notice($get('pl'));
+        $en = $notice($get('en'));
+        check('the Polish whitelist page names the hours in Polish',
+              str_contains($pl, 'pon–pt 10:00–02:30 następnego dnia, sob–niedz cały dzień, czas Europe/Warsaw'), $pl);
+        check('… its next change with a Polish day, after a colon',
+              (bool)preg_match('/najbliższa zmiana: (pon|wt|śr|czw|pt|sob|niedz) \d\d:\d\d \(Europe\/Warsaw\)/u', $pl), $pl);
+        check('… and no English left in it', $pl !== '' && !preg_match('/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|next day|all day)\b/', $pl), $pl);
+        check('the English page, in English', str_contains($en, 'Mon–Fri 10:00–02:30 the next day, Sat–Sun all day, Europe/Warsaw time')
+              && (bool)preg_match('/next change: (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:\d\d/', $en), $en);
+    } finally {
+        foreach ($keys as $k) {
+            if ($was[$k] === null) {
+                $db->prepare("DELETE FROM settings WHERE `key` = ?")->execute([$k]);
+            } else {
+                $db->prepare("UPDATE settings SET `value` = ?, updated_at = ? WHERE `key` = ?")
+                   ->execute([$was[$k]['value'], $was[$k]['updated_at'], $k]);
+            }
+        }
+    }
+}
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

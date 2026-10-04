@@ -76,6 +76,20 @@ $d = otAdvice(['cpus' => 6, 'workers' => 4, 'workers_consistent' => true, 'rmem_
                'socket_drops' => 0, 'other_dropins' => ['override.conf', 'limits.conf']]);
 check('advice: other drop-ins are named and declared untouched',
       str_contains(implode(' ', array_column($d, 'text')), 'never touched by the panel'));
+// 1.73.0: the advice was English on every page (the DB memory and sysctl cards' beside it were not): the dictionary's
+// words now (api.ot.adv_*), in the reader's language, numbers written the reader's way.
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl']);
+$aPl = implode(' ', array_column(otAdvice(['cpus' => 6, 'workers' => 4, 'workers_consistent' => false, 'rmem_max' => 212992, 'socket_drops' => 555378,
+                                           'other_dropins' => ['override.conf']]), 'text'));
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'en'], null);
+check('advice: said in the reader\'s language (Polish here), the numbers its way, the command and the file names as they are',
+      str_contains($aPl, 'Wątki UDP opentrackera: 4, rdzenie: 6') && str_contains($aPl, "212\u{00A0}992 B (net.core.rmem_max)")
+      && str_contains($aPl, "w liczbie 555\u{00A0}378") && str_contains($aPl, 'sudo sysctl -w net.core.rmem_max=8388608')
+      && str_contains($aPl, 'override.conf') && !str_contains($aPl, 'worker threads') && !str_contains($aPl, 'disagree'), $aPl);
+$otSrc = (string)file_get_contents($root . '/includes/opentracker.php') . (string)file_get_contents($root . '/api/admin/ot_status.php');
+check('… and the card\'s failures are the dictionary\'s too (otRun(), admin/ot_status)',
+      !str_contains($otSrc, "'No OpenTracker helper command is configured") && !str_contains($otSrc, "'PHP exec() is disabled")
+      && !str_contains($otSrc, "'The helper did not answer") && str_contains($otSrc, "__('api.ot.no_helper')") && str_contains($otSrc, "__('api.ot.exec_disabled')"));
 
 // ── 4. a deferred apply must survive the sandbox ────────────────────────────
 // The panel's PHP cannot write /etc when php-fpm runs with ProtectSystem, which is exactly the kind

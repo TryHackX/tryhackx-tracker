@@ -1146,8 +1146,10 @@ check('the format select is less cramped', str_contains($css, '.pm-editor .rt-fo
 
 check('the refresh button is the icon font\'s glyph with no box around it',
       str_contains($widget, 'bi bi-arrow-clockwise') && !str_contains($widget, '<svg viewBox="0 0 24 24"'));
+// 1.73.0: the words a script writes into the page are t.key() words (assets/js/i18n.js — the live language switch
+// says them again where they stand); the tooltip is the same call.
 check('… and answers in a tooltip on itself rather than a line under the box',
-      str_contains($boxJs, "tip(refreshBtn, t('js.shout.nothing_new')")
+      str_contains($boxJs, "tip(refreshBtn, t.key('js.shout.nothing_new')")
       && str_contains($appJs, 'window.pubTip = pubTip'));
 $tabsAt  = strpos($widget, '<div class="rt-tabs">');
 $countAt = $tabsAt === false ? false : strpos($widget, 'id="shout-count"', $tabsAt);
@@ -1234,9 +1236,10 @@ check('the Time zone block is in the card with Interface language, and not insid
       && strpos($accTpl, 'acc-tz-block') > strpos($accTpl, '<?php endif; ?>', (int)strpos($accTpl, 'acc-lang-block')));
 check('the volume slider moves in ones', str_contains($accTpl, 'id="snd-vol" min="0" max="100" step="1"') && !str_contains($accTpl, 'step="5"'));
 $favJs = (string)file_get_contents($root . '/assets/js/favourites.js');
+// 1.73.0: "Copied!" is a t.key() word, as every word a script writes into the page is.
 check('the favourites hash is a chip, and says "Copied!" in the site\'s tooltip over itself',
       !str_contains($css, 'text-decoration: underline dotted') && str_contains($css, '.pf-hash-copy.is-copied')
-      && str_contains($favJs, "window.pubTip(hs, t('js.common.copied'))"));
+      && str_contains($favJs, "window.pubTip(hs, t.key('js.common.copied'))"));
 
 $peopleJs = (string)file_get_contents($root . '/assets/js/people.js');
 // ── 1.64.0 ───────────────────────────────────────────────────────────────────
@@ -1246,15 +1249,38 @@ check('the hash chip is the size of its own words, in the site\'s font, in the s
 check('both renderers give a row an id, which is what the live language switch matches on first',
       str_contains($widget, 'id="shout-<?= (int)$s[\'id\'] ?>"')
       && str_contains($boxJs, "row.id = 'shout-' + (Number(r.id) || 0);"));
-check('the question in a row hides the row\'s other controls and takes itself away again',
+// askInPlace() itself and its finish(), read out of app.js — the pins below are about THAT function, not about
+// some line anywhere in the file. 1.73.0: a language switch is no longer a way out. The question and its Yes / No
+// are t.key() words the live switch says again where they stand, and the button waits beside them, hidden — in
+// the page, where the switch reaches it (it used to be swapped out, so the question closed itself on
+// `langswap:begin`); the switcher's own press is not a press "outside". shout_check / people_check press them all.
+$askSrc = preg_match('/const askInPlace = \(btn, question, onYes, opts\) => \{.*?\n\};\n/s', $appJs, $am) ? $am[0] : '';
+$askFinish = preg_match('/const finish = \(putBack\) => \{.*?\n    \};\n/s', $askSrc, $am) ? $am[0] : '';
+check('the question in a row hides the row\'s other controls and takes itself away again — but not on a language switch, which says it again where it stands',
       str_contains($css, '.shout-asking .shout-pin { display: none; }')
-      && str_contains($appJs, "opts.host.classList.add('shout-asking')")
-      && str_contains($appJs, "document.addEventListener('langswap:begin', onSwap)")
-      && str_contains($appJs, 'timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);'));
+      && str_contains($askSrc, "opts.host.classList.add('shout-asking')")
+      && str_contains($askFinish, "opts.host.classList.remove('shout-asking')")
+      && str_contains($askFinish, 'ask.remove();') && str_contains($askFinish, 'btn.hidden = wasHidden;')
+      && str_contains($askSrc, 'timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);')
+      && str_contains($askSrc, 'btn.after(ask);') && str_contains($askSrc, 'btn.hidden = true;')
+      && str_contains($askSrc, "t.key('js.shout.yes')") && str_contains($askSrc, "t.key('js.shout.no')")
+      && str_contains($askSrc, '!(window.LangSwap && window.LangSwap.isSwitch(e.target))')
+      && !str_contains($askSrc, 'langswap'));
+// Every listener askInPlace() puts on the document is taken off in finish(), and every exit calls finish(): the two
+// it has (a press outside, Esc) and no other — besides the Yes / No buttons' own clicks.
+preg_match_all("/document\\.addEventListener\\('([a-z]+)', (\\w+), true\\);/", $askSrc, $askAdds, PREG_SET_ORDER);
+$askLeft = [];
+foreach ($askAdds as $a) if (!str_contains($askFinish, "document.removeEventListener('{$a[1]}', {$a[2]}, true);")) $askLeft[] = $a[1];
+$askListeners = substr_count($askSrc, 'addEventListener(\'') - substr_count($askSrc, '.addEventListener(\'click\'');
 check('… and every way out of it goes through the one finish() that clears the timer and the listeners',
-      str_contains($appJs, "document.removeEventListener('pointerdown', onOutside, true);")
-      && str_contains($appJs, "document.removeEventListener('keydown', onEsc, true);")
-      && str_contains($appJs, "document.removeEventListener('langswap:begin', onSwap);"));
+      str_contains($askFinish, 'clearTimeout(timer);')
+      && count($askAdds) === 2 && $askListeners === 2
+      && $askLeft === []
+      && str_contains($askSrc, 'function onOutside(e) { if (!ask.contains(e.target) && !(window.LangSwap && window.LangSwap.isSwitch(e.target))) finish(true); }')
+      && str_contains($askSrc, "function onEsc(e) { if (e.key === 'Escape') { e.preventDefault(); finish(true); btn.focus(); } }")
+      && str_contains($askSrc, "no.addEventListener('click', () => { finish(true); btn.focus(); });")
+      && str_contains($askSrc, 'finish(back === false);'),
+      'listeners besides the clicks: ' . $askListeners . ' (2 expected); not taken off in finish(): ' . implode(', ', $askLeft));
 check('… and there is ONE of it: the shoutbox, the emote cards and the inbox all call app.js\'s',
       str_contains($appJs, 'window.askInPlace = askInPlace;')
       && str_contains($boxJs, 'var askInPlace = window.askInPlace;')

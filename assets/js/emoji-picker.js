@@ -68,12 +68,13 @@
             if (k === 'className') n.className = v;
             else if (k === 'text') n.textContent = v;
             else if (k === 'html') n.innerHTML = v;          // server-rendered, already sanitized
-            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.dataset[d] = v[d]; });
+            // data-* through setAttribute, which keeps a t.key() word's key (dataset would write its words only, 1.73.0)
+            else if (k === 'dataset') Object.keys(v).forEach(function (d) { n.setAttribute('data-' + d.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); }), v[d]); });
             else n.setAttribute(k, v === true ? '' : v);
         });
         (Array.isArray(kids) ? kids : kids ? [kids] : []).forEach(function (c) {
             if (c === null || c === undefined || c === false) return;
-            n.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+            n.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key
         });
         return n;
     }
@@ -398,15 +399,15 @@
 
         /** The words the panel says itself, from the dictionary — again after a live language switch. */
         function relabel() {
-            panel.setAttribute('aria-label', t('js.shout.emoji'));
+            panel.setAttribute('aria-label', t.key('js.shout.emoji'));
             // With a wider scope the search finds Font Awesome's icons too, and the box says so.
-            var sq = fa && fa.scope !== 'faces' ? t('js.shout.search_icons') : t('js.shout.search');
+            var sq = fa && fa.scope !== 'faces' ? t.key('js.shout.search_icons') : t.key('js.shout.search');
             searchIn.setAttribute('placeholder', sq);
             searchIn.setAttribute('aria-label', sq);
-            catsEl.setAttribute('aria-label', t('js.shout.fa_cats'));
-            clearBtn.title = t('js.shout.search_clear');
-            clearBtn.setAttribute('aria-label', t('js.shout.search_clear'));
-            if (allLink) allLink.textContent = t('js.shout.all_emotes');
+            catsEl.setAttribute('aria-label', t.key('js.shout.fa_cats'));
+            clearBtn.title = t.key('js.shout.search_clear');
+            clearBtn.setAttribute('aria-label', t.key('js.shout.search_clear'));
+            if (allLink) allLink.textContent = t.key('js.shout.all_emotes');
             pages.forEach(function (p) { p.label = p.labelOf(); });
             Array.prototype.forEach.call(tabsEl.children, function (b) {
                 var p = pageById(b.dataset.g);
@@ -448,7 +449,7 @@
 
         /* ── the items a cell stands for ── */
 
-        function toneLabel(n) { return t('js.shout.tone_' + n); }
+        function toneLabel(n) { return t.key('js.shout.tone_' + n); }
         /** An ordinary emoji: in the remembered tone unless `exact` (Recent keeps what was chosen). */
         function uniItem(row, exact, toneOf) {
             var tn = toneOf !== undefined ? toneOf : (row.t ? toneNow() : 0);
@@ -513,7 +514,7 @@
             b.tabIndex = -1;
             b.className = 'shout-picker-cell' + (it.kind === 'f' ? ' shout-picker-fa' : '') + (it.vars ? ' has-var' : '');
             b.setAttribute('data-k', String(k));
-            var title = it.label + (it.vars ? DASH + t('js.shout.variants_hint') : '');
+            var title = it.label + (it.vars ? DASH + t('js.shout.variants_hint') : '');   // plain words: the grid is drawn again on a swap
             b.title = title;
             b.setAttribute('aria-label', title);
             if (it.kind === 'u') b.textContent = it.text;
@@ -568,8 +569,8 @@
             if (page.cats && !cat) {
                 catsEl.hidden = true;
                 render([], false);
-                status(t('js.shout.fa_loading'));
-                catalogLoad().then(function (c) { if (!c && current === id && !panel.hidden) status(t('js.shout.fa_failed')); });
+                status(t.key('js.shout.fa_loading'));
+                catalogLoad().then(function (c) { if (!c && current === id && !panel.hidden) status(t.key('js.shout.fa_failed')); });
                 onMove();
                 return;
             }
@@ -596,21 +597,21 @@
 
         /** The pages, from what arrived: Recent, then Unicode's or Font Awesome's or both, then the pictures. */
         function buildPages() {
-            pages = [{ id: 'recent', icon: 'bi bi-clock-history', labelOf: function () { return t('js.shout.tab_recent'); },
+            pages = [{ id: 'recent', icon: 'bi bi-clock-history', labelOf: function () { return t.key('js.shout.tab_recent'); },
                        fill: function () { return recentGet().map(itemForText).filter(Boolean); },
-                       empty: function () { return t('js.shout.recent_empty'); } }];
+                       empty: function () { return t.key('js.shout.recent_empty'); } }];
             if (uni) GROUPS.forEach(function (g) {
                 if (!uni.groups[g.id] || !uni.groups[g.id].length) return;
-                pages.push({ id: g.id, icon: g.icon, labelOf: function () { return t('js.shout.tab_' + g.id); },
+                pages.push({ id: g.id, icon: g.icon, labelOf: function () { return t.key('js.shout.tab_' + g.id); },
                              fill: function () { return uni.groups[g.id].map(function (row) { return uniItem(row); }); } });
             });
             if (fa) fa.pages.forEach(function (p) {
-                pages.push({ id: p.id, faTab: p.tab, labelOf: function () { return t('js.shout.tab_' + String(p.id).replace(/-/g, '_')); },
+                pages.push({ id: p.id, faTab: p.tab, labelOf: function () { return t.key('js.shout.tab_' + String(p.id).replace(/-/g, '_')); },
                              fill: function () { return fa.faces.filter(function (f) { return f.p === p.id; }).map(function (f) { return faItem(f, ''); }); } });
             });
             // 1.70.0: with the scope at `all`, every icon of the package — one page, its categories on chips.
             if (fa && fa.scope === 'all') {
-                pages.push({ id: 'fa-all', faIcon: 'icons', cats: true, labelOf: function () { return t('js.shout.tab_fa_all'); },
+                pages.push({ id: 'fa-all', faIcon: 'icons', cats: true, labelOf: function () { return t.key('js.shout.tab_fa_all'); },
                              fill: catalogItems, note: catalogNote });
             }
             addEmotePages();
@@ -622,14 +623,14 @@
         function addEmotePages() {
             if (!emotesIn) return;
             if (emotePlain.length && !pageById('emotes')) {
-                pages.push({ id: 'emotes', img: emotePlain[0], labelOf: function () { return t('js.shout.tab_emotes'); },
+                pages.push({ id: 'emotes', img: emotePlain[0], labelOf: function () { return t.key('js.shout.tab_emotes'); },
                              fill: function () { return emotePlain.map(function (r) { return emoteItem(r, false); }); } });
             }
             if (emoteStick.length && !pageById('stickers')) {
-                pages.push({ id: 'stickers', img: emoteStick[0], wide: true, labelOf: function () { return t('js.shout.tab_stickers'); },
+                pages.push({ id: 'stickers', img: emoteStick[0], wide: true, labelOf: function () { return t.key('js.shout.tab_stickers'); },
                              fill: function () { return emoteStick.map(function (r) { return emoteItem(r, true); }); },
                              // The room sends a sticker the moment it is picked; an editor puts in its code.
-                             note: function () { return t(typeof opts.sticker === 'function' ? 'js.shout.sticker_hint' : 'js.shout.sticker_insert_hint'); } });
+                             note: function () { return t.key(typeof opts.sticker === 'function' ? 'js.shout.sticker_hint' : 'js.shout.sticker_insert_hint'); } });
             }
         }
         function firstPage() {
@@ -804,7 +805,7 @@
                 var g = catGlyphs(c);
                 var b = el('button', { type: 'button', className: 'shout-picker-cat' + (g.length > 1 ? ' shout-picker-cat-run' : g.length ? '' : ' shout-picker-cat-text') + (on ? ' active' : ''),
                                        'aria-pressed': on ? 'true' : 'false', 'aria-label': c.l, tabindex: on ? '0' : '-1',
-                                       dataset: { c: c.id, tip: t('js.shout.fa_cat_title', { name: c.l, n: c.n }) } }, g.length ? g : c.l);
+                                       dataset: { c: c.id, tip: t.key('js.shout.fa_cat_title', { name: c.l, n: c.n }) } }, g.length ? g : c.l);
                 b.addEventListener('click', function () { chooseCat(c.id); });
                 catsEl.appendChild(b);
             });
@@ -843,7 +844,7 @@
         }
         function catalogNote() {
             var c = catNow();
-            return c ? t('js.shout.fa_cat_status', { name: c.l, n: c.n }) : '';
+            return c ? t.key('js.shout.fa_cat_status', { name: c.l, n: c.n }) : '';
         }
 
         /* ── the search ── */
@@ -911,10 +912,10 @@
             current = 'search';
             catsEl.hidden = true;
             Array.prototype.forEach.call(tabsEl.children, function (b) { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
-            render(faList.length ? list.concat([{ kind: 'h', label: t('js.shout.fa_group', { n: faList.length }) }], faList) : list, false);
-            status(faList.length ? t('js.shout.search_found_fa', { n: list.length, m: faList.length })
-                   : list.length ? t('js.shout.search_found', { n: list.length })
-                   : faPending ? t('js.shout.fa_loading') : t('js.shout.search_none', { q: raw }));
+            render(faList.length ? list.concat([{ kind: 'h', label: t.key('js.shout.fa_group', { n: faList.length }) }], faList) : list, false);
+            status(faList.length ? t.key('js.shout.search_found_fa', { n: list.length, m: faList.length })
+                   : list.length ? t.key('js.shout.search_found', { n: list.length })
+                   : faPending ? t.key('js.shout.fa_loading') : t.key('js.shout.search_none', { q: raw }));
             onMove();
         }
         /**
@@ -1004,7 +1005,7 @@
             closeVariants(false);
             varFor = cell;
             varEl.textContent = '';
-            varEl.setAttribute('aria-label', t('js.shout.variants', { name: it.kind === 'f' ? it.face.l : it.row.n }));
+            varEl.setAttribute('aria-label', t.key('js.shout.variants', { name: it.kind === 'f' ? it.face.l : it.row.n }));
             variantsOf(it).forEach(function (o, i) {
                 var b = el('button', { type: 'button', className: 'shout-picker-vopt' + (o.current ? ' current' : ''), role: 'option',
                                        title: o.label, 'aria-label': o.label, 'aria-selected': o.current ? 'true' : 'false', dataset: { i: String(i) } });
@@ -1193,6 +1194,8 @@
             // Font Awesome face — and must not close the bubble it has just opened.
             if (!varEl.hidden && !varEl.contains(e.target) && !(varFor && varFor.contains(e.target))) closeVariants(false);
             if (panel.contains(e.target) || btn.contains(e.target)) return;
+            // The language switcher translates the picker where it stands (1.73.0): pressing it does not close it.
+            if (window.LangSwap && window.LangSwap.isSwitch && window.LangSwap.isSwitch(e.target)) return;
             close();
         }
 
@@ -1276,7 +1279,7 @@
             window.addEventListener('resize', onMove);
             if (floating) window.addEventListener('scroll', onScroll, true);
             var ready = !!pages.length && lang === currentLang();
-            if (!ready) { gridEl.textContent = ''; items = []; status(t('js.common.loading')); }
+            if (!ready) { gridEl.textContent = ''; items = []; status(t.key('js.common.loading')); }
             place();
             // The search box takes the typing at once — but not on a touch screen, where a focused box is
             // a keyboard over half the picker; there the first emoji takes the focus, as before.
@@ -1288,7 +1291,7 @@
             emotesWant();
             data.then(function () {
                 if (panel.hidden) return;
-                if (!pages.length) { status(t('js.shout.emoji_failed')); return; }
+                if (!pages.length) { status(t.key('js.shout.emoji_failed')); return; }
                 // Every time it opens: what this browser used last, when there is any (as a phone's
                 // picker opens), else the first page of emoji — or the results of a search still typed.
                 recentWaits = false;
@@ -1323,14 +1326,24 @@
         }
         function toggle() { if (panel.hidden) open(); else close(); }
         btn.addEventListener('click', toggle);
-        // A live language switch (assets/js/lang-swap.js): the picker closes, its words are the new
-        // language's at once, and its emoji are the new language's file the next time it opens.
+        // A live language switch (assets/js/lang-swap.js, 1.73.0): the picker STAYS as it is — open, on its page, with
+        // what is typed in its search (it used to close). Its own words are t.key() words and follow by themselves
+        // (assets/js/i18n.js); its emoji, faces and categories are named in a file of each language, so an OPEN
+        // picker asks for the new language's (the one request a switch makes beside the page's own, and only while a
+        // picker is open) and draws the page it was on again; a closed one asks when it next opens.
         function onLangSwap() {
-            close();
-            loading = null;
-            pages = [];
-            current = '';
             relabel();
+            if (lang === currentLang()) return;
+            // Closed: what it drew stays out of sight in the old language's names — taken away; the next open
+            // draws the new language's (open() sees the language changed and asks for its file).
+            if (panel.hidden) { gridEl.textContent = ''; items = []; catsEl.textContent = ''; return; }
+            var was = current;
+            ensureData().then(function () {
+                if (panel.hidden || !pages.length) return;
+                if (searchIn.value.trim()) runSearch();
+                else show(pageById(was) ? was : firstPage());
+                onMove();
+            });
         }
         document.addEventListener('langswap', onLangSwap);
         /** Taken down for good (1.70.0): an editor drawn again replaces its picker rather than adding one. */
@@ -1402,7 +1415,7 @@
         var add = lead + text + tail;
         var max = ta.maxLength > 0 ? ta.maxLength : 0;
         if (max && before.length + add.length + after.length > max) {
-            if (handle) handle.say(t('js.shout.err_too_long', { limit: max }));
+            if (handle) handle.say(t.key('js.shout.err_too_long', { limit: max }));
             return false;
         }
         ta.value = before + add + after;
