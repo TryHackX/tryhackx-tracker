@@ -689,7 +689,7 @@ check('one Esc, one layer: escLayer() in app.js, the Info panel on it, the leave
 $css = $src('assets/css/style.css');
 check('the look: the sections\' rule, head and search, and the chips as before (a name that was opened stays the link colour)',
       str_contains($css, '.who-sec:not([hidden]) ~ .who-sec:not([hidden])') && str_contains($css, '.who-sec-head .who-sec-search')
-      && str_contains($css, '#who-overlay .who-name:visited, #who-overlay .who-list:visited'));
+      && preg_match('/:visited\s*[,{]/', $css) === 0);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

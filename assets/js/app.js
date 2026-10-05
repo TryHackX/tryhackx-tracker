@@ -2259,6 +2259,39 @@ const siteToast = (() => {
 })();
 window.siteToast = siteToast;
 
+// === The nav's separators at the edge of a wrapped line (1.73.2) ===
+// The links are one wrapping row with a "|" between each two. When it wraps — Polish at 1280px, any language on a
+// phone — a separator can end a line or begin the next one, where it separates nothing ("| EN PL" alone on the
+// second line). CSS cannot tell which item a line starts with, so the lines are measured: a separator whose
+// neighbour on either side sits on another line gets `sep-lead` (begins a line: out of the row) or `sep-trail`
+// (ends one: hidden in place) — style.css says why the two differ. Every measure starts from the row as it is
+// without the marks, so it settles at once. Again whenever a piece of the row changes size (the window, a live
+// language switch, a number appearing on a link) and when the fonts have arrived.
+(function () {
+    'use strict';
+    const row = document.querySelector('.main-nav .nav-links');
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const sameLine = (a, b) => { const x = a.getBoundingClientRect(), y = b.getBoundingClientRect(); return x.top < y.bottom && y.top < x.bottom; };
+    function mark() {
+        row.querySelectorAll(':scope > .sep').forEach((s) => s.classList.remove('sep-lead', 'sep-trail'));
+        const items = [...row.children].filter((n) => n.getClientRects().length > 0);
+        items.forEach((n, i) => {
+            if (!n.classList.contains('sep')) return;
+            const prev = items[i - 1], next = items[i + 1];
+            if (!prev || !sameLine(prev, n)) n.classList.add('sep-lead');
+            else if (!next || !sameLine(n, next)) n.classList.add('sep-trail');
+        });
+    }
+    let queued = false;
+    const later = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; mark(); }); };
+    const ro = new ResizeObserver(later);
+    ro.observe(row);
+    [...row.children].forEach((n) => ro.observe(n));
+    mark();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+    document.addEventListener('langswap', later);
+})();
+
 // === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
 // All rendering uses textContent — usernames, group names, notification titles and torrent names
 // are untrusted. Endpoints: user_login/user_register/user_logout/user_me/user_update/

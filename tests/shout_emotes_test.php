@@ -741,8 +741,9 @@ check('the widget has a refresh button and the formatting rail beside the format
 check('… driven by the poll\'s own fetch rather than a second one',
       str_contains((string)file_get_contents($root . '/assets/js/shoutbox.js'), 'function fetchNew')
       && substr_count((string)file_get_contents($root . '/assets/js/shoutbox.js'), "get('shout_list&after=") === 1);
-check('a link inside a shout keeps the link colour, and the site-wide rule is untouched',
-      str_contains($css, '.shout-body a:visited') && str_contains($css, 'a:visited { color: var(--link-visited); }'));
+// 1.73.2: no visited colour on the site at all — the exemption this asserted went with the rule it exempted from.
+check('a link inside a shout keeps the link colour after a visit: no :visited rule anywhere in the stylesheet',
+      preg_match('/:visited\s*[,{]/', $css) === 0);
 check('the rows carry a dashed rule and the last one does not',
       str_contains($css, 'border-bottom: 1px dashed') && str_contains($css, '.shout-row:last-child { border-bottom: 0; }'));
 $page = (string)file_get_contents($root . '/templates/pages/emotes.php');

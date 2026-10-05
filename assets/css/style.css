@@ -207,7 +207,10 @@ body {
 }
 
 a { color: var(--link); text-decoration: none; transition: opacity 0.2s; }
-a:visited { color: var(--link-visited); }
+/* No visited colour (1.73.2, the owner's choice): a followed link looks like any other. `a:visited` had been taken
+   back place by place — names, the shoutbox, the sign-in's links, the Stats page's commit, Terms and Info — until no
+   place was left that wanted it, so the rule went, and every exception to it with it. (`--link-visited` stays: the
+   spinner's inner ring is drawn in it.) */
 a:hover { opacity: 0.8; text-decoration: underline; }
 
 /* === Navigation === */
@@ -228,10 +231,14 @@ a:hover { opacity: 0.8; text-decoration: underline; }
 .nav-links a { padding: 0.25rem 0.5rem; border-radius: var(--radius); color: var(--link); white-space: nowrap; }
 /* Row spacing that survives a wrap: without it two wrapped lines sit on top of each other. */
 .nav-links { row-gap: 0.15rem; }
-.nav-links a:visited { color: var(--link); }
 .nav-links a.active { background: var(--bg-code); color: var(--accent); }
-.nav-links a.active:visited { color: var(--accent); }
 .nav-links .sep { color: var(--text-muted); font-size: 0.8rem; }
+/* A separator at the edge of a wrapped line separates nothing ("| EN PL" alone on the second line, Polish at
+   1280px): assets/js/app.js measures the lines and marks it (1.73.2). One that begins a line is taken out of the
+   row — nothing above it can move, everything there fitted without it; one that ends a line is only hidden, as
+   taking it out could let the next item climb up beside the previous one with nothing between them. */
+.nav-links .sep.sep-lead { display: none; }
+.nav-links .sep.sep-trail { visibility: hidden; }
 
 /* === Language switcher ===
    Codes rather than flags: a flag is a country and a language is not, and "EN" is unambiguous
@@ -250,10 +257,8 @@ a:hover { opacity: 0.8; text-decoration: underline; }
     line-height: 1.3;
     text-decoration: none;
 }
-.lang-opt:visited { color: var(--text-muted); }
 .lang-opt:hover { color: var(--link); border-color: var(--link); }
-.lang-opt.active,
-.lang-opt.active:visited { background: var(--bg-code); border-color: var(--accent); color: var(--accent); }
+.lang-opt.active { background: var(--bg-code); border-color: var(--accent); color: var(--accent); }
 
 /* === Form centering === */
 .form-center { text-align: center; margin: 1rem 0; }
@@ -597,10 +602,10 @@ ul.feature-list li::before {
 .ic-btn { display: inline-flex; }
 
 /* Link styled as a button (home page "Register your torrent" CTA) — identical to <button class="btn">: the
-   generic a / a:visited / a:hover rules would otherwise paint it pink and underline it. */
-a.btn, a.btn:visited { color: #000; text-decoration: none; }
+   generic a / a:hover rules would otherwise colour it as a link and underline it. */
+a.btn { color: #000; text-decoration: none; }
 a.btn:hover, a.btn:focus-visible { opacity: 0.85; text-decoration: none; }
-a.btn.btn-secondary, a.btn.btn-secondary:visited { color: var(--text); }
+a.btn.btn-secondary { color: var(--text); }
 
 .btn-secondary {
     background: var(--control-bg);
@@ -728,10 +733,6 @@ footer p { margin: 0.25rem 0; }
     opacity: 1;
 }
 
-.report-link:visited {
-    color: var(--accent);
-}
-
 .contact-disclaimer {
     color: var(--text-muted);
     font-size: 0.59rem;
@@ -755,10 +756,6 @@ footer p { margin: 0.25rem 0; }
     opacity: 1;
 }
 
-.footer-brand:visited {
-    color: var(--accent);
-}
-
 .footer-link {
     color: #4879b1;
     text-decoration: none;
@@ -768,10 +765,6 @@ footer p { margin: 0.25rem 0; }
     color: #5a8fc8;
     text-decoration: underline;
     opacity: 1;
-}
-
-.footer-link:visited {
-    color: #4879b1;
 }
 
 .footer-link svg {
@@ -831,20 +824,7 @@ footer p { margin: 0.25rem 0; }
     color: var(--text-muted);
 }
 
-/* :visited too (1.73.0): `a:visited` (0,1,1) outranks a bare class (0,1,0), so the statistics page's "Git commit"
-   link — the build of opentracker, opened once — turned the visited colour for good, as the sign-in's links did
-   before 1.71.0. A value that links out is not a page the reader has read. */
-.status-link,
-.status-link:visited {
-    color: var(--link);
-}
-/* 1.73.1: the Terms and Info pages' links keep the link colour once opened (the owner: they "change colour after a
-   visit") — the same choice as the names, the shoutbox and the status links above, now for the two documents. The
-   body carries `page-tos` / `page-info` (templates/layout.php), shipped or rewritten in the page editor alike;
-   `.rt-page` is that editor's preview frame (assets/js/admin-pagecontent.js). Buttons keep their own colours. */
-.page-tos main a:not(.btn):visited,
-.page-info main a:not(.btn):visited,
-.rt-page a:not(.btn):visited {
+.status-link {
     color: var(--link);
 }
 
@@ -1845,10 +1825,6 @@ footer p { margin: 0.25rem 0; }
 .user-remember { display: block; margin: 0.4rem 0; color: var(--text-muted); font-size: 0.9rem; }
 .user-remember input { margin-right: 0.4rem; vertical-align: -0.1em; }
 .user-links { text-align: center; color: var(--text-muted); margin-top: 1rem; }
-/* The links under a sign-in, register or reset form (and the panel's sign-in) are the page's own way on —
-   Register, Reset it, Sign in, Back — not something read and left behind: no visited colour (1.71.0). A
-   followed "Register" turned pink and read as if something had happened there. */
-.user-links a:visited { color: var(--link); }
 .nav-unread { display: inline-block; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; vertical-align: 0.1em; }
 /* The shoutbox's own number (1.60.0). It wears the badge shape and not the badge COLOUR: two solid
    pills in one bar read as one thing counted twice, and these two count different things — that one
@@ -2610,7 +2586,7 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .profile-bio-text { color: var(--text); overflow-wrap: anywhere; unicode-bidi: isolate; }
 /* A link reads as a link in running text: the site's links carry no underline, and a pale blue among
    grey words is not enough to tell them apart. */
-.profile-bio-text a, .profile-bio-text a:visited { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.profile-bio-text a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
 /* Your own: the words are the button that opens the editor (a dashed edge on hover, a ring only for
    the keyboard), and when there are none, the dashed box that asks for some. */
 /* The edge sits round the words without moving them: the box reaches out to the sides and up into the
@@ -2679,13 +2655,12 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .profile-top.has-cover .profile-bio-err { background: rgba(0, 0, 0, 0.6); padding: 0.2rem 0.5rem; border-radius: var(--radius); }
 /* The account page's row: the same words, smaller, and the way to them. */
 .acc-bio-text { overflow-wrap: anywhere; line-height: 1.5; margin-bottom: 0.2rem; unicode-bidi: isolate; }
-.acc-bio-text a, .acc-bio-text a:visited { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.acc-bio-text a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
 .acc-bio-edit { font-size: 0.8rem; white-space: nowrap; }
 /* On a phone the link may wrap (1.69.0): unbroken, "Edytuj na swoim profilu" was the account table's
    widest piece and pushed it out of its card at 320–340. Here and not with the other phone rules, which
    come earlier in this file and would lose to the rule above. */
 @media (max-width: 480px) { .acc-bio-edit { white-space: normal; display: inline-block; } }
-.acc-bio-edit:visited { color: var(--link); }
 
 /* The account page: the Picture and Cover sub-sections of the Profile card. The drop zone is the
    Emotes page's own (.emote-drop), a little shallower here beside the three preview sizes. */
@@ -3403,22 +3378,10 @@ button.list-vis:focus-visible { outline: 2px solid var(--link); outline-offset: 
     font-size: 0.82rem; text-decoration: none; }
 .who-name:hover, .who-list:hover { border-color: var(--accent); }
 
-/* A NAME does not go purple once it has been clicked (1.64.0).
-   The site-wide a:visited rule is right for a document — it says which of these you have already
-   read — and wrong for a person: the same account appearing in a friends list and in the directory
-   came out in two colours, which reads as two different kinds of thing rather than as one somebody
-   had opened. The same reasoning as the shoutbox's exemption in 1.59.1, and the same shape: scoped
-   to the lists that draw people, with the global rule left exactly as it is. Scoped by their
-   containers on purpose — `.pf-name` is also the torrent-name class on the favourites and uploads
-   lists, and those are spans, but a rule that would have reached them if they ever became links is
-   a rule that would be wrong later. */
-#pe-list a.pf-name:visited, #dir-list a.pf-name:visited,
-#who-overlay .who-name:visited, #who-overlay .who-list:visited,
-a.pm-head-name:visited, a.av-who:visited, .av-who a:visited { color: var(--link); }
 /* 1.67.0: "Who has this" draws names and lists as CHIPS, and a chip is not a sentence — the site-wide
    `a:hover` underlined the words inside the pill (and dimmed them) the moment the pointer arrived.
    Here hover is the accent, on the edge and the name, and the keyboard's ring is a real outline;
-   no underline either way. After the :visited line above, so a name already opened lights up too. */
+   no underline either way. */
 #who-overlay .who-name:hover, #who-overlay .who-list:hover,
 #who-overlay .who-name:focus, #who-overlay .who-list:focus { text-decoration: none; opacity: 1; }
 #who-overlay .who-name:hover, #who-overlay .who-list:hover { border-color: var(--accent); color: var(--accent); }
@@ -3927,24 +3890,6 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-body.rt-body p { display: inline; margin: 0; }
 .shout-body.rt-body .rt-img { max-height: 3.5rem; margin: 0; vertical-align: text-bottom; }
 .shout-body.rt-body .rt-quote, .shout-body.rt-body .rt-code, .shout-body.rt-body .rt-list { margin: 0.2rem 0; }
-/* A link inside a shout does NOT go purple once it has been clicked. The site-wide a:visited rule is
-   right for a document — it says which of these you have already read — and wrong for a room: the
-   same address said twice by two people is one visited colour and one link colour, which reads as
-   two different things. Scoped to the body of a shout and to the picker's rows; the rule itself is
-   left exactly as it is everywhere else on the site. */
-/* 1.62.0: it still leaked in two places the rule below did not reach — the name in the PINNED strip
-   (not a .shout-row) and the Emotes link in the head — and the "Open the shoutbox" link beside it
-   had the same hole. So the scope is the whole widget rather than a list of its parts: a link added
-   to the box later cannot be forgotten by this rule. Every link the widget draws, by kind: names
-   and @mentions (the accent), a system line's author (muted, the colour its row gives it), the head
-   links, links inside a body, picture links, the picker's "All emotes", and the lightbox's "Open the
-   original" — which lives on <body>, outside the box, so it is named on its own. */
-.shoutbox a:visited, .shout-body a:visited, .shout-picker a:visited, .shout-lightbox a:visited { color: var(--link); }
-/* …except the one on the pill over the picture itself (1.64.0), which is white on a dark pill in
-   both states for the same reason the rest of this block exists: it must not change colour. */
-.shout-lightbox .shout-lb-orig:visited { color: #fff; }
-.shoutbox .shout-who:visited, .shoutbox .shout-mention:visited { color: var(--accent); }
-.shoutbox .shout-row-system .shout-who:visited { color: var(--text-muted); }
 .shout-mention { color: var(--accent); }
 .shout-mention-me { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 /* ── a line's own controls (1.67.0) ──

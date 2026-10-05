@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.73.2] — 2026-10-05
+
+Two things the owner asked for after 1.73.1: no separator at the edge of a wrapped line in the site's menu, and no
+visited colour anywhere. Checked in a browser only — the owner's choice: the full battery and sweep come with the
+audit that follows this release.
+
+### Fixed — a "|" at the start or end of a wrapped menu line
+
+* The public menu is one wrapping row with a "|" between each two links. Where it wraps — Polish at 1280px, where
+  the language switch went to a second line as "| EN PL"; any language at a tablet's width — a separator ended a
+  line or began the next one and separated nothing. CSS cannot tell the first item of a line from the others, so
+  `assets/js/app.js` measures the lines and marks such a separator: one that begins a line is taken out of the row
+  (nothing above it can move: everything there fitted without it), one that ends a line is hidden in place (taking it
+  out could let the next link climb up beside the previous one with nothing between them). It measures again whenever
+  a piece of the row changes size — the window, a live language switch, a number appearing on a link. Phones hide
+  every separator by design (≤600px), as before.
+* Checked with `scratchpad/shots/nav_sep_check.js`: both languages at eleven widths from 1920 to 320px, no line that
+  begins or ends with "|" and none with two links and nothing between them, then a live switch English → Polish at
+  1280 without a reload (one line before, two after, both clean). The README's Polish home picture is taken again
+  from the live site, its second line now "EN PL" alone.
+
+### Changed — no visited colour anywhere
+
+* A followed link turned pink (`a:visited`), and the owner had asked for it off place by place — the people lists'
+  names (1.64.0), the shoutbox (1.59.1, 1.62.0), the links under the sign-in forms (1.71.0), the Stats page's commit
+  link (1.73.0), the Terms and Info pages (1.73.1) — until no place was left that wanted it: the rule is gone, and
+  every exception to it with it. Nothing else changes colour: each exception repeated its link's own colour, so a
+  visited link now looks exactly as it did before it was followed. The body classes `page-tos` / `page-info` that
+  1.73.1 added for its exception are gone too; `--link-visited` stays, for the spinner's inner ring.
+* `tests/shout_test.php`, `shout_emotes_test.php` and `who_test.php` asserted the exceptions (and the rule they
+  exempted from) by their text; they assert now that the stylesheet holds no `:visited` rule at all.
+* Checked with `scratchpad/shots/visited_docs_check.js`: a real visit on Terms (both languages), Info and the home
+  page, the colour read off a picture of the link — the link colour; and, as the control, the old rule put back into
+  the page turns the same link pink, so the visit did register.
+
 ## [1.73.1] — 2026-10-05
 
 Corrections the README's new screenshots showed. Numbers are written in the language of the page — the server and the

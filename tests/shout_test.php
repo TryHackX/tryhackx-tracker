@@ -1204,9 +1204,9 @@ check('the picker is placed against its button, above when it fits and clamped t
 check('the format select drops its ring after a pointer, and keeps it for the keyboard',
       str_contains($appJs, "sel.classList.add('rt-pointer')") && str_contains($appJs, "s.classList.remove('rt-pointer')")
       && str_contains($css, '.rt-format.rt-pointer:focus-visible { outline: none; }'));
-check('every link the widget draws keeps its colour after a visit — the pinned name and the Emotes link included',
-      str_contains($css, '.shoutbox a:visited, .shout-body a:visited, .shout-picker a:visited, .shout-lightbox a:visited { color: var(--link); }')
-      && str_contains($css, '.shoutbox .shout-who:visited, .shoutbox .shout-mention:visited { color: var(--accent); }'));
+// 1.73.2: the site has no visited colour at all, so the widget's exemptions went with the rule.
+check('every link the widget draws keeps its colour after a visit — no :visited rule, names and mentions the accent',
+      preg_match('/:visited\s*[,{]/', $css) === 0 && str_contains($css, '.shout-mention { color: var(--accent); }'));
 check('the tooltip is placed by pubTip() — centred, pushed only by the viewport, flipped below when it must',
       str_contains($appJs, 'let left = a.left + a.width / 2 - w / 2;') && str_contains($appJs, 'left = Math.max(EDGE, Math.min(left, vw - EDGE - w));')
       && str_contains($appJs, 'const below = top < EDGE;') && !str_contains($css, '.shout-refresh .pub-tip'));
@@ -1315,11 +1315,8 @@ check('… a reply for a window that was closed is dropped, and Back closes the 
       && str_contains($appJs, 'const ours = () => mine === filesSeq && !overlay.hidden;')
       && str_contains($appJs, "history.pushState({ filesModal: 1 }, '', location.href); filesOwned++;")
       && str_contains($appJs, 'if (overlay && !overlay.hidden) { filesOwned = Math.max(0, filesOwned - 1); closeFiles(true); return; }'));
-check('a name in the people lists does not go purple once it has been opened',
-      str_contains($css, '#pe-list a.pf-name:visited, #dir-list a.pf-name:visited')
-      && str_contains($css, '#who-overlay .who-name:visited, #who-overlay .who-list:visited')
-      && str_contains($css, 'a.pm-head-name:visited, a.av-who:visited, .av-who a:visited { color: var(--link); }')
-      && str_contains($css, 'a:visited { color: var(--link-visited); }'));
+check('a name in the people lists does not go purple once it has been opened (1.73.2: no :visited rule anywhere)',
+      preg_match('/:visited\s*[,{]/', $css) === 0);
 check('the polled lists a script builds carry stable ids too',
       str_contains($peopleJs, "row.id = 'pm-th-' + x.with;")
       && str_contains($peopleJs, "wrap.id = 'pm-msg-' + (Number(m.id) || 0);")
