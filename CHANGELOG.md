@@ -10,8 +10,9 @@ Corrections the README's new screenshots showed. Numbers are written in the lang
 script alike, so a refresh never changes how a count looks — and a million or more in a torrent's swarm is written
 short ("520.22M" / "520,22 mln"), the exact count in its title. A torrent's row on a phone is two rows, not three,
 its facts kept apart; the Stats page says its countdown and its tooltips the same way before and after a refresh;
-the audit log's settings diff stays in its cell; the whitelist page no longer calls registration anonymous. The
-README's pictures are new: the public pages from the live site, the panel and the whitelist from a simulated one.
+the audit log's settings diff stays in its cell; the whitelist page no longer calls registration anonymous, and the
+Terms and Info pages' links keep their colour once visited. The README's pictures are new: the public pages from the
+live site, the panel and the whitelist from a simulated one.
 
 ### Fixed — numbers in the language of the page, not of the browser
 
@@ -120,6 +121,16 @@ README's pictures are new: the public pages from the live site, the panel and th
 * "we do not host, index or download any content" was not true while the observed-hash index is on, and the metadata
   worker does fetch a torrent's name and file list. It says what happens: no files are hosted and no file content is
   ever downloaded — at most the torrent's name and file list, from the swarm itself (`whitelist.rule_serve`).
+
+### Fixed — the Terms and Info pages' links changed colour once visited
+
+* A link on either page — to the Info page, the report form, the Whitelist — took the site-wide visited pink once it
+  had been followed, as a link in a list of results does. These are two documents read again and again, so their links
+  keep the link colour now: the choice the names, the shoutbox and the status links made before. The body carries
+  `page-tos` / `page-info` (`templates/layout.php`), a page shipped or rewritten in the page editor alike, and the
+  editor's preview follows (`.rt-page`); buttons keep their own colours, and the rest of the site keeps the visited
+  colour. Checked in a browser with a real visit, the colour read off a picture of the link — and, as the control, with
+  the rule taken out of the page, when the same link turns pink (`scratchpad/shots/visited_docs_check.js`).
 
 ## [1.73.0] — 2026-10-05
 

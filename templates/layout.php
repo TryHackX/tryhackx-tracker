@@ -87,7 +87,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
-<body<?= in_array($action, ['transparency', 'stats', 'search'], true) ? ' class="page-' . $action . '"' : '' ?>>
+<body<?= in_array($action, ['transparency', 'stats', 'search', 'tos', 'info'], true) ? ' class="page-' . $action . '"' : '' ?>>
     <div class="container">
         <?php include __DIR__ . '/nav.php'; ?>
         <main>

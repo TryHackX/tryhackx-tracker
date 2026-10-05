@@ -838,6 +838,15 @@ footer p { margin: 0.25rem 0; }
 .status-link:visited {
     color: var(--link);
 }
+/* 1.73.1: the Terms and Info pages' links keep the link colour once opened (the owner: they "change colour after a
+   visit") — the same choice as the names, the shoutbox and the status links above, now for the two documents. The
+   body carries `page-tos` / `page-info` (templates/layout.php), shipped or rewritten in the page editor alike;
+   `.rt-page` is that editor's preview frame (assets/js/admin-pagecontent.js). Buttons keep their own colours. */
+.page-tos main a:not(.btn):visited,
+.page-info main a:not(.btn):visited,
+.rt-page a:not(.btn):visited {
+    color: var(--link);
+}
 
 /* === Transparency === */
 .transparency-loading {
