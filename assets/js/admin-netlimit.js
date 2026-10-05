@@ -881,7 +881,9 @@
             series: series,
             legend: { live: true },
             cursor: { x: true, y: false, drag: { x: false, y: false } },
-            padding: [8, 8, 0, 4],
+            // No axis on the right: room for the right half of a time label whose tick falls at the edge (8px cut
+            // "16:00" to "16:0"), as on the Stats page's rate chart.
+            padding: [8, 18, 0, 4],
         }, [[], [], [], [], []], host);
     }
 

@@ -192,7 +192,9 @@
                 drawClear: [u => drawOpenSpans(u, payloadRef.current)],
                 setScale: onXScale ? [(u, key) => { if (key === 'x') onXScale(u); }] : [],
             },
-            padding: [8, 8, 0, 4],
+            // The rate chart has no axis on its right, so a time label whose tick falls at the right edge had 8px
+            // for its right half and lost its last digit ("16:0"); 18 holds half of an 11px "16:00" / "05.10".
+            padding: [8, isRate ? 18 : 8, 0, 4],
         };
         const data = [[]].concat(defs.map(() => []));
         return new uPlot(opts, data, host);

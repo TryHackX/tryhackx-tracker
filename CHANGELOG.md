@@ -10,9 +10,9 @@ Corrections the README's new screenshots showed. Numbers are written in the lang
 script alike, so a refresh never changes how a count looks — and a million or more in a torrent's swarm is written
 short ("520.22M" / "520,22 mln"), the exact count in its title. A torrent's row on a phone is two rows, not three,
 its facts kept apart; the Stats page says its countdown and its tooltips the same way before and after a refresh;
-the audit log's settings diff stays in its cell; the whitelist page no longer calls registration anonymous, and the
-Terms and Info pages' links keep their colour once visited. The README's pictures are new: the public pages from the
-live site, the panel and the whitelist from a simulated one.
+the audit log's settings diff stays in its cell; the whitelist page no longer calls registration anonymous; the
+Terms and Info pages' links keep their colour once visited, and a chart's last time label its last digit. The README's
+pictures are new: the public pages from the live site, the panel and the whitelist from a simulated one.
 
 ### Fixed — numbers in the language of the page, not of the browser
 
@@ -112,6 +112,10 @@ live site, the panel and the whitelist from a simulated one.
   the newest row the catalogue holds — the panel's Index lists the most recently seen first, and seed_catalogue.js's
   rows (stamped "now" by the checks that search for "ubuntu") had pushed all ten off its first page whenever one of
   those checks had run before it.
+* `texts_check.js`'s "everything off" configuration switches source links off as well: descriptions are on while
+  either of their two switches is, and a check run before it had left source links on, so the "off" pages kept the
+  anti-spam and moderation passages — exactly what the spec renders for that mix — and failed "nothing about a feature
+  that is off".
 
 ### Fixed — the whitelist page called registration anonymous, and said nothing is indexed
 
@@ -131,6 +135,15 @@ live site, the panel and the whitelist from a simulated one.
   editor's preview follows (`.rt-page`); buttons keep their own colours, and the rest of the site keeps the visited
   colour. Checked in a browser with a real visit, the colour read off a picture of the link — and, as the control, with
   the rule taken out of the page, when the same link turns pink (`scratchpad/shots/visited_docs_check.js`).
+
+### Fixed — a chart's last time label lost its last digit
+
+* The Stats page's requests-per-second chart and the panel's Traffic chart have no axis on their right, and gave a
+  label 8px beyond the plot: whenever a tick fell at the right edge — for a while every two hours — "16:00" read
+  "16:0" (the README's new Stats picture showed it). They keep 18px there now, half of an 11px "16:00" / "05.10"; the
+  chart with an axis on its right is unchanged. `scratchpad/shots/axis_edge_check.js` gives every chart on both pages
+  24 hours that end on a round hour, so a tick stands on the edge, and measures each label against its canvas at
+  1280 / 1920 / 390px — production before the fix as the control: "16:00" ended at 1099 of 1094px, now at 1089.
 
 ## [1.73.0] — 2026-10-05
 
