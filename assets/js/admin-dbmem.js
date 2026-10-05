@@ -22,7 +22,8 @@
 
     const state = { data: null, wanted: {}, unit: {} };
 
-    const num = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
+    // a count in the page's language (t.num(), 1.73.1 — the browser's own grouping before)
+    const num = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : t.num(v);
     const isBytes = (k) => !(k === 'max_connections' || k === 'table_open_cache');
 
     /* ── polling ─────────────────────────────────────────────────────────── */
@@ -109,7 +110,7 @@
             const f = fact(t.key('js.dbmem.table_size', { table: name }), fmtBytes(tsz.total));
             f.title = t.key('js.dbmem.table_size_title', {
                 data: fmtBytes(tsz.data), index: fmtBytes(tsz.index),
-                rows: tsz.rows == null ? '—' : Number(tsz.rows).toLocaleString(),
+                rows: tsz.rows == null ? '—' : t.num(Number(tsz.rows)),
             });
         });
         g.appendChild(head);
@@ -188,7 +189,7 @@
         if (!Object.keys(pairs).length) { showToast(t.key('js.dbmem.nothing_changed'), 'info'); return; }
         // pieces, each t.key() word keeping its key for the live language switch (1.73.0)
         const list = [];
-        Object.keys(pairs).forEach((k, i) => { if (i) list.push(' · '); list.push(t.key('js.dbmem.k_' + k), ': ' + human(k, pairs[k])); });
+        Object.keys(pairs).forEach((k, i) => { if (i) list.push(' · '); list.push(t.key('js.dbmem.k_' + k), ': ', human(k, pairs[k])); });
         const pw = await promptPassword(t.key('js.dbmem.apply_title'), [t.key('js.dbmem.apply_body'), '\n'].concat(list));
         if (!pw) return;
         const btn = $('btn-dm-apply'); btn.disabled = true;

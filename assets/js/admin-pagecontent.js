@@ -44,7 +44,7 @@
 
     function count() {
         const n = $('pc-body').value.length;
-        $('pc-count').textContent = t.key('js.pagecontent.count', { n: n.toLocaleString(), max: state.max.toLocaleString() });
+        $('pc-count').textContent = t.key('js.pagecontent.count', { n: t.num(n), max: t.num(state.max) });
         $('pc-count').className = 'wl-small ' + (n > state.max ? 'text-danger' : 'text-muted');
     }
 

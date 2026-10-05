@@ -68,7 +68,7 @@ if ($wlSched) {
 <?php endif; ?>
 <?php if ($wlCount !== null): ?>
 <p class="wl-count"><?= __($wlCount === 1 ? 'whitelist.count_one' : 'whitelist.count_many',
-                             ['n' => number_format($wlCount)]) ?></p>
+                             ['n' => langNumber($wlCount)]) ?></p>
 <?php endif; ?>
 <div id="wl-check-block">
     <h2 class="section-heading-spaced"><?= _h('whitelist.check_head') ?></h2>
@@ -87,7 +87,7 @@ if ($wlSched) {
 ]) ?></p>
 <?php if ($wlCount !== null): ?>
 <p class="wl-count"><?= __($wlCount === 1 ? 'whitelist.count_one' : 'whitelist.count_many',
-                             ['n' => number_format($wlCount)]) ?></p>
+                             ['n' => langNumber($wlCount)]) ?></p>
 <?php endif; ?>
 <div id="wl-check-block">
     <h2 class="section-heading-spaced"><?= _h('whitelist.check_head') ?></h2>
@@ -113,7 +113,7 @@ if ($wlSched) {
 <?php endif; ?>
 <?php if ($wlCount !== null): ?>
 <p class="wl-count"><?= __($wlCount === 1 ? 'whitelist.count_one' : 'whitelist.count_many',
-                             ['n' => number_format($wlCount)]) ?></p>
+                             ['n' => langNumber($wlCount)]) ?></p>
 <?php endif; ?>
 <ul class="wl-rules">
     <?php if (($cfg['whitelist_require_tracker'] ?? '0') === '1'): ?>

@@ -63,7 +63,7 @@ switch ($op) {
         jsonResponse(['success' => true, 'id' => $newId, 'added' => $added, 'note' => $note,
                       'lines' => $s['lines'],
                       'message' => $added
-                          ? __($added === 1 ? 'api.iplist.created_with_one' : 'api.iplist.created_with_many', ['n' => number_format($added)])
+                          ? __($added === 1 ? 'api.iplist.created_with_one' : 'api.iplist.created_with_many', ['n' => langNumber($added)])
                           : ($note !== '' ? $note : __('api.iplist.created_empty'))]);
     }
 
@@ -77,9 +77,9 @@ switch ($op) {
         $s = $sync();
         jsonResponse(['success' => true, 'added' => $e['added'], 'skipped' => $e['skipped'], 'lines' => $s['lines'],
                       'message' => __('api.iplist.entries_stored', [
-                          'stored'  => __($e['added'] === 1 ? 'api.iplist.stored_one' : 'api.iplist.stored_many', ['n' => number_format($e['added'])]),
+                          'stored'  => __($e['added'] === 1 ? 'api.iplist.stored_one' : 'api.iplist.stored_many', ['n' => langNumber($e['added'])]),
                           'skipped' => $e['skipped']
-                              ? __($e['skipped'] === 1 ? 'api.iplist.ignored_one' : 'api.iplist.ignored_many', ['n' => number_format($e['skipped'])])
+                              ? __($e['skipped'] === 1 ? 'api.iplist.ignored_one' : 'api.iplist.ignored_many', ['n' => langNumber($e['skipped'])])
                               : ''])]);
     }
 
@@ -89,7 +89,7 @@ switch ($op) {
         $s = $sync();
         jsonResponse(['success' => true, 'added' => (int)($r['added'] ?? 0), 'lines' => $s['lines'],
                       'message' => __((int)($r['added'] ?? 0) === 1 ? 'api.iplist.downloaded_one' : 'api.iplist.downloaded_many',
-                                      ['n' => number_format((int)($r['added'] ?? 0))])]);
+                                      ['n' => langNumber((int)($r['added'] ?? 0))])]);
     }
 
     case 'toggle': {
@@ -133,8 +133,8 @@ switch ($op) {
         $loaded = (array)($r['json']['lists'] ?? []);
         jsonResponse(['success' => true, 'applied' => $r['json'], 'lines' => $s['lines'], 'loaded' => $loaded,
                       'message' => __('api.iplist.loaded_summary', [
-                          'allowed' => number_format((int)($loaded['allow4'] ?? 0) + (int)($loaded['allow6'] ?? 0)),
-                          'blocked' => number_format((int)($loaded['block4'] ?? 0) + (int)($loaded['block6'] ?? 0)),
-                          'soft'    => number_format((int)($loaded['soft4'] ?? 0) + (int)($loaded['soft6'] ?? 0))])]);
+                          'allowed' => langNumber((int)($loaded['allow4'] ?? 0) + (int)($loaded['allow6'] ?? 0)),
+                          'blocked' => langNumber((int)($loaded['block4'] ?? 0) + (int)($loaded['block6'] ?? 0)),
+                          'soft'    => langNumber((int)($loaded['soft4'] ?? 0) + (int)($loaded['soft6'] ?? 0))])]);
     }
 }

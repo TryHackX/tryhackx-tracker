@@ -131,7 +131,7 @@ function dbmemHumanBytes($bytes): string {
 }
 
 function dbmemHumanValue(string $key, $v): string {
-    return dbmemUnit($key) === 'bytes' ? dbmemHumanBytes($v) : number_format((int)$v);
+    return dbmemUnit($key) === 'bytes' ? dbmemHumanBytes($v) : langNumber((int)$v);   // a count, the reader's way (1.73.1)
 }
 
 /* ── apply / restart / the janitor's share ────────────────────────────────────────────────── */

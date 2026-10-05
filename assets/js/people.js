@@ -1080,7 +1080,7 @@
             if (my !== dirSeq) return;             // a newer request is in flight: this answer is stale
             listEl.textContent = '';
             if (!j || !j.success) { listEl.appendChild(el('div', { className: 'pf-empty', text: t.key('js.fav.load_failed') })); return; }
-            if (totalEl) totalEl.textContent = j.total ? t.key('js.people.count', { n: j.total.toLocaleString() }) : '';
+            if (totalEl) totalEl.textContent = j.total ? t.key('js.people.count', { n: t.num(j.total) }) : '';
             if (!j.rows.length) { listEl.appendChild(el('div', { className: 'pf-empty', text: t.key('js.people.dir_empty') })); return; }
             j.rows.forEach(function (p) {
                 var row = el('div', { className: 'pf-row pe-row' });

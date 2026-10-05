@@ -142,7 +142,7 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string
     if (!langInstalled($lang)) return ['error' => __('api.pages.lang_not_installed')];
     if (!in_array($format, ['bbcode', 'markdown'], true)) return ['error' => __('api.pages.unknown_format')];
     if (strlen($body) > PAGECONTENT_MAX) {
-        return ['error' => __('api.pages.body_too_long', ['max' => number_format(PAGECONTENT_MAX)])];
+        return ['error' => __('api.pages.body_too_long', ['max' => langNumber(PAGECONTENT_MAX)])];
     }
     if (trim($body) === '' && $enabled) {
         return ['error' => __('api.pages.empty_page_enabled')];

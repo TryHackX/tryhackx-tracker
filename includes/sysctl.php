@@ -201,11 +201,11 @@ function sysctlValidate(string $key, string $value, array $st): string {
             $capB = max((int)($totalPages / 10),  $refB * 2);
             $capC = max((int)($totalPages / 4),   $refC * 2);
             if ($a > $capA) {
-                return __('api.sysctl.udp_mem_min_high', ['pages' => number_format($a), 'bytes' => sysctlHumanBytes($a * $pageSize), 'cap' => number_format($capA)]);
+                return __('api.sysctl.udp_mem_min_high', ['pages' => langNumber($a), 'bytes' => sysctlHumanBytes($a * $pageSize), 'cap' => langNumber($capA)]);
             }
-            if ($b > $capB) return __('api.sysctl.udp_mem_pressure_high', ['cap' => number_format($capB)]);
+            if ($b > $capB) return __('api.sysctl.udp_mem_pressure_high', ['cap' => langNumber($capB)]);
             if ($c > $capC) {
-                return __('api.sysctl.udp_mem_max_high', ['pages' => number_format($c), 'bytes' => sysctlHumanBytes($c * $pageSize), 'ram' => sysctlHumanBytes($memKb * 1024)]);
+                return __('api.sysctl.udp_mem_max_high', ['pages' => langNumber($c), 'bytes' => sysctlHumanBytes($c * $pageSize), 'ram' => sysctlHumanBytes($memKb * 1024)]);
             }
         }
         return '';
@@ -213,12 +213,12 @@ function sysctlValidate(string $key, string $value, array $st): string {
 
     if (!ctype_digit(trim($value))) return __('api.sysctl.not_integer', ['label' => $k['label']]);
     $v = (int)$value;
-    if ($v < $k['min']) return __('api.sysctl.below_min', ['label' => $k['label'], 'min' => number_format($k['min'])]);
+    if ($v < $k['min']) return __('api.sysctl.below_min', ['label' => $k['label'], 'min' => langNumber($k['min'])]);
     if ($k['max'] > 0 && $v > $k['max']) {
         if ($key === 'netdev_max_backlog') {
-            return __('api.sysctl.backlog_too_high', ['max' => number_format($k['max']), 'cpus' => $cpus, 'total' => number_format($k['max'] * $cpus)]);
+            return __('api.sysctl.backlog_too_high', ['max' => langNumber($k['max']), 'cpus' => $cpus, 'total' => langNumber($k['max'] * $cpus)]);
         }
-        return __('api.sysctl.above_max', ['label' => $k['label'], 'max' => number_format($k['max'])]);
+        return __('api.sysctl.above_max', ['label' => $k['label'], 'max' => langNumber($k['max'])]);
     }
     if ($k['unit'] === 'bytes' && $memKb > 0 && $v > (int)($memKb * 1024 / 8)) {
         return __('api.sysctl.eighth_of_ram', ['label' => $k['label']]);
@@ -267,7 +267,7 @@ function sysctlHumanBytes($bytes): string {
     $u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
     $i = 0;
     while ($b >= 1024 && $i < count($u) - 1) { $b /= 1024; $i++; }
-    if ($b >= 100 || $i === 0) return number_format($b, 0) . ' ' . $u[$i];
+    if ($b >= 100 || $i === 0) return langNumber($b) . ' ' . $u[$i];   // grouped in the page's language (1.73.1)
     // Trailing zeros make two identical numbers look different: "8 MiB" is what the operator typed,
     // "8.00 MiB" is what a formatter produced.
     return rtrim(rtrim(number_format($b, 2, '.', ''), '0'), '.') . ' ' . $u[$i];
@@ -417,7 +417,7 @@ function sysctlAdvice(array $st, array $cfg): array {
 
     $drops = (int)($st['socket']['drops'] ?? 0);
     if ($drops > 0) {
-        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_socket_drops', ['n' => number_format($drops)])];
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_socket_drops', ['n' => langNumber($drops)])];
     }
 
     // netdev_max_backlog gets a suggestion only when the counter that justifies it has moved.
@@ -425,7 +425,7 @@ function sysctlAdvice(array $st, array $cfg): array {
     if ($softDrop === 0) {
         $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_softnet_zero', ['cpus' => $cpus])];
     } else {
-        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_softnet_over', ['n' => number_format($softDrop), 'cpus' => $cpus])];
+        $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_softnet_over', ['n' => langNumber($softDrop), 'cpus' => $cpus])];
     }
 
     // One core doing all the receive work is invisible in every other number on this page.
@@ -448,10 +448,10 @@ function sysctlAdvice(array $st, array $cfg): array {
         $pressure = (int)$mem[1];
         if ($pressure > 0 && $used < (int)($pressure / 10)) {
             $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_udp_mem_fine', [
-                'used' => number_format($used), 'used_bytes' => sysctlHumanBytes(sysctlPagesToBytes($used, $pageSize)),
-                'pressure' => number_format($pressure), 'pressure_bytes' => sysctlHumanBytes(sysctlPagesToBytes($pressure, $pageSize))])];
+                'used' => langNumber($used), 'used_bytes' => sysctlHumanBytes(sysctlPagesToBytes($used, $pageSize)),
+                'pressure' => langNumber($pressure), 'pressure_bytes' => sysctlHumanBytes(sysctlPagesToBytes($pressure, $pageSize))])];
         } elseif ($pressure > 0) {
-            $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_udp_mem_near', ['used' => number_format($used), 'pressure' => number_format($pressure)])];
+            $out[] = ['level' => 'warn', 'text' => __('api.sysctl.adv_udp_mem_near', ['used' => langNumber($used), 'pressure' => langNumber($pressure)])];
         }
     }
 
@@ -464,7 +464,7 @@ function sysctlAdvice(array $st, array $cfg): array {
     }
 
     if ($memKb > 0) {
-        $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_machine', ['ram' => sysctlHumanBytes($memKb * 1024), 'cpus' => $cpus, 'page' => number_format($pageSize)])];
+        $out[] = ['level' => 'info', 'text' => __('api.sysctl.adv_machine', ['ram' => sysctlHumanBytes($memKb * 1024), 'cpus' => $cpus, 'page' => langNumber($pageSize)])];
     }
 
     if (netlimitAutoEnabled($cfg)) {

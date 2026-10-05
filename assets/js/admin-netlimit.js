@@ -42,7 +42,7 @@
     const STORE_RANGE = 'tracker_net_range';
     const STORE_COLLAPSE = 'tracker_net_collapsed';
 
-    const num = (v) => (v == null || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
+    const num = (v) => (v == null || isNaN(v)) ? '—' : t.num(v);   // a count in the page's language (1.73.1)
     const pad2 = (n) => (n < 10 ? '0' : '') + n;
     const fmtTime = (ts) => { const d = new Date(ts * 1000); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
     const fmtAxis = (v) => {

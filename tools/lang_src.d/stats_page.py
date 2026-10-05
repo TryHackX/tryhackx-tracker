@@ -19,12 +19,10 @@ def add(prefix, pairs):
 # ── stats ───────────────────────────────────────────────────────────────────
 # The public telemetry page: templates/pages/stats.php.
 #
-# TWO STRINGS GLUE A UNIT ONTO THEIR PLACEHOLDER, on purpose:
-#   'next_update'  ':secs'   -> ":sec" is the placeholder, the trailing "s" is the unit  ("12s")
-#   'heat_tip'     ':minm:'  -> ":min" is the placeholder, the "m" is the unit           ("05m:")
-# assets/js/app.js re-renders both of those on every poll and writes exactly that form, so the
-# server-rendered text has to match it. A translation must keep the unit glued the same way; the
-# placeholder check in tests/lang_test.php compares the two languages token for token.
+# The countdown under the sync loop and the heat map's tooltip are written by assets/js/app.js on every poll, so the
+# page renders them with app.js's OWN sentences (js.app.next_update_in, js.app.interval_tooltip in js.py) — until
+# 1.73.1 they had twins here ("Next update in :secs", "Interval :minm: …") that glued the unit onto the number, and the
+# first refresh changed "12s" into "12 s" and "05m" into "05 min".
 add('stats', {
     # ── header ──
     'h1':            ('Tracker Telemetry', 'Telemetria trackera'),
@@ -79,7 +77,6 @@ add('stats', {
     'integrity':     ('Swarm Integrity', 'Integralność roju'),
     'integrity_ok':  ('Active / Secure', 'Aktywna / bezpieczna'),
     'sync_loop':     ('Sync Loop', 'Pętla synchronizacji'),
-    'next_update':   ('Next update in :secs', 'Następna aktualizacja za :secs'),
 
     # ── protocol distribution ──
     'proto_title':   ('Protocol Distribution', 'Rozkład protokołów'),
@@ -104,7 +101,6 @@ add('stats', {
                       'Łączna liczba odnowień announce od peerów, pogrupowana według przedziału '
                       'interwału (00 - 44 min) i sumowana od startu trackera. Przedziały to sumy z '
                       'całego czasu działania, a nie bieżący rój.'),
-    'heat_tip':      ('Interval :minm: :count renews', 'Interwał :minm: :count odnowień'),
     'heat_empty':    ('No activity heat profile available.',
                       'Brak profilu aktywności do pokazania.'),
     'legend_low':    ('Low Announce rate', 'Niska częstość announce'),

@@ -253,11 +253,21 @@
         // whole list. An unknown swarm is a dash, which is also what the reader is owed.
         var meta = el('div', { className: 'pf-meta' });
         meta.appendChild(el('span', { text: fmtBytes(r.total_size) }));
-        meta.appendChild(el('span', {
-            text: (r.seeders === null || r.seeders === undefined)
-                ? '—'
-                : r.seeders + ' / ' + (r.leechers === null || r.leechers === undefined ? '—' : r.leechers),
-        }));
+        // The swarm (1.73.1): each count in the page's language, a million or more compact ("100.82M" / "100,82 mln",
+        // t.num(n, 'compact')) with the exact pair in the title — "520222222 / 172222222" ran over the hash chip beside
+        // it. Two pieces, each whole (.pf-n), the slash held to the first by a no-break space: a pair that still does
+        // not fit its column breaks after the slash, inside the column, never into the chip.
+        var known = function (n) { return n !== null && n !== undefined && n !== ''; };
+        var sl = el('span', { className: 'pf-sl' });
+        if (!known(r.seeders)) {
+            sl.textContent = '—';
+        } else {
+            var big = Number(r.seeders) >= 1e6 || (known(r.leechers) && Number(r.leechers) >= 1e6);
+            sl.append(el('span', { className: 'pf-n', text: t.num(r.seeders, 'compact') }), '\u00a0/ ',
+                      el('span', { className: 'pf-n', text: known(r.leechers) ? t.num(r.leechers, 'compact') : '—' }));
+            if (big) sl.title = t.key('js.fav.sl_exact', { s: t.num(r.seeders), l: known(r.leechers) ? t.num(r.leechers) : '—' });
+        }
+        meta.appendChild(sl);
         // The hash is shown short and SAID to be short (the ellipsis); a click or a tap copies the
         // whole of it, which is the only thing anybody wants a hash for.
         //
@@ -411,7 +421,7 @@
                 listEl.appendChild(el('div', { className: 'pf-empty', text: cfg.emptyText || t.key('js.fav.nothing') }));
             }
             j.rows.forEach(function (r) { listEl.appendChild(torrentRow(r, cfg)); });
-            if (totalEl) totalEl.textContent = j.total ? t.key('js.app.results_many', { n: j.total.toLocaleString() }) : '';
+            if (totalEl) totalEl.textContent = j.total ? t.key('js.app.results_many', { n: t.num(j.total) }) : '';
             if (pagerEl) renderPagerInto(pagerEl, j.page, j.pages, load);
             if (typeof cfg.onLoad === 'function') cfg.onLoad(j);
         }
@@ -646,7 +656,7 @@
                     }
                     rows.appendChild(row);
                 });
-                total.textContent = j.total ? t.key('js.app.results_many', { n: j.total.toLocaleString() }) : '';
+                total.textContent = j.total ? t.key('js.app.results_many', { n: t.num(j.total) }) : '';
                 renderPagerInto(pager, j.page, j.pages, load);
             }
             search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { load(1); }, 350); });
@@ -1728,7 +1738,7 @@
                 : r.seeders + ' / ' + (r.leechers === null || r.leechers === undefined ? '—' : r.leechers)));
             tr.appendChild(cell('own', lab, stars ? starsReadOnly(r.own_vote / 2) : thumbFor(r.own_vote)));
             tr.appendChild(scoreCell(r, lab, min));
-            tr.appendChild(cell('votes', lab, Number(r.votes_count || 0).toLocaleString()));
+            tr.appendChild(cell('votes', lab, t.num(Number(r.votes_count || 0))));
             // The date in the cell, the whole moment with its offset in the tooltip — both in the
             // reader's own zone, as the server wrote them.
             var when = cell('date', lab, r.voted_at ? String(r.voted_at).slice(0, 10) : '—');
@@ -1745,7 +1755,7 @@
             var j = last;
             if (!j) return;
             paintSort();
-            totalEl.textContent = j.total ? t.key('js.votes.total', { n: Number(j.total).toLocaleString() }) : '';
+            totalEl.textContent = j.total ? t.key('js.votes.total', { n: t.num(Number(j.total)) }) : '';
             body.textContent = '';
             if (!j.rows.length) {
                 say(narrowed(j.params) ? t.key('js.votes.none_match')
@@ -1916,7 +1926,7 @@
             var j = last;
             if (!j) return;
             paintSort();
-            totalEl.textContent = j.total ? t.key('js.descs.total', { n: Number(j.total).toLocaleString() }) : '';
+            totalEl.textContent = j.total ? t.key('js.descs.total', { n: t.num(Number(j.total)) }) : '';
             body.textContent = '';
             if (!j.rows.length) {
                 say(j.params && j.params.search ? t.key('js.descs.none_match') : (mine ? t.key('js.descs.none_own') : t.key('js.fav.nothing')));
@@ -2003,8 +2013,8 @@
         var x = document.getElementById('who-close');
         if (x) x.addEventListener('click', close);
 
-        var lang = function () { return document.documentElement.lang || undefined; };
-        var num = function (n) { return Number(n).toLocaleString(lang()); };
+        // A count in the page's language: the one helper every script writes numbers with (t.num(), 1.73.1).
+        var num = function (n) { return t.num(Number(n)); };
         // The picture beside each name (1.63.0), from the ADDRESS the server built (these rows never carry an
         // id); window.userAvatarImg() is assets/js/avatar.js, and answers null while pictures are switched off.
         var face = function (name, address) {

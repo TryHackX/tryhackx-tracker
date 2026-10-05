@@ -20,7 +20,7 @@
     let timer = null;
     let state = {};
 
-    const num = (v) => (v === null || v === undefined ? '—' : Number(v).toLocaleString());
+    const num = (v) => (v === null || v === undefined ? '—' : t.num(Number(v)));   // a count in the page's language (1.73.1)
 
     async function load() {
         const r = await apiCall('admin/tuner', 'POST', { op: 'status' });
@@ -172,7 +172,7 @@
     }
 
     async function applyLimit(pps) {
-        if (!await confirmAction(t.key('js.tuner.apply_title', {n: Number(pps).toLocaleString()}),
+        if (!await confirmAction(t.key('js.tuner.apply_title', {n: t.num(Number(pps))}),
             t.key('js.tuner.apply_body'),
             { after: t.key('js.tuner.apply_after'),
               okLabel: t.key('js.tuner.apply_ok') })) return;

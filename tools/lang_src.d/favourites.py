@@ -74,6 +74,8 @@ add('account', {
 
 # ── strings the browser scripts need ────────────────────────────────────────
 add('js.fav', {
+    # 1.73.1: a row's swarm with a count of a million or more is written compact ("100.82M"); its title says the pair
+    'sl_exact': ('Seeders / leechers: :s / :l', 'Seedery / leechery: :s / :l'),
     'add':            ('Add to favourites', 'Dodaj do ulubionych'),
     'remove':         ('Remove from favourites', 'Usuń z ulubionych'),
     'added':          ('Added to favourites', 'Dodano do ulubionych'),

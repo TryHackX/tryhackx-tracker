@@ -246,7 +246,7 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                     <div class="emote-drop acc-media-drop" tabindex="0" role="button" aria-label="<?= _h('account.media_drop_aria_avatar') ?>">
                         <i class="bi bi-person-square emote-drop-icon" aria-hidden="true"></i>
                         <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
-                        <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => number_format($accMaxKb, 0, '.', ' ')]) ?></span>
+                        <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => langNumber($accMaxKb)]) ?></span>
                         <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
                     </div>
                     <?php endif; ?>
@@ -291,7 +291,7 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                 <div class="emote-drop acc-media-drop" tabindex="0" role="button" aria-label="<?= _h('account.media_drop_aria_cover') ?>">
                     <i class="bi bi-image emote-drop-icon" aria-hidden="true"></i>
                     <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
-                    <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => number_format($accMaxKb, 0, '.', ' ')]) ?></span>
+                    <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => langNumber($accMaxKb)]) ?></span>
                     <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
                 </div>
                 <?php endif; ?>

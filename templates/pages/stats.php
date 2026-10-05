@@ -57,9 +57,11 @@ $peerLabelStyle = $cfg['tracker_stats_peer_label_style'] ?? 'percent';
 if (!in_array($peerLabelStyle, ['percent', 'absolute', 'peers_card'], true)) {
     $peerLabelStyle = 'percent';
 }
-$peersFmt = number_format($peers);
-$seedsFmt = number_format($seeds);
-$leechFmt = number_format($leechers);
+// Every count on this page in the page's language (langNumber(), 1.73.1): the characters app.js writes when it
+// refreshes them (t.num()) — they were English on both languages here, and the browser's grouping after the refresh.
+$peersFmt = langNumber($peers);
+$seedsFmt = langNumber($seeds);
+$leechFmt = langNumber($leechers);
 if ($peerLabelStyle === 'percent') {
     $subSeeds = _h('stats.sub_pct', ['pct' => $seedPct]);
     $subLeech = _h('stats.sub_pct', ['pct' => $leechPct]);
@@ -161,7 +163,7 @@ $tcpPct = 100 - $udpPct;
                 </div>
                 <div class="metric-info">
                     <span class="metric-label"><?= _h('stats.m_torrents') ?></span>
-                    <h2 class="metric-value font-mono" id="val-torrents"><?= number_format($torrents) ?></h2>
+                    <h2 class="metric-value font-mono" id="val-torrents"><?= langNumber($torrents) ?></h2>
                     <span class="metric-sub"><?= _h('stats.m_torrents_sub') ?></span>
                 </div>
             </div>
@@ -173,7 +175,7 @@ $tcpPct = 100 - $udpPct;
                 </div>
                 <div class="metric-info">
                     <span class="metric-label"><?= _h('stats.m_seeds') ?></span>
-                    <h2 class="metric-value font-mono text-success" id="val-seeds"><?= number_format($seeds) ?></h2>
+                    <h2 class="metric-value font-mono text-success" id="val-seeds"><?= $seedsFmt ?></h2>
                     <span class="metric-sub" id="sub-seeds"><?= $subSeeds ?></span>
                 </div>
             </div>
@@ -186,7 +188,7 @@ $tcpPct = 100 - $udpPct;
                 </div>
                 <div class="metric-info">
                     <span class="metric-label"><?= _h('stats.m_peers') ?></span>
-                    <h2 class="metric-value font-mono text-warning" id="val-peers"><?= number_format($peers) ?></h2>
+                    <h2 class="metric-value font-mono text-warning" id="val-peers"><?= $peersFmt ?></h2>
                     <span class="metric-sub" id="sub-peers"><?= $subPeers ?></span>
                 </div>
             </div>
@@ -198,7 +200,7 @@ $tcpPct = 100 - $udpPct;
                 </div>
                 <div class="metric-info">
                     <span class="metric-label"><?= _h('stats.m_leechers') ?></span>
-                    <h2 class="metric-value font-mono text-warning" id="val-leechers"><?= number_format($leechers) ?></h2>
+                    <h2 class="metric-value font-mono text-warning" id="val-leechers"><?= $leechFmt ?></h2>
                     <span class="metric-sub" id="sub-leechers"><?= $subLeech ?></span>
                 </div>
             </div>
@@ -211,7 +213,7 @@ $tcpPct = 100 - $udpPct;
                 </div>
                 <div class="metric-info">
                     <span class="metric-label"><?= _h('stats.m_completed') ?></span>
-                    <h2 class="metric-value font-mono text-info" id="val-completed"><?= number_format($completed) ?></h2>
+                    <h2 class="metric-value font-mono text-info" id="val-completed"><?= langNumber($completed) ?></h2>
                     <span class="metric-sub"><?= _h('stats.m_completed_sub') ?></span>
                 </div>
             </div>
@@ -266,8 +268,10 @@ $tcpPct = 100 - $udpPct;
                                 <?php
                                 $barClass = $isCacheFresh ? '' : 'syncing';
                                 $barWidth = $isCacheFresh ? (($remainingSeconds / $interval) * 100) : 100;
+                                // The words app.js writes when it ticks (js.app.next_update_in, 1.73.1): one sentence, so
+                                // the first tick does not change "12s" into "12 s".
                                 $countdownTextStr = $isCacheFresh
-                                    ? _h('stats.next_update', ['sec' => $remainingSeconds])
+                                    ? _h('js.app.next_update_in', ['n' => $remainingSeconds])
                                     : _h('stats.beacon_sync');
                                 ?>
                                 <div id="countdown-bar" class="countdown-bar <?= $barClass ?>" style="width: <?= $barWidth ?>%"></div>
@@ -298,19 +302,19 @@ $tcpPct = 100 - $udpPct;
                         <span class="protocol-title text-info"><?= _h('stats.udp_sockets') ?></span>
                         <div class="split-item">
                             <span><?= _h('stats.connects') ?></span>
-                            <span class="font-mono text-white" id="val-udp-connect"><?= number_format($udpConnect) ?></span>
+                            <span class="font-mono text-white" id="val-udp-connect"><?= langNumber($udpConnect) ?></span>
                         </div>
                         <div class="split-item">
                             <span><?= _h('stats.announces') ?></span>
-                            <span class="font-mono text-white" id="val-udp-announce"><?= number_format($udpAnnounce) ?></span>
+                            <span class="font-mono text-white" id="val-udp-announce"><?= langNumber($udpAnnounce) ?></span>
                         </div>
                         <div class="split-item">
                             <span><?= _h('stats.scrapes') ?></span>
-                            <span class="font-mono text-white" id="val-udp-scrape"><?= number_format($udpScrape) ?></span>
+                            <span class="font-mono text-white" id="val-udp-scrape"><?= langNumber($udpScrape) ?></span>
                         </div>
                         <div class="split-item">
                             <span><?= _h('stats.mismatches') ?></span>
-                            <span class="font-mono text-warning" id="val-udp-mismatch"><?= number_format($udpMismatch) ?></span>
+                            <span class="font-mono text-warning" id="val-udp-mismatch"><?= langNumber($udpMismatch) ?></span>
                         </div>
                     </div>
                     
@@ -318,19 +322,19 @@ $tcpPct = 100 - $udpPct;
                         <span class="protocol-title text-accent"><?= _h('stats.tcp_sockets') ?></span>
                         <div class="split-item">
                             <span><?= _h('stats.accepts') ?></span>
-                            <span class="font-mono text-white" id="val-tcp-accept"><?= number_format($tcpAccept) ?></span>
+                            <span class="font-mono text-white" id="val-tcp-accept"><?= langNumber($tcpAccept) ?></span>
                         </div>
                         <div class="split-item">
                             <span><?= _h('stats.announces') ?></span>
-                            <span class="font-mono text-white" id="val-tcp-announce"><?= number_format($tcpAnnounce) ?></span>
+                            <span class="font-mono text-white" id="val-tcp-announce"><?= langNumber($tcpAnnounce) ?></span>
                         </div>
                         <div class="split-item">
                             <span><?= _h('stats.scrapes') ?></span>
-                            <span class="font-mono text-white" id="val-tcp-scrape"><?= number_format($tcpScrape) ?></span>
+                            <span class="font-mono text-white" id="val-tcp-scrape"><?= langNumber($tcpScrape) ?></span>
                         </div>
                         <div class="split-item">
                             <span><?= _h('stats.live_syncs') ?></span>
-                            <span class="font-mono text-success" id="val-tcp-sync"><?= number_format($livesyncCount) ?></span>
+                            <span class="font-mono text-success" id="val-tcp-sync"><?= langNumber($livesyncCount) ?></span>
                         </div>
                     </div>
                 </div>
@@ -362,8 +366,10 @@ $tcpPct = 100 - $udpPct;
                             // twice, so both start from the raw value.
                             $rawLabel = trim((string)$item['interval']);
                             $label = sanitize($rawLabel);
-                            $countFormatted = number_format($item['count']);
-                            $tooltipText = _h('stats.heat_tip', ['min' => $rawLabel, 'count' => $countFormatted]);
+                            $countFormatted = langNumber((int)$item['count']);
+                            // The sentence app.js writes when it draws the map again (js.app.interval_tooltip, 1.73.1):
+                            // the server said "Interval 05m: …" and the first refresh "Interval 05 min: …".
+                            $tooltipText = _h('js.app.interval_tooltip', ['interval' => $rawLabel, 'count' => $countFormatted]);
                     ?>
                         <div class="heat-block level-<?= $level ?>" data-tooltip="<?= $tooltipText ?>">
                             <span><?= $label ?></span>
@@ -405,7 +411,7 @@ $tcpPct = 100 - $udpPct;
                         <?php if ($hasCache && !empty($cacheData['http_errors'])): ?>
                             <?php foreach ($cacheData['http_errors'] as $err): 
                                 $code = sanitize($err['code']);
-                                $count = number_format($err['count']);
+                                $count = langNumber((int)$err['count']);
                                 $badgeClass = 'status-badge-sm status-badge ';
                                 $severity = _h('stats.sev_low');
                                 if (str_starts_with($code, '5')) {

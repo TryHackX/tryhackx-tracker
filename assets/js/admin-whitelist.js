@@ -1317,13 +1317,13 @@
         const fillFiles = (files, truncated, short, capped) => {
             const nodes = [el('div', { className: 'wl-label mb-1', text: !files.length ? t.key('js.wl.files')
                 : (short && it.files_count
-                    ? t.key('js.wl.files_n_of', { n: files.length.toLocaleString(), total: Number(it.files_count).toLocaleString() })
-                    : t.key('js.wl.files_n', { n: files.length, more: (truncated || capped) ? t.key('js.wl.files_truncated') : '' })) })];
+                    ? t.key('js.wl.files_n_of', { n: t.num(files.length), total: t.num(Number(it.files_count)) })
+                    : t.key('js.wl.files_n', { n: t.num(files.length), more: (truncated || capped) ? t.key('js.wl.files_truncated') : '' })) })];
             if (files.length) nodes.push(buildFileTree(files));
-            if (files.length && short) nodes.push(el('div', { className: 'text-muted wl-small', text: t.key('js.wl.files_stored_cap', { n: files.length.toLocaleString() }) }));
+            if (files.length && short) nodes.push(el('div', { className: 'text-muted wl-small', text: t.key('js.wl.files_stored_cap', { n: t.num(files.length) }) }));
             // Rows are waiting and no button will fetch them: this list is already as long as the
             // panel is allowed to load (index_files_admin_max).
-            if (files.length && capped) nodes.push(el('div', { className: 'text-muted wl-small', text: t.key('js.wl.files_capped', { n: files.length.toLocaleString() }) }));
+            if (files.length && capped) nodes.push(el('div', { className: 'text-muted wl-small', text: t.key('js.wl.files_capped', { n: t.num(files.length) }) }));
             if (!files.length) nodes.push(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? t.key('js.wl.single_file_or_no_list') : t.key('js.wl.no_file_list_yet') }));
             filesBox.replaceChildren(...nodes);
         };

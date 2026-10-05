@@ -56,7 +56,7 @@
             : t.key('js.audit.note_disabled');
 
         $('au-total').textContent = r.total
-            ? (r.total === 1 ? t.key('js.audit.entry_one', { n: r.total.toLocaleString() }) : t.key('js.audit.entry_many', { n: r.total.toLocaleString() }))
+            ? (r.total === 1 ? t.key('js.audit.entry_one', { n: t.num(r.total) }) : t.key('js.audit.entry_many', { n: t.num(r.total) }))
             : '';
 
         fillGroups(r.groups);

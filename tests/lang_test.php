@@ -546,6 +546,93 @@ check('… and the four zone selects print it on their groups',
       substr_count($setTplSrc, '<optgroup label="<?= sanitize(tzRegionLabel(') === 3
       && str_contains($acc, '<optgroup label="<?= sanitize(tzRegionLabel($accTzGrp)) ?>">'));
 
+// ── 1.73.1: a count in the PAGE's language, the same characters on both sides ──
+// The home page's strip and the Stats page: the server wrote English grouping on both languages ("2,251,367"), and
+// app.js refreshed them with toLocaleString() and no locale — the BROWSER's grouping: a Polish browser showed
+// "2 251 367" on the English page, the Polish page kept the English commas (production, 2026-10-05). One rule now:
+// langNumber() (includes/lang.php) on the server, t.num() (assets/js/i18n.js, Intl.NumberFormat of the page's
+// language) in the scripts — so a refresh never changes how a number looks. The expected strings below are what
+// Intl.NumberFormat gives (node / Chrome, 2026-10): Polish leaves four digits whole and groups with U+00A0.
+$nbsp = "\u{00A0}";
+$numCases = [0, 7, 999, 1000, 1234, 9999, 10000, 12345, 2251367, -1234, -12345, 1234.5, '2251367'];
+$wantEn = ['0', '7', '999', '1,000', '1,234', '9,999', '10,000', '12,345', '2,251,367', '-1,234', '-12,345', '1,235', '2,251,367'];
+$wantPl = ['0', '7', '999', '1000', '1234', '9999', "10{$nbsp}000", "12{$nbsp}345", "2{$nbsp}251{$nbsp}367", '-1234', "-12{$nbsp}345", '1235', "2{$nbsp}251{$nbsp}367"];
+$gotEn = array_map(fn($v) => langNumber($v, 'en'), $numCases);
+$gotPl = array_map(fn($v) => langNumber($v, 'pl'), $numCases);
+check('langNumber(): English groups with a comma from four digits on — Intl.NumberFormat("en")', $gotEn === $wantEn, json_encode($gotEn));
+check('langNumber(): Polish leaves four digits whole and groups with a NO-BREAK space — Intl.NumberFormat("pl")',
+      $gotPl === $wantPl, json_encode($gotPl, JSON_UNESCAPED_UNICODE));
+relang(['default_language' => 'pl']);
+$numPagePl = langNumber(2251367);
+relang([]);
+check('… and with no language named it writes the page\'s (langCurrent())',
+      $numPagePl === "2{$nbsp}251{$nbsp}367" && langNumber(2251367) === '2,251,367', json_encode([$numPagePl, langNumber(2251367)], JSON_UNESCAPED_UNICODE));
+// Another installed language: ICU (PHP's intl), the same data a browser carries, with Intl's four-digit rule where
+// CLDR gives it (Spanish); without intl, the English rule.
+$icuOk = class_exists('NumberFormatter')
+    ? (langNumber(1234, 'de') === '1.234' && langNumber(2251367, 'de') === '2.251.367' && langNumber(1234, 'es') === '1234' && langNumber(12345, 'es') === '12.345')
+    : (langNumber(1234, 'de') === '1,234');
+check('… another language through ICU, with the four-digit rule CLDR gives it (es) — the English rule without intl', $icuOk,
+      json_encode([langNumber(1234, 'de'), langNumber(1234, 'es'), langNumber(12345, 'es')], JSON_UNESCAPED_UNICODE));
+// The client's half: one helper, from the page's language, Intl's grouping — and a number a script writes keeps it on
+// the element, so the live language switch writes it again in the new language's grouping (lang-swap.js t.ours/t.say).
+$i18nJs = str_replace("\r\n", "\n", (string)@file_get_contents($root . '/assets/js/i18n.js'));
+check('i18n.js: t.num() — Intl.NumberFormat of the page\'s language, whole numbers, a keyed number the live switch says again',
+      str_contains($i18nJs, 't.num = function (n, style) {') && str_contains($i18nJs, "{ maximumFractionDigits: 0 }")
+      && str_contains($i18nJs, "if (key === NUM) return fmtNum(params ? params['#'] : null, from === prev ? prevLang : lang, !!(params && params.c));")
+      && str_contains($i18nJs, 'return new Keyed(NUM, p);'));
+// … and compact from a million up where a place's width is fixed (the owner's item 4: a row's swarm ran over its hash
+// chip): Intl's compact notation, two decimals ("100.82M", "100,82 mln"), never below a million (Polish "23,46 tys."
+// is no shorter than "23 456"); the row's swarm writes it so, with the exact pair in its title.
+$favJs = str_replace("\r\n", "\n", (string)@file_get_contents($root . '/assets/js/favourites.js'));
+check('… t.num(n, \'compact\'): a million or more in Intl\'s compact notation, two decimals; a row\'s swarm uses it, its exact pair in the title',
+      str_contains($i18nJs, "var big = compact && Math.abs(v) >= 1e6;") && str_contains($i18nJs, "{ notation: 'compact', maximumFractionDigits: 2 }")
+      && str_contains($favJs, "t.num(r.seeders, 'compact')") && str_contains($favJs, "t.key('js.fav.sl_exact'"));
+// The Stats page's countdown and heat-map tooltip are app.js's sentences on the server too (the owner's item 5: the
+// first refresh changed "12s" into "12 s" and "Interval 05m" into "Interval 05 min").
+$statsTpl = (string)@file_get_contents($root . '/templates/pages/stats.php');
+check('the Stats page renders the countdown and the heat map\'s tooltip with app.js\'s own sentences (one wording each)',
+      str_contains($statsTpl, "_h('js.app.next_update_in', ['n' => \$remainingSeconds])")
+      && str_contains($statsTpl, "_h('js.app.interval_tooltip', ['interval' => \$rawLabel, 'count' => \$countFormatted])")
+      && !isset($en['stats.next_update']) && !isset($en['stats.heat_tip']));
+// No script writes a number with toLocaleString(): every one left is a DATE (outside this rule).
+$numLeft = [];
+$numFiles = array_merge(glob($root . '/assets/js/*.js') ?: [], glob($root . '/templates/*.php') ?: [], glob($root . '/templates/*/*.php') ?: []);
+foreach ($numFiles as $f) {
+    $src = (string)@file_get_contents($f);
+    $all = substr_count($src, '.toLocaleString(');
+    $dates = preg_match_all('~new Date\([^;]*?\)\.toLocaleString\(|\bd\.toLocaleString\(undefined, \{ year~', $src);
+    if ($all > $dates) $numLeft[] = basename($f) . ' (' . ($all - $dates) . ')';
+}
+check('… and no script groups a number with toLocaleString() any more (the browser\'s language) — only dates use it',
+      $numLeft === [], implode(', ', $numLeft));
+// No page or answer writes a count with number_format()'s English default: a one-argument call. Left alone on purpose:
+// the fallback where the dictionary is not loaded, and the auto-tuner's English note (includes/netlimit.php).
+$numPhp = [];
+$numPhpFiles = array_merge(glob($root . '/templates/*.php') ?: [], glob($root . '/templates/*/*.php') ?: [],
+                           glob($root . '/includes/*.php') ?: [], glob($root . '/api/*.php') ?: [], glob($root . '/api/*/*.php') ?: []);
+foreach ($numPhpFiles as $f) {
+    if (basename($f) === 'lang.php') continue;          // the helper itself
+    foreach (preg_split('/\R/', (string)@file_get_contents($f)) as $ln => $line) {
+        $at = 0;
+        if (preg_match('~^\s*(//|\*|/\*|#)~', $line)) continue;   // a comment naming it
+        while (($p = strpos($line, 'number_format(', $at)) !== false) {
+            $at = $p + 14;
+            if (str_contains($line, "function_exists('langNumber')") || preg_match('/pps (reaching|is comfortably)|already at the (floor|ceiling)/', $line)) continue;
+            $depth = 1; $comma = false;
+            for ($i = $at, $len = strlen($line); $i < $len && $depth > 0; $i++) {
+                $c = $line[$i];
+                if ($c === '(') $depth++;
+                elseif ($c === ')') $depth--;
+                elseif ($c === ',' && $depth === 1) $comma = true;
+            }
+            if (!$comma) $numPhp[] = basename($f) . ':' . ($ln + 1);
+        }
+    }
+}
+check('… and no page or answer writes a count with number_format()\'s English default — langNumber() does',
+      $numPhp === [], implode(', ', array_slice($numPhp, 0, 12)));
+
 // ── the generated files are what the sources make ───────────────────────────
 // lang/en.php and lang/pl.php are GENERATED from tools/lang_src.d/. Between 1.43 and 1.50, 369
 // strings were added to the generated files by hand and never to the sources, and the first

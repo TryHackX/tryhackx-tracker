@@ -182,7 +182,7 @@ if ($op === 'duplicate') {
                                                 . ($dropped ? ' (' . count($dropped) . ' strings dropped)' : '')]);
     jsonResponse(['success' => true, 'code' => $code, 'strings' => count($strings), 'dropped' => $dropped,
                   'message' => __('api.lang.duplicated', ['code' => strtoupper($code), 'source' => strtoupper($source),
-                                                         'count' => number_format(count($strings))])
+                                                         'count' => langNumber(count($strings))])
                              . ($dropped ? ' ' . $droppedNote($dropped) : '')]);
 }
 
@@ -234,8 +234,8 @@ if ($op === 'upload') {
                           . ' (' . count($clean) . ' strings' . ($dropped ? ', ' . count($dropped) . ' dropped' : '') . ')']);
     jsonResponse(['success' => true, 'code' => $code, 'strings' => count($clean),
                   'skipped' => $skipped, 'dropped' => $dropped, 'enabled' => !$isNew,
-                  'message' => __('api.lang.uploaded_count', ['code' => strtoupper($code), 'count' => number_format(count($clean))])
-                             . ($skipped ? __('api.lang.uploaded_skipped', ['skipped' => number_format($skipped)]) : '')
+                  'message' => __('api.lang.uploaded_count', ['code' => strtoupper($code), 'count' => langNumber(count($clean))])
+                             . ($skipped ? __('api.lang.uploaded_skipped', ['skipped' => langNumber($skipped)]) : '')
                              . ($isNew ? __('api.lang.uploaded_new_tail') : '.')
                              . ($dropped ? ' ' . $droppedNote($dropped) : '')]);
 }

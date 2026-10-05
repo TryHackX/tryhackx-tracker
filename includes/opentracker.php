@@ -168,8 +168,8 @@ function otTick(array $cfg): array {
  */
 function otAdvice(array $st): array {
     // In the reader's language (1.73.0: English on every page, while the DB memory and sysctl cards' advice beside it
-    // was not) — api.ot.adv_*, with the numbers written the reader's way.
-    $num = static fn(int $n): string => number_format($n, 0, '.', (function_exists('langCurrent') && langCurrent() === 'pl') ? "\u{00A0}" : ',');
+    // was not) — api.ot.adv_*, with the numbers written the reader's way (langNumber(), 1.73.1: Intl's grouping).
+    $num = static fn(int $n): string => function_exists('langNumber') ? langNumber($n) : number_format($n);
     $out = [];
     $cpus = max(1, (int)($st['cpus'] ?? 1));
     $workers = (int)($st['workers'] ?? 0);

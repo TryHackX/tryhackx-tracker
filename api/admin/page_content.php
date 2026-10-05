@@ -105,7 +105,7 @@ if ($op === 'preview') {
     // Rendered exactly as the page will be, including the signed-in state of whoever is looking —
     // a preview that hides what a [hide] block does would be a preview of a different page.
     if (strlen($body) > PAGECONTENT_MAX) {
-        jsonResponse(['error' => __('api.pages.body_too_long', ['max' => number_format(PAGECONTENT_MAX)])], 400);
+        jsonResponse(['error' => __('api.pages.body_too_long', ['max' => langNumber(PAGECONTENT_MAX)])], 400);
     }
     // The rules saving applies (pageContentSave()): a page is not held to a description's length, so
     // the preview of the built-in Info (19 000 characters) does not warn about a limit the save ignores.

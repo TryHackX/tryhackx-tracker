@@ -43,12 +43,12 @@
         const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
         let i = 0, v = b;
         while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-        if (v >= 100 || i === 0) return Math.round(v).toLocaleString() + ' ' + u[i];
+        if (v >= 100 || i === 0) return String(t.num(v)) + ' ' + u[i];   // grouped in the page's language (1.73.1)
         // "8.00 MiB" and "8 MiB" are the same number and look like different ones. The operator is
         // checking this against what they meant to type, so the zeros go.
         return String(parseFloat(v.toFixed(2))) + ' ' + u[i];
     }
-    const num = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
+    const num = (v) => (v === null || v === undefined || isNaN(v)) ? '—' : t.num(v);   // a count in the page's language (1.73.1)
 
     function pageSize() { return Math.max(1, Number((state.status || {}).page_size) || 4096); }
     function memTotalBytes() { return (Number((state.status || {}).mem_total_kb) || 0) * 1024; }

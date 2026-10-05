@@ -2301,7 +2301,12 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
    a control in it, which that rule must not clip. Long words and a detail's values break, not spill. */
 .wl-page .wl-table td.au-c-sum { white-space: normal; overflow: visible; text-overflow: clip; }
 .au-summary { overflow-wrap: anywhere; }
-.au-c-sum .au-diff td { overflow-wrap: anywhere; }
+/* …and the detail's own cells too (1.73.1): they are `.wl-table td`s as well, so the one-line rule kept them on one line
+   (white-space: nowrap) and a long value — smoke_admin's index_source_url "http://127.0.0.1:8091/scrape?n=300" — ran
+   up to 200px out of the cell. Its <code>s say `anywhere` themselves: Bootstrap gives a code `word-wrap: break-word`,
+   which breaks a line but leaves the word's whole width in the table's sizing, so the nested table never narrowed. */
+.wl-page .wl-table td.au-c-sum .au-diff td { white-space: normal; overflow: visible; text-overflow: clip; }
+.au-c-sum .au-diff :is(td, code) { overflow-wrap: anywhere; }
 .au-target { display: inline-block; margin-top: 0.15rem; font-size: 0.72rem; opacity: 0.75; word-break: break-all; }
 .au-detail { margin-top: 0.3rem; }
 .au-detail > summary { cursor: pointer; font-size: 0.75rem; color: #7f8c9a; list-style: none; }

@@ -1662,7 +1662,7 @@
                                  of the two is what every form on the site quotes (userMediaMaxBytes()). */ ?>
                         <small class="settings-hint"><?= __('settings.profiles_max_kb_hint', [
                             'min' => USER_MEDIA_KB_MIN, 'max' => USER_MEDIA_KB_MAX,
-                            'eff' => number_format(function_exists('userMediaMaxBytes') ? userMediaMaxBytes($cfg) / 1024 : 0, 0, '.', ' '),
+                            'eff' => langNumber(function_exists('userMediaMaxBytes') ? floor(userMediaMaxBytes($cfg) / 1024) : 0),
                             'php' => sanitize((string)ini_get('upload_max_filesize'))]) ?></small>
                     </div>
                     <div class="col-md-3" data-setting="avatar_max_mp">
@@ -1788,7 +1788,7 @@
                                value="<?= sanitize($cfg['profile_bio_max'] ?? (string)PROFILE_BIO_MAX_DEFAULT) ?>" min="<?= PROFILE_BIO_MAX_MIN ?>" max="<?= PROFILE_BIO_MAX_MAX ?>">
                         <small class="settings-hint"><?= __('settings.profile_bio_max_hint', [
                             'min' => PROFILE_BIO_MAX_MIN, 'max' => PROFILE_BIO_MAX_MAX,
-                            'factor' => PROFILE_BIO_SOURCE_FACTOR, 'cap' => number_format(PROFILE_BIO_SOURCE_CHARS, 0, '.', ' ')]) ?></small>
+                            'factor' => PROFILE_BIO_SOURCE_FACTOR, 'cap' => langNumber(PROFILE_BIO_SOURCE_CHARS)]) ?></small>
                     </div>
                 </div>
             </div>
@@ -1891,7 +1891,7 @@
                                value="<?= sanitize($cfg['lists_desc_max'] ?? (string)LIST_DESC_MAX_DEFAULT) ?>" min="<?= LIST_DESC_MAX_MIN ?>" max="<?= LIST_DESC_MAX_MAX ?>">
                         <small class="settings-hint" id="setting-lists_desc_max-hint"><?= __('settings.lists_desc_max_hint', [
                             'min' => LIST_DESC_MAX_MIN, 'max' => LIST_DESC_MAX_MAX,
-                            'factor' => LIST_DESC_SOURCE_FACTOR, 'cap' => number_format(LIST_DESC_SOURCE_CHARS, 0, '.', ' '),
+                            'factor' => LIST_DESC_SOURCE_FACTOR, 'cap' => langNumber(LIST_DESC_SOURCE_CHARS),
                         ]) ?></small>
                     </div>
                     <?php /* 1.70.0: the public lists a torrent is on, in its "Who has this" (includes/who.php). */ ?>
@@ -2531,7 +2531,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label"><?= _h('settings.iplists_capacity_label') ?></label>
-                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= _h('settings.iplists_capacity_value', ['n' => number_format(IPLIST_MAX_TOTAL)]) ?>" readonly disabled>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" value="<?= _h('settings.iplists_capacity_value', ['n' => langNumber(IPLIST_MAX_TOTAL)]) ?>" readonly disabled>
                         <small class="settings-hint">
                             <?= __('settings.iplists_capacity_hint') ?>
                             <a href="<?= $baseUrl ?>?action=admin-traffic#iplists-card"><?= _h('settings.iplists_capacity_hint_link') ?></a>.
@@ -3268,8 +3268,8 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                                 <?php endforeach; ?>
                             </select>
                             <?php if ($shoutFaCat !== null): ?>
-                            <?php /* 4,349 in English, 4 349 (a no-break space) in Polish. */
-                                  $shoutFaN = number_format((int)$shoutFaCat['icons'], 0, '.', (function_exists('langCurrent') && langCurrent() === 'pl') ? "\xC2\xA0" : ','); ?>
+                            <?php /* 4,349 in English, 4349 in Polish (langNumber(), 1.73.1: Intl's grouping, as the scripts write it). */
+                                  $shoutFaN = langNumber((int)$shoutFaCat['icons']); ?>
                             <small class="settings-hint"><?= __('settings.shout_emoji_fa_scope_hint', ['n' => $shoutFaN, 'c' => (int)$shoutFaCat['categories']]) ?></small>
                             <?php else: ?>
                             <small class="settings-hint"><?= __('settings.shout_emoji_fa_scope_noindex') ?></small>
@@ -3620,12 +3620,13 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
     // last clause as the field changes, from the numbers on the element — the pace does not move
     // with the budget, only how many polls a pass takes.
     $pollEst = function_exists('indexPollEstimateNow') ? indexPollEstimateNow($db, $cfg) : null;
-    $pollNum = static fn(int $n): string => number_format($n, 0, '.', langCurrent() === 'pl' ? "\u{00A0}" : ',');
+    // The counts in the page's language (langNumber(), 1.73.1); the element carries them as NUMBERS, which the script
+    // writes with t.num() — a number a script holds as words would stay in the old language after a live switch.
+    $pollNum = static fn(int $n): string => langNumber($n);
 ?>
                         <?php if ($pollEst): ?>
                         <small class="settings-hint d-block mt-1" id="idx-budget-estimate" data-needs="<?= (int)$pollEst['needs'] ?>"
-                               data-rate="<?= sanitize($pollNum($pollEst['rate'])) ?>" data-scrape="<?= sanitize($pollNum($pollEst['scrape'])) ?>"
-                               data-needs-text="<?= sanitize($pollNum($pollEst['needs'])) ?>"><?= _h($pollEst['polls'] > 1 ? 'settings.index_poll_estimate_many' : 'settings.index_poll_estimate_one', [
+                               data-rate="<?= (int)$pollEst['rate'] ?>" data-scrape="<?= (int)$pollEst['scrape'] ?>"><?= _h($pollEst['polls'] > 1 ? 'settings.index_poll_estimate_many' : 'settings.index_poll_estimate_one', [
                             'rate' => $pollNum($pollEst['rate']), 'scrape' => $pollNum($pollEst['scrape']), 'needs' => $pollNum($pollEst['needs']),
                             'budget' => (int)$pollEst['budget'], 'polls' => (int)$pollEst['polls']]) ?></small>
                         <?php else: ?>
@@ -3805,7 +3806,7 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
                     <div class="col-md-3">
                         <label class="form-label"><?= _h('settings.index_max_files') ?> <small class="settings-hint"><?= _h('settings.index_max_files_note') ?></small></label>
                         <input type="number" class="form-control bg-dark text-light border-secondary" name="meta_max_files" value="<?= sanitize($cfg['meta_max_files'] ?? '') ?>" min="1" max="<?= META_MAX_FILES_MAX ?>" placeholder="<?= _h('settings.index_max_files_ph') ?>">
-                        <small class="settings-hint"><?= __('settings.index_max_files_hint', ['max' => number_format(META_MAX_FILES_MAX, 0, '.', '&nbsp;')]) ?>
+                        <small class="settings-hint"><?= __('settings.index_max_files_hint', ['max' => langNumber(META_MAX_FILES_MAX)]) ?>
                             <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.index_max_files_more') ?></summary><?= __('settings.index_max_files_more_body') ?></details></small>
                     </div>
                     <div class="col-md-3">
@@ -3833,7 +3834,8 @@ $modeNow     = (string)($cfg['meta_order_mode'] ?? 'oldest');
             ];
             $fileModePub   = indexFilesMode($cfg);
             $fileModeAdmin = indexFilesAdminMode($cfg);
-            $nbsp = fn(int $n) => number_format($n, 0, '.', '&nbsp;');
+            // the page's language (langNumber(), 1.73.1: "100,000" / "100 000", the Polish space a no-break one)
+            $nbsp = fn(int $n) => langNumber($n);
             ?>
             <div class="settings-section" id="section-filelist" data-group="index" data-title="<?= _h('settings.filelist_title') ?>">
                 <h5><?= _h('settings.filelist_title') ?></h5>
@@ -4884,7 +4886,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     testBtn.disabled = true;
                     const r = await call('admin/fed_peer_test', { id: p.id });
                     testBtn.disabled = false;
-                    if (r.success) note(t.key('js.settings.peer_test_ok', { peer: p.name, node: r.reply.node || '?', state: r.reply.export_enabled ? t.key('js.settings.on') : t.key('js.settings.off'), rows: (r.reply.exportable_rows || 0).toLocaleString() }), 'alert-success');
+                    if (r.success) note(t.key('js.settings.peer_test_ok', { peer: p.name, node: r.reply.node || '?', state: r.reply.export_enabled ? t.key('js.settings.on') : t.key('js.settings.off'), rows: t.num(r.reply.exportable_rows || 0) }), 'alert-success');
                     else note(t.key('js.settings.test_failed', { error: r.error || '?' }), 'alert-danger');
                 });
                 const togglePull = el('button', p.pull_enabled ? t.key('js.settings.pull_off') : t.key('js.settings.pull_on'), 'btn btn-sm btn-outline-secondary me-1');
@@ -4930,7 +4932,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                     const c = await call('admin/fed_purge', { op: 'count', peer: p.name });
                     if (c.error) { note(c.error, 'alert-danger'); return; }
                     if (!c.rows) { note(t.key('js.settings.nothing_from_peer', { peer: p.name }), 'alert-info'); return; }
-                    if (!window.confirm(t('js.settings.undo_import_confirm', { peer: p.name, rows: c.rows.toLocaleString(), files: c.files.toLocaleString() }))) return;
+                    if (!window.confirm(t('js.settings.undo_import_confirm', { peer: p.name, rows: t.num(c.rows), files: t.num(c.files) }))) return;
                     const pw = window.prompt(t('js.settings.admin_password_prompt'));
                     if (!pw) return;
                     undoBtn.disabled = true;
@@ -4939,7 +4941,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                         const r = await call('admin/fed_purge', { op: 'run', peer: p.name, password: pw });
                         if (r.error) { note(r.error, 'alert-danger'); break; }
                         total += r.done;
-                        note(t.key('js.settings.undo_progress', { peer: p.name, done: total.toLocaleString(), left: r.remaining.toLocaleString() }), 'alert-info');
+                        note(t.key('js.settings.undo_progress', { peer: p.name, done: t.num(total), left: t.num(r.remaining) }), 'alert-info');
                         if (!r.remaining || !r.done) { note(r.message, 'alert-success'); break; }
                     }
                     undoBtn.disabled = false;
@@ -5011,7 +5013,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
             if (r.error) { rnote(r.error, 'alert-danger'); return; }
             const pending = (r.counts && r.counts.pending) || 0;
             const rejected = (r.counts && r.counts.rejected) || 0;
-            document.getElementById('fr-count').textContent = pending.toLocaleString();
+            document.getElementById('fr-count').textContent = t.num(pending);   // in the page's language (1.73.1)
             // Visible when there is something to decide, or when review mode is on and the operator
             // is entitled to see that the queue is empty.
             const reviewOn = (document.querySelector('[name="fed_import_mode"]') || {}).value === 'review';
@@ -5036,7 +5038,10 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 nameTd.title = row.info_hash;
                 tr.appendChild(nameTd);
                 tr.appendChild(el('td', bytes(row.total_size), 'text-nowrap'));
-                tr.appendChild(el('td', (row.files_count || 0).toLocaleString() + (row.files_truncated ? t.key('js.settings.list_capped') : ''), 'text-nowrap'));
+                // the count in the page's language and the "list capped" word as pieces, each keeping its key (1.73.1)
+                const filesTd = el('td', undefined, 'text-nowrap');
+                filesTd.append(t.num(row.files_count || 0), ...(row.files_truncated ? [t.key('js.settings.list_capped')] : []));
+                tr.appendChild(filesTd);
                 tr.appendChild(el('td', row.peer_name, 'text-muted'));
                 tr.appendChild(el('td', row.origin_at || '—', 'text-muted small text-nowrap'));
                 const act = el('td', undefined, 'text-nowrap');

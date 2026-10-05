@@ -69,7 +69,7 @@ switch ($op) {
         setSettings($db, ['net_limit_enabled' => '1', 'net_limit_pps' => (string)netlimitClampInt($pps, NET_PPS_MIN, NET_PPS_MAX, 30000),
                           'net_limit_burst' => (string)netlimitClampInt($burst, NET_BURST_MIN, NET_BURST_MAX, 100),
                           'net_limit_port' => (string)netlimitClampInt($port, 1, 65535, 6969)]);
-        jsonResponse(['success' => true, 'message' => __('api.net.inbound_set', ['pps' => number_format((int)($r['json']['pps'] ?? $pps))]),
+        jsonResponse(['success' => true, 'message' => __('api.net.inbound_set', ['pps' => langNumber((int)($r['json']['pps'] ?? $pps))]),
                       'applied' => $r['json'], 'persistent' => !empty($r['json']['persistent'])]);
 
     case 'off':
@@ -84,7 +84,7 @@ switch ($op) {
         $r = netlimitPanic($db, $cfg, $minutes, $panicPps);
         if (empty($r['ok'])) jsonResponse(['error' => $r['error'] ?? __('api.net.panic_failed'), 'output' => $r['output'] ?? ''], 500);
         jsonResponse(['success' => true, 'until' => (int)($r['until'] ?? 0), 'restore_pps' => (int)($r['restore_pps'] ?? 0),
-                      'message' => __('api.net.panic_set', ['pps' => number_format(netlimitClampInt($panicPps, NET_PPS_MIN, NET_PPS_MAX, NET_PANIC_PPS)),
+                      'message' => __('api.net.panic_set', ['pps' => langNumber(netlimitClampInt($panicPps, NET_PPS_MIN, NET_PPS_MAX, NET_PANIC_PPS)),
                                                               'minutes' => max(1, min(240, $minutes))])]);
 
     case 'restore':
@@ -92,12 +92,12 @@ switch ($op) {
         if (empty($r['ok'])) jsonResponse(['error' => $r['error'] ?? __('api.net.restore_failed')], 500);
         if (!$r['restored']) jsonResponse(['success' => true, 'message' => __('api.net.no_panic')]);
         jsonResponse(['success' => true, 'message' => $r['enabled']
-            ? __('api.net.previous_restored', ['pps' => number_format((int)$r['pps'])])
+            ? __('api.net.previous_restored', ['pps' => langNumber((int)$r['pps'])])
             : __('api.net.panic_lifted')]);
 
     case 'egress':
         $r = netlimitEgress($cfg, $pps, false);
         if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.net.egress_failed'), 'output' => $r['output']], 500);
-        jsonResponse(['success' => true, 'message' => __('api.net.egress_set', ['pps' => number_format((int)($r['json']['pps'] ?? $pps))]),
+        jsonResponse(['success' => true, 'message' => __('api.net.egress_set', ['pps' => langNumber((int)($r['json']['pps'] ?? $pps))]),
                       'file_updated' => !empty($r['json']['file_updated']), 'applied' => $r['json']]);
 }

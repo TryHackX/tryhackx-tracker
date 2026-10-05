@@ -466,6 +466,8 @@ function netlimitAutoDecide(array $autoState, int $observedPps, int $currentPps,
         return $out;
     }
 
+    // The reason is an ENGLISH note the janitor stores with its decision (net_state.json) and the card quotes as it is —
+    // so its numbers are English too (number_format()), whatever the page's language (langNumber() is for the reader's).
     if ($over >= NET_AUTO_HYSTERESIS) {
         $want = max($min, (int)round($currentPps * (1 - NET_AUTO_STEP)));
         $why = $cpuHot
@@ -1186,9 +1188,9 @@ function netlimitSayParts(array $parts): string {
     return implode(' ', $said);
 }
 
-/** A whole number written the reader's way: 40,000 in English, 40 000 in Polish (a no-break space, as Settings writes them). */
+/** A whole number written the reader's way: 40,000 in English, 40 000 in Polish — langNumber() (1.73.1: Intl's grouping, as the scripts write it). */
 function netlimitNum(int $n): string {
-    return number_format($n, 0, '.', (function_exists('langCurrent') && langCurrent() === 'pl') ? "\u{00A0}" : ',');
+    return function_exists('langNumber') ? langNumber($n) : number_format($n);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -31,6 +31,9 @@
  *   t.attr(node, name, key, params)  one attribute
  *   t.node(key, params) / t.html(key, params)   a <span> that says a key, as a node / as markup for a string template
  *   t.child(x)                       what append() would make of x: a t.key() word a <span>, a string a text node
+ *   t.num(n)                         a count in the page's language ("2,251,367" / "2 251 367", 1.73.1), written like
+ *                                    a t.key() word and said again in the new language's grouping by a live switch;
+ *                                    t.num(n, 'compact'): a million or more compact ("100.82M" / "100,82 mln")
  *
  * The keys live on the node, so a node that is cloned, moved, or taken out and put back keeps them, and nothing has to
  * be registered or forgotten. A plain word written later where a key was drops that key: the node no longer says it.
@@ -40,7 +43,7 @@
  */
 (function () {
     'use strict';
-    var strings = {}, prev = {}, lang = 'en', swap = false;
+    var strings = {}, prev = {}, lang = 'en', prevLang = 'en', swap = false;
     // Read (or re-read) the bundle the page carries. assets/js/lang-swap.js replaces the contents
     // of #i18n-data with the other language's bundle and calls this, so a string asked for after
     // an in-place switch is answered in the language now on the screen. The bundle it replaces is
@@ -48,17 +51,53 @@
     function load() {
         try {
             var node = document.getElementById('i18n-data');
-            if (!node) return;
+            if (!node) { lang = prevLang = String(document.documentElement.lang || 'en').toLowerCase(); return; }
             var data = JSON.parse(node.textContent || '{}');
             prev = strings;
+            prevLang = lang;
             strings = data.strings || {};
-            lang = data.lang || 'en';
+            lang = data.lang || String(document.documentElement.lang || 'en').toLowerCase();
             swap = data.swap === true;
         } catch (e) { strings = {}; }
     }
     load();
     prev = {};
+    prevLang = lang;
+
+    /*
+     * A COUNT IN THE PAGE'S LANGUAGE (1.73.1): "2,251,367" on an English page, "2 251 367" on a Polish one, from the
+     * language of the PAGE — the bundle's, which is <html lang> (the server writes both from langCurrent(), and the
+     * live switch changes both) — never from the browser's: a locale-less call wrote a Polish browser's grouping into
+     * the English page and English commas into a Polish page opened by an English browser.
+     * Intl.NumberFormat, so a four-digit Polish number stays whole ("1234", "12 345") and the separator is a no-break
+     * space — exactly what includes/lang.php langNumber() writes on the server, so the script's refresh of a number
+     * never changes how it looks. A count is whole: anything else is rounded (half away from zero, like PHP's round()).
+     * COMPACT (1.73.1, the owner: a row's "100 000 000 / 100 000 000" ran over the hash chip beside it — "convert it to
+     * 100.82 mln then"): a million or more in the page language's compact notation, up to two decimals — "100.82M",
+     * "100,82 mln" (a no-break space before "mln") — and anything below exactly as above: Intl's compact thousands
+     * are no shorter in Polish ("23,46 tys." for 23 456) and would lose the count.
+     */
+    var NUM = '#n', numFmt = {};
+    function fmtNum(n, code, compact) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v)) return '—';
+        code = String(code || 'en').toLowerCase();
+        var big = compact && Math.abs(v) >= 1e6;
+        if (!big) v = v < 0 ? -Math.round(-v) : Math.round(v);
+        var id = (big ? 'c:' : '') + code;
+        var f = numFmt[id];
+        if (!f) {
+            var opt = big ? { notation: 'compact', maximumFractionDigits: 2 } : { maximumFractionDigits: 0 };
+            try { f = new Intl.NumberFormat(code, opt); }
+            catch (e) { f = new Intl.NumberFormat('en', opt); }
+            numFmt[id] = f;
+        }
+        return f.format(v || 0);
+    }
     function say(from, key, params) {
+        // A number written with t.num() is said in the language of the dictionary it is said from (the old one when
+        // a swap asks which words still say what the page says, the new one once it is loaded).
+        if (key === NUM) return fmtNum(params ? params['#'] : null, from === prev ? prevLang : lang, !!(params && params.c));
         var s = Object.prototype.hasOwnProperty.call(from, key) ? from[key] : key;
         if (params && typeof params === 'object') {
             // Longest name first. ":page" is a prefix of ":pages", so replacing in the order the
@@ -92,6 +131,23 @@
     function t(key, params) { return words(key, params); }
     // The word to write into the page: it leaves its key on the element (see WHERE A SCRIPT WRITES WORDS below).
     t.key = function (key, params) { return new Keyed(key, params); };
+    /**
+     * A count in the page's language (1.73.1, fmtNum() above) — THE way a script writes a number for people to read.
+     * Like a t.key() word it is written INTO the page (textContent, a placeholder of a t.key() word, a child, t.esc()
+     * in markup) and keeps the number on the element (data-i18n="#n", the number in data-i18n-p), so the live
+     * language switch writes it again in the new language's grouping. Where a plain string is needed — a library's
+     * formatter, a comparison — String(t.num(n)). Nothing to write ('—') for a missing or non-numeric value.
+     * t.num(n, 'compact'): a million or more compact ("100.82M" / "100,82 mln"), anything below as t.num(n) — for a
+     * place whose width is fixed (a row's swarm); give the exact count beside it (a title).
+     */
+    t.num = function (n, style) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v)) return '—';
+        var p = {};
+        p['#'] = v;
+        if (style === 'compact') p.c = 1;
+        return new Keyed(NUM, p);
+    };
     t.words = words;
     t.isKey = function (v) { return v instanceof Keyed; };
     /**

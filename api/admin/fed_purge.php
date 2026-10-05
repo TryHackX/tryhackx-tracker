@@ -47,7 +47,7 @@ try {
     $db->prepare("DELETE FROM fed_review WHERE peer_name = ?")->execute([$peer]);
 } catch (\Throwable $e) {
     error_log('[fed purge] ' . $e->getMessage());
-    jsonResponse(['error' => __('api.federation.purge_stopped', ['n' => number_format($done), 'err' => $e->getMessage()])], 500);
+    jsonResponse(['error' => __('api.federation.purge_stopped', ['n' => langNumber($done), 'err' => $e->getMessage()])], 500);
 }
 $left = fedPurgeCount($db, $peer);
 jsonResponse([
@@ -55,6 +55,6 @@ jsonResponse([
     'done'      => $done,
     'remaining' => $left['rows'],
     'message'   => $left['rows'] > 0
-        ? __('api.federation.purge_progress', ['n' => number_format($done), 'left' => number_format($left['rows'])])
-        : __('api.federation.purge_done', ['n' => number_format($done)]),
+        ? __('api.federation.purge_progress', ['n' => langNumber($done), 'left' => langNumber($left['rows'])])
+        : __('api.federation.purge_done', ['n' => langNumber($done)]),
 ]);

@@ -52,19 +52,19 @@ if (!$ids) {
 try {
     if ($op === 'accept') {
         $t = fedReviewAccept($db, $ids, $peer);
-        $msg = __('api.federation.review_accepted', ['n' => number_format($t['accepted'])])
-             . ($t['files'] ? __('api.federation.review_accepted_files', ['n' => number_format($t['files'])]) : '')
-             . ($t['skipped'] ? __('api.federation.review_accepted_skipped', ['n' => number_format($t['skipped'])]) : '') . '.';
+        $msg = __('api.federation.review_accepted', ['n' => langNumber($t['accepted'])])
+             . ($t['files'] ? __('api.federation.review_accepted_files', ['n' => langNumber($t['files'])]) : '')
+             . ($t['skipped'] ? __('api.federation.review_accepted_skipped', ['n' => langNumber($t['skipped'])]) : '') . '.';
         jsonResponse(['success' => true, 'message' => $msg, 'tally' => $t, 'counts' => fedReviewCounts($db)]);
     }
     if ($op === 'reject') {
         $n = fedReviewReject($db, $ids, $peer);
         jsonResponse(['success' => true, 'counts' => fedReviewCounts($db),
-            'message' => __('api.federation.review_rejected', ['n' => number_format($n)])]);
+            'message' => __('api.federation.review_rejected', ['n' => langNumber($n)])]);
     }
     $n = fedReviewUnreject($db, $ids, $peer);
     jsonResponse(['success' => true, 'counts' => fedReviewCounts($db),
-        'message' => __('api.federation.review_unrejected', ['n' => number_format($n)])]);
+        'message' => __('api.federation.review_unrejected', ['n' => langNumber($n)])]);
 } catch (\Throwable $e) {
     error_log('[fed review] ' . $e->getMessage());
     jsonResponse(['error' => __('api.federation.review_failed', ['err' => $e->getMessage()])], 500);

@@ -28,7 +28,7 @@
     let state = null;
     let busy = false;
 
-    const fmt = (n) => Number(n || 0).toLocaleString();
+    const fmt = (n) => t.num(Number(n || 0));   // a count in the page's language (1.73.1)
     /** 342983424 -> "343 M". A column is not the place for nine digits. */
     const short = (n) => {
         n = Number(n || 0);

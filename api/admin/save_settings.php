@@ -633,7 +633,7 @@ if (isset($data['net_limit_cmd']) && !netlimitValidCommand($data['net_limit_cmd'
 if (isset($data['net_auto_min']) || isset($data['net_auto_max'])) {
     $min = (int)($data['net_auto_min'] ?? netlimitAutoMin($cfg));
     $max = (int)($data['net_auto_max'] ?? netlimitAutoMax($cfg));
-    if ($max < $min) jsonResponse(['error' => __('api.settings.net_auto_band_inverted', ['max' => number_format($max), 'min' => number_format($min)])], 400);
+    if ($max < $min) jsonResponse(['error' => __('api.settings.net_auto_band_inverted', ['max' => langNumber($max), 'min' => langNumber($min)])], 400);
 }
 // ── Backups ──
 // The directory is where archives full of database passwords land, so it is checked here as well as

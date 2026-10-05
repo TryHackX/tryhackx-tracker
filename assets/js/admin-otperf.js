@@ -22,7 +22,7 @@
 
     const $ = (id) => document.getElementById(id);
     const POLL_MS = 15000;      // this changes when somebody presses a button, not by itself
-    const num = (v) => (v == null || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
+    const num = (v) => (v == null || isNaN(v)) ? '—' : t.num(v);   // a count in the page's language (1.73.1)
     const state = { pending: null, status: null, cfg: null };
 
     /*

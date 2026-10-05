@@ -24,7 +24,7 @@
     let pending = null;      // strings parsed from the picked file, until it is submitted
     let dupSource = null;
 
-    const fmt = (n) => Number(n || 0).toLocaleString();
+    const fmt = (n) => t.num(Number(n || 0));   // a count in the page's language (1.73.1)
 
     async function load() {
         const d = await apiCall('admin/languages');

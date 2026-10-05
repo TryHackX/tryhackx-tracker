@@ -2771,12 +2771,18 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
    actions gave back (below) — the chip's four more characters (.pf-hash-more) and a column 1.5em wider.
    Under 600px the facts have a line of their own, 336px wide on a 390px phone, and 16 would not fit it. Not
    in an upload's row: its actions are words (the switch below) and gave nothing back — the name would pay. */
-.pf-meta { display: grid; grid-template-columns: 6em 7.5em 9.5em; gap: 0.8rem;
+/* The swarm's column (1.73.1): a pair of six-digit counts in either language — "999,999 / 999,999", "999 999 / 999 999",
+   seventeen characters of the site's monospace face, 10.2em — where 7.5em held thirteen, and "23,456 / 12,345" (the
+   busiest torrents' swarm, grouped since 1.73.1) ran over the hash chip. A million or more is compact (favourites.js,
+   "100.82M"); a pair that is still longer ("100,82 mln / 100,82 mln") breaks after its slash, inside the column. */
+.pf-meta { display: grid; grid-template-columns: 6em 10.25em 9.5em; gap: 0.8rem;
     color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;
     text-align: right; font-variant-numeric: tabular-nums; }
+.pf-meta > .pf-sl { white-space: normal; min-width: 0; }
+.pf-sl > .pf-n { white-space: nowrap; }
 .pf-hash-more { display: none; }
 @media (min-width: 600px) {
-    .pf-row:not(:has(.pf-vis-row)) .pf-meta { grid-template-columns: 6em 7.5em 11em; }
+    .pf-row:not(:has(.pf-vis-row)) .pf-meta { grid-template-columns: 6em 10.25em 11em; }
     .pf-row:not(:has(.pf-vis-row)) .pf-hash-more { display: inline; }
 }
 /* The site's own font (1.64.0). This said `var(--mono, monospace)` and `--mono` is defined nowhere
@@ -2817,6 +2823,43 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 .pf-vis-row > .pf-vis-t { grid-area: 1 / 1; justify-self: center; }
 .pf-vis-row:not(.pf-vis-on) > .pf-vis-t-on, .pf-vis-row.pf-vis-on > .pf-vis-t-off { visibility: hidden; }
 .pf-empty, .pf-loading { color: var(--text-muted); padding: 0.6rem 0; }
+
+/* A TORRENT'S ROW ON A PHONE (1.73.1): two rows, not three. Up to 600px a row was the name, then the facts in their
+   desktop columns, then the actions ALONE on a third line at the right (the owner's screenshots) — and from 360px down
+   the columns were wider than the row: the hash chip ran out of it and the page zoomed out, and a swarm of nine digits
+   ran over the chip at every width. Now a grid (the owner's proposal): the name across the top, one line, its ellipsis;
+   the facts and the actions sharing the second row. The facts are a run that wraps INSIDE their cell — a nine-digit
+   swarm goes under the size and the chip under them — so nothing pushes the actions off the row's right edge; the
+   actions keep the width of their three icons (four in a list of your own), so every row's facts wrap alike. The size
+   and the swarm read as one run with an ordinary gap ("13.3 GiB 16 / 3", his note): a gap of a full em and a middle
+   dot in it, drawn in the gap BEFORE the next fact (::before, pulled back by the gap's width) — so a fact that wraps
+   to the start of a line takes its dot outside the cell, where the cell's clip hides it (overflow: clip, a margin of
+   3px for the chip's focus ring); the dot only ever stands BETWEEN two facts. Torrent rows only (they have facts):
+   People's rows (.pe-row) share .pf-row and stay as they are. The account's Uploads carry the visibility switch, a
+   button of words (153px in English, 226px in Polish) that no phone has room for beside the facts: there the facts
+   take the second row whole and the actions a line of their own at its end, as before. Desktop (601px and up): the
+   columns above, untouched. */
+@media (max-width: 600px) {
+    .pf-row:has(> .pf-meta) { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "title title" "meta acts";
+        align-items: center; gap: 0.35rem 0.6rem; padding: 0.5rem 0.65rem; }
+    .pf-row:has(> .pf-meta) > .pf-main { grid-area: title; min-width: 0; }
+    .pf-row:has(> .pf-meta) .pf-name { font-size: 0.9rem; }
+    .pf-row > .pf-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; column-gap: 1.25em; row-gap: 0.3rem;
+        min-width: 0; text-align: left; font-size: 0.76rem; overflow: clip; overflow-clip-margin: 3px; }
+    .pf-row > .pf-meta > span { white-space: nowrap; }
+    /* the swarm may break at its " / " where even a line of its own is too narrow for it: 520222222 / 172222222 is
+       21 characters, 153px, and a list of your own in its window at 320px leaves the facts 124px */
+    .pf-row > .pf-meta > span + span:not(.pf-hash-copy) { white-space: normal; }
+    /* The dot is DRAWN, 2px (the size of Courier New's own, which stands 1.5px right of its cell's middle — measured —
+       next to the swarm's first digit), in the middle of the gap and of the x-height. Its margins add up to nothing. */
+    .pf-row > .pf-meta > span + span:not(.pf-hash-copy)::before { content: ""; display: inline-block; width: 2px; height: 2px;
+        border-radius: 50%; background: currentColor; vertical-align: middle; margin: 0 calc(0.625em - 1px) 0 calc(-0.625em - 1px); }
+    /* the chip a size down with the row, its measured padding (0.29em / 0.13em: the ink in the middle, 1.67.0) kept */
+    .pf-row > .pf-meta > .pf-hash-copy { font-size: 0.72rem; padding: 0.29em 0.45em 0.13em; }
+    .pf-row:has(> .pf-meta) > .pf-acts { grid-area: acts; margin-left: 0; justify-content: flex-end; align-self: center; }
+    .pf-row:has(> .pf-acts > .pf-vis-row) { grid-template-areas: "title title" "meta meta" "acts acts"; }
+    .pf-row:has(> .pf-acts > .pf-vis-row) > .pf-acts { flex-wrap: wrap; row-gap: 0.35rem; }
+}
 
 /* ── likes / ratings (1.69.0): the table on the account tab and the profile section ────────────────
    The search table's look (the transparency table's head and rules, its sort arrows, its rating

@@ -102,7 +102,7 @@
         if (r.error) { showToast(t.key('js.users.users_error', { error: r.error }), 'danger'); return; }
         state.us.rows = r.rows || [];
         renderStatus(r.counts || { total: 0, active: 0, banned: 0 }, !!r.enabled);
-        $('us-total').textContent = t.key('js.users.count_users', { n: (r.total || 0).toLocaleString() });
+        $('us-total').textContent = t.key('js.users.count_users', { n: t.num(r.total || 0) });
         const tb = $('us-body');
         tb.textContent = '';
         if (!state.us.rows.length) {

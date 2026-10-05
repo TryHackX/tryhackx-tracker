@@ -118,6 +118,9 @@ add('js.app', {
         ':n plików'),
     'files_n': (':n files',
         ':n plików'),
+    # 1.73.1: "1,234+ files" as a sentence of its own — the count keeps its key (t.num()), a "+" glued to it would not
+    'files_n_more': (':n+ files',
+        ':n+ plików'),
     'files_one': ('1 file',
         '1 plik'),
     'files_truncated': ('List truncated — this torrent has more files.',

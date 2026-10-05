@@ -55,7 +55,9 @@ $docTtl      = function_exists('authBridgeTtl') ? authBridgeTtl($cfg) : 120;
 // separators are the dictionary's (apidocs.num_decimal / num_thousands), and a number of days carries
 // its noun in the reader's language ("1 day", "30 dni" — pageContentDays()).
 $docDec = __('apidocs.num_decimal');
-$docNum = fn($n, int $dec = 0): string => number_format((float)$n, $dec, $docDec, __('apidocs.num_thousands'));
+// A count is langNumber()'s (1.73.1: the one rule of the site — Intl's grouping, "2000" and "12 000" in Polish).
+$docNum = fn($n, int $dec = 0): string => $dec === 0 ? langNumber((float)$n)
+    : number_format((float)$n, $dec, $docDec, __('apidocs.num_thousands'));
 $docBanText = function_exists('pageContentDays') ? pageContentDays($docBanDays) : $docBanDays . ' days';
 // A byte budget said the way a person reads it: 5 GB, 750 MB, 1,5 GB in Polish.
 $docBytesText = $docBytesDay >= 1073741824 ? rtrim(rtrim($docNum($docBytesDay / 1073741824, 1), '0'), $docDec) . ' GB'

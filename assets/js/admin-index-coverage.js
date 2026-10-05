@@ -78,7 +78,7 @@
     let pinnedTs = null;        // …and which poll it is, so a redraw (the minute's reload, a resize) keeps them open
     let loadSeq = 0;            // which request is the current one (see load())
 
-    const fmt = (n) => Number(n || 0).toLocaleString();
+    const fmt = (n) => t.num(Number(n || 0));   // a count in the page's language (1.73.1)
     // 99.99 is the whole scrape: the tracker's count and the file's length differ by a handful
     const pct = (v) => (v === null || v === undefined) ? '—' : (v >= 99.95 ? '100' : Number(v).toFixed(1)) + ' %';
     const dur = (s) => {

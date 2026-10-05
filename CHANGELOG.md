@@ -4,6 +4,123 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.73.1] — 2026-10-05
+
+Corrections the README's new screenshots showed. Numbers are written in the language of the page — the server and the
+script alike, so a refresh never changes how a count looks — and a million or more in a torrent's swarm is written
+short ("520.22M" / "520,22 mln"), the exact count in its title. A torrent's row on a phone is two rows, not three,
+its facts kept apart; the Stats page says its countdown and its tooltips the same way before and after a refresh;
+the audit log's settings diff stays in its cell; the whitelist page no longer calls registration anonymous. The
+README's pictures are new: the public pages from the live site, the panel and the whitelist from a simulated one.
+
+### Fixed — numbers in the language of the page, not of the browser
+
+* **Production, 2026-10-05**: the home page's strip and the Stats page's counters came from the server grouped the
+  English way on both languages ("2,251,367"), and app.js then refreshed them with `toLocaleString()` and no locale —
+  the BROWSER's grouping. A Polish browser showed "2 251 367" on the English page; the Polish page kept the English
+  commas until the refresh, and then took whatever the visitor's browser spoke.
+* **One rule, the same characters on both sides**: `langNumber()` beside the language code (includes/lang.php) and
+  `t.num()` in the scripts (assets/js/i18n.js, `Intl.NumberFormat` of the page's language) — Intl's rules, not
+  `number_format()`'s: English groups with a comma from four digits on; Polish leaves four digits whole ("1234",
+  "12 345") and groups with a no-break space. Another installed language asks ICU (PHP's intl, the data a browser
+  carries) with the same four-digit rule where CLDR gives it, the English rule without intl. A refresh never changes
+  how a number looks, and a number a script wrote keeps its value on the element, so the **live language switch**
+  writes it again in the new language's grouping (the cards, the protocol counts, the error table, the heat map's
+  tooltips — nothing redrawn, nothing asked again).
+* **Every count the site writes** goes through them: the home strip and its placeholders, the Stats page (cards,
+  protocol counts, HTTP errors, heat map, the timeline's legend and status line), the Info panel (seeders,
+  leechers, completed, files, peak, times seen), the search's and the lists' totals and pagers, the files window,
+  the hash check, the whitelist page's count, the account's picture limit, the API guide's numbers; and the panel —
+  the Index (status, coverage, rows, toasts), Traffic (limits, rates, advice, the tuner, the sysctl and DB-memory
+  cards), Users, Audit, IP lists, Languages, the page editor's counter, Settings' hints and the poll estimate, the
+  federation queue — and the server's own sentences (the federation's review and purge, the IP lists, uploaded
+  languages, limits applied, the sysctl / DB-memory / opentracker advice). Dates, sizes with decimals ("13.3 GiB")
+  and units are not counts and stay as they were ("54 sec" too — the owner: "w Polsce też używa się s / sec").
+* **Found on the way**: a Stats card counted up from 2 on a Polish browser — the count-up read its start value with
+  only the commas taken out ("2 251 367" → 2); every non-digit goes now. Settings' poll estimate carried its numbers
+  ready-formatted in the element (a live switch kept the old grouping) — raw numbers now, formatted by the script. The
+  files window's "1,234+ files" is a sentence of its own (`js.app.files_n_more`), not a number with a "+" glued on.
+
+### Fixed — the Stats page's countdown and heat-map tooltip changed their words on the first refresh
+
+* The server wrote "Next update in 12s" and "Interval 05m: 98,765 renews", app.js's first pass "Next update in 12 s"
+  and "Interval 05 min: …" — two dictionary sentences each. The page renders app.js's own now
+  (`js.app.next_update_in`, `js.app.interval_tooltip`); `stats.next_update` and `stats.heat_tip` are gone.
+
+### Changed — a torrent's row on a phone: two rows, not three
+
+* **The owner's screenshots**: up to 600px a favourites row was the name, then size / swarm / hash chip, then the
+  actions alone on a third line at the right — and below 360px the facts' desktop columns were wider than the row:
+  the hash chip stood outside every row and the page was 347px wide on a 320px phone. His proposal, built: a grid —
+  the name across the top (one line, its ellipsis and its title), the facts and the actions sharing the second row.
+* **What he saw fixed**: the size and the swarm read as one run ("13.3 GiB 16 / 3"): 1.25em between facts and a
+  drawn dot in the middle of the gap (Courier New's own "·" stands 1.5px right of its cell's middle — measured). The
+  facts wrap inside their cell — a nine-digit swarm goes under the size, the chip under them, a fact starting a line
+  takes no dot — and the actions keep their width at the row's right edge. Every user of the row — favourites,
+  uploads, a list's window, on the account page and the profile — 320 / 360 / 390 / 414 / 600 px, English and
+  Polish, Bootstrap Icons and Font Awesome; the favourites star at its 1.72.1 gap, no frame. The account's Uploads,
+  whose visibility switch is words (153px, 226px in Polish), keep their actions on a line of their own. People's rows,
+  which share the class, are untouched.
+
+### Fixed — a row's swarm ran over the hash chip on a desktop
+
+* **The owner**: "jak 100 mln i 100 mln robi problem … może konwertować wtedy na 100.82 mln". The swarm's column held
+  13 characters and the busiest torrents' pair is 15 since the grouping ("23,456 / 12,345"). Now a count of a million
+  or more is written compact in the page's language — `t.num(n, 'compact')`, Intl's compact notation, two decimals:
+  "520.22M", "520,22 mln" (Polish compact thousands, "23,46 tys.", are no shorter than "23 456", so nothing below a
+  million is shortened) — with the exact pair in the cell's title; the column fits a pair of six-digit counts in
+  either language (17 characters, 10.25em); a pair that still does not fit ("520,22 mln / 172,22 mln") breaks after its
+  slash, inside its column, each count whole — never onto the chip, at any width.
+
+### Fixed — the audit log's settings diff ran out of its cell
+
+* The panel's Audit page, "What happened": a settings save's details kept every value on one line — the tables'
+  one-line rule (1.68.1) reached the diff's own cells too, so the `overflow-wrap` meant for them never applied — and a
+  long value, an address such as `http://127.0.0.1:8091/scrape?n=300`, ran up to 200px out of the column. The diff's
+  cells wrap now and a long value breaks inside its cell (its `code` says `anywhere` itself: Bootstrap's
+  `word-wrap: break-word` on a code breaks the line but keeps the word's whole width in the table's sizing).
+
+### Documentation — the README's whitelist and panel pictures from a simulated tracker
+
+* Production runs in blacklist mode (its public Whitelist page is a sign-in prompt) and its panel cannot be captured
+  at full size from here, so `whitelist.png` and every `admin-*.png` are taken from the local instance: whitelist
+  mode with public registration open, a catalogue of Linux and BSD images, public-domain and Creative Commons films,
+  open datasets, Creative Commons music and free software; reports of made-up works by the documentation's
+  fictitious organisations (Contoso, Fabrikam, Northwind…) at example.org addresses and documentation-range IPs;
+  members with made-up names (scratchpad/shots/readme_local_shots.js, readme_timeline.php). The five public pictures
+  stay production's.
+
+### Tests
+
+* **New**: `scratchpad/shots/number_lang_check.js` — the home page and Stats in each language opened by a browser of
+  the other (`--lang`, Accept-Language, navigator.language, its Intl default), the numbers as the server renders them
+  and after the script's refresh: identical, the page's grouping, then a live switch; the two Stats sentences.
+  `scratchpad/shots/pfrow_check.js` — the row's shape at every phone width and the swarm at 601 / 1280 / 1440 / 1920,
+  both languages, both icon sets, with before / after pictures. `tests/lang_test.php` — `langNumber()` against Intl's
+  output for English and Polish (and ICU for another language), `t.num()` and its compact form, no `toLocaleString()`
+  left on a count, no one-argument `number_format()` left on a page or an answer, the Stats sentences.
+* **Fixed checks**: `icons_align_check.js` asked a style-only mode (Pro light, Jelly) for a favourites star on the
+  account page, which it never opens beyond the Sounds tab, and `ALIGN_ONLY=member:u` matched no profile (they are
+  `u&name=…`); `emoji_picker_check.js` and `lists_check.js` expected the old grouping. `comments_check.js` and
+  `descriptions_check.js` signed smokepeer in as a moderator only when `fav_check.js` had run before them and left it
+  in the admin group — a set without it found a plain member (Reply / Report only) and failed; each now puts
+  smokepeer in the admin group itself (made when absent, asked of `userGroups()`) and its memberships back row by
+  row. `table_fit_check.js` lists every request the browser could not make or that came back an error, beside its
+  "no script errors" line: a script lost on one load (once, "closeOnBackdrop is not defined" — app.js did not run on
+  one member search page, with no error of its own) now names its cause; and its catalogue rows are stamped just after
+  the newest row the catalogue holds — the panel's Index lists the most recently seen first, and seed_catalogue.js's
+  rows (stamped "now" by the checks that search for "ubuntu") had pushed all ten off its first page whenever one of
+  those checks had run before it.
+
+### Fixed — the whitelist page called registration anonymous, and said nothing is indexed
+
+* "Registration is **free and anonymous**" stood two lines above "Your IP address is stored with each registration"
+  — the address is kept, as 1.73.0's Info and home page say. It reads "Registration is **free** and needs no account"
+  / "Rejestracja jest **darmowa** i nie wymaga konta" now (`whitelist.anon`).
+* "we do not host, index or download any content" was not true while the observed-hash index is on, and the metadata
+  worker does fetch a torrent's name and file list. It says what happens: no files are hosted and no file content is
+  ever downloaded — at most the torrent's name and file list, from the swarm itself (`whitelist.rule_serve`).
+
 ## [1.73.0] — 2026-10-05
 
 The owner's last list before the final audit. Private messages get an **Archive** (what "hide" did, now a place

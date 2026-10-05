@@ -43,8 +43,9 @@
         864000, 1209600, 1814400, 2592000, 3888000, 5184000, 7776000, 10368000, 15552000, 23328000,
         31536000, 47304000, 63072000, 94608000, 157680000];
 
-    const fmtInt = (v) => (v == null || isNaN(v)) ? '—' : Math.round(v).toLocaleString();
-    const fmtRate = (v) => (v == null || isNaN(v)) ? '—' : (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(v >= 10 ? 1 : 2));
+    // Counts in the page's language (t.num(), 1.73.1), as the cards above them; a rate under 100 keeps its decimals.
+    const fmtInt = (v) => (v == null || isNaN(v)) ? '—' : t.num(v);
+    const fmtRate = (v) => (v == null || isNaN(v)) ? '—' : (v >= 100 ? t.num(v) : v.toFixed(v >= 10 ? 1 : 2));
     const fmtAxis = (v) => {
         if (v == null) return '';
         const a = Math.abs(v);
@@ -368,7 +369,7 @@
         const isZoomed = (u) => { const d = u.data && u.data[0]; return !!d && d.length > 1 && (u.scales.x.min > d[0] || u.scales.x.max < d[d.length - 1]); };
         const put = (u, d, keepZoom) => { if (keepZoom && isZoomed(u)) { u.setData(d, false); u.redraw(); } else u.setData(d); };
         const stepTxt = (s) => s >= 3600 ? t.key('js.timeline.unit_h', {n: s / 3600}) : (s >= 60 ? t.key('js.timeline.unit_min', {n: s / 60}) : t.key('js.timeline.unit_s', {n: s}));
-        const statusFor = (p, zoomed) => t.key('js.timeline.status', {points: p.points.toLocaleString(), step: stepTxt(p.step), table: p.table, zoom: zoomed ? t.key('js.timeline.status_zoom') : '', time: fmtTime(p.generated_at)});
+        const statusFor = (p, zoomed) => t.key('js.timeline.status', {points: t.num(p.points), step: stepTxt(p.step), table: p.table, zoom: zoomed ? t.key('js.timeline.status_zoom') : '', time: fmtTime(p.generated_at)});
         // zoom-window refetch state: while active, main+rate show a fine-grained slice fetched with
         // &from/&to (the server picks raw → 5m → 1h for the span); the ranger keeps the full range
         let basePayload = null;

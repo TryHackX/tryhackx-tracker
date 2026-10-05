@@ -1576,9 +1576,10 @@ function renderStatsDashboard(res) {
     const totalPeers = res.peers || 1;
     const seedPct = Math.round((res.seeds / totalPeers) * 100);
     const leechPct = Math.round((res.leechers / totalPeers) * 100);
-    const peersFmt = Number(res.peers).toLocaleString();
-    const seedsFmt = Number(res.seeds).toLocaleString();
-    const leechFmt = Number(res.leechers).toLocaleString();
+    // Counts in the PAGE's language (t.num(), 1.73.1) — what the server rendered (langNumber()), never the browser's.
+    const peersFmt = t.num(Number(res.peers));
+    const seedsFmt = t.num(Number(res.seeds));
+    const leechFmt = t.num(Number(res.leechers));
 
     const subSeedsEl = document.getElementById('sub-seeds');
     const subLeechEl = document.getElementById('sub-leechers');
@@ -1629,15 +1630,15 @@ function renderStatsDashboard(res) {
         barTcp.style.width = tcpPct + '%';
     }
     
-    document.getElementById('val-udp-connect').textContent = res.connections.udp.connect.toLocaleString();
-    document.getElementById('val-udp-announce').textContent = res.connections.udp.announce.toLocaleString();
-    document.getElementById('val-udp-scrape').textContent = res.connections.udp.scrape.toLocaleString();
-    document.getElementById('val-udp-mismatch').textContent = res.connections.udp.mismatch.toLocaleString();
-    
-    document.getElementById('val-tcp-accept').textContent = res.connections.tcp.accept.toLocaleString();
-    document.getElementById('val-tcp-announce').textContent = res.connections.tcp.announce.toLocaleString();
-    document.getElementById('val-tcp-scrape').textContent = res.connections.tcp.scrape.toLocaleString();
-    document.getElementById('val-tcp-sync').textContent = res.connections.livesync.toLocaleString();
+    document.getElementById('val-udp-connect').textContent = t.num(res.connections.udp.connect);
+    document.getElementById('val-udp-announce').textContent = t.num(res.connections.udp.announce);
+    document.getElementById('val-udp-scrape').textContent = t.num(res.connections.udp.scrape);
+    document.getElementById('val-udp-mismatch').textContent = t.num(res.connections.udp.mismatch);
+
+    document.getElementById('val-tcp-accept').textContent = t.num(res.connections.tcp.accept);
+    document.getElementById('val-tcp-announce').textContent = t.num(res.connections.tcp.announce);
+    document.getElementById('val-tcp-scrape').textContent = t.num(res.connections.tcp.scrape);
+    document.getElementById('val-tcp-sync').textContent = t.num(res.connections.livesync);
     
     renderRenewHeatmap(res.renew_intervals || []);
     
@@ -1660,7 +1661,7 @@ function renderStatsDashboard(res) {
                 }
                 return `<tr>
                     <td class="font-mono text-white">${escHtml(err.code)}</td>
-                    <td class="font-mono">${err.count.toLocaleString()}</td>
+                    <td class="font-mono">${escHtml(t.num(err.count))}</td>
                     <td><span class="${badgeClass}">${t.html(severity)}</span></td>
                 </tr>`;
             }).join('');
@@ -1694,7 +1695,7 @@ function renderRenewHeatmap(intervals) {
         // item.interval comes from upstream XML — escape before interpolating into markup.
         const label = escHtml(item.interval);
         // The tooltip keeps its key (t.ah(), 1.73.0), so the live language switch says it again.
-        return `<div class="heat-block level-${level}"${t.ah('data-tooltip', 'js.app.interval_tooltip', {interval: item.interval, count: item.count.toLocaleString()})}>
+        return `<div class="heat-block level-${level}"${t.ah('data-tooltip', 'js.app.interval_tooltip', {interval: item.interval, count: t.num(item.count)})}>
             <span>${label}</span>
         </div>`;
     }).join('');
@@ -1703,10 +1704,12 @@ function renderRenewHeatmap(intervals) {
 function animateNumber(id, endVal) {
     const el = document.getElementById(id);
     if (!el) return;
-    
-    const startVal = parseInt(el.textContent.replace(/,/g, '')) || 0;
+
+    // Where it starts: every digit of what the card shows, whatever its language groups them with (1.73.1: a Polish
+    // card is "2 251 367" — taking only the commas out read that as 2, and the card counted up from 2).
+    const startVal = parseInt(el.textContent.replace(/\D/g, ''), 10) || 0;
     if (startVal === endVal) {
-        el.textContent = endVal.toLocaleString();
+        el.textContent = t.num(endVal);
         return;
     }
     
@@ -1718,12 +1721,12 @@ function animateNumber(id, endVal) {
         const progress = Math.min(elapsed / duration, 1);
         const ease = progress * (2 - progress);
         const current = Math.floor(startVal + (endVal - startVal) * ease);
-        el.textContent = current.toLocaleString();
-        
+        el.textContent = t.num(current);
+
         if (progress < 1) {
             requestAnimationFrame(update);
         } else {
-            el.textContent = endVal.toLocaleString();
+            el.textContent = t.num(endVal);
         }
     }
     requestAnimationFrame(update);
@@ -1808,14 +1811,16 @@ function renderHomeStats(json) {
     }
     if (at > 0) statsHomeLastRenderedAt = at;
 
-    document.getElementById('home-val-torrents').textContent = json.torrents.toLocaleString();
-    document.getElementById('home-val-seeds').textContent = json.seeds.toLocaleString();
+    // In the PAGE's language (t.num(), 1.73.1): the same characters the server rendered (langNumber()), so the
+    // refresh never changes how a number looks — a locale-less call wrote the BROWSER's grouping over them.
+    document.getElementById('home-val-torrents').textContent = t.num(json.torrents);
+    document.getElementById('home-val-seeds').textContent = t.num(json.seeds);
     // 3rd figure is Leechers or Peers depending on the admin-selected style — only one exists.
     const homeLe = document.getElementById('home-val-leechers');
-    if (homeLe) homeLe.textContent = json.leechers.toLocaleString();
+    if (homeLe) homeLe.textContent = t.num(json.leechers);
     const homePe = document.getElementById('home-val-peers');
-    if (homePe) homePe.textContent = Number(json.peers).toLocaleString();
-    document.getElementById('home-val-completed').textContent = json.completed.toLocaleString();
+    if (homePe) homePe.textContent = t.num(Number(json.peers));
+    document.getElementById('home-val-completed').textContent = t.num(json.completed);
     document.getElementById('home-val-uptime').textContent = json.uptime_string;
 }
 
@@ -3553,15 +3558,15 @@ window.siteToast = siteToast;
         };
         const seedV = document.createElement('span');
         seedV.id = 'info-sl-seed';
-        seedV.textContent = st.seeders == null ? '—' : Number(st.seeders).toLocaleString();
+        seedV.textContent = st.seeders == null ? '—' : t.num(st.seeders);
         const leechV = document.createElement('span');
         leechV.id = 'info-sl-leech';
-        leechV.textContent = st.leechers == null ? '—' : Number(st.leechers).toLocaleString();
+        leechV.textContent = st.leechers == null ? '—' : t.num(st.leechers);
         strip.appendChild(statCell(seedV, t.key('js.app.stat_seeders'), 'info-stat-seed'));
         strip.appendChild(statCell(leechV, t.key('js.app.stat_leechers'), 'info-stat-leech'));
-        if (st.completed != null) strip.appendChild(statCell(Number(st.completed).toLocaleString(), t.key('js.app.stat_completed')));
+        if (st.completed != null) strip.appendChild(statCell(t.num(st.completed), t.key('js.app.stat_completed')));
         if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t.key('js.app.stat_size')));
-        if (st.files_count != null) strip.appendChild(statCell(Number(st.files_count).toLocaleString(), st.files_count === 1 ? t.key('js.app.stat_file') : t.key('js.app.stat_files')));
+        if (st.files_count != null) strip.appendChild(statCell(t.num(st.files_count), st.files_count === 1 ? t.key('js.app.stat_file') : t.key('js.app.stat_files')));
         body.appendChild(strip);
 
         // 2. the two chips that qualify those numbers, on one line with the refresh control.
@@ -3594,8 +3599,8 @@ window.siteToast = siteToast;
                 const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
                     op: 'refresh', csrf_token: csrfToken(btn) });
                 if (r && r.success) {
-                    seedV.textContent = Number(r.seeders).toLocaleString();
-                    leechV.textContent = Number(r.leechers).toLocaleString();
+                    seedV.textContent = t.num(Number(r.seeders));
+                    leechV.textContent = t.num(Number(r.leechers));
                     btn.textContent = t.key('js.app.refreshed');
                 } else {
                     btn.textContent = (r && r.error) || t.key('js.app.no_answer');
@@ -3735,9 +3740,9 @@ window.siteToast = siteToast;
         //    strip above rather than as another list of equally important facts.
         const grid = document.createElement('div');
         grid.className = 'info-grid';
-        if (st.peak_seeders != null) grid.appendChild(infoRow(t.key('js.app.row_peak_seeders'), Number(st.peak_seeders).toLocaleString()));
+        if (st.peak_seeders != null) grid.appendChild(infoRow(t.key('js.app.row_peak_seeders'), t.num(st.peak_seeders)));
         if (st.first_seen) grid.appendChild(infoRow(t.key('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
-        if (st.seen_count != null) grid.appendChild(infoRow(t.key('js.app.row_times_seen'), Number(st.seen_count).toLocaleString()));
+        if (st.seen_count != null) grid.appendChild(infoRow(t.key('js.app.row_times_seen'), t.num(st.seen_count)));
         const hashEl = document.createElement('code');
         hashEl.className = 'info-hash';
         hashEl.textContent = json.info_hash;
@@ -3786,7 +3791,7 @@ window.siteToast = siteToast;
             // numbers as pages arrive rather than promising a count nothing can deliver.
             const totalFiles = Number(st.files_count) || 0;
             const sumText = document.createElement('span');
-            sumText.textContent = t.key('js.app.files_count', {n: totalFiles.toLocaleString()});
+            sumText.textContent = t.key('js.app.files_count', {n: t.num(totalFiles)});
             sum.append(iconEl('bi bi-chevron-right disc-chev'), sumText);
             det.appendChild(sum);
             const holder = document.createElement('div');
@@ -3832,9 +3837,9 @@ window.siteToast = siteToast;
             // of every page as well as at the end of it.
             const chrome = () => {
                 sumText.textContent = (totalFiles && allFiles.length < totalFiles)
-                    ? t.key('js.app.files_count_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
-                    : t.key('js.app.files_count', {n: (totalFiles || allFiles.length).toLocaleString()});
-                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                    ? t.key('js.app.files_count_of', {n: t.num(allFiles.length), total: t.num(totalFiles)})
+                    : t.key('js.app.files_count', {n: t.num(totalFiles || allFiles.length)});
+                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: t.num(allFiles.length)});
                 btn.disabled = loading;
                 foot.hidden = !more;
             };
@@ -3871,10 +3876,10 @@ window.siteToast = siteToast;
                 if (fj.truncated && !fj.can_more) note(t.key('js.app.files_truncated'));
                 // Not an error and not a permission: the list simply ends short of the count in
                 // the heading, because that is all the catalogue ever stored for this torrent.
-                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
+                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: t.num(fj.stored_total || allFiles.length)}));
                 // The site's own ceiling, not a permission and not the worker's storage cap:
                 // there are more rows and this page is not going to fetch them.
-                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
+                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: t.num(fj.max || allFiles.length)}));
                 render();
                 return true;
             };
@@ -4038,7 +4043,7 @@ window.siteToast = siteToast;
         if (skipped) {
             const cut = document.createElement('p');
             cut.className = 'text-muted';
-            cut.textContent = t.key('js.app.files_tree_cap', {n: drawn.toLocaleString(), rest: skipped.toLocaleString()});
+            cut.textContent = t.key('js.app.files_tree_cap', {n: t.num(drawn), rest: t.num(skipped)});
             container.appendChild(cut);
         }
         return container;
@@ -4806,7 +4811,7 @@ window.siteToast = siteToast;
             if (json.rows.length === 0 && json.total > 0 && json.page > json.pages) { run(json.pages, 'replace'); return; }
             table.hidden = json.rows.length === 0;
             if (shareBtn) shareBtn.hidden = json.rows.length === 0;
-            $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t.key('js.app.results_one') : t.key('js.app.results_many', {n: json.total.toLocaleString()}));
+            $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t.key('js.app.results_one') : t.key('js.app.results_many', {n: t.num(json.total)}));
             note.hidden = json.total !== 0;
             note.textContent = json.total === 0 ? t.key('js.app.nothing_found') : '';
             renderPager(json.page, json.pages, json.total);
@@ -4846,7 +4851,7 @@ window.siteToast = siteToast;
             if (total) {
                 const tot = document.createElement('span');
                 tot.className = 'pg-total';
-                tot.append('· ', t.key('js.app.pg_rows', {n: total.toLocaleString()}));
+                tot.append('· ', t.key('js.app.pg_rows', {n: t.num(total)}));
                 box.appendChild(tot);
             }
             box.appendChild(mk([t.key('js.app.pg_next'), ' ', iconEl('bi bi-chevron-right')], page + 1, page >= pages));
@@ -4973,15 +4978,16 @@ window.siteToast = siteToast;
             // the folder somebody had just opened folded itself twice per page.
             const chrome = () => {
                 const head = (totalFiles && allFiles.length < totalFiles)
-                    ? t.key('js.app.files_n_of', {n: allFiles.length.toLocaleString(), total: totalFiles.toLocaleString()})
-                    : t.key('js.app.files_n', {n: allFiles.length.toLocaleString() + (more || (json.truncated && !json.can_more) ? '+' : '')});
+                    ? t.key('js.app.files_n_of', {n: t.num(allFiles.length), total: t.num(totalFiles)})
+                    // "1,234+ files" is a sentence of its own (1.73.1): the number keeps its key, a "+" glued to it would not
+                    : t.key((more || (json.truncated && !json.can_more)) ? 'js.app.files_n_more' : 'js.app.files_n', {n: t.num(allFiles.length)});
                 title.replaceChildren(json.name || name || t.key('js.app.files'), ' — ', head);
                 matchNote.hidden = !beyond && !json.matches_more;
                 const bits = [];
-                if (beyond) bits.push(t.key('js.app.files_matches_beyond', {n: beyond.toLocaleString()}));
-                if (json.matches_more) bits.push(...(bits.length ? [' '] : []), t.key('js.app.files_matches_more', {n: matches.length.toLocaleString()}));
+                if (beyond) bits.push(t.key('js.app.files_matches_beyond', {n: t.num(beyond)}));
+                if (json.matches_more) bits.push(...(bits.length ? [' '] : []), t.key('js.app.files_matches_more', {n: t.num(matches.length)}));
                 matchNote.replaceChildren(...bits);
-                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: allFiles.length.toLocaleString()});
+                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: t.num(allFiles.length)});
                 btn.disabled = loading; foot.hidden = !more;
             };
             const render = () => {
@@ -5004,8 +5010,8 @@ window.siteToast = siteToast;
                 }
                 stalled = false;
                 (fj.files || []).forEach(f => allFiles.push(f)); next = typeof fj.next === 'number' ? fj.next : allFiles.length; more = !!fj.truncated && !!fj.can_more;
-                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: Number(fj.stored_total || allFiles.length).toLocaleString()}));
-                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: Number(fj.max || allFiles.length).toLocaleString()}));
+                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: t.num(fj.stored_total || allFiles.length)}));
+                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: t.num(fj.max || allFiles.length)}));
                 render();
                 return true;
             };
@@ -5032,9 +5038,9 @@ window.siteToast = siteToast;
             if (json.truncated && !json.can_more) note(t.key('js.app.files_truncated'));
             // The list ends here and ends short: the rest was never written, so there is nothing to
             // load and nothing wrong — say it once, quietly, under the tree.
-            if (json.stored_short) note(t.key('js.app.files_stored_cap', {n: Number(json.stored_total || allFiles.length).toLocaleString()}));
+            if (json.stored_short) note(t.key('js.app.files_stored_cap', {n: t.num(json.stored_total || allFiles.length)}));
             // The first page can already stand on the site's total when the two numbers are equal.
-            if (json.capped) note(t.key('js.app.files_cap_reached', {n: Number(json.max || allFiles.length).toLocaleString()}));
+            if (json.capped) note(t.key('js.app.files_cap_reached', {n: t.num(json.max || allFiles.length)}));
             render();
             if (filesMode === 'all') await loadAll();
         }
@@ -5660,8 +5666,8 @@ window.siteToast = siteToast;
         // seen in the swarm
         const seen = j.seen;
         if (!off.has('seen')) out.appendChild(row(t.key('js.app.hc_seen'), seen
-            ? t.key('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: Number(seen.times).toLocaleString(),
-                                       s: Number(seen.seeders).toLocaleString(), l: Number(seen.leechers).toLocaleString()})
+            ? t.key('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: t.num(Number(seen.times)),
+                                       s: t.num(Number(seen.seeders)), l: t.num(Number(seen.leechers))})
             : t.key('js.app.hc_seen_no'), seen ? 'hc-yes' : 'hc-no'));
 
         // metadata and files
@@ -5672,9 +5678,9 @@ window.siteToast = siteToast;
         const fetched = Number(f.fetched) || 0;
         const total = f.total === null || f.total === undefined ? null : Number(f.total);
         let filesText;
-        if (!fetched) filesText = total ? t.key('js.app.hc_files_known_only', {total: total.toLocaleString()}) : t.key('js.app.hc_files_none');
-        else if (total && total > fetched) filesText = t.key('js.app.hc_files_partial', {n: fetched.toLocaleString(), total: total.toLocaleString()});
-        else filesText = t.key('js.app.hc_files_all', {n: fetched.toLocaleString()});
+        if (!fetched) filesText = total ? t.key('js.app.hc_files_known_only', {total: t.num(total)}) : t.key('js.app.hc_files_none');
+        else if (total && total > fetched) filesText = t.key('js.app.hc_files_partial', {n: t.num(fetched), total: t.num(total)});
+        else filesText = t.key('js.app.hc_files_all', {n: t.num(fetched)});
         out.appendChild(row(t.key('js.app.hc_files'), filesText, fetched ? 'hc-yes' : 'hc-no'));
         out.hidden = false;
     }

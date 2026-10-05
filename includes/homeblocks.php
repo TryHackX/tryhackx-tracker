@@ -72,29 +72,30 @@ function homeBlocks(PDO $db, array $cfg, string $baseUrl): array {
     <div class="home-stats-content <?= $hasCache ? '' : 'hidden' ?>">
         <div class="home-stat-item">
             <span class="h-label"><?= _h('home.stat_torrents') ?></span>
-            <strong class="h-value font-mono text-accent" id="home-val-torrents"><?= $hasCache ? number_format($cacheData['torrents']) : '—' ?></strong>
+            <?php /* Counts in the page's language (langNumber(), 1.73.1) — the characters app.js writes when it refreshes them (t.num()). */ ?>
+            <strong class="h-value font-mono text-accent" id="home-val-torrents"><?= $hasCache ? langNumber((int)$cacheData['torrents']) : '—' ?></strong>
         </div>
         <div class="home-stat-divider"></div>
         <div class="home-stat-item">
             <span class="h-label"><?= _h('home.stat_seeds') ?></span>
-            <strong class="h-value font-mono text-success" id="home-val-seeds"><?= $hasCache ? number_format($cacheData['seeds']) : '—' ?></strong>
+            <strong class="h-value font-mono text-success" id="home-val-seeds"><?= $hasCache ? langNumber((int)$cacheData['seeds']) : '—' ?></strong>
         </div>
         <div class="home-stat-divider"></div>
         <?php if ($peerLabelStyle === 'peers_card'): ?>
         <div class="home-stat-item">
             <span class="h-label"><?= _h('home.stat_peers') ?></span>
-            <strong class="h-value font-mono text-warning" id="home-val-peers"><?= $hasCache ? number_format($cacheData['peers']) : '—' ?></strong>
+            <strong class="h-value font-mono text-warning" id="home-val-peers"><?= $hasCache ? langNumber((int)$cacheData['peers']) : '—' ?></strong>
         </div>
         <?php else: ?>
         <div class="home-stat-item">
             <span class="h-label"><?= _h('home.stat_leechers') ?></span>
-            <strong class="h-value font-mono text-warning" id="home-val-leechers"><?= $hasCache ? number_format($cacheData['leechers']) : '—' ?></strong>
+            <strong class="h-value font-mono text-warning" id="home-val-leechers"><?= $hasCache ? langNumber((int)$cacheData['leechers']) : '—' ?></strong>
         </div>
         <?php endif; ?>
         <div class="home-stat-divider"></div>
         <div class="home-stat-item">
             <span class="h-label"><?= _h('home.stat_completed') ?></span>
-            <strong class="h-value font-mono text-info" id="home-val-completed"><?= $hasCache ? number_format($cacheData['completed']) : '—' ?></strong>
+            <strong class="h-value font-mono text-info" id="home-val-completed"><?= $hasCache ? langNumber((int)$cacheData['completed']) : '—' ?></strong>
         </div>
         <div class="home-stat-divider"></div>
         <div class="home-stat-item">
@@ -313,7 +314,8 @@ $homeFeat = [
 function homePlaceholders(PDO $db, array $cfg, string $baseUrl, ?array $blocks = null): array {
     $blocks = $blocks ?? homeBlocks($db, $cfg, $baseUrl);
     $e = fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-    $n = fn($v) => $v === null ? '—' : number_format((int)$v);
+    // the page's language (langNumber(), 1.73.1); English where the dictionary is not loaded (a CLI tool, a test)
+    $n = fn($v) => $v === null ? '—' : (function_exists('langNumber') ? langNumber((int)$v) : number_format((int)$v));
 
     $cache = null;
     $cacheFile = __DIR__ . '/../config/stats_cache.json';

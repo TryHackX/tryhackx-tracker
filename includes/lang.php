@@ -210,6 +210,53 @@ function langInit(array $cfg, ?string $userLanguage = null): void {
 /** The active code. Falls back to English before langInit() has run. */
 function langCurrent(): string { return $GLOBALS['__lang']['current'] ?? LANG_FALLBACK; }
 
+/**
+ * The languages whose numbers leave four digits whole — "1234", but "12 345" (CLDR's minimumGroupingDigits 2, the data
+ * the browser's Intl.NumberFormat carries; read from it, 2026-10). PHP's NumberFormatter does not apply that rule, so
+ * langNumber() does.
+ */
+const LANG_NUMBER_MIN2 = ['pl', 'es', 'it', 'hu', 'bg', 'sl', 'lv', 'et', 'be', 'sq', 'ka', 'hy', 'la'];
+
+/**
+ * A COUNT AS THE PAGE'S LANGUAGE WRITES IT (1.73.1): "2,251,367" on an English page, "2 251 367" on a Polish one —
+ * character for character what the browser's Intl.NumberFormat gives for that language, which is what the scripts
+ * write when they refresh the same number (t.num(), assets/js/i18n.js): the server's render and the script's refresh
+ * never differ. Until 1.73.1 the server grouped every page the English way (number_format()) and the scripts by the
+ * BROWSER's language (toLocaleString() with no locale) — a Polish browser showed "2 251 367" on the English page, and
+ * the Polish page kept the English commas.
+ *
+ * Intl's rules, not number_format()'s: English groups with a comma from four digits on; Polish with a NO-BREAK space
+ * (U+00A0) and leaves four digits whole ("1234", "12 345"). A count is a whole number — anything else is rounded
+ * (half away from zero, as round() does). Another installed language asks ICU (PHP's intl, the data a browser carries
+ * too) with the same four-digit rule where CLDR gives it; without intl, the English rule. Only counts: a date, a size
+ * with decimals ("13.3 GiB") and the units are not this function's ("54 sec" stays — the owner: "w Polsce też używa
+ * się s / sec").
+ */
+function langNumber(int|float|string $n, ?string $code = null): string {
+    $v = (int)round((float)$n);
+    $code = strtolower($code ?? langCurrent());
+    if ($code === 'en') return number_format($v);
+    $whole = abs($v) < 10000 && in_array($code, LANG_NUMBER_MIN2, true);
+    if ($code === 'pl') return $whole ? (string)$v : number_format($v, 0, '', "\u{00A0}");
+    static $icu = [];
+    if (!array_key_exists($code, $icu)) {
+        $icu[$code] = null;
+        if (class_exists('NumberFormatter') && preg_match('/^[a-z]{2,3}$/', $code)) {
+            try {
+                $f = \NumberFormatter::create($code, \NumberFormatter::DECIMAL);
+                if ($f) { $f->setAttribute(\NumberFormatter::MAX_FRACTION_DIGITS, 0); $icu[$code] = $f; }
+            } catch (\Throwable $e) { /* the English rule below */ }
+        }
+    }
+    $f = $icu[$code];
+    if (!$f) return number_format($v);
+    if (!$whole) return (string)$f->format($v);
+    $f->setAttribute(\NumberFormatter::GROUPING_USED, 0);
+    $s = (string)$f->format($v);
+    $f->setAttribute(\NumberFormatter::GROUPING_USED, 1);
+    return $s;
+}
+
 /** Read one language file, once. */
 function langLoad(string $code): array {
     if (isset($GLOBALS['__lang']['loaded'][$code])) return $GLOBALS['__lang']['loaded'][$code];

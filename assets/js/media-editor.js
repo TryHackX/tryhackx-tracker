@@ -507,7 +507,9 @@
     function preflight(file, maxBytes) {
         if (!file) return T('js.media.not_image');
         if (!(TYPES.indexOf(file.type) !== -1 || (!file.type && EXT.test(file.name || '')))) return T('js.media.not_image');
-        if (maxBytes > 0 && file.size > maxBytes) return T('js.media.too_large', { kb: Math.floor(maxBytes / 1024) });
+        // the limit as the drop zone says it: grouped in the page's language (t.num(), 1.73.1)
+        const kb = Math.floor(maxBytes / 1024);
+        if (maxBytes > 0 && file.size > maxBytes) return T('js.media.too_large', { kb: (window.t && window.t.num) ? window.t.num(kb) : kb });
         return '';
     }
 

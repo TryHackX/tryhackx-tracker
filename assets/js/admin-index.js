@@ -61,7 +61,7 @@
     function kv(label, value) {
         return el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, value)]);
     }
-    const num = (n) => (Number(n) || 0).toLocaleString();
+    const num = (n) => t.num(Number(n) || 0);   // a count in the page's language (1.73.1)
     function renderStatus(s) {
         const c = s.counts || {}, st = s.state || {};
         $('idx-disabled-note').style.display = s.enabled ? 'none' : '';
@@ -189,7 +189,7 @@
         state.rows = data.rows || [];
         state.pages = data.pages || 1;
         renderRows(data);
-        $('idx-total').textContent = t.key('js.index.n_rows', { n: (data.total || 0).toLocaleString() });
+        $('idx-total').textContent = t.key('js.index.n_rows', { n: t.num(data.total || 0) });
         renderPagination($('idx-pagination'), { total: data.total, page: data.page, pages: data.pages, onPage: (p) => { state.page = p; load(); } });
         syncBulkbar();
     }
@@ -388,13 +388,13 @@
             // different numbers and the modal read as if the list were complete. Say both.
             const fill = (files, truncated, short, capped) => {
                 const nodes = [el('h6', { className: 'text-muted', text: short && it.files_count
-                    ? t.key('js.index.files_n_of', { n: files.length.toLocaleString(), total: Number(it.files_count).toLocaleString() })
+                    ? t.key('js.index.files_n_of', { n: t.num(files.length), total: t.num(Number(it.files_count)) })
                     : t.key('js.index.files_n', { n: files.length + (truncated || capped ? '+' : '') }) })];
                 nodes.push(buildFileTree(files));
-                if (short) nodes.push(el('div', { className: 'text-muted small mt-1', text: t.key('js.index.files_stored_cap', { n: files.length.toLocaleString() }) }));
+                if (short) nodes.push(el('div', { className: 'text-muted small mt-1', text: t.key('js.index.files_stored_cap', { n: t.num(files.length) }) }));
                 // A third sentence for a third state: rows are waiting and no button will bring
                 // them, because this list already stands on the panel's own total.
-                if (capped) nodes.push(el('div', { className: 'text-muted small mt-1', text: t.key('js.index.files_capped', { n: files.length.toLocaleString() }) }));
+                if (capped) nodes.push(el('div', { className: 'text-muted small mt-1', text: t.key('js.index.files_capped', { n: t.num(files.length) }) }));
                 list.replaceChildren(...nodes);
             };
             fill(d.files, d.files_truncated, d.files_short, d.files_capped);
@@ -517,20 +517,20 @@
         const body = { scope: 'date' };
         if (hours === 'custom') { const r = await promptDateRange(); if (!r) return; body.from = r.from; if (r.to) body.to = r.to; }
         else body.since_hours = Number(hours);
-        try { const r = await apiCall('admin/index_fetch_meta', 'POST', body); if (!r.success || r.error) { showToast(r.error || t.key('js.index.queue_failed'), 'error'); return; } showToast(r.queued ? t.key('js.index.queued_n_range', { n: r.queued.toLocaleString(), from: r.from, to: r.to }) : t.key('js.index.nothing_queue_window'), r.queued ? 'success' : 'info'); loadStatus(); }
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', body); if (!r.success || r.error) { showToast(r.error || t.key('js.index.queue_failed'), 'error'); return; } showToast(r.queued ? t.key('js.index.queued_n_range', { n: t.num(r.queued), from: r.from, to: r.to }) : t.key('js.index.nothing_queue_window'), r.queued ? 'success' : 'info'); loadStatus(); }
         catch (e) { showToast(e.message, 'error'); }
     }
     async function restoreMeta() {
         try {
             const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'restore' });
             if (!r.success || r.error) { showToast(r.error || t.key('js.index.rebuild_failed'), 'error'); return; }
-            showToast(r.restored ? t.key('js.index.restored_n', { n: r.restored.toLocaleString() }) : t.key('js.index.nothing_restore'), r.restored ? 'success' : 'info');
+            showToast(r.restored ? t.key('js.index.restored_n', { n: t.num(r.restored) }) : t.key('js.index.nothing_restore'), r.restored ? 'success' : 'info');
             load(); loadStatus();
         } catch (e) { showToast(e.message, 'error'); }
     }
     async function cancelMetaQueue() {
         if (!(await confirmAction(t.key('js.index.cancel_queue_title'), t.key('js.index.cancel_queue_body'), { danger: true, okLabel: t.key('js.index.cancel_queue_ok') }))) return;
-        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'cancel' }); if (!r.success || r.error) { showToast(r.error || t.key('js.index.cancel_failed'), 'error'); return; } showToast([t.key('js.index.cancelled_n', { n: (r.cancelled || 0).toLocaleString() }), r.restored ? t.key('js.index.cancelled_restored', { n: r.restored.toLocaleString() }) : '']); load(); loadStatus(); }
+        try { const r = await apiCall('admin/index_fetch_meta', 'POST', { scope: 'cancel' }); if (!r.success || r.error) { showToast(r.error || t.key('js.index.cancel_failed'), 'error'); return; } showToast([t.key('js.index.cancelled_n', { n: t.num(r.cancelled || 0) }), r.restored ? t.key('js.index.cancelled_restored', { n: t.num(r.restored) }) : '']); load(); loadStatus(); }
         catch (e) { showToast(e.message, 'error'); }
     }
     let scrapeRunning = false, scrapeStop = false;
@@ -644,7 +644,7 @@
         $('btn-idx-poll').addEventListener('click', async () => {
             const btn = $('btn-idx-poll'); btn.disabled = true;
             const orig = btn.innerHTML; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> ' + esc(t.key('js.index.polling'));
-            try { const r = await apiCall('admin/index_poll_now', 'POST', {}); if (r.success) showToast([t.key('js.index.poll_result', { seen: r.entries.toLocaleString(), kept: r.kept.toLocaleString(), ms: r.ms }), r.partial ? t.key('js.index.ended_early_suffix') : (r.truncated ? t.key('js.index.truncated_suffix') : '')]); else showToast(r.error || t.key('js.index.poll_failed'), 'warning'); load(); loadStatus(); }
+            try { const r = await apiCall('admin/index_poll_now', 'POST', {}); if (r.success) showToast([t.key('js.index.poll_result', { seen: t.num(r.entries), kept: t.num(r.kept), ms: r.ms }), r.partial ? t.key('js.index.ended_early_suffix') : (r.truncated ? t.key('js.index.truncated_suffix') : '')]); else showToast(r.error || t.key('js.index.poll_failed'), 'warning'); load(); loadStatus(); }
             catch (e) { showToast(e.message, 'error'); }
             finally { btn.disabled = false; btn.innerHTML = orig; }
         });

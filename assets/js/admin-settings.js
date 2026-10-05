@@ -718,8 +718,9 @@
         if (!needs || isNaN(raw)) return;
         const budget = Math.max(lo, Math.min(hi, raw));
         const polls = Math.max(1, Math.ceil(needs / budget));
+        // the counts in the page's language (t.num(), 1.73.1), from the numbers the element carries
         line.textContent = t.key(polls > 1 ? 'js.settings.poll_estimate_many' : 'js.settings.poll_estimate_one', {
-            rate: line.dataset.rate, scrape: line.dataset.scrape, needs: line.dataset.needsText, budget: budget, polls: polls,
+            rate: t.num(Number(line.dataset.rate)), scrape: t.num(Number(line.dataset.scrape)), needs: t.num(needs), budget: budget, polls: polls,
         });
     }
     field.addEventListener('input', paint);

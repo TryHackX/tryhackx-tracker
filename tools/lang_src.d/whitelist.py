@@ -68,12 +68,14 @@ add('whitelist', {
                      'magnet (albo same 40-znakowe info hashe), a zostaną dodane do whitelisty na Twoim '
                      'koncie (bez CAPTCHY). Torrenty publikowane na forum społecznościowym rejestrują '
                      'się automatycznie.'),
+    # 1.73.1: "free and anonymous" became "free, no account needed" — the address a registration is sent from is
+    # stored with it (rule_ip, two lines below on the same page), as 1.73.0 already said on the home page.
     'anon':        ('This tracker serves <strong>registered torrents only</strong>:hours. Registration is '
-                    '<strong>free and anonymous</strong> — paste one or more magnet links (or plain '
+                    '<strong>free</strong> and needs no account — paste one or more magnet links (or plain '
                     '40-character info hashes), :captcha and the hashes are added to the whitelist. '
                     'Torrents posted on the community forum are registered automatically.',
                     'Ten tracker obsługuje <strong>wyłącznie zarejestrowane torrenty</strong>:hours. '
-                    'Rejestracja jest <strong>darmowa i anonimowa</strong> — wklej jeden lub więcej '
+                    'Rejestracja jest <strong>darmowa</strong> i nie wymaga konta — wklej jeden lub więcej '
                     'linków magnet (albo same 40-znakowe info hashe), :captcha, a hashe zostaną dodane '
                     'do whitelisty. Torrenty publikowane na forum społecznościowym rejestrują się '
                     'automatycznie.'),
@@ -107,10 +109,14 @@ add('whitelist', {
                     'Banned hashes cannot be re-registered.',
                     'Zarejestrowane hashe mogą zostać w każdej chwili usunięte lub zbanowane (np. po '
                     'zgłoszeniu nadużycia). Zbanowanych hashy nie można zarejestrować ponownie.'),
-    'rule_serve':  ('Registration only tells the tracker to <em>serve</em> the swarm — we do not host, '
-                    'index or download any content.',
-                    'Rejestracja mówi trackerowi jedynie, by <em>obsługiwał</em> rój — nie hostujemy, nie '
-                    'indeksujemy ani nie pobieramy żadnych treści.'),
+    # 1.73.1: "we do not … index …" was not true while the observed-hash index is on, and the metadata worker does
+    # fetch a torrent's name and file list — never a file's content. Said as it is.
+    'rule_serve':  ('Registration only tells the tracker to <em>serve</em> the swarm — no files are hosted here '
+                    'and no file content is ever downloaded; at most the torrent\'s name and file list, from the '
+                    'swarm itself.',
+                    'Rejestracja mówi trackerowi jedynie, by <em>obsługiwał</em> rój — nie hostujemy żadnych '
+                    'plików i nigdy nie pobieramy ich treści; najwyżej nazwę torrenta i listę plików, z samego '
+                    'roju.'),
     'input_label': ('Magnet links / info hashes', 'Linki magnet / info hashe'),
     'input_err':   ('Paste at least one valid magnet link or 40-hex info hash',
                     'Wklej przynajmniej jeden poprawny link magnet albo 40-znakowy info hash'),
