@@ -89,7 +89,11 @@ pictures are new: the public pages from the live site, the panel and the whiteli
   open datasets, Creative Commons music and free software; reports of made-up works by the documentation's
   fictitious organisations (Contoso, Fabrikam, Northwind…) at example.org addresses and documentation-range IPs;
   members with made-up names (scratchpad/shots/readme_local_shots.js, readme_timeline.php). The five public pictures
-  stay production's.
+  stay production's, taken again once 1.73.1 was live — its numbers, the chart's whole last label — and only once
+  every font had loaded (a first Polish home page drew its copy buttons as empty squares).
+* The note above the README's pictures said they all came from a local instance and none from production; it says
+  which come from where, and why. The Status caption promised "is the tracker up" — the page follows a report by its
+  number and checks whether a hash is blocked, and the caption says that.
 
 ### Tests
 

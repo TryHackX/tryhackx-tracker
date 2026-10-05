@@ -277,8 +277,11 @@ Mail goes out through PHP's `mail()` — the machine needs an MTA (INSTALL §1).
 
 ## Screenshots
 
-*All shots come from a local instance with bootstrap data ("Local Tracker", example.org addresses,
-the smoke-test accounts) — nothing from production appears in them.*
+*The public pages — home, statistics, status, info — are the live tracker at
+[tracker.tryhackx.org](https://tracker.tryhackx.org/), seen by a guest. The whitelist page and the panel come from a
+local instance with simulated data (a catalogue of free and open works, members with made-up names, reports by
+fictitious organisations at example.org addresses): the live site runs in blacklist mode, and its panel holds real
+members' data.*
 
 <p align="center">
   <img src="assets/img/screenshots/admin-panel.png" alt="Admin dashboard — reports table with search, filters and workflow actions" width="900">
@@ -300,7 +303,7 @@ the smoke-test accounts) — nothing from production appears in them.*
   </tr>
   <tr>
     <td align="center"><em>Live tracker statistics (cached, auto-refreshing) with the swarm timeline.</em></td>
-    <td align="center"><em>Public status — is my hash whitelisted, is the tracker up.</em></td>
+    <td align="center"><em>Status — follow a report by its number, check whether a hash is blocked.</em></td>
   </tr>
   <tr>
     <td width="50%" valign="top"><img src="assets/img/screenshots/whitelist.png" alt="Public whitelist registration" width="100%"></td>
