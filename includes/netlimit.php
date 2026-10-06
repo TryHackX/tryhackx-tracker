@@ -229,6 +229,9 @@ function netlimitStateDefaults(): array {
         'last_error'    => null, 'last_error_at' => 0, 'last_ok_at' => 0,
         'last_apply_at' => 0, 'last_apply_pps' => 0, 'last_apply_source' => '',
         'last_prune_at' => 0, 'last_tick_at' => 0,
+        // 1.73.3: the TCP counters at the last sample ({out, retrans, at}) and the resent share they gave
+        // ({x10, at, span, segs, read}) — what the provider drops outside the machine (netlimitStoreSample()).
+        'tcp_prev'      => null, 'tcp_retrans_now' => null,
     ];
 }
 
@@ -817,6 +820,194 @@ function netlimitLive(array $status, ?int $now = null): array {
     return $result;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Outside the machine (1.73.3): the share of TCP segments resent
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Production, 2026-10-05: whenever the tracker SENT more than roughly 50–80 k packets a second, the provider
+// (a VPS) dropped packets of the WHOLE machine in both directions — the website, the forum, mail, SSH: limit
+// 50 000 → ~52 500 pps out, 20 % of pings lost; 90 000 → ~88 k out, 52 %; 175 000 → ~94 k out, 66–70 %. And
+// inside the guest nothing showed it: rx/tx_dropped 0, softnet 0, the egress queue 0, the CPU 65 % idle, so
+// every card here (and the stability probe) said all was well. One counter inside the VM does follow it: the
+// TCP segments the machine has to send AGAIN (/proc/net/snmp, RetransSegs against OutSegs) — 15.6 % at
+// 90 000 pps going out, 1.9 % with the tracker stopped. The janitor reads it with every traffic sample.
+
+const NET_LOSS_MIN_SEGMENTS = 300;  // fewer TCP segments over a sample say nothing (tools/tuner.py RETRANS_MIN_SEGMENTS)
+const NET_LOSS_WARN_PCT     = 4.0;  // ok below this share resent, warn from here…
+const NET_LOSS_BAD_PCT      = 8.0;  // … bad from here
+const NET_LOSS_HOUR_S       = 3600; // the advice also reads the median of the last hour of samples…
+const NET_LOSS_HOUR_MIN     = 5;    // … made of at least this many readings (an hour of the safe-history cap too)
+const NET_LOSS_LOWER        = 0.8;  // while warn/bad the advice suggests ~80 % of what the limit lets through now
+const NET_LOSS_SAFE_DAYS    = 7;    // when ok, a suggestion is capped at the busiest hour with an ok reading in this window
+
+/** /proc/net/snmp, or the file TRACKER_PROC_SNMP names (tests; tools/tuner.py honours the same variable). */
+function netlimitProcSnmpFile(): string {
+    $e = getenv('TRACKER_PROC_SNMP');
+    return is_string($e) && $e !== '' ? $e : '/proc/net/snmp';
+}
+
+/**
+ * ['out' => OutSegs, 'retrans' => RetransSegs] from the text of /proc/net/snmp, or null. The file is pairs of
+ * lines per protocol — the field names, then their values — so the two are found by NAME, not by position.
+ */
+function netlimitSnmpTcp(string $raw): ?array {
+    $head = null;
+    foreach (preg_split('/\R/', $raw) ?: [] as $line) {
+        if (strncmp($line, 'Tcp:', 4) !== 0) continue;
+        $f = preg_split('/\s+/', trim(substr($line, 4)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($head === null) { $head = $f; continue; }
+        if (count($f) !== count($head)) return null;
+        $row = array_combine($head, $f);
+        if (!isset($row['OutSegs'], $row['RetransSegs']) || !ctype_digit($row['OutSegs']) || !ctype_digit($row['RetransSegs'])) return null;
+        return ['out' => (int)$row['OutSegs'], 'retrans' => (int)$row['RetransSegs']];
+    }
+    return null;
+}
+
+/** The machine's TCP counters now, or null — a platform without /proc/net/snmp gives no reading, never zeros. */
+function netlimitTcpRead(): ?array {
+    $f = netlimitProcSnmpFile();
+    if (!@is_readable($f)) return null;
+    $raw = @file_get_contents($f);
+    return is_string($raw) ? netlimitSnmpTcp($raw) : null;
+}
+
+/**
+ * Segments resent per 1 000 sent between two readings (what `net_samples.tcp_retrans_x10` holds), or null: either
+ * reading missing, a span outside [NET_LIVE_MIN_SPAN, $maxSpan], a counter that went backwards (a reboot between
+ * them), or fewer than NET_LOSS_MIN_SEGMENTS sent — a dozen segments with one resent is noise, not 8 %.
+ */
+function netlimitRetransX10(?array $prev, ?array $cur, int $span, int $maxSpan = NET_LIVE_MAX_SPAN): ?int {
+    if (!$prev || !$cur || $span < NET_LIVE_MIN_SPAN || $span > $maxSpan) return null;
+    $out = (int)($cur['out'] ?? 0) - (int)($prev['out'] ?? 0);
+    $re  = (int)($cur['retrans'] ?? 0) - (int)($prev['retrans'] ?? 0);
+    if ($out < NET_LOSS_MIN_SEGMENTS || $re < 0) return null;
+    return min(65535, (int)round(1000 * $re / $out));
+}
+
+/** ok below NET_LOSS_WARN_PCT, warn below NET_LOSS_BAD_PCT, bad from there; null for no reading. */
+function netlimitLossLevel(?float $pct): ?string {
+    if ($pct === null) return null;
+    return $pct >= NET_LOSS_BAD_PCT ? 'bad' : ($pct >= NET_LOSS_WARN_PCT ? 'warn' : 'ok');
+}
+
+/**
+ * What admin/net_status says about the loss outside the machine. Pure: the state's `tcp_retrans_now`, the last hour
+ * of samples (netlimitLossHour()), the time and the sample interval. Null when nothing was ever read.
+ *
+ *   pct / level / at   the newest sample's share resent (one decimal), ok|warn|bad, when it was read; pct null with
+ *                      `why` = 'few' (under NET_LOSS_MIN_SEGMENTS), 'unreadable' (no /proc/net/snmp here) or
+ *                      'stale' (older than three sample intervals, at least ten minutes — the janitor stopped)
+ *   hour_pct / hour_level / hour_n   the median of the last hour's readings, from NET_LOSS_HOUR_MIN of them
+ *   guard / guard_pct  warn or bad now OR over the hour: the advice never suggests a higher limit then
+ */
+function netlimitOutsideLoss(?array $now, ?array $hour, int $at, int $sampleSeconds = 60): ?array {
+    $out = ['pct' => null, 'level' => null, 'at' => 0, 'why' => 'none', 'segs' => null,
+            'hour_pct' => null, 'hour_level' => null, 'hour_n' => 0, 'guard' => false, 'guard_pct' => null];
+    if (is_array($now) && (int)($now['at'] ?? 0) > 0) {
+        $out['at'] = (int)$now['at'];
+        $out['segs'] = isset($now['segs']) ? (int)$now['segs'] : null;
+        if ($at - $out['at'] > max(600, 3 * $sampleSeconds)) $out['why'] = 'stale';
+        elseif (empty($now['read'])) $out['why'] = 'unreadable';
+        elseif (!isset($now['x10']) || $now['x10'] === null) $out['why'] = 'few';
+        else {
+            $out['pct'] = round((int)$now['x10'] / 10, 1);
+            $out['level'] = netlimitLossLevel($out['pct']);
+            $out['why'] = '';
+        }
+    }
+    if (is_array($hour) && (int)($hour['n'] ?? 0) >= NET_LOSS_HOUR_MIN && ($hour['median_x10'] ?? null) !== null) {
+        $out['hour_pct'] = round((int)$hour['median_x10'] / 10, 1);
+        $out['hour_level'] = netlimitLossLevel($out['hour_pct']);
+        $out['hour_n'] = (int)$hour['n'];
+    }
+    $hurts = static fn(?string $l): bool => $l === 'warn' || $l === 'bad';
+    if ($hurts($out['level']) || $hurts($out['hour_level'])) {
+        $out['guard'] = true;
+        $out['guard_pct'] = max($hurts($out['level']) ? (float)$out['pct'] : 0.0, $hurts($out['hour_level']) ? (float)$out['hour_pct'] : 0.0);
+    }
+    return ($out['at'] === 0 && $out['hour_pct'] === null) ? null : $out;
+}
+
+/**
+ * The last hour of samples: the median share resent (x10) over the rows that have one, how many do, and the median
+ * rate that got through (the advice lowers from it when nothing better is known).
+ */
+function netlimitLossHour(PDO $db, int $now): array {
+    $st = $db->prepare("SELECT tcp_retrans_x10, pps_passed FROM `" . NET_SAMPLE_TABLE . "` WHERE ts > ? AND ts <= ?");
+    $st->execute([$now - NET_LOSS_HOUR_S, $now]);
+    $x = []; $passed = [];
+    foreach ($st->fetchAll(PDO::FETCH_NUM) ?: [] as [$rx, $pp]) {
+        if ($rx !== null) $x[] = (int)$rx;
+        $passed[] = (int)$pp;
+    }
+    return ['median_x10' => $x ? netlimitPercentile($x, 50) : null, 'n' => count($x),
+            'passed' => $passed ? netlimitPercentile($passed, 50) : null];
+}
+
+/**
+ * The busiest hour this machine is known to have coped with: the highest hourly average of `pps_passed` over the last
+ * $days days among the hours whose average share resent stayed under NET_LOSS_WARN_PCT, from NET_LOSS_HOUR_MIN readings
+ * at least. Null when no hour qualifies (no history — the samples before 1.73.3 have no reading — or none was ok).
+ */
+function netlimitSafeHistoryCap(PDO $db, int $now, int $days = NET_LOSS_SAFE_DAYS): ?int {
+    $st = $db->prepare("SELECT AVG(pps_passed) AS passed, AVG(tcp_retrans_x10) AS rx, COUNT(tcp_retrans_x10) AS n
+                        FROM `" . NET_SAMPLE_TABLE . "` WHERE ts > ? AND ts <= ? GROUP BY FLOOR(ts / 3600)");
+    $st->execute([$now - $days * 86400, $now]);
+    $best = null;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+        if ((int)$r['n'] < NET_LOSS_HOUR_MIN || $r['rx'] === null || (float)$r['rx'] >= NET_LOSS_WARN_PCT * 10) continue;
+        $best = max($best ?? 0, (int)round((float)$r['passed']));
+    }
+    return $best ?: null;
+}
+
+/**
+ * The rate the advice lowers from while the machine loses packets outside: what the limit in force lets through —
+ * the lower of the limit and the rate getting through now (a limit far above the traffic does not hold it, so 80 % of
+ * the LIMIT would not lower what is sent at all; production 2026-10-03: a limit of 175 000 passed ~100 000). Either
+ * alone when the other is unknown; 0 when neither is.
+ */
+function netlimitLossBase(int $limitInForce, int $passed): int {
+    if ($limitInForce > 0 && $passed > 0) return min($limitInForce, $passed);
+    return max(0, $limitInForce, $passed);
+}
+
+/**
+ * The recommendation, guarded by the loss outside the machine (pure; admin/net_status applies it between
+ * netlimitRecommend() and netlimitRecommendParts()):
+ *   · warn/bad now or over the last hour (`$loss['guard']`) — `guard` 'loss': the suggestion is ~NET_LOSS_LOWER of
+ *     $base (netlimitLossBase()), rounded with netlimitRoundStep(), never above the limit in force; 0 when $base is
+ *     unknown (the words then send the operator to lower it by hand or to the stability probe);
+ *   · otherwise, with a known safe hour (netlimitSafeHistoryCap()) under the suggestion — `guard` 'cap': the
+ *     suggestion is capped there (rounded down to the step);
+ *   · `suggested_was` keeps what the arrivals alone said (P95 + 5 %), so the sentence about them stays true.
+ */
+function netlimitRecommendGuard(array $rec, ?array $loss, int $base, ?int $safeCap): array {
+    $rec['guard'] = null;
+    if (empty($rec['samples'])) return $rec;
+    if (is_array($loss) && !empty($loss['guard'])) {
+        $rec['guard'] = 'loss';
+        $rec['suggested_was'] = (int)$rec['suggested'];
+        $rec['loss_pct'] = (float)($loss['guard_pct'] ?? 0);
+        $rec['loss_base'] = max(0, $base);
+        $rec['suggested'] = $base > 0 ? netlimitRoundStep((int)round($base * NET_LOSS_LOWER)) : 0;
+        return $rec;
+    }
+    if ($safeCap !== null && $safeCap > 0 && (int)$rec['suggested'] > $safeCap) {
+        $cap = netlimitRoundStep($safeCap);
+        if ($cap > $safeCap) $cap -= $cap >= 100000 ? 5000 : 1000;
+        $cap = max(NET_PPS_MIN, $cap);
+        if ($cap < (int)$rec['suggested']) {
+            $rec['guard'] = 'cap';
+            $rec['suggested_was'] = (int)$rec['suggested'];
+            $rec['safe_cap'] = $safeCap;
+            $rec['suggested'] = $cap;
+        }
+    }
+    return $rec;
+}
+
 /** Is a chart sample due? */
 function netlimitSampleDue(array $state, array $cfg, int $now): bool {
     $last = (int)($state['sample']['ts'] ?? 0);
@@ -828,19 +1019,33 @@ function netlimitSampleDue(array $state, array $cfg, int $now): bool {
  * the chart is independent of how often somebody has the panel open.
  */
 function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): array {
+    $maxSpan = max(NET_LIVE_MAX_SPAN, netlimitSampleSeconds($cfg) * 5);
+    // Outside the machine (1.73.3): the TCP counters, read with every sample whether or not a table of ours is
+    // loaded — what the provider drops is not counted by the firewall. The previous reading stays in the state
+    // (`tcp_prev`), the share it gives goes into the row and into `tcp_retrans_now` for the card.
+    $tcp = netlimitTcpRead();
+    $retrans = null;
+    netlimitStateUpdate(function (array &$s) use ($tcp, $now, $maxSpan, &$retrans) {
+        $prev = is_array($s['tcp_prev'] ?? null) ? $s['tcp_prev'] : null;
+        $span = $prev ? $now - (int)($prev['at'] ?? 0) : 0;
+        $retrans = netlimitRetransX10($prev, $tcp, $span, $maxSpan);
+        $s['tcp_prev'] = $tcp !== null ? ['out' => $tcp['out'], 'retrans' => $tcp['retrans'], 'at' => $now] : null;
+        $s['tcp_retrans_now'] = ['x10' => $retrans, 'at' => $now, 'span' => $span, 'read' => $tcp !== null,
+                                 'segs' => ($prev && $tcp) ? $tcp['out'] - (int)($prev['out'] ?? 0) : null];
+        return true;
+    });
     // With no table of ours loaded there are no counters, so every field would be a legitimate-looking
     // zero — and a run of zeros drags the median to nothing and makes the recommendation a lie. A
     // missing measurement has to stay missing.
     if (empty($status['table'])) {
         netlimitStateUpdate(function (array &$s) { $s['sample'] = ['ts' => 0, 'counters' => []]; return true; });
-        return ['stored' => false, 'reason' => 'nothing is counting — no rules of ours are loaded', 'pps' => null];
+        return ['stored' => false, 'reason' => 'nothing is counting — no rules of ours are loaded', 'pps' => null, 'retrans_x10' => $retrans];
     }
     $in  = netlimitCounterPackets((array)($status['counters'] ?? []), NET_IN_COUNTERS);
     $out = netlimitCounterPackets((array)($status['egress']['counters'] ?? []), NET_OUT_COUNTERS);
     $state = netlimitStateRead();
     $prevTs = (int)($state['sample']['ts'] ?? 0);
     $span = $prevTs > 0 ? ($now - $prevTs) : 0;
-    $maxSpan = max(NET_LIVE_MAX_SPAN, netlimitSampleSeconds($cfg) * 5);
     $rates  = netlimitRates((array)($state['sample']['counters'] ?? []), $in, $span, NET_LIVE_MIN_SPAN, $maxSpan);
     $erates = netlimitRates((array)($state['sample']['egress'] ?? []), $out, $span, NET_LIVE_MIN_SPAN, $maxSpan);
 
@@ -849,17 +1054,17 @@ function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): arra
         return true;
     });
     // first reading after a start/reload has nothing to subtract from — remember it, store nothing
-    if ($rates === null) return ['stored' => false, 'reason' => $prevTs === 0 ? 'first reading' : 'counters restarted', 'pps' => null];
+    if ($rates === null) return ['stored' => false, 'reason' => $prevTs === 0 ? 'first reading' : 'counters restarted', 'pps' => null, 'retrans_x10' => $retrans];
 
     $sql = "INSERT INTO `" . NET_SAMPLE_TABLE . "`
                 (ts, span, in_total, in_passed, in_capped, out_ok, out_capped,
-                 pps_total, pps_passed, pps_capped, epps_ok, epps_capped, limit_pps, load_x100)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 pps_total, pps_passed, pps_capped, epps_ok, epps_capped, limit_pps, load_x100, tcp_retrans_x10)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE span = VALUES(span), in_total = VALUES(in_total), in_passed = VALUES(in_passed),
                  in_capped = VALUES(in_capped), out_ok = VALUES(out_ok), out_capped = VALUES(out_capped),
                  pps_total = VALUES(pps_total), pps_passed = VALUES(pps_passed), pps_capped = VALUES(pps_capped),
                  epps_ok = VALUES(epps_ok), epps_capped = VALUES(epps_capped), limit_pps = VALUES(limit_pps),
-                 load_x100 = VALUES(load_x100)";
+                 load_x100 = VALUES(load_x100), tcp_retrans_x10 = VALUES(tcp_retrans_x10)";
     $db->prepare($sql)->execute([
         $now, $span,
         $in['in_total'], $in['in_passed'], $in['in_capped'],
@@ -871,8 +1076,10 @@ function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): arra
         // The load at the moment of the sample. Recorded next to the rate so the panel can later
         // say at what traffic level THIS machine started struggling, instead of the admin guessing.
         (function () { $l = netlimitLoadPerCore(); return $l === null ? null : (int)round($l * 100); })(),
+        // …and the share of TCP segments resent over the same span (1.73.3): the loss OUTSIDE the machine.
+        $retrans,
     ]);
-    return ['stored' => true, 'reason' => '', 'pps' => $rates];
+    return ['stored' => true, 'reason' => '', 'pps' => $rates, 'retrans_x10' => $retrans];
 }
 
 /**
@@ -901,13 +1108,14 @@ function netlimitStoreSample(PDO $db, array $cfg, array $status, int $now): arra
  *    'busy_pps'=>int|null,     the lowest rate whose bucket is at or above the busy threshold
  *    'peak_load'=>float|null, 'quiet_load'=>float|null,
  *    'confident'=>bool, 'why'=>string,  'why' explains a null in words the card can print (the reader's language)
- *    'why_part'=>['key','vars']|null]   … and the same sentence as its dictionary key and numbers (1.73.0)
+ *    'why_part'=>['key','vars']|null,   … and the same sentence as its dictionary key and numbers (1.73.0)
+ *    'thin_part'=>['key','vars']|null]  a hotter bucket with too few readings to count, said after it (1.73.3, MAIN-2)
  */
 function netlimitLoadCurve(PDO $db, array $cfg, int $days = 7, ?int $now = null): array {
     $now = $now ?? time();
     $days = max(1, min(netlimitKeepDays($cfg), $days));
     $out = ['samples' => 0, 'buckets' => [], 'busy_pps' => null, 'peak_load' => null,
-            'quiet_load' => null, 'confident' => false, 'why' => '', 'why_part' => null];
+            'quiet_load' => null, 'confident' => false, 'why' => '', 'why_part' => null, 'thin_part' => null];
 
     $st = $db->prepare("SELECT pps_passed, load_x100 FROM `" . NET_SAMPLE_TABLE . "`
                         WHERE ts >= ? AND load_x100 IS NOT NULL AND pps_passed > 0");
@@ -961,9 +1169,25 @@ function netlimitLoadCurve(PDO $db, array $cfg, int $days = 7, ?int $now = null)
         }
     }
     if ($out['busy_pps'] === null) {
+        // MAIN-2 (1.73.3): "the busiest median" is read from the buckets that COUNT — those with NET_LOAD_MIN_BUCKET
+        // readings behind them, the same ones busy_pps is found among. Read from every bucket, a hot bucket of three
+        // unlucky minutes made the sentence argue with itself: "never reached a load of 0.85 … (busiest median 0.92)".
+        // Ten buckets over at least NET_LOAD_MIN_SAMPLES readings always leave one that counts.
+        $counted = array_filter($out['buckets'], static fn($b) => $b['n'] >= NET_LOAD_MIN_BUCKET);
+        $maxCounted = $counted ? max(array_column($counted, 'load')) : 0.0;
         // the loads as decimals with a point, as the card writes the busy threshold (a string: said as it is)
-        $why($out, 'load_never', ['busy' => (string)NET_LOAD_BUSY,
-                                  'max' => number_format(max(array_column($out['buckets'], 'load')), 2, '.', '')]);
+        $why($out, 'load_never', ['busy' => (string)NET_LOAD_BUSY, 'max' => number_format($maxCounted, 2, '.', '')]);
+        // …and a hotter bucket with too few readings is a sentence of its own, not the maximum: the hottest one that
+        // would have been busy, with its rate, its load and how many readings it has (`thin_part`, said after `why`).
+        $thin = null;
+        foreach ($out['buckets'] as $b) {
+            if ($b['n'] < NET_LOAD_MIN_BUCKET && $b['load'] >= NET_LOAD_BUSY && ($thin === null || $b['load'] > $thin['load'])) $thin = $b;
+        }
+        if ($thin !== null) {
+            $out['thin_part'] = ['key' => 'api.net.load_thin', 'vars' => ['pps' => (int)$thin['pps'], 'n' => (int)$thin['n'],
+                                 'load' => number_format((float)$thin['load'], 2, '.', ''), 'min' => NET_LOAD_MIN_BUCKET]];
+            $out['why'] = netlimitSayParts([$out['why_part'], $out['thin_part']]);
+        }
     }
     $out['confident'] = $out['busy_pps'] !== null;
     return $out;
@@ -1160,7 +1384,26 @@ function netlimitRecommendParts(array $rec, bool $flood = false, int $passed = 0
     $days = (int)($rec['days'] ?? 7);
     $out = [$part($days === 1 ? 'rec_stats_day' : 'rec_stats',
                   ['days' => $days, 'median' => (int)$rec['median'], 'p95' => (int)$rec['p95'], 'peak' => (int)$rec['peak']])];
+
+    // The machine is losing packets OUTSIDE it (netlimitRecommendGuard(), 1.73.3): nothing else here may lead, and no
+    // sentence may point at a higher limit — the arrivals' P95 and the flood's reference are both higher, and both were
+    // what sent production from 90 000 to 175 000 while two thirds of every packet of the machine was being lost.
+    // The shares are strings, said as they are (one decimal with a point, as the card writes them).
+    if (($rec['guard'] ?? null) === 'loss') {
+        $out[] = $part('rec_loss', ['pct' => number_format((float)($rec['loss_pct'] ?? 0), 1, '.', ''),
+                                    'warn' => number_format(NET_LOSS_WARN_PCT, 0, '.', '')]);
+        $out[] = (int)$rec['suggested'] > 0
+            ? $part('rec_loss_lower', ['n' => (int)$rec['suggested'], 'base' => (int)($rec['loss_base'] ?? 0)])
+            : $part('rec_loss_probe');
+        return $out;
+    }
     if (!$rec['enough']) { $out[] = $part('rec_few'); return $out; }
+    // What the arrivals alone said, before a cap (`suggested_was`) — the sentences about them stay true; the cap is said after.
+    $fromArrivals = (int)($rec['suggested_was'] ?? $rec['suggested']);
+    $cap = ($rec['guard'] ?? null) === 'cap'
+        ? $part('rec_cap', ['n' => (int)$rec['suggested'], 'safe' => (int)($rec['safe_cap'] ?? 0), 'days' => NET_LOSS_SAFE_DAYS,
+                            'warn' => number_format(NET_LOSS_WARN_PCT, 0, '.', '')])
+        : null;
 
     // Which sentence comes FIRST decides what the admin reads. When arrivals are not demand — the
     // counting mode drops nothing, or somebody else's rule drops it further down — leading with
@@ -1170,10 +1413,12 @@ function netlimitRecommendParts(array $rec, bool $flood = false, int $passed = 0
     if ($flood) {
         $out[] = $part('rec_flood');
         $out[] = $passed > 0 ? $part('rec_flood_passed', ['passed' => $passed]) : $part('rec_flood_pick');
-        $out[] = $part('rec_flood_ref', ['n' => (int)$rec['suggested']]);
+        $out[] = $part('rec_flood_ref', ['n' => $fromArrivals]);
+        if ($cap) $out[] = $cap;
         return $out;
     }
-    $out[] = $part('rec_normal', ['suggested' => (int)$rec['suggested'], 'floor' => (int)$rec['floor']]);
+    $out[] = $part('rec_normal', ['suggested' => $fromArrivals, 'floor' => (int)$rec['floor']]);
+    if ($cap) $out[] = $cap;
     return $out;
 }
 

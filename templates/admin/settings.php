@@ -2570,6 +2570,22 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <input type="number" step="0.1" min="0.5" max="20" class="form-control bg-dark text-light border-secondary" name="tuner_load_hard" value="<?= sanitize($cfg['tuner_load_hard'] ?? '2.0') ?>">
                         <small class="settings-hint"><?= _h('settings.tuner_hard_hint') ?></small>
                     </div>
+                    <?php /* 1.73.3: what the provider drops OUTSIDE the machine — includes/tuner.php, tools/tuner.py */ ?>
+                    <div class="col-md-4" data-setting="tuner_loss_targets">
+                        <label class="form-label"><?= _h('settings.tuner_targets') ?></label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary" name="tuner_loss_targets" value="<?= sanitize($cfg['tuner_loss_targets'] ?? TUNER_TARGETS_DEFAULT) ?>" placeholder="1.1.1.1 9.9.9.9" maxlength="300">
+                        <small class="settings-hint"><?= __('settings.tuner_targets_hint', ['max' => TUNER_TARGETS_MAX]) ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_retrans_max">
+                        <label class="form-label"><?= _h('settings.tuner_retrans_max') ?> <small class="settings-hint">(%)</small></label>
+                        <input type="number" step="0.1" min="<?= TUNER_RETRANS_MAX_MIN ?>" max="<?= TUNER_RETRANS_MAX_MAX ?>" class="form-control bg-dark text-light border-secondary" name="tuner_retrans_max" value="<?= sanitize($cfg['tuner_retrans_max'] ?? '5.0') ?>">
+                        <small class="settings-hint"><?= __('settings.tuner_retrans_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tuner_ping_loss_max">
+                        <label class="form-label"><?= _h('settings.tuner_ping_loss_max') ?> <small class="settings-hint">(%)</small></label>
+                        <input type="number" step="1" min="<?= TUNER_PING_LOSS_MAX_MIN ?>" max="<?= TUNER_PING_LOSS_MAX_MAX ?>" class="form-control bg-dark text-light border-secondary" name="tuner_ping_loss_max" value="<?= sanitize($cfg['tuner_ping_loss_max'] ?? '10') ?>">
+                        <small class="settings-hint"><?= __('settings.tuner_ping_loss_max_hint') ?></small>
+                    </div>
                 </div>
             </div>
 

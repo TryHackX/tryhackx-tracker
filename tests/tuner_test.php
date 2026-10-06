@@ -191,6 +191,126 @@ check('"updated" on the card is the newer of the two stamps', $s['updated_at'] >
 check('the card learns how the process was started, and the unit\'s name', ($s['launch']['via'] ?? '') === 'unit' && $s['unit'] === 'tracker-probe');
 check('the card learns whether the helper is configured', $s['helper'] === true && tunerStatus(['tuner_enabled' => '1', 'net_limit_cmd' => ''])['helper'] === false);
 
+// ── outside the machine (1.73.3) ────────────────────────────────────────────
+// Production, 2026-10-05: past ~50–80 k packets a second sent, the provider dropped 45–70 % of the whole machine's
+// packets while every reading inside the VM said "no harm" — and the probe judged 129 000–175 000 safe. It now also
+// reads the share of TCP segments resent and pings out of the box, on absolute thresholds per step.
+check('targets: addresses and host names', tunerValidTarget('1.1.1.1') && tunerValidTarget('2606:4700:4700::1111')
+      && tunerValidTarget('one.one.one.one') && tunerValidTarget('dns9.quad9.net.'));
+check('targets: never anything ping could read as an option, nor anything that is not a name',
+      !tunerValidTarget('-f') && !tunerValidTarget('--flood') && !tunerValidTarget('x$(id)') && !tunerValidTarget('')
+      && !tunerValidTarget('a..b') && !tunerValidTarget('host-') && !tunerValidTarget(str_repeat('a', 64) . '.com'));
+$pt = tunerParseTargets(" 1.1.1.1, 9.9.9.9;1.1.1.1\n ");
+check('targets: split on spaces, commas or semicolons, de-duplicated in order', $pt['targets'] === ['1.1.1.1', '9.9.9.9'] && !$pt['bad'] && !$pt['too_many'], json_encode($pt));
+check('targets: a bad entry is named (the save refuses it by name), never dropped quietly', tunerParseTargets('1.1.1.1 -f')['bad'] === ['-f']);
+check('targets: more than ' . TUNER_TARGETS_MAX . ' is refused, ' . TUNER_TARGETS_MAX . ' are fine',
+      tunerParseTargets('a b c d e')['too_many'] === true && tunerParseTargets('a b c d')['too_many'] === false);
+check('targets: empty is a real answer — no pings', tunerParseTargets('') === ['targets' => [], 'bad' => [], 'too_many' => false]);
+
+// Four places or it is not a setting: a default, the search catalogue, the save allow-list, a control on the page.
+require_once $root . '/includes/schema.php';
+require_once $root . '/includes/settings_catalog.php';
+$saveSrc = (string)file_get_contents($root . '/api/admin/save_settings.php');
+$setTpl  = (string)file_get_contents($root . '/templates/admin/settings.php');
+$defs = trackerSchemaDefaultSettings();
+$kwds = settingsCatalogKeywords();
+foreach (['tuner_loss_targets' => TUNER_TARGETS_DEFAULT, 'tuner_retrans_max' => '5.0', 'tuner_ping_loss_max' => '10'] as $k => $def) {
+    check("$k: ships as '$def', is in the catalogue, the allow-list and on the page",
+          ($defs[$k] ?? null) === $def && isset($kwds[$k]) && str_contains($saveSrc, "'$k'") && str_contains($setTpl, 'name="' . $k . '"'),
+          json_encode([$defs[$k] ?? null, isset($kwds[$k])]));
+}
+check('the schema says so: 92, its line, the column on the CREATE and as a guarded ALTER',
+      TRACKER_SCHEMA_VERSION >= 92 && str_contains((string)file_get_contents($root . '/includes/schema.php'), '92 = the packets lost OUTSIDE this machine')
+      && str_contains((string)file_get_contents($root . '/includes/schema.php'), "if (!schemaColumnExists(\$db, 'net_samples', 'tcp_retrans_x10'))"));
+check('the save refuses a bad target by name, a list too long, and clamps the two thresholds',
+      str_contains($saveSrc, 'tunerParseTargets((string)$data[\'tuner_loss_targets\'])')
+      && str_contains($saveSrc, "__('api.settings.tuner_target_invalid', ['entry' => \$tg['bad'][0]])")
+      && str_contains($saveSrc, "__('api.settings.tuner_targets_too_many', ['max' => TUNER_TARGETS_MAX])")
+      && str_contains($saveSrc, 'max(TUNER_RETRANS_MAX_MIN, min(TUNER_RETRANS_MAX_MAX, $v))')
+      && str_contains($saveSrc, 'max(TUNER_PING_LOSS_MAX_MIN, min(TUNER_PING_LOSS_MAX_MAX, $v))'));
+$enT = langLoad('en'); $plT = langLoad('pl');
+$tw = ['settings.tuner_targets', 'settings.tuner_targets_hint', 'settings.tuner_retrans_max', 'settings.tuner_retrans_max_hint',
+       'settings.tuner_ping_loss_max', 'settings.tuner_ping_loss_max_hint', 'api.settings.tuner_target_invalid', 'api.settings.tuner_targets_too_many',
+       'js.tuner.step_retrans', 'js.tuner.step_ping', 'js.tuner.outside_first', 'js.tuner.harm_outside', 'js.tuner.outside_rule'];
+$missing = array_values(array_filter($tw, static fn($k) => empty($enT[$k]) || empty($plT[$k]) || $enT[$k] === $plT[$k]));
+check('… its words, in English and in Polish', $missing === [], implode(', ', $missing));
+
+// The card reads what the probe wrote: the steps' two figures and the report's verdict pass through untouched.
+$write(['running' => false, 'phase' => 'done', 'updated_at' => time() - 5,
+        'baseline' => ['arriving_pps' => 170000, 'outside' => ['retrans_pct' => 15.6, 'ping_loss_pct' => 70.0]],
+        'steps' => [['limit_pps' => 102000, 'ok' => false, 'outside' => true, 'harm_kind' => 'outside', 'harm' => 'the provider …',
+                     'retrans_pct' => 15.6, 'ping_loss_pct' => 70.0]],
+        'report' => ['outside_first' => 102000, 'outside_dry' => false, 'retrans_max' => 5.0, 'ping_loss_max' => 10.0,
+                     'suggested_safe' => null, 'suggested_minimum' => null, 'summary' => 'Even at 102,000 pps …']]);
+$s = tunerStatus($cfgRun);
+check('the card gets the steps\' figures, the baseline outside and the report\'s verdict as the probe wrote them',
+      // (the state file is JSON: 70.0 comes back as 70 — the card reads any number)
+      ($s['steps'][0]['retrans_pct'] ?? null) === 15.6 && ($s['steps'][0]['harm_kind'] ?? '') === 'outside'
+      && (float)($s['baseline']['outside']['ping_loss_pct'] ?? -1) === 70.0 && ($s['report']['outside_first'] ?? null) === 102000, json_encode($s['report']));
+$tnJs = (string)file_get_contents($root . '/assets/js/admin-tuner.js');
+check('… and writes them: two figures per step ("—" when there is none), the verdict and the first step\'s loss in the reader\'s language',
+      str_contains($tnJs, 'text: retransWord(s.retrans_pct)') && str_contains($tnJs, 'text: pingWord(s.ping_loss_pct)')
+      && str_contains($tnJs, "t.key('js.tuner.step_retrans_none')") && str_contains($tnJs, "s.harm_kind === 'outside' ? t.key('js.tuner.harm_outside')")
+      && str_contains($tnJs, "t.key('js.tuner.outside_first', {n: num(rep.outside_first)})") && str_contains($tnJs, "t.key('js.tuner.no_value_outside')"));
+
+// The rules themselves, in tools/tuner.py: its self-test, and the cases the brief names run through the real code.
+if ($py === '') {
+    skip('tuner.py: the rules outside the machine', 'no python 3 on PATH');
+} else {
+    $self = (string)@shell_exec($py . ' ' . escapeshellarg($root . DIRECTORY_SEPARATOR . 'tools' . DIRECTORY_SEPARATOR . 'tuner.py') . ' --self-test 2>&1');
+    check('tuner.py --self-test passes (it writes only TRACKER_TUNER_STATE, the temporary file)',
+          (bool)preg_match('/\n(\d+) checks, 0 failed\s*$/', $self, $mSelf) && (int)$mSelf[1] >= 80, substr($self, -400));
+    $probe = $tmp . DIRECTORY_SEPARATOR . 'outside_cases.py';
+    file_put_contents($probe, str_replace('@TOOLS@', str_replace('\\', '/', $root . '/tools'), <<<'PY'
+import json, sys
+sys.path.insert(0, '@TOOLS@')
+import tuner
+
+base = {'sockets': {'6969': 100}, 'softnet': {'dropped': 0}, 'load': {'per_core': 0.3}}
+cfg = {'_tracker_port': '6969'}
+def at(out, re_, p1, p2):
+    return dict(base, tcp={'out': out, 'retrans': re_}, ping={'1.1.1.1': p1, '9.9.9.9': p2})
+st0 = {'tcp': {'out': 100000, 'retrans': 1000}, 'ping': {'1.1.1.1': 0.0, '9.9.9.9': 0.0}}
+cases = {
+    'over_retrans': at(110000, 1600, 0.0, 0.0),     # 6.0 % resent
+    'over_ping': at(110000, 1100, 40.0, 20.0),      # 1 % resent, pings 0, 0, 40, 20 -> 15 %
+    'under_both': at(110000, 1400, 20.0, 0.0),      # 4 % resent, pings 5 %
+    'missing': dict(base, tcp=None, ping=None),
+}
+out = {}
+for name, now in cases.items():
+    start = st0 if name != 'missing' else {'tcp': None, 'ping': None}
+    out[name] = list(tuner.harm_detail(base, now, base, cfg, step_start=start, step_samples=[start, now]))
+steps = [
+    {'limit_pps': 60000, 'ok': True, 'harm': '', 'dropped_pps': 50000},
+    {'limit_pps': 80000, 'ok': True, 'harm': '', 'dropped_pps': 30000},
+    {'limit_pps': 100000, 'ok': False, 'outside': True, 'harm': 'x', 'dropped_pps': 10000},
+]
+later = tuner.summarise(steps, 110000, 175000, '')
+first = tuner.summarise([dict(steps[2])], 170000, 175000, '')
+out['later'] = {'safe': later['suggested_safe'], 'first': later['outside_first']}
+out['first'] = {'safe': first['suggested_safe'], 'minimum': first['suggested_minimum'], 'first': first['outside_first'], 'summary': first['summary']}
+print(json.dumps(out))
+PY
+    ));
+    $raw = (string)@shell_exec($py . ' ' . escapeshellarg($probe) . ' 2>&1');
+    $res = json_decode(trim($raw), true);
+    // a key that is there and null (`?? 'x'` would read a null as missing)
+    $isNull = static fn($a, string $k): bool => is_array($a) && array_key_exists($k, $a) && $a[$k] === null;
+    check('tuner.py: a step over tuner_retrans_max (6 % resent) is harm — outside the machine',
+          is_array($res) && ($res['over_retrans'][0] ?? '') === 'outside' && str_contains($res['over_retrans'][1] ?? '', '6.0 %'), $raw);
+    check('tuner.py: a step over tuner_ping_loss_max (15 % of pings lost) is harm too',
+          is_array($res) && ($res['over_ping'][0] ?? '') === 'outside' && str_contains($res['over_ping'][1] ?? '', '15 %'), $raw);
+    check('tuner.py: under both (4 % resent, 5 % lost) is not harm, and missing readings are not harm',
+          is_array($res) && ($res['under_both'] ?? null) === ['', ''] && ($res['missing'] ?? null) === ['', ''], $raw);
+    check('tuner.py: the suggestion is the highest step that passed every rule (80 000 below the step that lost packets)',
+          is_array($res) && ($res['later']['safe'] ?? null) === 80000 && $isNull($res['later'] ?? null, 'first'), $raw);
+    check('tuner.py: the first step already lost packets → said plainly, nothing suggested',
+          is_array($res) && ($res['first']['first'] ?? null) === 100000 && $isNull($res['first'] ?? null, 'safe')
+          && $isNull($res['first'] ?? null, 'minimum') && str_contains($res['first']['summary'] ?? '', 'Even at 100,000 pps this machine loses packets outside it'), $raw);
+    @unlink($probe);
+}
+
 // clean up
 putenv('PATH=' . $pathBefore);
 foreach (['TRACKER_TUNER_STATE', 'STUB_OUT', 'STUB_REPLY', 'INVOCATION_ID'] as $v) putenv($v);

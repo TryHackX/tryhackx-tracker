@@ -64,6 +64,11 @@
         if (state.baseline && state.baseline.arriving_pps) {
             g.appendChild(kv(t.key('js.tuner.arriving_at_start'), t.key('js.tuner.pps', {n: num(Math.round(state.baseline.arriving_pps))})));
         }
+        // What was already lost OUTSIDE the machine before anything moved (1.73.3) — context, never a reason to stop.
+        const bo = state.baseline && state.baseline.outside;
+        if (bo && (typeof bo.retrans_pct === 'number' || typeof bo.ping_loss_pct === 'number')) {
+            g.appendChild(kv(t.key('js.tuner.outside_at_start'), [retransWord(bo.retrans_pct), ' · ', pingWord(bo.ping_loss_pct)]));
+        }
         if (state.plan && state.plan.length) {
             g.appendChild(kv(t.key('js.tuner.plan'), t.key('js.tuner.pps', {n: state.plan.map(p => num(p)).join(' → ')})));
         }
@@ -125,9 +130,26 @@
                 text: t.key('js.tuner.step_dropped', {n: s.dropped_pps === null ? '—' : num(Math.round(s.dropped_pps))}) }));
             row.appendChild(el('span', { className: 'tn-step-fig',
                 text: s.load_per_core === null ? t.key('js.tuner.step_load_none') : t.key('js.tuner.step_load', {n: s.load_per_core.toFixed(2)}) }));
-            row.appendChild(el('span', { className: 'tn-step-verdict', text: s.ok ? t.key('js.tuner.no_harm') : s.harm }));
+            // Outside the machine (1.73.3): TCP segments resent and pings lost over the step — "—" where there was
+            // nothing to read (no /proc/net/snmp, no ping, too few segments, a report from before 1.73.3).
+            row.appendChild(el('span', { className: 'tn-step-fig tn-step-retrans', title: t.key('js.tuner.step_retrans_title'),
+                text: retransWord(s.retrans_pct) }));
+            row.appendChild(el('span', { className: 'tn-step-fig tn-step-ping', title: t.key('js.tuner.step_ping_title'),
+                text: pingWord(s.ping_loss_pct) }));
+            // A step the loss outside stopped says so in the reader's language; the other reasons are the probe's own.
+            row.appendChild(el('span', { className: 'tn-step-verdict', text: s.ok ? t.key('js.tuner.no_harm')
+                : (s.harm_kind === 'outside' ? t.key('js.tuner.harm_outside') : s.harm) }));
             box.appendChild(row);
         });
+    }
+
+    /** "TCP resent 15.6 %" / "TCP resent —" — a share the probe read, one decimal, as the card writes the load. */
+    function retransWord(v) {
+        return typeof v === 'number' ? t.key('js.tuner.step_retrans', {n: v.toFixed(1)}) : t.key('js.tuner.step_retrans_none');
+    }
+    /** "pings lost 70 %" / "pings lost —". */
+    function pingWord(v) {
+        return typeof v === 'number' ? t.key('js.tuner.step_ping', {n: Math.round(v)}) : t.key('js.tuner.step_ping_none');
     }
 
     function renderReport() {
@@ -144,7 +166,19 @@
             box.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small mb-2',
                 text: rep.inconclusive }));
         }
+        // The first step already lost packets OUTSIDE the machine (1.73.3): the provider's limit is below the whole
+        // plan, and the answer is a lower limit than anything the run held — said first, in the reader's language.
+        const outsideFirst = rep.outside_dry
+            ? (rep.outside_first ? t.key('js.tuner.outside_first_dry', {n: num(rep.outside_first)}) : t.key('js.tuner.outside_first_dry_none'))
+            : (rep.outside_first ? t.key('js.tuner.outside_first', {n: num(rep.outside_first)}) : null);
+        if (outsideFirst) {
+            box.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mb-2 tn-outside-first', text: outsideFirst }));
+        }
         box.appendChild(el('div', { className: 'tn-report-summary', text: rep.summary || '' }));
+        if (typeof rep.retrans_max === 'number' && typeof rep.ping_loss_max === 'number') {
+            box.appendChild(el('div', { className: 'wl-small text-muted mt-1 tn-outside-rule',
+                text: t.key('js.tuner.outside_rule', {r: rep.retrans_max.toFixed(1), p: Math.round(rep.ping_loss_max)}) }));
+        }
 
         const acts = el('div', { className: 'tn-report-acts' });
         // Only the values the run held. A suggestion the machine never actually ran at would be a
@@ -166,7 +200,7 @@
             acts.appendChild(el('span', { className: 'wl-small text-muted',
                 text: rep.inconclusive
                     ? t.key('js.tuner.no_value_inconclusive')
-                    : t.key('js.tuner.no_value_short') }));
+                    : (outsideFirst ? t.key('js.tuner.no_value_outside') : t.key('js.tuner.no_value_short')) }));
         }
         box.appendChild(acts);
     }

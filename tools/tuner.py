@@ -25,7 +25,8 @@ THE THREE RULES IT IS BUILT AROUND
 
 2. HARM STOPS THE RUN, NOT THE OPERATOR. Every sample is checked against the baseline taken before the
    first change. If another service starts dropping, or the load crosses a ceiling, the run ends
-   immediately and restores. It never needs somebody watching it.
+   immediately and restores. It never needs somebody watching it. And since 1.73.3 a step that
+   LOSES PACKETS OUTSIDE THE MACHINE stops it too — see "Outside the machine" below.
 
 3. IT SUGGESTS, IT DOES NOT APPLY. The run ends with the settings exactly as it found them and a
    report. Applying anything from that report is a separate, password-confirmed decision in the panel.
@@ -88,6 +89,35 @@ WHAT_BOTH = 'both'
 # answers roughly one packet per announce, so the two are naturally close; the headroom covers the
 # replies that are larger than the question.
 OUTBOUND_HEADROOM = 1.35
+
+# OUTSIDE THE MACHINE (1.73.3)
+#
+# Everything else this program watches is INSIDE the VM, and on 2026-10-05 that was the whole problem:
+# whenever the tracker sent more than roughly 50-80 thousand packets a second, the provider dropped
+# 45-70 % of every packet of the machine in both directions — the website, mail, SSH — while inside the
+# guest nothing showed it (no drops on any socket, none in softnet, none in the egress queue, the CPU
+# 65 % idle). The probe judged 129 000-175 000 "no harm", and the limit was raised on its advice.
+#
+# Two readings inside the VM DO follow that loss, measured at the same moment (limit 90 000, ~90 000
+# packets a second out): the share of TCP segments the machine had to send AGAIN — /proc/net/snmp,
+# RetransSegs / OutSegs, 15.6 % (1.9 % with the tracker stopped) — and pings FROM the server to a couple
+# of outside addresses, 85 % and 55 % lost. Both are judged on ABSOLUTE thresholds: a loss outside is a
+# property of the level the step holds, not something the run "added" to a baseline — and the baseline
+# may already be bad (on that day it was).
+#
+# The ratio is over the step so far (from the sample taken right after the limit moved), and says
+# nothing below RETRANS_MIN_SEGMENTS: on a quiet box a dozen segments with one resent is noise, not 8 %.
+# The pings are the mean over the step so far, judged from PING_MIN_READINGS runs of PING_COUNT each.
+# A missing reading — no /proc/net/snmp, no `ping`, not Linux, a target that does not resolve — is never
+# harm, and never a zero.
+SNMP_PATH = '/proc/net/snmp'            # TRACKER_PROC_SNMP overrides it, for tests (includes/netlimit.php reads the same)
+RETRANS_MIN_SEGMENTS = 300              # the same floor as includes/netlimit.php NET_LOSS_MIN_SEGMENTS
+PING_COUNT = 5
+PING_MIN_READINGS = 4                   # four runs of five pings (two samples of the two default targets)
+LOSS_TARGETS_DEFAULT = '1.1.1.1 9.9.9.9'
+LOSS_TARGETS_MAX = 4                    # includes/tuner.php TUNER_TARGETS_MAX
+RETRANS_MAX_DEFAULT = 5.0               # % of TCP segments resent over a step (tuner_retrans_max)
+PING_LOSS_MAX_DEFAULT = 10.0            # % of pings lost, the mean over a step (tuner_ping_loss_max)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,6 +349,152 @@ def read_load() -> dict:
         return {}
 
 
+def parse_snmp_tcp(text: str):
+    """
+    {'out': OutSegs, 'retrans': RetransSegs} from the text of /proc/net/snmp, or None.
+
+    The file is pairs of lines per protocol — a header naming the fields, then their values — so the
+    fields are found by NAME in the header rather than by position, which differs between kernels.
+    """
+    header = None
+    for line in (text or '').splitlines():
+        if not line.startswith('Tcp:'):
+            continue
+        fields = line.split()[1:]
+        if header is None:
+            header = fields
+            continue
+        row = dict(zip(header, fields))
+        try:
+            return {'out': int(row['OutSegs']), 'retrans': int(row['RetransSegs'])}
+        except (KeyError, ValueError):
+            return None
+    return None
+
+
+def read_tcp(path: str = None):
+    """The machine's TCP counters (parse_snmp_tcp()), or None when the file is not there — never zeros."""
+    p = path or os.environ.get('TRACKER_PROC_SNMP') or SNMP_PATH
+    try:
+        with open(p, 'r', encoding='utf-8', errors='replace') as fh:
+            return parse_snmp_tcp(fh.read())
+    except Exception:
+        return None
+
+
+def retrans_pct(a, b, min_segments: int = RETRANS_MIN_SEGMENTS):
+    """
+    The share of TCP segments sent AGAIN between two readings, in per cent — or None when either reading
+    is missing, a counter went backwards (a reboot between them), or fewer than `min_segments` were sent.
+    """
+    if not a or not b:
+        return None
+    try:
+        d_out = int(b['out']) - int(a['out'])
+        d_re = int(b['retrans']) - int(a['retrans'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if d_out < max(1, min_segments) or d_re < 0:
+        return None
+    return 100.0 * d_re / d_out
+
+
+_HOST_LABEL = re.compile(r'(?!-)[A-Za-z0-9-]{1,63}(?<!-)$')
+
+
+def valid_target(t: str) -> bool:
+    """
+    An address or a host name `ping` may be handed — and nothing that could be read as an option.
+
+    The same rule as includes/tuner.php tunerValidTarget(), which refuses the setting on save; checked
+    here again because this reads the settings table directly, and a row is not only written by the panel.
+    """
+    t = (t or '').strip()
+    if not t or len(t) > 253 or t.startswith('-'):
+        return False
+    try:
+        import ipaddress
+        ipaddress.ip_address(t)
+        return True
+    except ValueError:
+        pass
+    return all(_HOST_LABEL.match(part) for part in t.rstrip('.').split('.'))
+
+
+def loss_targets(cfg: dict) -> list:
+    """The ping targets from `tuner_loss_targets`: the default when the setting is not there at all, none when it is empty."""
+    raw = cfg.get('tuner_loss_targets')
+    if raw is None:
+        raw = LOSS_TARGETS_DEFAULT
+    out = []
+    for item in re.split(r'[\s,;]+', str(raw).strip()):
+        if item and valid_target(item) and item not in out and len(out) < LOSS_TARGETS_MAX:
+            out.append(item)
+    return out
+
+
+def parse_ping_loss(text: str):
+    """The loss `ping -q` reports in its summary ("5 packets transmitted, 4 received, 20% packet loss"), or None."""
+    m = re.search(r'(\d+(?:\.\d+)?)%\s+packet loss', text or '')
+    return float(m.group(1)) if m else None
+
+
+def read_ping_loss(targets: list):
+    """
+    Loss per target, in per cent: {target: pct or None}, or None when nothing can ping (not Linux, no
+    `ping`, no targets). The targets are pinged side by side, so a sample costs about two seconds
+    whatever their number.
+    """
+    if not IS_LINUX or not targets:
+        return None
+    exe = shutil.which('ping')
+    if not exe:
+        return None
+    procs = {}
+    for t in targets:
+        try:
+            # argv, no shell; the target is validated (valid_target) and can never be an option
+            procs[t] = subprocess.Popen([exe, '-n', '-q', '-c', str(PING_COUNT), '-i', '0.2', '-W', '1', t],
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except Exception:
+            procs[t] = None
+    out = {}
+    for t, p in procs.items():
+        if p is None:
+            out[t] = None
+            continue
+        try:
+            so, _ = p.communicate(timeout=10)
+        except Exception:
+            p.kill()
+            p.communicate()
+            out[t] = None
+            continue
+        out[t] = parse_ping_loss(so)
+    return out
+
+
+def ping_mean(samples: list):
+    """(mean loss %, number of readings) over every target of every sample; (None, 0) with no reading at all."""
+    vals = []
+    for s in samples or []:
+        for v in ((s or {}).get('ping') or {}).values():
+            if v is not None:
+                vals.append(float(v))
+    return (sum(vals) / len(vals), len(vals)) if vals else (None, 0)
+
+
+def loss_limits(cfg: dict) -> tuple:
+    """(tuner_retrans_max, tuner_ping_loss_max) as numbers, the defaults for anything missing or unreadable."""
+    def num(key, default, lo, hi):
+        try:
+            v = float(str(cfg.get(key)).replace(',', '.'))
+        except (TypeError, ValueError):
+            return default
+        return max(lo, min(hi, v)) if v == v else default    # NaN is not a limit
+    return num('tuner_retrans_max', RETRANS_MAX_DEFAULT, 0.5, 50.0), num('tuner_ping_loss_max', PING_LOSS_MAX_DEFAULT, 1.0, 100.0)
+
+
 def sample(cfg: dict, port: int) -> dict:
     """One reading of everything that matters, with absent things absent rather than zero."""
     s = {'at': int(time.time())}
@@ -352,6 +528,9 @@ def sample(cfg: dict, port: int) -> dict:
     s['sockets'] = read_socket_drops(port)
     s['softnet'] = read_softnet()
     s['load'] = read_load()
+    # Outside the machine (1.73.3): the TCP counters, and the loss of a few pings out of it.
+    s['tcp'] = read_tcp()
+    s['ping'] = read_ping_loss(loss_targets(cfg))
     return s
 
 
@@ -389,13 +568,46 @@ def build_plan(baseline_pps, current_limit, steps=6, low_factor=0.6, high_factor
     return [int(round((lo + stride * i) / 1000.0)) * 1000 for i in range(steps)]
 
 
-def harm(baseline: dict, now: dict, prev: dict, cfg: dict) -> str:
-    """
-    Is this step hurting anything? Returns a reason, or '' when it is not.
+def harm(baseline: dict, now: dict, prev: dict, cfg: dict, step_start: dict = None, step_samples: list = None) -> str:
+    """Is this step hurting anything? A reason, or '' — harm_detail() without the kind."""
+    return harm_detail(baseline, now, prev, cfg, step_start, step_samples)[1]
 
-    Only counters the run itself watched from a baseline are used. "Load is high" is not harm if it
-    was high before the run started — the question is whether THIS step made it worse.
+
+def outside_figures(step_start: dict, now: dict, step_samples: list) -> tuple:
+    """(TCP resent % from the step's start to now or None, mean ping loss % over the step or None, its readings)."""
+    pl, n = ping_mean(step_samples if step_samples is not None else [now])
+    return retrans_pct((step_start or {}).get('tcp'), (now or {}).get('tcp')), pl, n
+
+
+def harm_detail(baseline: dict, now: dict, prev: dict, cfg: dict, step_start: dict = None, step_samples: list = None) -> tuple:
     """
+    Is this step hurting anything? (kind, reason) — ('', '') when it is not; the kind is 'load',
+    'collateral', 'softnet' or 'outside'.
+
+    The rules INSIDE the machine use only counters the run itself watched from a baseline. "Load is high"
+    is not harm if it was high before the run started — the question is whether THIS step made it worse.
+    The rule OUTSIDE it (1.73.3) is absolute, for the step so far (from `step_start`, over
+    `step_samples`): a loss there belongs to the level being held, whatever the baseline was.
+    """
+    reason = _harm_inside(baseline, now, prev, cfg)
+    if reason:
+        return reason
+    if step_start is not None:
+        rmax, pmax = loss_limits(cfg)
+        rp, pl, n = outside_figures(step_start, now, step_samples)
+        over_r = rp is not None and rp > rmax
+        over_p = pl is not None and n >= PING_MIN_READINGS and pl > pmax
+        if over_r or over_p:
+            said_r = ('%.1f %%' % rp) if rp is not None else 'no reading'
+            said_p = ('%.0f %%' % pl) if pl is not None else 'no reading'
+            return ('outside', 'the provider is dropping this machine\'s packets outside it: %s of TCP segments '
+                               'were sent again (the stop is %.1f %%) and %s of pings were lost (the stop is %.0f %%)'
+                               % (said_r, rmax, said_p, pmax))
+    return ('', '')
+
+
+def _harm_inside(baseline: dict, now: dict, prev: dict, cfg: dict) -> tuple:
+    """The rules inside the machine: (kind, reason), or None when none of them fired."""
     # LOAD IS JUDGED AGAINST WHERE IT STARTED, not against a fixed number.
     #
     # This function's own docstring has always said that, and the code did the opposite: it compared
@@ -413,9 +625,9 @@ def harm(baseline: dict, now: dict, prev: dict, cfg: dict) -> str:
     base_load = (baseline.get('load') or {}).get('per_core')
     if load is not None:
         if load > hard:
-            return 'load reached %.2f per core, over the hard stop of %.2f' % (load, hard)
+            return ('load', 'load reached %.2f per core, over the hard stop of %.2f' % (load, hard))
         if base_load is not None and load > base_load + headroom:
-            return ('load rose from %.2f to %.2f per core, more than the %.2f this run is allowed to add'
+            return ('load', 'load rose from %.2f to %.2f per core, more than the %.2f this run is allowed to add'
                     % (base_load, load, headroom))
 
     # Any OTHER socket that started discarding during this step. The tracker's own socket is expected
@@ -430,13 +642,13 @@ def harm(baseline: dict, now: dict, prev: dict, cfg: dict) -> str:
         if before is None:
             continue
         if d - before > int(cfg.get('tuner_collateral_tolerance') or 50):
-            return 'another service on port %s discarded %d packets during the run' % (port, d - before)
+            return ('collateral', 'another service on port %s discarded %d packets during the run' % (port, d - before))
 
     sn_now = (now.get('softnet') or {}).get('dropped')
     sn_base = (baseline.get('softnet') or {}).get('dropped')
     if sn_now is not None and sn_base is not None and sn_now - sn_base > 0:
-        return 'the per-CPU packet queue overflowed %d times during the run' % (sn_now - sn_base)
-    return ''
+        return ('softnet', 'the per-CPU packet queue overflowed %d times during the run' % (sn_now - sn_base))
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -538,8 +750,13 @@ def run(args) -> int:
         time.sleep(min(30, SAMPLE_EVERY_S * 2))
         baseline = sample(cfg, port)
         arriving = rate(first, baseline, 'arrived')
+        # What was already being lost OUTSIDE the machine before anything moved (1.73.3): context for the
+        # report, never a reason to stop — the steps are judged on absolute thresholds of their own.
+        b_retrans, b_ping, _ = outside_figures(first, baseline, [first, baseline])
+        baseline_outside = {'retrans_pct': b_retrans, 'ping_loss_pct': b_ping}
         state_update(phase='planning', baseline={'arriving_pps': arriving, 'at': baseline['at'],
-                                                 'load': baseline.get('load'), 'softnet': baseline.get('softnet')})
+                                                 'load': baseline.get('load'), 'softnet': baseline.get('softnet'),
+                                                 'outside': baseline_outside})
 
         # An outbound run is planned around the reply rate, not the arrival rate: they are different
         # numbers and planning the wrong one would test a range the machine never operates in.
@@ -604,6 +821,7 @@ def run(args) -> int:
             samples = []
             t_end = time.time() + dwell
             reason = ''
+            kind = ''
             while time.time() < t_end:
                 time.sleep(min(SAMPLE_EVERY_S, max(1, t_end - time.time())))
                 # The panel's Stop button writes `cancel` into the state file. Nothing read it, so
@@ -613,6 +831,7 @@ def run(args) -> int:
                 # effect within one sample interval and still goes out through the restore path.
                 if state_read().get('cancel'):
                     reason = 'stopped from the panel'
+                    kind = 'cancel'
                     break
                 s = sample(cfg, port)
                 samples.append(s)
@@ -621,11 +840,15 @@ def run(args) -> int:
                 # to the janitor -- which then reaped the run, consumed its restore marker, and left
                 # the test limit in force on a machine nobody was watching.
                 state_update(phase='running', current_step=idx, samples_in_step=len(samples))
-                reason = harm(baseline, s, samples[-2] if len(samples) > 1 else step_start, cfg)
+                kind, reason = harm_detail(baseline, s, samples[-2] if len(samples) > 1 else step_start, cfg,
+                                           step_start=step_start, step_samples=[step_start] + samples)
                 if reason:
                     break
 
             last = samples[-1] if samples else step_start
+            # Outside the machine, over the whole step: shown per step on the card and in the report,
+            # None ("—") where there was nothing to read.
+            out_r, out_p, _ = outside_figures(step_start, last, [step_start] + samples)
             step = {
                 'limit_pps': pps,
                 'arrived_pps': rate(step_start, last, 'arrived'),
@@ -633,8 +856,12 @@ def run(args) -> int:
                 'dropped_pps': rate(step_start, last, 'dropped'),
                 'load_per_core': (last.get('load') or {}).get('per_core'),
                 'busiest_core_share': busiest_share(step_start.get('softnet'), last.get('softnet')),
+                'retrans_pct': out_r,
+                'ping_loss_pct': out_p,
                 'samples': len(samples),
                 'harm': reason,
+                'harm_kind': kind,
+                'outside': kind == 'outside',
                 'ok': reason == '',
             }
             steps.append(step)
@@ -644,7 +871,7 @@ def run(args) -> int:
                     else 'stopped at %d pps: %s' % (pps, reason)
                 break
 
-        report = summarise(steps, arriving, current_limit, stopped)
+        report = summarise(steps, arriving, current_limit, stopped, dry=dry, cfg=cfg, baseline_outside=baseline_outside)
         state_update(phase='restoring', report=report)
         rr = restore(cfg, dry)
         state_update(running=False, phase='done', finished_at=int(time.time()),
@@ -665,17 +892,27 @@ def run(args) -> int:
         return 1
 
 
-def summarise(steps, arriving, current_limit, stopped) -> dict:
+def summarise(steps, arriving, current_limit, stopped, dry=False, cfg=None, baseline_outside=None) -> dict:
     """
     What the run learned, in the terms the operator asked the question in.
 
-    `safe` is the highest step that hurt nothing. `minimum` is the lowest step that still served
-    everything that arrived — below it, legitimate announces are being refused. Both are None when
-    the run did not get far enough to know, and saying None is the point: a suggestion invented from
-    two data points would be worse than no suggestion.
+    `safe` is the highest step that hurt nothing — that passed EVERY rule, the loss outside the machine
+    included (1.73.3). `minimum` is the lowest step that still served everything that arrived — below
+    it, legitimate announces are being refused. Both are None when the run did not get far enough to
+    know, and saying None is the point: a suggestion invented from two data points would be worse than
+    no suggestion.
+
+    A run whose FIRST step already lost packets outside the machine has found that the provider's
+    limit is below the whole plan (it starts at 0.6 × what arrives). That is said plainly, and nothing
+    at or above that step is offered: the answer is a lower limit, which the run never held.
     """
     ok_steps = [s for s in steps if s['ok']]
     safe = max((s['limit_pps'] for s in ok_steps), default=None)
+    rmax, pmax = loss_limits(cfg or {})
+    outside_first = None
+    if steps and steps[0].get('outside'):
+        # A dry run moved nothing, so what it saw is the machine at the limit already in force.
+        outside_first = (int(current_limit) if current_limit else None) if dry else int(steps[0]['limit_pps'])
 
     # A SECOND, INDEPENDENT WAY TO NOTICE THAT NOTHING HAPPENED.
     #
@@ -710,10 +947,30 @@ def summarise(steps, arriving, current_limit, stopped) -> dict:
             minimum = s['limit_pps']
             break
     harmed = next((s for s in steps if not s['ok']), None)
+    if steps and steps[0].get('outside'):
+        # Nothing higher than the lowest step — and that one already lost packets, so nothing at all.
+        lowest = min(s['limit_pps'] for s in steps)
+        safe = safe if (safe is not None and safe < lowest) else None
+        minimum = minimum if (minimum is not None and minimum < lowest) else None
 
     lines = []
     if arriving:
         lines.append('About %s packets a second were arriving while this ran.' % f'{int(arriving):,}')
+    if steps and steps[0].get('outside'):
+        if not dry:
+            lines.append('Even at %s pps this machine loses packets outside it — your provider\'s limit is lower; '
+                         'lower the limit further.' % f'{int(steps[0]["limit_pps"]):,}')
+        elif current_limit:
+            lines.append('This test run moved nothing, and at the limit already in force (%s pps) this machine loses '
+                         'packets outside it — your provider\'s limit is lower; lower the limit.' % f'{int(current_limit):,}')
+        else:
+            lines.append('This test run moved nothing, and with no limit in force this machine loses packets outside it — '
+                         'your provider\'s limit is lower than what it sends now; set a limit.')
+    bo = baseline_outside or {}
+    if bo.get('retrans_pct') is not None or bo.get('ping_loss_pct') is not None:
+        lines.append('Before the first step %s of TCP segments were being sent again and %s of pings were lost.'
+                     % ('%.1f %%' % bo['retrans_pct'] if bo.get('retrans_pct') is not None else 'an unknown share',
+                        '%.0f %%' % bo['ping_loss_pct'] if bo.get('ping_loss_pct') is not None else 'an unknown share'))
 
     # WHAT IS HAPPENING RIGHT NOW, not only what this run changed.
     #
@@ -754,6 +1011,14 @@ def summarise(steps, arriving, current_limit, stopped) -> dict:
         'suggested_minimum': None if flat else minimum,
         'inconclusive': flat,
         'stopped_because': stopped,
+        # Outside the machine (1.73.3): the level at which the very first step already lost packets there
+        # (or, in a test run, the limit in force; 0 = none in force), the thresholds it was judged by, and
+        # what was being lost before anything moved. The card says the first in the reader's language.
+        'outside_first': outside_first if (steps and steps[0].get('outside')) else None,
+        'outside_dry': bool(dry and steps and steps[0].get('outside')),
+        'retrans_max': rmax,
+        'ping_loss_max': pmax,
+        'baseline_outside': baseline_outside,
         'steps': steps,
         'summary': ' '.join(lines),
     }
@@ -814,6 +1079,94 @@ def self_test() -> int:
     check('a per-CPU queue that overflowed is harm', 'queue overflowed' in harm(base, squeezed, base, cfg))
     check('a socket that did not exist at baseline is not counted against the run',
           harm(base, {'sockets': {'9999': 500}, 'softnet': {}, 'load': {}}, base, cfg) == '')
+
+    # ── outside the machine (1.73.3) ──
+    #
+    # 2026-10-05: the provider dropped 45-70 % of the machine's packets while every reading inside the
+    # VM said "no harm". TCP retransmissions and pings out of the box are the two that follow it.
+    snmp = ('Ip: Forwarding DefaultTTL InReceives\nIp: 1 64 123\n'
+            'Tcp: RtoAlgorithm RtoMin RtoMax MaxConn ActiveOpens PassiveOpens AttemptFails EstabResets '
+            'CurrEstab InSegs OutSegs RetransSegs InErrs OutRsts InCsumErrors\n'
+            'Tcp: 1 200 120000 -1 100 200 3 4 5 900000 1000000 19000 0 10 0\n'
+            'Udp: InDatagrams NoPorts\nUdp: 1 2\n')
+    check('the TCP counters are read by NAME out of /proc/net/snmp',
+          parse_snmp_tcp(snmp) == {'out': 1000000, 'retrans': 19000}, parse_snmp_tcp(snmp))
+    check('… a file without them is no reading, never zeros', parse_snmp_tcp('Ip: a b\nIp: 1 2\n') is None and parse_snmp_tcp('') is None)
+    check('… and so is a file that is not there', read_tcp(os.path.join(ROOT, 'no-such-dir', 'snmp')) is None)
+    import tempfile
+    fd, fixture = tempfile.mkstemp(suffix='.snmp')
+    with os.fdopen(fd, 'w') as fh:
+        fh.write(snmp)
+    env_was = os.environ.get('TRACKER_PROC_SNMP')
+    os.environ['TRACKER_PROC_SNMP'] = fixture
+    try:
+        check('TRACKER_PROC_SNMP points the reading at another file (the tests\' way in, PHP\'s as well)',
+              read_tcp() == {'out': 1000000, 'retrans': 19000}, read_tcp())
+    finally:
+        if env_was is None:
+            os.environ.pop('TRACKER_PROC_SNMP', None)
+        else:
+            os.environ['TRACKER_PROC_SNMP'] = env_was
+        os.remove(fixture)
+    check('the resent share is over the interval: 1 560 of 10 000 segments is 15.6 %',
+          abs((retrans_pct({'out': 100000, 'retrans': 1000}, {'out': 110000, 'retrans': 2560}) or 0) - 15.6) < 1e-9)
+    check('… fewer than %d segments say nothing' % RETRANS_MIN_SEGMENTS,
+          retrans_pct({'out': 100, 'retrans': 1}, {'out': 399, 'retrans': 100}) is None)
+    check('… nor a counter that went backwards (a reboot), nor a missing reading',
+          retrans_pct({'out': 5000, 'retrans': 50}, {'out': 9000, 'retrans': 10}) is None
+          and retrans_pct(None, {'out': 9000, 'retrans': 10}) is None and retrans_pct({'out': 1}, {'out': 9000}) is None)
+    check('ping\'s summary is read: 20 % lost',
+          parse_ping_loss('--- 1.1.1.1 ping statistics ---\n5 packets transmitted, 4 received, 20% packet loss, time 806ms\n') == 20.0)
+    check('… with errors, and as busybox says it',
+          parse_ping_loss('5 packets transmitted, 0 received, +5 errors, 100% packet loss, time 820ms') == 100.0
+          and parse_ping_loss('5 packets transmitted, 5 packets received, 0% packet loss') == 0.0)
+    check('… and a ping that said nothing of the kind is no reading', parse_ping_loss('ping: x: Name or service not known') is None)
+    check('the targets: addresses and host names', all(valid_target(t) for t in ['1.1.1.1', '2606:4700:4700::1111', 'one.one.one.one', 'dns9.quad9.net.']))
+    check('… never anything ping could read as an option, nor anything that is not a name',
+          not any(valid_target(t) for t in ['-f', '--flood', '-i0', 'x$(id)', '', 'a..b', 'host-', 'a' * 64 + '.com']))
+    check('the default targets when the setting is not there at all, none when it is empty',
+          loss_targets({}) == ['1.1.1.1', '9.9.9.9'] and loss_targets({'tuner_loss_targets': ''}) == [])
+    check('… split, de-duplicated, the bad ones dropped, at most %d' % LOSS_TARGETS_MAX,
+          loss_targets({'tuner_loss_targets': '8.8.8.8, -f 8.8.8.8;a b c d e'}) == ['8.8.8.8', 'a', 'b', 'c'],
+          loss_targets({'tuner_loss_targets': '8.8.8.8, -f 8.8.8.8;a b c d e'}))
+    check('no targets, or not Linux: no pings at all (None, never 0 %)', read_ping_loss([]) is None
+          and (IS_LINUX or read_ping_loss(['1.1.1.1']) is None))
+    check('the thresholds: 5.0 % and 10 % by default, a typed value read, garbage the default',
+          loss_limits({}) == (5.0, 10.0) and loss_limits({'tuner_retrans_max': '7,5', 'tuner_ping_loss_max': '25'}) == (7.5, 25.0)
+          and loss_limits({'tuner_retrans_max': 'x', 'tuner_ping_loss_max': None}) == (5.0, 10.0))
+
+    st0 = {'tcp': {'out': 100000, 'retrans': 1000}, 'ping': {'1.1.1.1': 0.0, '9.9.9.9': 0.0}}
+    def at(out, retrans, p1, p2):
+        return {'sockets': {'6969': 100, '2302': 5}, 'softnet': {'dropped': 0}, 'load': {'per_core': 0.3},
+                'tcp': {'out': out, 'retrans': retrans}, 'ping': {'1.1.1.1': p1, '9.9.9.9': p2}}
+    resent = at(110000, 2560, 0.0, 0.0)                    # 15.6 % resent, every ping answered
+    kind, why = harm_detail(base, resent, base, cfg, step_start=st0, step_samples=[st0, resent])
+    check('a step that resends more than tuner_retrans_max of its TCP segments is harm — outside the machine',
+          kind == 'outside' and '15.6 %' in why and 'provider' in why and '5.0 %' in why, (kind, why))
+    pingy = at(110000, 1100, 60.0, 40.0)                   # 1 % resent; pings 0, 0, 60, 40 → 25 % over the step
+    kind, why = harm_detail(base, pingy, base, cfg, step_start=st0, step_samples=[st0, pingy])
+    check('a step whose pings are lost above tuner_ping_loss_max is harm too, and the reason names both numbers',
+          kind == 'outside' and '25 %' in why and '1.0 %' in why, (kind, why))
+    calm = at(110000, 1200, 0.0, 20.0)                     # 2 % resent; pings 0, 0, 0, 20 → 5 %
+    check('under both thresholds is not harm',
+          harm_detail(base, calm, base, cfg, step_start=st0, step_samples=[st0, calm]) == ('', ''),
+          harm_detail(base, calm, base, cfg, step_start=st0, step_samples=[st0, calm]))
+    blind = {'sockets': {'6969': 100, '2302': 5}, 'softnet': {'dropped': 0}, 'load': {'per_core': 0.3}, 'tcp': None, 'ping': None}
+    check('missing readings are not harm (no /proc/net/snmp, no ping)',
+          harm_detail(base, blind, base, cfg, step_start={'tcp': None, 'ping': None},
+                      step_samples=[{'tcp': None, 'ping': None}, blind]) == ('', ''))
+    quiet = at(100200, 1100, 0.0, 0.0)                     # 100 resent of 200: 50 %, but too few segments to say
+    check('fewer than %d segments over the step are not judged' % RETRANS_MIN_SEGMENTS,
+          harm_detail(base, quiet, base, cfg, step_start=st0, step_samples=[st0, quiet]) == ('', ''))
+    one = {'tcp': None, 'ping': {'1.1.1.1': 100.0}}
+    check('nor fewer than %d ping readings' % PING_MIN_READINGS,
+          harm_detail(base, dict(blind, ping={'1.1.1.1': 100.0}), base, cfg, step_start=one, step_samples=[one]) == ('', ''))
+    check('the threshold is the setting: 15.6 % is not harm under tuner_retrans_max = 20',
+          harm_detail(base, resent, base, dict(cfg, tuner_retrans_max='20'), step_start=st0, step_samples=[st0, resent]) == ('', ''))
+    check('without a step start the outside rule is not asked (and the old callers see what they always saw)',
+          harm(base, resent, base, cfg) == '')
+    check('the rules inside the machine keep their kinds', harm_detail(base, collateral, base, cfg)[0] == 'collateral'
+          and harm_detail(warm_base, huge, warm_base, cfg)[0] == 'load' and harm_detail(base, squeezed, base, cfg)[0] == 'softnet')
 
     # ── rates ──
     check('a rate needs two readings', rate(None, {'at': 2, 'arrived': 5}, 'arrived') is None)
@@ -884,6 +1237,33 @@ def self_test() -> int:
                      200000, 90000, '')
     check('… and says nothing of the sort when nothing is being refused',
           'refused by the limit right now' not in calm['summary'], calm['summary'])
+
+    # ── the report, when the loss is outside the machine (1.73.3) ──
+    out_why = 'the provider is dropping this machine\'s packets outside it: 15.6 % of TCP segments were sent again'
+    first_out = [{'limit_pps': 102000, 'ok': False, 'outside': True, 'harm': out_why, 'served_pps': 100000,
+                  'dropped_pps': 70000, 'retrans_pct': 15.6, 'ping_loss_pct': 70.0}]
+    fo = summarise(first_out, 170000, 175000, 'stopped at 102000 pps: ' + out_why)
+    check('a run whose FIRST step already lost packets outside says so plainly',
+          'Even at 102,000 pps this machine loses packets outside it' in fo['summary'] and 'lower the limit further' in fo['summary']
+          and fo['outside_first'] == 102000 and fo['outside_dry'] is False, fo['summary'])
+    check('… and offers nothing: no value higher than the lowest step, and that one lost packets',
+          fo['suggested_safe'] is None and fo['suggested_minimum'] is None, fo)
+    fd_ = summarise(first_out, 170000, 175000, '', dry=True)
+    check('a test run says it of the limit already in force, not of a step it never applied',
+          'at the limit already in force (175,000 pps)' in fd_['summary'] and 'Even at 102,000' not in fd_['summary']
+          and fd_['outside_first'] == 175000 and fd_['outside_dry'] is True, fd_['summary'])
+    later = [
+        {'limit_pps': 60000, 'ok': True, 'harm': '', 'dropped_pps': 50000, 'retrans_pct': 1.2, 'ping_loss_pct': 0.0},
+        {'limit_pps': 80000, 'ok': True, 'harm': '', 'dropped_pps': 30000, 'retrans_pct': 3.1, 'ping_loss_pct': 5.0},
+        {'limit_pps': 100000, 'ok': False, 'outside': True, 'harm': out_why, 'dropped_pps': 10000, 'retrans_pct': 15.6, 'ping_loss_pct': 70.0},
+    ]
+    lt = summarise(later, 110000, 175000, 'stopped at 100000 pps: ' + out_why,
+                   cfg={'tuner_retrans_max': '5', 'tuner_ping_loss_max': '10'}, baseline_outside={'retrans_pct': 15.6, 'ping_loss_pct': 85.0})
+    check('the suggestion is the highest step that passed EVERY rule, the loss outside included',
+          lt['suggested_safe'] == 80000 and lt['outside_first'] is None and 'Even at' not in lt['summary'], lt)
+    check('… the step that lost packets outside is named, with its reason', '100,000 pps' in lt['summary'] and 'provider' in lt['summary'], lt['summary'])
+    check('… what was lost before anything moved is said too', 'Before the first step 15.6 % of TCP segments' in lt['summary'] and '85 %' in lt['summary'], lt['summary'])
+    check('… and the report carries the thresholds it was judged by', lt['retrans_max'] == 5.0 and lt['ping_loss_max'] == 10.0, lt)
 
     # ── the share is of the interval, not of all history ──
     a = {'per_cpu': [100, 100, 1000]}

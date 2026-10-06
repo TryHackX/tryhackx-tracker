@@ -2324,7 +2324,9 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
    A step list rather than a chart: six rows of numbers are read faster than a plot with six points,
    and the one thing the operator is looking for — which step went wrong — is a word, not a shape. */
 .tn-progress { margin-top: 0.7rem; display: flex; flex-direction: column; gap: 0.25rem; }
-.tn-step { display: grid; grid-template-columns: 8rem 9rem 9rem 8rem 1fr; gap: 0.6rem; align-items: baseline;
+/* 1.73.3: two figures more per step — TCP resent and pings lost, the loss OUTSIDE the machine — so seven columns, and
+   two from 1100 px down (the verdict needs its room; a step's row is its own grid, so the columns are fixed widths). */
+.tn-step { display: grid; grid-template-columns: 7.5rem 8.5rem 8.5rem 9rem 8.5rem 8.5rem 1fr; gap: 0.6rem; align-items: baseline;
            padding: 0.3rem 0.5rem; border-radius: 4px; background: rgba(255,255,255,0.03);
            border-left: 3px solid #3fa45b; font-size: 0.8rem; }
 .tn-step-bad { border-left-color: #b4433c; background: rgba(180,67,60,0.10); }
@@ -2337,7 +2339,7 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .tn-report-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.07em; color: #9aa4b2; margin-bottom: 0.3rem; }
 .tn-report-summary { font-size: 0.88rem; line-height: 1.5; }
 .tn-report-acts { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.6rem; }
-@media (max-width: 900px) { .tn-step { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 1100px) { .tn-step { grid-template-columns: 1fr 1fr; } }
 .tn-what { width: auto; display: inline-block; }
 
 /* ── Settings: a long explanation that is not in the way ─────────────────────

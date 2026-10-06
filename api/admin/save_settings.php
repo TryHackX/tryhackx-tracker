@@ -188,6 +188,8 @@ $allowed = [
     'meta_order_mode', 'meta_order_mix_oldest', 'meta_order_mix_newest',
     'meta_order_mix_seeders', 'meta_order_mix_random', 'meta_order_mix_whitelist',
     'meta_order_mix_seen', 'meta_order_mix_completed', 'net_limit_trusted', 'net_limit_blocked', 'tuner_load_headroom', 'tuner_load_hard',
+    // the stability probe's view outside the machine (1.73.3, includes/tuner.php): what it pings, and the two thresholds
+    'tuner_loss_targets', 'tuner_retrans_max', 'tuner_ping_loss_max',
     // schema v9: verification gate, terms, email-change cooldown, member-search switches
     'users_require_email_verify', 'users_terms_text', 'users_email_change_cooldown_days',
     'index_search_enabled', 'index_search_include_whitelist',
@@ -634,6 +636,28 @@ if (isset($data['net_auto_min']) || isset($data['net_auto_max'])) {
     $min = (int)($data['net_auto_min'] ?? netlimitAutoMin($cfg));
     $max = (int)($data['net_auto_max'] ?? netlimitAutoMax($cfg));
     if ($max < $min) jsonResponse(['error' => __('api.settings.net_auto_band_inverted', ['max' => langNumber($max), 'min' => langNumber($min)])], 400);
+}
+// ── The stability probe, outside the machine (1.73.3, includes/tuner.php) ──
+// The targets are handed to `ping` (argv, no shell): a bad entry is refused BY NAME rather than dropped, so what is
+// saved is what the probe pings. Empty is a real answer — no pings, the TCP reading alone. Judged only when it CHANGED
+// (the page posts every control on every save — trusted_proxy_ips' rule above): a row edited elsewhere must not make
+// the whole page unsavable, and the probe drops what it cannot ping anyway. The two thresholds are clamped like the
+// numbers above; one decimal for the resent share, a whole per cent for the pings.
+if (isset($data['tuner_loss_targets']) && $data['tuner_loss_targets'] !== (string)($cfg['tuner_loss_targets'] ?? TUNER_TARGETS_DEFAULT)) {
+    $tg = tunerParseTargets((string)$data['tuner_loss_targets']);
+    if ($tg['bad']) jsonResponse(['error' => __('api.settings.tuner_target_invalid', ['entry' => $tg['bad'][0]])], 400);
+    if ($tg['too_many']) jsonResponse(['error' => __('api.settings.tuner_targets_too_many', ['max' => TUNER_TARGETS_MAX])], 400);
+    $data['tuner_loss_targets'] = implode(' ', $tg['targets']);
+}
+if (isset($data['tuner_retrans_max'])) {
+    $raw = str_replace(',', '.', (string)$data['tuner_retrans_max']);
+    $v = is_numeric($raw) ? (float)$raw : TUNER_RETRANS_MAX_DEFAULT;
+    $data['tuner_retrans_max'] = number_format(max(TUNER_RETRANS_MAX_MIN, min(TUNER_RETRANS_MAX_MAX, $v)), 1, '.', '');
+}
+if (isset($data['tuner_ping_loss_max'])) {
+    $raw = str_replace(',', '.', (string)$data['tuner_ping_loss_max']);
+    $v = is_numeric($raw) ? (int)round((float)$raw) : TUNER_PING_LOSS_MAX_DEFAULT;
+    $data['tuner_ping_loss_max'] = (string)max(TUNER_PING_LOSS_MAX_MIN, min(TUNER_PING_LOSS_MAX_MAX, $v));
 }
 // ── Backups ──
 // The directory is where archives full of database passwords land, so it is checked here as well as

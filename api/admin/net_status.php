@@ -34,6 +34,10 @@ $out = [
         'auto_target_cpu' => netlimitAutoTargetCpu($cfg),
         'cmd'        => netlimitCommand($cfg),
         'cmd_set'    => $cmdSet,
+        // Which list the tracker serves (1.73.3). In blacklist mode almost every reply is a real announce, and the
+        // outbound budget caps only connect and "not authorized" replies — the card says so rather than push it up.
+        'tracker_mode' => function_exists('trackerMode') ? trackerMode($cfg)
+                          : ((($cfg['tracker_mode'] ?? 'blacklist') === 'whitelist') ? 'whitelist' : 'blacklist'),
     ],
     'exec_available' => trackerExecAvailable(),
     'cpus'          => netlimitCpuCount(),
@@ -100,6 +104,13 @@ if ((int)($state['last_apply_at'] ?? 0) > 0) {
 // one indexed range scan over the same rows the recommendation already reads.
 try { $out['load_curve'] = netlimitLoadCurve($db, $cfg, (int)($_GET['days'] ?? 7), $now); }
 catch (\Throwable $e) { $out['load_curve'] = null; }
+// What the provider drops OUTSIDE this machine (1.73.3): the share of TCP segments resent, which the janitor reads
+// with every sample — the newest one ({pct, level ok|warn|bad, at}) and the median of the last hour, which together
+// decide whether the advice below may ever point higher. Its own try: a failure here must not take the card with it.
+$lossHour = null;
+try { $lossHour = netlimitLossHour($db, $now); } catch (\Throwable $e) { $lossHour = null; }
+$out['outside_loss'] = netlimitOutsideLoss(is_array($state['tcp_retrans_now'] ?? null) ? $state['tcp_retrans_now'] : null,
+                                           $lossHour, $now, netlimitSampleSeconds($cfg));
 $out['persist_deferred'] = !empty($state['persist_deferred']);
 $out['last_persist_at'] = (int)($state['last_persist_at'] ?? 0);
 // A failure the helper has since recovered from is history, not news: show it only while it is
@@ -124,6 +135,17 @@ try {
     $out['recommend_days'] = $days;
     // In a flood the number worth quoting is what is GETTING THROUGH, not what is arriving.
     $passedNow = (int)(($out['live']['pps']['in_passed'] ?? 0));
+    // 1.73.3: never a higher limit while the machine loses packets outside it (now, or over the last hour) — ~80 % of
+    // what the limit lets through instead; and when it does not, no higher than the busiest hour of the last week it
+    // coped with (includes/netlimit.php netlimitRecommendGuard()). "Use suggested" fills whatever this leaves.
+    $limitInForce = (is_array($fw) && !empty($fw['table']) && ($fw['mode'] ?? '') !== 'count' && (int)($fw['pps'] ?? 0) > 0)
+        ? (int)$fw['pps'] : (netlimitEnabled($cfg) ? netlimitPps($cfg) : 0);
+    $lossBase = netlimitLossBase($limitInForce, $passedNow > 0 ? $passedNow : (int)($lossHour['passed'] ?? 0));
+    $safeCap = null;
+    if (empty($out['outside_loss']['guard'])) {
+        try { $safeCap = netlimitSafeHistoryCap($db, $now); } catch (\Throwable $e) { $safeCap = null; }
+    }
+    $rec = netlimitRecommendGuard($rec, $out['outside_loss'], $lossBase, $safeCap);
     // The paragraph in the reader's language, and its sentences as keys and numbers (`parts`), which the card writes
     // as words that keep their keys — they follow the live language switch (1.73.0).
     $rec['parts'] = netlimitRecommendParts($rec, $flood, $passedNow);

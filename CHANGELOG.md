@@ -4,6 +4,132 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.73.3] — 2026-10-06
+
+The tracker's way out. On 2026-10-05 production's provider was dropping packets of the WHOLE machine — the website,
+the forum, mail, SSH, in both directions — whenever the tracker sent more than roughly 50–80 thousand packets a second,
+and nothing the panel watched could see it: every counter inside the VM said all was well, the Stability probe judged
+129 000–175 000 "no harm", and the Traffic page's advice pointed at a higher limit. The probe and the Traffic page now
+read the two things inside the machine that do follow that loss — TCP segments resent, and pings out of the box — stop
+on them, show them, and never advise upward while they say the machine is losing packets outside. Schema 92. Deployed
+by the normal web deploy: no root helper and no nftables file changed.
+
+### Fixed — the Stability probe judged a machine losing two thirds of its packets "no harm"
+
+* **Production, 2026-10-05**: the tracker answers about one for one (UDP in 912 588 ≈ out 911 609 datagrams in 10 s),
+  and once it SENT more than ~50–80 k packets a second the provider (a VPS) dropped packets of the whole machine:
+  inbound limit 50 000 → ~52 500 pps sent, 0/20 new TCP connections stalled, 20 % of pings lost; 90 000 → ~88 000,
+  9/20, 52 %; 175 000 → ~94 000, 42–50 %, 66–70 %; the tracker stopped → nothing lost. Inside the guest nothing showed
+  it (rx/tx_dropped 0, softnet 0, the egress queue 0, the CPU 65 % idle) — and the probe watches only the inside
+  (other sockets' drops, softnet, the load), so it judged 129 000–175 000 "no harm" and the limit went from 90 000 to
+  175 000 on its advice.
+* **Two readings inside the VM do follow it** (measured at the same moment, limit 90 000, ~90 000 pps out): TCP
+  segments resent against segments sent (`/proc/net/snmp`, RetransSegs / OutSegs) — 15.6 %, 1.9 % with the tracker
+  stopped — and pings from the server to 1.1.1.1 / 9.9.9.9 — 85 % / 55 % lost.
+* `tools/tuner.py`: every sample also reads `tcp` {out, retrans} (`TRACKER_PROC_SNMP` overrides the path, for tests;
+  no file → no reading, never zeros) and `ping` — the loss per target of `ping -n -q -c 5 -i 0.2 -W 1` to each address
+  in the new setting `tuner_loss_targets` (default `1.1.1.1 9.9.9.9`, at most four, pinged side by side; empty = no
+  pings; not Linux or no `ping` → no reading). `harm()` gains OUTSIDE LOSS, judged on ABSOLUTE thresholds for the step
+  so far: more than `tuner_retrans_max` (5.0 %) of the TCP segments resent since the step's first sample (once 300 have
+  gone out), or a mean ping loss above `tuner_ping_loss_max` (10 %, from four rounds of five). A loss outside belongs to
+  the level being held, not to what the run added — the baseline may already be bad, and that day it was. The reason
+  names both numbers and says the provider is dropping this machine's packets. Every rule inside the machine stays as
+  it was; a missing reading is never harm.
+* The plan still walks upward from 0.6 × what arrives, so the first step over a threshold ends the run and the
+  settings go back. The suggestion is the highest step that passed every rule. If the very first step already loses
+  packets outside, the report says so plainly — "even at N pps this machine loses packets outside it — your provider's
+  limit is lower; lower the limit further" (a test run says it of the limit already in force) — and offers nothing to
+  apply. What was being lost before the first step is recorded too.
+* The card (`assets/js/admin-tuner.js`) shows per step "TCP resent X %" and "pings lost Y %" ("—" where nothing was
+  read, and for a report from before 1.73.3), "Lost outside at the start", the thresholds the run was judged by, and a
+  first step's loss as a red line of its own — in the reader's language and through the live switch (the probe's own
+  summary sentence stays English, as before). A step's row has seven columns, two from 1100 px down.
+* Three settings, in all four places (the default, Settings → Stability probe with their hints, the save, the search
+  catalogue): a ping target must be an IPv4 or IPv6 address or a host name and never begin with a dash (`-f` is a
+  flood) — a bad one is refused by name, more than four are refused, the list is stored normalised
+  (`includes/tuner.php` `tunerValidTarget()` / `tunerParseTargets()`; `tools/tuner.py` checks it again, since it reads
+  the settings table directly); the thresholds are clamped (0.5–50 % in tenths; 1–100 %).
+
+### Added — "Lost outside this machine" on the Traffic page (schema 92)
+
+* `net_samples.tcp_retrans_x10` (SMALLINT UNSIGNED NULL): TCP segments resent per 1 000 sent over the sample's span;
+  NULL when unreadable or when fewer than 300 went out — no reading, not a zero. The janitor reads `/proc/net/snmp`
+  with every traffic sample (whether or not a table of ours is loaded — the firewall does not count what the provider
+  drops), keeps the counters in `config/net_state.json` (`tcp_prev`) and the newest share in `tcp_retrans_now`.
+* `admin/net_status` answers `outside_loss`: the newest share (one decimal), its level — ok under 4 %, warn 4–8 %, bad
+  from 8 % (`NET_LOSS_WARN_PCT` / `NET_LOSS_BAD_PCT`) — and its time; the median of the last hour; and why there is no
+  number when there is none (too few segments, no `/proc/net/snmp`, a reading the janitor stopped renewing).
+* A tile on the UDP traffic card (`#net-tile-outside`): the share, a level badge (normal / raised / high) in its
+  colour, the hour's median, and a sentence that rises with the level — in warn and bad, that the provider is dropping
+  the whole machine's packets (the website, mail and SSH lose them too, and nothing inside the machine shows it) and
+  that the inbound limit is what lowers it. Every word follows the live language switch.
+
+### Changed — the Traffic page stops advising the wrong direction
+
+* While the machine loses packets outside — warn or bad now, or as the median of the last hour — the recommendation
+  under the inbound slider never suggests a higher limit: it says the machine is losing packets outside and suggests
+  about 80 % of what the limit lets through now, rounded like every suggestion — the lower of the limit in force and
+  the rate getting through, because 80 % of a limit far above the traffic would lower nothing (production on
+  2026-10-03: a limit of 175 000 passed ~100 000) — or a run of the stability probe. "Use suggested" fills that number;
+  the slider loses its red "cutting into traffic" zone and the "little headroom" line (cutting is the cure here).
+  While nothing is lost outside, today's logic stays, capped at the busiest hour of the last 7 days the machine coped
+  with (an hourly average of `pps_passed` with under 4 % resent, from five readings). `netlimitRecommendGuard()` runs
+  between `netlimitRecommend()` and `netlimitRecommendParts()`; the arrivals' sentence keeps its own P95 + 5 % and the
+  cap is said after it.
+* The outbound budget, in blacklist mode (`tracker_mode`): the card says that the budget covers only connect and "not
+  authorized" replies — every announce reply passes outside it (`ottrack.nft` accepts those before its limit rule;
+  production capped 0–21 pps of the 76 000–87 000 sent) — and that the inbound limit controls what the tracker sends.
+  No "almost no headroom … would hit the cap" push, no red/amber zones on its slider and no upward "Use suggested" —
+  in blacklist mode, nor in whitelist mode while the machine loses packets outside; whitelist mode with nothing lost
+  keeps today's behaviour. The grid's budget tile and the "In force" line drop "capping it keeps the rest of the
+  machine reachable" in blacklist mode.
+
+### Fixed — the load study argued with itself (MAIN-2)
+
+* "This machine never reached a load of 0.85 per core at any rate seen so far (busiest median 0.92)": the busiest
+  median was read from every bucket, the ceiling only from those with five readings or more. Both come from the
+  counted buckets now, and a hotter rate with too few readings to count is a sentence of its own after it — its rate,
+  its median load, its readings (`api.net.load_thin`, said on the card as a word that keeps its key).
+
+### Documentation
+
+* README: Traffic → the new tile, what it means and what to do, the advice's guard and cap, the budget in blacklist
+  mode; the Stability probe → the loss outside (what it reads, the thresholds, what the report says); "What whitelist
+  mode does NOT fix" → a paragraph for BLACKLIST mode (the budget does not cap announce replies, the inbound limit is
+  the lever) with the measured table; the schema table's `net_samples`.
+
+### Tests
+
+* `tests/netlimit_test.php` (408 checks): `/proc/net/snmp` from a fixture through `TRACKER_PROC_SNMP`, the ratio and
+  its NULL cases, the row's new column and the state, the levels, `outside_loss`, the advice lowered while warn/bad (in
+  a flood too, and before there are enough samples) and capped while ok, the safe hour from stored rows, the blacklist
+  budget's words and wiring, MAIN-2 (three hot readings never become "busiest median 1.20").
+  `tests/tuner_test.php` (63): the targets' rule, the three settings in their four places, the card's wiring,
+  `tuner.py --self-test`, and the cases of the brief run through the real `harm_detail()` / `summarise()`.
+  `tools/tuner.py --self-test` (91): the new rules (over each threshold is harm, under both is not, missing readings
+  are not), the summary's suggestion and the first-step sentence.
+* Browser (local checks): `scratchpad/shots/traffic_cards_check.js` — the tile in ok / warn / bad / none / stale, the
+  advice and "Use suggested", the live switch and a fresh Polish render, a 360px phone, the budget in blacklist and
+  whitelist mode (its stand-in helper reports a budget with `--egress <pps>`); new `scratchpad/shots/tuner_card_check.js`
+  — the probe's card in English and Polish (live and fresh) at 1440 / 1280 / a phone, and the Settings fields and their
+  save. MAIN-6: `shout_check.js` and `polish_check.js` still asserted the visited colour 1.73.2 removed on purpose; they
+  check now that no rule colours a visited link, with the old rule put back as the control (as
+  `visited_docs_check.js` does).
+
+### Production note
+
+* The migration adds one nullable column to `net_samples` (a small table — seconds). The tile needs the traffic
+  monitor on; its first number comes with the second sample after the deploy. Nothing changes on the firewall.
+* **Where production stands (2026-10-05, evening):** the owner put the limit back to 90 000 — still 52 % of pings and
+  9 of 20 new TCP connections lost (~88 000 pps sent); at 50 000 the same measurement gave ~52 500 pps sent, 0 of 20
+  connections stalled and 20 % of pings lost, and the replies that actually reach clients were the same ~42 000 a
+  second as at 90 000 (30 000 at 175 000). Until the Stability probe has been run on 1.73.3 — it now stops on this
+  very loss and suggests the level itself — 50 000 is the measured safe setting. Since the machine's restart on
+  2026-10-03 the loss is also worse at a given rate than before it (the metadata worker fetched 145–240 names an hour
+  at ~75–80 k pps sent, against 545–700 before 2026-10-02 at the same rate), so the level that is safe today is lower
+  than the 90 000 that was safe in September. `www-data` can ping there (`net.ipv4.ping_group_range` covers every
+  group), so the probe's ping reading works on production.
+
 ## [1.73.2] — 2026-10-05
 
 Two things the owner asked for after 1.73.1: no separator at the edge of a wrapped line in the site's menu, and no

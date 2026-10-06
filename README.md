@@ -1549,7 +1549,8 @@ unbounded, it is an oracle for walking the catalogue one hash at a time.
 The Traffic page can suggest a limit from a formula over past traffic. It cannot answer the question
 an operator on a shared machine actually has — *if I raise this, does anything else here start to
 hurt?* The probe answers it by trying: it moves the limit through a few steps, holds each for a few
-minutes, and watches the drop counters of every other UDP socket on the machine while it does.
+minutes, and watches the drop counters of every other UDP socket on the machine while it does — and,
+since 1.73.3, whether the machine starts losing packets *outside* it (below).
 
 - The way back is written down **before** the first change, so the settings return even if the run is
   killed or the machine reboots — the janitor restores them. The revert does not depend on the
@@ -1561,6 +1562,22 @@ minutes, and watches the drop counters of every other UDP socket on the machine 
 It can move the receive limit, the reply budget, or both. It deliberately does **not** ramp kernel
 buffers: a socket's buffer is fixed when the socket is created, so testing one means restarting the
 tracker at every step.
+
+**Packets lost outside the machine (1.73.3).** On a VPS the provider can drop the machine's packets *outside* it
+while every counter inside the guest says all is well — on tryhackx.org, 45–70 % of everything, the website and mail
+included, whenever the tracker sent more than roughly 50–80 thousand packets a second (see "What whitelist mode does
+NOT fix"). The probe watched only the inside, judged 129 000–175 000 "no harm", and the limit was raised on its
+advice. So every sample now also reads the share of TCP segments resent (`/proc/net/snmp`) and pings the addresses in
+**Ping targets outside** (`tuner_loss_targets`, default `1.1.1.1 9.9.9.9`, at most four, empty = no pings; five pings
+each, side by side). A step stops the run when, over the step so far, more than **`tuner_retrans_max`** (5.0 %) of the
+TCP segments were resent — judged once 300 have gone out — or more than **`tuner_ping_loss_max`** (10 %) of the pings
+were lost, judged from four rounds. These are absolute thresholds, not a rise over the baseline: a loss outside belongs
+to the level being held, and the baseline may already be bad. A missing reading (not Linux, no `ping`, a name that does
+not resolve) is never harm. The plan walks upward from 0.6 × what arrives, so the first step over a threshold ends the
+run and the settings go back; the suggestion is the highest step that passed every rule. If the **first** step already
+loses packets outside, the report says so plainly — *even at N pps this machine loses packets outside it; your
+provider's limit is lower, lower the limit further* — and offers nothing to apply. The card shows both figures per
+step ("—" where there is nothing to read) and what was being lost before the first step.
 
 **How it is started (1.50.1).** The janitor does not run it in the background itself: the janitor is
 a oneshot systemd service, and a oneshot service kills every process left in its control group the
@@ -2417,6 +2434,30 @@ torrent keeps sending `connect` + `announce` (measured on tryhackx.org: **90–2
   to speed that up is a UDP reply that makes them back off (long `interval`), which is a policy /
   patch decision, not a config one.
 
+**In BLACKLIST mode the egress budget caps almost nothing — the inbound limit is the lever (measured on
+tryhackx.org, 2026-10-05).** `ottrack.nft` lets every real announce/scrape reply, and everything to a client
+already marked "good", pass *before* its limit rule; the budget only ever sees connect replies and the 8-byte "not
+authorized" ones. In blacklist mode nearly every reply is a real announce, so the budget capped 0–21 pps while the
+tracker sent 76 000–87 000. What the tracker sends there is what the **inbound limit** (section 7) lets in — it
+answers about one for one (UDP in 912 588 ≈ out 911 609 datagrams in 10 s). And on this VPS, once the tracker sent
+more than roughly 50–80 thousand packets a second, the provider dropped packets of the **whole machine** in both
+directions — the website, the forum, mail, SSH — while nothing inside the guest showed it (rx/tx_dropped 0, softnet
+0, the egress queue 0, the CPU 65 % idle):
+
+| Inbound limit | Sent by the machine | New TCP connections stalled | Pings lost | Replies that reach clients (≈ sent × (1 − loss)) |
+|---|---|---|---|---|
+| tracker stopped | — | 0 % | 0 % | — |
+| 50 000 pps | ~52 500 pps | 0/20 | 20 % | ~42 000/s |
+| 90 000 pps | ~88 000 pps | 9/20 | 52 % | ~42 000/s |
+| 175 000 pps | ~94 000 pps | 42–50 % | 66–70 % | ~30 000/s |
+
+A higher limit did not even get more answers to clients. The one counter inside the machine that follows this loss
+is the share of TCP segments it has to send again (`/proc/net/snmp`: 15.6 % at 90 000 pps going out, 1.9 % with the
+tracker stopped; pings from the server to 1.1.1.1 / 9.9.9.9 lost 85 % / 55 % at the same moment). Since 1.73.3 the
+Traffic page shows it as **Lost outside this machine**, the advice under the inbound slider never points higher
+while it is 4 % or more, the outbound budget card says in blacklist mode what it does not cover, and the stability
+probe stops at the level where the loss starts — see section 7 and [The stability probe](#the-stability-probe-1220).
+
 #### 7. UDP traffic monitor + inbound rate limit (optional, 1.11.0)
 
 The egress budget above protects the *machine*. The other half of the same problem is the **CPU** the
@@ -2502,6 +2543,21 @@ Inbound limit → Burst** and loaded with **Traffic → Apply limit**; the limit
 last hour and the last day — about one is normal, well above one is clients repeating the handshake
 because their packets or the replies were dropped.
 
+**Lost outside this machine (1.73.3).** A tile on the card shows the share of TCP segments this machine had to send
+again between the last two samples (`/proc/net/snmp`, RetransSegs against OutSegs — the janitor reads it with every
+sample and keeps it in `net_samples.tcp_retrans_x10`; NULL when fewer than 300 segments went out, never a zero). It is
+the one counter inside a VM that follows packets the provider drops *outside* it — see the measurements under "What
+whitelist mode does NOT fix" above. Under 4 % is **normal**; from 4 % it is **raised** and from 8 % **high**, and then
+the words under it say what that means: the provider is dropping the whole machine's packets, the website and mail
+included, and the inbound limit is what lowers it (the tracker sends about as much as it lets in). While it is raised
+or high — now, or as the median of the last hour — the advice under the slider **never suggests a higher limit**: it
+says the machine is losing packets outside and suggests about 80 % of what the limit lets through now (the lower of
+the limit and the rate getting through — 80 % of a limit far above the traffic would lower nothing), or a run of the
+stability probe. **Use suggested** fills that number, the slider loses its red "cutting into traffic" zone, and the
+outbound budget gets no "almost no headroom" push. While it is normal, the suggestion (P95 + 5 %) is capped at the
+busiest hour of the last 7 days in which the machine lost little outside it (an hourly average under 4 %, from five
+readings at least). Without `/proc/net/snmp` the tile says there is nothing to read, and nothing is guarded.
+
 Applying, removing, throttling hard and restoring all require the **admin password**;
 **Preview ruleset** does not, because it only renders and `nft -c`-checks the file without loading it.
 The **Test** button in Settings is read-only too: it checks `exec()`, the sudoers rule (`sudo -n -l`,
@@ -2511,7 +2567,10 @@ that makes the rule survive a reboot, and prints copy-paste fixes for whatever i
 
 The card also **shows** the egress budget's counters next to the inbound ones and can change its rate
 (`nft replace rule` on that one rule, so the table's 262 144-entry "good client" sets are not flushed);
-it never installs or removes `ottrack.nft` — that stays a manual, documented step.
+it never installs or removes `ottrack.nft` — that stays a manual, documented step. In blacklist mode (1.73.3) it
+says that the budget covers only connect and "not authorized" replies — every announce reply passes outside it, so
+the inbound limit is what controls what the tracker sends — and it draws no zones on that slider and makes no "almost
+no headroom" push; neither does it in whitelist mode while the machine loses packets outside it.
 
 #### 8. Backups from the panel (optional, 1.11.0)
 
@@ -3113,7 +3172,7 @@ upgrade takes (`includes/schema.php`, schema **91** in 1.73.0):
 | `auth_handoffs` | Sign-in bridge: one-time tickets (sha256 only), in either direction — schema v49 |
 | `fed_peers` | Federation peers (base URL, outbound bearer, inbound API client, pull cursor/status) |
 | `fed_review` | Quarantine for `fed_import_mode = review`: what a peer offered, waiting for an admin to accept or reject it — schema v15 |
-| `net_samples` | UDP traffic: one sample per interval — nftables counters plus the packets/second derived from them, and the limit in force — schema v11 |
+| `net_samples` | UDP traffic: one sample per interval — nftables counters plus the packets/second derived from them, and the limit in force — schema v11; the load per core beside it (v13) and the TCP segments resent per 1 000 sent, the loss outside the machine (`tcp_retrans_x10`, v92) |
 
 Schema upgrades are applied automatically on the first request (`includes/schema.php`,
 `settings.schema_version`); fresh installs get the same tables from `install.php`.

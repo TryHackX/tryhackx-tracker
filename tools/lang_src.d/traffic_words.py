@@ -70,15 +70,53 @@ add('api.net', {
                    'za mało odczytów — badanie obciążenia potrzebuje próbek z zapisanym obciążeniem: co najmniej :min, a jest ich :n.'),
     'load_flat':  ('the traffic barely varied over this window (:lo–:hi pps), so there is nothing to compare a busy machine against.',
                    'ruch w tym oknie prawie się nie zmieniał (:lo–:hi pps), więc nie ma z czym porównać zapracowanej maszyny.'),
-    'load_never': ('this machine never reached a load of :busy per core at any rate seen so far (busiest median :max) — there is no '
-                   'ceiling to warn about yet.',
-                   'ta maszyna przy żadnym widzianym dotąd ruchu nie doszła do obciążenia :busy na rdzeń (najwyższa mediana :max) — '
-                   'nie ma jeszcze sufitu, przed którym trzeba by ostrzegać.'),
+    # 1.73.3 (MAIN-2): :max is the busiest median among the rates seen often enough to count — the same rates the
+    # ceiling is looked for among; a hotter one with too few readings is load_thin, said after this
+    'load_never': ('this machine never reached a load of :busy per core at any rate seen often enough to count (busiest median '
+                   ':max) — there is no ceiling to warn about yet.',
+                   'ta maszyna przy żadnym ruchu widzianym dość często, by się liczył, nie doszła do obciążenia :busy na rdzeń '
+                   '(najwyższa mediana :max) — nie ma jeszcze sufitu, przed którym trzeba by ostrzegać.'),
 })
 
 # ── the card's own failure (admin/net_status; the other two are api.net.no_helper_2 and api.net.exec_disabled) ──
 add('api.net', {
     'helper_no_answer': ('The firewall helper did not answer.', 'Pomocnik zapory nie odpowiedział.'),
+})
+
+# ── 1.73.3: what the provider drops OUTSIDE the machine (netlimitRecommendGuard(), netlimitLoadCurve()) ────────────────
+# Production, 2026-10-05: whenever the tracker sent more than ~50–80 k packets a second, the provider dropped 45–70 % of
+# the whole machine's packets — and the paragraph under the slider kept pointing at a HIGHER limit (P95 + 5 %). While the
+# share of TCP segments resent is 4 % or more (now, or the median of the last hour) these lead instead and nothing points
+# higher; when it is not, a suggestion above the busiest hour the machine coped with is capped there. :pct and :warn are
+# shares written with a point, as the card writes them; :days is 7.
+add('api.net', {
+    # :pct is the newest sample's share or the last hour's median, whichever of them is the raised one — no "right now"
+    'rec_loss':       ('This machine is losing packets OUTSIDE it — :pct % of its TCP segments have to be sent again (under '
+                       ':warn % is normal). That is the provider dropping the whole machine\'s traffic, the website and mail '
+                       'included, and a higher limit would only make it worse.',
+                       'Ta maszyna gubi pakiety POZA sobą — :pct % jej segmentów TCP trzeba wysyłać ponownie (poniżej :warn % '
+                       'to norma). To dostawca odrzuca ruch całej maszyny, także strony i poczty, a wyższy limit tylko by to '
+                       'pogorszył.'),
+    'rec_loss_lower': ('Lower the limit instead: to about :n pps (80 % of the :base pps it lets through now), and watch the '
+                       'share fall — or run the stability probe, which stops at the level where this begins.',
+                       'Zamiast tego obniż limit: do około :n pps (80 % z :base pps, które przepuszcza teraz), i obserwuj, jak '
+                       'ten odsetek spada — albo uruchom sondę stabilności, która zatrzymuje się na poziomie, od którego to się '
+                       'zaczyna.'),
+    'rec_loss_probe': ('Lower the limit below what the tracker sends now and watch the share fall — or run the stability probe, '
+                       'which stops at the level where this begins.',
+                       'Obniż limit poniżej tego, co tracker teraz wysyła, i obserwuj, jak ten odsetek spada — albo uruchom sondę '
+                       'stabilności, która zatrzymuje się na poziomie, od którego to się zaczyna.'),
+    'rec_cap':        ('The suggestion is capped at :n pps: in the busiest hour of the last :days days in which this machine lost '
+                       'little outside it (under :warn % of TCP resent), :safe pps got through — above that it has not been '
+                       'seen to cope.',
+                       'Sugestia jest ograniczona do :n pps: w najbardziej ruchliwej godzinie ostatnich :days dni, w której ta '
+                       'maszyna traciła niewiele pakietów poza sobą (poniżej :warn % retransmisji TCP), przechodziło :safe pps — '
+                       'powyżej tego nie widziano, by sobie radziła.'),
+    # MAIN-2: a hotter bucket with too few readings to count is said apart, never as the busiest median (load_never)
+    'load_thin':      ('A hotter rate — around :pps pps, a median load of :load — has too few readings behind it to count '
+                       '(:n of the :min needed).',
+                       'Wyższe obciążenie — około :pps pps, mediana :load — ma za mało odczytów, by się liczyło (odczyty: :n, '
+                       'potrzeba co najmniej :min).'),
 })
 
 # ── the OpenTracker card beside it (includes/opentracker.php otRun() / otAdvice(), admin/ot_status) ────────────────

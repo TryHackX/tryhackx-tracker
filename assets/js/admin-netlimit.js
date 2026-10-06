@@ -263,6 +263,11 @@
                    : t.key('js.net.nothing_dropped_now') })]
             : [el('span', { className: 'text-muted', text: '—' })]));
 
+        // What the provider drops OUTSIDE this machine (1.73.3, net_status `outside_loss`): the share of TCP segments
+        // resent between the last two samples. Production, 2026-10-05: 45–70 % of every packet of the machine lost —
+        // the website, mail, SSH — while every counter inside the guest, these tiles included, said all was well.
+        grid.appendChild(outsideTile(j));
+
         // What the drops cost in repeats: handshakes (UDP connects) per announce, from the statistics
         // timeline — the last hour and the last day, each absent when the tracker restarted inside it
         // (net_status: netlimitHandshakes()). A dropped packet makes a client shake hands again, so
@@ -289,7 +294,8 @@
             grid.appendChild(kv(t.key('js.net.outbound_budget'), [
                 badge(t.key('js.net.pps_value', {n: num(eg.pps)}), 'wl-b-ok'), ' ',
                 el('span', { className: 'wl-small text-muted', text: hasE ? t.key('js.net.out_capped', {out: num((epps.announce_ok || 0) + (epps.passed_good || 0)), capped: num(epps.capped)}) : t.key('js.net.measuring') }),
-                el('div', { className: 'wl-small text-muted', text: t.key('js.net.egress_note') }),
+                // In blacklist mode almost every reply is a real announce and passes before the budget's rule (1.73.3)
+                el('div', { className: 'wl-small text-muted', text: isBlacklist(j) ? t.key('js.net.egress_note_blacklist') : t.key('js.net.egress_note') }),
             ]));
         }
 
@@ -409,6 +415,50 @@
         if (windowS < MIN_WINDOW_S) { prevWorker = prev; return null; }
         const box = 100 * dProc / dTotal;
         return { box, core: box * (cpus || 1), window: Math.round(windowS) };
+    }
+
+    /*
+     * OUTSIDE THE MACHINE (1.73.3). net_status's `outside_loss`: the newest sample's share of TCP segments resent
+     * ({pct, level ok|warn|bad, at, why}), the median of the last hour, and `guard` — warn or bad now or over the hour,
+     * which is when nothing on this card may push a limit or a budget UP. The words say what the level means and rise
+     * with it; the tile keeps a stable id (#net-tile-outside), because every poll draws it again.
+     */
+    const LOSS_TEXT = { ok: '', warn: 'text-warning', bad: 'text-danger' };
+    const LOSS_BADGE = { ok: 'wl-b-ok', warn: 'wl-b-warn', bad: 'wl-b-bad' };
+    const LOSS_LEVEL = { ok: () => t.key('js.net.outside_lvl_ok'), warn: () => t.key('js.net.outside_lvl_warn'), bad: () => t.key('js.net.outside_lvl_bad') };
+    const LOSS_SAYS = { ok: () => t.key('js.net.outside_ok'), warn: () => t.key('js.net.outside_warn'), bad: () => t.key('js.net.outside_bad') };
+    /** The machine is losing packets outside it (now or over the last hour): no push upward anywhere on the card. */
+    const lossGuard = () => !!(state.status && state.status.outside_loss && state.status.outside_loss.guard);
+    /** Blacklist mode: the outbound budget caps only connect and "not authorized" replies, never an announce reply. */
+    const isBlacklist = (j) => (((j || state.status || {}).configured || {}).tracker_mode) === 'blacklist';
+
+    function outsideTile(j) {
+        const ol = j.outside_loss || null;
+        const parts = [];
+        if (ol && typeof ol.pct === 'number') {
+            const lvl = LOSS_SAYS[ol.level] ? ol.level : 'ok';
+            parts.push(el('strong', { className: LOSS_TEXT[lvl], text: ol.pct.toFixed(1) + ' %' }),
+                       el('span', { className: 'nl-unit' }, [' ', t.key('js.net.outside_unit')]), ' ',
+                       badge(LOSS_LEVEL[lvl](), LOSS_BADGE[lvl]),
+                       el('div', { className: 'wl-small ' + (LOSS_TEXT[lvl] || 'text-muted'), text: LOSS_SAYS[lvl]() }));
+        } else {
+            const why = ol ? ol.why : '';
+            parts.push(el('span', { className: 'text-muted', text: '—' }),
+                       el('div', { className: 'wl-small text-muted', text: why === 'few' ? t.key('js.net.outside_few')
+                           : why === 'unreadable' ? t.key('js.net.outside_unreadable')
+                           : why === 'stale' ? t.key('js.net.outside_stale', {t: fmtAgo(Math.max(0, Math.floor(j.server_time - ol.at)))})
+                           : t.key('js.net.outside_none') }));
+        }
+        if (ol && typeof ol.hour_pct === 'number') {
+            parts.push(el('div', { className: 'wl-small ' + (LOSS_TEXT[ol.hour_level] || 'text-muted'),
+                                   text: t.key('js.net.outside_hour', {n: ol.hour_pct.toFixed(1)}) }));
+        }
+        const tile = kv(t.key('js.net.outside_title'), parts);
+        tile.id = 'net-tile-outside';
+        tile.dataset.tile = 'outside';
+        tile.dataset.level = (ol && ol.level) || 'none';
+        tile.setAttribute('title', t.key('js.net.outside_tile_title'));
+        return tile;
     }
 
     function renderNotes(j) {
@@ -585,11 +635,20 @@
                 box.appendChild(el('div', { className: 'text-warning wl-small', text:
                     t.key('js.net.advice_busy', {load: NL_BUSY_LOAD, busy: num(lc2.busy_pps), cur: num(cur)}) }));
             } else if (lc2 && !lc2.busy_pps && lc2.why) {
-                // the reason by its key when the server named it (a keyed word inside a keyed sentence follows the switch)
-                box.appendChild(el('div', { className: 'wl-small text-muted', text: t.key('js.net.load_study', {why: saidPart(lc2.why_part) || lc2.why}) }));
+                // the reason by its key when the server named it (a keyed word inside a keyed sentence follows the switch);
+                // MAIN-2 (1.73.3): a hotter rate with too few readings to count is a sentence of its own after it (`thin_part`)
+                const thin = saidPart(lc2.why_part) ? saidPart(lc2.thin_part) : null;
+                box.appendChild(el('div', { className: 'wl-small text-muted' },
+                    [t.key('js.net.load_study', {why: saidPart(lc2.why_part) || lc2.why}), thin ? ' ' : null, thin]));
             }
             const ref = inboundReference();
-            if (ref > 0) {
+            if (ref > 0 && lossGuard()) {
+                // While the machine loses packets OUTSIDE it (1.73.3), cutting into what gets through is the point, not a
+                // danger: the tracker sends as much as it lets in. The one warning left is a limit that changes nothing.
+                if (cur >= ref) {
+                    box.appendChild(el('div', { className: 'text-warning wl-small', text: t.key('js.net.advice_loss_above', {cur: num(cur), ref: num(ref)}) }));
+                }
+            } else if (ref > 0) {
                 if (cur < ref) {
                     box.appendChild(el('div', { className: 'text-danger wl-small', text: t.key('js.net.advice_cutting', {cur: num(cur), ref: num(ref)}) }));
                 } else if (cur < ref * ZONE_HEADROOM) {
@@ -597,7 +656,7 @@
                 } else if (cur > r.peak * 2 && r.peak > 0) {
                     box.appendChild(el('div', { className: 'text-muted wl-small', text: t.key('js.net.advice_far_above', {cur: num(cur)}) }));
                 }
-            } else if (cur < r.floor) {
+            } else if (cur < r.floor && !lossGuard()) {
                 box.appendChild(el('div', { className: 'text-warning wl-small', text: t.key('js.net.adv_dropping_arriving', {n: num(cur)}) }));
             } else if (cur > r.peak * 2 && r.peak > 0) {
                 box.appendChild(el('div', { className: 'text-muted wl-small', text: t.key('js.net.adv_never_trigger', {n: num(cur)}) }));
@@ -725,9 +784,19 @@
         const epps = parseInt(eg.pps, 10);
         if (!eState.loaded && epps > 0) { eState.pps = epps; eState.loaded = true; setEpps(eState.pps); }
         else if (!eState.loaded) { egressEnabled(false); }
-        else paintSlider($('net-epps-range'), eState.pps, eState.ref, machineCeiling());
+        else paintSlider($('net-epps-range'), eState.pps, egressZoneRef(), machineCeiling());
         renderEgressScale();
         renderEgressAdvice(eg);
+    }
+
+    /**
+     * What the budget's low zones are drawn from: the rate going out — except where pushing the budget UP is the wrong
+     * advice (1.73.3). In blacklist mode almost every reply is a real announce, which passes before the budget's rule
+     * (ottrack.nft), so the budget caps none of it (production: 0–21 pps capped of 76–87 thousand sent) and red below
+     * "sending now" only ever pointed upward; while the machine loses packets outside it, more going out is the harm.
+     */
+    function egressZoneRef() {
+        return (isBlacklist() || lossGuard()) ? 0 : eState.ref;
     }
 
     function renderEgressScale() {
@@ -761,8 +830,17 @@
         if (!box) return;
         box.textContent = '';
         const inForce = parseInt(eg.pps, 10) || 0;
+        const blacklist = isBlacklist();
         const lines = [];
-        lines.push(el('div', { text: t.key('js.net.egress_in_force', {n: num(inForce)}) }));
+        // "Capping it is what keeps the rest of the machine reachable" is not true in blacklist mode (1.73.3) — the note
+        // below says what the budget does cover there
+        lines.push(el('div', { text: blacklist ? t.key('js.net.egress_in_force_blacklist', {n: num(inForce)})
+                                               : t.key('js.net.egress_in_force', {n: num(inForce)}) }));
+        // Blacklist mode (1.73.3): say what this budget does NOT cover, right under what is in force — the announce
+        // replies, i.e. nearly everything the tracker sends. The inbound limit is the lever there.
+        if (blacklist) {
+            lines.push(el('div', { className: 'text-info', dataset: { note: 'blacklist' }, text: t.key('js.net.egress_blacklist') }));
+        }
         // A budget that is live but missing from the file is gone at the next reboot, and there is
         // no way to find that out except by rebooting. So say it here instead.
         if (eg.file === false) {
@@ -774,7 +852,14 @@
             lines.push(el('div', { className: 'text-muted', text: t.key('js.net.egress_no_rate') }));
         } else {
             lines.push(el('div', { text: t.key('js.net.egress_measured_now', {n: num(eState.ref)}) }));
-            if (eState.pps < eState.ref) {
+            // No "almost no headroom … would hit the cap" push where it is the wrong advice (1.73.3): in blacklist mode the
+            // budget caps none of the announce replies it is measured against; while the machine loses packets outside
+            // it, more going out is the harm itself. Whitelist mode with nothing lost outside keeps the old advice.
+            if (blacklist) {
+                // the note above says it all
+            } else if (lossGuard()) {
+                lines.push(el('div', { className: 'text-warning', dataset: { note: 'loss' }, text: t.key('js.net.egress_loss') }));
+            } else if (eState.pps < eState.ref) {
                 lines.push(el('div', { className: 'text-danger', text: t.key('js.net.egress_too_low', {n: num(eState.pps)}) }));
             } else if (eState.pps < eState.ref * ZONE_HEADROOM) {
                 lines.push(el('div', { className: 'text-warning', text: t.key('js.net.egress_tight', {n: num(eState.pps)}) }));
@@ -787,7 +872,7 @@
         eState.pps = Math.max(PPS_MIN, Math.min(PPS_MAX, parseInt(v, 10) || PPS_MIN));
         if (!fromInput) $('net-epps-input').value = eState.pps;
         $('net-epps-range').value = ppsToPos(eState.pps);
-        paintSlider($('net-epps-range'), eState.pps, eState.ref, machineCeiling());
+        paintSlider($('net-epps-range'), eState.pps, egressZoneRef(), machineCeiling());
         const eg = (state.status && state.status.firewall && state.status.firewall.egress) || {};
         renderEgressAdvice(eg);
     }
@@ -820,7 +905,8 @@
         range.value = ppsToPos(state.pps);
         // WebKit cannot fill the rail up to the thumb on its own (Gecko has ::-moz-range-progress);
         // the CSS reads --nl-fill as a gradient stop and --nl-zones as the layer beneath it.
-        paintSlider(range, state.pps, inboundReference(), machineCeiling());
+        // No red below what gets through while the machine loses packets outside it (1.73.3): a lower limit is the cure.
+        paintSlider(range, state.pps, lossGuard() ? 0 : inboundReference(), machineCeiling());
         renderAdvice();
     }
 
@@ -1091,6 +1177,8 @@
         });
         $('btn-net-suggest').addEventListener('click', () => {
             const r = state.recommend;
+            // Losing packets outside with nothing to go down from (1.73.3): say that, not "no measurements".
+            if (r && r.guard === 'loss' && !r.suggested) { showToast(t.key('js.net.toast_loss_no_value'), 'warning'); return; }
             if (!r || !r.suggested) { showToast(t.key('js.net.toast_no_measurements'), 'warning'); return; }
             setPps(r.suggested);
             showToast(t.key('js.net.toast_suggested', {n: num(r.suggested)}), 'success');
@@ -1103,6 +1191,10 @@
         }
         const eSuggest = $('btn-net-esuggest');
         if (eSuggest) eSuggest.addEventListener('click', () => {
+            // Twice what goes out is an upward push — the wrong one in blacklist mode (the budget caps no announce reply)
+            // and while the machine loses packets outside it (1.73.3).
+            if (isBlacklist()) { showToast(t.key('js.net.toast_egress_blacklist'), 'warning'); return; }
+            if (lossGuard()) { showToast(t.key('js.net.toast_egress_loss'), 'warning'); return; }
             if (!eState.ref) { showToast(t.key('js.net.toast_egress_none'), 'warning'); return; }
             // Twice what is going out: clear of the amber band, and still a real cap.
             const v = Math.min(PPS_MAX, Math.max(PPS_MIN, Math.round(eState.ref * 2 / 1000) * 1000));

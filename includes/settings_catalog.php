@@ -434,6 +434,9 @@ function settingsCatalogKeywords(): array {
         'tuner_python'              => 'stability probe python interpreter path tuner command',
         'tuner_load_headroom'       => 'stability probe load headroom rise allowed per core stop ceiling',
         'tuner_load_hard'           => 'stability probe hard stop load per core absolute ceiling',
+        'tuner_loss_targets'        => 'stability probe ping targets outside packet loss provider hypervisor addresses 1.1.1.1 9.9.9.9 straty pakietow',
+        'tuner_retrans_max'         => 'stability probe tcp retransmissions resent segments outside packet loss provider stop threshold percent retransmisje straty',
+        'tuner_ping_loss_max'       => 'stability probe ping loss outside packet loss provider stop threshold percent straty pakietow',
         // #section-sysctl
         'sysctl_cmd'                => 'sysctl kernel network buffers helper command rmem wmem udp_mem netdev_max_backlog socket receive buffer packet drops queue full pages backlog tuning',
         'sysctl_enabled'            => 'sysctl kernel buffers enable rmem_max rmem_default wmem_max wmem_default udp_rmem_min udp_wmem_min udp_mem netdev_max_backlog socket drops tuning',

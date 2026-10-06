@@ -3505,8 +3505,8 @@ add('js.tuner', {
         'Przebieg nie zaszedł wystarczająco daleko, by zaproponować wartość.'),
     'note_failed': ('The last run failed: :error',
         'Ostatni przebieg nie powiódł się: :error'),
-    'note_idle': ('Each step holds a limit for a few minutes and watches what happens — to the tracker and to everything else on this machine. It stops early if anything else starts dropping packets, and it always puts the settings back. Nothing is applied for you.',
-        'Każdy krok utrzymuje limit przez kilka minut i obserwuje, co się dzieje — z trackerem i ze wszystkim innym na tej maszynie. Przerywa wcześniej, jeśli cokolwiek innego zacznie gubić pakiety, i zawsze przywraca ustawienia. Nic nie jest stosowane automatycznie.'),
+    'note_idle': ('Each step holds a limit for a few minutes and watches what happens — to the tracker and to everything else on this machine. It stops early if anything else starts dropping packets, or if the machine starts losing packets outside it (TCP segments resent, pings lost), and it always puts the settings back. Nothing is applied for you.',
+        'Każdy krok utrzymuje limit przez kilka minut i obserwuje, co się dzieje — z trackerem i ze wszystkim innym na tej maszynie. Przerywa wcześniej, jeśli cokolwiek innego zacznie gubić pakiety albo jeśli maszyna zacznie gubić pakiety poza sobą (retransmisje TCP, utracone pingi), i zawsze przywraca ustawienia. Nic nie jest stosowane automatycznie.'),
     'note_requested': ('Requested — the janitor starts it on its next tick, within a minute.',
         'Zlecono — sprzątacz uruchomi go przy następnym cyklu, w ciągu minuty.'),
     'note_stale': ('A run stopped without finishing. The janitor puts the settings back and closes it within a few minutes.',
@@ -4744,4 +4744,76 @@ add('js.shout', {
                             'Czas na wycofanie tego wpisu już minął.'),
     'new_lines':        ('New lines', 'Nowe wpisy'),
     'new_lines_title':  ('Jump to the newest lines', 'Przejdź do najnowszych wpisów'),
+})
+
+
+# ── 1.73.3: what the provider drops OUTSIDE the machine ─────────────────────────────────────────────
+# Production, 2026-10-05: whenever the tracker sent more than ~50–80 k packets a second, the provider dropped 45–70 % of
+# every packet of the machine (website, mail, SSH) while every counter inside the VM said all was well. The UDP traffic
+# card shows the one counter inside that follows it — the share of TCP segments resent — as a tile of its own
+# (assets/js/admin-netlimit.js, #net-tile-outside), stops pushing the outbound budget up where it caps nothing, and the
+# stability probe's card shows it per step (assets/js/admin-tuner.js).
+add('js.net', {
+    'outside_title':      ('Lost outside this machine', 'Tracone poza tą maszyną'),
+    'outside_tile_title': ('TCP segments sent again, against those sent, between the last two traffic samples (/proc/net/snmp)',
+                           'Segmenty TCP wysłane ponownie wobec wysłanych, między dwiema ostatnimi próbkami ruchu (/proc/net/snmp)'),
+    'outside_unit':       ('of TCP segments resent', 'segmentów TCP wysłanych ponownie'),
+    'outside_lvl_ok':     ('normal', 'w normie'),
+    'outside_lvl_warn':   ('raised', 'podwyższone'),
+    'outside_lvl_bad':    ('high', 'wysokie'),
+    'outside_ok':         ('What the provider drops between this machine and the world shows first here: TCP segments it has to send again. Under 4 % is normal.',
+                           'To, co dostawca gubi między tą maszyną a światem, widać najpierw tutaj: segmenty TCP, które trzeba wysłać ponownie. Poniżej 4 % to norma.'),
+    'outside_warn':       ('The provider is dropping some of this machine’s packets outside it — the website, mail and SSH lose them too, and nothing inside the machine shows it. The inbound limit is what lowers it.',
+                           'Dostawca gubi część pakietów tej maszyny poza nią — tracą je też strona, poczta i SSH, a nic wewnątrz maszyny tego nie pokazuje. Obniża to limit ruchu przychodzącego.'),
+    'outside_bad':        ('The provider is dropping a lot of this machine’s packets outside it — every service here loses them, in both directions, and nothing inside the machine shows it. Lower the inbound limit: the tracker sends as much as it answers.',
+                           'Dostawca gubi dużo pakietów tej maszyny poza nią — tracą je wszystkie usługi tutaj, w obie strony, a nic wewnątrz maszyny tego nie pokazuje. Obniż limit ruchu przychodzącego: tracker wysyła tyle, ile odpowiada.'),
+    'outside_hour':       ('median of the last hour: :n %', 'mediana z ostatniej godziny: :n %'),
+    'outside_none':       ('No reading yet — the janitor takes one with every traffic sample, so it needs the traffic monitor on.',
+                           'Brak odczytu — janitor bierze go przy każdej próbce ruchu, więc potrzebny jest włączony monitor ruchu.'),
+    'outside_few':        ('Too little TCP traffic in the last sample to judge (fewer than 300 segments).',
+                           'Za mało ruchu TCP w ostatniej próbce, by to ocenić (mniej niż 300 segmentów).'),
+    'outside_unreadable': ('This machine has no /proc/net/snmp to read it from.',
+                           'Ta maszyna nie ma /proc/net/snmp, z którego można by to odczytać.'),
+    'outside_stale':      ('No fresh reading — the last one is :t old; the janitor takes one with every traffic sample.',
+                           'Brak świeżego odczytu — ostatni ma :t; janitor bierze go przy każdej próbce ruchu.'),
+    'advice_loss_above':  ('At :cur pps the tracker can keep sending what it sends now (:ref pps get through) — while this machine loses packets outside it, a lower limit is what helps.',
+                           'Przy :cur pps tracker może dalej wysyłać tyle, co teraz (przechodzi :ref pps) — dopóki ta maszyna gubi pakiety poza sobą, pomaga niższy limit.'),
+    'toast_loss_no_value': ('This machine is losing packets outside it and there is no limit or measured rate to go down from — set a limit below what it sends, or run the stability probe.',
+                            'Ta maszyna gubi pakiety poza sobą, a nie ma limitu ani zmierzonego ruchu, od którego można by zejść niżej — ustaw limit poniżej tego, co wysyła, albo uruchom sondę stabilności.'),
+    # the outbound budget in blacklist mode: real announce replies pass BEFORE its limit rule (ottrack.nft), so it caps
+    # only connect and "not authorized" replies — 0–21 pps of production's 76–87 thousand
+    'egress_blacklist':   ('In blacklist mode this budget covers only connect and “not authorized” replies: every announce reply passes outside it. What the tracker sends is set by the inbound limit — lower that to send less.',
+                           'W trybie blacklist ten budżet obejmuje tylko odpowiedzi connect i „not authorized”: każda odpowiedź na announce przechodzi poza nim. To, ile tracker wysyła, wyznacza limit ruchu przychodzącego — obniż go, by wysyłać mniej.'),
+    'egress_in_force_blacklist': ('In force: :n pps. This is table inet ottrack, on the way OUT.',
+                                  'W mocy: :n pps. To tabela inet ottrack, na drodze WYCHODZĄCEJ.'),
+    'egress_note_blacklist': ('table inet ottrack — in blacklist mode only connect and “not authorized” replies; announce replies pass outside it.',
+                              'table inet ottrack — w trybie blacklist tylko odpowiedzi connect i „not authorized”; odpowiedzi na announce przechodzą poza nim.'),
+    'egress_loss':        ('This machine is losing packets outside it, so no higher budget is suggested here — lower the inbound limit.',
+                           'Ta maszyna gubi pakiety poza sobą, więc nie proponujemy tu wyższego budżetu — obniż limit ruchu przychodzącego.'),
+    'toast_egress_blacklist': ('In blacklist mode the budget does not cap announce replies — there is nothing to suggest here. Lower the inbound limit to send less.',
+                               'W trybie blacklist budżet nie ogranicza odpowiedzi na announce — nie ma tu czego proponować. Obniż limit ruchu przychodzącego, by wysyłać mniej.'),
+    'toast_egress_loss':  ('This machine is losing packets outside it — no higher budget is suggested. Lower the inbound limit.',
+                           'Ta maszyna gubi pakiety poza sobą — nie proponujemy wyższego budżetu. Obniż limit ruchu przychodzącego.'),
+})
+add('js.tuner', {
+    'step_retrans':       ('TCP resent :n %', 'retransmisje :n %'),
+    'step_retrans_none':  ('TCP resent —', 'retransmisje —'),
+    'step_retrans_title': ('TCP segments this machine had to send again during the step — packets lost outside it',
+                           'Segmenty TCP, które ta maszyna musiała wysłać ponownie w tym kroku — pakiety utracone poza nią'),
+    'step_ping':          ('pings lost :n %', 'utracone pingi :n %'),
+    'step_ping_none':     ('pings lost —', 'utracone pingi —'),
+    'step_ping_title':    ('Pings from this machine to the targets in Settings that got no answer during the step',
+                           'Pingi z tej maszyny do celów z Ustawień, które w tym kroku nie dostały odpowiedzi'),
+    'harm_outside':       ('the provider is dropping this machine’s packets outside it', 'dostawca gubi pakiety tej maszyny poza nią'),
+    'outside_at_start':   ('Lost outside at the start', 'Straty na zewnątrz na starcie'),
+    'outside_first':      ('Even at :n pps this machine loses packets outside it — your provider’s limit is lower. Lower the limit further.',
+                           'Nawet przy :n pps ta maszyna gubi pakiety poza sobą — limit twojego dostawcy jest niższy. Obniż limit jeszcze bardziej.'),
+    'outside_first_dry':  ('This test run moved nothing, and at the limit already in force (:n pps) this machine loses packets outside it — your provider’s limit is lower. Lower the limit.',
+                           'Ten próbny przebieg niczego nie zmieniał, a przy obowiązującym limicie (:n pps) ta maszyna gubi pakiety poza sobą — limit twojego dostawcy jest niższy. Obniż limit.'),
+    'outside_first_dry_none': ('This test run moved nothing, and with no limit in force this machine loses packets outside it — your provider’s limit is lower than what it sends now. Set a limit.',
+                               'Ten próbny przebieg niczego nie zmieniał, a bez żadnego limitu ta maszyna gubi pakiety poza sobą — limit twojego dostawcy jest niższy niż to, co teraz wysyła. Ustaw limit.'),
+    'no_value_outside':   ('No value is offered: the run’s lowest step already lost packets outside the machine. Lower the limit below it on the UDP traffic card.',
+                           'Żadna wartość nie jest proponowana: już najniższy krok przebiegu gubił pakiety poza maszyną. Obniż limit poniżej niego w karcie ruchu UDP.'),
+    'outside_rule':       ('A step stops when over :r % of TCP segments are resent or over :p % of pings are lost (Settings → Stability probe).',
+                           'Krok kończy się, gdy ponad :r % segmentów TCP trzeba wysłać ponownie albo ginie ponad :p % pingów (Ustawienia → Sonda stabilności).'),
 })

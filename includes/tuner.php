@@ -37,6 +37,53 @@ const TUNER_UNIT = 'tracker-probe';
 
 function tunerEnabled(array $cfg): bool { return (($cfg['tuner_enabled'] ?? '0') === '1'); }
 
+/*
+ * OUTSIDE THE MACHINE (1.73.3). The probe also stops a step that loses packets OUTSIDE the VM — the provider dropping
+ * the whole machine's traffic, which no counter inside the guest shows (2026-10-05: 45-70 % lost, every reading in the
+ * guest "no harm"). It reads two things that do follow it: the share of TCP segments resent (/proc/net/snmp) and the loss
+ * of a few pings out of the box. Three settings (tools/tuner.py reads them straight from the settings table):
+ *   tuner_loss_targets   '1.1.1.1 9.9.9.9'  what it pings (at most TUNER_TARGETS_MAX; empty = no pings)
+ *   tuner_retrans_max    '5.0'              % of TCP segments resent over a step that stops the run (0.5–50)
+ *   tuner_ping_loss_max  '10'               % of pings lost over a step that stops the run (1–100)
+ */
+const TUNER_TARGETS_MAX = 4;
+const TUNER_TARGETS_DEFAULT = '1.1.1.1 9.9.9.9';
+const TUNER_RETRANS_MAX_MIN = 0.5;
+const TUNER_RETRANS_MAX_MAX = 50.0;
+const TUNER_RETRANS_MAX_DEFAULT = 5.0;
+const TUNER_PING_LOSS_MAX_MIN = 1;
+const TUNER_PING_LOSS_MAX_MAX = 100;
+const TUNER_PING_LOSS_MAX_DEFAULT = 10;
+
+/**
+ * One ping target: an IPv4 / IPv6 address or a host name — and never anything `ping` could read as an option ("-f" is a
+ * flood). The probe runs ping without a shell, so this is not about quoting; it is about what ping is asked to do.
+ * tools/tuner.py valid_target() applies the same rule again, because it reads the settings table directly.
+ */
+function tunerValidTarget(string $t): bool {
+    $t = trim($t);
+    if ($t === '' || strlen($t) > 253 || $t[0] === '-') return false;
+    if (filter_var($t, FILTER_VALIDATE_IP) !== false) return true;
+    foreach (explode('.', rtrim($t, '.')) as $label) {
+        if (!preg_match('/^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$/', $label)) return false;
+    }
+    return true;
+}
+
+/**
+ * The typed targets: split on spaces, commas or semicolons, de-duplicated in order. ['targets' => [...], 'bad' => [...],
+ * 'too_many' => bool] — the save refuses a bad entry by name and more than TUNER_TARGETS_MAX, never trims one silently.
+ */
+function tunerParseTargets(string $raw): array {
+    $out = ['targets' => [], 'bad' => [], 'too_many' => false];
+    foreach (preg_split('/[\s,;]+/', trim($raw), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $t) {
+        if (!tunerValidTarget($t)) { $out['bad'][] = $t; continue; }
+        if (!in_array($t, $out['targets'], true)) $out['targets'][] = $t;
+    }
+    if (count($out['targets']) > TUNER_TARGETS_MAX) $out['too_many'] = true;
+    return $out;
+}
+
 /** The interpreter, validated the same way the helper validates it. */
 function tunerPython(array $cfg): string {
     $python = trim((string)($cfg['tuner_python'] ?? 'python3'));

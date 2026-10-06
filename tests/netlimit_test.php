@@ -326,6 +326,136 @@ check('handshakes: the card shows them with one sentence on what a high value me
 check('handshakes: … and the burst hint travels in the recommendation', str_contains($ns, "\$rec['burst_hint'] = netlimitBurstHint(\$db, \$cfg, \$now,")
       && str_contains($nj, 'const bh = r.burst_hint;') && str_contains($nj, "t.key('js.net.burst_hint'"));
 
+// ── 4e. what the provider drops OUTSIDE the machine (1.73.3) ─────────────────
+// Production, 2026-10-05: past ~50–80 k packets a second sent, the provider dropped 45–70 % of the whole machine's
+// packets while every counter inside the guest said all was well; the share of TCP segments resent followed it (15.6 %
+// at 90 000 pps out, 1.9 % with the tracker stopped). The card reads it, and the advice never points higher meanwhile.
+$snmpText = static fn(int $out, int $re): string =>
+    "Ip: Forwarding DefaultTTL InReceives\nIp: 1 64 123\nIcmp: InMsgs InErrors\nIcmp: 5 0\n"
+    . "Tcp: RtoAlgorithm RtoMin RtoMax MaxConn ActiveOpens PassiveOpens AttemptFails EstabResets CurrEstab InSegs OutSegs RetransSegs InErrs OutRsts InCsumErrors\n"
+    . "Tcp: 1 200 120000 -1 100 200 3 4 5 900000 $out $re 0 10 0\n"
+    . "Udp: InDatagrams NoPorts InErrors OutDatagrams\nUdp: 912588 3 0 911609\n";
+check('snmp: OutSegs and RetransSegs are read by name', netlimitSnmpTcp($snmpText(1000000, 19000)) === ['out' => 1000000, 'retrans' => 19000],
+      json_encode(netlimitSnmpTcp($snmpText(1000000, 19000))));
+check('snmp: a file without the Tcp pair, a broken row or a field missing is no reading — never zeros',
+      netlimitSnmpTcp("Ip: a\nIp: 1\n") === null && netlimitSnmpTcp('') === null
+      && netlimitSnmpTcp("Tcp: OutSegs RetransSegs\nTcp: 5\n") === null && netlimitSnmpTcp("Tcp: InSegs OutSegs\nTcp: 1 2\n") === null);
+$snmpDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'netlimit_snmp_' . getmypid();
+@mkdir($snmpDir, 0777, true);
+$snmpFile = $snmpDir . DIRECTORY_SEPARATOR . 'snmp';
+file_put_contents($snmpFile, $snmpText(2000000, 31000));
+putenv('TRACKER_PROC_SNMP=' . $snmpFile);
+check('snmp: TRACKER_PROC_SNMP points the reading at a fixture (tools/tuner.py honours the same)',
+      netlimitProcSnmpFile() === $snmpFile && netlimitTcpRead() === ['out' => 2000000, 'retrans' => 31000], json_encode(netlimitTcpRead()));
+putenv('TRACKER_PROC_SNMP=' . $snmpDir . DIRECTORY_SEPARATOR . 'missing');
+check('snmp: a file that is not there gives no reading', netlimitTcpRead() === null);
+putenv('TRACKER_PROC_SNMP');
+check('snmp: without the variable it is /proc/net/snmp', netlimitProcSnmpFile() === '/proc/net/snmp');
+$pA = ['out' => 1000000, 'retrans' => 10000];
+check('ratio: 1 560 resent of 10 000 sent is 156 per 1 000 (15.6 %)', netlimitRetransX10($pA, ['out' => 1010000, 'retrans' => 11560], 60) === 156);
+check('ratio: fewer than ' . NET_LOSS_MIN_SEGMENTS . ' segments is NULL, not a number', netlimitRetransX10($pA, ['out' => 1000299, 'retrans' => 10100], 60) === null
+      && netlimitRetransX10($pA, ['out' => 1000300, 'retrans' => 10003], 60) === 10);
+check('ratio: a counter that went backwards (a reboot), a missing reading or a span out of range is NULL',
+      netlimitRetransX10($pA, ['out' => 5000, 'retrans' => 3], 60) === null && netlimitRetransX10(null, $pA, 60) === null
+      && netlimitRetransX10($pA, null, 60) === null && netlimitRetransX10($pA, ['out' => 1010000, 'retrans' => 11560], 1) === null
+      && netlimitRetransX10($pA, ['out' => 1010000, 'retrans' => 11560], NET_LIVE_MAX_SPAN + 1) === null);
+check('levels: ok under 4 %, warn from 4 %, bad from 8 % (named constants)', NET_LOSS_WARN_PCT === 4.0 && NET_LOSS_BAD_PCT === 8.0
+      && netlimitLossLevel(3.9) === 'ok' && netlimitLossLevel(4.0) === 'warn' && netlimitLossLevel(7.9) === 'warn'
+      && netlimitLossLevel(8.0) === 'bad' && netlimitLossLevel(null) === null);
+$tNow = 1800000000;
+check('outside loss: nothing ever read is null', netlimitOutsideLoss(null, null, $tNow) === null
+      && netlimitOutsideLoss(null, ['median_x10' => null, 'n' => 0, 'passed' => null], $tNow) === null);
+$ol = netlimitOutsideLoss(['x10' => 156, 'at' => $tNow - 30, 'span' => 60, 'segs' => 10000, 'read' => true], null, $tNow);
+check('outside loss: 15.6 % now is bad, one decimal, with its time — and the advice is guarded',
+      $ol['pct'] === 15.6 && $ol['level'] === 'bad' && $ol['at'] === $tNow - 30 && $ol['guard'] === true && $ol['guard_pct'] === 15.6, json_encode($ol));
+$ol = netlimitOutsideLoss(['x10' => 19, 'at' => $tNow - 30, 'read' => true], null, $tNow);
+check('outside loss: 1.9 % is ok and guards nothing', $ol['level'] === 'ok' && $ol['guard'] === false, json_encode($ol));
+$ol = netlimitOutsideLoss(['x10' => 19, 'at' => $tNow - 30, 'read' => true], ['median_x10' => 52, 'n' => 30, 'passed' => 80000], $tNow);
+check('outside loss: ok now but a warn median over the last hour still guards the advice',
+      $ol['level'] === 'ok' && $ol['hour_pct'] === 5.2 && $ol['hour_level'] === 'warn' && $ol['hour_n'] === 30 && $ol['guard'] === true && $ol['guard_pct'] === 5.2, json_encode($ol));
+check('outside loss: … from ' . NET_LOSS_HOUR_MIN . ' readings at least',
+      netlimitOutsideLoss(['x10' => 19, 'at' => $tNow - 30, 'read' => true], ['median_x10' => 90, 'n' => NET_LOSS_HOUR_MIN - 1, 'passed' => 1], $tNow)['guard'] === false);
+check('outside loss: too few segments, no /proc/net/snmp, or a reading the janitor stopped renewing say so — pct null',
+      netlimitOutsideLoss(['x10' => null, 'at' => $tNow - 30, 'read' => true], null, $tNow)['why'] === 'few'
+      && netlimitOutsideLoss(['x10' => null, 'at' => $tNow - 30, 'read' => false], null, $tNow)['why'] === 'unreadable'
+      && netlimitOutsideLoss(['x10' => 156, 'at' => $tNow - 3600, 'read' => true], null, $tNow)['why'] === 'stale'
+      && netlimitOutsideLoss(['x10' => 156, 'at' => $tNow - 3600, 'read' => true], null, $tNow)['pct'] === null
+      && netlimitOutsideLoss(['x10' => 156, 'at' => $tNow - 3600, 'read' => true], null, $tNow)['guard'] === false);
+check('loss base: the lower of the limit in force and what gets through (a limit far above the traffic holds nothing)',
+      netlimitLossBase(90000, 88000) === 88000 && netlimitLossBase(175000, 100000) === 100000
+      && netlimitLossBase(0, 52000) === 52000 && netlimitLossBase(50000, 0) === 50000 && netlimitLossBase(0, 0) === 0);
+// the advice, guarded: production's week — arrivals P95 ~105 000, so P95 + 5 % = 110 000, above a limit of 90 000
+$recP = netlimitRecommendFrom(array_merge(array_fill(0, 90, 95000), array_fill(0, 10, 105000))) + ['days' => 7];
+$lossOl = netlimitOutsideLoss(['x10' => 156, 'at' => $tNow - 30, 'read' => true], null, $tNow);
+$g = netlimitRecommendGuard($recP, $lossOl, netlimitLossBase(90000, 88000), null);
+check('guard: while losing outside, ~80 % of what the limit lets through (88 000 → 70 000), never above the limit in force',
+      $recP['suggested'] === 110000 && $g['guard'] === 'loss' && $g['suggested'] === netlimitRoundStep((int)round(88000 * NET_LOSS_LOWER))
+      && $g['suggested'] === 70000 && $g['suggested'] < 90000 && $g['suggested_was'] === 110000 && $g['loss_base'] === 88000, json_encode($g));
+$g175 = netlimitRecommendGuard($recP, $lossOl, netlimitLossBase(175000, 100000), null);
+check('guard: … at 175 000 with 100 000 getting through it is 80 000 — 80 % of the LIMIT (140 000) would lower nothing',
+      $g175['suggested'] === 80000, json_encode($g175));
+$partsL = netlimitRecommendParts($g);
+$textL = netlimitSayParts($partsL);
+check('guard: the words say the machine is losing packets OUTSIDE it and what to do — nothing points higher',
+      array_column($partsL, 'key') === ['api.net.rec_stats', 'api.net.rec_loss', 'api.net.rec_loss_lower']
+      && $partsL[1]['vars'] === ['pct' => '15.6', 'warn' => '4'] && $partsL[2]['vars'] === ['n' => 70000, 'base' => 88000]
+      && str_contains($textL, 'losing packets OUTSIDE') && str_contains($textL, '70,000') && str_contains($textL, 'stability probe')
+      && !str_contains($textL, '110,000') && !str_contains($textL, 'never trigger'), $textL);
+$gNoBase = netlimitRecommendGuard($recP, $lossOl, 0, null);
+check('guard: with no limit and no rate to go down from, no number — lower it by hand or run the probe',
+      $gNoBase['suggested'] === 0 && array_column(netlimitRecommendParts($gNoBase), 'key')[2] === 'api.net.rec_loss_probe');
+$recFew = netlimitRecommendFrom(array_fill(0, 10, 95000)) + ['days' => 7];
+check('guard: the loss leads even before there are enough samples for a recommendation',
+      array_column(netlimitRecommendParts(netlimitRecommendGuard($recFew, $lossOl, 88000, null)), 'key') === ['api.net.rec_stats', 'api.net.rec_loss', 'api.net.rec_loss_lower']);
+check('guard: in a flood too — no "for reference … above the arrivals"',
+      !in_array('api.net.rec_flood_ref', array_column(netlimitRecommendParts($g, true, 88000), 'key'), true));
+$okOl = netlimitOutsideLoss(['x10' => 19, 'at' => $tNow - 30, 'read' => true], null, $tNow);
+$gCap = netlimitRecommendGuard($recP, $okOl, 88000, 82600);
+check('cap: when nothing is lost, the suggestion stops at the busiest hour seen coping (82 600 → 82 000, rounded DOWN)',
+      $gCap['guard'] === 'cap' && $gCap['suggested'] === 82000 && $gCap['suggested_was'] === 110000 && $gCap['safe_cap'] === 82600, json_encode($gCap));
+$partsC = netlimitRecommendParts($gCap);
+check('cap: … the arrivals\' sentence keeps its own number and the cap is said after it',
+      array_column($partsC, 'key') === ['api.net.rec_stats', 'api.net.rec_normal', 'api.net.rec_cap']
+      && $partsC[1]['vars']['suggested'] === 110000 && $partsC[2]['vars'] === ['n' => 82000, 'safe' => 82600, 'days' => NET_LOSS_SAFE_DAYS, 'warn' => '4'],
+      json_encode($partsC));
+check('cap: … in a flood the reference keeps the arrivals\' number, the cap follows',
+      array_slice(array_column(netlimitRecommendParts($gCap, true, 80000), 'key'), -2) === ['api.net.rec_flood_ref', 'api.net.rec_cap']
+      && netlimitRecommendParts($gCap, true, 80000)[3]['vars'] === ['n' => 110000]);
+check('cap: a safe hour above the suggestion changes nothing; no history, no cap; no samples, no guard',
+      netlimitRecommendGuard($recP, $okOl, 88000, 150000)['guard'] === null && netlimitRecommendGuard($recP, $okOl, 88000, 150000)['suggested'] === 110000
+      && netlimitRecommendGuard($recP, $okOl, 88000, null)['guard'] === null
+      && netlimitRecommendGuard(netlimitRecommendFrom([]), $lossOl, 88000, 50000)['guard'] === null);
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl'], null);
+$textLpl = netlimitSayParts($partsL);
+$GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'en'], null);
+check('guard: … in Polish, Polish numbers', str_contains($textLpl, 'POZA sobą') && str_contains($textLpl, "70\u{00A0}000 pps") && str_contains($textLpl, '15.6 %'), $textLpl);
+// net_status and the card wire it: the tile, the guard, the blacklist budget
+$ns2 = (string)file_get_contents($root . '/api/admin/net_status.php');
+check('net_status: `outside_loss` from the state and the last hour, the guard between the recommendation and its words, the mode',
+      str_contains($ns2, "\$out['outside_loss'] = netlimitOutsideLoss(") && str_contains($ns2, 'netlimitLossHour($db, $now)')
+      && str_contains($ns2, "\$rec = netlimitRecommendGuard(\$rec, \$out['outside_loss'], \$lossBase, \$safeCap);")
+      && strpos($ns2, 'netlimitRecommendGuard(') < strpos($ns2, "\$rec['parts'] = netlimitRecommendParts(")
+      && str_contains($ns2, "'tracker_mode' =>"));
+check('card: the tile has a stable id and a level, its words are keyed (ok / warn / bad and why there is none)',
+      str_contains($nj, "tile.id = 'net-tile-outside';") && str_contains($nj, "tile.dataset.level = (ol && ol.level) || 'none';")
+      && str_contains($nj, "t.key('js.net.outside_title')") && str_contains($nj, "t.key('js.net.outside_bad')") && str_contains($nj, "t.key('js.net.outside_few')"));
+check('card: while losing outside, no red zone under what gets through and no "cutting into" warning',
+      str_contains($nj, 'paintSlider(range, state.pps, lossGuard() ? 0 : inboundReference(), machineCeiling());')
+      && str_contains($nj, "if (ref > 0 && lossGuard()) {"));
+check('blacklist: the budget says it covers only connect / "not authorized" replies and the inbound limit is the lever …',
+      str_contains($enL['js.net.egress_blacklist'] ?? '', 'only connect and “not authorized” replies')
+      && str_contains($enL['js.net.egress_blacklist'] ?? '', 'every announce reply passes outside it')
+      && str_contains($enL['js.net.egress_blacklist'] ?? '', 'inbound limit')
+      && str_contains($plL['js.net.egress_blacklist'] ?? '', 'tylko odpowiedzi connect i „not authorized”')
+      && str_contains($nj, "t.key('js.net.egress_blacklist')") && str_contains($nj, "isBlacklist(j) ? t.key('js.net.egress_note_blacklist') : t.key('js.net.egress_note')"));
+$eAdv = substr($nj, (int)strpos($nj, 'function renderEgressAdvice'), 4000);
+check('blacklist: … and neither it nor a loss outside gets the "too low" / "almost no headroom" push, the amber zone or "Use suggested"',
+      (bool)preg_match("/if \\(blacklist\\) \\{.*?\\} else if \\(lossGuard\\(\\)\\) \\{.*?\\} else if \\(eState\\.pps < eState\\.ref\\) \\{.*?egress_too_low.*?egress_tight/s", $eAdv)
+      && str_contains($nj, 'return (isBlacklist() || lossGuard()) ? 0 : eState.ref;')
+      && substr_count($nj, 'egressZoneRef()') >= 3
+      && str_contains($nj, "if (isBlacklist()) { showToast(t.key('js.net.toast_egress_blacklist'), 'warning'); return; }"));
+@unlink($snmpFile); @rmdir($snmpDir);
+
 // ── 5. bucketing ─────────────────────────────────────────────────────────────
 check('bucket: 24 h of 60 s samples stays raw', netlimitBucketFor(86400, 60) === 0);
 check('bucket: 30 d of 60 s samples is bucketed', netlimitBucketFor(2592000, 60) > 0);
@@ -1094,6 +1224,90 @@ if ($db !== null) {
     $seedLoad($db, $t0, 200, static fn($i) => 10000 + $i * 400, static fn($i, $p) => $i % 2 ? null : 1.5);
     $lc = netlimitLoadCurve($db, $cfgS, 7);
     check('load study: readings with no load recorded are skipped', $lc['samples'] === 100, (string)$lc['samples']);
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+
+    // MAIN-2 (1.73.3): a hot bucket of three readings is not "the busiest median". Before, the sentence said "never reached
+    // a load of 0.85 … (busiest median 1.20)" — the max was read from every bucket, the ceiling only from the counted ones.
+    $seedLoad($db, $t0, 200, static fn($i) => $i < 197 ? 10000 + $i * 350 : 90000, static fn($i, $p) => $i < 197 ? 0.30 : 1.20);
+    $lc = netlimitLoadCurve($db, $cfgS, 7);
+    preg_match('/busiest median ([0-9.]+)/', $lc['why'], $mMax);
+    check('load study (MAIN-2): three hot readings are no ceiling, and "the busiest median" is read from the rates that count',
+          $lc['busy_pps'] === null && isset($mMax[1]) && (float)$mMax[1] < NET_LOAD_BUSY && ($lc['why_part']['vars']['max'] ?? '') === '0.30'
+          && !str_contains($lc['why'], 'busiest median 1.2'), $lc['why']);
+    check('load study (MAIN-2): … the hotter rate is a sentence of its own — its rate, its load, its readings',
+          ($lc['thin_part']['key'] ?? '') === 'api.net.load_thin' && ($lc['thin_part']['vars']['n'] ?? null) === 3
+          && ($lc['thin_part']['vars']['load'] ?? '') === '1.20' && ($lc['thin_part']['vars']['min'] ?? null) === NET_LOAD_MIN_BUCKET
+          && $lc['why'] === netlimitSayParts([$lc['why_part'], $lc['thin_part']]) && str_contains($lc['why'], 'too few readings'), json_encode($lc['thin_part']));
+    check('load study (MAIN-2): … and the card writes it after the first, as a keyed word',
+          str_contains($nlJs, 'const thin = saidPart(lc2.why_part) ? saidPart(lc2.thin_part) : null;')
+          && str_contains($nlJs, "[t.key('js.net.load_study', {why: saidPart(lc2.why_part) || lc2.why}), thin ? ' ' : null, thin]"));
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $seedLoad($db, $t0, 200, static fn($i) => 10000 + $i * 400, static fn($i, $p) => 0.10 + $p / 900000);
+    check('load study (MAIN-2): with no thin hot rate there is no second sentence', netlimitLoadCurve($db, $cfgS, 7)['thin_part'] === null);
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+
+    // ── the loss outside, stored (1.73.3): /proc/net/snmp through TRACKER_PROC_SNMP, a fixture file ──
+    $snmpDir2 = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'netlimit_snmp_db_' . getmypid();
+    @mkdir($snmpDir2, 0777, true);
+    $snmpFix = $snmpDir2 . DIRECTORY_SEPARATOR . 'snmp';
+    putenv('TRACKER_PROC_SNMP=' . $snmpFix);
+    @unlink($stateFile);
+    $tS = 1800000000;
+    file_put_contents($snmpFix, $snmpText(1000000, 10000));
+    $r = netlimitStoreSample($db, $cfgS, $mkStatus(0, 0, 0), $tS);
+    $stL = netlimitStateRead();
+    check('stored loss: the first reading keeps the counters (tcp_prev) and has no share yet',
+          $r['stored'] === false && ($stL['tcp_prev'] ?? null) === ['out' => 1000000, 'retrans' => 10000, 'at' => $tS]
+          && is_array($stL['tcp_retrans_now'] ?? null) && array_key_exists('x10', $stL['tcp_retrans_now']) && $stL['tcp_retrans_now']['x10'] === null
+          && ($stL['tcp_retrans_now']['read'] ?? null) === true, json_encode($stL['tcp_retrans_now'] ?? null));
+    file_put_contents($snmpFix, $snmpText(1010000, 11560));
+    $r = netlimitStoreSample($db, $cfgS, $mkStatus(1200000, 1080000, 120000, 90000), $tS + 60);
+    $row = $db->query('SELECT tcp_retrans_x10 FROM `' . NET_SAMPLE_TABLE . '` WHERE ts = ' . ($tS + 60))->fetch(PDO::FETCH_ASSOC);
+    $stL = netlimitStateRead();
+    check('stored loss: 1 560 resent of 10 000 is written into the row as 156 and into the state for the card',
+          $r['stored'] === true && $r['retrans_x10'] === 156 && $row !== false && (int)$row['tcp_retrans_x10'] === 156
+          && ($stL['tcp_retrans_now']['x10'] ?? null) === 156 && ($stL['tcp_retrans_now']['segs'] ?? null) === 10000
+          && ($stL['tcp_retrans_now']['at'] ?? null) === $tS + 60 && ($stL['tcp_prev']['out'] ?? null) === 1010000, json_encode([$row, $stL['tcp_retrans_now'] ?? null]));
+    $olS = netlimitOutsideLoss($stL['tcp_retrans_now'], null, $tS + 70, 60);
+    check('stored loss: … which admin/net_status reads as 15.6 %, bad', $olS['pct'] === 15.6 && $olS['level'] === 'bad' && $olS['at'] === $tS + 60, json_encode($olS));
+    file_put_contents($snmpFix, $snmpText(1010200, 11570));
+    netlimitStoreSample($db, $cfgS, $mkStatus(2400000, 2160000, 240000, 90000), $tS + 120);
+    $row = $db->query('SELECT tcp_retrans_x10 FROM `' . NET_SAMPLE_TABLE . '` WHERE ts = ' . ($tS + 120))->fetch(PDO::FETCH_ASSOC);
+    check('stored loss: fewer than ' . NET_LOSS_MIN_SEGMENTS . ' segments over the span is NULL in the row — not 50 per 1 000',
+          $row !== false && $row['tcp_retrans_x10'] === null && netlimitOutsideLoss(netlimitStateRead()['tcp_retrans_now'], null, $tS + 130, 60)['why'] === 'few', json_encode($row));
+    putenv('TRACKER_PROC_SNMP=' . $snmpDir2 . DIRECTORY_SEPARATOR . 'missing');
+    netlimitStoreSample($db, $cfgS, $mkStatus(3600000, 3240000, 360000, 90000), $tS + 180);
+    $row = $db->query('SELECT tcp_retrans_x10 FROM `' . NET_SAMPLE_TABLE . '` WHERE ts = ' . ($tS + 180))->fetch(PDO::FETCH_ASSOC);
+    $stL = netlimitStateRead();
+    check('stored loss: a machine without /proc/net/snmp stores NULL, keeps no counters, and says it cannot read them',
+          $row !== false && $row['tcp_retrans_x10'] === null && array_key_exists('tcp_prev', $stL) && $stL['tcp_prev'] === null
+          && netlimitOutsideLoss($stL['tcp_retrans_now'], null, $tS + 190, 60)['why'] === 'unreadable', json_encode($stL['tcp_retrans_now'] ?? null));
+    putenv('TRACKER_PROC_SNMP=' . $snmpFix);
+    file_put_contents($snmpFix, $snmpText(1100000, 12000));
+    $r = netlimitStoreSample($db, $cfgS, ['ok' => true, 'pps' => 0, 'table' => false, 'counters' => [], 'egress' => ['counters' => []]], $tS + 240);
+    file_put_contents($snmpFix, $snmpText(1200000, 13000));
+    $r = netlimitStoreSample($db, $cfgS, ['ok' => true, 'pps' => 0, 'table' => false, 'counters' => [], 'egress' => ['counters' => []]], $tS + 300);
+    check('stored loss: with no table of ours loaded no row is written, but the share is still read for the card (1 000 of 100 000)',
+          $r['stored'] === false && $r['retrans_x10'] === 10 && (netlimitStateRead()['tcp_retrans_now']['x10'] ?? null) === 10, json_encode($r));
+    putenv('TRACKER_PROC_SNMP');
+    @unlink($snmpFix); @rmdir($snmpDir2);
+
+    // the last hour's median, and the busiest hour this machine is known to have coped with
+    $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
+    $insL = $db->prepare('INSERT INTO `' . NET_SAMPLE_TABLE . '` (ts, span, pps_total, pps_passed, pps_capped, limit_pps, tcp_retrans_x10) VALUES (?,60,?,?,0,90000,?)');
+    $tH0 = intdiv($tS, 3600) * 3600;                       // a whole hour, so each fixture hour is one hour of the GROUP BY
+    for ($i = 0; $i < 60; $i++) $insL->execute([$tH0 - 3 * 3600 + 60 * $i, 82000, 82000, 19]);                  // coped: 82 000 at 1.9 %
+    for ($i = 0; $i < 60; $i++) $insL->execute([$tH0 - 2 * 3600 + 60 * $i, 88000, 88000, $i < 50 ? 156 : 160]); // busier, but losing
+    for ($i = 0; $i < 4; $i++)  $insL->execute([$tH0 - 1 * 3600 + 60 * $i, 99000, 99000, 10]);                 // calm but four readings
+    for ($i = 4; $i < 60; $i++) $insL->execute([$tH0 - 1 * 3600 + 60 * $i, 99000, 99000, null]);               // … the rest unread
+    check('safe hour: the busiest hour with an ok share (82 000 at 1.9 %) — not the busier one losing 15.6 %, not one of four readings',
+          netlimitSafeHistoryCap($db, $tH0) === 82000, (string)netlimitSafeHistoryCap($db, $tH0));
+    check('safe hour: none in the window → no cap', netlimitSafeHistoryCap($db, $tH0 + 30 * 86400) === null);
+    $lh = netlimitLossHour($db, $tH0 - 3600);
+    check('last hour: the median of its readings (15.6 %), how many, and what got through',
+          $lh['median_x10'] === 156 && $lh['n'] === 60 && $lh['passed'] === 88000, json_encode($lh));
+    $olH = netlimitOutsideLoss(['x10' => 19, 'at' => $tH0 - 3600 - 10, 'read' => true], $lh, $tH0 - 3600, 60);
+    check('last hour: ok now, but a bad hour behind it keeps the advice guarded', $olH['level'] === 'ok' && $olH['hour_level'] === 'bad' && $olH['guard'] === true, json_encode($olH));
     $db->exec('TRUNCATE TABLE `' . NET_SAMPLE_TABLE . '`');
 
     // the janitor tick must not fork anything at all while everything is off
