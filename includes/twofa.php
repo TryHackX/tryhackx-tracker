@@ -34,20 +34,44 @@ const TWOFA_SETUP_TTL = 900;
 
 function twofaFile(): string { return __DIR__ . '/../config/admin_2fa.json'; }
 
+/**
+ * The state, with defaults. `broken` (1.74.0, AUTH-4) is true when the file EXISTS but is not a state this code wrote:
+ * unreadable, empty, truncated, not a JSON object, or "enabled" with no secret. Until 1.74.0 all of those read as
+ * "two-factor off" — a bad restore, a full disk or a hand edit took the second factor away without a word, and the
+ * sign-in went through on the password alone. Now a broken file means ON (fail-closed): no code can be checked
+ * against it, so the panel's own sign-in stops at the code until the file is repaired — or deleted, which is what
+ * "never set up" looks like and which the README gives as the way back. A MISSING file is still "never set up".
+ */
 function twofaState(): array {
     $f = twofaFile();
     $d = [];
-    if (is_file($f)) {
-        $raw = @file_get_contents($f);
-        $d = $raw ? (json_decode($raw, true) ?: []) : [];
+    $broken = false;
+    if (file_exists($f)) {
+        $raw = is_file($f) ? @file_get_contents($f) : false;
+        $d = is_string($raw) && $raw !== '' ? json_decode($raw, true) : null;
+        if (!is_array($d) || !array_key_exists('enabled', $d)
+            || (!empty($d['enabled']) && (!is_string($d['secret'] ?? null) || $d['secret'] === ''))) {
+            $broken = true;
+            $d = [];
+            static $said = false;
+            if (!$said) {
+                $said = true;
+                error_log('[2fa] ' . basename($f) . ' is not a two-factor state this panel wrote — treated as ON (fail-closed) until it is repaired or deleted');
+            }
+        }
     }
     return array_replace([
         'enabled' => false, 'secret' => '', 'recovery' => [], 'last_step' => 0,
         'confirmed_at' => 0, 'pending' => null,
-    ], is_array($d) ? $d : []);
+    ], $d, ['broken' => $broken]);
 }
 
 function twofaStateWrite(array $s): bool {
+    // A state read from a BROKEN file is the defaults, i.e. "off": written back it would turn a fail-closed panel
+    // into an open one through whatever path saves the state (cancelling a setup needs no password). Only a state
+    // built whole — twofaDisable(), which asks for the password and a code — replaces a broken file.
+    if (!empty($s['broken'])) return false;
+    unset($s['broken']);
     $f = twofaFile();
     $tmp = $f . '.tmp.' . getmypid();
     if (@file_put_contents($tmp, json_encode($s, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX) === false) return false;
@@ -55,7 +79,27 @@ function twofaStateWrite(array $s): bool {
     return @rename($tmp, $f);
 }
 
-function twofaEnabled(): bool { return !empty(twofaState()['enabled']) && twofaState()['secret'] !== ''; }
+/**
+ * Run $fn with the state file's lock held (1.74.0, AUTH-2): read, check and write of a code as one step. Without
+ * it two sign-ins carrying the same six digits — or the same recovery code — at the same moment both read the
+ * state before either wrote it, and both were let in: one stolen code, two sessions. A lock that cannot be had
+ * (config/ not writable) runs $fn anyway, as before; the write it does fails the same way.
+ */
+function twofaLocked(callable $fn): mixed {
+    $h = @fopen(twofaFile() . '.lock', 'c');
+    if ($h) @flock($h, LOCK_EX);
+    try {
+        return $fn();
+    } finally {
+        if ($h) { @flock($h, LOCK_UN); @fclose($h); }
+    }
+}
+
+/** On: armed with a secret — or a state file that cannot be read as one (fail-closed, see twofaState()). */
+function twofaEnabled(): bool {
+    $s = twofaState();
+    return !empty($s['broken']) || (!empty($s['enabled']) && $s['secret'] !== '');
+}
 
 /* ── base32, because that is what authenticator apps speak ────────────────── */
 
@@ -126,16 +170,18 @@ function twofaVerifyCode(string $secretB32, string $code, ?int $now = null, int 
     return null;
 }
 
-/** Full verification against the stored secret, including the replay refusal. */
+/** Full verification against the stored secret, including the replay refusal — under the state's lock. */
 function twofaCheck(string $code, ?int $now = null): bool {
-    $s = twofaState();
-    if (empty($s['enabled']) || $s['secret'] === '') return false;
-    $step = twofaVerifyCode((string)$s['secret'], $code, $now);
-    if ($step === null) return false;
-    if ($step <= (int)$s['last_step']) return false;    // already used, or older than one already used
-    $s['last_step'] = $step;
-    twofaStateWrite($s);
-    return true;
+    return (bool)twofaLocked(function () use ($code, $now): bool {
+        $s = twofaState();
+        if (!empty($s['broken']) || empty($s['enabled']) || $s['secret'] === '') return false;
+        $step = twofaVerifyCode((string)$s['secret'], $code, $now);
+        if ($step === null) return false;
+        if ($step <= (int)$s['last_step']) return false;    // already used, or older than one already used
+        $s['last_step'] = $step;
+        twofaStateWrite($s);
+        return true;
+    });
 }
 
 /* ── recovery codes ───────────────────────────────────────────────────────── */
@@ -162,21 +208,23 @@ function twofaNormalizeRecovery(string $c): string {
     return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $c));
 }
 
-/** Consume a recovery code. Returns how many are left, or null if it was not one. */
+/** Consume a recovery code — under the state's lock, so one code opens one session. Returns how many are left, or null if it was not one. */
 function twofaUseRecovery(string $code): ?int {
-    $s = twofaState();
-    if (empty($s['enabled'])) return null;
-    $want = hash('sha256', twofaNormalizeRecovery($code));
-    $left = [];
-    $found = false;
-    foreach ((array)$s['recovery'] as $h) {
-        if (!$found && hash_equals((string)$h, $want)) { $found = true; continue; }
-        $left[] = $h;
-    }
-    if (!$found) return null;
-    $s['recovery'] = $left;
-    twofaStateWrite($s);
-    return count($left);
+    return twofaLocked(function () use ($code): ?int {
+        $s = twofaState();
+        if (!empty($s['broken']) || empty($s['enabled'])) return null;
+        $want = hash('sha256', twofaNormalizeRecovery($code));
+        $left = [];
+        $found = false;
+        foreach ((array)$s['recovery'] as $h) {
+            if (!$found && hash_equals((string)$h, $want)) { $found = true; continue; }
+            $left[] = $h;
+        }
+        if (!$found) return null;
+        $s['recovery'] = $left;
+        twofaStateWrite($s);
+        return count($left);
+    });
 }
 
 function twofaRecoveryLeft(): int { return count((array)twofaState()['recovery']); }
@@ -260,6 +308,9 @@ function twofaRegenerateRecovery(): array {
  * read a file. The file is authoritative; when they disagree the row is wrong and gets corrected.
  */
 function twofaSyncSetting(PDO $db, array &$cfg): void {
+    // A broken file is not evidence of anything (AUTH-4): the row is the one record left of what the owner set up,
+    // and "correcting" it to 0 would erase the last trace of a second factor somebody had switched on.
+    if (!empty(twofaState()['broken'])) return;
     $want = twofaEnabled() ? '1' : '0';
     if ((string)($cfg['admin_2fa_enabled'] ?? '0') === $want) return;
     try {

@@ -246,6 +246,9 @@ function bulkTick(PDO $db, array $cfg): array {
                     'greeting' => '',
                     'body'     => $htmlBody,
                     'unsubscribe_url' => $unsub,
+                    // The frame's own words (the preferences link) in the member's language (1.74.0, QUAL-18) — the
+                    // janitor that sends this has none of its own.
+                    'lang'     => function_exists('recipientLangOf') ? recipientLangOf($db, $cfg, (int)($r['user_id'] ?? 0)) : null,
                   ], $cfg)
                 : $htmlBody;
             $ok = sendEmail((string)$r['email'], (string)$r['subject'], (string)$r['body'], $html, $cfg, $unsub);

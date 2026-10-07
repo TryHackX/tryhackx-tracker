@@ -138,6 +138,13 @@ function user2faConfirmSetup(PDO $db, int $userId, string $code): array
  * A used recovery code is REMOVED rather than marked, so the list is always exactly what is left.
  * Both paths advance `last_step` — a recovery code is single-use by being deleted, a TOTP code by
  * the step it carries.
+ *
+ * SPENT IN THE DATABASE, NOT BETWEEN A READ AND A WRITE (1.74.0, AUTH-2). The check used to be "read last_step,
+ * compare, update": two sign-ins carrying the same six digits at the same moment both read the old step and both
+ * were let in — one intercepted code, two sessions (the 1.57.0 changelog promised otherwise and the code never
+ * did it). Now the UPDATE itself is the guard — it moves last_step only if no sign-in has moved it to this step
+ * yet — and only the request whose UPDATE changed the row wins. A recovery code is taken out the same way: the
+ * list is replaced only if it is still the list this request read, so of two requests spending one code, one does.
  */
 function user2faVerify(PDO $db, int $userId, string $code): bool
 {
@@ -150,9 +157,10 @@ function user2faVerify(PDO $db, int $userId, string $code): bool
     if ($step !== null) {
         // Replay: the same digits are valid for up to 90 seconds, and this is what makes them once.
         if ($r['last_step'] !== null && $step <= (int)$r['last_step']) return false;
-        $db->prepare("UPDATE user_twofa SET last_step = ?, last_used_at = NOW() WHERE user_id = ?")
-           ->execute([$step, $userId]);
-        return true;
+        $st = $db->prepare("UPDATE user_twofa SET last_step = ?, last_used_at = NOW()
+                             WHERE user_id = ? AND enabled = 1 AND (last_step IS NULL OR last_step < ?)");
+        $st->execute([$step, $userId, $step]);
+        return $st->rowCount() === 1;
     }
 
     $codes = json_decode((string)($r['recovery'] ?? '[]'), true);
@@ -165,9 +173,9 @@ function user2faVerify(PDO $db, int $userId, string $code): bool
         $left[] = $c;
     }
     if (!$found) return false;
-    $db->prepare("UPDATE user_twofa SET recovery = ?, last_used_at = NOW() WHERE user_id = ?")
-       ->execute([json_encode($left), $userId]);
-    return true;
+    $st = $db->prepare("UPDATE user_twofa SET recovery = ?, last_used_at = NOW() WHERE user_id = ? AND enabled = 1 AND recovery = ?");
+    $st->execute([json_encode($left), $userId, (string)$r['recovery']]);
+    return $st->rowCount() === 1;
 }
 
 /** Turn it off and forget the secret. The caller is responsible for asking for the password first. */

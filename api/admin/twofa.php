@@ -82,7 +82,7 @@ if ($op === 'begin') {
         require_once dirname(__DIR__, 2) . '/includes/qr.php';
         $qr = qrSvg(qrMatrix((string)($r['uri'] ?? '')));
     } catch (Throwable $e) {
-        error_log('2FA QR could not be drawn: ' . $e->getMessage());
+        error_log('[2fa] the QR could not be drawn: ' . $e->getMessage());
     }
     // Nothing has changed yet. The secret is pending until a code proves it arrived intact.
     jsonResponse(['success' => true] + $r + [

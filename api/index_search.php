@@ -69,17 +69,27 @@ if (!preg_match('/^(relevance|seeders|leechers|size|last|name|files)(:(asc|desc)
 $perPage = (int)($_GET['per_page'] ?? 25);
 if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = 25;
 
-$res = indexSearchCatalogue($db, $cfg, [
-    'page'              => $_GET['page'] ?? 1,
-    'per_page'          => $perPage,
-    'sort'              => $sort,
-    'search'            => $search,
-    'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
-    'include_whitelist' => $canWl,
-    'content'           => (string)($_GET['content'] ?? 'not_rejected'),
-    // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
-    'hash_search'       => $canMagnet,
-]);
+// A search the database stopped for running past max_statement_time (api.php, 20 s) is an answer, not a 500 (1.74.0):
+// production's log had five bare 500s from exactly this — a common word with "search in files", a deep sort — and the
+// reader saw a blank error with nothing to do about it. 503 with a sentence in their language, and the code for the
+// page to recognise; nothing was retried behind their back (see indexSearchCatalogue()).
+try {
+    $res = indexSearchCatalogue($db, $cfg, [
+        'page'              => $_GET['page'] ?? 1,
+        'per_page'          => $perPage,
+        'sort'              => $sort,
+        'search'            => $search,
+        'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
+        'include_whitelist' => $canWl,
+        'content'           => (string)($_GET['content'] ?? 'not_rejected'),
+        // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
+        'hash_search'       => $canMagnet,
+    ]);
+} catch (IndexSearchTimeout $e) {
+    error_log('[index search] stopped for time: ' . mb_substr($search, 0, 80) . ' sort=' . $sort . ' — ' . $e->getMessage());
+    header('Retry-After: 30');
+    jsonResponse(['success' => false, 'error' => __('api.search.timeout'), 'code' => 'search_timeout'], 503);
+}
 
 $repInResults = repEnabled($cfg) && repShowInResults($cfg);
 $repMin = repMinVotes($cfg);
@@ -94,6 +104,17 @@ if (favEnabled($cfg) && $canMagnet && userCan($db, $cfg, 'favourites.use')) {
     if ($meFav) $favMark = favMarkFor($db, (int)$meFav['id'], array_column($res['rows'], 'info_hash'));
 }
 
+// "Last seen" in the READER's clock and the site's one short format (1.74.0, part D — UX-23): the script read the raw
+// DATETIME as the browser's own time and wrote it in the browser's language ("10/05/2026, 04:00 PM" on a Polish page,
+// two hours off). The column holds the database session's clock, which is PHP's offset (config/database.php).
+$readerTz = function_exists('userDisplayTimezone') ? userDisplayTimezone(usersEnabled($cfg) ? currentUser($db) : null, $cfg) : null;
+$dbZone = new DateTimeZone(date('P'));
+$readerTime = static function ($dt) use ($readerTz, $dbZone): string {
+    if ($readerTz === null || !is_string($dt) || $dt === '') return '';
+    try { return (new DateTimeImmutable($dt, $dbZone))->setTimezone($readerTz)->format('Y-m-d H:i'); }
+    catch (\Throwable $e) { return ''; }
+};
+
 $rows = [];
 foreach ($res['rows'] as $r) {
     $row = [
@@ -102,6 +123,7 @@ foreach ($res['rows'] as $r) {
         'seeders'  => $r['seeders'],
         'leechers' => $r['leechers'],
         'last_seen' => $r['last_seen'],
+        'last_seen_time' => $readerTime($r['last_seen'] ?? null),
         'src'      => $r['src'],
     ];
     if ($canFiles) $row['files_count'] = $r['files_count'];
@@ -129,6 +151,8 @@ foreach ($res['rows'] as $r) {
 
 jsonResponse([
     'success' => true, 'rows' => $rows, 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'],
+    // 1.74.0 (PERF-2): true when `total` is only how far the search counted — the page shows "N+".
+    'total_capped' => !empty($res['total_capped']),
     'can' => ['files' => $canFiles, 'magnet' => $canMagnet, 'whitelist' => $canWl],
     'rep_in_results' => $repInResults,
 ]);

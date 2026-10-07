@@ -57,6 +57,4 @@ add('account', {
 add('js.pm', {
     'back_title': ('Back to your messages', 'Wróć do wiadomości'),
     # op 'hide': the thread leaves the inbox until somebody writes in it again; nothing is deleted
-    'hide_title': ('Take this conversation out of your inbox — nothing is deleted, and the next message brings it back',
-                   'Zdejmij tę rozmowę ze skrzynki — nic nie zostaje usunięte, a następna wiadomość ją przywróci'),
 })

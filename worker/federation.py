@@ -830,6 +830,20 @@ def purge_peer(db, peer_name, dry_run=False, batch=500):
             except Exception:
                 pass
             raise
+        # A row without a name is not in the public catalogue's narrow table (index_catalog, 1.74.0). Its own
+        # statement, after the commit, and allowed to fail: a grant for the table may not be there yet
+        # (worker/README.md), and the janitor's rolling walk takes these rows out within hours anyway.
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM index_catalog WHERE info_hash IN (%s)" % marks, hashes)
+            conn.commit()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            if done == 0:
+                log.info("purge %s: index_catalog not updated (%s) — the janitor's walk will catch up", peer_name, e)
         done += len(hashes)
         if done % 5000 < batch:
             log.info("purge %s: %d/%d", peer_name, done, total)

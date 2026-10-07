@@ -302,17 +302,11 @@ function contentReportRequest(PDO $db, array $cfg, ?array $me, array $input, str
     return ['status' => 200, 'body' => ['success' => true, 'reported' => true, 'already' => false, 'message' => __('api.creport.reported')]];
 }
 
-/* ── languages, the actor, the author's account ───────────────────────────────────────────────────── */
-
-/** The language a notification is written in for THIS account: theirs, else the site's, else English. */
-function reportLangFor(array $cfg, ?array $user): string
-{
-    $mine = strtolower(trim((string)($user['language'] ?? '')));
-    if ($mine !== '' && function_exists('langSupported') && langSupported($cfg, $mine)) return $mine;
-    $site = strtolower(trim((string)($cfg['default_language'] ?? '')));
-    if ($site !== '' && $site !== 'auto' && function_exists('langSupported') && langSupported($cfg, $site)) return $site;
-    return defined('LANG_FALLBACK') ? LANG_FALLBACK : 'en';
-}
+/* ── languages, the actor, the author's account ───────────────────────────────────────────────────── *
+ *
+ * A notification is written in its RECIPIENT's language — recipientLang() (includes/users.php), the one helper
+ * this file and includes/comments.php had a copy each of until 1.74.0.
+ */
 
 /** Who is acting in the panel: ['id' => the account, 0 for the owner's own session, 'username' => the name]. */
 function reportPanelActor(PDO $db): array
@@ -361,7 +355,7 @@ function userWarn(PDO $db, array $cfg, int $userId, string $reason, array $src, 
     $st->execute([$userId]);
     $n = (int)$st->fetchColumn();
 
-    $lang = reportLangFor($cfg, $user);
+    $lang = recipientLang($cfg, $user);
     $name = (string)($src['name'] ?? '');
     if ($action === 'mute' || $action === 'ban') {
         if ($until === null) {
@@ -743,7 +737,7 @@ function contentReportTellReporters(PDO $db, array $cfg, array $rows, string $ou
         if ($rid <= 0 || isset($told[$rid])) continue;
         $u = userFindById($db, $rid);
         if ($u === null) continue;
-        $lang = reportLangFor($cfg, $u);
+        $lang = recipientLang($cfg, $u);
         $vars = ['name' => $name, 'user' => $author !== '' ? $author : langFor($lang, 'notify.creport_someone')];
         if ($outcome === 'removed') {
             $title = langFor($lang, 'notify.creport_removed_' . $kind, $vars);
@@ -918,7 +912,7 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
         }
         // Lifting one is good news, not a warning: said plainly when loud, not at all when silent.
         if ($mode === 'loud' && $author !== null) {
-            $lang = reportLangFor($cfg, $author);
+            $lang = recipientLang($cfg, $author);
             userNotify($db, $uid, 'account', langFor($lang, $action === 'unmute' ? 'notify.unmuted' : 'notify.unbanned'),
                        langFor($lang, $action === 'unmute' ? 'notify.unmuted_body' : 'notify.unbanned_body'));
         }

@@ -33,19 +33,7 @@ const WL_SQL_IN_CHUNK          = 5000;   // max placeholders per IN (...) — My
 // Small helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Rate-limit / ban key for an IP: IPv4 = exact address, IPv6 = its /64 prefix (SLAAC hosts rotate inside a /64). */
-function ipBucket(string $ip): string {
-    $ip = unmapIpv4($ip);
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-        $bin = @inet_pton($ip);
-        if ($bin !== false && strlen($bin) === 16) {
-            $prefix = substr($bin, 0, 8) . str_repeat("\0", 8);
-            $txt = @inet_ntop($prefix);
-            if ($txt !== false) return $txt . '/64';
-        }
-    }
-    return $ip;
-}
+// ipBucket() — the address group every per-address limit keys by — is in includes/functions.php since 1.74.0.
 
 function trackerMode(array $cfg): string {
     return (($cfg['tracker_mode'] ?? 'blacklist') === 'whitelist') ? 'whitelist' : 'blacklist';
@@ -705,6 +693,18 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
 
         $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at, submitter_id, submitter_public, review_status)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        // WHAT A SUBMITTED MAGNET MAY CARRY INTO THE TABLE (1.74.0, SRV-1). Its tr=, xs=, ws= and x.pe= are addresses
+        // the metadata worker announces to and fetches from — chosen by whoever submitted the link: a visitor on the
+        // public form, or a partner key whose submissions queue metadata by themselves (WL_META_AUTO_SOURCES). A
+        // tracker at 127.0.0.1 or at the cloud's metadata address is a request from this machine to wherever the
+        // submitter liked. So a magnet from anybody but the panel keeps its hash and its name and nothing else: it is
+        // rebuilt from this tracker's own announce URLs (buildMagnet()), which is all the worker needs. The panel's
+        // own additions stay as typed. (The worker filters what it announces to as well — worker/worker.py.)
+        $storedMagnet = static function (array $it) use ($source, $cfg): ?string {
+            $m = $it['magnet'] ?? null;
+            if (!is_string($m) || $m === '') return null;
+            return $source === 'admin' ? $m : buildMagnet((string)$it['hash'], $it['name'] ?? null, $cfg);
+        };
         foreach ($valid as $i => $it) {
             $h = $it['hash'];
             if (isset($banned[$h]) || (isset($existing[$h]) && $existing[$h] === 1)) {
@@ -722,7 +722,7 @@ function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): arra
             // over — and does not get it on their profile either. api/whitelist_submit.php already
             // distinguishes `added` from `exists`, so the form says so in one sentence rather than
             // leaving somebody to wonder why their torrent never appeared.
-            $ins->execute([$h, $it['name'] ?? null, $it['magnet'] ?? null, $source, $ref, $apiClientId, $ip, $bucket,
+            $ins->execute([$h, $it['name'] ?? null, $storedMagnet($it), $source, $ref, $apiClientId, $ip, $bucket,
                            $autoMeta ? 'pending' : 'none', $autoMeta ? date('Y-m-d H:i:s') : null,
                            $submitterId, $submitterPublic, $review]);
             if ($ins->rowCount() > 0) {
@@ -1302,10 +1302,16 @@ function whitelistStatus(PDO $db, array $cfg): array {
         $counts['banned_hashes'] = (int)$db->query("SELECT COUNT(*) FROM banned_hashes")->fetchColumn();
         $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status = 'pending'")->fetchColumn();
         $counts['fetching_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status = 'fetching'")->fetchColumn();
-    } catch (\Throwable $e) {}
+        $countsFailed = false;
+    } catch (\Throwable $e) {
+        // The card's numbers stay 0 — but the card SAYS they could not be read (1.74.0, QUAL-26), and the log why.
+        error_log('[whitelist] the status counts failed: ' . $e->getMessage());
+        $countsFailed = true;
+    }
     $workerHb = whitelistWorkerHeartbeat($cfg);
     $hb = $workerHb['age'];
     $warnings = [];
+    if ($countsFailed) $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_counts_failed')];
     if ($mode === 'whitelist') {
         if (!$perm['ok']) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_file_problem', ['errors' => implode(' ', $perm['errors'])])];
         elseif (!$file['exists'] || $file['size'] === 0) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_file_empty')];

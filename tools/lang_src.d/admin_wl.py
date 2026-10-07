@@ -49,7 +49,7 @@ add('a.wl', {
     'rv_submissions':   ('Submissions', 'Zgłoszenia'),
     'rv_rewrites':      ('Rewrites', 'Poprawki'),
     'rv_search_ph':     ('Hash, name, link or a word from the text...',
-                         'Hash, nazwa, link albo słowo z tekstu...'),
+                         'Hash, nazwa, link albo słowo z tekstu…'),
     'rv_status_title':  ('Which items to show', 'Które pozycje pokazać'),
     'rv_st_pending':    ('Waiting for a decision', 'Czekają na decyzję'),
     'rv_st_approved':   ('Published', 'Opublikowane'),
@@ -74,7 +74,7 @@ add('a.wl', {
                          'nie przywraca: stary tekst wraca tylko wtedy, gdy ktoś zaproponuje go ponownie.'),
 
     # ── whitelist toolbar ───────────────────────────────────────────────────
-    'wl_search_ph':     ('Search hash prefix, IP, name...', 'Szukaj prefiksu hasha, IP, nazwy...'),
+    'wl_search_ph':     ('Search hash prefix, IP, name...', 'Szukaj prefiksu hasha, IP, nazwy…'),
     'clear_search':     ('Clear search', 'Wyczyść wyszukiwanie'),
     'src_all':          ('All sources', 'Wszystkie źródła'),
     'f_meta_title':     ('Metadata status', 'Status metadanych'),
@@ -188,7 +188,7 @@ add('a.wl', {
     'col_lifted':       ('Lifted', 'Zdjęty'),
 
     # ── banned hashes view ──────────────────────────────────────────────────
-    'bn_search_ph':     ('Search hash prefix or reason...', 'Szukaj prefiksu hasha albo powodu...'),
+    'bn_search_ph':     ('Search hash prefix or reason...', 'Szukaj prefiksu hasha albo powodu…'),
     'ban_hashes':       ('Ban hashes', 'Zbanuj hashe'),
 
     # ── API clients view ────────────────────────────────────────────────────
@@ -199,7 +199,7 @@ add('a.wl', {
     'cl_create':        ('Create client', 'Utwórz klienta'),
 
     # ── API bans view ───────────────────────────────────────────────────────
-    'ab_search_ph':     ('Search IP prefix, key id or reason...', 'Szukaj prefiksu IP, key id albo powodu...'),
+    'ab_search_ph':     ('Search IP prefix, key id or reason...', 'Szukaj prefiksu IP, key id albo powodu…'),
     'ab_active':        ('Active bans', 'Aktywne bany'),
     'ab_all':           ('All bans', 'Wszystkie bany'),
     'ban_ip':           ('Ban IP', 'Zbanuj IP'),
@@ -286,8 +286,6 @@ add('', {
     # 1.65.0. Named by what it is FOR, because that is the decision: a shop's webhook needs three
     # endpoints, and `users` would additionally let it make accounts and sign people in here.
     'a.wl.cl_scope_shop': ('shop — sell and refund group memberships',
-        'shop — sprzedawanie i zwracanie członkostwa w grupach'),
-    'js.wl.cl_scope_shop': ('shop — sell and refund group memberships',
         'shop — sprzedawanie i zwracanie członkostwa w grupach'),
     'a.wl.cl_shop_note': ('A shop key can look an account up, grant a group and take that grant back — and nothing else. It cannot create accounts and it cannot reach the sign-in bridge.',
         'Klucz sklepu może wyszukać konto, nadać grupę i cofnąć to nadanie — i nic więcej. Nie może zakładać kont ani sięgać do mostka logowania.'),

@@ -145,7 +145,8 @@ if ($isOwn) {
     // Every gate the profile applies, and one 404 for all of them — including profilesEnabled(),
     // because a list of somebody else's is read on their profile and with profiles off there is no
     // page for it to be on.
-    if (!$me || !profilesEnabled($cfg) || !userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
+    // The READER's account (1.74.0, PRIV-6), not a panel session in the same browser.
+    if (!$me || !profilesEnabled($cfg) || !userIdHasPermission($db, $cfg, (int)$me['id'], 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
     // A private list — and the not-yet-converted NULL of a migration in progress — is nobody else's.
     $vis = listVisibilityOf($list['visibility'] ?? null);
     if ($vis === 'private') jsonResponse(['error' => 'not_found'], 404);

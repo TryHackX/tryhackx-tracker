@@ -88,7 +88,7 @@
             el('span', { text: t.key('js.index.n_queued', { n: num((c.meta_pending || 0) + (c.meta_fetching || 0)) }) }), ' · ',
             el('span', { text: t.key('js.index.n_failed', { n: num(c.meta_failed) }) }),
             // Pieces, not one string (1.73.0): each a t.key() word that keeps its key for the live language switch.
-            el('div', { className: 'wl-small text-muted' }, [s.meta_auto_queue ? t.key('js.index.auto_queue_on') : t.key('js.index.budget_today', { used: num(st.meta_budget_used), total: num(s.meta_daily_budget) }), ' · ', t.key('js.index.n_file_entries', { n: num(c.files) })]),
+            el('div', { className: 'wl-small text-muted' }, [s.meta_auto_queue ? t.key('js.index.auto_queue_on') : t.key('js.index.budget_today', { used: num(st.meta_budget_used), total: num(s.meta_daily_budget) }), ' · ', t.key('js.index.n_file_entries', { n: (c.files_approx ? '≈ ' : '') + num(c.files) })]),
         ]));
         // The lifecycle, as two rates side by side. A total that falls for days looks like data loss
         // until you can see that expiry and resolution are simply running at different speeds — and
@@ -210,7 +210,8 @@
         }
         state.rows.forEach(r => {
             const tr = el('tr', { className: state.selected.has(r.info_hash) ? 'table-active' : null });
-            const cb = el('input', { type: 'checkbox', className: 'idx-row-check' });
+            // A name for the row's box (1.74.0, UX-11).
+            const cb = el('input', { type: 'checkbox', className: 'idx-row-check', 'aria-label': t.key('js.index.select_row', { name: r.name || r.info_hash }) });
             cb.checked = state.selected.has(r.info_hash);
             cb.addEventListener('change', () => { if (cb.checked) state.selected.add(r.info_hash); else state.selected.delete(r.info_hash); tr.classList.toggle('table-active', cb.checked); syncBulkbar(); });
             tr.appendChild(el('td', {}, cb));
@@ -275,7 +276,9 @@
     function contentBlock(c) {
         if (!c) return null;
         const hasText = !!c.description_html;
-        const hasLink = !!c.source_url;
+        // A link only when it is one (1.74.0, part D — XSS-3): http or https, as the public Info panel checks it. The
+        // server allows nothing else when a source is written; a row from before, or from a restored backup, is not drawn.
+        const hasLink = !!c.source_url && /^https?:\/\//i.test(String(c.source_url));
         if (!hasText && !hasLink) return null;
 
         const wrap = el('div', { className: 'wl-content-block' });
@@ -655,7 +658,12 @@
         // page behind is the page the sender was on.
         const linked = hashFromUrl();
         if (linked) openModal(linked);
-        setInterval(loadStatus, 30000);
+        // Not while the tab is hidden (1.74.0, PERF-4): the counts are seconds of the database when they are not cached,
+        // and a tab forgotten in the background was asking for them all day. Coming back to it after a while asks once.
+        let statusAt = Date.now();
+        const pollStatus = () => { statusAt = Date.now(); loadStatus(); };
+        setInterval(() => { if (!document.hidden) pollStatus(); }, 30000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - statusAt > 30000) pollStatus(); });
         // live view while metadata resolves: silently refresh the current page every 5 s when the
         // meta filter is pending/fetching or any visible row still is — sort/filters/selection survive
         setInterval(() => {

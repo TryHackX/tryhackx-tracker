@@ -17,7 +17,11 @@
  *
  * The password is asked for because this is the button somebody presses when they think another
  * person is in their account, and the other person may be the one sitting at the screen.
+ *
+ * With accounts switched off (`users_enabled` 0) it answers `accounts_disabled` like every other account endpoint
+ * (1.74.0, PUB-8): an existing session read its own list here while user_me said the accounts were off.
  */
+if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
 $me = currentUser($db);
 if (!$me) jsonResponse(['error' => 'login_required'], 401);
 $uid = (int)$me['id'];
@@ -51,7 +55,8 @@ if (!password_verify((string)($input['current_password'] ?? ''), (string)$me['pa
 $ended = userSignOutOthers($db, $uid, true);
 // Worth a notification of its own: if this was NOT the account's owner, the owner reads it later and
 // knows exactly when somebody swept the sessions.
-userNotify($db, $uid, 'account', __('notify.sessions_ended'), __('notify.sessions_ended_body', ['n' => $ended]));
+$meLang = recipientLang($cfg, $me);   // the account's language, the one it reads its notifications in (1.74.0)
+userNotify($db, $uid, 'account', langFor($meLang, 'notify.sessions_ended'), langFor($meLang, 'notify.sessions_ended_body', ['n' => $ended]));
 auditLog($db, 'user.sessions_cleared', ['target_type' => 'user', 'target_id' => $uid,
                                         'summary' => 'signed out ' . $ended . ' remembered device(s)']);
 jsonResponse(['success' => true, 'ended' => $ended]);

@@ -6,7 +6,11 @@ try {
     foreach ($db->query("SELECT group_id, COUNT(*) c FROM user_group_members GROUP BY group_id") as $c) {
         $counts[(int)$c['group_id']] = (int)$c['c'];
     }
-} catch (\Throwable $e) {}
+} catch (\Throwable $e) {
+    // Not "0 members" in every group (1.74.0, QUAL-26): the panel shows its error row and keeps what it had.
+    error_log('[admin] fetch_groups: the member counts failed: ' . $e->getMessage());
+    jsonResponse(['error' => __('api.db_unavailable')], 503);
+}
 foreach ($db->query("SELECT * FROM user_groups ORDER BY priority DESC, name") as $g) {
     $rows[] = [
         'id' => (int)$g['id'], 'slug' => $g['slug'], 'name' => $g['name'], 'description' => $g['description'],

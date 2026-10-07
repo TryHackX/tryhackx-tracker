@@ -12,3 +12,23 @@ Options -Indexes
         Deny from all
     </IfModule>
 </FilesMatch>
+
+# Caching (1.74.0, PERF-7). Measured on production before this: no Cache-Control at all on assets/, so a
+# browser revalidated on a guess (a tenth of the file's age), and the revalidation then FAILED — 20 of 22
+# files came back 200 with the whole body (~410 KB gzip) instead of 304.
+#
+# 1. An address with a version (`?v=<mtime>`, assetVer() in includes/functions.php — every stylesheet and
+#    script a page links) never changes what it answers: a changed file is a changed address. A year,
+#    immutable — not even revalidated. ONLY those: the favicon and what scripts fetch by a bare path
+#    (assets/img/favicon.svg, assets/emoji/…) carry no version, and a year of immutable would freeze them.
+<IfModule mod_headers.c>
+    <If "%{QUERY_STRING} =~ /(^|&)v=/">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </If>
+</IfModule>
+# 2. Why the revalidation failed: mod_deflate appends `-gzip` to the ETag of a compressed answer, the
+#    browser sends that tag back in If-None-Match, and Apache does not recognise its own tag with the
+#    suffix — so it answers 200 with everything. Without an ETag the browser revalidates by
+#    Last-Modified, which compression does not touch: 304. (iconpack.php, which sends its own ETag, takes
+#    the suffix off before comparing — includes/iconpack.php, iconpackRequestEtags().)
+FileETag None

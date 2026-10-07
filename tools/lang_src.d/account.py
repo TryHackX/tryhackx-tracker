@@ -114,7 +114,7 @@ add('account', {
 # match the sources, so a string added to the generated file alone fails the battery on the spot.
 add('', {
     'account.lists_public_hint': ('Each list still carries its own answer — private, for friends or public — and this one decides whether the section exists for anybody else at all, your friends included. Off, nobody sees that you have lists.',
-        'Każda lista ma nadal własną odpowiedź — prywatna, dla znajomych albo publiczna — a ten przełącznik decyduje, czy sekcja w ogóle istnieje dla kogokolwiek innego, także dla twoich znajomych. Wyłączone — nikt nie widzi, że masz listy.'),
+        'Każda lista ma nadal własną odpowiedź — prywatna, dla znajomych albo publiczna — a ten przełącznik decyduje, czy sekcja w ogóle istnieje dla kogokolwiek innego, także dla Twoich znajomych. Wyłączone — nikt nie widzi, że masz listy.'),
     'account.lists_public_label': ('Show my lists on my profile',
         'Pokazuj moje listy na moim profilu'),
     'account.needs_grant': ('This switch is saved, but nothing acts on it yet: none of your groups grants <code>:perm</code>, and that permission is what every page checks before showing this to anybody else. An administrator grants it in the panel, under Users → Groups.',
@@ -162,7 +162,7 @@ add('', {
     'account.twofa_on': ('on',
         'włączone'),
     'account.twofa_panel_note': ('This is your <strong>account</strong>&rsquo;s second factor. The admin panel has its own, set up inside the panel — they are separate secrets with separate recovery codes, and turning one on does not turn the other on.',
-        'To drugi składnik <strong>twojego konta</strong>. Panel administracyjny ma własny, ustawiany w panelu — to osobne sekrety z osobnymi kodami zapasowymi, a włączenie jednego nie włącza drugiego.'),
+        'To drugi składnik <strong>Twojego konta</strong>. Panel administracyjny ma własny, ustawiany w panelu — to osobne sekrety z osobnymi kodami zapasowymi, a włączenie jednego nie włącza drugiego.'),
     'account.twofa_required_all': ('This site asks every account for a second factor. Yours does not have one yet.',
         'Ta strona prosi o drugi składnik każde konto. Twoje jeszcze go nie ma.'),
     'account.twofa_required_panel': ('Your account can open the admin panel, and this site asks those accounts for a second factor. <strong>Until you set one up the panel will not open</strong> — everything else about your account works as usual.',
@@ -178,6 +178,8 @@ add('', {
     'account.snd_volume': ('Volume', 'Głośność'),
     'account.snd_pre': ('Wake-up before the sound', 'Rozbieg przed dźwiękiem'),
     'account.snd_pre_none': ('none', 'brak'),
+    # 1.74.0 (UX-11): the second select of the wake-up row has a name of its own
+    'account.snd_pre_kind': ('What the wake-up plays', 'Co gra rozbieg'),
     'account.snd_pre_silence': ('silence', 'cisza'),
     'account.snd_pre_hum': ('a very quiet low tone', 'bardzo cichy niski ton'),
     'account.snd_pre_hint': ('For speakers or an amplifier that wake up when a stream starts and swallow its first second (HDMI receivers do): the stream is opened this long before the sound — silence is enough for that. <em>A very quiet low tone</em> is for an amplifier that stands by until it senses a signal; it is audible as a faint hum before the sound.',
@@ -187,7 +189,7 @@ add('', {
     'account.snd_ev_message': ('A message from anyone else', 'Wiadomość od pozostałych'),
     'account.snd_test': ('Test', 'Test'),
     'account.snd_autoplay': ('Browsers let a page make a sound only after you have clicked or typed on it. Until then a small <i class="bi bi-volume-mute" aria-hidden="true"></i> note appears beside your name at the top, and the first click anywhere plays what was waiting.',
-        'Przeglądarki pozwalają stronie wydać dźwięk dopiero po tym, jak na niej klikniesz albo coś wpiszesz. Do tego czasu przy twoim imieniu u góry pojawia się mała notka <i class="bi bi-volume-mute" aria-hidden="true"></i>, a pierwsze kliknięcie gdziekolwiek odtwarza to, co czekało.'),
+        'Przeglądarki pozwalają stronie wydać dźwięk dopiero po tym, jak na niej klikniesz albo coś wpiszesz. Do tego czasu przy Twoim imieniu u góry pojawia się mała notka <i class="bi bi-volume-mute" aria-hidden="true"></i>, a pierwsze kliknięcie gdziekolwiek odtwarza to, co czekało.'),
     'account.snd_save': ('Save', 'Zapisz'),
 })
 

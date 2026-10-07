@@ -75,7 +75,7 @@ add('tos', {
                 'odblokowuje jedynie funkcje dla zalogowanych (na przykład wyszukiwarkę katalogu), '
                 'zgodnie z przyznanymi mu grupami.'),
     'acc_own': ('Keep your password to yourself: you are responsible for what is done with your account.',
-                'Nie zdradzaj nikomu hasła: odpowiadasz za to, co dzieje się na twoim koncie.'),
+                'Nie zdradzaj nikomu hasła: odpowiadasz za to, co dzieje się na Twoim koncie.'),
     'acc_twofa': ('A second factor — a code from an authenticator app — can be switched on on the account page, '
                   'and is worth switching on.',
                   'Drugi składnik — kod z aplikacji uwierzytelniającej — można włączyć na stronie konta i warto '
@@ -86,7 +86,7 @@ add('tos', {
                 'confirming a new address, notices about your groups and your security — and for the operator\'s '
                 'announcements, which can be switched off on the account page.',
                 'Adres e-mail służy samemu kontu — linkom weryfikacyjnym, resetom hasła, potwierdzeniu nowego '
-                'adresu, powiadomieniom o twoich grupach i bezpieczeństwie — oraz ogłoszeniom operatora, które '
+                'adresu, powiadomieniom o Twoich grupach i bezpieczeństwie — oraz ogłoszeniom operatora, które '
                 'można wyłączyć na stronie konta.'),
     'acc3_api': ('A partner site the operator connects to accounts through the API — a shop, a sign-in bridge — '
                  'can look an account up and receives its name, e-mail address, state, creation date and groups.',
@@ -111,7 +111,7 @@ add('tos', {
                    'co z jej pomocą zrobiłeś, nie jest usuwane.'),
     'acc_bridge': ('Signing in through a partner site makes that site answer for who you are: it signs you in here '
                    'without a password or a second factor.',
-                   'Logowanie przez serwis partnera sprawia, że to on poręcza za twoją tożsamość: loguje cię tutaj '
+                   'Logowanie przez serwis partnera sprawia, że to on poręcza za Twoją tożsamość: loguje Cię tutaj '
                    'bez hasła i bez drugiego składnika.'),
     'acc6':    ('An account used for abuse — spam, attacks on the service, deliberately registering infringing '
                 'content after a warning — may be silenced, suspended or deleted, and the torrents it registered '
@@ -122,7 +122,7 @@ add('tos', {
     'acc7':    ('To have your account deleted, write to the operator from the account\'s e-mail address; the Info '
                 'page says what deleting removes and what stays.',
                 'Aby usunąć konto, napisz do operatora z adresu e-mail przypisanego do konta; strona Informacji '
-                'mówi, co usunięcie kasuje, a co zostaje.'),
+                'mówi, co usunięcie usuwa, a co zostaje.'),
     'acc8':    ('Searching the index is a member feature. The results show what the tracker has observed in the '
                 'swarms, not what is hosted here — nothing is.',
                 'Wyszukiwarka indeksu jest funkcją dla zalogowanych. Wyniki pokazują to, co tracker zaobserwował '

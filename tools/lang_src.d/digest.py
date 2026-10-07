@@ -37,5 +37,5 @@ add('', {
     'digest.outro': ('Nothing here is urgent by itself — but somebody on the other end of each of these is waiting for an answer.',
         'Nic z tego samo w sobie nie jest pilne — ale po drugiej stronie każdej z tych pozycji ktoś czeka na odpowiedź.'),
     'digest.subject': ('[:site] :n things are waiting for you',
-        '[:site] czeka na ciebie :n rzeczy'),
+        '[:site] czeka na Ciebie :n rzeczy'),
 })

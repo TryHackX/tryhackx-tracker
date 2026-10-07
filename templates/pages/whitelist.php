@@ -149,8 +149,10 @@ if ($wlSched) {
     // attribution to be shown, this reader's group holds `uploads.public`, and they are signed in.
     // It applies to the rows THIS submission creates — a hash somebody already registered belongs to
     // whoever registered it first, and the reply says so.
+    // 1.74.0 (PRIV-5): the account's GRANT (userIdHasGrantedPermission()), as api/whitelist_submit.php asks it — a
+    // consent is never the Admin group's blanket, nor a panel session.
     $wlMe = usersEnabled($cfg) ? currentUser($db) : null;
-    $wlPubOn = $wlMe !== null && uploadsPublicEnabled($cfg) && userCan($db, $cfg, 'uploads.public');
+    $wlPubOn = $wlMe !== null && uploadsPublicEnabled($cfg) && userIdHasGrantedPermission($db, $cfg, (int)$wlMe['id'], 'uploads.public');
 ?>
 <?php if ($wlPubOn): ?>
     <div class="form-group wl-visibility">

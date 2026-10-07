@@ -26,7 +26,7 @@ add('apidocs', {
     'api_off':   ('The API is switched off on this tracker right now. Requests will be refused until the operator turns it back on.',
                   'API jest w tej chwili wyłączone na tym trackerze. Żądania będą odrzucane, dopóki operator go nie włączy.'),
     'intro':     ('This page describes <strong>your</strong> key. The address you were sent carries the answers the operator chose for it, so what is written below is what your key will actually do — not one page covering every possibility. Your key itself is not on this page; it came in the same message, from a person.',
-                  'Ta strona opisuje <strong>twój</strong> klucz. Adres, który dostałeś, niesie odpowiedzi wybrane dla niego przez operatora, więc to, co jest niżej, jest tym, co twój klucz naprawdę zrobi — a nie jedną stroną o wszystkich możliwościach. Samego klucza tu nie ma; przyszedł w tej samej wiadomości, od człowieka.'),
+                  'Ta strona opisuje <strong>Twój</strong> klucz. Adres, który dostałeś, niesie odpowiedzi wybrane dla niego przez operatora, więc to, co jest niżej, jest tym, co Twój klucz naprawdę zrobi — a nie jedną stroną o wszystkich możliwościach. Samego klucza tu nie ma; przyszedł w tej samej wiadomości, od człowieka.'),
     'k_endpoint': ('Endpoint', 'Endpoint'),
     'k_approval': ('Approval', 'Zatwierdzanie'),
     'k_required': ('Required with every item', 'Wymagane przy każdej pozycji'),
@@ -38,7 +38,7 @@ add('apidocs', {
     'required_none':  ('nothing beyond the hash', 'nic poza hashem'),
     'h_auth':    ('Authentication', 'Uwierzytelnianie'),
     'auth_body': ('Two headers on every request. The bearer is your key id (16 hex characters) and your secret (64 hex characters) joined by a dot. Send it over HTTPS and store it the way you store a password — anybody holding it can do everything your key can.',
-                  'Dwa nagłówki przy każdym żądaniu. Bearer to identyfikator klucza (16 znaków szesnastkowych) i sekret (64 znaki szesnastkowe) połączone kropką. Wysyłaj po HTTPS i przechowuj jak hasło — kto go ma, może wszystko to, co twój klucz.'),
+                  'Dwa nagłówki przy każdym żądaniu. Bearer to identyfikator klucza (16 znaków szesnastkowych) i sekret (64 znaki szesnastkowe) połączone kropką. Wysyłaj po HTTPS i przechowuj jak hasło — kto go ma, może wszystko to, co Twój klucz.'),
     'auth_ban':  ('<strong>A wrong key bans the address it came from.</strong> A malformed, unknown or wrong key is answered with <code>403</code> and the address it came from (IPv4, or the IPv6 /64) is banned for :days: from then on every request from there is refused, even with the right key, until the operator lifts it. A request with no <code>Authorization</code> header at all gets <code>401</code> and is not banned. So test with the right key, and never retry a <code>403</code> in a loop.',
                   '<strong>Zły klucz banuje adres, z którego przyszedł.</strong> Na klucz o błędnym formacie, nieznany albo zły odpowiedzią jest <code>403</code>, a adres, z którego przyszedł (IPv4 albo /64 IPv6), zostaje zbanowany na :days: od tej chwili każde żądanie stamtąd jest odrzucane, nawet z dobrym kluczem, dopóki operator nie zdejmie bana. Żądanie w ogóle bez nagłówka <code>Authorization</code> dostaje <code>401</code> i nie jest banowane. Dlatego testuj z dobrym kluczem i nigdy nie ponawiaj <code>403</code> w pętli.'),
     'ep_wl_submit': ('Register torrents: a batch of magnet links or info hashes.',
@@ -47,8 +47,8 @@ add('apidocs', {
                      'Pytanie, co się stało z wysłanymi hashami — albo z dowolnym hashem.'),
     'ep_wl_ping':   ('Check that the key works. Changes nothing.', 'Sprawdzenie, czy klucz działa. Niczego nie zmienia.'),
     'h_request': ('The request', 'Żądanie'),
-    'request_body': ('One POST, one JSON body, any number of items up to the batch limit. An item is a magnet link or an info hash — 40 hex characters or 32 in base32 — given as a bare string, as <code>{"magnet": …}</code> or as <code>{"hash": …}</code>; an object may add a <code>name</code> and a <code>ref</code> (<code>post_id</code>, <code>discussion_id</code>, a <code>url</code> back to your post).',
-                     'Jeden POST, jedno ciało JSON, dowolnie wiele pozycji do limitu paczki. Pozycja to link magnet albo info hash — 40 znaków szesnastkowych albo 32 w base32 — podany jako sam napis, jako <code>{"magnet": …}</code> albo jako <code>{"hash": …}</code>; obiekt może dodać <code>name</code> i <code>ref</code> (<code>post_id</code>, <code>discussion_id</code>, <code>url</code> twojego wpisu).'),
+    'request_body': ('One POST, one JSON body, any number of items up to the batch limit. An item is a magnet link or an info hash — 40 hex characters or 32 in base32 — given as a bare string, as <code>{"magnet": …}</code> or as <code>{"hash": …}</code>; an object may add a <code>name</code> and a <code>ref</code> (<code>post_id</code>, <code>discussion_id</code>, a <code>url</code> back to your post). A magnet is stored as its hash and name with this tracker\'s own announce addresses — the trackers, web seeds and sources written in it are not kept.',
+                     'Jeden POST, jedno ciało JSON, dowolnie wiele pozycji do limitu paczki. Pozycja to link magnet albo info hash — 40 znaków szesnastkowych albo 32 w base32 — podany jako sam napis, jako <code>{"magnet": …}</code> albo jako <code>{"hash": …}</code>; obiekt może dodać <code>name</code> i <code>ref</code> (<code>post_id</code>, <code>discussion_id</code>, <code>url</code> Twojego wpisu). Link magnet jest zapisywany jako hash i nazwa z adresami announce tego trackera — zapisane w nim trackery, web seedy i źródła nie są przechowywane.'),
     'required_note': ('Your key requires <code>:fields</code> on every item. An item without them is refused as <code>invalid</code> and named in the reply — it is not registered and then hidden, it is not registered at all.',
                       'Twój klucz wymaga <code>:fields</code> przy każdej pozycji. Pozycja bez nich jest odrzucana jako <code>invalid</code> i nazwana w odpowiedzi — nie jest rejestrowana i ukrywana, tylko w ogóle nie jest rejestrowana.'),
     'h_reply':   ('The reply', 'Odpowiedź'),
@@ -69,7 +69,7 @@ add('apidocs', {
     'st_banned': ('Blocked on this tracker. It will not be served whoever sends it.',
                   'Zablokowane na tym trackerze. Nie będzie serwowane, kto by go nie wysłał.'),
     'st_invalid': ('Not a usable magnet or hash, or missing a field your key requires. The reason is in <code>error</code>.',
-                   'To nie jest poprawny link magnet ani hash albo brakuje pola wymaganego przez twój klucz. Powód jest w <code>error</code>.'),
+                   'To nie jest poprawny link magnet ani hash albo brakuje pola wymaganego przez Twój klucz. Powód jest w <code>error</code>.'),
     'h_rules':   ('Rules worth knowing before you write the client', 'Zasady, które warto znać przed napisaniem klienta'),
     'rule_idempotent': ('<strong>Idempotent.</strong> Sending the same hash again is safe and answers <code>exists</code>. You do not need to remember what you have already sent.',
                         '<strong>Idempotentne.</strong> Ponowne wysłanie tego samego hasha jest bezpieczne i daje <code>exists</code>. Nie musisz pamiętać, co już wysłałeś.'),
@@ -150,7 +150,7 @@ add('apidocs', {
                        'rozwiązania.'),
     'ep_auth_login':  ('Find, link or create the account behind one of your users, and mint the ticket that '
                        'signs them in.',
-                       'Znajdź, powiąż albo utwórz konto stojące za twoim użytkownikiem i wydaj bilet, który go '
+                       'Znajdź, powiąż albo utwórz konto stojące za Twoim użytkownikiem i wydaj bilet, który go '
                        'zaloguje.'),
     'ep_auth_logout': ('They signed out on your side. Ends their bridged session here.',
                        'Wylogował się u was. Kończy jego mostkowaną sesję tutaj.'),
@@ -258,8 +258,8 @@ add('apidocs', {
                      '<code>reporter</code> (<code>name</code>, <code>representative</code>, <code>company</code>, <code>email</code>) i <code>statement</code> można wysłać raz dla całej paczki albo przy pozycji, gdzie wygrywają dla tej pozycji; <code>title</code> (najwyżej 255 znaków), <code>evidence_url</code> (adres http albo https) i <code>reason</code> należą do każdej pozycji. Do :n pozycji na żądanie.'),
     'required_note_abuse': ('Your key requires <code>:fields</code> for every report — on the item, or for <code>reporter</code> and <code>statement</code> once for the batch. A report without them is refused as <code>invalid</code> and named in the reply.',
                             'Twój klucz wymaga <code>:fields</code> przy każdym zgłoszeniu — przy pozycji albo, w przypadku <code>reporter</code> i <code>statement</code>, raz dla paczki. Zgłoszenie bez nich jest odrzucane jako <code>invalid</code> i nazwane w odpowiedzi.'),
-    'curl_note_ping': ('A reply with <code>"ok": true</code> means the key works; it changes nothing on the tracker.',
-                       'Odpowiedź z <code>"ok": true</code> znaczy, że klucz działa; niczego nie zmienia na trackerze.'),
+    'curl_note_ping': ('A reply with <code>"ok": true</code> means the key works; it changes nothing on the tracker. A <code>503</code> with <code>"ok": false</code> means the tracker\'s database is not answering just now — try again after <code>Retry-After</code>; a count that failed is never reported as <code>"whitelist_count": 0</code>.',
+                       'Odpowiedź z <code>"ok": true</code> znaczy, że klucz działa; niczego nie zmienia na trackerze. <code>503</code> z <code>"ok": false</code> znaczy, że baza danych trackera w tej chwili nie odpowiada — spróbuj ponownie po <code>Retry-After</code>; nieudane liczenie nigdy nie jest podawane jako <code>"whitelist_count": 0</code>.'),
     'curl_note_lookup': ('A reply with <code>"ok": true</code> — found or not — means the key works; a lookup changes nothing.',
                          'Odpowiedź z <code>"ok": true</code> — znaleziono konto czy nie — znaczy, że klucz działa; lookup niczego nie zmienia.'),
     'curl_note_abuse': ('There is no harmless call for a reporting key, so this sends an empty batch: <code>422</code> <code>no_items</code> means the key and its scope were accepted and nothing was filed.',
@@ -288,11 +288,6 @@ add('a.wl', {
 })
 
 add('js.wl', {
-    'cl_scope_wl':     ('whitelist — register torrents', 'whitelist — rejestrowanie torrentów'),
-    'cl_scope_users':  ('users — accounts and the sign-in bridge', 'users — konta i mostek logowania'),
-    'cl_scope_fed':    ('federation — exchange lists with another tracker',
-                        'federation — wymiana list z innym trackerem'),
-    'cl_scope_all':    ('all — everything above (use sparingly)', 'all — wszystko powyższe (używaj oszczędnie)'),
     'cl_can':          ('What this key may call', 'Co ten klucz może wywołać'),
     'cl_only_wl':      ('Approval and required fields apply to registering torrents, so they are only '
                         'asked for a key that can do it.',
@@ -411,15 +406,6 @@ add('js.wl', {
     'cl_saved':        ('Key settings saved', 'Zapisano ustawienia klucza'),
 })
 
-add('settings', {
-    'api_auto_approve':      ('Approval', 'Zatwierdzanie'),
-    'api_auto_approve_auto': ('Publish immediately', 'Publikuj od razu'),
-    'api_auto_approve_review': ('Hold for review', 'Wstrzymaj do przeglądu'),
-    'api_required_fields':   ('Require with every item', 'Wymagaj przy każdej pozycji'),
-    'api_docs_link':         ('Integration guide for this key', 'Instrukcja integracji dla tego klucza'),
-    'api_docs_copy':         ('Copy the guide link', 'Kopiuj link do instrukcji'),
-})
-
 
 # ── recovered 2026-09-13 ────────────────────────────────────────────────────
 # These strings were added straight to lang/en.php and lang/pl.php between 1.43 and 1.50 and never to
@@ -442,7 +428,7 @@ add('', {
     'apidocs.abuse_note_auto': ('<strong>This key blocks on arrival.</strong> A hash you send here stops being served to anybody who has that torrent, without a person reading the report first. Send only what you are certain of; an appeal is the only way back.',
         '<strong>Ten klucz blokuje od razu.</strong> Hash wysłany tutaj przestaje być serwowany wszystkim, którzy mają ten torrent, bez czytania zgłoszenia przez człowieka. Wysyłaj tylko to, czego jesteś pewien; jedyną drogą powrotną jest odwołanie.'),
     'apidocs.abuse_note_review': ('Reports from this key are <strong>held for review</strong>. They land in the operator\'s queue with your name against them, and nothing about the torrent changes until somebody decides.',
-        'Zgłoszenia z tego klucza są <strong>wstrzymywane do przeglądu</strong>. Trafiają do kolejki operatora z twoją nazwą i w sprawie torrenta nic się nie zmienia, dopóki ktoś nie zdecyduje.'),
+        'Zgłoszenia z tego klucza są <strong>wstrzymywane do przeglądu</strong>. Trafiają do kolejki operatora z Twoją nazwą i w sprawie torrenta nic się nie zmienia, dopóki ktoś nie zdecyduje.'),
     'apidocs.abuse_reply_auto': ('Every item comes back with what happened to it. <code>blocked</code> means the tracker has already stopped serving that torrent.',
         'Każda pozycja wraca z informacją, co się z nią stało. <code>blocked</code> znaczy, że tracker już przestał serwować ten torrent.'),
     'apidocs.abuse_reply_review': ('Every item comes back with what happened to it. <code>received</code> means it is in the queue — not that it has been acted on.',
@@ -456,7 +442,7 @@ add('', {
     'apidocs.check_body_review': ('Your submissions wait for a person, so <code>pending</code> is not the end of the story. Ask this endpoint what happened: it returns the decision and, when a row was turned down, the note the moderator wrote about it. Send one hash in the query string, or a batch in the body.',
         'Twoje zgłoszenia czekają na człowieka, więc <code>pending</code> to nie koniec historii. Zapytaj ten endpoint, co się z nimi stało: zwraca decyzję, a przy odrzuceniu także notatkę, którą napisał moderator. Wyślij jeden hash w query stringu albo paczkę w treści żądania.'),
     'apidocs.check_note': ('The note is returned only to the key that submitted the row — it was written for you. Anybody else asking about the same hash sees the status and <code>mine: false</code>.',
-        'Notatkę dostaje wyłącznie klucz, który przysłał dany wpis — była napisana do ciebie. Ktokolwiek inny pytający o ten sam hash widzi status i <code>mine: false</code>.'),
+        'Notatkę dostaje wyłącznie klucz, który przysłał dany wpis — była napisana do Ciebie. Ktokolwiek inny pytający o ten sam hash widzi status i <code>mine: false</code>.'),
     'apidocs.ck_banned': ('Refused by this tracker. Re-submitting will not change it.',
         'Odrzucony przez ten tracker. Ponowne wysłanie tego nie zmieni.'),
     'apidocs.ck_live': ('Being served by the tracker.',

@@ -104,8 +104,6 @@ add('a.users', {
 })
 add('js.users', {
     'bridge_via': ('via :name', 'przez :name'),
-    'bridge_local': ('here', 'tutaj'),
     # See the note in apidocs.py: the JS bundle is `js.` only, so this is a deliberate duplicate of
     # a.users.source_title rather than a widening of the bundle.
-    'bridge_title': ('Where this account can sign in from', 'Skąd to konto może się logować'),
 })

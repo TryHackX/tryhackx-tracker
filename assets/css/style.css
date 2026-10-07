@@ -417,16 +417,6 @@ body.page-stats .container {
     color: var(--text-muted);
 }
 
-.inline-select {
-    background: var(--bg-code);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 0.85rem;
-    padding: 0.3rem 0.5rem;
-}
-
 /* === Typography === */
 h1 { font-size: 1.6rem; color: var(--accent); margin-bottom: 0.5rem; }
 h2 { font-size: 1.3rem; color: var(--link); margin: 1.5rem 0 0.75rem; }
@@ -517,10 +507,12 @@ ul.feature-list li::before {
 
 /* === FAQ === */
 .faq-item { margin: 1rem 0; }
+/* A question, not a link (1.74.0): it wore the link colour and the hand of an accordion that was never there — a
+   click did nothing (the answer is always shown). The text's own colour, in bold, and the ordinary pointer. */
 .faq-q {
-    color: var(--link);
+    color: var(--text);
     font-weight: bold;
-    cursor: pointer;
+    cursor: default;
     padding: 0.5rem 0;
 }
 .faq-q::before { content: '? '; color: var(--accent); }
@@ -1822,10 +1814,10 @@ footer p { margin: 0.25rem 0; }
 .text-muted { color: var(--text-muted); }
 .btn-small { padding: 0.25rem 0.7rem; font-size: 0.8rem; }
 .user-form { max-width: 26em; margin: 1rem auto; }
-.user-remember { display: block; margin: 0.4rem 0; color: var(--text-muted); font-size: 0.9rem; }
-.user-remember input { margin-right: 0.4rem; vertical-align: -0.1em; }
 .user-links { text-align: center; color: var(--text-muted); margin-top: 1rem; }
-.nav-unread { display: inline-block; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.72rem; line-height: 1.5; text-align: center; vertical-align: 0.1em; }
+/* Black on the accent, as the inbox's own count (.pm-count) is: white on it was 2.75:1 — the number that says "you
+   have 5 new" was the hardest thing on the page to read; black is 7.6:1 (1.74.0). */
+.nav-unread { display: inline-block; min-width: 1.2em; margin-left: 0.35em; padding: 0 0.35em; border-radius: 999px; background: var(--accent); color: #000; font-size: 0.72rem; line-height: 1.5; text-align: center; vertical-align: 0.1em; }
 /* The shoutbox's own number (1.60.0). It wears the badge shape and not the badge COLOUR: two solid
    pills in one bar read as one thing counted twice, and these two count different things — that one
    is notifications and messages, this one is lines in a room. Outlined, so it is legibly a second
@@ -1866,7 +1858,7 @@ footer p { margin: 0.25rem 0; }
 /* The messages default is a select, and a select is as wide as its longest option — 392px, 433 in
    Polish, in a card as narrow as 260. At most its card's width; the open list still shows it whole. */
 .acc-pm-select { max-width: 100%; }
-.acc-badge { display: inline-block; padding: 0.1em 0.6em; margin: 0 0.5em; border-radius: 999px; background: var(--accent); color: #fff; font-size: 0.72rem; vertical-align: 0.15em; }
+.acc-badge { display: inline-block; padding: 0.1em 0.6em; margin: 0 0.5em; border-radius: 999px; background: var(--accent); color: #000; font-size: 0.72rem; vertical-align: 0.15em; }   /* black: 7.6:1 (1.74.0), see .nav-unread */
 .acc-group { padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
 .acc-group:last-child { border-bottom: 0; }
 .acc-group-desc { font-size: 0.85rem; }
@@ -2114,11 +2106,6 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 /* The icon fills its em where the old multiplication sign was half of it (1.68.0). */
 .files-close .bi { font-size: 0.75em; }
 .files-body { padding: 0.5rem 1rem 1rem; overflow-y: auto; font-size: 0.85rem; }
-.files-list { list-style: none; margin: 0; padding: 0; }
-.files-list li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
-.files-list li:last-child { border-bottom: 0; }
-.files-path { word-break: break-word; }
-.files-size { white-space: nowrap; }
 
 
 /* === Mobile pass (whole public site) === */
@@ -2466,7 +2453,7 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 /* `center`, not `baseline` (1.63.0): a 64 px picture now sits at the start of this row, and a
    baseline row hangs everything else off the bottom of the picture. */
 .profile-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
-.profile-name { font-size: 1.2rem; color: var(--accent); font-weight: 600; }
+.profile-name { font-size: 1.2rem; color: var(--accent); font-weight: 600; min-width: 0; overflow-wrap: anywhere; }   /* a 32-letter name wraps on a phone (1.74.0) */
 .profile-since, .profile-you { color: var(--text-muted); font-size: 0.82rem; }
 /* Beside the name, NOT pinned to the right edge. With `margin-left: auto` it ended up a thousand
    pixels from the thing it shares on a wide screen, quiet grey on near-black, and the first person
@@ -2494,6 +2481,14 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 /* A picture and its name are one unit wherever text can wrap: a narrow line must never leave the
    picture at the end of one line and the name at the start of the next. */
 .av-who { white-space: nowrap; }
+/* …except in the account page's heading on a phone (1.74.0): a name of up to 32 letters in the heading's size is
+   wider than the screen, and kept on one line it pushed the whole page sideways. There the picture and the name are
+   one row of their own that the name may break inside, anywhere — the picture stays beside its first letters. */
+@media (max-width: 600px) {
+    .account-head h1 .av-who { display: inline-flex; align-items: center; max-width: 100%; min-width: 0;
+                               white-space: normal; overflow-wrap: anywhere; vertical-align: middle; }
+    .account-head h1 .av-who .acc-h1-av { flex: none; }
+}
 .nav-user .nav-av { margin-right: 0.4em; }
 .account-head h1 .acc-h1-av { margin-right: 0.35em; }
 .who-name .who-av, .who-list-by .who-av, .emote-by .emote-av, .info-desc-by .info-av { margin: -3px 0.3em -3px 0; }
@@ -3075,7 +3070,10 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
 /* Which conversation the pane beside this list is showing. */
 .pm-row-open { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .pm-meta { display: flex; align-items: center; justify-content: flex-end; gap: 0.4rem; }
-.pm-who { font-weight: 600; color: var(--accent); }
+/* One line, cut with "…" (1.74.0): a name of 12 letters ran under the unread count at 1280, a 32-letter one — the
+   longest a name may be — over the count and the time at every width and off the side of a phone (the whole name
+   is in the row's tooltip, assets/js/people.js). The column is `minmax(0, 1fr)`; the name now keeps to it. */
+.pm-who { font-weight: 600; color: var(--accent); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The picture (1.63.0) takes a column of its own to the left of BOTH lines — the name and what was
    last said — rather than a place in the first: a person beside their conversation. The class comes
    from assets/js/people.js with the picture, so a row without one keeps the two-column grid above. */
@@ -3088,7 +3086,7 @@ img.js-avatar { outline: 1px solid rgba(255, 255, 255, 0.16); outline-offset: -1
             padding: 0 0.45em; font-size: 0.75rem; }
 .pm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
 /* The picture sits inside the name's link (1.63.0), centred on it rather than on the text's baseline. */
-.pm-head-name { font-weight: 600; margin-right: auto; display: inline-flex; align-items: center; gap: 0.5rem; }
+.pm-head-name { font-weight: 600; margin-right: auto; display: inline-flex; align-items: center; gap: 0.5rem; min-width: 0; overflow-wrap: anywhere; }
 .pm-msgs { display: flex; flex-direction: column; gap: 0.5rem; max-height: 26rem; overflow-y: auto; padding-right: 0.2rem; }
 .pm-msg { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.5rem 0.6rem; background: var(--bg); }
 /* Mine sit to the right and carry the accent border: whose line is whose has to be readable at a
@@ -4552,3 +4550,71 @@ button.as-waiting[data-as-wait]::after {
     visibility: visible;
     pointer-events: none;
 }
+
+/* ══ 1.74.0 — what the audit found in the pages' looks (part D) ═══════════════════════════════════════════════ */
+
+/* "SKIP TO THE CONTENT" — the first stop of the Tab key on every page (templates/layout.php): ten to fourteen menu
+   links stood between the top of a page and its first word, sixty-two on the account page. Out of sight until the
+   keyboard reaches it; the content it leads to takes the focus (<main tabindex="-1">) without a ring of its own. */
+.skip-link {
+    position: absolute; left: 0.75rem; top: -10rem; z-index: 3000;
+    padding: 0.5rem 0.9rem; border-radius: 0 0 var(--radius) var(--radius);
+    background: var(--accent); color: #000; font-weight: 600; text-decoration: none;
+}
+.skip-link:focus, .skip-link:focus-visible { top: 0; outline: 2px solid var(--link); outline-offset: 2px; color: #000; }
+main:focus { outline: none; }
+
+/* A FIELD'S EDGE IS A CONTROL'S, NOT A SEPARATOR'S. The fields were drawn in --border (#222, the colour of the rules
+   between paragraphs) — 1.23–1.31:1 against the card, an edge nobody with weaker sight could find — and the account's
+   and profile's filters in --control-border, 2.04:1. One token of their own, 3.3:1 on the card and 3.5:1 on the page
+   (WCAG 1.4.11 asks 3:1); the focus and an error keep their own colours (their rules are more specific). */
+:root { --field-border: #5b6577; }
+.form-group input, .form-group textarea, .form-group select, .search-box input, .search-toolbar select,
+.trans-pagination .pg-input, .form-group .rt-editor select.rt-format, .rt-editor, .profile-search, .profile-toolbar select,
+.pm-input, .pm-editor .rt-format, .snd-row select, .shout-edit-form > .shout-input, .shout-compose > .shout-input,
+.shout-picker-search, .emote-fields input[type="text"], .acc-language { border-color: var(--field-border); }
+/* A placeholder at the muted text's colour (4.75:1 on a field), as the profile's filter already had: Chrome's own
+   grey was 3.65:1 — and on the report and status forms the placeholder carries the instruction. */
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
+
+/* A PHONE DOES NOT ZOOM INTO A FIELD. Safari on an iPhone enlarges the page when the focus lands in a field whose
+   text is smaller than 16px — and every field of these pages was 12.5–14.4px: the search, the sign-in, the shoutbox,
+   the report form. At a phone's width every field's text is at least 16px. */
+@media (max-width: 600px) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]):not([type="hidden"]),
+    select, textarea { font-size: max(16px, 1em) !important; }
+}
+
+/* A FINGER HAS MORE ROOM THAN THE BUTTON SHOWS. The row's icon buttons are 26px, the shoutbox's 19–22px — fine for a
+   pointer, small for a finger beside its neighbours. On a touch screen each gets an invisible margin of 8px that
+   takes the press: nothing it draws moves (fav_check.js and icons_align_check.js measure those boxes). `:where()` so
+   a button already placed (absolute, sticky) keeps its own position — it is then the frame of its margin anyway. */
+@media (pointer: coarse) {
+    :where(.ic-btn, .search-act-btn, .fav-star, .shout-refresh, .shout-send-btn, .shout-emoji-btn, .rt-tools.shout-tools button,
+           .list-name, .list-vis, .pf-hash-copy, .emote-copy) { position: relative; }
+    :is(.ic-btn, .search-act-btn, .fav-star, .shout-refresh, .shout-send-btn, .shout-emoji-btn, .rt-tools.shout-tools button,
+        .list-name, .list-vis, .pf-hash-copy, .emote-copy)::after { content: ""; position: absolute; inset: -8px; }
+}
+
+/* WHAT TAKES SOMETHING AWAY LOOKS LIKE IT (1.74.0): Remove friend and Decline beside Message, Delete a list — the
+   same quiet grey as everything round them. A red word on a faint red ground (8.6:1), the same size and border as
+   .btn-secondary, so a row's buttons stay one height. */
+.btn-danger-soft { background: rgba(244, 67, 54, 0.08); border: 1px solid #b8433a; color: #ff8a80; }
+.btn-danger-soft:hover { background: rgba(244, 67, 54, 0.18); border-color: var(--error); color: #ffb4ab; opacity: 1; }
+a.btn.btn-danger-soft { color: #ff8a80; }
+/* While a person's row asks "Remove from your friends?", its other buttons step aside (as the inbox's do). */
+.pe-row.shout-asking .pf-acts > .btn { visibility: hidden; }
+.pe-row.shout-asking .pf-acts > .shout-confirm { visibility: visible; }
+
+/* A window's title takes the focus as the window opens (app.js escLayer()): it is read, not pressed — no ring. */
+.files-box [role="dialog"] h3[tabindex="-1"]:focus, .files-box h3[tabindex="-1"]:focus, [role="dialog"] .files-head h3:focus { outline: none; }
+
+/* A SORTABLE HEADER IS A BUTTON (search results, Transparency): drawn as the header's words it always was — the
+   keyboard reaches it and Enter or Space sorts; the focus ring is its only look of its own. */
+.th-sort {
+    background: none; border: 0; padding: 0; margin: 0; border-radius: 2px;
+    color: inherit; font: inherit; line-height: inherit; text-transform: inherit; letter-spacing: inherit;
+    text-align: inherit; white-space: inherit; text-wrap: inherit; cursor: pointer; max-width: 100%;
+}
+.th-sort:hover { color: #fff; }
+.th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

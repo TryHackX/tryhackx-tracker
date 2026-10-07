@@ -1,5 +1,5 @@
 <?php
-if (($cfg['transparency_enabled'] ?? '0') !== '1') {
+if (!transparencyEnabled($cfg)) {
     jsonResponse(['error' => __('api.transparency.disabled')], 403);
 }
 
@@ -17,7 +17,7 @@ $allowedTransSorts = [
     'blocked'        => 'blocked',
     'pending'        => 'pending',
 ];
-$sortParam = trim($_GET['sort'] ?? 'total:desc');
+$sortParam = trim(strInput($_GET, 'sort', 'total:desc'));   // `sort[]=x` reads as the default (1.74.0, PUB-3)
 $orderParts = [];
 foreach (explode(',', $sortParam) as $part) {
     $pieces = explode(':', trim($part));

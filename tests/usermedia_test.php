@@ -581,10 +581,11 @@ check('… or the site\'s default picture, once the owner chose it and it exists
 check('pictures off: the address is the letter, and the element is not drawn at all',
       userAvatarUrl($withPic, 64, $base, $cfgNoAv) === userAvatarGeneratedUrl('Alice', $base) && userAvatarHtml($withPic, 64, $base, 'x', $cfgNoAv) === '');
 $html = userAvatarHtml($withPic, 64, $base, 'prof-av', $cfgOn);
-check('the element is square, sized, decorative and lazy, with the letter to fall back to',
+check('the element is square, sized, decorative and lazy, with the letter to fall back to — drawn, not an address (1.74.0)',
       str_contains($html, 'class="prof-av js-avatar"') && str_contains($html, 'width="64" height="64"') && str_contains($html, 'alt=""')
       && str_contains($html, 'loading="lazy"') && str_contains($html, 'decoding="async"')
-      && str_contains($html, 'data-fallback="/api.php?endpoint=user_avatar_default&amp;l=A&amp;c='), $html);
+      && str_contains($html, 'data-fallback="' . htmlspecialchars(userAvatarLetterSrc('A', userAvatarColourIndex('Alice')), ENT_QUOTES, 'UTF-8') . '"')
+      && !str_contains($html, 'user_avatar_default'), $html);
 check('… and escapes what it prints', !str_contains(userAvatarHtml(['username' => '"><script>', 'avatar_sha' => null], 24, $base, 'a"b', $cfgOn), '<script>'));
 check('the helpers ask no query: no PDO in their signature', (new ReflectionFunction('userAvatarUrl'))->getNumberOfParameters() === 4
       && !array_filter((new ReflectionFunction('userAvatarUrl'))->getParameters(), fn($p) => (string)$p->getType() === 'PDO'));
@@ -660,10 +661,10 @@ check('… `avatar` = \'\' is the server saying "nothing here": nothing is drawn
       userAvatarHtml(['username' => 'Alice', 'avatar' => ''], 20, $base, 'x', $cfgOn) === '');
 $foreign = userAvatarHtml(['username' => 'Alice', 'avatar' => 'https://evil.example/x.png'], 20, $base, 'x', $cfgOn);
 check('… and an address this file did not write is never drawn: the letter stands in',
-      str_contains($foreign, 'src="' . htmlspecialchars($letterA, ENT_QUOTES, 'UTF-8') . '"') && !str_contains($foreign, 'evil'), $foreign);
+      str_contains($foreign, 'src="' . htmlspecialchars(userAvatarDrawn($letterA, $base), ENT_QUOTES, 'UTF-8') . '"') && !str_contains($foreign, 'evil'), $foreign);
 $mark = userAvatarHtml(['username' => 'Local Tracker', 'avatar' => userAvatarSiteField($base, $cfgOn)], 20, $base, 'shout-av', $cfgOn);
 check('the site\'s own mark draws as the same element, with the site name\'s letter behind it',
-      str_contains($mark, 'src="/assets/img/favicon.svg"') && str_contains($mark, 'data-fallback="' . htmlspecialchars(userAvatarGeneratedUrl('Local Tracker', $base), ENT_QUOTES, 'UTF-8') . '"')
+      str_contains($mark, 'src="/assets/img/favicon.svg"') && str_contains($mark, 'data-fallback="' . htmlspecialchars(userAvatarDrawn(userAvatarGeneratedUrl('Local Tracker', $base), $base), ENT_QUOTES, 'UTF-8') . '"')
       && !str_contains($mark, 'srcset='), $mark);
 check('for a JSON row: the address while pictures are on, \'\' while they are off',
       userAvatarField($withPic, 32, $base, $cfgOn) === userAvatarUrl($withPic, 32, $base, $cfgOn)
@@ -681,6 +682,128 @@ check('the panel\'s tag for assets/js/avatar.js carries the switch, the base and
 foreach (['userAvatarField', 'userAvatarSiteField', 'userAvatarSized', 'userAvatarSrcset', 'userAvatarUrlKind', 'userAvatarHtml'] as $fn) {
     check("$fn() asks no query: no PDO in its signature",
           !array_filter((new ReflectionFunction($fn))->getParameters(), fn($p) => (string)$p->getType() === 'PDO'));
+}
+
+// ── 11c. the letter is drawn without a request (1.74.0, MAIN-3) ────────────────────────────────
+// It was one request per letter × colour through the whole api.php bootstrap. Now the element carries the very SVG
+// the endpoint serves, as a data: address; rows and replies keep the ADDRESS, and only the drawing changes.
+$hNo = userAvatarHtml($noPic, 24, $base, 'row-av', $cfgOn);
+$bobSrc = userAvatarLetterSrc('B', userAvatarColourIndex('bob_the_builder'));
+check('MAIN-3: somebody without a picture is drawn as the letter itself — a data: picture, no address to fetch',
+      str_contains($hNo, ' src="' . htmlspecialchars($bobSrc, ENT_QUOTES, 'UTF-8') . '"') && !str_contains($hNo, 'user_avatar_default')
+      && !str_contains($hNo, 'data-fallback='), $hNo);
+check('MAIN-3: the drawn letter is the endpoint\'s own SVG, rawurlencoded',
+      $bobSrc === 'data:image/svg+xml,' . rawurlencode(userAvatarDefaultSvg('B', userAvatarColourIndex('bob_the_builder')))
+      && rawurldecode(substr($bobSrc, strlen('data:image/svg+xml,'))) === userAvatarDefaultSvg('B', userAvatarColourIndex('bob_the_builder'))
+      && !preg_match('/["<>\s&]/', $bobSrc));
+check('MAIN-3: … while the JSON field still carries the letter\'s ADDRESS (what every reader of a row checks)',
+      userAvatarField($noPic, 24, $base, $cfgOn) === userAvatarGeneratedUrl('bob_the_builder', $base));
+$sqAddr = $sq . '64';
+check('MAIN-3: only a letter\'s address is swapped when drawn; a square, the site\'s mark and anything else stay as they are',
+      userAvatarDrawn($letterA, $base) === userAvatarLetterSrc('A', userAvatarColourIndex('Alice'))
+      && userAvatarDrawn($sqAddr, $base) === $sqAddr && userAvatarDrawn(userAvatarSiteUrl($base), $base) === userAvatarSiteUrl($base)
+      && userAvatarDrawn('https://evil.example/x.png', $base) === 'https://evil.example/x.png'
+      && userAvatarDrawn('/api.php?endpoint=user_avatar_default&l=A&c=12', $base) === '/api.php?endpoint=user_avatar_default&l=A&c=12'
+      && userAvatarDrawn('/sub/api.php?endpoint=user_avatar_default&l=A&c=1', '/sub/') === userAvatarLetterSrc('A', 1));
+$allKnown = true; $bad = '';
+foreach (array_merge(range('A', 'Z'), range('0', '9')) as $L) {
+    for ($c = 0; $c < count(USER_AVATAR_COLOURS); $c++) {
+        $s = userAvatarLetterSrc((string)$L, $c);
+        if (userAvatarLetterSrcParse($s) !== [(string)$L, $c] || (userAvatarUrlKind($s, $base)['kind'] ?? '') !== 'letter'
+            || userAvatarSized($s, 48, $base) !== $s || userAvatarSrcset($s, 48, $base) !== '') { $allKnown = false; $bad = "$L/$c"; break 2; }
+    }
+}
+check('MAIN-3: all 432 drawn letters are recognised as letters (kind, sized as one drawing, no srcset)', $allKnown, $bad);
+$tamper = [
+    str_replace('%3EB%3C%2Ftext', '%3Eb%3C%2Ftext', $bobSrc),                       // a lower-case letter
+    str_replace(rawurlencode(USER_AVATAR_COLOURS[userAvatarColourIndex('bob_the_builder')]), rawurlencode('#123456'), $bobSrc),
+    str_replace('%3C%2Fsvg%3E', '%3Cscript%3Ealert(1)%3C%2Fscript%3E%3C%2Fsvg%3E', $bobSrc),
+    str_replace('%3Ctext', '%3Ctext%20onload%3D%22x%22', $bobSrc),
+    'data:image/svg+xml;base64,' . base64_encode(userAvatarDefaultSvg('B', 1)),
+    'data:image/svg+xml,' . rawurlencode('<svg xmlns="http://www.w3.org/2000/svg"><text>B</text></svg>'),
+];
+check('MAIN-3: … and a data: picture this file did not write is not a letter — so it is never drawn',
+      count(array_filter($tamper, fn($s) => userAvatarUrlKind($s, $base) !== null)) === 0
+      && !str_contains(userAvatarHtml(['username' => 'Bob', 'avatar' => $tamper[2]], 20, $base, 'x', $cfgOn), 'script'));
+check('MAIN-3: a row that carries a drawn letter draws the same element as the row carrying its address',
+      userAvatarHtml(['username' => 'bob_the_builder', 'avatar' => $bobSrc], 20, $base, 'x', $cfgOn)
+      === userAvatarHtml(['username' => 'bob_the_builder', 'avatar' => userAvatarGeneratedUrl('bob_the_builder', $base)], 20, $base, 'x', $cfgOn));
+// (That both policies allow data: images — what makes this possible at all — is section 14's check below.)
+
+// The JavaScript twin draws the same bytes: assets/js/avatar.js run in node with the smallest DOM it needs, asked for
+// every letter × colour and for whole elements, and compared with this side's answers. Its inputs go through a file:
+// escapeshellarg() on Windows turns a JSON argument's quotes into spaces.
+$node = trim(strtok((string)@shell_exec(PHP_OS_FAMILY === 'Windows' ? 'where node 2>NUL' : 'command -v node 2>/dev/null'), "\r\n") ?: '');
+if ($node === '') {
+    echo "SKIP MAIN-3 twin: node is not on this machine's PATH\n";
+} else {
+    $harness = <<<'JS'
+const fs = require('fs'), vm = require('vm');
+function El() { this.attrs = {}; this.dataset = {}; }
+El.prototype.setAttribute = function (k, v) { if (k === 'data-fallback') this.dataset.fallback = String(v); else this.attrs[k] = String(v); };
+El.prototype.getAttribute = function (k) {
+  if (k === 'data-fallback') return this.dataset.fallback === undefined ? null : this.dataset.fallback;
+  if (k === 'width') return this.width === undefined ? (this.attrs.width || null) : String(this.width);
+  return Object.prototype.hasOwnProperty.call(this.attrs, k) ? this.attrs[k] : null;
+};
+El.prototype.removeAttribute = function (k) { if (k === 'data-fallback') delete this.dataset.fallback; else delete this.attrs[k]; };
+const ctx = { window: {}, document: { currentScript: { dataset: { base: '/', avatars: '1', def: '' } },
+  addEventListener() {}, createElement() { return new El(); }, createDocumentFragment() { return new El(); } } };
+ctx.window.document = ctx.document;
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), ctx);
+const w = ctx.window, out = { drawn: {}, img: {}, set: {} };
+const input = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+for (const L of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') for (let c = 0; c < 12; c++) {
+  out.drawn[L + c] = w.userAvatarDrawn('/api.php?endpoint=user_avatar_default&l=' + L + '&c=' + c);
+}
+for (const name of input.names) {
+  const el = w.userAvatarImg({ username: name, avatar_sha: null }, 24, 'row-av');
+  out.img[name] = { src: el.getAttribute('src'), fb: el.getAttribute('data-fallback') };
+}
+// a picture set back to the letter, and one replaced by a square: the letter stays the fallback, drawn
+const pic = w.userAvatarImg({ username: 'Alice', avatar_sha: 'ab'.repeat(20) }, 32, 'x');
+w.userAvatarSet(pic, '/api.php?endpoint=user_avatar_default&l=A&c=' + input.alice);
+out.set.toLetter = { src: pic.getAttribute('src'), fb: pic.getAttribute('data-fallback') };
+w.userAvatarSet(pic, '/api.php?endpoint=user_media&h=' + 'cd'.repeat(8) + '&s=64');
+out.set.toSquare = { src: pic.getAttribute('src'), fb: pic.getAttribute('data-fallback'), srcset: pic.getAttribute('srcset') };
+process.stdout.write(JSON.stringify(out));
+JS;
+    $tmpBase = sys_get_temp_dir() . '/avjs_' . getmypid() . '_' . bin2hex(random_bytes(3));
+    $hf = $tmpBase . '.js';
+    $inf = $tmpBase . '.json';
+    file_put_contents($hf, $harness);
+    // Usernames are ASCII (the colour hashes bytes on one side and UTF-16 units on the other — same thing for ASCII).
+    $names = ['alice', 'Bob', 'zed_9', '...', '42nd', 'x', 'Q-u_e.u'];
+    file_put_contents($inf, json_encode(['names' => $names, 'alice' => userAvatarColourIndex('Alice')]));
+    $cmd = escapeshellarg($node) . ' ' . escapeshellarg($hf) . ' ' . escapeshellarg($root . '/assets/js/avatar.js') . ' ' . escapeshellarg($inf);
+    $js = json_decode((string)shell_exec($cmd), true);
+    @unlink($hf); @unlink($inf);
+    $same = is_array($js) && count($js['drawn'] ?? []) === 432; $diff = '';
+    if ($same) {
+        foreach ($js['drawn'] as $k => $v) {
+            if ($v !== userAvatarLetterSrc(substr($k, 0, 1), (int)substr($k, 1))) { $same = false; $diff = $k; break; }
+        }
+    }
+    check('MAIN-3: assets/js/avatar.js draws every one of the 432 letters byte for byte as PHP does', $same, $diff ?: substr(json_encode($js), 0, 300));
+    $imgSame = is_array($js);
+    foreach ($names as $nm) {
+        $php = userAvatarHtml(['username' => $nm, 'avatar_sha' => null], 24, $base, 'row-av', $cfgOn);
+        preg_match('/ src="([^"]+)"/', $php, $pm);
+        $one = $js['img'][$nm] ?? [];
+        if (!$imgSame || ($one['src'] ?? '') !== html_entity_decode($pm[1] ?? '', ENT_QUOTES, 'UTF-8')
+            || !array_key_exists('fb', $one) || $one['fb'] !== null) {
+            $imgSame = false; $diff = $nm; break;
+        }
+    }
+    check('MAIN-3: … and a whole element for a name without a picture: the same src, no fallback needed', $imgSame, $diff);
+    $letterAliceSrc = userAvatarLetterSrc('A', userAvatarColourIndex('Alice'));
+    check('MAIN-3: userAvatarSet() back to the letter draws it, and a square put in its place keeps the drawn letter to fall back to',
+          is_array($js) && ($js['set']['toLetter']['src'] ?? '') === $letterAliceSrc
+          && array_key_exists('fb', $js['set']['toLetter'] ?? []) && $js['set']['toLetter']['fb'] === null
+          && ($js['set']['toSquare']['src'] ?? '') === '/api.php?endpoint=user_media&h=' . str_repeat('cd', 8) . '&s=64'
+          && ($js['set']['toSquare']['fb'] ?? '') === $letterAliceSrc && ($js['set']['toSquare']['srcset'] ?? '') !== '',
+          json_encode($js['set'] ?? null));
 }
 
 // ── 12. the rate limit ────────────────────────────────────────────────────────────────────────

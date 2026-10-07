@@ -796,6 +796,7 @@ blank error after thirty.
 | 1.65.0 | review Users → Groups: the profile cover moved to the new `premium` group |
 | 1.69.0 | install icon packages as the web user (section 15) |
 | 1.72.0 | raise the inbound limiter's burst (section 12c) |
+| 1.74.0 | consider a new HMAC key (*Contact & email*, behind the password): Settings used to print it to every panel session; a new one also voids the unsubscribe links of mails already sent. Copy the worker and restart it (the block above). The public search's catalogue (`index_catalog`) fills itself from the janitor — `[catalog] … PASS-COMPLETE` in `janitor.php -v`; until then the search runs as before. Optional: `GRANT DELETE ON tracker.index_catalog TO 'tracker_meta'@'localhost'` (federation's purge; without it the janitor catches up). On nginx, add the assets caching block (README → *Reverse proxy / Nginx notes*, 4) |
 
 ---
 
@@ -829,6 +830,10 @@ blank error after thirty.
 | `?action=health` shows the home page | the token is shorter than 16 characters | a longer token |
 | Mail never arrives | no MTA, or a From address the MTA refuses | section 1; Settings → Contact & email |
 | A chart is a flat zero | the column existed before the data did — check whether the series is new | |
+| The warning card: the rate limits' state cannot be written | `config/` (or `config/ratelimit/`) is not the web user's — the limits let everything through meanwhile | `chown -R www-data config` |
+| The panel says the session "could not be confirmed just now" (503) | the database did not answer twice while re-checking the account behind a panel session — the session is kept | try again; look at MariaDB (`[auth]` in the PHP error log) |
+| An upgrade's migration seems to wait a minute between tries | it failed, or left its heavy part to the janitor; the web retries after `config/schema_retry.marker` runs out | run `sudo -u www-data php tools/janitor.php -v` and read the `[tracker schema]` line |
+| A partner's "Test connection" gets `503` | the database could not count the whitelist (it used to answer "ok, 0") | the PHP error log (`[api v1]`) |
 
 `journalctl -u tracker-whitelist-janitor -u tracker-janitor-heavy -n 50`, the PHP error log and the
 panel's own **Log** page answer most of the rest between them.
@@ -844,7 +849,7 @@ panel's own **Log** page answer most of the rest between them.
   `config/admin_2fa.json`, and `tools/twofa_cli.php off` is the way back in without the phone.
 - The actions that change the machine, restore a backup or rewrite the site ask for the owner's
   password again; five wrong answers sign you out, and they count toward the sign-in lockout (5 failures
-  in 15 minutes per address).
+  in 15 minutes per address group — an IPv4 address, an IPv6 host's whole /64, since 1.74.0).
 - Code owned by root, `config/` and `lang/` by the web user, `database.php` and `hash.txt` 0600,
   sudoers only for the copies in `/usr/local/sbin`, `.git` and `tests/` unreachable from the web.
 - Behind a proxy or a CDN, set *Trusted proxy IPs* and the client-IP header (README → *Reverse proxy /

@@ -30,12 +30,12 @@ add('stats', {
                       'Diagnostyka kondycji na żywo i aktywność rojów naszego publicznego silnika '
                       'OpenTracker.'),
     'beacon_live':   ('Live Syncing', 'Synchronizacja na żywo'),
-    'beacon_sync':   ('Syncing Swarms...', 'Synchronizuję roje...'),
+    'beacon_sync':   ('Syncing Swarms...', 'Synchronizuję roje…'),
 
     # ── loader / error ──
     'loader_title':  ('Establishing Connection', 'Nawiązywanie połączenia'),
     'loader_sub':    ('Querying tracker stats interface...',
-                      'Odpytuję interfejs statystyk trackera...'),
+                      'Odpytuję interfejs statystyk trackera…'),
     'error_title':   ('Telemetry Fetch Failed', 'Nie udało się pobrać telemetrii'),
     'error_msg':     ('The statistics server is currently busy or unreachable. Swarm updates are '
                       'unaffected.',
@@ -55,8 +55,9 @@ add('stats', {
     # (tracker_stats_peer_label_style).
     'sub_pct':       (':pct% of total peers', ':pct% wszystkich peerów'),
     'sub_abs':       ('of :peers peers', 'z :peers peerów'),
+    # Polish as labels (1.74.0): "2 leecherów" is wrong Polish and "leecherów: 2" right for every number.
     'sub_peers':     (':leechers leechers &middot; :seeds seeds',
-                      ':leechers leecherów &middot; :seeds seedów'),
+                      'leecherów: :leechers &middot; seedów: :seeds'),
 
     # ── swarm timeline ──
     'tl_title':      ('Swarm Timeline', 'Oś czasu roju'),
@@ -73,7 +74,7 @@ add('stats', {
     'tracker_id':    ('Tracker ID', 'ID trackera'),
     'version_check': ('Version Check', 'Sprawdzenie wersji'),
     'git_commit':    ('Git Commit', 'Commit Git'),
-    'analyzing':     ('Analyzing...', 'Analizuję...'),
+    'analyzing':     ('Analyzing...', 'Analizuję…'),
     'integrity':     ('Swarm Integrity', 'Integralność roju'),
     'integrity_ok':  ('Active / Secure', 'Aktywna / bezpieczna'),
     'sync_loop':     ('Sync Loop', 'Pętla synchronizacji'),

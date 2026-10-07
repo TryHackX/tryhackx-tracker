@@ -461,8 +461,8 @@ function listsMayPublish(PDO $db, array $cfg, int $userId): bool
 /**
  * May this ACCOUNT share a list with its friends: the site (listsFriendsEnabled()) and the account's own
  * `friends.use`. A feature, not consent — asked as the friends page asks it, the administrator's blanket
- * included — and of the named account, never of whoever holds the session (a panel session answers yes to
- * everything, and a reader's permission is not the owner's).
+ * included — and of the named account, never of whoever holds the session (the owner's panel session answers
+ * yes to everything, and a reader's permission is not the owner's).
  */
 function listsMayShareFriends(PDO $db, array $cfg, int $userId): bool
 {
@@ -549,8 +549,9 @@ function listsContext(PDO $db, array $cfg, ?array $viewer): array
         'friends_why' => !$mayUse || $friends ? '' : (!listsPublicEnabled($cfg) ? 'sharing_off'
                          : (!listsFriendsEnabled($cfg) ? 'friends_off' : 'no_friends')),
         // May they read somebody else's? The same permission that opens profiles and favourites:
-        // one decision about whether this install shows people to each other at all.
-        'may_view'    => $on && $viewer !== null && userCan($db, $cfg, 'favourites.view_others'),
+        // one decision about whether this install shows people to each other at all — asked of the READER's
+        // account (1.74.0, PRIV-6), as the endpoints behind it ask it, never of a panel session.
+        'may_view'    => $on && $uid > 0 && userIdHasPermission($db, $cfg, $uid, 'favourites.view_others'),
         'max_lists'   => listsMaxPerUser($cfg),
         'max_items'   => listsMaxItems($cfg),
     ];

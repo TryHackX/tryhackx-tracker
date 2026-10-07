@@ -154,7 +154,7 @@ file sets some differently):
 
 | key | meaning |
 |---|---|
-| `concurrency` [3] | parallel fetches, 1–64 (the panel's `meta_worker_concurrency` overrides it live) |
+| `concurrency` [3] | parallel fetches, 1–64 (the panel's `meta_worker_concurrency` overrides it live; the example file says 3 too, and the panel's per-submitter probe limit assumes the heartbeat's number, else 3) |
 | `timeout_seconds` [90] | how long one fetch may take, 20–600 |
 | `poll_interval` [3] | seconds between looks at the queue |
 | `stale_claim_minutes` [10] | a claim older than this is taken back |
@@ -176,3 +176,27 @@ The panel's status card shows the heartbeat; *Fetch details* on a live torrent s
 Privacy note: resolving metadata means announcing this server's IP + the hash to DHT and the
 configured trackers — the hashes are already public (registered, or seen in this tracker's own
 swarms). The worker stores no peer addresses: only the name, size, piece length and file list.
+
+**What a magnet may make this server contact (1.74.0).** A magnet submitted through the web, a partner's
+API key or the forum can name its own trackers (`tr=`), web seeds (`ws=`) and peers (`x.pe=`). The worker
+announces to a magnet's tracker only when it is `http(s)` or `udp`, carries no credentials, and its host —
+every address it resolves to, looked up by the worker with a 3-second limit — is on the public internet:
+never loopback, the LAN, link-local (`169.254.169.254`, the cloud metadata address), shared, unique-local or
+reserved space. A `udp` tracker is then pinned to the address that was checked, so a second lookup cannot
+answer differently (DNS rebinding); an `http(s)` one keeps its name and libtorrent's `ssrf_mitigation` is
+set. Web seeds are dropped (metadata never comes from one) and so are peers that are not public. A refused
+tracker is one `WARNING` line in the journal (`tracker from the magnet of … refused: … (why)`). The trackers
+in this file's `trackers` are yours and are used as written, a local one included.
+
+**How hard it works (1.74.0).** A hash that has found nobody at all — no peer connected, none even known —
+after 60 seconds is given up (`failed`, *no peers within 60 s*) instead of holding its slot for the whole
+`timeout_seconds`. The number of parallel fetches follows the yield of the last 200: under 10 % stored it
+halves, under 3 % it quarters, never below 4 (or the configured number, if that is smaller); the heartbeat
+reports what was asked (`concurrency`, what the panel compares with its setting) beside what runs now
+(`concurrency_now`) and the yield (`yield_pct`). The claim's catch-all lane rests for a minute after it came
+back empty, and libtorrent's listen backlog is 128 instead of 5. **Deploy:** `systemctl restart
+tracker-metadata` after updating `worker.py`.
+
+`federation.py`'s purge also takes the purged names out of the public search's narrow table
+(`index_catalog`, 1.74.0). Without `GRANT DELETE ON tracker.index_catalog TO 'tracker_meta'@'localhost'`
+that one statement fails and is logged, and the web side's janitor removes those rows within hours anyway.

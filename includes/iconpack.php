@@ -1622,6 +1622,63 @@ function iconpackAssetUrl(string $base, array $m, string $rel): string {
     return $base . 'iconpack.php?p=' . rawurlencode((string)$m['id']) . '&v=' . iconpackAssetVersion($m) . '&f=' . str_replace('%2F', '/', rawurlencode($rel));
 }
 
+/** How many of a package's stylesheets one bundle may join (a Pro 7 package with every style ticked links ~40). */
+const ICONPACK_BUNDLE_MAX = 64;
+
+/**
+ * ONE stylesheet for several of the package's own (1.74.0, PERF-8): `f=bundle.css&s=<name>,<name>…`, each name a
+ * css/<name>.css of the manifest, joined in that order as iconpackServeRequest() serves them. A page with many styles
+ * ticked linked one sheet per style — 38 on production, each a request through PHP that blocks the first paint — and
+ * now links one, cached for a year like each of them was: the package's hash and the list are in the address, so a
+ * different package or a different choice of styles is a different address. Null when a file's name does not fit the
+ * address (the page then links the files one by one, as before).
+ */
+function iconpackBundleUrl(string $base, array $m, array $rels): ?string {
+    $names = [];
+    foreach ($rels as $rel) {
+        if (!preg_match('#^css/([A-Za-z0-9_-][A-Za-z0-9._-]*)\.css$#', (string)$rel, $mm)) return null;
+        $names[] = $mm[1];
+    }
+    if (!$names || count($names) > ICONPACK_BUNDLE_MAX) return null;
+    return $base . 'iconpack.php?p=' . rawurlencode((string)$m['id']) . '&v=' . iconpackAssetVersion($m)
+         . '&f=bundle.css&s=' . implode(',', $names);
+}
+
+/**
+ * The ETags a request's If-None-Match names, the way this file writes them (1.74.0, PERF-7): a `W/` dropped, and the
+ * `-gzip` (mod_deflate) or `-br` (mod_brotli) Apache appends inside the quotes when it compresses the answer taken off
+ * again. Compared as sent, the browser's own copy of the tag never matched, and a revalidation re-sent the whole
+ * stylesheet with a 200.
+ */
+function iconpackRequestEtags(string $inm): array {
+    $out = [];
+    foreach (explode(',', $inm) as $t) {
+        $t = trim($t);
+        if ($t === '') continue;
+        if (str_starts_with($t, 'W/')) $t = substr($t, 2);
+        $out[] = (string)preg_replace('/-(?:gzip|br)"$/', '"', $t);
+    }
+    return $out;
+}
+
+/** Does this request already hold the answer — the ETag (as iconpackRequestEtags() reads it), or else the date? */
+function iconpackNotModified(string $etag, int $lastMod, array $server): bool {
+    $inm = (string)($server['HTTP_IF_NONE_MATCH'] ?? '');
+    $ims = (string)($server['HTTP_IF_MODIFIED_SINCE'] ?? '');
+    if ($inm !== '') {
+        $tags = iconpackRequestEtags($inm);
+        return in_array('*', $tags, true) || in_array($etag, $tags, true);
+    }
+    return $ims !== '' && ($t = strtotime($ims)) !== false && $t >= $lastMod;
+}
+
+/** A stylesheet of the package as served: every url(../webfonts/NAME) pointed at iconpack.php — see below. */
+function iconpackRewriteCss(string $css, string $id, string $v): string {
+    $prefix = 'iconpack.php?p=' . rawurlencode($id) . '&v=' . $v . '&f=webfonts/';
+    return (string)preg_replace_callback('/url\(\s*(["\']?)\.\.\/webfonts\/([A-Za-z0-9._-]+)\1\s*\)/i',
+        fn($mm) => 'url("' . $prefix . $mm[2] . '")', $css);
+}
+
 /**
  * The answer to one request of iconpack.php, without sending it (the tests read this directly).
  *
@@ -1649,6 +1706,7 @@ function iconpackServeRequest(array $get, array $server): array {
     $id = (string)($get['p'] ?? '');
     $v = (string)($get['v'] ?? '');
     $f = (string)($get['f'] ?? '');
+    if ($f === 'bundle.css') return iconpackServeBundle($id, $v, (string)($get['s'] ?? ''), $server, $nf);
     if (!iconpackValidId($id) || !preg_match('#^(css|webfonts)/[A-Za-z0-9._-]+$#', $f) || !preg_match('/^[0-9a-f]{16}-[0-9a-z]+$/', $v)) return $nf;
     $m = iconpackManifest($id);
     if ($m === null || $v !== iconpackAssetVersion($m)) return $nf;
@@ -1674,20 +1732,59 @@ function iconpackServeRequest(array $get, array $server): array {
         'Cross-Origin-Resource-Policy: same-origin',
         "Content-Security-Policy: default-src 'none'",
     ];
-    $inm = (string)($server['HTTP_IF_NONE_MATCH'] ?? '');
-    $ims = (string)($server['HTTP_IF_MODIFIED_SINCE'] ?? '');
-    if (($inm !== '' && in_array($etag, array_map('trim', explode(',', $inm)), true))
-        || ($inm === '' && $ims !== '' && ($t = strtotime($ims)) !== false && $t >= $lastMod)) {
+    if (iconpackNotModified($etag, $lastMod, $server)) {
         return ['status' => 304, 'headers' => array_values(array_filter($headers, fn($h) => !str_starts_with($h, 'Content-Type')))];
     }
     if ($ext === 'css') {
-        $css = (string)@file_get_contents($path);
-        $prefix = 'iconpack.php?p=' . rawurlencode($id) . '&v=' . $v . '&f=webfonts/';
-        $body = (string)preg_replace_callback('/url\(\s*(["\']?)\.\.\/webfonts\/([A-Za-z0-9._-]+)\1\s*\)/i',
-            fn($mm) => 'url("' . $prefix . $mm[2] . '")', $css);
+        $body = iconpackRewriteCss((string)@file_get_contents($path), $id, $v);
         $headers[] = 'Content-Length: ' . strlen($body);
         return ['status' => 200, 'headers' => $headers, 'body' => $body];
     }
     $headers[] = 'Content-Length: ' . (int)filesize($path);
     return ['status' => 200, 'headers' => $headers, 'path' => $path];
+}
+
+/**
+ * `f=bundle.css&s=a,b,c` (1.74.0, PERF-8): the package's css/a.css, css/b.css and css/c.css, each rewritten as it would
+ * be served alone, joined in that order — one answer with the same type, caching and policy as a single sheet. Every
+ * name must be a stylesheet the manifest lists, each once, at most ICONPACK_BUNDLE_MAX; anything else is the 404 a
+ * file outside the manifest gets. The ETag names the package's version and the files' own hashes, so it changes with
+ * any of them.
+ */
+function iconpackServeBundle(string $id, string $v, string $list, array $server, array $nf): array {
+    if (!iconpackValidId($id) || !preg_match('/^[0-9a-f]{16}-[0-9a-z]+$/', $v)) return $nf;
+    $names = $list === '' ? [] : explode(',', $list);
+    if (!$names || count($names) > ICONPACK_BUNDLE_MAX || count(array_unique($names)) !== count($names)) return $nf;
+    $m = iconpackManifest($id);
+    if ($m === null || $v !== iconpackAssetVersion($m)) return $nf;
+    $paths = []; $shas = [];
+    foreach ($names as $n) {
+        if (!preg_match('/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/', $n)) return $nf;
+        $rel = 'css/' . $n . '.css';
+        $entry = $m['files'][$rel] ?? null;
+        if (!is_array($entry) || ($entry['kind'] ?? '') !== 'css') return $nf;
+        $path = iconpackDir() . DIRECTORY_SEPARATOR . $id . DIRECTORY_SEPARATOR . 'css' . DIRECTORY_SEPARATOR . $n . '.css';
+        if (!is_file($path)) return $nf;
+        $paths[] = $path;
+        $shas[] = (string)($entry['sha256'] ?? '');
+    }
+    $etag = '"' . $v . '-b' . substr(hash('sha256', implode(',', $names) . '|' . implode(',', $shas)), 0, 16) . '"';
+    $lastMod = strtotime((string)$m['installed_at']) ?: 0;
+    $headers = [
+        'Content-Type: text/css; charset=utf-8',
+        'X-Content-Type-Options: nosniff',
+        'Cache-Control: public, max-age=31536000, immutable',
+        'ETag: ' . $etag,
+        'Last-Modified: ' . gmdate('D, d M Y H:i:s', $lastMod) . ' GMT',
+        'Cross-Origin-Resource-Policy: same-origin',
+        "Content-Security-Policy: default-src 'none'",
+    ];
+    if (iconpackNotModified($etag, $lastMod, $server)) {
+        return ['status' => 304, 'headers' => array_values(array_filter($headers, fn($h) => !str_starts_with($h, 'Content-Type')))];
+    }
+    $parts = [];
+    foreach ($paths as $p) $parts[] = iconpackRewriteCss((string)@file_get_contents($p), $id, $v);
+    $body = implode("\n", $parts);
+    $headers[] = 'Content-Length: ' . strlen($body);
+    return ['status' => 200, 'headers' => $headers, 'body' => $body];
 }

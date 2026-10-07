@@ -54,6 +54,30 @@ function wlProbeOnFail(array $cfg): string {
     return in_array($v, ['keep', 'delete'], true) ? $v : 'delete';
 }
 
+/** worker/worker.py's own default for `concurrency` (its Config) — and the example config's and worker/README.md's. */
+const WL_PROBE_WORKER_DEFAULT_CONCURRENCY = 3;
+
+/**
+ * How many parallel fetches the metadata worker runs (1.74.0, QUAL-3): the panel's `meta_worker_concurrency` when
+ * set (the worker takes it over its config file), else what the worker's heartbeat says it runs with (`concurrency`,
+ * fresh within ten minutes), else the worker's own default. Until 1.74.0 this was `?? 8` — a fifth number beside the
+ * worker's 3, the example config's 4 and the README's [3] — so one submitter could hold 8 rows "probing" while the
+ * worker fetched 3.
+ */
+function wlProbeWorkerConcurrency(array $cfg): int {
+    $set = (int)($cfg['meta_worker_concurrency'] ?? 0);
+    if ($set > 0) return max(1, min(64, $set));
+    if (function_exists('whitelistWorkerHeartbeat')) {
+        $hb = whitelistWorkerHeartbeat($cfg);
+        $info = $hb['info'] ?? null;
+        if (is_array($info) && $hb['age'] !== null && $hb['age'] <= 600) {
+            $c = (int)($info['concurrency'] ?? 0);
+            if ($c > 0) return max(1, min(64, $c));
+        }
+    }
+    return WL_PROBE_WORKER_DEFAULT_CONCURRENCY;
+}
+
 /**
  * How many may be probing at once, per submitter.
  *
@@ -62,7 +86,7 @@ function wlProbeOnFail(array $cfg): string {
  * a queue of five hundred "probing" rows is not faster, it just makes everyone wait together.
  */
 function wlProbeMaxPerSubmit(array $cfg): int {
-    $worker = max(1, min(64, (int)($cfg['meta_worker_concurrency'] ?? 8) ?: 8));
+    $worker = wlProbeWorkerConcurrency($cfg);
     return max(1, min($worker, (int)($cfg['wl_probe_max_batch'] ?? $worker) ?: $worker));
 }
 

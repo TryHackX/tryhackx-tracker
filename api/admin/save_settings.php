@@ -22,7 +22,7 @@ $allowed = [
     'recaptcha_on_appeal', 'recaptcha_on_block_check',
     'captcha_threshold', 'captcha_grace_minutes',
     'captcha_pts_report', 'captcha_pts_status', 'captcha_pts_appeal',
-    'captcha_pts_block_check', 'captcha_pts_login_fail',
+    'captcha_pts_block_check',
     'delete_captcha_attempts', 'delete_lockout_attempts', 'delete_lockout_minutes',
     'login_lockout_attempts', 'login_lockout_minutes', 'admin_reauth_max_attempts',
     'rate_limit', 'rate_limit_status', 'rate_limit_block_check', 'rate_limit_appeal',
@@ -48,6 +48,8 @@ $allowed = [
     'lists_desc_max',
     'index_keep_saved', 'index_keep_saved_days',
     'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
+    // the daily cap on report and appeal confirmation mails (1.74.0, PUB-1, confirmMailAllow())
+    'confirm_mail_daily_cap',
     'user_2fa_enabled', 'user_2fa_required',
     'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
     'sounds_enabled', 'sound_default_notification', 'sound_default_message_friend', 'sound_default_message',
@@ -249,13 +251,34 @@ $reauthKeys = [
     // A host in this box may RUN SCRIPTS on every page of this site, in every visitor's session.
     // That is a change to whom the site trusts, which is the one thing this array is for.
     'csp_extra_hosts'              => '',                     // cspPolicy(), includes/csp.php
+    // The switches whose consequence the JANITOR carries out (1.74.0, PANEL-2): arming the schedule runs the mode
+    // switch command, the limit and its automatic band the firewall helper, the monitor its sampler, backups the
+    // backup helper — as root, on the next minute. Each of those deeds asks for the password where it is done by
+    // hand (admin/tracker_mode, admin/net_apply, admin/backup_action); arming it to happen by itself did not.
+    'tracker_schedule_enabled'     => '0',                    // includes/schedule.php
+    'net_limit_enabled'            => '0',                    // includes/netlimit.php
+    'net_auto_enabled'             => '0',
+    'net_monitor_enabled'          => '0',
+    'backup_enabled'               => '0',                    // includes/backup.php
 ];
+
+// The secrets this page never prints (1.74.0, PANEL-1; templates/admin/settings.php): each field arrives EMPTY
+// unless somebody typed a new value, and empty means "keep what is stored" — or every save would blank them, and
+// the HMAC key's empty value would ask for the password on every save besides. The health token is never printed
+// either, but an empty one is a real answer — the endpoint switched off — so it keeps that meaning here, and it is
+// the PAGE that leaves an untouched token field out of its save (and sends it empty when "switch off" is ticked).
+$secretKeys = ['hmac_secret', 'recaptcha_secret', 'recaptcha_v3_secret', 'turnstile_secret', 'hcaptcha_secret'];
 
 $data = [];
 foreach ($allowed as $key) {
     if (array_key_exists($key, $input)) {
+        // A value that is not a string or a number is not a setting (1.74.0): `x[]=…` used to be stored as "Array".
+        if (!is_scalar($input[$key]) && $input[$key] !== null) continue;
         $data[$key] = trim((string)$input[$key]);
     }
+}
+foreach ($secretKeys as $key) {
+    if (array_key_exists($key, $data) && $data[$key] === '') unset($data[$key]);
 }
 
 if (empty($data)) {
@@ -359,6 +382,16 @@ if (isset($data['recaptcha_v3_min_score'])) {
 }
 if (isset($data['whitelist_scrape_url']) && $data['whitelist_scrape_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['whitelist_scrape_url'])) {
     jsonResponse(['error' => __('api.settings.scrape_url_invalid')], 400);
+}
+// ── The footer's addresses (1.74.0, XSS-6) ──
+// Each becomes an href on every page, so it is an http(s) address or nothing — `javascript:` was stored as typed and
+// printed into the link. Judged only when it CHANGED (the page posts every control on every save — the rule of
+// trusted_proxy_ips below): a row written elsewhere must not make the whole page unsavable, and the footer drops what
+// is not http(s) on its own way out (templates/footer.php, safeHttpUrl()).
+foreach (['footer_brand_url', 'footer_tracker_url', 'footer_tracker_author_url', 'footer_os_url', 'github_url'] as $k) {
+    if (isset($data[$k]) && $data[$k] !== '' && $data[$k] !== (string)($cfg[$k] ?? '') && safeHttpUrl($data[$k]) === '') {
+        jsonResponse(['error' => __('api.settings.footer_url_invalid', ['entry' => $data[$k]])], 400);
+    }
 }
 $intClamp = [
     'whitelist_max_per_submission' => [1, 500, 20], 'rate_limit_whitelist' => [0, 1000, 10],
@@ -487,6 +520,8 @@ $intClamp = [
     'net_auto_target' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_auto_target_cpu' => [10, 100, 70],
     'net_lists_ttl_default' => [IPLIST_TTL_MIN, IPLIST_TTL_MAX, IPLIST_TTL_DEFAULT],
     'index_poll_keep_days' => [1, 3650, 90],
+    // The day's report and appeal confirmations (1.74.0, includes/functions.php): 0 is a real answer — none sent.
+    'confirm_mail_daily_cap' => [0, CONFIRM_MAIL_CAP_MAX, CONFIRM_MAIL_CAP_DEFAULT],
     // backups (includes/backup.php)
     'backup_keep' => [0, BACKUP_KEEP_MAX, 7], 'backup_keep_days' => [0, BACKUP_DAYS_MAX, 30],
     'backup_max_size_gb' => [0, BACKUP_GB_MAX, 20], 'backup_nice' => [0, 19, 15],

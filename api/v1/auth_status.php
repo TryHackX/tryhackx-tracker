@@ -54,6 +54,6 @@ jsonResponse([
     'provider' => $identity ? (string)$identity['provider'] : null,
     'last_login_at' => $identity ? $identity['last_login_at'] : null,
     'logged_out_at' => $identity ? $identity['logout_at'] : null,
-    'groups' => userGroupsAll($db, (int)$user['id']),
+    'groups' => userGroupsForPartner($db, (int)$user['id']),   // 1.74.0 (PRIV-7): never the panel's notes on a grant
     'server_time' => time(),
 ]);

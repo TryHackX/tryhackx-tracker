@@ -51,4 +51,5 @@ try {
     if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => __('api.groups.slug_exists')], 400);
     throw $e;
 }
+userPermissionsForget();   // a group's permissions changed: nothing in this request answers from before (1.74.0)
 jsonResponse(['success' => true, 'id' => $id]);

@@ -20,7 +20,7 @@ if ($scope === 'date') {
                   'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);
 }
 if ($scope !== '') {
-    $queued = indexQueueMetaByScope($db, $scope);
+    $queued = indexQueueMetaByScope($db, $scope, $cfg);
     if ($queued === null) jsonResponse(['error' => __('api.index.invalid_meta_scope')], 400);
     jsonResponse(['success' => true, 'scope' => $scope, 'queued' => $queued, 'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);
 }
@@ -28,5 +28,5 @@ $hashes = $input['hashes'] ?? [];
 if (!is_array($hashes)) $hashes = [$hashes];
 if (!$hashes) jsonResponse(['error' => __('api.index.no_hashes_or_scope')], 400);
 if (count($hashes) > 500) jsonResponse(['error' => __('api.index.too_many_hashes')], 400);
-$queued = indexRequestMeta($db, $hashes, 5);
+$queued = indexRequestMeta($db, $hashes, 5, $cfg);
 jsonResponse(['success' => true, 'queued' => $queued, 'worker_heartbeat_age' => whitelistWorkerHeartbeatAge($cfg)]);

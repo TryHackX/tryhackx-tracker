@@ -24,8 +24,14 @@ const OT_WEIGHT_MAX = 10000;
 const OT_NOFILE_MIN = 1024;
 const OT_NOFILE_MAX = 1048576;
 const OT_WORKERS_MAX = 64;
-/** Status is polled by a card; reuse the helper's answer briefly rather than forking per request. */
-const OT_STATUS_TTL = 5;
+/**
+ * Status is polled by a card (every 15 s while it is visible); the helper's answer is reused rather than forked per
+ * request. Kept in a FILE (1.74.0, PERF-13): the `static` it lived in before died with each php-fpm request, so the
+ * cache never answered a single poll and every visible Traffic card ran the root helper (pgrep, several systemctl
+ * reads, ss) every 15 s. What it reports changes when somebody presses a button, and every button drops it
+ * (otStatusCacheDrop()), so half a minute of reuse — shared by every tab and every panel account — costs nothing.
+ */
+const OT_STATUS_TTL = 30;
 
 function otPerfCommand(array $cfg): string { return trim((string)($cfg['ot_perf_cmd'] ?? '')); }
 function otNice(array $cfg): int { return netlimitClampInt((int)($cfg['ot_nice'] ?? -2), OT_NICE_MIN, OT_NICE_MAX, -2); }
@@ -94,14 +100,30 @@ function otRun(array $cfg, array $args): array {
     return $out;
 }
 
-function otStatus(array $cfg, bool $fresh = false): array {
-    static $cache = null, $cachedAt = 0;
-    if (!$fresh && $cache !== null && (time() - $cachedAt) < OT_STATUS_TTL) return $cache + ['cached' => true];
+/** Where the helper's last status answer is kept between requests (OT_STATUS_TTL). */
+function otStatusCacheFile(): string { return __DIR__ . '/../config/ot_status_cache.json'; }
+
+/** Forget it: whatever a button just changed is read from the helper on the next poll. */
+function otStatusCacheDrop(): void { @unlink(otStatusCacheFile()); }
+
+function otStatus(array $cfg, bool $fresh = false, ?int $now = null): array {
+    $now = $now ?? time();
+    $file = otStatusCacheFile();
+    $cmd = otPerfCommand($cfg);
+    if (!$fresh && is_file($file)) {
+        $c = json_decode((string)@file_get_contents($file), true);
+        // Keyed by the helper command, so changing it in Settings never shows the old helper's answer.
+        if (is_array($c) && isset($c['at'], $c['v']) && is_array($c['v']) && ($c['cmd'] ?? null) === $cmd
+            && ($now - (int)$c['at']) >= 0 && ($now - (int)$c['at']) < OT_STATUS_TTL) {
+            return $c['v'] + ['cached' => true];
+        }
+    }
     $r = otRun($cfg, ['status']);
     if (!$r['ok'] || !is_array($r['json'])) return ['ok' => false, 'error' => $r['error'] ?? 'unknown error', 'output' => $r['output']];
-    $cache = $r['json'];
-    $cachedAt = time();
-    return $cache + ['cached' => false];
+    // A tmp+rename so a reader never sees half a file; a failed write only means the next poll asks the helper again.
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, json_encode(['at' => $now, 'cmd' => $cmd, 'v' => $r['json']])) !== false) @rename($tmp, $file);
+    return $r['json'] + ['cached' => false];
 }
 
 function otCheck(array $cfg): array {
@@ -113,22 +135,32 @@ function otCheck(array $cfg): array {
 function otApply(array $cfg, bool $dryRun = false): array {
     $args = ['apply', (string)otNice($cfg), (string)otCpuWeight($cfg), otCpuAffinity($cfg), (string)otLimitNofile($cfg)];
     if ($dryRun) $args[] = '--dry-run';
-    return otRun($cfg, $args);
+    $r = otRun($cfg, $args);
+    if (!$dryRun) otStatusCacheDrop();
+    return $r;
 }
 
 function otWorkers(array $cfg, int $n, bool $dryRun = false): array {
     $args = ['workers', (string)netlimitClampInt($n, 1, OT_WORKERS_MAX, 4)];
     if ($dryRun) $args[] = '--dry-run';
-    return otRun($cfg, $args);
+    $r = otRun($cfg, $args);
+    if (!$dryRun) otStatusCacheDrop();
+    return $r;
 }
 
 function otReset(array $cfg, bool $dryRun = false): array {
     $args = ['reset'];
     if ($dryRun) $args[] = '--dry-run';
-    return otRun($cfg, $args);
+    $r = otRun($cfg, $args);
+    if (!$dryRun) otStatusCacheDrop();
+    return $r;
 }
 
-function otRestart(array $cfg): array { return otRun($cfg, ['restart']); }
+function otRestart(array $cfg): array {
+    $r = otRun($cfg, ['restart']);
+    otStatusCacheDrop();
+    return $r;
+}
 
 /**
  * A deferred apply, remembered in the same state file the firewall uses.

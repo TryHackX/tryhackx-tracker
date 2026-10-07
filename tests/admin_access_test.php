@@ -653,9 +653,75 @@ check('the report form validates the link rather than merely parsing it',
 check('… and no longer trusts FILTER_VALIDATE_URL for it',
       !str_contains($sr, 'filter_var($link, FILTER_VALIDATE_URL)'));
 $aj = (string)file_get_contents($root . '/assets/js/admin.js');
-check('the panel puts the link in the attribute with escAttr(), not esc()',
-      !str_contains($aj, 'href="${esc(r.link)}"') && substr_count($aj, 'href="${escAttr(r.link)}"') === 2,
-      (string)substr_count($aj, 'href="${escAttr(r.link)}"'));
+// 1.74.0 (XSS-3): the report window and the appeal window no longer write `href="${escAttr(r.link)}"` themselves — both
+// draw the link through linkHtml() (assets/js/admin.js), which makes a link ONLY of an http(s) address, puts it in the
+// attribute through escAttr(), and shows anything else as plain text. The old check counted the literal in two places;
+// what it protected is that a stranger's quote cannot close the attribute and that a `javascript:` address is never a
+// link, so the same two properties are asserted — in the source (the sink is the helper, esc() never feeds an href) and
+// by RUNNING the real linkHtml()/esc()/escAttr() of admin.js (node, a stand-in only for the DOM's innerHTML escaping).
+check('the panel never puts the link in an attribute through esc() (it leaves quotes alone)',
+      !str_contains($aj, 'href="${esc(r.link)}"') && !str_contains($aj, "href=\"' + esc(r.link)"));
+check('… the report window and the appeal window both draw it through linkHtml(), and nothing else touches r.link in markup',
+      substr_count($aj, 'linkHtml(r.link)') === 2 && substr_count($aj, 'r.link') === 2,
+      'linkHtml(r.link) x' . substr_count($aj, 'linkHtml(r.link)') . ', r.link x' . substr_count($aj, 'r.link'));
+$jsFn = static function (string $src, string $name): string {
+    $p = strpos($src, "\nfunction " . $name . '(');
+    $e = $p === false ? false : strpos($src, "\n}\n", $p);
+    return $e === false ? '' : substr($src, $p + 1, $e - $p + 2);
+};
+$ajN = str_replace("\r\n", "\n", $aj);
+$linkSrc = $jsFn($ajN, 'linkHtml') . $jsFn($ajN, 'esc') . $jsFn($ajN, 'escAttr');
+check('admin.js carries linkHtml(), esc() and escAttr() as plain top-level functions',
+      str_contains($linkSrc, 'function linkHtml(') && str_contains($linkSrc, 'function esc(') && str_contains($linkSrc, 'function escAttr('));
+$linkCases = [
+    0 => 'https://example.org/torrent/1',
+    1 => 'HTTP://EXAMPLE.ORG/Up',
+    2 => 'https://e.example/x" onmouseover="alert(1)',
+    3 => "https://e.example/x'><img src=x onerror=alert(1)>",
+    4 => 'javascript://x/%0aalert(1)',
+    5 => "java\tscript:alert(1)",
+    6 => 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+    7 => '//e.example/protocol-relative',
+    8 => '<script>alert(1)</script>',
+    9 => '',
+];
+$tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'lnk_' . bin2hex(random_bytes(4));
+file_put_contents($tmp . '.js',
+    "const t = { isKey: () => false, html: (s) => String(s) };\n"
+    . "const document = { createElement: () => { let v = ''; return { set textContent(x) { v = String(x); }, "
+    . "get innerHTML() { return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); } }; } };\n"
+    . $linkSrc . "\nconst urls = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));\n"
+    . "process.stdout.write(JSON.stringify(urls.map((u) => linkHtml(u))));\n");
+file_put_contents($tmp . '.json', json_encode($linkCases, JSON_UNESCAPED_UNICODE));
+$raw = (string)@shell_exec('node ' . escapeshellarg($tmp . '.js') . ' ' . escapeshellarg($tmp . '.json') . ' 2>&1');
+@unlink($tmp . '.js'); @unlink($tmp . '.json');
+$drawn = json_decode($raw, true);
+if (!is_array($drawn) || count($drawn) !== count($linkCases)) {
+    check('node ran linkHtml() on every address', false, substr($raw, 0, 600));
+} else {
+    // the one shape a link may have: an anchor whose attributes are exactly these five, the address inside href with
+    // its quotes written as &quot; — a bare quote in the value would end the attribute and start another
+    $anchor = '~^<a href="([^"]*)" rel="noopener noreferrer" target="_blank" class="text-info" data-external>([^<]*)</a>$~';
+    $link = [];
+    foreach ($linkCases as $i => $u) $link[$i] = preg_match($anchor, $drawn[$i], $mm) === 1 ? $mm : null;
+    check('an ordinary https address is a link whose href is the address (any case of the scheme)',
+          $link[0] !== null && $link[0][1] === $linkCases[0] && $link[1] !== null && $link[1][1] === $linkCases[1],
+          json_encode([$drawn[0], $drawn[1]]));
+    check('… a quote inside an https address cannot leave the attribute: it comes out as &quot; and the tag keeps exactly its own attributes',
+          $link[2] !== null && $link[2][1] === str_replace('"', '&quot;', $linkCases[2]), (string)$drawn[2]);
+    check('… nor can a bracket or a handler: the markup in the address is text (&lt; &gt;) in the anchor and in the href',
+          $link[3] !== null && !str_contains($drawn[3], '<img') && str_contains($link[3][1], '&lt;img')
+          && str_contains($link[3][2], '&lt;img'), (string)$drawn[3]);
+    $notLinks = [];
+    foreach ([4, 5, 6, 7, 8] as $i) {
+        // not a link: no anchor, no attribute, no tag of any kind (a `<` could only be written as &lt;)
+        if (str_contains($drawn[$i], '<') || str_contains($drawn[$i], 'href=')) $notLinks[] = $drawn[$i];
+    }
+    check('javascript:, data:, a control character in the scheme, a protocol-relative address and markup are shown as text, never a link',
+          $notLinks === [] && $drawn[4] === $linkCases[4] && $drawn[7] === $linkCases[7]
+          && $drawn[8] === '&lt;script&gt;alert(1)&lt;/script&gt;', json_encode($notLinks));
+    check('… and an empty address draws nothing', $drawn[9] === '');
+}
 $pj = (string)file_get_contents($root . '/assets/js/app.js');
 check('the public status page escapes the quote too', str_contains($pj, 'replace(/"/g,'));
 

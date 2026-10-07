@@ -34,7 +34,7 @@ require_once __DIR__ . '/icons.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.73.3';
+const TRACKER_VERSION = '1.74.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -50,6 +50,15 @@ function versionShown(array $cfg, bool $inPanel): bool {
     if ($mode === 'both') return true;
     return $mode === ($inPanel ? 'panel' : 'public');
 }
+
+/**
+ * The public Transparency page is on (`transparency_enabled`). ONE reader with the schema's default, ON (1.74.0,
+ * QUAL-2): its data endpoint and the Settings field said '0' for a missing row while the menu and the page-content
+ * conditions said '1' — a row deleted by hand left a menu link to a page whose data answered 403 (the 1.73.0 fix
+ * seeded the row; this makes every reader agree when there is none). The menu, the endpoint, the field and the
+ * page-content condition all ask here; includes/lang.php langSwapEnabled() is its twin for the language switch.
+ */
+function transparencyEnabled(array $cfg): bool { return (string)($cfg['transparency_enabled'] ?? '1') === '1'; }
 
 /**
  * Redirect from inside a page template.
@@ -70,8 +79,43 @@ function pageRedirect(string $url): void {
     echo '<meta http-equiv="refresh" content="0;url=' . $u . '"><script' . nonceAttr() . '>location.replace(' . json_encode($url) . ');</script>';
 }
 
-function sanitize(string $input): string {
+/**
+ * Escaped text for HTML. A value that is not a string or a number reads as '' (1.74.0): `name[]=x` in a request body
+ * is an ARRAY, and handing one to a `string` parameter is an uncaught TypeError — on production a blank 500 for
+ * whoever sends it, on every endpoint that sanitises a field.
+ */
+function sanitize(mixed $input): string {
+    if (!is_string($input)) $input = (is_int($input) || is_float($input)) ? (string)$input : '';
     return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * One field of a request ($_GET, $_POST, a decoded JSON body) as a string — or $default when it is missing or is not
+ * a string or a number (1.74.0). An array where a string belongs (`hash[]=x`, `{"email":["x"]}`) used to reach
+ * trim()/strtolower()/a `string` parameter as an array and end the request with an uncaught TypeError; read through
+ * this, it is simply not there, and the endpoint answers its own 400 or 404.
+ */
+function strInput(array $src, string $key, string $default = ''): string {
+    $v = $src[$key] ?? null;
+    if (is_string($v)) return $v;
+    if (is_int($v) || is_float($v)) return (string)$v;
+    return $default;
+}
+
+/**
+ * An absolute http(s) address, or '' (1.74.0, XSS-6). For a setting that becomes an href or a redirect: the scheme
+ * check is the point — `javascript:` in a settings field is a stored script with an operator's own hand on it, and a
+ * scheme-relative `//evil.example` reads as a path to a person and as a host to a browser. A host is required, and no
+ * control character or white space may be in it. includes/authbridge.php's authBridgeSafeUrl() is this.
+ */
+function safeHttpUrl(mixed $url, int $maxLen = 500): string {
+    if (!is_string($url)) return '';
+    $url = trim($url);
+    if ($url === '' || strlen($url) > $maxLen) return '';
+    if (!preg_match('#^https?://#i', $url) || preg_match('/[\x00-\x20\x7F]/', $url)) return '';
+    $p = parse_url($url);
+    if (!is_array($p) || empty($p['host'])) return '';
+    return $url;
 }
 
 /**
@@ -140,8 +184,10 @@ function generateCsrfToken(): string {
     return $_SESSION['csrf_token'];
 }
 
-function verifyCsrfToken(string $token): bool {
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+/** Is this the session's token? Anything that is not a string — `csrf_token[]=x` — is not (1.74.0: was a TypeError). */
+function verifyCsrfToken(mixed $token): bool {
+    return is_string($token) && $token !== '' && isset($_SESSION['csrf_token']) && is_string($_SESSION['csrf_token'])
+        && hash_equals($_SESSION['csrf_token'], $token);
 }
 
 /** Verify the CSRF token sent by admin AJAX calls in the X-CSRF-Token header. */
@@ -200,9 +246,11 @@ function captchaConfigured(array $cfg): bool {
 }
 
 /**
- * One HTTP helper for the siteverify calls: form-encoded POST, hard timeouts (connect 3 s, total
- * 5 s), TLS verification on. Returns the decoded JSON object or null on any transport/parse error
- * so callers fail closed. cURL is preferred; falls back to a stream context with a timeout.
+ * One HTTP helper for the siteverify calls: form-encoded POST, TLS verification on, hard timeouts per attempt
+ * (connect 5 s, total 8 s — captchaHttpPostOnce()) and two attempts, so a verifier that cannot be reached holds
+ * the request for up to ~16 s before it is refused. Returns the decoded JSON object or null on any transport/parse
+ * error so callers fail closed. cURL is preferred; falls back to a stream context with the same total timeout.
+ * (1.74.0, QUAL-25: this said "connect 3 s, total 5 s" — the numbers of an earlier version.)
  */
 function captchaHttpPost(string $url, array $fields): ?array {
     // Two attempts: this host shares its uplink with a large BitTorrent swarm and measured 30-40 %
@@ -428,29 +476,38 @@ function captchaHeadTags(array $cfg): string {
  * NO 'strict-dynamic'. It would make every host expression here be IGNORED, and all three widget
  * vendors load further scripts from these hosts once their loader runs. The plain allow-list is
  * what works today and what keeps working.
+ *
+ * GOOGLE'S TWO EXTRAS (1.74.0, from production's report-only policy, 10–29.09): reCAPTCHA's loader puts a
+ * stylesheet from www.gstatic.com into the page (style-src — reported on the account page, where a member's CAPTCHA
+ * is drawn on demand), and the code it runs in the page tries eval (script-src 'unsafe-eval' — the front page's
+ * reports, where the shoutbox asks for one). `eval` => true says so; includes/csp.php grants it only where a CAPTCHA
+ * can be drawn — every public page (assets/js/captcha.js draws one wherever an answer asks for it) and the panel's
+ * dashboard (its deletion CAPTCHA) — never on another panel page, and never for Turnstile or hCaptcha.
  */
 function captchaCspHosts(array $cfg): array {
-    $empty = ['script' => [], 'style' => [], 'connect' => [], 'frame' => []];
+    $empty = ['script' => [], 'style' => [], 'connect' => [], 'frame' => [], 'eval' => false];
     if (!captchaConfigured($cfg)) return $empty;
     switch (captchaProvider($cfg)) {
         case 'turnstile':
             $h = ['https://challenges.cloudflare.com'];
-            return ['script' => $h, 'style' => [], 'connect' => $h, 'frame' => $h];
+            return ['script' => $h, 'style' => [], 'connect' => $h, 'frame' => $h, 'eval' => false];
         case 'hcaptcha':
             // The apex is listed next to the wildcard because a CSP wildcard does not match the
             // bare domain — hcaptcha.com and *.hcaptcha.com are two different source expressions.
             $h = ['https://hcaptcha.com', 'https://*.hcaptcha.com'];
             return ['script' => array_merge(['https://js.hcaptcha.com'], $h), 'style' => $h,
-                    'connect' => $h, 'frame' => $h];
+                    'connect' => $h, 'frame' => $h, 'eval' => false];
         case 'recaptcha_v3':
             // v3 renders no widget and needs no frame — but api.js still pulls its worker code from
             // www.gstatic.com, which is the host people forget and then cannot explain the failure.
             return ['script' => ['https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net'],
-                    'style' => [], 'connect' => ['https://www.google.com', 'https://www.recaptcha.net'], 'frame' => []];
+                    'style' => ['https://www.gstatic.com'],
+                    'connect' => ['https://www.google.com', 'https://www.recaptcha.net'], 'frame' => [], 'eval' => true];
         default:   // recaptcha v2 checkbox
             return ['script' => ['https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net'],
-                    'style' => [], 'connect' => ['https://www.google.com', 'https://www.recaptcha.net'],
-                    'frame' => ['https://www.google.com', 'https://www.recaptcha.net']];
+                    'style' => ['https://www.gstatic.com'],
+                    'connect' => ['https://www.google.com', 'https://www.recaptcha.net'],
+                    'frame' => ['https://www.google.com', 'https://www.recaptcha.net'], 'eval' => true];
     }
 }
 
@@ -810,14 +867,17 @@ function cookieBaseParams(?array $cfg = null, array $overrides = []): array {
 }
 
 /**
- * Exactly the three keys session_start() was passed before and no more — no cookie_path, so a
- * php.ini that sets a non-'/' session.cookie_path keeps behaving the way it does today.
+ * The options every session_start() of the site is given (index.php, api.php, install.php): the three cookie keys
+ * it was passed before — no cookie_path, so a php.ini that sets a non-'/' session.cookie_path keeps behaving the way
+ * it does today — and, from 1.74.0 (AUTH-9), strict mode: PHP refuses a session id it did not issue itself, instead of
+ * adopting one a visitor (or a page that planted a cookie) made up. php.ini ships it off, and production had it off.
  */
 function sessionCookieParams(?array $cfg = null): array {
     return [
         'cookie_httponly' => true,
         'cookie_samesite' => 'Lax',
         'cookie_secure'   => cookieSecureFlag($cfg),
+        'use_strict_mode' => true,
     ];
 }
 
@@ -903,39 +963,187 @@ function getClientIp(?array $cfg = null): string {
     return $remote;
 }
 
-function checkRateLimit(PDO $db, string $ip, int $maxPerHour): bool {
-    $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE ip = ? AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
-    $stmt->execute([$ip]);
-    return $stmt->fetchColumn() < $maxPerHour;
+/** Rate-limit / ban key for an IP: IPv4 = exact address, IPv6 = its /64 prefix (SLAAC hosts rotate inside a /64). */
+function ipBucket(string $ip): string {
+    // Here, beside getClientIp(), since 1.74.0 (it was in includes/whitelist.php): every per-address limit and the
+    // panel's sign-in lockout key by it, and a helper that is not loaded wherever an address is counted is a
+    // helper some entry point counts without.
+    $ip = unmapIpv4($ip);
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16) {
+            $prefix = substr($bin, 0, 8) . str_repeat("\0", 8);
+            $txt = @inet_ntop($prefix);
+            if ($txt !== false) return $txt . '/64';
+        }
+    }
+    return $ip;
 }
 
 /**
- * Generic sliding-window rate limiter, file-based (config/ is denied to the web). Returns true
- * if the request is ALLOWED (and records the hit), false if the per-IP limit for this action is
- * already reached. $max <= 0 disables the limit. Fails OPEN on any filesystem error so a disk
- * problem can never lock legitimate users out. Mirrors the login-throttle design in auth.php.
+ * The SQL that matches a stored address against a visitor's ADDRESS GROUP (ipBucket()): the address itself for IPv4,
+ * the first 64 bits for IPv6. ['sql' => …, 'arg' => …], for `WHERE <col>` (1.74.0, Temat L: the report and appeal
+ * hourly limits counted the full address, and a host rotating inside its /64 had a fresh count per address).
  */
+function ipBucketSql(string $column, string $ip): array {
+    $ip = unmapIpv4($ip);
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        return ['sql' => "LEFT(INET6_ATON($column), 8) = LEFT(INET6_ATON(?), 8)", 'arg' => $ip];
+    }
+    return ['sql' => "$column = ?", 'arg' => $ip];
+}
+
+/** Reports from this address GROUP in the last hour below the limit? (the report form's own limit, `rate_limit`). */
+function checkRateLimit(PDO $db, string $ip, int $maxPerHour): bool {
+    $where = ipBucketSql('ip', $ip);   // a literal condition on the literal column; the address is bound
+    $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE " . $where['sql'] . " AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $stmt->execute([$where['arg']]);
+    return $stmt->fetchColumn() < $maxPerHour;
+}
+
+/* ── The file limiter (Temat L, 1.74.0) ───────────────────────────────────────────────────────────────────────────
+ *
+ * Every per-address limit of the site is one call: rateLimitAllow($action, <subject>, $max, $window) — true when the
+ * request may go on (and its hit is counted), false when the subject has used up this action's window. config/ is
+ * denied to the web. Until 1.74.0 every action shared ONE file, config/rate_limits.json, read, decoded and rewritten
+ * WHOLE under ONE lock on every call: the shoutbox's poll, the search and the sign-in queued on the same flock behind
+ * each other's addresses, and a flood of one action taxed all the others. Now:
+ *
+ *   · ONE FILE AND ONE LOCK PER ACTION — config/ratelimit/<action>.json (+ .lock), {"a": action, "g": generation,
+ *     "h": {subject: [unix times]}}. A poll reads and writes its own file and nobody else's.
+ *   · A HARD CAP per file: RATE_LIMIT_MAX_KEYS subjects and RATE_LIMIT_MAX_HITS times in all. Past either, the
+ *     subjects whose last hit is oldest go first — they are the ones furthest from their limit.
+ *   · config/rate_limits.json is the RESET HANDLE: {"<action>|*": [generation, minted at]}. A hit counts only in its
+ *     action's current generation, so deleting that file — or one action's line in it — forgets the hits at once.
+ *     It is what the README's troubleshooting, the tests and the browser checks already do for a clean slate, and it
+ *     keeps meaning exactly that.
+ *   · FAIL-OPEN STAYS THE CONTRACT: a disk problem must never lock legitimate visitors out, and ~45 call sites rely
+ *     on it. It is no longer silent: rateLimitHealth() puts a line on the panel's warning card and in healthReport()
+ *     while config/ or a state file cannot be written; an unreadable file is set aside as <file>.bad.<time> with an
+ *     error_log('[ratelimit] …') line; and a SIGN-IN whose count cannot be written pays a delay instead
+ *     (RATE_LIMIT_SIGNIN_ACTIONS — the owner's choice for AUTH-7; the panel's own sign-in, includes/auth.php, too).
+ *   · rateLimitPrune() (the janitor, every minute) walks the directory: hits past RATE_LIMIT_KEEP_SECONDS, files left
+ *     empty or of a forgotten generation, stale temporary files, set-aside files after a week.
+ *
+ * The subject is the caller's: ipBucket(getClientIp($cfg)) for an address — an IPv6 host is its /64, a host rotating
+ * inside it is one subject — or 'u<id>' / 'user:<id>' for an account.
+ */
+const RATE_LIMIT_MAX_KEYS = 5000;
+const RATE_LIMIT_MAX_HITS = 100000;
+/** The sign-in actions: a count that cannot be written costs a delay (adminReauthDelayUs()) rather than nothing. */
+const RATE_LIMIT_SIGNIN_ACTIONS = ['user_login'];
+/** Seconds rateLimitHealth()'s answer is reused: the warning card is polled by every open dashboard. */
+const RATE_LIMIT_HEALTH_TTL = 60;
+/** How long a set-aside (unreadable) state file is kept for somebody to look at — it holds addresses. */
+const RATE_LIMIT_BAD_KEEP_SECONDS = 604800;
+
+function rateLimitDir(): string { return __DIR__ . '/../config/ratelimit'; }
+function rateLimitIndexFile(): string { return __DIR__ . '/../config/rate_limits.json'; }
+
+/** config/ratelimit/<action>.json — the action's name where it is a plain slug, a hashed one otherwise. */
+function rateLimitFile(string $action): string {
+    $slug = trim((string)preg_replace('/[^a-z0-9_-]+/', '-', strtolower($action)), '-_');
+    if ($slug === '' || strlen($slug) > 64 || $slug !== $action) {
+        $slug = substr($slug !== '' ? $slug : 'action', 0, 40) . '-' . substr(sha1($action), 0, 12);
+    }
+    return rateLimitDir() . '/' . $slug . '.json';
+}
+
+/** config/ratelimit/ exists, or was just made. False when it cannot be had — the caller fails open. */
+function rateLimitEnsureDir(): bool {
+    $d = rateLimitDir();
+    if (is_dir($d)) return true;
+    if (file_exists($d)) return false;
+    return @mkdir($d, 0775, true) || is_dir($d);
+}
+
+/**
+ * A JSON state file of the limiter, read: ['ok' => bool, 'data' => array, 'bad' => bool]. 'ok' is false when it
+ * exists and cannot be read as a map. With the file's lock held ($locked), unparseable content is set aside as
+ * <file>.bad.<time> and an error_log line says so; either way the caller starts from an empty map (QUAL-20).
+ */
+function rateLimitReadJson(string $file, bool $locked): array {
+    if (!file_exists($file)) return ['ok' => true, 'data' => [], 'bad' => false];
+    if (!is_file($file)) return ['ok' => false, 'data' => [], 'bad' => false];
+    $raw = @file_get_contents($file);
+    if ($raw === false) return ['ok' => false, 'data' => [], 'bad' => false];
+    if (trim($raw) === '') return ['ok' => true, 'data' => [], 'bad' => false];
+    $d = json_decode($raw, true);
+    if (is_array($d)) return ['ok' => true, 'data' => $d, 'bad' => false];
+    if ($locked) rateLimitSetAside($file);
+    return ['ok' => false, 'data' => [], 'bad' => true];
+}
+
+/** Move an unreadable state file out of the way — kept for a week (rateLimitPrune()), logged once per request. */
+function rateLimitSetAside(string $file): void {
+    static $said = [];
+    $to = $file . '.bad.' . date('Ymd-His');
+    $moved = @rename($file, $to);
+    if (isset($said[$file])) return;
+    $said[$file] = true;
+    error_log('[ratelimit] ' . basename($file) . ' is not a JSON map — '
+        . ($moved ? 'set aside as ' . basename($to) . ', counting starts over' : 'it could not be set aside; counting starts over'));
+}
+
+/** The generation in an index value ([generation, minted at]), or ''. */
+function rateLimitGenOf(mixed $v): string {
+    $g = is_array($v) ? ($v[0] ?? null) : null;
+    return (is_string($g) && preg_match('/^[0-9a-f]{8,32}$/', $g)) ? $g : '';
+}
+
+/**
+ * This action's current generation, from config/rate_limits.json — minted (under that file's own lock) when the
+ * action has none, which is what a deleted file or a deleted line means: its hits are forgotten. A generation that
+ * cannot be written is still returned: every call then sees a new one, the count never builds up, and the limiter
+ * is open — the contract — while rateLimitHealth() says why.
+ */
+function rateLimitGeneration(string $action): string {
+    $idx = rateLimitIndexFile();
+    $key = $action . '|*';
+    $g = rateLimitGenOf(rateLimitReadJson($idx, false)['data'][$key] ?? null);
+    if ($g !== '') return $g;
+    $h = @fopen($idx . '.lock', 'c');
+    if ($h) @flock($h, LOCK_EX);
+    try {
+        $map = rateLimitReadJson($idx, true)['data'];
+        $g = rateLimitGenOf($map[$key] ?? null);
+        if ($g !== '') return $g;
+        $g = bin2hex(random_bytes(4));
+        $map[$key] = [$g, time()];
+        rateLimitWrite($idx, $map);
+        return $g;
+    } finally {
+        if ($h) { @flock($h, LOCK_UN); @fclose($h); }
+    }
+}
+
 function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3600): bool {
     if ($max <= 0) return true;
-    $file = __DIR__ . '/../config/rate_limits.json';
-    $now  = time();
-    $key  = $action . '|' . $ip;
-
-    // ONE LOCK AROUND THE READ AND THE WRITE, on a separate path.
-    //
-    // LOCK_EX on file_put_contents() covered only the write: two requests could both read the same
-    // map, each add its own hit, and the second write erased the first — and because every writer
-    // rewrites the WHOLE file, the lost hit could belong to any action and any IP. A burst of
-    // parallel submissions is exactly the case a rate limit exists for. The lock file is a
-    // different path from the data file so a future rename()-based replace cannot pull the inode
-    // out from under a waiter (the shape loginAttemptsUpdate() uses).
+    $now = time();
+    $gen = rateLimitGeneration($action);
+    if (!rateLimitEnsureDir()) { rateLimitWriteFailed($action, null); return true; }
+    $file = rateLimitFile($action);
+    // ONE LOCK AROUND THE READ AND THE WRITE, on a separate path, so two parallel hits cannot both read the same map
+    // and lose one — a burst of parallel requests is exactly what a limit is for — and so the rename()-based replace
+    // of the data file never pulls the lock's inode out from under a waiter (the shape loginAttemptsUpdate() uses).
     $lockH = @fopen($file . '.lock', 'c');
     if ($lockH) @flock($lockH, LOCK_EX);
     try {
-        return rateLimitAllowLocked($file, $key, $action, $now, $max, $windowSec);
+        return rateLimitAllowLocked($file, $gen, $ip, $action, $now, $max, $windowSec);
     } finally {
         if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
     }
+}
+
+/**
+ * A sign-in whose count could not be written (AUTH-7): the time a wrong panel password costs, rather than nothing —
+ * by the hits this subject has in the window, at least one; three when they could not even be read. Every other
+ * action stays open and silent here (rateLimitHealth() is what speaks).
+ */
+function rateLimitWriteFailed(string $action, ?int $hits): void {
+    if (!in_array($action, RATE_LIMIT_SIGNIN_ACTIONS, true)) return;
+    $n = $hits === null ? 3 : min(5, max(1, $hits));
+    usleep(function_exists('adminReauthDelayUs') ? adminReauthDelayUs($n) : (int)(min(8.0, 0.25 * (2 ** $n)) * 1000000));
 }
 
 /**
@@ -944,46 +1152,136 @@ function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3
  * For a page that SHOWS whether an action is possible. Asking must not cost what doing costs: the Info
  * panel asked twice per opening whether its reader could vote (api/index_info.php), each asking spent a
  * vote from the hour's budget, and a member who opened fifteen panels could not vote at all. Reads the
- * map as rateLimitAllow() leaves it — whole, since every write is a rename — and writes nothing.
+ * action's file as rateLimitAllow() leaves it — whole, since every write is a rename — and writes nothing.
  */
 function rateLimitPeek(string $action, string $ip, int $max, int $windowSec = 3600): bool {
     if ($max <= 0) return true;
-    $file = __DIR__ . '/../config/rate_limits.json';
+    $file = rateLimitFile($action);
     if (!is_file($file)) return true;
-    $raw  = @file_get_contents($file);
-    $data = $raw ? (json_decode($raw, true) ?: []) : [];
+    $d = rateLimitReadJson($file, false)['data'];
+    $gen = rateLimitGenOf(rateLimitReadJson(rateLimitIndexFile(), false)['data'][$action . '|*'] ?? null);
+    if ($gen === '' || ($d['g'] ?? null) !== $gen || !is_array($d['h'] ?? null)) return true;
     $now  = time();
-    $hits = array_filter((array)($data[$action . '|' . $ip] ?? []), fn($t) => ($now - (int)$t) < $windowSec);
+    $hits = array_filter((array)($d['h'][$ip] ?? []), fn($t) => ($now - (int)$t) < $windowSec);
     return count($hits) < $max;
 }
 
-/** The body of rateLimitAllow(), run with the lock held. */
-function rateLimitAllowLocked(string $file, string $key, string $action, int $now, int $max, int $windowSec): bool {
-    $data = [];
-    if (is_file($file)) {
-        $raw  = @file_get_contents($file);
-        $data = $raw ? (json_decode($raw, true) ?: []) : [];
+/**
+ * The body of rateLimitAllow(), run with the action's lock held. The window prunes this file only — every file is
+ * one action now, so a 60-second poller can no longer evict an hourly action's hits (the bug the old shared file
+ * had to guard against by key prefix).
+ */
+function rateLimitAllowLocked(string $file, string $gen, string $subject, string $action, int $now, int $max, int $windowSec): bool {
+    $r = rateLimitReadJson($file, true);
+    $d = $r['data'];
+    $same = ($d['g'] ?? null) === $gen && is_array($d['h'] ?? null);
+    $h = $same ? $d['h'] : [];
+    $changed = !$same && $d !== [];
+    foreach ($h as $k => $times) {
+        $keep = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < $windowSec));
+        if (count($keep) !== count((array)$times)) $changed = true;
+        if ($keep) $h[$k] = $keep;
+        else unset($h[$k]);
     }
-    // Prune expired timestamps to keep the file bounded — ONLY within this action's own namespace.
-    // The window differs per action (e.g. the public timeline poller uses 60 s while appeals use
-    // 3600 s); pruning every key with the caller's window would let a short-window call evict other
-    // actions' older hits and silently reset their hourly limits.
-    $prefix = $action . '|';
-    foreach ($data as $k => $times) {
-        if (strncmp($k, $prefix, strlen($prefix)) !== 0) continue;
-        $data[$k] = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < $windowSec));
-        if (empty($data[$k])) unset($data[$k]);
-    }
-
-    $hits = $data[$key] ?? [];
+    $hits = $h[$subject] ?? [];
     if (count($hits) >= $max) {
-        rateLimitWrite($file, $data);
+        if ($changed) rateLimitWrite($file, ['a' => $action, 'g' => $gen, 'h' => (object)$h]);
         return false;
     }
     $hits[] = $now;
-    $data[$key] = $hits;
-    rateLimitWrite($file, $data);
+    $h[$subject] = $hits;
+    rateLimitCap($h);
+    if (!rateLimitWrite($file, ['a' => $action, 'g' => $gen, 'h' => (object)$h])) {
+        rateLimitWriteFailed($action, $r['ok'] ? count($hits) : null);
+    }
     return true;
+}
+
+/**
+ * The hard cap of one action's file: at most RATE_LIMIT_MAX_KEYS subjects and RATE_LIMIT_MAX_HITS times. Over
+ * either, the subjects whose last hit is the oldest go first. Returns how many subjects went.
+ */
+function rateLimitCap(array &$h): int {
+    $keys = count($h);
+    $total = 0;
+    foreach ($h as $t) $total += count((array)$t);
+    if ($keys <= RATE_LIMIT_MAX_KEYS && $total <= RATE_LIMIT_MAX_HITS) return 0;
+    $last = [];
+    foreach ($h as $k => $t) $last[$k] = $t ? (int)max((array)$t) : 0;
+    asort($last);
+    $dropped = 0;
+    foreach (array_keys($last) as $k) {
+        if ($keys <= RATE_LIMIT_MAX_KEYS && $total <= RATE_LIMIT_MAX_HITS) break;
+        $total -= count((array)$h[$k]);
+        $keys--;
+        unset($h[$k]);
+        $dropped++;
+    }
+    return $dropped;
+}
+
+/**
+ * The hits this action counts now, subject => [unix times] — its current generation only. For the tests, and for
+ * anything that must SHOW a count; nothing is written.
+ */
+function rateLimitHits(string $action): array {
+    $d = rateLimitReadJson(rateLimitFile($action), false)['data'];
+    $gen = rateLimitGenOf(rateLimitReadJson(rateLimitIndexFile(), false)['data'][$action . '|*'] ?? null);
+    if ($gen === '' || ($d['g'] ?? null) !== $gen || !is_array($d['h'] ?? null)) return [];
+    return $d['h'];
+}
+
+/**
+ * Forget this action's hits: every subject's (a new generation, the file gone), or — with $match — only the
+ * subjects $match(string $subject): bool says yes to. Returns how many subjects went (every one, when it is all).
+ * What a test uses to take back what it spent, and what an operator's "reset" would be.
+ */
+function rateLimitForget(string $action, ?callable $match = null): int {
+    $file = rateLimitFile($action);
+    $n = 0;
+    $lockH = @fopen($file . '.lock', 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        $d = rateLimitReadJson($file, true)['data'];
+        $h = is_array($d['h'] ?? null) ? $d['h'] : [];
+        if ($match === null) {
+            $n = count($h);
+            if (is_file($file)) @unlink($file);
+        } else {
+            foreach (array_keys($h) as $k) if ($match((string)$k)) { unset($h[$k]); $n++; }
+            if ($n > 0) rateLimitWrite($file, ['a' => $action, 'g' => (string)($d['g'] ?? ''), 'h' => (object)$h]);
+        }
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
+    if ($match === null) {
+        $idx = rateLimitIndexFile();
+        $ih = @fopen($idx . '.lock', 'c');
+        if ($ih) @flock($ih, LOCK_EX);
+        try {
+            $map = rateLimitReadJson($idx, true)['data'];
+            if (array_key_exists($action . '|*', $map)) { unset($map[$action . '|*']); rateLimitWrite($idx, $map); }
+        } finally {
+            if ($ih) { @flock($ih, LOCK_UN); @fclose($ih); }
+        }
+    }
+    return $n;
+}
+
+/**
+ * rateLimitForget() across every action's file: each subject $match(string $action, string $subject): bool says
+ * yes to goes. Returns how many went. For a test that spent hits under several actions from addresses of its own.
+ */
+function rateLimitForgetWhere(callable $match): int {
+    $n = 0;
+    foreach (glob(rateLimitDir() . '/*.json') ?: [] as $file) {
+        if (str_starts_with(basename($file), '_')) continue;
+        $d = rateLimitReadJson($file, false)['data'];
+        $action = (string)($d['a'] ?? '');
+        if ($action === '' || rateLimitFile($action) !== $file) continue;
+        $n += rateLimitForget($action, fn(string $s): bool => (bool)$match($action, $s));
+    }
+    return $n;
 }
 
 /**
@@ -995,44 +1293,207 @@ function rateLimitAllowLocked(string $file, string $key, string $action, int $no
 const RATE_LIMIT_KEEP_SECONDS = 3600;
 
 /**
- * The janitor's half of the limiter's retention (1.73.0). rateLimitAllowLocked() prunes only the CALLING
- * action's keys — rightly, since windows differ — so an action nobody called again kept its addresses and
- * times in config/rate_limits.json for ever. This drops every hit older than RATE_LIMIT_KEEP_SECONDS, and
- * every key left empty, for all actions at once — under the limiter's own lock, rewriting the file only when
- * something went. Returns the number of hits dropped. $now is for the tests (a clock passed in).
+ * The janitor's half of the limiter's retention (1.73.0; one file per action since 1.74.0). rateLimitAllowLocked()
+ * prunes only the CALLED action's file, so an action nobody called again kept its addresses and times for ever.
+ * This walks every one, each under its own lock, and drops: every hit older than RATE_LIMIT_KEEP_SECONDS, a subject
+ * left with none, a file left empty or holding a forgotten generation; in config/rate_limits.json, every line that
+ * is not a generation (the pre-1.74.0 map's address keys) and the generation of an action with no file once it is
+ * older than the window; stale temporary files; a set-aside file after RATE_LIMIT_BAD_KEEP_SECONDS. Returns the
+ * number of hits dropped. $now is for the tests (a clock passed in).
  */
 function rateLimitPrune(?int $now = null): int {
-    $file = __DIR__ . '/../config/rate_limits.json';
-    if (!is_file($file)) return 0;
     $now = $now ?? time();
-    $lockH = @fopen($file . '.lock', 'c');
-    if ($lockH) @flock($lockH, LOCK_EX);
-    try {
-        $raw  = @file_get_contents($file);
-        $data = $raw ? json_decode($raw, true) : [];
-        if (!is_array($data)) return 0;   // not a map we wrote: leave it to the next writer, which starts over
-        $dropped = 0;
-        $changed = false;
-        foreach ($data as $k => $times) {
-            $keep = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < RATE_LIMIT_KEEP_SECONDS));
-            $dropped += count((array)$times) - count($keep);
-            if ($keep && count($keep) === count((array)$times)) continue;
-            $changed = true;
-            if ($keep) $data[$k] = $keep;
-            else unset($data[$k]);
+    $dropped = 0;
+    $idx = rateLimitIndexFile();
+    $dir = rateLimitDir();
+    if (is_file($idx)) {
+        $lockH = @fopen($idx . '.lock', 'c');
+        if ($lockH) @flock($lockH, LOCK_EX);
+        try {
+            $r = rateLimitReadJson($idx, true);
+            $map = $r['data'];
+            $changed = false;
+            foreach ($map as $k => $v) {
+                $k = (string)$k;
+                if (!str_ends_with($k, '|*') || rateLimitGenOf($v) === '') {
+                    // The old shared map's "<action>|<address>" => [times]: counted in no generation any more.
+                    foreach ((array)$v as $t) if (is_int($t) || (is_string($t) && ctype_digit($t))) $dropped++;
+                    unset($map[$k]);
+                    $changed = true;
+                    continue;
+                }
+                if (!is_file(rateLimitFile(substr($k, 0, -2))) && ($now - (int)($v[1] ?? 0)) >= RATE_LIMIT_KEEP_SECONDS) {
+                    unset($map[$k]);
+                    $changed = true;
+                }
+            }
+            if ($changed) rateLimitWrite($idx, $map);
+        } finally {
+            if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
         }
-        if ($changed) rateLimitWrite($file, $data);
-        return $dropped;
+    }
+    if (is_dir($dir)) {
+        foreach (glob($dir . '/*.json') ?: [] as $file) {
+            if (str_starts_with(basename($file), '_')) continue;
+            $lockH = @fopen($file . '.lock', 'c');
+            if ($lockH) @flock($lockH, LOCK_EX);
+            try {
+                $d = rateLimitReadJson($file, true)['data'];
+                $action = (string)($d['a'] ?? '');
+                if ($action === '' || rateLimitFile($action) !== $file) continue;   // not one of ours: left alone
+                $h = is_array($d['h'] ?? null) ? $d['h'] : [];
+                // The generation is asked again HERE, under this file's lock: a request that minted one a moment
+                // ago and has just written its first hit must not lose it to a list read before it existed.
+                $gen = rateLimitGenOf(rateLimitReadJson($idx, false)['data'][$action . '|*'] ?? null);
+                if ($gen === '' || ($d['g'] ?? null) !== $gen) {
+                    foreach ($h as $t) $dropped += count((array)$t);
+                    @unlink($file);
+                    continue;
+                }
+                $changed = false;
+                foreach ($h as $k => $times) {
+                    $keep = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < RATE_LIMIT_KEEP_SECONDS));
+                    if (count($keep) === count((array)$times)) continue;
+                    $dropped += count((array)$times) - count($keep);
+                    $changed = true;
+                    if ($keep) $h[$k] = $keep;
+                    else unset($h[$k]);
+                }
+                if (!$h) @unlink($file);
+                elseif ($changed) rateLimitWrite($file, ['a' => $action, 'g' => $gen, 'h' => (object)$h]);
+            } finally {
+                if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+            }
+        }
+        // A lock whose file is gone and has been for the longest window: an action nobody calls (a test's own).
+        foreach (glob($dir . '/*.json.lock') ?: [] as $lock) {
+            if (is_file(substr($lock, 0, -5)) || ($now - (int)@filemtime($lock)) < RATE_LIMIT_KEEP_SECONDS) continue;
+            $lh = @fopen($lock, 'c');
+            if ($lh && @flock($lh, LOCK_EX | LOCK_NB)) {
+                @flock($lh, LOCK_UN);
+                @fclose($lh);
+                if (!is_file(substr($lock, 0, -5))) @unlink($lock);
+            } elseif ($lh) {
+                @fclose($lh);
+            }
+        }
+    }
+    $root = dirname($dir);
+    foreach (array_merge(glob($dir . '/*.tmp.*') ?: [], glob($root . '/rate_limits.json.tmp.*') ?: []) as $tmp) {
+        if (($now - (int)@filemtime($tmp)) >= 3600) @unlink($tmp);
+    }
+    foreach (rateLimitSetAsideFiles() as $bad) {
+        if (($now - (int)@filemtime($bad)) >= RATE_LIMIT_BAD_KEEP_SECONDS) @unlink($bad);
+    }
+    return $dropped;
+}
+
+/** Every set-aside (unreadable) state file of the limiter and of the panel's sign-in lockout. */
+function rateLimitSetAsideFiles(): array {
+    $dir = rateLimitDir();
+    $root = dirname($dir);
+    return array_merge(is_dir($dir) ? (glob($dir . '/*.bad.*') ?: []) : [],
+                       glob($root . '/rate_limits.json.bad.*') ?: [], glob($root . '/login_attempts.json.bad.*') ?: []);
+}
+
+/** tmp + rename, so a reader never sees a half-written map. Called with the lock held. True when it was written. */
+function rateLimitWrite(string $file, array $data): bool {
+    $json = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) return false;
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, $json) === false) { @unlink($tmp); return false; }
+    if (@rename($tmp, $file)) return true;
+    @unlink($tmp);
+    return false;
+}
+
+/**
+ * What is wrong with the limiter's storage, if anything (QUAL-20): [['what' => 'dir'|'file'|'bad', 'path' => …]],
+ * [] when nothing is. 'dir' — config/ or config/ratelimit/ cannot be written; 'file' — a state file (the reset
+ * handle config/rate_limits.json, an action's file, the panel's config/login_attempts.json) cannot be read or
+ * written, or is not a file; 'bad' — one was unreadable and was set aside. Reused for RATE_LIMIT_HEALTH_TTL
+ * seconds (config/ratelimit/_health.json) unless $fresh: the warning card is polled by every open dashboard.
+ */
+function rateLimitHealth(bool $fresh = false): array {
+    $dir = rateLimitDir();
+    $root = dirname($dir);
+    $cache = $dir . '/_health.json';
+    $now = time();
+    if (!$fresh && is_file($cache) && ($now - (int)@filemtime($cache)) < RATE_LIMIT_HEALTH_TTL) {
+        $c = json_decode((string)@file_get_contents($cache), true);
+        if (is_array($c) && is_array($c['problems'] ?? null)) return $c['problems'];
+    }
+    $rel = fn(string $p): string => 'config/' . ltrim(str_replace('\\', '/', substr($p, strlen($root))), '/');
+    $problems = [];
+    if (!is_dir($root) || !is_writable($root)) $problems[] = ['what' => 'dir', 'path' => 'config/'];
+    if (file_exists($dir) && (!is_dir($dir) || !is_writable($dir))) $problems[] = ['what' => 'dir', 'path' => 'config/ratelimit/'];
+    $files = [rateLimitIndexFile(), function_exists('loginAttemptsFile') ? loginAttemptsFile() : $root . '/login_attempts.json'];
+    if (is_dir($dir)) foreach (glob($dir . '/*.json') ?: [] as $f) if (!str_starts_with(basename($f), '_')) $files[] = $f;
+    foreach ($files as $f) {
+        if (!file_exists($f)) continue;
+        if (!is_file($f) || !is_readable($f) || !is_writable($f)) $problems[] = ['what' => 'file', 'path' => $rel($f)];
+    }
+    foreach (rateLimitSetAsideFiles() as $b) $problems[] = ['what' => 'bad', 'path' => $rel($b)];
+    if (is_dir($dir) && is_writable($dir)) rateLimitWrite($cache, ['t' => $now, 'problems' => $problems]);
+    return $problems;
+}
+
+/** One rateLimitHealth() problem as a sentence for the warning card and the health endpoint (plain text). */
+function rateLimitHealthText(array $p): string {
+    $path = (string)($p['path'] ?? '');
+    return match ((string)($p['what'] ?? '')) {
+        'dir'   => __('api.ratelimit.health_dir', ['path' => $path]),
+        'bad'   => __('api.ratelimit.health_bad', ['path' => $path]),
+        default => __('api.ratelimit.health_file', ['path' => $path]),
+    };
+}
+
+/* ── The daily cap on confirmation mails (PUB-1, 1.74.0) ──────────────────────────────────────────────────────────
+ *
+ * A report or an appeal confirms itself by mail to the address typed into the form — an address nobody has
+ * verified. However the mail is worded (it carries none of the sender's own words, includes/mail.php), every send
+ * is one more mail from this site's domain to an address somebody else chose. So the whole site sends at most
+ * `confirm_mail_daily_cap` of them a day (default 200; 0 = none at all), counted in config/ratelimit/_confirm_mail.json
+ * under its own lock. FAIL-CLOSED, the opposite of the limiter above: a mail that cannot be counted is not sent —
+ * the report or appeal itself is still taken, and its status page works the same.
+ */
+const CONFIRM_MAIL_CAP_DEFAULT = 200;
+const CONFIRM_MAIL_CAP_MAX = 100000;
+
+function confirmMailDailyCap(array $cfg): int {
+    $v = $cfg['confirm_mail_daily_cap'] ?? CONFIRM_MAIL_CAP_DEFAULT;
+    $n = is_numeric($v) ? (int)$v : CONFIRM_MAIL_CAP_DEFAULT;
+    return max(0, min(CONFIRM_MAIL_CAP_MAX, $n));
+}
+
+function confirmMailFile(): string { return rateLimitDir() . '/_confirm_mail.json'; }
+
+/** May one more confirmation mail go out today? Counts it when it may. $now is for the tests. */
+function confirmMailAllow(array $cfg, ?int $now = null): bool {
+    $cap = confirmMailDailyCap($cfg);
+    if ($cap <= 0 || !rateLimitEnsureDir()) return false;
+    $day = date('Y-m-d', $now ?? time());
+    $file = confirmMailFile();
+    $h = @fopen($file . '.lock', 'c');
+    if (!$h) return false;
+    if (!@flock($h, LOCK_EX)) { @fclose($h); return false; }
+    try {
+        $r = rateLimitReadJson($file, true);
+        if (!$r['ok'] && !$r['bad']) return false;   // cannot be read: cannot be counted
+        $d = $r['data'];
+        $n = (($d['day'] ?? '') === $day) ? max(0, (int)($d['n'] ?? 0)) : 0;
+        if ($n >= $cap) return false;
+        return rateLimitWrite($file, ['day' => $day, 'n' => $n + 1]);
     } finally {
-        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+        @flock($h, LOCK_UN);
+        @fclose($h);
     }
 }
 
-/** tmp + rename, so a reader never sees a half-written map. Called with the lock held. */
-function rateLimitWrite(string $file, array $data): void {
-    $tmp = $file . '.tmp.' . getmypid();
-    if (@file_put_contents($tmp, json_encode($data)) !== false) @rename($tmp, $file);
-    else @unlink($tmp);
+/** How many confirmation mails today's count holds (the Settings page shows it beside the cap). */
+function confirmMailSentToday(?int $now = null): int {
+    $d = rateLimitReadJson(confirmMailFile(), false)['data'];
+    return (($d['day'] ?? '') === date('Y-m-d', $now ?? time())) ? max(0, (int)($d['n'] ?? 0)) : 0;
 }
 
 function jsonResponse(array $data, int $code = 200): void {
@@ -1095,7 +1556,14 @@ function generateUnsubscribeToken(string $email, string $secret): string {
     return hash_hmac('sha256', $email, $secret);
 }
 
-function verifyUnsubscribeToken(string $email, string $token, string $secret): bool {
+/**
+ * Is this the link a mail to $email carried? Never with an empty secret (QUAL-21: an HMAC under '' is a token anybody
+ * can compute, so every address could be unsubscribed by a stranger), and never for a value that is not a string
+ * (PUB-3: `email[]=a` was an uncaught TypeError on the page and both endpoints).
+ */
+function verifyUnsubscribeToken(mixed $email, mixed $token, string $secret): bool {
+    if (!is_string($email) || !is_string($token) || $email === '' || $token === '') return false;
+    if (trim($secret) === '') return false;
     return hash_equals(generateUnsubscribeToken($email, $secret), $token);
 }
 
@@ -1545,7 +2013,14 @@ function getTrackerServiceWarnings(array $cfg): array {
                 }
                 $res['count'] = count($res['items']);
                 $res['whitelist'] = ['active' => $ws['counts']['active'], 'pending_reload' => (bool)$ws['state']['pending_reload'], 'regen_needed' => (bool)$ws['state']['regen_needed']];
-            } catch (\Throwable $e) {}
+            } catch (\Throwable $e) {
+                // Said, not skipped (1.74.0, QUAL-26): without its part the card and ?action=health could read
+                // green while the whitelist's own warnings were exactly what could not be looked at.
+                error_log('[tracker] the whitelist\'s warnings could not be built: ' . $e->getMessage());
+                $res['items'][] = ['level' => 'warn', 'text' => __('api.wl.warn_status_failed')];
+                if ($res['level'] === 'none') $res['level'] = 'warn';
+                $res['count'] = count($res['items']);
+            }
         }
         $adds = 0; $dels = 0;
     } else {
@@ -1562,6 +2037,14 @@ function getTrackerServiceWarnings(array $cfg): array {
         }
         $res['count'] = count($res['items']);
     }
+    // The limits and the panel's sign-in lockout (1.74.0, QUAL-20): they let everything through while their state
+    // cannot be written — the contract, so a disk problem locks nobody out — and this is where that stops being
+    // silent. Cached for a minute (rateLimitHealth()), because this function is polled.
+    foreach (rateLimitHealth() as $p) {
+        $res['items'][] = ['level' => 'warn', 'text' => rateLimitHealthText($p)];
+        if ($res['level'] === 'none') $res['level'] = 'warn';
+    }
+    $res['count'] = count($res['items']);
     $res['mode']           = function_exists('trackerMode') ? trackerMode($cfg) : 'blacklist';
     $res['pending_adds']   = $adds;
     $res['pending_dels']   = $dels;
@@ -1720,32 +2203,17 @@ function autoCloseRelatedAppeals(PDO $db, string $infoHash, string $appealType, 
             archiveAppeal($db, $updated);
         }
 
-        // Notify appellant
-        if (!empty($rel['email']) && !isUnsubscribed($db, $rel['email'], 'appeal')) {
+        // Tell the appellant — through the dictionary, in the site's language (1.74.0, QUAL-18; includes/mail.php
+        // sendAppealDecision(), loaded by every page and endpoint that closes appeals). Logged on failure.
+        if (!empty($rel['email']) && function_exists('sendAppealDecision')) {
+            $obLevel = ob_get_level();
+            ob_start();
             try {
-                ob_start();
-                $subject = 'Appeal Closed — ' . ($cfg['site_name'] ?? 'Tracker');
-                $body = "Your " . ($appealType === 'block' ? 'block request' : 'unblock appeal') .
-                        " for the info hash below has been automatically closed because another appeal for the same hash has been resolved.";
-                $details = [
-                    'Info Hash' => '<code>' . sanitize($rel['infoHash']) . '</code>',
-                    'Request Type' => $appealType === 'block' ? 'Block Request' : 'Unblock Appeal',
-                    'Decision' => '<strong>Automatically Closed</strong>',
-                ];
-                $unsubUrl = getUnsubscribeUrl($rel['email'], $cfg);
-                $htmlBody = buildEmailHtml([
-                    'title' => $subject,
-                    'greeting' => 'Hello ' . sanitize($rel['name']),
-                    'body' => $body,
-                    'details' => $details,
-                    'unsubscribe_url' => $unsubUrl,
-                ], $cfg);
-                $plainText = 'Your appeal for hash ' . $rel['infoHash'] . ' has been automatically closed.';
-                @sendEmail($rel['email'], $subject, $plainText, $htmlBody, $cfg, $unsubUrl);
-                ob_end_clean();
+                sendAppealDecision($db, $rel, 'auto_closed', $cfg);
             } catch (\Throwable $e) {
-                if (ob_get_level()) ob_end_clean();
+                error_log('[appeal] the "closed" mail of appeal #' . (int)$rel['id'] . ' failed: ' . $e->getMessage());
             }
+            while (ob_get_level() > $obLevel) ob_end_clean();
         }
         $count++;
     }

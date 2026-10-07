@@ -1,4 +1,4 @@
-// === Shared admin helpers (whitelist page; the dashboard keeps its own copies in admin.js) ===
+// === Shared admin helpers (every panel page; the dashboard's admin.js asks through them too since 1.74.0) ===
 // Exposes window.AdminCommon = { apiCall, esc, el, emptyState, showToast, confirmAction, promptModal, flashTip, makeSortStack,
 // renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, el }. Everything renders via textContent /
 // createElement — values shown here (torrent names, file paths, IPs, snapshots) come from untrusted sources.
@@ -8,7 +8,18 @@
     const API_BASE = () => document.body.dataset.apiBase || '';
     const CSRF = () => document.body.dataset.csrf || '';
 
-    /** JSON call to api.php. Adds X-CSRF-Token. Resolves with the parsed body (non-2xx bodies carry `error`). */
+    /**
+     * JSON call to api.php. Adds X-CSRF-Token. Resolves with the parsed body (non-2xx bodies carry `error`).
+     *
+     * A SESSION THAT HAS ENDED IS SAID HERE, ONCE, FOR EVERY PAGE OF THE PANEL (1.74.0). A panel endpoint answers 401
+     * when the session is gone — idle past its limit (a computer asleep over lunch), past its twelve hours, signed out
+     * in another tab, or signed out by a reauthentication locked out. The Reports page used to read that answer as an
+     * empty queue ("No reports found. Total: 0", its badges gone), so somebody back at the desk saw nothing to do; every
+     * other page said nothing or said a code. Now the answer carries `__expired` and the page gets one bar at its top —
+     * "your session has expired, sign in again" — whose button reloads the page, which IS the way back: a panel page
+     * asked for without a session renders the sign-in form in its place (index.php), and comes back after it. Only
+     * `admin/*` endpoints speak for the panel's session; nothing else this file is asked to call does.
+     */
     async function apiCall(endpoint, method = 'GET', body = null) {
         const opts = { method, headers: { 'Accept': 'application/json' } };
         const csrf = CSRF();
@@ -20,9 +31,28 @@
         const res = await fetch(API_BASE() + endpoint, opts);
         let json;
         try { json = await res.json(); } catch { json = { error: t.key('js.common.invalid_response', { status: res.status }) }; }
-        if (!res.ok && json && json.error === undefined) json.error = 'HTTP ' + res.status;
+        if (!json || typeof json !== 'object') json = { error: t.key('js.common.invalid_response', { status: res.status }) };
+        if (!res.ok && json.error === undefined) json.error = 'HTTP ' + res.status;
         json.__status = res.status;
+        // (The sign-in's own 401 — a wrong password — is not an ended session; the sign-in page has its own script.)
+        if (res.status === 401 && String(endpoint).startsWith('admin/') && !String(endpoint).startsWith('admin/login')) {
+            json.__expired = true;
+            sessionExpired();
+        }
         return json;
+    }
+
+    /** The bar that says the session has ended (see apiCall()). One per page, however many requests came back 401. */
+    let expiredBar = null;
+    function sessionExpired() {
+        if (expiredBar && expiredBar.isConnected) return;
+        expiredBar = el('div', { className: 'session-expired-bar', role: 'alert' }, [
+            el('i', { className: 'bi bi-exclamation-triangle-fill', 'aria-hidden': 'true' }),
+            el('span', { className: 'session-expired-text' }, t.key('js.common.session_expired')),
+            el('button', { type: 'button', className: 'btn btn-sm btn-warning', onclick: () => location.reload() },
+               t.key('js.common.sign_in_again')),
+        ]);
+        document.body.prepend(expiredBar);
     }
 
     // A t.key() word comes out as markup that keeps its key (t.html(), assets/js/i18n.js, 1.73.0) — text content only.
@@ -83,11 +113,22 @@
             el('div', { className: 'd-flex' }, [
                 el('div', { className: 'toast-body text-light' }, [el('i', { className: 'bi ' + (iconMap[type] || iconMap.info) }), ' ']
                     .concat((Array.isArray(msg) ? msg : [msg]).map(p => (p instanceof Node || t.isKey(p)) ? p : String(p)))),
-                el('button', { type: 'button', className: 'btn-close btn-close-white me-2 m-auto', onclick: () => toast.remove() }),
+                el('button', { type: 'button', className: 'btn-close btn-close-white me-2 m-auto', 'aria-label': t.key('js.common.close'), onclick: () => toast.remove() }),
             ]),
         ]);
         container.appendChild(toast);
-        setTimeout(() => toast.remove(), type === 'danger' ? 7000 : 4000);
+        // Its clock stops while the pointer rests on it or the focus is in it (1.74.0), as the public pages' toast does:
+        // an error read slowly, or its × reached with the keyboard, is not taken away mid-sentence.
+        let left = type === 'danger' ? 7000 : 4000, since = Date.now(), timer = setTimeout(() => toast.remove(), left);
+        let hover = false, focus = false;
+        const sync = () => {
+            if (hover || focus) { if (timer) { clearTimeout(timer); timer = 0; left = Math.max(1500, left - (Date.now() - since)); } }
+            else if (!timer) { since = Date.now(); timer = setTimeout(() => toast.remove(), left); }
+        };
+        toast.addEventListener('pointerenter', () => { hover = true; sync(); });
+        toast.addEventListener('pointerleave', () => { hover = false; sync(); });
+        toast.addEventListener('focusin', () => { focus = true; sync(); });
+        toast.addEventListener('focusout', (e) => { if (!toast.contains(e.relatedTarget)) { focus = false; sync(); } });
     }
 
     /* Small dialogs (confirm / prompt) may be opened on top of another modal (details modal → Ban / Delete).
@@ -120,10 +161,27 @@
         };
     }
 
+    /**
+     * The focus goes back where it came from once a dialog this file opened has closed (1.74.0). Bootstrap gives it
+     * back only to a data-bs-toggle button, and these open from code — after an answer, Esc or Cancel the focus fell to
+     * <body>, and somebody working with the keyboard was back at the top of the page. Back to the element that had it
+     * (the button that asked), if it is still on the page and drawn; not when the focus has moved on by itself.
+     */
+    function focusBackTo(from, modalEl) {
+        return () => {
+            const now = document.activeElement;
+            if (now && now !== document.body && !modalEl.contains(now)) return;
+            if (from && from.isConnected && from !== document.body && from.getClientRects().length && typeof from.focus === 'function') {
+                try { from.focus({ preventScroll: true }); } catch (e) { from.focus(); }
+            }
+        };
+    }
+
     let confirmModalEl = null;
     /** confirmAction(title, message, {okLabel, danger}) → Promise<boolean>. Also accepts (message). */
     function confirmAction(title, message, opts = {}) {
         if (message === undefined) { message = title; title = t.key('js.common.please_confirm'); }
+        const from = document.activeElement;
         return new Promise((resolve) => {
             if (!confirmModalEl) {
                 confirmModalEl = el('div', { className: 'modal confirm-modal', id: 'commonConfirmModal', tabindex: '-1' }, [
@@ -169,10 +227,18 @@
             const onOk = () => { resolved = true; cleanup(); modal.hide(); resolve(true); };
             const onCancel = () => { resolved = true; cleanup(); modal.hide(); resolve(false); };
             let unstack = () => {};
-            const onHidden = () => { unstack(); restoreModalOpen(); if (!resolved) { cleanup(); resolve(false); } };
+            const onHidden = () => { if (!resolved) { cleanup(); resolve(false); } };
+            // Whichever way it closed — OK, Cancel, Esc, the backdrop — and only once: the window it was stacked over
+            // gets its place back, and the focus goes back to what asked (1.74.0; the first two used to skip both).
+            const back = focusBackTo(from, confirmModalEl);
+            const afterHidden = () => {
+                confirmModalEl.removeEventListener('hidden.bs.modal', afterHidden);
+                unstack(); restoreModalOpen(); back();
+            };
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
             confirmModalEl.addEventListener('hidden.bs.modal', onHidden);
+            confirmModalEl.addEventListener('hidden.bs.modal', afterHidden);
             modal.show();
             unstack = stackAbove(confirmModalEl);
         });
@@ -188,6 +254,7 @@
     function promptModal(opts = {}) {
         if (typeof opts === 'string' || t.isKey(opts)) opts = { title: opts };
         const o = Object.assign({ title: t.key('js.common.input'), label: '', value: '', placeholder: '', okLabel: t.key('js.common.ok'), danger: false, multiline: false, maxlength: null, hint: '', password: false }, opts);
+        const from = document.activeElement;
         return new Promise((resolve) => {
             if (!promptModalEl) {
                 promptModalEl = el('div', { className: 'modal confirm-modal prompt-modal', id: 'commonPromptModal', tabindex: '-1', 'aria-labelledby': 'commonPrompt-title' }, [
@@ -254,11 +321,15 @@
             };
             const onShown = () => { input.focus(); if (!o.multiline && input.value) input.select(); };
             const onHidden = () => { restoreModalOpen(); if (!resolved) { resolved = true; cleanup(); resolve(null); } };
+            // The focus back to what asked, whichever way it closed (1.74.0, focusBackTo()).
+            const back = focusBackTo(from, promptModalEl);
+            const afterHidden = () => { promptModalEl.removeEventListener('hidden.bs.modal', afterHidden); restoreModalOpen(); back(); };
             okBtn.addEventListener('click', onOk);
             cancelBtn.addEventListener('click', onCancel);
             input.addEventListener('keydown', onKey);
             promptModalEl.addEventListener('shown.bs.modal', onShown);
             promptModalEl.addEventListener('hidden.bs.modal', onHidden);
+            promptModalEl.addEventListener('hidden.bs.modal', afterHidden);
             modal.show();
         });
     }
@@ -298,7 +369,15 @@
      * Multi-column sort stack bound to a table's th.sortable[data-sort] headers.
      * Click cycles asc → desc → removed; other columns keep their place (priority badges when >1).
      * makeSortStack({ table, defaultSort:[{col,dir}], onChange }) → { get, serialize, reset, bindHeaders, update }
+     *
+     * Each header holds a <button class="th-sort"> in the page's own markup (1.74.0): the keyboard reaches it, and Enter
+     * or Space is its click, which the header hears. The order is told to a screen reader by `aria-sort` on the column
+     * that decides it — the first of the stack (ARIA asks for one sorted header at a time); the others carry none.
      */
+    function sortMark(th, dir, first) {
+        if (dir && first) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+        else th.removeAttribute('aria-sort');
+    }
     function makeSortStack({ table, defaultSort = [{ col: 'date', dir: 'desc' }], onChange = null }) {
         let stack = defaultSort.map(s => ({ ...s }));
         const api = {
@@ -319,11 +398,13 @@
                         const s = stack[idx];
                         icon.className = s.dir === 'asc' ? 'bi bi-arrow-up sort-icon active' : 'bi bi-arrow-down sort-icon active';
                         if (stack.length > 1) {
-                            const badge = el('sup', { className: 'sort-priority', text: String(idx + 1) });
+                            const badge = el('sup', { className: 'sort-priority', text: String(idx + 1), 'aria-hidden': 'true' });
                             icon.after(badge);
                         }
+                        sortMark(th, s.dir, idx === 0);
                     } else {
                         icon.className = 'bi bi-arrow-down-up sort-icon';
+                        sortMark(th, null, false);
                     }
                 });
             },
@@ -504,20 +585,23 @@
         return container;
     }
 
+    // The site's one size rule (1.74.0, t.bytes() in assets/js/i18n.js): the same digits as before, in the page
+    // language's decimal separator — "1,27 GiB" on a Polish page, a keyed word the live switch says again.
     function fmtBytes(n) {
-        n = Number(n);
-        if (!isFinite(n) || n <= 0) return '—';
-        const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-        let i = 0;
-        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-        return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];
+        return t.bytes(n);
     }
 
+    // The panel's one short date (1.74.0): "2026-10-05 18:00", as the Reports table and the public pages write it —
+    // never the browser's language ("10/05/2026" stood in the Polish panel's Whitelist, Index, Users and Log). A server
+    // DATETIME (no zone) is shortened as it came, the server's clock as before; a moment with a zone in this browser's.
     function fmtDate(s) {
         if (!s) return '—';
-        const d = new Date(String(s).replace(' ', 'T'));
-        if (isNaN(d.getTime())) return String(s);
-        return d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const v = String(s);
+        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(v)) return v.replace('T', ' ').slice(0, 16);
+        const d = new Date(v);
+        if (isNaN(d.getTime())) return v;
+        const p = (n) => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
     }
 
     function fmtAgo(seconds) {
@@ -747,5 +831,5 @@
         if (btn) btn.closest('.toast')?.remove();
     });
 
-    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot };
+    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot };
 })();

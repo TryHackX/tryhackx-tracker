@@ -30,8 +30,10 @@ if (isset($r['error'])) {
     jsonResponse(['ok' => false, 'error' => $r['error']], $code);
 }
 $u = $r['user'];
-userNotify($db, (int)$u['id'], 'welcome', 'Welcome to ' . ($cfg['site_name'] ?? 'the tracker') . '!',
-    'Your account was created' . ($generated ? ' — please change the generated password after your first login.' : '.'));
+// The site's language (1.74.0): a new account has chosen none, and this request is a partner's (recipientLang()).
+$uLang = recipientLang($cfg, $u);
+userNotify($db, (int)$u['id'], 'welcome', langFor($uLang, 'notify.welcome', ['site' => $cfg['site_name'] ?? 'Tracker']),
+    langFor($uLang, $generated ? 'notify.welcome_api_generated_body' : 'notify.welcome_api_body'));
 
 $grant = null;
 $groupSlug = trim((string)($payload['group'] ?? ''));

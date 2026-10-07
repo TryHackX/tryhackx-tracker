@@ -563,6 +563,44 @@ $m304 = $get(['p' => $idA, 'v' => $ver, 'f' => 'css/sharp-solid.css'], ['HTTP_IF
 check('validators: the ETag (package + file hash) and Last-Modified answer 304 without a body',
       (bool)preg_match('/^"[0-9a-f]{16}-1-[0-9a-f]{16}"$/', $etag) && $c304['status'] === 304 && !isset($c304['body']) && $m304['status'] === 304
       && $hdr($css, 'Last-Modified') !== null, $etag . ' ' . $c304['status'] . ' ' . $m304['status']);
+// 1.74.0 (PERF-7): Apache's mod_deflate sends the tag back as "…-gzip" (mod_brotli "…-br"), a browser may mark it weak,
+// and a list may carry other tags — measured on production, the tag the server had just sent answered 200 and the whole
+// sheet. Each of these is the same tag; a different one is not.
+$inm = fn(string $v) => $get(['p' => $idA, 'v' => $ver, 'f' => 'css/sharp-solid.css'], ['HTTP_IF_NONE_MATCH' => $v])['status'];
+$asSent = substr($etag, 0, -1);   // without the closing quote
+check('… and the tag comes back as the compressing server re-wrote it: -gzip, -br, weak, in a list, or * — all 304',
+      $inm($asSent . '-gzip"') === 304 && $inm($asSent . '-br"') === 304 && $inm('W/' . $etag) === 304 && $inm('W/' . $asSent . '-gzip"') === 304
+      && $inm('"0000000000000000-1-0000000000000000", ' . $asSent . '-gzip"') === 304 && $inm('*') === 304,
+      json_encode([$inm($asSent . '-gzip"'), $inm($asSent . '-br"'), $inm('W/' . $etag), $inm('*')]));
+check('… while another tag — or this one with a suffix that is not a compression\'s — is a 200 with the sheet',
+      $inm('"0000000000000000-1-0000000000000000"') === 200 && $inm($asSent . '-zip"') === 200 && $inm($asSent . 'gzip"') === 200);
+// 1.74.0 (PERF-8): ONE stylesheet for a page's several — the files joined in the order asked, each exactly as it is
+// served alone, under the same headers; anything that is not a list of the package's own stylesheets is a 404.
+$allCss = $get(['p' => $idA, 'v' => $ver, 'f' => 'css/all.css']);
+$bundle = $get(['p' => $idA, 'v' => $ver, 'f' => 'bundle.css', 's' => 'all,sharp-solid']);
+check('the bundle: 200, text/css, nosniff, a year immutable, its own ETag — all.css then sharp-solid.css as each is served',
+      $bundle['status'] === 200 && $hdr($bundle, 'Content-Type') === 'text/css; charset=utf-8' && $hdr($bundle, 'X-Content-Type-Options') === 'nosniff'
+      && $hdr($bundle, 'Cache-Control') === 'public, max-age=31536000, immutable' && $hdr($bundle, 'Content-Security-Policy') === "default-src 'none'"
+      && ($bundle['body'] ?? null) === $allCss['body'] . "\n" . $css['body'] && (int)$hdr($bundle, 'Content-Length') === strlen((string)($bundle['body'] ?? ''))
+      && (bool)preg_match('/^"[0-9a-f]{16}-1-b[0-9a-f]{16}"$/', (string)$hdr($bundle, 'ETag')), json_encode($bundle['headers']));
+$bTag = (string)$hdr($bundle, 'ETag');
+$bOther = $get(['p' => $idA, 'v' => $ver, 'f' => 'bundle.css', 's' => 'sharp-solid,all']);
+check('… revalidated by its ETag (with -gzip too) as a 304; the same files in another order are another sheet with another tag',
+      $get(['p' => $idA, 'v' => $ver, 'f' => 'bundle.css', 's' => 'all,sharp-solid'], ['HTTP_IF_NONE_MATCH' => substr($bTag, 0, -1) . '-gzip"'])['status'] === 304
+      && $bOther['status'] === 200 && (string)$hdr($bOther, 'ETag') !== $bTag && ($bOther['body'] ?? '') === $css['body'] . "\n" . $allCss['body']);
+$badB = [];
+foreach (['nothing asked' => '', 'a name the manifest does not list' => 'all,nope', 'one twice' => 'all,all',
+          'a traversal' => 'all,../manifest', 'a path' => 'css/all', 'a font' => 'fa-sharp-solid-900',
+          'too many' => implode(',', array_map(fn($i) => 'n' . $i, range(1, ICONPACK_BUNDLE_MAX + 1)))] as $label => $s) {
+    $x = $get(['p' => $idA, 'v' => $ver, 'f' => 'bundle.css', 's' => $s]);
+    if ($x['status'] !== 404) $badB[] = $label . '=' . $x['status'];
+}
+$xv = $get(['p' => $idA, 'v' => str_repeat('0', 16) . '-1', 'f' => 'bundle.css', 's' => 'all']);
+check('… and a bundle of anything but the package\'s own listed stylesheets, or of another version, is a 404',
+      $badB === [] && $xv['status'] === 404, implode(', ', $badB) . ' v=' . $xv['status']);
+check('the bundle\'s address: the files by name in the order given, and none when a name would not fit it',
+      iconpackBundleUrl('/', $m, ['css/all.css', 'css/sharp-solid.css']) === '/iconpack.php?p=' . $idA . '&v=' . $ver . '&f=bundle.css&s=all,sharp-solid'
+      && iconpackBundleUrl('/', $m, ['css/all.css', 'css/odd,name.css']) === null && iconpackBundleUrl('/', $m, []) === null);
 check('… a POST is 405, a HEAD is answered like a GET', $get(['p' => $idA, 'v' => $ver, 'f' => 'css/all.css'], ['REQUEST_METHOD' => 'POST'])['status'] === 405
       && $get(['p' => $idA, 'v' => $ver, 'f' => 'css/all.css'], ['REQUEST_METHOD' => 'HEAD'])['status'] === 200);
 check('the endpoint file sends exactly that decision and loads nothing but includes/iconpack.php',
@@ -592,9 +630,13 @@ check('a package loads its core and exactly the ticked files', $sA['source'] ===
       && str_contains($sA['css'][0]['href'], 'f=css/all.css') && str_contains($sA['css'][1]['href'], 'f=css/sharp-solid.css') && $sA['css'][0]['integrity'] === ''
       && array_keys($sA['styles']) === ['solid', 'regular', 'light', 'brands', 'sharp-solid'], json_encode(array_column($sA['css'], 'href')));
 $tag = iconFontTag($cfgPack($idA, ['sharp-solid'], 'sharp-solid'));
-check('… printed in the head as same-origin links, no SRI, &amp; escaped, the map and the observer after them',
-      substr_count($tag, '<link ') === 2 && str_contains($tag, 'iconpack.php?p=' . $idA . '&amp;v=' . $ver . '&amp;f=css/all.css') && !str_contains($tag, 'integrity')
-      && strpos($tag, 'id="icon-map"') > strrpos($tag, '<link ') && str_contains($tag, 'assets/js/icons.js'));
+// 1.74.0 (PERF-8): the two files are ONE link in the head — the bundle of both, in the setup's order.
+check('… printed in the head as ONE same-origin link joining both, no SRI, &amp; escaped, the map and the observer after it',
+      substr_count($tag, '<link ') === 1 && str_contains($tag, 'iconpack.php?p=' . $idA . '&amp;v=' . $ver . '&amp;f=bundle.css&amp;s=all,sharp-solid') && !str_contains($tag, 'integrity')
+      && strpos($tag, 'id="icon-map"') > strrpos($tag, '<link ') && str_contains($tag, 'assets/js/icons.js'), $tag);
+$tagCore = iconFontTag($cfgPack($idA, [], 'solid'));
+check('… and a package with nothing ticked links its core alone, as before (a bundle of one is just the file)',
+      substr_count($tagCore, '<link ') === 1 && str_contains($tagCore, '&amp;f=css/all.css') && !str_contains($tagCore, 'bundle.css'), $tagCore);
 $mapA = iconFaMap($sA);
 check('with sharp solid chosen: what follows the style is sharp, an outline is classic regular (sharp regular is not ticked), a brand is a brand',
       $mapA['gear'] === 'fa-sharp fa-solid fa-gear' && $mapA['bell'] === 'fa-regular fa-bell' && $mapA['star-fill'] === 'fa-sharp fa-solid fa-star'

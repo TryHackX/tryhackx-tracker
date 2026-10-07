@@ -271,7 +271,11 @@ function apiRateLimit(PDO $db, array $cfg, array $client, int $requestBytes): vo
     }
     if ($retry === null) return;
 
-    try { $db->prepare("UPDATE api_clients SET rl_blocked_count = rl_blocked_count + 1 WHERE id = ?")->execute([$id]); } catch (\Throwable $e) {}
+    try { $db->prepare("UPDATE api_clients SET rl_blocked_count = rl_blocked_count + 1 WHERE id = ?")->execute([$id]); }
+    catch (\Throwable $e) {
+        // Bookkeeping only: the 429 below is the answer either way — but not silently (1.74.0, QUAL-26).
+        error_log('[api] the blocked-request count of client #' . $id . ' could not be written: ' . $e->getMessage());
+    }
     header('Retry-After: ' . (int)$retry);
     jsonResponse([
         'error' => 'rate_limited',
@@ -293,7 +297,11 @@ function apiChargeBytes(PDO $db, array $client, int $bytes): void {
     try {
         $db->prepare("UPDATE api_clients SET rl_day_bytes = IF(rl_day IS NULL OR rl_day <> CURDATE(), ?, rl_day_bytes + ?), rl_day = CURDATE() WHERE id = ?")
            ->execute([$bytes, $bytes, $id]);
-    } catch (\Throwable $e) {}
+    } catch (\Throwable $e) {
+        // Best effort, as said above — and said in the log, since an uncharged reply leaves the day's budget open
+        // (1.74.0, QUAL-26).
+        error_log('[api] ' . $bytes . ' bytes could not be charged to client #' . $id . ': ' . $e->getMessage());
+    }
 }
 
 /**
@@ -337,7 +345,10 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     try {
         $db->prepare("UPDATE api_clients SET last_used_at = NOW(), last_used_ip = ?, requests_count = requests_count + 1 WHERE id = ?")
            ->execute([$ip, (int)$client['id']]);
-    } catch (\Throwable $e) {}
+    } catch (\Throwable $e) {
+        // The "last used" line on the key is bookkeeping; the call goes on — logged, not silent (1.74.0, QUAL-26).
+        error_log('[api] the last use of client #' . (int)$client['id'] . ' could not be recorded: ' . $e->getMessage());
+    }
     unset($client['secret_hash']);
     apiRateLimit($db, $cfg, $client, strlen((string)$rawBody));
     // Name the actor for the audit log. auditActor() has read this global since the log was

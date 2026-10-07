@@ -26,7 +26,7 @@ def add(prefix, pairs):
 
 # ── Settings -> Emoji & emotes -> Emoji in the picker (under Shoutbox until 1.71.0) ──
 add('settings', {
-    'shout_emoji_heading': ('Emoji in the picker', 'Emoji w wybieraku'),
+    'shout_emoji_heading': ('Emoji in the picker', 'Emoji w selektorze'),
     'shout_emoji_sub': (
         'Every emoji Unicode has, up to Emoji 16.0 — the newest set Windows 11, Android and iOS all draw — on '
         'Unicode\'s own pages, with a search in the reader\'s language (and, after what that finds, in English), '
@@ -39,7 +39,7 @@ add('settings', {
         'także po angielsku), z ostatnio używanymi na osobnej karcie i z pięcioma odcieniami skóry po '
         'przytrzymaniu emoji, jak w telefonie. To zwykłe znaki rysowane przez urządzenie czytelnika, więc nie '
         'ma w nich czego przełączać; do wyboru jest Font Awesome — jego buźki i to, ile jeszcze z paczki '
-        'pokazuje wybierak.'),
+        'pokazuje selektor.'),
     'shout_emoji_fa': ('Font Awesome faces', 'Buźki Font Awesome'),
     'shout_emoji_fa_off': ('Off — the ordinary emoji', 'Wyłączone — zwykłe emoji'),
     'shout_emoji_fa_fa': ('Instead of the ordinary emoji', 'Zamiast zwykłych emoji'),
@@ -52,7 +52,7 @@ add('settings', {
         '<code>:fa-name:</code> and drawn as the face while this package and that style load — anywhere else '
         '(this switched off, another icon source, an e-mail) it is the ordinary emoji it stands for. Offered '
         'only while a Font Awesome Pro package is the site\'s icon source.',
-        'Buźki paczki Font Awesome Pro, której używa strona (:n), na osobnych kartach wybieraka; przytrzymana '
+        'Buźki paczki Font Awesome Pro, której używa strona (:n), na osobnych kartach selektora; przytrzymana '
         'buźka pokazuje każdy styl, w którym jest rysowana, spośród wczytywanych przez stronę. W tekście '
         'zapisuje się jako <code>:fa-nazwa:</code> i jest rysowana jako buźka, dopóki ta paczka i ten styl są '
         'wczytywane — gdzie indziej (po wyłączeniu tej opcji, przy innym źródle ikon, w e-mailu) jest zwykłym '
@@ -67,11 +67,11 @@ add('settings', {
     'shout_emoji_fa_unavailable': (
         'Font Awesome\'s faces can be offered in the picker once a Font Awesome Pro package is the site\'s icon '
         'source (Settings → Site → Font Awesome, then save).',
-        'Buźki Font Awesome można udostępnić w wybieraku, gdy źródłem ikon strony jest paczka Font Awesome Pro '
+        'Buźki Font Awesome można udostępnić w selektorze, gdy źródłem ikon strony jest paczka Font Awesome Pro '
         '(Ustawienia → Strona → Font Awesome, potem zapisz).'),
     # 1.70.0: how much more of the package the picker offers (`shout_emoji_fa_scope`), shown only while the
     # faces are on. :n is how many icons the package's catalogue holds, :c its categories.
-    'shout_emoji_fa_scope': ('Font Awesome in the picker', 'Font Awesome w wybieraku'),
+    'shout_emoji_fa_scope': ('Font Awesome in the picker', 'Font Awesome w selektorze'),
     'shout_emoji_fa_scope_faces': ('The faces only', 'Tylko buźki'),
     'shout_emoji_fa_scope_search': ('The faces, and the search finds every icon', 'Buźki, a wyszukiwarka znajduje każdą ikonę'),
     'shout_emoji_fa_scope_all': ('Every icon, by category', 'Każda ikona, według kategorii'),
@@ -83,17 +83,17 @@ add('settings', {
         'its category, in either language. The picker fetches the list of icons only when this needs it, once per '
         'browser. This is how the picker offers icons, not what a message may show: an icon already posted is drawn '
         'whatever this says, and where Font Awesome cannot draw it, it is its name in brackets.',
-        'Ile z paczki wybierak pokazuje poza buźkami: nic więcej; każdą z :n ikon przez wyszukiwarkę, w grupie '
+        'Ile z paczki selektor pokazuje poza buźkami: nic więcej; każdą z :n ikon przez wyszukiwarkę, w grupie '
         '„Font Awesome” po emoji; albo każdą ikonę także na kartach :c kategorii Font Awesome. Przytrzymana ikona '
         'pokazuje style, w których jest rysowana. Wyszukiwarka znajduje buźkę po słowach w języku czytelnika, a każdą '
         'inną ikonę po angielskiej nazwie i słowach — albo po nazwie jej kategorii, w obu językach. Wybierak pobiera '
-        'listę ikon tylko wtedy, gdy to ustawienie jej wymaga, raz na przeglądarkę. Ono mówi, co wybierak proponuje, '
+        'listę ikon tylko wtedy, gdy to ustawienie jej wymaga, raz na przeglądarkę. Ono mówi, co selektor proponuje, '
         'a nie co może pokazać wiadomość: wysłana już ikona jest rysowana niezależnie od niego, a tam, gdzie Font '
         'Awesome nie może jej narysować, jest jej nazwą w nawiasach.'),
     'shout_emoji_fa_scope_noindex': (
         'This package came without an index to read (Font Awesome’s metadata/ folder), so the picker can offer its '
         'faces only; the two wider choices need a package that has one.',
-        'Ta paczka nie ma indeksu do odczytania (folderu metadata/ Font Awesome), więc wybierak może pokazać tylko jej '
+        'Ta paczka nie ma indeksu do odczytania (folderu metadata/ Font Awesome), więc selektor może pokazać tylko jej '
         'buźki; dwie szersze opcje wymagają paczki z indeksem.'),
 })
 
@@ -236,5 +236,5 @@ add('api.iconpack', {
 add('js.iconpack', {
     'reindex': ('Read the index again', 'Odczytaj indeks ponownie'),
     'catalog': ('catalogue: :n icons, :c categories', 'katalog: ikon :n, kategorii :c'),
-    'catalog_none': ('catalogue: not built yet — the picker builds it when it first needs it', 'katalog: jeszcze niezbudowany — wybierak zbuduje go, gdy pierwszy raz będzie potrzebny'),
+    'catalog_none': ('catalogue: not built yet — the picker builds it when it first needs it', 'katalog: jeszcze niezbudowany — selektor zbuduje go, gdy pierwszy raz będzie potrzebny'),
 })

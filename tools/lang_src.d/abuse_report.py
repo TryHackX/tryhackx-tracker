@@ -43,7 +43,7 @@ add('report', {
     'magnet_err': ('Invalid magnet link or hash mismatch with Info Hash field',
                    'Nieprawidłowy link magnet albo hash niezgodny z polem Info Hash'),
     'message':   ('Additional information (optional)', 'Dodatkowe informacje (opcjonalnie)'),
-    'message_ph': ('Additional details about the report...', 'Dodatkowe szczegóły zgłoszenia...'),
+    'message_ph': ('Additional details about the report...', 'Dodatkowe szczegóły zgłoszenia…'),
     'message_err': ('Message exceeds the maximum allowed length',
                     'Wiadomość przekracza maksymalną dozwoloną długość'),
     'required':  ('This field is required', 'To pole jest wymagane'),

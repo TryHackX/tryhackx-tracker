@@ -924,6 +924,15 @@ async function loadTransparency(page) {
     }
 }
 
+/**
+ * The order said on the header too (1.74.0): `aria-sort` on the column that decides it — the first of the stack, as ARIA
+ * asks for one sorted header at a time; the others carry none. The headers' words are buttons (the templates).
+ */
+function sortMarkPub(th, dir, first) {
+    if (dir && first) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+    else th.removeAttribute('aria-sort');
+}
+
 function updateTransSortIcons() {
     document.querySelectorAll('.trans-sortable').forEach(th => {
         const icon = th.querySelector('.trans-sort-icon');
@@ -939,11 +948,14 @@ function updateTransSortIcons() {
             if (transSortStack.length > 1) {
                 const badge = document.createElement('sup');
                 badge.className = 'trans-sort-priority';
+                badge.setAttribute('aria-hidden', 'true');
                 badge.textContent = idx + 1;
                 icon.after(badge);
             }
+            sortMarkPub(th, s.dir, idx === 0);
         } else {
             icon.className = 'bi bi-arrow-down-up trans-sort-icon';
+            sortMarkPub(th, null, false);
         }
     });
 }
@@ -2014,9 +2026,40 @@ const escLayerTop = (box) => {
     }
     return true;
 };
+/*
+ * THE KEYBOARD IS IN THE WINDOW WHILE IT IS OPEN (1.74.0). The windows say role="dialog" aria-modal="true", but the
+ * focus stayed on the button UNDER the window (the Info panel, the file list, Block), Tab walked the page behind it — at
+ * forty results not one Tab of twenty reached the panel — and on Esc the focus fell to <body>. Now on() remembers what
+ * had the focus and puts it in the window: on its title (made focusable for this, tabindex -1) — a caller that knows
+ * better (the list picker's name box) moves it on after; Tab and Shift+Tab go round the window's controls ONLY while it
+ * is the top layer (escLayerTop()): a window opened over it — "Who has this", the list picker, "you are leaving", a
+ * CAPTCHA, an emoji picker — keeps its own focus; and off() gives the focus back to what had it, when the focus was in
+ * the window (or fell to <body> as it closed) — never when the reader has put it somewhere else since. The pattern is the
+ * list's Edit window's (1.70.0) and "Who has this"'s (favourites.js), which already did this by hand.
+ */
+const escLayerFocusables = (box) => [...box.querySelectorAll(
+    'a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]')]
+    .filter((n) => !n.disabled && n.getClientRects().length > 0 && !n.closest('[hidden], [inert]') && getComputedStyle(n).visibility !== 'hidden');
+const escLayerTitle = (box) => box.querySelector('[role="dialog"] .files-head h3, [role="dialog"] h3, [role="dialog"] h2');
 const escLayer = (box, close) => {
+    let from = null, active = false;
+    const onTab = (e) => {
+        if (!escLayerTop(box)) return;
+        const list = escLayerFocusables(box);
+        if (!list.length) { e.preventDefault(); return; }
+        const first = list[0], last = list[list.length - 1], a = document.activeElement;
+        if (!a || !box.contains(a)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+        const i = list.indexOf(a);
+        // Not one of the controls (the window's title, a cell somebody clicked): where it stands decides the wrap.
+        const before = i === -1 && !!(a.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING);
+        const after = i === -1 && !!(last.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
+        if (e.shiftKey && (i === 0 || before)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (i === list.length - 1 || after)) { e.preventDefault(); first.focus(); }
+    };
     const onKey = (e) => {
-        if (e.key !== 'Escape' || e.isComposing || box.hidden || !escLayerTop(box)) return;
+        if (e.isComposing || box.hidden) return;
+        if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) { onTab(e); return; }
+        if (e.key !== 'Escape' || !escLayerTop(box)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
         const inner = [...box.querySelectorAll('[data-esc-layer][data-esc-at]')].filter((n) => !n.hidden && n.getClientRects().length > 0);
@@ -2028,8 +2071,28 @@ const escLayer = (box, close) => {
         close();
     };
     return {
-        on: () => window.addEventListener('keydown', onKey, true),
-        off: () => window.removeEventListener('keydown', onKey, true),
+        on: () => {
+            window.addEventListener('keydown', onKey, true);
+            if (active) return;          // drawn again while open (the live language switch): the focus stays where it is
+            active = true;
+            const a = document.activeElement;
+            from = a && a !== document.body && !box.contains(a) ? a : null;
+            if (a && box.contains(a)) return;
+            const to = escLayerTitle(box) || escLayerFocusables(box)[0];
+            if (!to) return;
+            if (!to.matches('a[href], button, input, select, textarea, summary, [tabindex]')) to.setAttribute('tabindex', '-1');
+            try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); }
+        },
+        off: () => {
+            window.removeEventListener('keydown', onKey, true);
+            if (!active) return;
+            active = false;
+            const back = from, a = document.activeElement;
+            from = null;
+            if (!back || !back.isConnected || !back.getClientRects().length) return;
+            if (a && a !== document.body && !box.contains(a)) return;
+            try { back.focus({ preventScroll: true }); } catch (e) { back.focus(); }
+        },
     };
 };
 
@@ -2057,16 +2120,28 @@ const escLayer = (box, close) => {
  * the row away itself. The timer stops the moment Yes is pressed; the request is asynchronous and
  * nothing may pull the question out from under it.
  *
+ * FOR THE KEYBOARD AND A SCREEN READER (1.74.0): the question is a group named by its words, and Yes and No say what
+ * they answer (aria-describedby) — a reader heard a bare "Yes, button"; the focus starts on NO, so a second Enter
+ * does not take the thing away; and when the five seconds run out under the reader's focus, the focus goes back to
+ * the button that asked, as Esc and No already did — it fell to <body>.
+ *
  * opts: { host, life }   (`relabel`, which re-read the button's words on its way back, is no longer needed)
  */
+let askSeq = 0;
 const askInPlace = (btn, question, onYes, opts) => {
     opts = opts || {};
     const mk = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; if (text !== undefined) n.textContent = text; return n; };
     const ask = mk('span', 'shout-confirm');
-    ask.appendChild(mk('span', 'shout-confirm-q', question));
+    const q = mk('span', 'shout-confirm-q', question);
+    q.id = 'ask-q-' + (++askSeq);
+    ask.setAttribute('role', 'group');
+    ask.setAttribute('aria-labelledby', q.id);
+    ask.appendChild(q);
     const yes = mk('button', 'shout-yes', t.key('js.shout.yes'));
     const no = mk('button', 'shout-no', t.key('js.shout.no'));
     yes.type = 'button'; no.type = 'button';
+    yes.setAttribute('aria-describedby', q.id);
+    no.setAttribute('aria-describedby', q.id);
     let timer = 0, open = true;
     const wasHidden = btn.hidden;
 
@@ -2081,6 +2156,12 @@ const askInPlace = (btn, question, onYes, opts) => {
             ask.remove();
             btn.hidden = wasHidden;
         }
+    };
+    // Run out: put back, and the focus with it when the reader's focus was in the question.
+    const expire = () => {
+        const held = ask.contains(document.activeElement);
+        finish(true);
+        if (held && btn.isConnected) btn.focus();
     };
     // The language switcher translates the question where it stands (1.73.0): pressing it is not a "no".
     function onOutside(e) { if (!ask.contains(e.target) && !(window.LangSwap && window.LangSwap.isSwitch(e.target))) finish(true); }
@@ -2100,11 +2181,11 @@ const askInPlace = (btn, question, onYes, opts) => {
     if (opts.host) opts.host.classList.add('shout-asking');
     btn.after(ask);
     btn.hidden = true;
-    yes.focus();
+    no.focus();
     // Capture, so a control that stops the press from travelling still closes the question.
     document.addEventListener('pointerdown', onOutside, true);
     document.addEventListener('keydown', onEsc, true);
-    timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);
+    timer = setTimeout(expire, Number(opts.life) > 0 ? Number(opts.life) : 5000);
     return ask;
 };
 // On window as well as in scope: assets/js/shoutbox.js and assets/js/people.js are separate files
@@ -2324,19 +2405,18 @@ window.siteToast = siteToast;
 
 
     // `msg` a word, a t.key() word, or a list of them (1.73.0: sentences made of several keys keep every key).
+    // Said aloud as well as shown (1.74.0): an error as an alert, a success as a status (every form's alert box is a
+    // live region from the start — see the end of this file — and this says which kind the words are).
     function showAlert(el, msg, ok) {
         el.className = 'alert show ' + (ok ? 'alert-success' : 'alert-error');
+        el.setAttribute('role', ok ? 'status' : 'alert');
         if (Array.isArray(msg)) el.replaceChildren(...msg);
         else el.textContent = msg;
     }
-    // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB)
+    // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB). The site's one size rule
+    // (1.74.0, t.bytes() in assets/js/i18n.js): the same digits, in the page language's decimal separator ("1,27 GiB").
     function fmtBytesPub(n) {
-        n = Number(n);
-        if (!isFinite(n) || n <= 0) return '—';
-        const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-        let i = 0;
-        while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-        return (i === 0 ? n : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];
+        return t.bytes(n);
     }
     // ── password policy (mirrors userPasswordIssues() server-side) + live checklist UI ──
     const PW_REQS = [
@@ -2600,19 +2680,44 @@ window.siteToast = siteToast;
      * The error only shows after the field was touched (blurred once) or a submit was attempted,
      * so users are not yelled at while still typing their first character.
      */
+    // A field that is wrong SAYS so to a screen reader too (1.74.0): aria-invalid, and its group's message (.error-msg)
+    // named as its description while it applies — the red edge and the line under it were all there was.
     function liveValidate(input, check) {
         if (!input) return () => true;
         const group = input.closest('.form-group');
+        const msg = group ? group.querySelector('.error-msg') : null;
+        if (msg && !msg.id) msg.id = (input.id || 'field') + '-error';
         let touched = false;
-        const apply = () => { if (group) group.classList.toggle('has-error', touched && !check()); };
+        const apply = () => {
+            const bad = touched && !check();
+            if (group) group.classList.toggle('has-error', bad);
+            input.setAttribute('aria-invalid', bad ? 'true' : 'false');
+            if (msg) {
+                const ids = (input.getAttribute('aria-describedby') || '').split(/\s+/).filter((x) => x && x !== msg.id);
+                if (bad) ids.push(msg.id);
+                if (ids.length) input.setAttribute('aria-describedby', ids.join(' ')); else input.removeAttribute('aria-describedby');
+            }
+            return bad;
+        };
         input.addEventListener('input', apply);
         input.addEventListener('blur', () => { touched = true; apply(); });
         return (forceTouch) => { if (forceTouch) touched = true; apply(); return check(); };
     }
-    const fmtDatePub = (s) => {
+    /** After a refused submit: the focus to the first field that is wrong (1.74.0) — it fell to <body> with the button. */
+    function focusFirstBad(form) {
+        const bad = form && form.querySelector('[aria-invalid="true"]');
+        if (bad) { try { bad.focus({ preventScroll: false }); } catch (e) { bad.focus(); } return true; }
+        return false;
+    }
+    // The site's one short date (1.74.0): "2026-10-05 18:00", as the inbox, the comments and the people lists write it —
+    // never the browser's ("10/05/2026, 04:00 PM" stood on a Polish page). A moment the server wrote for the reader
+    // (`*_time`, in their zone) is shown as it came; a raw DATETIME (the server's clock) is shortened, not reinterpreted:
+    // reading it as the browser's own time is what put "last seen" two hours off.
+    const fmtDatePub = (s, local) => {
+        if (local) return String(local);
         if (!s) return '—';
-        const d = new Date(String(s).replace(' ', 'T'));
-        return isNaN(d.getTime()) ? String(s) : d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+        const v = String(s);
+        return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(v) ? v.replace('T', ' ').slice(0, 16) : v;
     };
 
     // ── sign in ──
@@ -2626,7 +2731,7 @@ window.siteToast = siteToast;
             e.preventDefault();
             const alert = $id('login-alert'), btn = $id('login-submit');
             const ok = [vLogin(true), vPass(true)].every(Boolean);
-            if (!ok) return;
+            if (!ok) { focusFirstBad(form); return; }
             btn.disabled = true;
             const codeEl = $id('login-code');
             const json = await fetchWithCaptcha('user_login', {
@@ -2652,6 +2757,9 @@ window.siteToast = siteToast;
             } else {
                 showAlert(alert, (json && json.error) || t.key('js.app.signin_failed'), false);
                 btn.disabled = false;
+                // The button was disabled for the request and the focus fell to <body>: back to the password, to try
+                // again — the alert above it has been said (1.74.0).
+                if (document.activeElement === document.body || document.activeElement === btn) { pass.focus(); pass.select(); }
             }
         });
     }
@@ -2684,7 +2792,7 @@ window.siteToast = siteToast;
             e.preventDefault();
             const alert = $id('register-alert'), btn = $id('register-submit');
             const ok = [vUser(true), vMail(true), vP1(true), vP2(true), vTerms()].every(Boolean);
-            if (!ok) return;
+            if (!ok) { if (!focusFirstBad(form) && !terms.checked) terms.focus(); return; }
             btn.disabled = true;
             const json = await fetchWithCaptcha('user_register', {
                 csrf_token: csrfOf(form),
@@ -3599,7 +3707,8 @@ window.siteToast = siteToast;
         strip.appendChild(statCell(leechV, t.key('js.app.stat_leechers'), 'info-stat-leech'));
         if (st.completed != null) strip.appendChild(statCell(t.num(st.completed), t.key('js.app.stat_completed')));
         if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t.key('js.app.stat_size')));
-        if (st.files_count != null) strip.appendChild(statCell(t.num(st.files_count), st.files_count === 1 ? t.key('js.app.stat_file') : t.key('js.app.stat_files')));
+        // The word under the count in the language's form (1.74.0): "2 pliki", "5 plików" — never "2 plików".
+        if (st.files_count != null) strip.appendChild(statCell(t.num(st.files_count), t.plural(st.files_count, 'js.app.stat_files')));
         body.appendChild(strip);
 
         // 2. the two chips that qualify those numbers, on one line with the refresh control.
@@ -3615,7 +3724,7 @@ window.siteToast = siteToast;
         if (st.last_seen) {
             const chip = document.createElement('span');
             chip.className = 'info-chip';
-            chip.textContent = t.key('js.app.last_seen', {date: fmtDatePub(st.last_seen)});
+            chip.textContent = t.key('js.app.last_seen', {date: fmtDatePub(st.last_seen, st.last_seen_time)});
             chips.appendChild(chip);
         }
         if (json.can_refresh) {
@@ -3650,15 +3759,22 @@ window.siteToast = siteToast;
             row.className = 'rt-src-row info-section';
             const lab = document.createElement('strong');
             lab.textContent = t.key('js.app.source_label');
-            const a = document.createElement('a');
+            // A link only when it is one (1.74.0): http or https, as the status page checks the report's link. The server
+            // allows nothing else when a source is written (richtextValidateSourceUrl()), but a row from before that check,
+            // restored from an old backup or typed into the database would otherwise be a clickable `javascript:` here —
+            // anything else is shown as text.
+            const safe = /^https?:\/\//i.test(String(json.source_url));
+            const a = document.createElement(safe ? 'a' : 'span');
             a.className = 'rt-src-url';
-            a.href = json.source_url;
+            if (safe) a.href = json.source_url;
             a.textContent = json.source_url;
-            a.rel = 'nofollow noopener noreferrer ugc';
-            a.target = '_blank';
+            if (safe) {
+                a.rel = 'nofollow noopener noreferrer ugc';
+                a.target = '_blank';
+            }
             // Not our link. Off-site ones get the confirmation; the operator's own trusted
             // domains do not, because warning about your own site teaches people to click through.
-            if (!json.source_trusted) a.setAttribute('data-external', '1');
+            if (safe && !json.source_trusted) a.setAttribute('data-external', '1');
             if (json.source_auto) {
                 // Added by the importer, not typed into the form. Saying so is the difference
                 // between "the uploader vouched for this link" and "this is where we found it".
@@ -3774,7 +3890,7 @@ window.siteToast = siteToast;
         const grid = document.createElement('div');
         grid.className = 'info-grid';
         if (st.peak_seeders != null) grid.appendChild(infoRow(t.key('js.app.row_peak_seeders'), t.num(st.peak_seeders)));
-        if (st.first_seen) grid.appendChild(infoRow(t.key('js.app.row_first_seen'), fmtDatePub(st.first_seen)));
+        if (st.first_seen) grid.appendChild(infoRow(t.key('js.app.row_first_seen'), fmtDatePub(st.first_seen, st.first_seen_time)));
         if (st.seen_count != null) grid.appendChild(infoRow(t.key('js.app.row_times_seen'), t.num(st.seen_count)));
         const hashEl = document.createElement('code');
         hashEl.className = 'info-hash';
@@ -4481,11 +4597,14 @@ window.siteToast = siteToast;
                 const old = th.querySelector('.search-sort-priority');
                 if (old) old.remove();
                 // The arrows are icons now (1.68.0), the same three the transparency table uses.
-                if (idx === -1) { icon.className = 'bi bi-arrow-down-up search-sort-icon'; return; }
+                if (idx === -1) { icon.className = 'bi bi-arrow-down-up search-sort-icon'; sortMarkPub(th, null, false); return; }
                 icon.className = sortStack[idx].dir === 'asc' ? 'bi bi-arrow-up search-sort-icon active' : 'bi bi-arrow-down search-sort-icon active';
+                // aria-sort on the column that decides the order (1.74.0) — not while "best match first" decides it.
+                sortMarkPub(th, sortStack[idx].dir, idx === 0 && !(bestBox && bestBox.checked));
                 if (sortStack.length > 1) {
                     const sup = document.createElement('sup');
                     sup.className = 'search-sort-priority';
+                    sup.setAttribute('aria-hidden', 'true');
                     sup.textContent = String(idx + 1);
                     icon.after(sup);
                 }
@@ -4799,7 +4918,7 @@ window.siteToast = siteToast;
                 const seenTd = document.createElement('td');
                 // search-seen: on a phone the date and its time may take a line each — see style.css
                 seenTd.className = 'search-num search-seen';
-                seenTd.textContent = fmtDatePub(r.last_seen);
+                seenTd.textContent = fmtDatePub(r.last_seen, r.last_seen_time);
                 tr.appendChild(seenTd);
                 if (canMagnet) {
                     const magTd = document.createElement('td');
@@ -4844,15 +4963,21 @@ window.siteToast = siteToast;
             if (json.rows.length === 0 && json.total > 0 && json.page > json.pages) { run(json.pages, 'replace'); return; }
             table.hidden = json.rows.length === 0;
             if (shareBtn) shareBtn.hidden = json.rows.length === 0;
-            $id('search-total').textContent = json.total === 0 ? '' : (json.total === 1 ? t.key('js.app.results_one') : t.key('js.app.results_many', {n: t.num(json.total)}));
+            // total_capped (1.74.0, PERF-2): the server counted a search only as far as it had to, so the number is a
+            // floor — "1,000+ results", and the pager's last page grows as the reader goes deeper. The "+" is the
+            // dictionary's (js.app.results_capped), so the count stays a t.num() word a live switch says again.
+            const capped = !!json.total_capped;
+            $id('search-total').textContent = json.total === 0 ? ''
+                : (capped ? t.key('js.app.results_capped', {n: t.num(json.total)})
+                    : (json.total === 1 ? t.key('js.app.results_one') : t.key('js.app.results_many', {n: t.num(json.total)})));
             note.hidden = json.total !== 0;
             note.textContent = json.total === 0 ? t.key('js.app.nothing_found') : '';
-            renderPager(json.page, json.pages, json.total);
+            renderPager(json.page, json.pages, json.total, !!json.total_capped);
         }
         // First / Prev / Page [n] of M · X rows / Next / Last — same pattern as the admin tables, and the
         // chevrons are icons beside the words the way admin-common.js draws them (1.68.0; they used to
         // be angle-quote characters inside the dictionary strings).
-        function renderPager(page, pages, total) {
+        function renderPager(page, pages, total, capped) {
             const box = $id('search-pagination');
             box.textContent = '';
             if (pages <= 1) return;
@@ -4879,12 +5004,12 @@ window.siteToast = siteToast;
             inp.addEventListener('change', jumpTo);
             inp.addEventListener('focus', () => inp.select());
             jump.appendChild(inp);
-            jump.append(' ', t.key('js.app.pg_of', {pages: pages}));
+            jump.append(' ', t.key('js.app.pg_of', {pages: pages + (capped ? '+' : '')}));
             box.appendChild(jump);
             if (total) {
                 const tot = document.createElement('span');
                 tot.className = 'pg-total';
-                tot.append('· ', t.key('js.app.pg_rows', {n: t.num(total)}));
+                tot.append('· ', capped ? t.key('js.app.pg_rows_capped', {n: t.num(total)}) : t.key('js.app.pg_rows', {n: t.num(total)}));
                 box.appendChild(tot);
             }
             box.appendChild(mk([t.key('js.app.pg_next'), ' ', iconEl('bi bi-chevron-right')], page + 1, page >= pages));
@@ -4903,19 +5028,21 @@ window.siteToast = siteToast;
         // counts the entries we own; `filesPopping` keeps our own history.back() from being read
         // as the reader pressing Back.
         let filesOwned = 0, filesPopping = false;
+        // Its Esc, its Tab and its focus are the windows' own (escLayer(), 1.74.0): the focus goes into the list as it
+        // opens and back to its "N files" chip as it closes — it used to stay on the chip under the window.
+        const filesLayer = overlay ? escLayer(overlay, () => closeFiles()) : null;
         function closeFiles(fromHistory) {
             if (!overlay || overlay.hidden) return;
             overlay.hidden = true;
             filesSeq++;                                  // an answer still in the air is not ours
             if (filesObserver) { filesObserver.disconnect(); filesObserver = null; }
-            document.removeEventListener('keydown', escFiles);
+            if (filesLayer) filesLayer.off();
             if (!fromHistory && filesOwned > 0) {
                 filesOwned--;
                 filesPopping = true;
                 try { history.back(); } catch (e) { filesPopping = false; }
             }
         }
-        function escFiles(e) { if (e.key === 'Escape') closeFiles(); }
         // One DOM node per file, and this tree is rebuilt from scratch on every page that arrives —
         // so ten pages of 2 000 is ten rebuilds of a tree growing to 20 000 lines. The panel's tree
         // has had a cap since it was written (AdminCommon.buildFileTree); this one had none, which
@@ -4956,7 +5083,7 @@ window.siteToast = siteToast;
             title.textContent = name || t.key('js.app.files');
             body.textContent = t.key('js.common.loading');
             overlay.hidden = false;
-            document.addEventListener('keydown', escFiles);
+            if (filesLayer) filesLayer.on();
             // An entry of its own, so Back shuts the list (1.64.0). The address does not change —
             // the list is not a view of this page, it is a window over it — and popstate below
             // takes it away again. Without this, Back went to the search's previous view and ran
@@ -5012,8 +5139,10 @@ window.siteToast = siteToast;
             const chrome = () => {
                 const head = (totalFiles && allFiles.length < totalFiles)
                     ? t.key('js.app.files_n_of', {n: t.num(allFiles.length), total: t.num(totalFiles)})
-                    // "1,234+ files" is a sentence of its own (1.73.1): the number keeps its key, a "+" glued to it would not
-                    : t.key((more || (json.truncated && !json.can_more)) ? 'js.app.files_n_more' : 'js.app.files_n', {n: t.num(allFiles.length)});
+                    // "1,234+ files" is a sentence of its own (1.73.1): the number keeps its key, a "+" glued to it would not.
+                    // The whole count is a counted word in the language's form (1.74.0, t.plural(): "3 pliki", "5 plików").
+                    : ((more || (json.truncated && !json.can_more)) ? t.key('js.app.files_n_more', {n: t.num(allFiles.length)})
+                                                                     : t.plural(allFiles.length, 'js.app.files'));
                 title.replaceChildren(json.name || name || t.key('js.app.files'), ' — ', head);
                 matchNote.hidden = !beyond && !json.matches_more;
                 const bits = [];
@@ -5738,4 +5867,16 @@ window.siteToast = siteToast;
         render(j);
     });
     input.addEventListener('input', () => form.querySelector('.form-group').classList.remove('has-error'));
+})();
+
+/*
+ * EVERY FORM'S ALERT IS SAID ALOUD (1.74.0). The pages write their answers — "Invalid credentials", a refused report,
+ * a status not found — into a `<div class="alert">` above the form (twelve of them: sign-in, register, report, the
+ * two resets, search, the four status forms, account, the whitelist's), and a screen reader heard nothing: none was
+ * a live region. Each is made one now, before anything is written into it (a region that appears together with its
+ * first words is one some readers never read); showAlert() says whether the words are an alert or a status.
+ */
+(function () {
+    const mark = () => document.querySelectorAll('div.alert[id]:not([role])').forEach((a) => a.setAttribute('role', 'alert'));
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mark); else mark();
 })();

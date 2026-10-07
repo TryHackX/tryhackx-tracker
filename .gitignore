@@ -92,6 +92,13 @@ config/dbmem_state.json
 config/dbmem_state.json.tmp.*
 config/dbmem_state.lock
 config/tuner_state.json
+# 1.74.0: the OpenTracker card's last helper answer, shared between requests (includes/opentracker.php)
+config/ot_status_cache.json
+# 1.74.0: the limiter's state, one file per action, the daily count of confirmation mails and the files set aside
+# as unreadable (includes/functions.php) — addresses, every one of them
+config/ratelimit/
+config/rate_limits.json.*
+config/login_attempts.json.bad.*
 config/*.lock
 config/*.tmp.*
 

@@ -22,7 +22,7 @@ add('a.audit', {
     'subtitle':     ('who did what in this panel', 'kto co zrobił w tym panelu'),
 
     # toolbar
-    'search_ph':    ('Action, summary, target, who, IP...', 'Akcja, opis, cel, kto, IP...'),
+    'search_ph':    ('Action, summary, target, who, IP...', 'Akcja, opis, cel, kto, IP…'),
     'area':         ('Area', 'Obszar'),
     'area_all':     ('Every area', 'Każdy obszar'),
     'who':          ('Who', 'Kto'),

@@ -126,6 +126,21 @@ $m = $sent(fn() => userVerifySend($db, $cfg, $u), $OLD);
 check('the verification mail is sent', count($m) === 1, json_encode($m));
 check('… with no List-Unsubscribe header', isset($m[0]) && !$hasUnsub($m[0]), $m[0]['headers'] ?? '');
 
+// ── in the RECIPIENT's language (1.74.0, QUAL-18) ──────────────────────────────────────────────────
+// This run speaks English (no langInit at all); the account reads Polish — its mail is Polish.
+$db->prepare("UPDATE users SET language = 'pl' WHERE id = ?")->execute([$uid]);
+$uPl = userFindById($db, $uid);
+$site = (string)($cfg['site_name'] ?? 'Tracker');
+$m = $sent(fn() => userResetSend($db, $cfg, $uPl), $OLD);
+check('a Polish account\'s password reset: a Polish subject', ($m[0]['subject'] ?? '') === langFor('pl', 'mail.reset_subject', ['site' => $site])
+      && !str_contains($m[0]['subject'] ?? '', 'password reset'), $m[0]['subject'] ?? '');
+$m = $sent(fn() => userVerifySend($db, $cfg, $uPl), $OLD);
+check('… and its verification mail', ($m[0]['subject'] ?? '') === langFor('pl', 'mail.verify_subject', ['site' => $site]), $m[0]['subject'] ?? '');
+$db->prepare("UPDATE users SET language = NULL WHERE id = ?")->execute([$uid]);
+$m = $sent(fn() => userResetSend($db, $cfg, userFindById($db, $uid)), $OLD);
+check('an account that chose no language, on a site whose default is not Polish: English, as before',
+      str_contains($m[0]['subject'] ?? '', 'password reset') || ($cfg['default_language'] ?? 'en') === 'pl', $m[0]['subject'] ?? '');
+
 $offAll($NEW);
 $m = $sent(function () use ($db, $cfg, $u, $NEW, &$start) { $start = userEmailChangeStart($db, $cfg, $u, $NEW); }, $OLD);
 check('an e-mail change starts (step 1 from the current address)', ($start['stage'] ?? '') === 'old', json_encode($start));

@@ -77,26 +77,84 @@ $p = livesyncValidate($base + ['livesync_bind_ip' => '10.9.0.1', 'livesync_peer_
 check('a sane tunnel configuration passes', $p === [], implode(' | ', $p));
 
 /* ── 4. nothing forks a root helper from a page view ──────────────────────── */
-
+// Against a stub helper that writes down every call (1.74.0, QUAL-7: these were greps of livesync.php and of the
+// endpoint): the helper's command is a real one the feature accepts, and what ran is what the stub wrote down.
 $src = file_get_contents($root . '/includes/livesync.php');
-check('the status is served from cache unless a caller explicitly asks for fresh',
-      str_contains($src, 'function livesyncStatus(array $cfg, bool $fresh = false)')
-      && str_contains($src, 'if (!$fresh) return $cached'));
-// Bounded to the function's own body. An unbounded .*? walks straight into livesyncTick(), which
-// asks for a fresh status on purpose, and the check would fail for the wrong reason.
-$warnBody = '';
-if (preg_match('/function livesyncWarnings\(.*?\n\}/s', $src, $mm)) $warnBody = $mm[0];
-check('the warnings collector never asks for a fresh status — its callers are pollers',
-      $warnBody !== '' && !str_contains($warnBody, 'livesyncStatus($cfg, true)'));
+$lsDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'lst_' . getmypid() . '_' . bin2hex(random_bytes(3));
+@mkdir($lsDir, 0777, true);
+file_put_contents($lsDir . DIRECTORY_SEPARATOR . 'helper.php', '<?php
+file_put_contents(__DIR__ . "/calls.log", implode(" ", array_slice($argv, 1)) . "\n", FILE_APPEND);
+$op = $argv[1] ?? "";
+echo json_encode($op === "status" ? ["ok" => true, "armed" => true, "listening" => false] : ["ok" => true, "op" => $op]), "\n";
+');
+// The feature's own rule for the command ([A-Za-z0-9 _./-]): on Windows the drive goes, "/Users/…" is that drive's.
+$lsHelper = preg_replace('#^[A-Za-z]:#', '', str_replace('\\', '/', (string)realpath($lsDir . DIRECTORY_SEPARATOR . 'helper.php')));
+$lsCfg = ['livesync_enabled' => '1', 'livesync_cmd' => 'php ' . $lsHelper, 'livesync_bind_ip' => '10.9.0.1', 'livesync_peer_ip' => '10.9.0.2',
+          'livesync_port' => '9696'];
+$lsCalls = function () use ($lsDir): array { clearstatcache(); return array_values(array_filter(explode("\n", (string)@file_get_contents($lsDir . '/calls.log')))); };
+$stateFile = netlimitStateFile();
+$stateWas = is_file($stateFile) ? (string)file_get_contents($stateFile) : null;
+$probeOut = []; $probeRc = null;
+@exec('php -r "echo 1;" 2>&1', $probeOut, $probeRc);
+if (!livesyncValidCommand($lsCfg['livesync_cmd']) || !trackerExecAvailable() || $probeRc !== 0) {
+    skip('the helper is never forked by a page view (against a stub)', 'the stub\'s command is not one the feature accepts here, or exec()/php is unavailable');
+} else {
+    try {
+        $s = livesyncStatus($lsCfg);
+        check('the status is served from cache: asking for it runs no helper', $lsCalls() === [] && !empty($s['cached']), json_encode($s));
+        livesyncWarnings($lsCfg);
+        check('the warnings collector never asks for a fresh status either — its callers are pollers', $lsCalls() === []);
+        $fresh = livesyncStatus($lsCfg, true);
+        check('… only a caller that asks for fresh runs it — once, "status"', $lsCalls() === ['status'] && ($fresh['cached'] ?? null) === false
+              && !empty($fresh['armed']), json_encode([$lsCalls(), $fresh]));
+        $w = livesyncWarnings($lsCfg);
+        check('… and the warnings then read what it said, from the cache, still without running it', $lsCalls() === ['status'] && count($w) === 1
+              && str_contains($w[0], 'nothing is listening'), json_encode($w));
+        $t = livesyncTick($lsCfg);
+        check('the tick is what refreshes it (here, the CLI): one more "status"', $t['did'] === 'refreshed' && $lsCalls() === ['status', 'status'], json_encode($t));
+        // The endpoint, run as the panel runs it: reading the plan is free, arming asks for the owner's password.
+        $runner = $lsDir . DIRECTORY_SEPARATOR . 'runner.php';
+        file_put_contents($runner, '<?php
+$a = json_decode((string)file_get_contents($argv[1]), true);
+chdir($a["root"]);
+foreach (["config/app.php", "includes/functions.php", "includes/lang.php", "includes/netlimit.php", "includes/livesync.php", "includes/auth.php",
+          "includes/audit.php"] as $f) require_once $f;
+$cfg = $a["cfg"]; $GLOBALS["cfg"] = $cfg;
+$_SERVER["REQUEST_METHOD"] = "POST"; $_SERVER["REMOTE_ADDR"] = "127.0.0.76";
+$_POST = $a["post"];
+$_SESSION = ["loggedin" => true, "login_time" => time(), "last_activity" => time()];
+register_shutdown_function(function () { fwrite(STDERR, "STATUS:" . (int)http_response_code() . "\n"); });
+langInit($cfg, "en");
+require "api/admin/livesync_apply.php";
+');
+        $post = function (array $body) use ($runner, $root, $lsCfg, $lsDir): array {
+            $arg = $lsDir . DIRECTORY_SEPARATOR . 'args_' . bin2hex(random_bytes(3)) . '.json';
+            file_put_contents($arg, json_encode(['root' => $root, 'cfg' => $lsCfg, 'post' => $body]));
+            $p = proc_open([PHP_BINARY, '-d', 'display_errors=0', $runner, $arg], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+            $out = (string)stream_get_contents($pipes[1]); $err = (string)stream_get_contents($pipes[2]);
+            foreach ($pipes as $h) fclose($h);
+            proc_close($p);
+            return ['status' => preg_match('/STATUS:(\d+)/', $err, $mm) ? ((int)$mm[1] ?: 200) : 0, 'json' => json_decode(trim($out), true)];
+        };
+        $plan = $post(['op' => 'plan']);
+        check('the plan is read without the password — it changes nothing (and the helper is asked for it)',
+              $plan['status'] === 200 && !empty($plan['json']['success']) && in_array('plan 10.9.0.1 9696 10.9.0.2', $lsCalls(), true), json_encode([$plan, $lsCalls()]));
+        $before = count($lsCalls());
+        $arm = $post(['op' => 'apply', 'password' => '']);
+        check('arming without the owner\'s password is refused (403) — and the helper is never asked to arm',
+              $arm['status'] === 403 && count($lsCalls()) === $before, json_encode([$arm, $lsCalls()]));
+        $off = $post(['op' => 'revert', 'password' => '']);
+        check('… nor to disarm', $off['status'] === 403 && count($lsCalls()) === $before, json_encode($off));
+    } finally {
+        if ($stateWas === null) @unlink($stateFile); else file_put_contents($stateFile, $stateWas);
+        foreach ((array)glob($lsDir . DIRECTORY_SEPARATOR . '*') as $x) @unlink($x);
+        @rmdir($lsDir);
+    }
+}
 check('the tick refuses to run under anything but the CLI',
       preg_match('/function livesyncTick.*?PHP_SAPI !== .cli.*?return \$out;/s', $src) === 1);
 $jan = file_get_contents($root . '/tools/janitor.php');
 check('the janitor is what refreshes it', str_contains($jan, 'livesyncTick($cfg)'));
-
-$apply = file_get_contents($root . '/api/admin/livesync_apply.php');
-check('arming and disarming are password-gated', substr_count($apply, 'requireAdminReauth') >= 1);
-check('… and status/plan are not, because they change nothing',
-      strpos($apply, 'requireAdminReauth') > strpos($apply, "op === 'plan'"));
 
 /* ── 5. the helper itself, against stubs ──────────────────────────────────── */
 

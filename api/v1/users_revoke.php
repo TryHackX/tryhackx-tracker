@@ -118,6 +118,7 @@ if ($cur !== null) {
 }
 $db->prepare("UPDATE user_group_orders SET action = 'revoked' WHERE client_id = ? AND order_id = ?")
    ->execute([(int)$client['id'], $orderId]);
+userPermissionsForget($uid);   // its memberships as this request remembers them (userGroups(), 1.74.0)
 
 auditNote(['target_type' => 'user', 'target_id' => (string)$uid,
            'summary' => 'refunded order ' . $orderId . ' of "' . $group['slug'] . '"'

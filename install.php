@@ -352,7 +352,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'captcha_pts_status' => '1',
                 'captcha_pts_appeal' => '3',
                 'captcha_pts_block_check' => '1',
-                'captcha_pts_login_fail' => '6',
                 'delete_captcha_attempts' => '2',
                 'delete_lockout_attempts' => '5',
                 'delete_lockout_minutes' => '60',

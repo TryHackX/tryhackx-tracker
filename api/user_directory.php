@@ -20,7 +20,8 @@ if (!directoryEnabled($cfg)) jsonResponse(['error' => 'directory_disabled'], 404
 
 $me = currentUser($db);
 if (!$me) jsonResponse(['error' => 'login_required'], 401);
-if (!userCan($db, $cfg, 'directory.view')) jsonResponse(['error' => 'no_permission'], 403);
+// The READER's account (1.74.0, PRIV-6): a panel session in the same browser is not the member's permission.
+if (!userIdHasPermission($db, $cfg, (int)$me['id'], 'directory.view')) jsonResponse(['error' => 'no_permission'], 403);
 
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 header('Cache-Control: private, no-store');

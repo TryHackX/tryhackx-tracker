@@ -679,6 +679,32 @@
 
     var busy = false;
 
+    /*
+     * THE OTHER LANGUAGE'S DICTIONARY IS A FILE (1.74.0, includes/lang.php langJsBridge()): the fetched page names it
+     * (#i18n-data: `id`, `src`) instead of carrying it, and it is loaded before anything is rewritten — the very
+     * address a page in that language names, so the browser has it cached once either page was opened. A page that
+     * still carries its strings inline (an older render) needs nothing loaded. A file that does not come in time is a
+     * swap that cannot be made: the plain navigation, as for any other failure.
+     */
+    function dictReady(meta) {
+        if (meta.strings || !meta.id || (window.I18N_DICT && window.I18N_DICT[meta.id])) return Promise.resolve();
+        if (!meta.src) return Promise.reject(new Error('no dictionary'));
+        return new Promise(function (ok, no) {
+            var s = document.createElement('script'), done = false;
+            var finish = function (good) {
+                if (done) return;
+                done = true;
+                clearTimeout(late);
+                if (good && window.I18N_DICT && window.I18N_DICT[meta.id]) ok(); else no(new Error('no dictionary'));
+            };
+            var late = setTimeout(function () { finish(false); }, SWAP_DEADLINE);
+            s.addEventListener('load', function () { finish(true); });
+            s.addEventListener('error', function () { finish(false); });
+            s.src = meta.src;
+            document.head.appendChild(s);
+        });
+    }
+
     document.addEventListener('click', function (e) {
         if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var a = e.target.closest ? e.target.closest(LINKS) : null;
@@ -725,6 +751,10 @@
             // Not the page we asked for — an expired session, a redirect to the sign-in form, an
             // error page. Let the browser go there properly instead of grafting it onto this one.
             if (!bundle || bundle.lang !== code || !doc.body) throw new Error('not the same page');
+            // Its dictionary first (1.74.0, dictReady()): nothing is touched until the words are here.
+            return dictReady(bundle).then(function () { return { doc: doc, dataNode: dataNode }; });
+        }).then(function (got) {
+            var doc = got.doc, dataNode = got.dataNode;
 
             var out = [];
             if (marked) regainButtons();

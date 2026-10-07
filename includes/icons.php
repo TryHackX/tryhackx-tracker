@@ -403,7 +403,7 @@ function iconSetup(array $cfg): array {
         $want = iconFaPackStyles($cfg);
         $styles = []; $css = [];
         $coreKind = (string)($m['core']['kind'] ?? 'all');
-        $css[] = ['href' => iconpackAssetUrl($base, $m, (string)$m['core']['file']), 'integrity' => ''];
+        $css[] = ['href' => iconpackAssetUrl($base, $m, (string)$m['core']['file']), 'integrity' => '', 'file' => (string)$m['core']['file']];
         foreach ($m['styles'] as $st) {
             $k = (string)$st['key'];
             // With all.css as the core its styles are there whatever is ticked; with fontawesome.css
@@ -414,7 +414,7 @@ function iconSetup(array $cfg): array {
             if (!$inCore && !$forced && !in_array($k, $want, true)) continue;
             if (!$inCore && $st['file'] === null) continue;
             $styles[$k] = $st;
-            if (!$inCore) $css[] = ['href' => iconpackAssetUrl($base, $m, (string)$st['file']), 'integrity' => ''];
+            if (!$inCore) $css[] = ['href' => iconpackAssetUrl($base, $m, (string)$st['file']), 'integrity' => '', 'file' => (string)$st['file']];
         }
         $s['styles'] = $styles;
         $s['css'] = $css;
@@ -675,7 +675,15 @@ function iconFontTag(array $cfg): string {
     $setup = iconSetup($cfg);
     $base = function_exists('getBaseUrl') ? getBaseUrl() : '/';
     $links = [];
-    foreach ($setup['css'] as $c) {
+    $css = $setup['css'];
+    // A package's sheets as ONE stylesheet (1.74.0, PERF-8): iconpackBundleUrl() joins its core and the ticked styles
+    // in this same order, so the page draws exactly what the separate links drew — with one request instead of one
+    // per style (38 on production). The setup keeps the files one by one: the panel lists and previews them so.
+    if (($setup['source'] ?? '') === 'pack' && count($css) > 1 && function_exists('iconpackBundleUrl')) {
+        $bundle = iconpackBundleUrl($base, (array)$setup['pack'], array_column($css, 'file'));
+        if ($bundle !== null) $css = [['href' => $bundle, 'integrity' => '']];
+    }
+    foreach ($css as $c) {
         $links[] = '<link href="' . htmlspecialchars($c['href'], ENT_QUOTES, 'UTF-8') . '" rel="stylesheet"'
             . ($c['integrity'] !== '' ? ' integrity="' . $c['integrity'] . '" crossorigin="anonymous"' : '') . '>';
     }

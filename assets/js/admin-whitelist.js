@@ -713,7 +713,9 @@
                 tr.style.borderLeft = '4px solid ' + ipColor(row.ip || '');
                 if (row.ip !== lastIp) tr.classList.add('wl-group-first');
             }
-            const cb = el('input', { type: 'checkbox', className: 'form-check-input wl-row-check', dataset: { id: String(row.id) } });
+            // A name for the row's box (1.74.0, UX-11): a screen reader said only "checkbox, not checked" per row.
+            const cb = el('input', { type: 'checkbox', className: 'form-check-input wl-row-check', dataset: { id: String(row.id) },
+                                     'aria-label': t.key('js.wl.select_row', { name: row.name || row.info_hash }) });
             cb.checked = state.wl.selected.has(row.id);
             tr.appendChild(el('td', null, cb));
             tr.appendChild(el('td', { className: 'wl-id', text: String(row.id) }));
@@ -1126,7 +1128,9 @@
     function contentBlock(c) {
         if (!c) return null;
         const hasText = !!c.description_html;
-        const hasLink = !!c.source_url;
+        // A link only when it is one (1.74.0, part D — XSS-3): http or https, as the public Info panel checks it. The
+        // server allows nothing else when a source is written; a row from before, or from a restored backup, is not drawn.
+        const hasLink = !!c.source_url && /^https?:\/\//i.test(String(c.source_url));
         if (!hasText && !hasLink) return null;
 
         const wrap = el('div', { className: 'wl-content-block' });
@@ -1202,7 +1206,8 @@
             [sc0 ? sc0.leechers : (it.scrape_leechers != null ? it.scrape_leechers : null), t.key('js.wl.stat_leechers'), 'info-stat-leech'],
             [sc0 ? sc0.completed : (it.scrape_completed != null ? it.scrape_completed : null), t.key('js.wl.stat_completed')],
             [it.total_size ? fmtBytes(it.total_size) : null, t.key('js.wl.stat_size')],
-            [it.files_count != null ? it.files_count : null, it.files_count === 1 ? t.key('js.wl.stat_file') : t.key('js.wl.stat_files')],
+            // the word in the language's form (1.74.0): "2 pliki", "5 plików" — it said "2 plików"
+            [it.files_count != null ? it.files_count : null, it.files_count != null ? t.plural(it.files_count, 'js.wl.stat_files') : t.key('js.wl.stat_files_many')],
             [idx && idx.peak_seeders != null ? idx.peak_seeders : null, t.key('js.wl.stat_peak_seeders')],
         ]);
         if (strip) body.appendChild(strip);

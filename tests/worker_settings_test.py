@@ -19,7 +19,7 @@ Everything below drives the real methods with fake objects. No database, no libt
 
     python tests/worker_settings_test.py
 """
-import json, os, re, sys, tempfile, types
+import collections, json, os, re, sys, tempfile, types
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, os.path.join(ROOT, 'worker'))
@@ -294,6 +294,7 @@ def run_finish(stored_cap, real_files=18000, keep_files=True, q=IDXQ):
         cfg=c, db=db, active={'tok': {'row': row, 'handle': object(), 'started': 0}},
         ses=types.SimpleNamespace(remove_torrent=lambda *a: None),
         _meta_source_ok=True,
+        _outcomes=collections.deque(maxlen=W.ADAPT_WINDOW),   # the yield finish() records (1.74.0, PERF-16)
         effective_max_files=lambda: stored_cap)
     W.Worker.finish.__get__(ns)('tok', True, ti=FakeTi(real_files))
     return conn
@@ -348,9 +349,12 @@ hbfile = os.path.join(hbdir, 'heartbeat')
 hbdb = FakeDb({'meta_worker_concurrency': '8'})
 ns = types.SimpleNamespace(cfg=cfg(heartbeat=hbfile), db=hbdb, active={},
                            _conc_override=None, _conc_checked_at=0.0, _max_files_override=20000,
-                           _order_mode='seeders', _order_shares={'seeders': 100})
+                           _order_mode='seeders', _order_shares={'seeders': 100},
+                           _outcomes=collections.deque(maxlen=W.ADAPT_WINDOW), _working=None)
 ns.effective_concurrency = W.Worker.effective_concurrency.__get__(ns)
 ns.effective_max_files = W.Worker.effective_max_files.__get__(ns)
+ns.working_concurrency = W.Worker.working_concurrency.__get__(ns)   # 1.74.0 (PERF-16): the heartbeat says both
+ns.yield_pct = W.Worker.yield_pct.__get__(ns)
 W.Worker.heartbeat.__get__(ns)()
 hb = json.loads(open(hbfile, encoding='utf-8').read())
 check('heartbeat: says what the worker is RUNNING', hb.get('max_files') == 20000, hb.get('max_files'))
@@ -403,6 +407,31 @@ check('federation import bounds a peer row by its own constant, not by meta_max_
       and 'meta_max_files' not in fed_py.replace('`meta_max_files`', ''))
 check('the review-approval path does not reach for it either',
       'meta_max_files' not in re.sub(r'//[^\n]*', '', fed_php))
+
+# ── one default for the parallel fetches (1.74.0, QUAL-3) ───────────────────
+# Four numbers said "the default": the worker's code (3), the example config (4), worker/README.md ([3]) and the
+# panel's per-submitter probe limit (`?? 8`, includes/wlprobe.php). The worker's is the truth — what it RUNS with
+# when its config has no `concurrency` line — so it is read by behaviour, and the other three must say the same.
+import configparser  # noqa: E402
+with tempfile.TemporaryDirectory() as td:
+    conf = os.path.join(td, 'bare.conf')
+    with open(conf, 'w', encoding='utf-8') as fh:
+        fh.write('[db]\nhost = localhost\nname = tracker\nuser = x\npassword = y\n\n[worker]\n')
+    bare = W.Config(conf).concurrency
+check('QUAL-3: the worker runs 3 parallel fetches when its config has no concurrency line', bare == 3, bare)
+ex = configparser.ConfigParser()
+ex.read(os.path.join(ROOT, 'worker', 'tracker-metadata.conf.example'), encoding='utf-8')
+ex_conc = ex.getint('worker', 'concurrency', fallback=-1)
+check('… the example config says the same number (it said 4)', ex_conc == bare, ex_conc)
+readme_m = re.search(r'`concurrency` \[(\d+)\]', read('worker/README.md'))
+check('… so does worker/README.md\'s table of defaults', readme_m is not None and int(readme_m.group(1)) == bare,
+      readme_m.group(1) if readme_m else 'no row')
+php_m = re.search(r'const WL_PROBE_WORKER_DEFAULT_CONCURRENCY\s*=\s*(\d+);', read('includes/wlprobe.php'))
+check('… and the panel\'s fallback for the probe limit (includes/wlprobe.php; it was `?? 8`)',
+      php_m is not None and int(php_m.group(1)) == bare and '?? 8) ?: 8' not in read('includes/wlprobe.php'),
+      php_m.group(1) if php_m else 'no constant')
+check('the heartbeat still publishes `concurrency`, the number the panel reads before falling back',
+      '"concurrency": self.effective_concurrency()' in read('worker/worker.py'))
 
 print(chr(10) + '%d checks, %d failed' % (n, fails))
 sys.exit(1 if fails else 0)

@@ -105,7 +105,7 @@ add('js.users', {
     'consent_admin_line': ('Every capability of the Admin group is held by its blanket, so those boxes are ticked and cannot be cleared. '
                            'The ones left open are consent — what others may see of an administrator — and are yours to give.',
                            'Każde uprawnienie do działania grupa Admin ma z urzędu, więc te pola są zaznaczone i nie da się ich odznaczyć. '
-                           'Otwarte zostały zgody — co inni mogą zobaczyć u administratora — i to ty je dajesz.'),
+                           'Otwarte zostały zgody — co inni mogą zobaczyć u administratora — i to Ty je dajesz.'),
     'perms_admin':       ('every capability (the blanket) · consent: :list', 'każde uprawnienie do działania (z urzędu) · zgody: :list'),
     'perms_admin_none':  ('every capability (the blanket) · no consent given', 'każde uprawnienie do działania (z urzędu) · bez zgód'),
 })

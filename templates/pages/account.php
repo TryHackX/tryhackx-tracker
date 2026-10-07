@@ -247,7 +247,7 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                         <i class="bi bi-person-square emote-drop-icon" aria-hidden="true"></i>
                         <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
                         <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => langNumber($accMaxKb)]) ?></span>
-                        <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
+                        <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif" aria-label="<?= _h('account.media_drop_aria_avatar') ?>">
                     </div>
                     <?php endif; ?>
                     <?php /* The same two buttons, with the same icons, as Settings → Profiles in the panel. */ ?>
@@ -292,7 +292,7 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
                     <i class="bi bi-image emote-drop-icon" aria-hidden="true"></i>
                     <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
                     <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => langNumber($accMaxKb)]) ?></span>
-                    <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif">
+                    <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif" aria-label="<?= _h('account.media_drop_aria_cover') ?>">
                 </div>
                 <?php endif; ?>
                 <div class="acc-media-acts">
@@ -428,7 +428,7 @@ if (count($accLangs) > 1):
     <section class="account-card acc-card acc-lang-block" id="acc-card-lang">
             <h2><?= _h('account.lang_head') ?></h2>
             <p class="acc-card-desc"><?= _h('account.lang_note') ?></p>
-            <select id="acc-language" class="acc-language">
+            <select id="acc-language" class="acc-language" aria-label="<?= _h('account.lang_head') ?>">
                 <option value=""<?= $accLangNow === '' ? ' selected' : '' ?>><?= _h('account.lang_site') ?></option>
                 <?php foreach ($accLangs as $accCode => $accName): ?>
                 <option value="<?= sanitize($accCode) ?>"<?= $accLangNow === $accCode ? ' selected' : '' ?>><?= sanitize($accName) ?></option>
@@ -705,7 +705,8 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
 <h2 class="section-heading-spaced"><?= _h('account.notifications') ?> <span id="acc-unread-badge" class="acc-badge" hidden></span>
     <span class="acc-notif-tools">
         <button type="button" class="btn btn-secondary btn-small" id="acc-mark-all"><?= _h('account.mark_all') ?></button>
-        <button type="button" class="btn btn-secondary btn-small" id="acc-delete-read" title="<?= _h('account.delete_read_title') ?>"><?= _h('account.delete_read') ?></button>
+        <?php /* What takes something away looks like it (1.74.0, .btn-danger-soft): beside "Mark all read", same grey. */ ?>
+        <button type="button" class="btn btn-danger-soft btn-small" id="acc-delete-read" title="<?= _h('account.delete_read_title') ?>"><?= _h('account.delete_read') ?></button>
     </span></h2>
 <div id="acc-notifications"><span class="text-muted"><?= _h('common.loading') ?></span></div>
 <div class="trans-pagination acc-notif-pagination" id="acc-notif-pagination"></div>
@@ -739,23 +740,27 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
         $accHasEmail ? __('account.email_hint_confirm')
             . ($accCooldownDays > 0 ? __('account.email_hint_cooldown', ['days' => $accCooldownDays]) : '') : '' ?></small></label>
         <input type="email" id="acc-new-email" maxlength="190" autocomplete="email" value="<?= sanitize((string)($meUser['email'] ?? '')) ?>">
-        <div class="error-msg"><?= _h('account.email_err') ?></div>
+        <?php /* The four messages of this form have their ids from the server (1.74.0, UX-12): liveValidate() names each as its
+                 field's description, and an id a script adds after load has no counterpart in the fetched page — the live
+                 language switch pairs by id first (assets/js/lang-swap.js) and left the words in the old language. The ids
+                 are the ones the script makes: <field id>-error. */ ?>
+        <div class="error-msg" id="acc-new-email-error"><?= _h('account.email_err') ?></div>
     </div>
     <div class="form-group" id="acc-new-email2-group" hidden>
         <label for="acc-new-email2"><?= _h('account.email2') ?></label>
         <input type="email" id="acc-new-email2" maxlength="190" autocomplete="off">
-        <div class="error-msg"><?= _h('account.email2_err') ?></div>
+        <div class="error-msg" id="acc-new-email2-error"><?= _h('account.email2_err') ?></div>
     </div>
     <div class="form-group">
         <label for="acc-new-pass"><?= _h('account.new_pass') ?> <small class="form-hint"><?= _h('account.new_pass_hint') ?></small></label>
         <input type="password" id="acc-new-pass" maxlength="200" autocomplete="new-password">
         <div class="pw-checklist" id="acc-pw-checklist" hidden></div>
-        <div class="error-msg"><?= _h('account.new_pass_err') ?></div>
+        <div class="error-msg" id="acc-new-pass-error"><?= _h('account.new_pass_err') ?></div>
     </div>
     <div class="form-group" id="acc-new-pass2-group" hidden>
         <label for="acc-new-pass2"><?= _h('account.new_pass2') ?></label>
         <input type="password" id="acc-new-pass2" maxlength="200" autocomplete="new-password">
-        <div class="error-msg"><?= _h('account.new_pass2_err') ?></div>
+        <div class="error-msg" id="acc-new-pass2-error"><?= _h('account.new_pass2_err') ?></div>
     </div>
     <div class="form-center"><button type="submit" class="btn" id="account-save"><?= _h('account.save') ?></button></div>
 </form>
@@ -852,7 +857,7 @@ $accTrashDays = (int)$accPeople['trash_days'];
             <p class="text-muted pm-view-note" id="pm-note-archive" hidden><?= _h($accPeople['archive_returns'] ? 'pm.note_archive' : 'pm.note_archive_stays') ?></p>
             <div class="pm-view-note pm-trash-note" id="pm-note-trash" hidden>
                 <span class="text-muted"><?= $accTrashDays > 0 ? _h($accTrashDays === 1 ? 'pm.note_trash_one' : 'pm.note_trash_many', ['days' => $accTrashDays]) : _h('pm.note_trash_none') ?></span>
-                <button type="button" class="btn btn-secondary btn-small" id="pm-empty-trash"><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('pm.empty_trash') ?></button>
+                <button type="button" class="btn btn-danger-soft btn-small" id="pm-empty-trash"><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('pm.empty_trash') ?></button>
             </div>
             <div class="pm-list" id="pm-threads" role="tabpanel" aria-labelledby="pm-view-inbox"></div>
         </div>
@@ -1014,7 +1019,7 @@ $accTrashDays = (int)$accPeople['trash_days'];
                     <option value="<?= $sndMs ?>"><?= $sndMs === 0 ? _h('account.snd_pre_none') : number_format($sndMs / 1000, 1) . ' s' ?></option>
                     <?php endforeach; ?>
                 </select>
-                <select id="snd-pre-kind">
+                <select id="snd-pre-kind" aria-label="<?= _h('account.snd_pre_kind') ?>">
                     <option value="silence"><?= _h('account.snd_pre_silence') ?></option>
                     <option value="hum"><?= _h('account.snd_pre_hum') ?></option>
                 </select>

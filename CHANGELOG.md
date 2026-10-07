@@ -4,6 +4,238 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.74.0] — 2026-10-06
+
+Every fix from the full audit of 1.73.2 (`AUDIT-REPORT-1.73.2.md`, kept outside the repository), in one release, as
+the owner asked: 116 findings after an independent second agent tried to refute each one — none critical; six high,
+seventeen medium. The two high ones in the code are closed first: an admin-group session could forge a backup download
+from the HMAC key the Settings page printed, and the public limits and the panel lockout counted an IPv6 host per
+address instead of per /64. Schema 93.
+
+<!-- part A: Identity, limits and the panel's secrets -->
+- **Backup downloads need the password again (PANEL-1).** A download link has to have been issued by *Download*
+  (behind the owner's password): its nonce is recorded and redeemed once; a token signed with the HMAC key alone — which
+  Settings used to show to every admin-group session — is refused (403), and one dated further than five minutes ahead is
+  not valid. Settings never prints a secret any more: the HMAC key, the four CAPTCHA secrets and the health token are
+  write-only fields ("set — leave empty to keep"); the health token has its own "switch off" box. Consider a new HMAC key
+  after upgrading (it also invalidates unsubscribe links in mails already sent).
+- **Rate limits per address group, one file per action, and never silently open (PUB-2, AUTH-3, PERF-11, QUAL-20,
+  AUTH-7, PUB-6).** The block and status lookups, appeals, the report form's hourly limit and the panel's sign-in lockout
+  count an IPv6 host by its /64 (IPv4 unchanged) — every address of a /64 used to be a fresh count. Each limit has its own
+  file and lock in `config/ratelimit/` with a hard cap of subjects, so the shoutbox's poll and the sign-in no longer queue
+  on one lock and one rewritten file; `config/rate_limits.json` stays the reset switch. When `config/` or a state file
+  cannot be written the limits still let everything through, but the dashboard's warning card and `?action=health` say so;
+  an unreadable file is set aside as `.bad` and logged; a sign-in whose count cannot be written costs a delay instead.
+  The GET block lookup stays without CAPTCHA, documented.
+- **Confirmation mails have a daily cap (PUB-1):** *Contact & email → Report and appeal confirmations per day*, 200 by
+  default (0 = none); past it reports and appeals are still taken, without the mail; a mail that cannot be counted is not sent.
+- **A code works once even when it is used twice at the same moment (AUTH-2)** — the member's TOTP and recovery codes
+  (one guarded UPDATE) and the panel's (one lock around read and write). **A damaged `config/admin_2fa.json` now means
+  two-factor ON (AUTH-4)**, not off; only a missing file means "never set up".
+- Smaller: the duplicate-text rule sees through zero-width characters and compatibility forms (AUTH-5); the sign-in
+  bridge refuses without a site URL instead of building its link from the request's Host header (AUTH-6); `next=` refuses a
+  backslash (PUB-4); sessions run in strict mode (AUTH-9); an array where a string belongs gets a clean 4xx instead of a
+  blank 500 (PUB-3); arming the schedule, the inbound limit, its automatic band, the monitor or backups asks for the
+  password (PANEL-2); an empty HMAC secret verifies no unsubscribe link (QUAL-21); Settings' "Test path" escapes what it
+  repeats (XSS-2); footer addresses are http(s) or nothing, on save and on render (XSS-6); the Traffic page's dry-run title
+  is escaped (XSS-7); the emotes table scrolls inside its box on a phone (UX-3); a magnet from the public form or a partner
+  key is stored with its hash and name only, announced on this tracker's own URLs (SRV-1, PHP half); with reCAPTCHA
+  configured the policy allows its stylesheet host and, where a CAPTCHA can be drawn, its eval — so `csp_mode = enforce`
+  is ready (XSS-1; the mode itself is the owner's switch).
+
+<!-- part B: Privacy, permissions and the language of what people receive -->
+- **A panel session opened through an account is that account on the site** (AUTH-1, PRIV-6, PANEL-3): `userCan()`
+  gives it what the account's groups give (the Admin group's blanket included) — no longer every permission. A
+  moderator whose group gives the panel and one queue is an ordinary member on the public pages (no deleting other
+  people's emotes, no reading profiles their groups do not open); the reader gates (profile, favourites, lists,
+  uploads, directory, "who has this") ask the reader's account; the uncropped source of a picture is streamed only to
+  its owner and to the owner's or an administrator's panel session; `[hide]` opens for the owner's panel session or a
+  signed-in account. Signing in as another account in the same browser ends a panel session that rode in on the
+  previous one. (Moderators see less on the site than before — say so to the operator.)
+- **Notifications quote words — and now follow them** (PRIV-1): when a comment is edited, the copies of its first words
+  in other people's notifications become the new words; when it is deleted (by its author, a moderator, silently or
+  not) they become "[deleted]"; when an account is deleted, its comments' words and its name leave every notification
+  ("a comment on … — its author's account was deleted"), and the friend requests it sent go (new `sender_id`, schema
+  93; the old ones get their sender from their title once). A moderator's own notice to the author is untouched.
+  Info says so.
+- **What people receive is in their language** (QUAL-18, QUAL-15): every notification is written in the RECIPIENT's
+  language — the account's, else (for its own request) the page's, else the site's default — through one helper
+  (`recipientLang()`, replacing the two copies in comments and reports): group granted / removed / expired / about to
+  expire, e-mail address set / changed / removed, password changed / reset, welcome, friend requests and acceptances
+  (until now in the sender's language), descriptions published or not, reports answered, messages removed, silences
+  and bans lifted, pictures and descriptions removed, two factors on/off, devices signed out. Every mail —
+  password reset, address verification, the three steps of an address change and its two notices, the groups' mails,
+  and the report and appeal mails — comes from the dictionary in one language, its frame (greeting, button line,
+  preferences link) included.
+- **A confirmation carries nothing the sender typed** (PUB-1): the mail confirming a report says it was received, its
+  number, the info hash, the date, its state and where to check it, and that whoever did not send it may ignore it —
+  no name, representative, company, title, message, magnet or address; an appeal's confirmation no name, reason or
+  address. (The per-day ceiling and the per-network limit are Part A's.)
+- **Moderators see members' addresses shortened** (PRIV-2): on the Users page the e-mail address, the addresses an
+  account signed up and last signed in from, and a partner's ids are shown in full only to staff who may edit accounts
+  (`panel.users.edit`, and the owner); the rest see `j...e@e...e.org`, `203.0.113.0/24`, `2001:db8:1::/48`, and search
+  by name only. Info says who sees what.
+- **A hidden profile is hidden everywhere** (PRIV-3): the open conversation's live poll, the inbox with its counts,
+  badge and search, `typing` and `follow` treat an account that hid its profile from you exactly like a name nobody has
+  (404 not_found); the profile page is one not-found page, byte for byte.
+- **Somebody else's uploads list is what the tracker serves** (PRIV-4): no banned registration, none still probing or
+  refused, and a description's moderation state only "published"; the state filter is on your own profile only.
+- **A consent is a grant** (PRIV-5): "show it on my profile" on the whitelist form is offered, and honoured, only when
+  the account's group grants `uploads.public` — never through the Admin blanket or a panel session.
+- **Partners see memberships, not notes** (PRIV-7): v1/users/lookup and the sign-in bridge's v1/auth/status and
+  v1/auth/verify give each group as slug, name, from, until and whether in force — no notes, no "granted by", no row ids.
+- **One gate for "who has this" and the profile** (QUAL-13): the same SQL decides both (a verified ADDRESS, the Admin
+  group exempt; a membership in force up to its last second); the Users page no longer marks an account without an
+  address as verified.
+- **One friend request per unread request** (PUB-5): following, unfollowing and following again no longer delivers a
+  notification per turn while the first is unread.
+- **Fewer queries per page** (PERF-10, PERF-1's twin): an account's memberships are read once per request (narrow
+  columns, no sort in the database); the unread-from-friends count for messages reads the friends once.
+- Mails: the title, the labels and the site's name are escaped in every mail's HTML.
+
+<!-- part C: Performance -->
+- **The letter beside a name is drawn, not fetched (MAIN-3).** A person without a picture of their own used to cost one
+  request per letter and colour through the whole api.php bootstrap (a session, the database, the settings — ~5 ms idle,
+  ~300 ms under load, and on a lossy line every new request is a chance to hang). The `<img>` now carries the very SVG the
+  endpoint serves, as a `data:` address, built where it is drawn — by `userAvatarHtml()` on the server and by
+  `userAvatarImg()`/`userAvatarSet()` in assets/js/avatar.js, byte for byte the same. What travels in JSON is still the
+  letter's address; the endpoint stays for every address already out there. Both policies already allow `data:` images.
+- **The public search has a narrow catalogue of its own (PERF-3, PERF-2).** The search page lists only named torrents —
+  714 000 of production's 4.75 million — and sorted them out of the wide index table: every order but seeders was a full
+  scan and a filesort (4–8 s warm, 7–18 s at a small pool, on one click of any member), and a popular word read a wide row
+  per hit, twice. `index_catalog` holds those rows with only what is searched and sorted on, an index per order and its own
+  fulltext index; a page is an index walk however deep, and the wide rows are read by key for the page alone. Measured on a
+  production-sized copy: the same rows as before in every one of 54 cases, browsing 4–18 s → well under a second, a popular
+  word 7–14 s → 1.6–2.8 s at a 128 MB pool. It is kept by the code that writes those rows (the poll's batches, the scrapes,
+  the deletes, the pruner, federation's purge) and, for what the metadata worker and federation store from Python, by the
+  janitor following `meta_fetched_at`; the janitor's rolling walk fills it after the upgrade (~100 s on production's size, a
+  20-second slice a minute) and keeps re-checking it. Until a whole pass is made — and on any catalogue under 250 000 rows —
+  the search runs as before.
+- **A search counts only as far as it needs to (PERF-2).** The count of a search was a second full pass; it now stops at
+  max(1 000, ten pages past the one being read) and the page says *1 000+* (the pager grows as the reader goes deeper).
+  Browsing keeps its exact, cached count.
+- **A search the database stops for time is an answer, not a 500.** Production logged five bare 500s on 2026-10-06 (a common
+  word with *search in files*, a deep sort): the search ran into `max_statement_time` and the LIKE fallback behind it ran into
+  it again. Now neither is retried after a timeout, and the page says *this search took too long — narrow it*.
+- **Smaller ones.** The unread count of the shoutbox asks for the reader's friends once instead of once per line (1 s a minute
+  at 2 000 lines and 400 friendships, 15 s at 30 000 → milliseconds), and an account that has never opened the room no longer
+  inherits its backlog as unread; the room's poll reads its newest id from the end of the key (PERF-1, PERF-15). The Index
+  card's numbers come from one pass instead of three and are kept five minutes (they are dropped by every action on the
+  page), the file count is InnoDB's estimate past 200 000 rows ("≈"), and a hidden tab stops asking (PERF-4). The pruner
+  deletes the file rows of exactly what it deleted, by key — the scan of every file row for orphans runs once a day
+  (PERF-5) — and asking for a resolved torrent again no longer gets it deleted by the next prune for a grace that ran out
+  long before (VPERF-1). The panel's whitelist search in file names is two indexed branches instead of an OR that ran a
+  subquery per row (PERF-6). Two panel pollers let go of the session lock (PERF-12); the OpenTracker card's helper answer is
+  shared between requests for 30 s (PERF-13); the timeline's cache outlives its 60-second poll (PERF-17).
+- **Assets are cached properly (PERF-7, PERF-8).** Versioned stylesheets and scripts (`?v=`) are cached for a year, immutable;
+  everything in assets/ revalidates by date (the ETag mod_deflate suffixed with `-gzip` made every revalidation a full 200), and
+  iconpack.php recognises its own tag with the suffix. A Font Awesome package's stylesheets are ONE request (iconpack.php's
+  bundle) instead of one per ticked style (38 on production).
+- **The metadata worker (SRV-1, PERF-16).** A magnet's own trackers are used only when every address they resolve to is on
+  the public internet (never loopback, the LAN or 169.254.169.254); a UDP one is pinned to the address checked; web seeds and
+  private direct peers are dropped. A hash with nobody found after 60 s is given up instead of holding its slot for the
+  whole timeout, the number of parallel fetches follows the recent yield, the catch-all claim rests for a minute after an
+  empty answer, and the listen backlog is 128 instead of 5.
+
+<!-- part D: The pages: accessibility, layout and their language -->
+- Panel: a session that has ended is said on every page, once — a bar at the top ("your panel session has expired — sign
+  in again") whose button brings back the sign-in form. The Reports table no longer reads an ended session, a rate limit
+  or a server error as an empty queue ("No reports found. Total: 0", badges gone): it says "Loading…" while it waits, an
+  error row when it cannot load, and keeps the counts it had. A toast's clock stops while it is pointed at or holds the
+  focus, and its × has a name. (UX-21, UX-15)
+- Panel, Reports: "Are you sure?" asks through the panel's one dialog — grey Cancel, red OK where the action takes
+  something away, blue where it gives something back — instead of a page-own dialog with a red Cancel and a green
+  Confirm. Remove friend and Decline ask first in the row, and what takes something away on the public pages looks like
+  it (a red "soft" button). (UX-18, UX-26)
+- Panel: the "…" that opens a report or an appeal has a name ("Open report #12"), and every table's actions column
+  stays at the right edge of the table's visible box on a laptop instead of past it. (UX-27)
+- Windows: Info, the file list and Block take the keyboard's focus as they open (their title), Tab stays inside the top
+  window, and Esc gives the focus back to the button that opened them; the panel's windows and its confirm/prompt
+  dialogs give it back too. (UX-10)
+- Every sortable column header is a button — the keyboard reaches it, Enter sorts — and the sorted column says so to a
+  screen reader (aria-sort): the search results, Transparency and every panel table. (UX-13)
+- Readable: Settings' explanations 7.4:1 (were 1.84:1); alerts dark on every panel page (the "Security → CAPTCHA" link
+  was 2.03:1); outline buttons' words, the Log's code and the Traffic hints above 4.5:1; the unread counts black on blue
+  (7.6:1) and the panel's badges a darker red; field edges 3.3:1 and placeholders 4.75:1. (UX-6, UX-9, UX-8, UX-7)
+- Screen readers and the keyboard: a "skip to the content" link; the menu's "|" not read; the page the reader is on
+  marked; the panel's pages a main landmark and one <h1>; every close button and the "…" named; the empty search's ×
+  out of the Tab order; the Traffic slider shows its focus; form errors said aloud (alerts are live regions, a wrong
+  field aria-invalid with its message), and after a refused sign-in the focus is back in the password; the in-place
+  question names what Yes answers, starts on No, and gives the focus back when it runs out. (UX-15, UX-16, UX-12, UX-14)
+- Phones: a long name (up to 32 letters) no longer runs under the inbox's count and time or pushes the account and the
+  profile sideways; fields are 16px, so an iPhone does not zoom into them; icon buttons take a press 8px round them.
+  (UX-1, UX-2, UX-4, UX-5)
+- The words: Polish "2–4" forms — "2 pliki", "3 wyniki", "4 oceny" (were "plików", "wyników", "ocen") — chosen by the
+  language's own rule wherever a count is said, on the server and in the scripts (and Russian, Czech and the like get
+  theirs when a translation writes them); sizes in the page's decimal separator ("1,27 GiB"), one size rule everywhere;
+  "Last seen" in the reader's clock and the site's one short date format ("2026-10-05 18:00"), never the browser's;
+  one set of Polish terms (Ty/Twój with a capital, administrator, blacklista, selektor, …); a message refused because
+  messages were switched off says so instead of "js.pm.why_pm_disabled"; a failed list or friend action says so; the
+  FAQ's questions no longer look like links. (QUAL-17, UX-24, UX-25, UX-23, QUAL-19, UX-20, UX-19, UX-17)
+- The comment counter counts as the server does (tabs, invisible characters, a link without words) — it said "259/500"
+  for a text the server refused as too long. (QUAL-14)
+- Two keys the server asked for and the dictionary never had are there; a test reads every server-side lookup. (QUAL-10)
+- Defence in depth: a report's link and a torrent's source link are links only when they are http(s); the site's
+  address is escaped where the layout and the panel sign-in write it into a script. (XSS-3, XSS-8)
+- The scripts' dictionary is a cached file of its own per language (`i18n.php`, immutable, named by its content) instead
+  of 52 KB inline in every page; the live language switch loads the other language's file. (PERF-9)
+
+<!-- part E: Quality and tests -->
+- Panel: a database that stutters while the panel re-checks who is signed in no longer throws an administrator out.
+  The check is asked once more after 200 ms; if it still cannot answer, that one request is refused with 503 ("your
+  panel session could not be confirmed just now — try again in a moment", Retry-After 5) and the session stays.
+  (QUAL-22)
+- A failed or deferred schema upgrade no longer runs again on every page view: the website waits 60 s before the next
+  try (`config/schema_retry.marker`, cleared as soon as the version is recorded); the command line always tries.
+  (QUAL-24)
+- What the server could not read is no longer said as "nothing": the partner API's `v1/whitelist/ping` and the
+  federation ping answer 503 with Retry-After instead of "ok, 0 torrents"; the panel's Groups and Users tables show
+  their error row instead of an empty list; the Index and Whitelist totals are "unknown" instead of 0 while the rows
+  still load; the index status card keeps what it showed instead of an empty index for five minutes; Home layout's
+  reset and save refuse before changing anything; the Whitelist card and the service warnings say when their counts
+  failed; the traffic timeline leaves a gap instead of a zero. Every such failure is logged with its `[prefix]`; no
+  `catch` is left empty without a word. (QUAL-26)
+- Accounts switched off: the sessions and two-step sign-in endpoints answer "accounts are disabled" first, like the
+  rest of the account API. (PUB-8)
+- Appeals: whoever appealed a block gets the decision by mail — accepted, rejected, or closed because the block was
+  lifted — in the site's language (an appeal has no account). (QUAL-18)
+- Settings: every field has a name a screen reader says — its words are tied to it, so a click on them puts the cursor
+  in it (about 400 fields in Settings, 50 in Users, Traffic, Dashboard, Whitelist and Backups); the fields without
+  words of their own (the schedule's week table, the drop zones' file inputs, the status filters, select-all) are
+  named. The row checkboxes of the Whitelist, Index, Users and federation review tables say which row they select.
+  (UX-11)
+- Settings: the limits counted per address say "(per IP; IPv6 per /64)" — an IPv6 address counts by its /64.
+- One default for the two switches whose readers disagreed: Transparency and the language switch are ON when the row
+  was never written, as the schema seeds them (the menu hid Transparency while the page served it). (QUAL-2)
+- The metadata worker's default number of parallel probes is 3 everywhere — the worker, its example config, its README
+  and the panel's estimate when the worker has not reported its own. (QUAL-3)
+- The search results' "1000+" and the panel's capped row count are said in the reader's language and follow the live
+  language switch. The Info window uses the same Polish terms as the rest of the site.
+- Removed what nothing used: the CAPTCHA "failed sign-ins" points setting nobody read (QUAL-1), ten functions nothing
+  called (QUAL-9), 48 dictionary entries nothing said (QUAL-11), style rules for elements no page has (QUAL-12). The
+  CAPTCHA request's comment states its real time limits (QUAL-25).
+- Docs: README, INSTALL and the API page say what 1.74.0 changed — a submitted magnet is stored as its hash and name
+  with this tracker's own announce addresses, the pings' 503, the panel session's re-check, the appeal mails, caching
+  the scripts and styles behind nginx, and the 1.74.0 upgrade steps and troubleshooting rows.
+- Tests: new `routes_ratchet_test` (every route has its file and is in the permission map or a reviewed owner-only
+  list; a list of untested routes that may only shrink; the refusals per route kind over HTTP),
+  `state_switch_test` (bulk send, the dead-hash janitor, the scheduled mode switch — run, not grepped) and
+  `quality_1740_test`; `partner_api`, `retention`, `livesync` and `iplist` tests run the code instead of grepping it;
+  the SQL safety baseline is current. Browser checks try once more by themselves on Windows' `ERR_NO_BUFFER_SPACE`,
+  and the language-swap check removes its fixtures even when a run dies. (QUAL-5, QUAL-6, QUAL-7, QUAL-8)
+
+### Production note
+
+* Migration 93 adds `user_notifications.sender_id` with two keys, the empty `index_catalog` table and the setting
+  `confirm_mail_daily_cap` (200). The janitor fills `index_catalog` by itself in a few minutes; the search uses it only
+  after a whole pass (`config/index_state.json` → `catalog_pass_at`).
+* The metadata worker changed: deploy it (`worker.py`, `federation.py`) and restart `tracker-metadata`.
+* `i18n.php` is a new entry point (the script dictionary as a versioned file) and is in the deploy's allow-list.
+* After the deploy the owner rotates `hmac_secret` (Settings, behind the password): every backup and unsubscribe token
+  signed with the old one stops working, which is the point; links in mails already sent stop working too.
+* The Content-Security-Policy is ready for `enforce` (reCAPTCHA's styles and its eval are allowed where it renders);
+  switching `csp_mode` stays the owner's click, after a look at the CSP reports.
+
 ## [1.73.3] — 2026-10-06
 
 The tracker's way out. On 2026-10-05 production's provider was dropping packets of the WHOLE machine — the website,

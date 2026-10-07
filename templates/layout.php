@@ -88,9 +88,12 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <?php endif; ?>
 </head>
 <body<?= in_array($action, ['transparency', 'stats', 'search'], true) ? ' class="page-' . $action . '"' : '' ?>>
+    <?php /* The first stop of the Tab key (1.74.0): past the menu, to the page's own content — out of sight until the
+             keyboard reaches it (style.css .skip-link). The content takes the focus it leads to (tabindex -1). */ ?>
+    <a class="skip-link" href="#main-content"><?= _h('common.skip_to_content') ?></a>
     <div class="container">
         <?php include __DIR__ . '/nav.php'; ?>
-        <main>
+        <main id="main-content" tabindex="-1">
             <?php include $pageTemplate; ?>
         </main>
         <?php include __DIR__ . '/footer.php'; ?>
@@ -108,8 +111,11 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <?php /* What the server wrote, marked before any script of the page can add to it (1.73.0): the live language
              switch rewrites only that (assets/js/lang-swap.js). The first thing after the page's markup. */ ?>
     if (window.LangSwap) window.LangSwap.mark();
-    const APP_BASE = '<?= $baseUrl ?>';
-    const APP_API = '<?= $baseUrl ?>api.php?endpoint=';
+    <?php /* The site's address as a script string (1.74.0): through json_encode() with every HEX flag, as langJsBridge()
+             escapes it — a base path is the operator's and the server's to say, but it is still not written raw into
+             a script. */ ?>
+    const APP_BASE = <?= json_encode((string)$baseUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+    const APP_API = APP_BASE + 'api.php?endpoint=';
     <?php /* The two facts window.userAvatarUrl() needs to build the same address userAvatarUrl() does:
              whether pictures exist at all, and the site's default picture (its address prefix) when the
              owner chose one. Nothing about any account — those ride along with each row. */ ?>

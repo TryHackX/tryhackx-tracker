@@ -35,7 +35,7 @@ add('settings', {
         'description — offers the same emoji, the same Font Awesome icons and the same emotes and stickers. The '
         'emoji and the icons work on their own; the emotes and the stickers are pictures the shoutbox keeps, so '
         'they need it switched on (<a href=":url">Shoutbox</a>).',
-        'Dla całej strony, nie tylko dla shoutboxa: każdy tekst, który ma wybierak emoji — shoutbox, prywatne '
+        'Dla całej strony, nie tylko dla shoutboxa: każdy tekst, który ma selektor emoji — shoutbox, prywatne '
         'wiadomości, opisy torrentów i propozycje, które je zmieniają, opisy list i opis profilu — pokazuje te '
         'same emoji, te same ikony Font Awesome i te same emotki i naklejki. Emoji i ikony działają same; emotki '
         'i naklejki to obrazki, które przechowuje shoutbox, więc potrzebują go włączonego '

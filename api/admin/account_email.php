@@ -50,7 +50,8 @@ if (isset($r['error'])) {
 if (($r['stage'] ?? '') === 'done_direct') {
     $fresh = userFindById($db, (int)$u['id']);
     $sent = ($fresh && trim((string)$fresh['email']) !== '') ? userVerifySend($db, $cfg, $fresh) : false;
-    userNotify($db, (int)$u['id'], 'account', 'Your email was set', 'Set from the admin panel.');
+    $uLang = recipientLang($cfg, $fresh ?? $u);   // the account's language (1.74.0)
+    userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.email_set'), langFor($uLang, 'notify.email_set_admin_body'));
     jsonResponse(['success' => true, 'stage' => 'done_direct', 'verify_sent' => $sent,
         'message' => $sent ? __('api.account.email_saved_sent') : __('api.account.email_saved_not_sent')]);
 }

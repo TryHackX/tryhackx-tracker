@@ -858,6 +858,55 @@ function userAvatarGeneratedUrl(string $username, string $baseUrl): string
 }
 
 /**
+ * The generated picture as the element DRAWS it (1.74.0, MAIN-3): the very SVG api/user_avatar_default.php serves,
+ * in a `data:` address, so a letter costs no request at all.
+ *
+ * It was a request per letter × colour through the whole api.php bootstrap — a session, the database, the settings —
+ * about 5 ms of server when idle and ~300 ms under load, and on a connection that drops packets each new request is
+ * a chance to hang for seconds beside a name. The picture is a rectangle and one character; drawing it where it is
+ * drawn is cheaper than any cache.
+ *
+ * What travels in JSON stays the ADDRESS (userAvatarField()): an address names one of 432 pictures and is the shape
+ * every reader of those rows already checks. The swap happens where an element is drawn — userAvatarHtml() here,
+ * userAvatarImg() / userAvatarSet() in assets/js/avatar.js, which builds the same string byte for byte (FNV-1a and
+ * the twelve colours are written there too, and rawurlencode() equals encodeURIComponent() plus !'()*). The
+ * endpoint stays for every address already out there. Both policies' img-src carry `data:` (includes/csp.php and
+ * the .htaccess fallback), which the account page's local preview has relied on since 1.63.0.
+ */
+function userAvatarLetterSrc(string $letter, int $colour): string
+{
+    return 'data:image/svg+xml,' . rawurlencode(userAvatarDefaultSvg($letter, $colour));
+}
+
+/**
+ * What an `<img>` draws for one of this file's addresses: a letter's address becomes its `data:` picture
+ * (userAvatarLetterSrc()), anything else is drawn as it is.
+ */
+function userAvatarDrawn(string $url, string $baseUrl): string
+{
+    $b = preg_quote($baseUrl, '~');
+    if (preg_match('~^' . $b . 'api\.php\?endpoint=user_avatar_default&l=([A-Z0-9])&c=([0-9]|1[01])$~', $url, $m)) {
+        return userAvatarLetterSrc($m[1], (int)$m[2]);
+    }
+    return $url;
+}
+
+/**
+ * Is $src exactly one of the 432 drawn letters? [letter, colour] or null. Read off the string and then rebuilt and
+ * compared whole, so nothing but a picture this file itself writes is ever taken for one.
+ */
+function userAvatarLetterSrcParse(string $src): ?array
+{
+    if (!str_starts_with($src, 'data:image/svg+xml,')
+        || !preg_match('~fill%3D%22%23([0-9a-f]{6})%22%2F%3E.*%3E([A-Z0-9])%3C%2Ftext%3E%3C%2Fsvg%3E$~', $src, $m)) {
+        return null;
+    }
+    $colour = array_search('#' . $m[1], USER_AVATAR_COLOURS, true);
+    if ($colour === false) return null;
+    return userAvatarLetterSrc($m[2], (int)$colour) === $src ? [$m[2], (int)$colour] : null;
+}
+
+/**
  * THE helper phase B calls beside every name: the right address for somebody's picture.
  *
  * `$userish` is anything carrying `username` and `avatar_sha` (a full users row, or the subset a
@@ -894,6 +943,9 @@ function userAvatarUrl(array $userish, int $size, string $baseUrl, ?array $cfg =
  *
  * `srcset` names the square each screen density should take (userAvatarSrcset); `src` stays the
  * square userAvatarUrl() picks, twice the CSS size, for anything that does not read srcset.
+ *
+ * A letter — as `src`, and as the `data-fallback` behind a stored picture — is drawn as its `data:` picture
+ * (userAvatarDrawn(), 1.74.0): the address is decided first, exactly as before, and only the drawing changes.
  */
 function userAvatarHtml(array $userish, int $size, string $baseUrl, string $class = 'avatar', ?array $cfg = null): string
 {
@@ -909,10 +961,12 @@ function userAvatarHtml(array $userish, int $size, string $baseUrl, string $clas
         $url = userAvatarUrl($userish, $size, $baseUrl, $cfg);
     }
     $srcset = userAvatarSrcset($url, $size, $baseUrl);
+    $src = userAvatarDrawn($url, $baseUrl);
+    $fallback = userAvatarDrawn($fallback, $baseUrl);
     return '<img class="' . htmlspecialchars(trim($class . ' js-avatar'), ENT_QUOTES, 'UTF-8') . '"'
-         . ' src="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"'
+         . ' src="' . htmlspecialchars($src, ENT_QUOTES, 'UTF-8') . '"'
          . ($srcset !== '' ? ' srcset="' . htmlspecialchars($srcset, ENT_QUOTES, 'UTF-8') . '"' : '')
-         . ($fallback !== $url ? ' data-fallback="' . htmlspecialchars($fallback, ENT_QUOTES, 'UTF-8') . '"' : '')
+         . ($fallback !== $src ? ' data-fallback="' . htmlspecialchars($fallback, ENT_QUOTES, 'UTF-8') . '"' : '')
          . ' width="' . $size . '" height="' . $size . '" alt="" loading="lazy" decoding="async">';
 }
 
@@ -937,7 +991,8 @@ function userAvatarSiteUrl(string $baseUrl): string
 /**
  * Which of this file's addresses $url is, or null for anything else: 'media' (an account's square or
  * the site's default picture, with `prefix` = everything up to the size), 'letter' (the generated
- * picture) or 'site' (the site's mark). assets/js/avatar.js asks the same three questions.
+ * picture — its address, or since 1.74.0 the drawn `data:` picture itself, userAvatarLetterSrcParse())
+ * or 'site' (the site's mark). assets/js/avatar.js asks the same three questions.
  */
 function userAvatarUrlKind(string $url, string $baseUrl): ?array
 {
@@ -945,7 +1000,8 @@ function userAvatarUrlKind(string $url, string $baseUrl): ?array
     if (preg_match('~^(' . $b . 'api\.php\?endpoint=user_media&h=[0-9a-f]{16}&s=)[0-9]{1,3}$~', $url, $m)) {
         return ['kind' => 'media', 'prefix' => $m[1]];
     }
-    if (preg_match('~^' . $b . 'api\.php\?endpoint=user_avatar_default&l=[A-Z0-9]&c=(?:[0-9]|1[01])$~', $url)) {
+    if (preg_match('~^' . $b . 'api\.php\?endpoint=user_avatar_default&l=[A-Z0-9]&c=(?:[0-9]|1[01])$~', $url)
+        || userAvatarLetterSrcParse($url) !== null) {
         return ['kind' => 'letter'];
     }
     return $url === userAvatarSiteUrl($baseUrl) ? ['kind' => 'site'] : null;

@@ -23,7 +23,6 @@ function fedNodeName(array $cfg): string { return mb_substr(trim((string)($cfg['
 function fedExportEnabled(array $cfg): bool { return fedEnabled($cfg) && (($cfg['fed_export_enabled'] ?? '0') === '1'); }
 function fedExportFiles(array $cfg): bool { return (($cfg['fed_export_files'] ?? '1') === '1'); }
 function fedExportMaxBatch(array $cfg): int { return max(100, min(20000, (int)($cfg['fed_export_max_batch'] ?? 2000) ?: 2000)); }
-function fedImportNew(array $cfg): bool { return (($cfg['fed_import_new'] ?? '0') === '1'); }
 /**
  * fill = a peer's answer goes straight into the catalogue. review = it goes into fed_review and
  * nothing is visible until somebody accepts it. The difference matters the moment a peer is someone
@@ -44,7 +43,8 @@ function fedExportMaxBytes(array $cfg): int { return max(0, min(1073741824, (int
 function fedExportMaxFiles(array $cfg): int { return max(0, min(50000000, (int)($cfg['fed_export_max_files'] ?? 200000))); }
 /** Rows read from the database at a time while streaming. Bounds memory; not user-visible. */
 const FED_STREAM_CHUNK = 500;
-function fedPullMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['fed_pull_minutes'] ?? 60) ?: 60)); }
+// `fed_import_new` and `fed_pull_minutes` are read by worker/federation.py, the side that imports and pulls; their
+// PHP twins (fedImportNew(), fedPullMinutes()) were never called and went in 1.74.0 (QUAL-9).
 
 /**
  * One export page. Cursor = (since = UNIX ts of meta_fetched_at, after_hash = tie-break within the
@@ -563,5 +563,7 @@ function fedPurgeBatch(PDO $db, string $peerName, int $limit = 500): int {
         $db->rollBack();
         throw $e;
     }
+    // Rows without a name leave the public catalogue's narrow table with them (1.74.0, includes/index.php).
+    if (function_exists('indexCatalogForget')) indexCatalogForget($db, $hashes);
     return count($hashes);
 }

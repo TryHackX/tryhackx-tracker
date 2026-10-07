@@ -109,14 +109,17 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
                      favourites — the question app.js asks of data-fav before it draws one in a row. */ ?>
             <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><?= $repCol ? '<col class="search-c-rep">' : '' ?><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions' . ($favCtx['may_use'] ? ' search-c-actions-fav' : '') . '">' : '' ?>
         </colgroup>
+        <?php /* Each sortable header's words are a button (1.74.0): the keyboard reaches it and Enter or Space sorts
+                 (the header hears its click); app.js says the order on the header (aria-sort). A header that only
+                 listened for a click could not be sorted without a mouse. */ ?>
         <thead><tr>
-            <th class="search-sortable" data-sort="name"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>
-            <th class="search-sortable" data-sort="size"><?= _h('search.col_size') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>
-            <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th>
+            <th class="search-sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th>
+            <th class="search-sortable" data-sort="size"><button type="button" class="th-sort"><?= _h('search.col_size') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th>
+            <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><button type="button" class="th-sort"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th>
             <?php if ($repCol): ?>
             <th title="<?= _h('search.col_rating_title') ?>"><?= _h('search.col_rating') ?></th>
             <?php endif; ?>
-            <th class="search-sortable" data-sort="last"><?= _h('search.col_last') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></th><?= $canMagnet ? '<th></th>' : '' ?>
+            <th class="search-sortable" data-sort="last"><button type="button" class="th-sort"><?= _h('search.col_last') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th><?= $canMagnet ? '<th></th>' : '' ?>
         </tr></thead>
         <tbody id="search-body"></tbody>
     </table>

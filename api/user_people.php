@@ -46,11 +46,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!userCan($db, $cfg, 'friends.use')) jsonResponse(['error' => 'no_permission'], 403);
     }
 
+    // A friend notification is written in THEIR language (1.74.0, QUAL-18 — until then in the sender's: this is the
+    // sender's request) and says whose it is (`sender_id`, v93), so it goes when that account goes (PRIV-1).
+    $tellThem = static function (string $type) use ($db, $cfg, $them, $tid, $uid, $me): void {
+        userNotify($db, $tid, $type, langFor(recipientLang($cfg, $them), 'notify.' . $type, ['user' => $me['username']]), '', null, $uid);
+    };
+
     switch ($op) {
         case 'follow':
+            // A profile hidden from me by their block is not there for me (1.74.0, PRIV-3): the same not-found
+            // the profile page, the conversation and every other question answer — never "blocked", which says
+            // the account exists and has done something about me.
+            $theirBlock = blockRow($db, $tid, $uid);
+            if ($theirBlock !== null && !empty($theirBlock['hide_profile'])) jsonResponse(['error' => 'not_found'], 404);
             // Blocked either way, no request: a request is a message of a kind, and the whole point
             // of a block is that it stops those.
-            if (blockRow($db, $tid, $uid) !== null || blockRow($db, $uid, $tid) !== null) {
+            if ($theirBlock !== null || blockRow($db, $uid, $tid) !== null) {
                 jsonResponse(['error' => 'blocked'], 403);
             }
             // If THEY already asked ME, following back is what accepting means. One row, and the
@@ -59,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                  WHERE user_id = ? AND friend_id = ? AND status = 'pending'");
             $st->execute([$tid, $uid]);
             if ($st->rowCount() === 1) {
-                userNotify($db, $tid, 'friend_accepted', __('notify.friend_accepted', ['user' => $me['username']]));
+                $tellThem('friend_accepted');
                 jsonResponse(['success' => true, 'state' => 'friends']);
             }
             // Already friends (through the row THEY hold): nothing to ask, and a second, pending row
@@ -69,9 +80,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $ins = $db->prepare("INSERT IGNORE INTO user_friends (user_id, friend_id, status) VALUES (?, ?, 'pending')");
             $ins->execute([$uid, $tid]);
             // One notification per request made, not per click: repeating the POST used to deliver
-            // one more line into the other person's inbox each time.
-            if ($ins->rowCount() === 1) {
-                userNotify($db, $tid, 'friend_request', __('notify.friend_request', ['user' => $me['username']]));
+            // one more line into the other person's inbox each time. And (1.74.0, PUB-5) not one per
+            // follow-unfollow round either: while a request from me still waits UNREAD in their
+            // notifications, a new one says nothing it does not — the loop delivered a line per turn.
+            if ($ins->rowCount() === 1 && !friendRequestUnread($db, $tid, $uid)) {
+                $tellThem('friend_request');
             }
             jsonResponse(['success' => true, 'state' => friendState($db, $uid, $tid)]);
             // no break — jsonResponse() exits
@@ -89,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                  WHERE user_id = ? AND friend_id = ? AND status = 'pending'");
             $st->execute([$tid, $uid]);
             if ($st->rowCount() !== 1) jsonResponse(['error' => 'not_found'], 404);
-            userNotify($db, $tid, 'friend_accepted', __('notify.friend_accepted', ['user' => $me['username']]));
+            $tellThem('friend_accepted');
             jsonResponse(['success' => true, 'state' => 'friends']);
 
         case 'decline':

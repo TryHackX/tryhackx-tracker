@@ -11,8 +11,8 @@ if (isCaptchaRequired($cfg, 'status')) {
     onCaptchaSolved();
 }
 
-$query = trim($input['search_query'] ?? '');
-$email = trim($input['email'] ?? '');
+$query = trim(strInput($input, 'search_query'));
+$email = trim(strInput($input, 'email'));
 
 if (empty($query)) {
     jsonResponse(['error' => __('api.status.query_required')], 400);
@@ -23,9 +23,10 @@ if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     jsonResponse(['error' => __('api.status.email_required')], 400);
 }
 
-// Per-IP rate limit: report IDs are sequential, so without a throttle an attacker could iterate
-// them against a target email to confirm ownership. CAPTCHA is optional; this always applies.
-if (!rateLimitAllow('status', getClientIp($cfg), (int)($cfg['rate_limit_status'] ?? 20))) {
+// Per-address-group rate limit: report IDs are sequential, so without a throttle an attacker could iterate
+// them against a target email to confirm ownership. CAPTCHA is optional; this always applies — to an IPv6 host's
+// whole /64 (ipBucket(), 1.74.0), not to each of its addresses.
+if (!rateLimitAllow('status', ipBucket(getClientIp($cfg)), (int)($cfg['rate_limit_status'] ?? 20))) {
     jsonResponse(['error' => __('api.status.too_many')], 429);
 }
 

@@ -64,10 +64,10 @@ add('account', {
     'votes_public_label_stars': ('Show my ratings on my profile', 'Pokazuj moje oceny na moim profilu'),
     'votes_public_hint_thumbs': (
         'Your thumbs down are shown too, not only the likes. Off, nobody but you sees the list.',
-        'Widać też twoje kciuki w dół, nie tylko polubienia. Wyłączone — tej listy nie widzi nikt poza tobą.'),
+        'Widać też Twoje kciuki w dół, nie tylko polubienia. Wyłączone — tej listy nie widzi nikt poza Tobą.'),
     'votes_public_hint_stars': (
         'Your low ratings are shown too, not only the high ones. Off, nobody but you sees the list.',
-        'Widać też twoje niskie oceny, nie tylko wysokie. Wyłączone — tej listy nie widzi nikt poza tobą.'),
+        'Widać też Twoje niskie oceny, nie tylko wysokie. Wyłączone — tej listy nie widzi nikt poza Tobą.'),
 })
 
 # ── the profile page's section heading (the account tab's pane uses it too) ─────
@@ -96,7 +96,7 @@ add('votes', {
     'col_date_stars': ('Rated on', 'Data oceny'),
     'col_date_title': (
         'When the vote was cast or last changed, in your time zone',
-        'Kiedy głos oddano albo ostatnio zmieniono — w twojej strefie czasowej'),
+        'Kiedy głos oddano albo ostatnio zmieniono — w Twojej strefie czasowej'),
     'col_actions': ('Actions', 'Akcje'),
     'range_from': ('From', 'Od'),
     'range_to': ('to', 'do'),

@@ -573,7 +573,10 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endp
             'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
             'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users', 'admin/content_reports',
             'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',
-            'admin/fetch_fed_peers', 'admin/user_media'], true)) {
+            'admin/fetch_fed_peers', 'admin/user_media',
+            // 1.74.0 (PERF-12): the two pollers that were missing — the whitelist modal's row (every 3 s, and
+            // a live scrape of up to 2 s inside it) and the Index page's poll passes.
+            'admin/whitelist_item', 'admin/index_polls'], true)) {
         session_write_close();
     }
 }

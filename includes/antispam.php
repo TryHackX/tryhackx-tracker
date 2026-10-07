@@ -265,10 +265,24 @@ function antispamAgeAt(?string $accountCreated, ?string $writtenAt): ?int
 
 /* ── the words ───────────────────────────────────────────────────────────────────────────────────── */
 
-/** A text's fingerprint for the duplicate rule: case and spacing aside; '' for words too short to count. */
+/**
+ * A text's fingerprint for the duplicate rule: case and spacing aside; '' for words too short to count.
+ *
+ * And what cannot be SEEN aside (1.74.0, AUTH-5): the same words with a zero-width space, a soft hyphen or a
+ * word joiner slipped in, or typed in their full-width or other compatibility forms, are the same words to a
+ * reader and were a new text to this rule. So the text is brought to its NFKC form first (where PHP has intl; the
+ * shapes NFKC folds are rare without it) and every format character (\p{Cf}: U+200B–U+200D, U+2060, U+FEFF, U+00AD
+ * and their kind) taken out. Look-alike letters from other scripts (a Cyrillic "а") are not folded — that is a
+ * guess about intent this rule does not make.
+ */
 function antispamFingerprint(?string $text): string
 {
     if ($text === null) return '';
+    if (class_exists('Normalizer')) {
+        $n = Normalizer::normalize($text, Normalizer::FORM_KC);
+        if (is_string($n)) $text = $n;
+    }
+    $text = (string)preg_replace('/[\p{Cf}\x{00AD}\x{200B}-\x{200D}\x{2060}\x{FEFF}]+/u', '', $text);
     $t = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $text)), 'UTF-8');
     if (mb_strlen($t, 'UTF-8') < ANTISPAM_DUP_MIN_CHARS) return '';
     return substr(hash('sha256', $t), 0, 16);

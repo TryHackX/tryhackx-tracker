@@ -27,7 +27,7 @@ add('js.reports', {
     'restart_tracker_title_svc': ('Restart the tracker service (:service)',
         'Zrestartuj usługę trackera (:service)'),
     'reload_tracker_title_svc': ('Reload the tracker blacklist (SIGHUP, no downtime) — :service',
-        'Przeładuj czarną listę trackera (SIGHUP, bez przestoju) — :service'),
+        'Przeładuj blacklistę trackera (SIGHUP, bez przestoju) — :service'),
 })
 # ── a sign-in bridge on the panel's Users table: the sentence and the account it names ──
 add('js.users', {

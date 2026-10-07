@@ -8,13 +8,14 @@
     <table class="transparency-table" id="trans-table">
         <thead>
             <tr>
+                <?php /* The sortable headers' words are buttons (1.74.0): the keyboard reaches them, Enter sorts. */ ?>
                 <th>#</th>
-                <th class="trans-sortable" data-sort="company" data-exclusive="representative"><?= _h('transparency.company') ?> <i class="bi bi-arrow-down-up trans-sort-icon"></i></th>
-                <th class="trans-sortable" data-sort="representative" data-exclusive="company"><?= _h('transparency.represented') ?> <i class="bi bi-arrow-down-up trans-sort-icon"></i></th>
-                <th class="trans-sortable" data-sort="total"><?= _h('transparency.total') ?> <i class="bi bi-arrow-down-up trans-sort-icon"></i></th>
-                <th class="trans-sortable" data-sort="accepted"><?= _h('transparency.reviewed') ?> <i class="bi bi-arrow-down-up trans-sort-icon"></i></th>
-                <th class="trans-sortable" data-sort="blocked"><?= _h('transparency.blocked') ?> <i class="bi bi-arrow-down-up trans-sort-icon"></i></th>
-                <th class="trans-sortable" data-sort="pending"><?= _h('transparency.pending') ?> <i class="bi bi-arrow-down-up trans-sort-icon"></i></th>
+                <th class="trans-sortable" data-sort="company" data-exclusive="representative"><button type="button" class="th-sort"><?= _h('transparency.company') ?> <i class="bi bi-arrow-down-up trans-sort-icon" aria-hidden="true"></i></button></th>
+                <th class="trans-sortable" data-sort="representative" data-exclusive="company"><button type="button" class="th-sort"><?= _h('transparency.represented') ?> <i class="bi bi-arrow-down-up trans-sort-icon" aria-hidden="true"></i></button></th>
+                <th class="trans-sortable" data-sort="total"><button type="button" class="th-sort"><?= _h('transparency.total') ?> <i class="bi bi-arrow-down-up trans-sort-icon" aria-hidden="true"></i></button></th>
+                <th class="trans-sortable" data-sort="accepted"><button type="button" class="th-sort"><?= _h('transparency.reviewed') ?> <i class="bi bi-arrow-down-up trans-sort-icon" aria-hidden="true"></i></button></th>
+                <th class="trans-sortable" data-sort="blocked"><button type="button" class="th-sort"><?= _h('transparency.blocked') ?> <i class="bi bi-arrow-down-up trans-sort-icon" aria-hidden="true"></i></button></th>
+                <th class="trans-sortable" data-sort="pending"><button type="button" class="th-sort"><?= _h('transparency.pending') ?> <i class="bi bi-arrow-down-up trans-sort-icon" aria-hidden="true"></i></button></th>
             </tr>
         </thead>
         <tbody id="trans-body"></tbody>

@@ -56,7 +56,7 @@ add('', {
 # The three tabs above the list, the notes under them, and the Trash's one button — drawn by
 # templates/pages/account.php, so the live language switch swaps them with the page.
 add('pm', {
-    'views_label': ('Where your conversations are', 'Gdzie są twoje rozmowy'),
+    'views_label': ('Where your conversations are', 'Gdzie są Twoje rozmowy'),
     'view_inbox': ('Inbox', 'Odebrane'),
     'view_archive': ('Archive', 'Archiwum'),
     'view_trash': ('Trash', 'Kosz'),
@@ -65,9 +65,9 @@ add('pm', {
     'note_archive_stays': ('Archived conversations wait here — nothing is deleted. A new message stays here too, marked unread.',
                            'Zarchiwizowane rozmowy czekają tutaj — nic nie jest usuwane. Nowa wiadomość też zostaje tutaj, oznaczona jako nieprzeczytana.'),
     'note_trash_one': ('A deleted conversation waits here for 1 day, then it is deleted for good — for you only: the other person keeps their copy.',
-                       'Usunięta rozmowa czeka tu 1 dzień, potem jest usuwana na dobre — tylko dla ciebie: druga strona zachowuje swoją kopię.'),
+                       'Usunięta rozmowa czeka tu 1 dzień, potem jest usuwana na dobre — tylko dla Ciebie: druga strona zachowuje swoją kopię.'),
     'note_trash_many': ('A deleted conversation waits here for :days days, then it is deleted for good — for you only: the other person keeps their copy.',
-                        'Usunięta rozmowa czeka tu :days dni, potem jest usuwana na dobre — tylko dla ciebie: druga strona zachowuje swoją kopię.'),
+                        'Usunięta rozmowa czeka tu :days dni, potem jest usuwana na dobre — tylko dla Ciebie: druga strona zachowuje swoją kopię.'),
     'note_trash_none': ('This tracker keeps no Trash any more: Delete deletes at once. What is still here is deleted for good within a minute.',
                         'Ten tracker nie ma już kosza: „Usuń” usuwa od razu. To, co tu jeszcze jest, zostanie usunięte na dobre w ciągu minuty.'),
     'empty_trash': ('Empty the Trash', 'Opróżnij kosz'),
@@ -127,12 +127,12 @@ add('js.pm', {
     't_undone': ('Undone.', 'Cofnięto.'),
     't_stale': ('Nothing to undo any more — it has changed since.', 'Nie ma już czego cofnąć — w międzyczasie coś się zmieniło.'),
     # the bar under a conversation's head: where it is, and its way back
-    'bar_archive': ('This conversation is in your Archive.', 'Ta rozmowa jest w twoim archiwum.'),
+    'bar_archive': ('This conversation is in your Archive.', 'Ta rozmowa jest w Twoim archiwum.'),
     'bar_trash': ('This conversation is in your Trash — it will be deleted for good on :date.',
-                  'Ta rozmowa jest w twoim koszu — zostanie usunięta na dobre :date.'),
-    'bar_trash_plain': ('This conversation is in your Trash.', 'Ta rozmowa jest w twoim koszu.'),
+                  'Ta rozmowa jest w Twoim koszu — zostanie usunięta na dobre :date.'),
+    'bar_trash_plain': ('This conversation is in your Trash.', 'Ta rozmowa jest w Twoim koszu.'),
     'bar_older': ('Earlier messages of this conversation are in your Trash (:n).',
-                  'Wcześniejsze wiadomości tej rozmowy są w twoim koszu (:n).'),
+                  'Wcześniejsze wiadomości tej rozmowy są w Twoim koszu (:n).'),
     'bar_restore_older': ('Restore them', 'Przywróć je'),
     # the places' empty lists
     'no_archive': ('Nothing in the Archive.', 'Archiwum jest puste.'),

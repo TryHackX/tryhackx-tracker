@@ -28,5 +28,6 @@ $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")->execute([password_h
 // leave whoever they are worried about exactly where they were.
 userSignOutOthers($db, $userId, false);
 $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([$userId]);
-userNotify($db, $userId, 'account', 'Your password was reset', 'If this was not you, contact the site admin.');
+$uLang = recipientLangOf($db, $cfg, $userId);   // the account's language, not the reset page's (1.74.0)
+userNotify($db, $userId, 'account', langFor($uLang, 'notify.password_reset'), langFor($uLang, 'notify.password_reset_body'));
 jsonResponse(['success' => true]);

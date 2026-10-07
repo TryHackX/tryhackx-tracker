@@ -292,15 +292,9 @@ function repMyVote(PDO $db, array $cfg, string $hash): int {
     return (int)($st->fetchColumn() ?: 0);
 }
 
-/**
- * How much CAPTCHA pressure a vote adds.
- *
- * The site already has a points scheme: actions add points and the CAPTCHA appears past a threshold.
- * A vote joins it rather than inventing a second mechanism — which means somebody voting steadily is
- * never bothered, and somebody voting fifty times in a minute meets a CAPTCHA without anybody having
- * to write a bot detector.
- */
-function repCaptchaPoints(array $cfg): int { return max(0, min(100, (int)($cfg['captcha_pts_vote'] ?? 2))); }
+// How much CAPTCHA pressure a vote adds: `captcha_pts_vote`, spent by api/rate_hash.php through the site's one points
+// scheme, addCaptchaPoints($cfg, 'vote') — somebody voting steadily is never bothered, somebody voting fifty times
+// in a minute meets a CAPTCHA. (repCaptchaPoints(), a second reader nothing called, went in 1.74.0, QUAL-9.)
 
 /**
  * Wipe every vote on a hash — used when a hash is banned, so a ban does not leave a score behind.

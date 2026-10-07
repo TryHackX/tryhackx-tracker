@@ -36,7 +36,12 @@ const ST_5M_TABLE       = 'stats_samples_5m';
 const ST_1H_TABLE       = 'stats_samples_1h';
 const ST_ROLLUP_MAX_BUCKETS = 2000;    // buckets rolled per tick per table (bounds one INSERT…SELECT)
 const ST_PRUNE_EVERY    = 3600;        // seconds between prune runs
-const ST_API_CACHE_TTL  = 30;          // seconds the stats_timeline JSON is cached per range
+// Seconds the stats_timeline JSON is cached per range. LONGER than the chart's own 60-second poll
+// (assets/js/stats-timeline.js), 1.74.0 (PERF-17): at 30 s every poll of a lone viewer found the file
+// stale and rebuilt the whole range; at 90 s every other poll of one viewer, and every poll of the next
+// one, is the file. A sample lands every stats_timeline_interval (60 s by default), so the chart is at
+// most about one sample behind what it would be.
+const ST_API_CACHE_TTL  = 90;
 const ST_MAX_RAW_POINTS = 3000;        // above this the API switches raw → 5m
 const ST_MAX_5M_POINTS  = 4500;        // above this the API switches 5m → 1h
 
@@ -302,7 +307,10 @@ function statsTimelineRowFromParsed(PDO $db, array $cfg, array $p, int $now): ar
     $udp = $p['connections']['udp'] ?? [];
     $tcp = $p['connections']['tcp'] ?? [];
     $wl = 0;
-    try { $wl = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); } catch (\Throwable $e) {}
+    // A count that fails leaves 0 in its NOT NULL column — a dip on the chart for that one sample — and, since 1.74.0
+    // (QUAL-26), a line in the log that says the dip is not the tracker's.
+    try { $wl = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn(); }
+    catch (\Throwable $e) { error_log('[timeline] the whitelist count of a sample failed: ' . $e->getMessage()); }
     // The catalogue size, from the cache in includes/index.php rather than a fresh COUNT(*).
     //
     // MEASURED on production 2026-09-08: that count is an index scan over 3 368 887 entries of
@@ -321,7 +329,10 @@ function statsTimelineRowFromParsed(PDO $db, array $cfg, array $p, int $now): ar
     // api/tracker_stats.php and tests/stats_timeline_test.php all reach this file on paths that do not
     // necessarily carry includes/index.php, and a sample that fails to build is a sample not stored.
     $idx = 0;
-    if (function_exists('indexTotalCached')) { try { $idx = (int)indexTotalCached($db, ST_INDEX_ROWS_TTL); } catch (\Throwable $e) {} }
+    if (function_exists('indexTotalCached')) {
+        try { $idx = (int)indexTotalCached($db, ST_INDEX_ROWS_TTL); }
+        catch (\Throwable $e) { error_log('[timeline] the index count of a sample failed: ' . $e->getMessage()); }   // 0, as $wl above
+    }
     // How many of those have a name and a file list. Drawn beside the total so the gap between the
     // two lines IS the backlog — which is the question people actually ask of this chart, and which
     // the queue depth alone cannot answer once the queue has been drained and refilled.
@@ -338,7 +349,11 @@ function statsTimelineRowFromParsed(PDO $db, array $cfg, array $p, int $now): ar
     $idxFetched = 0;
     try {
         $idxFetched = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'done'")->fetchColumn();
-    } catch (\Throwable $e) {}
+    } catch (\Throwable $e) {
+        // NULL, not 0 (1.74.0, QUAL-26): this column may be empty — the chart leaves a gap instead of drawing a fall.
+        error_log('[timeline] the resolved-index count of a sample failed: ' . $e->getMessage());
+        $idxFetched = null;
+    }
     $peers = max(0, (int)($p['peers'] ?? 0));
     $seeds = max(0, (int)($p['seeds'] ?? 0));
     return [
@@ -740,7 +755,11 @@ function statsTimelineStatus(PDO $db, array $cfg): array {
         $counts['raw'] = (int)$db->query("SELECT COUNT(*) FROM `" . ST_RAW_TABLE . "`")->fetchColumn();
         $counts['5m'] = (int)$db->query("SELECT COUNT(*) FROM `" . ST_5M_TABLE . "`")->fetchColumn();
         $counts['1h'] = (int)$db->query("SELECT COUNT(*) FROM `" . ST_1H_TABLE . "`")->fetchColumn();
-    } catch (\Throwable $e) {}
+    } catch (\Throwable $e) {
+        // Unknown, not an empty history (1.74.0, QUAL-26).
+        error_log('[timeline] the status counts failed: ' . $e->getMessage());
+        $counts = ['raw' => null, '5m' => null, '1h' => null];
+    }
     return ['enabled' => statsTimelineEnabled($cfg), 'public' => statsTimelinePublic($cfg), 'interval' => statsTimelineInterval($cfg),
             'raw_days' => statsTimelineRawDays($cfg), 'keep_days' => statsTimelineKeepDays($cfg), 'counts' => $counts, 'state' => statsTimelineStateRead()];
 }

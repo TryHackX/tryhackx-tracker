@@ -30,8 +30,9 @@ $me = currentUser($db);
 if (!$me) jsonResponse(['error' => 'not_found'], 404);
 // A hash somebody cannot find is a hash they cannot ask about — the same rule api/index_info.php
 // applies, and the reason this is checked before anything else is read.
-if (!userCan($db, $cfg, 'index.view')) jsonResponse(['error' => 'not_found'], 404);
-if (!userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
+// Both asked of the READER's account (1.74.0, PRIV-6) — whoSections() asks them so for api/hash_who.php.
+if (!userIdHasPermission($db, $cfg, (int)$me['id'], 'index.view')) jsonResponse(['error' => 'not_found'], 404);
+if (!userIdHasPermission($db, $cfg, (int)$me['id'], 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
 
 $perHour = (int)($cfg['rate_limit_index_search'] ?? 120);
 if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {

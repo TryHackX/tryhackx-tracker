@@ -122,37 +122,45 @@ foreach (['key_id', 'secret', 'bearer', 'token'] as $word) {
 }
 
 /* ── 4. the page renders every combination and none of them is a 500 ──────── */
-// A page whose content is chosen by GET is a page somebody will hand a wrong GET to.
-$docsSrc = (string)@file_get_contents($root . '/templates/pages/apidocs.php');
-check('an unknown scope falls back rather than trips',
-      preg_match('/\$docScope\s*=.*isset\(\$docScopes/s', $docsSrc) === 1);
-check('the fields parameter goes through the same cleaner as the stored one',
-      str_contains($docsSrc, 'apiClientCleanFields(') && str_contains($docsSrc, "GET['fields']"));
+// A page whose content is chosen by GET is a page somebody will hand a wrong GET to. Rendered for real (1.74.0,
+// QUAL-7 — these were greps of the template), in a process of its own WITHOUT a database: a page that read one
+// would fail there, which is the property "nothing on the page reads the database" is about.
+$docRunner = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'pat_docs_' . getmypid() . '.php';
+file_put_contents($docRunner, '<?php
+$a = json_decode((string)file_get_contents($argv[1]), true);
+chdir($a["root"]);
+foreach (["includes/functions.php", "includes/lang.php", "includes/api_auth.php", "includes/authbridge.php", "includes/pagecontent.php",
+          "includes/federation.php", "includes/users.php"] as $f) require_once $f;
+$cfg = $a["cfg"]; $_GET = $a["get"]; $baseUrl = "/";
+langInit($cfg, "en");
+ob_start();
+require "templates/pages/apidocs.php";
+echo json_encode(["html" => ob_get_clean()]);
+');
+$renderDocs = function (array $get) use ($docRunner, $root): ?string {
+    $arg = $docRunner . '.' . bin2hex(random_bytes(3)) . '.json';
+    file_put_contents($arg, json_encode(['root' => $root, 'get' => $get, 'cfg' => ['api_enabled' => '1', 'site_url' => 'https://tracker.example.org']]));
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=0 ' . escapeshellarg($docRunner) . ' ' . escapeshellarg($arg) . ' 2>&1');
+    @unlink($arg);
+    $j = json_decode(trim($out), true);
+    return is_array($j) ? (string)$j['html'] : null;
+};
+$bogus = $renderDocs(['scope' => 'no-such-scope', 'approve' => 'review', 'fields' => 'name,DROP TABLE,url']);
+check('an unknown scope renders the default chapter (the whitelist\'s) instead of tripping — with no database at all',
+      $bogus !== null && str_contains($bogus, 'v1/whitelist/submit'), substr((string)$bogus, 0, 200));
+check('… the fields parameter goes through the same cleaner as the stored one: "DROP TABLE" is not on the page, name and url are',
+      $bogus !== null && !str_contains($bogus, 'DROP TABLE') && str_contains($bogus, 'name, url'));
+$auth = $renderDocs(['scope' => 'auth']);
+check('… and an old ?scope=auth link still opens the accounts chapter it always was', $auth !== null && str_contains($auth, 'v1/users/lookup'));
+@unlink($docRunner);
 check('the page is told not to be indexed', str_contains((string)@file_get_contents($root . '/templates/layout.php'), 'apidocs')
       && str_contains((string)@file_get_contents($root . '/templates/layout.php'), 'noindex'));
-check('nothing on the page reads the database',
-      !preg_match('/\$db->|->prepare\(|->query\(/', $docsSrc));
 
 /* ── 5. the submit endpoint honours both per-key answers ──────────────────── */
-$subSrc = (string)@file_get_contents($root . '/api/v1/whitelist_submit.php');
-check('the endpoint reads the key own approval setting', str_contains($subSrc, "client['auto_approve']"));
-check('… and the key own required fields', str_contains($subSrc, "client['required_fields']"));
-// 1.73.0: read through the whitelist half's vocabulary — an `all` key's stored list also holds the report's
-// fields, and read raw, `reporter` refused every registration (proved over HTTP below).
-check('… cleaned to the fields a registration can carry',
-      str_contains($subSrc, "apiClientCleanFields((string)(\$client['required_fields'] ?? ''), 'whitelist')"));
-check("a held item is passed to the store as 'pending'", preg_match("/'review'\s*=>\s*\\\$autoApprove\s*\?\s*'none'\s*:\s*'pending'/", $subSrc) === 1);
-// A missing field is a problem with ONE item, not with the request: the rest of the batch still
-// goes through, and the reply says which one and why.
-check('a missing field is refused per item, not per request', str_contains($subSrc, 'missing_'));
-check('… and the reply repeats the configuration back',
-      str_contains($subSrc, "'auto_approve'") && str_contains($subSrc, "'required_fields'"));
-
-$wlSrc = (string)@file_get_contents($root . '/includes/whitelist.php');
-check('the store writes the review column', str_contains($wlSrc, 'review_status'));
-check('… and the generator filters on it', str_contains($wlSrc, "review_status IN ('none','approved')"));
-check("… with 'none' in that list, so nothing published before this feature disappeared",
-      str_contains($wlSrc, "review_status IN ('none','approved')"));
+// Proved by a real submission in section 11 (1.74.0, QUAL-7: these were greps of the endpoint): a key that holds
+// for review gets `pending` back and its row is stored waiting, the reply repeats the key's two answers, an item
+// that lacks a required field is refused alone, and an `all` key is asked only for what a registration can carry.
+// What the store does with the review column is section 6: the generator leaves a waiting row out of the file.
 
 /* ── 6. THE ONE THAT MATTERS: a waiting row is not in the file ────────────── */
 // Against the real generator, the real table and a real file on disk. Everything above could be
@@ -272,10 +280,8 @@ $file4 = (string)@file_get_contents($tmpFile);
 $st = $db->prepare("SELECT probe_status FROM whitelist WHERE info_hash = ?");
 $st->execute([$hProbing]);
 check('the probe gives up on it', $st->fetchColumn() === 'failed', json_encode($tick));
-check('… and the file no longer carries it — no waiting for some other regeneration', !str_contains($file4, $hProbing), json_encode($tick));
-$wlSrcNow = (string)@file_get_contents($root . '/includes/wlprobe.php');
-check('the tick regenerates on a failure as well as on a pass',
-      str_contains($wlSrcNow, "if (\$out['passed'] > 0 || \$out['failed'] > 0) {"));
+check('… and the file no longer carries it — no waiting for some other regeneration (the tick regenerated on a failure)',
+      !str_contains($file4, $hProbing), json_encode($tick));
 $db->prepare("DELETE FROM whitelist WHERE info_hash IN (?,?,?,?)")->execute($fast);
 
 /* ── 11. over HTTP: an `all` key that asks for a reporter still registers (1.73.0) ─────────────── */
@@ -311,6 +317,13 @@ if ($probe === false || !function_exists('curl_init')) {
           json_encode($j['results'][1] ?? null));
     check('… and the reply names only the fields a registration is asked for', ($j['required_fields'] ?? null) === ['name'],
           json_encode($j['required_fields'] ?? null));
+    // The key's approval answer, read by the endpoint and said back (1.74.0, QUAL-7: this was a grep of the endpoint).
+    check('… the reply repeats the key\'s approval answer: held, not published', ($j['auto_approve'] ?? null) === false, json_encode($j['auto_approve'] ?? null));
+    $stored = $db->prepare("SELECT review_status, api_client_id FROM whitelist WHERE info_hash = ?");
+    $stored->execute([$hNamed]);
+    $sr = $stored->fetch(PDO::FETCH_ASSOC) ?: [];
+    check('… and the row is stored waiting for a person, under the key that sent it',
+          ($sr['review_status'] ?? '') === 'pending' && (int)($sr['api_client_id'] ?? 0) === (int)$key['id'], json_encode($sr));
     $db->prepare("DELETE FROM whitelist WHERE info_hash IN (?, ?)")->execute([$hNamed, $hBare]);
     $db->prepare("DELETE FROM api_clients WHERE id = ?")->execute([(int)$key['id']]);
     if ($apiWas === null) $db->prepare("DELETE FROM settings WHERE `key` = 'api_enabled'")->execute();

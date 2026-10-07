@@ -134,7 +134,7 @@ try {
 } catch (\Exception $e) {
     $db->rollBack();
     // Log the detail server-side; never echo raw DB errors (schema/paths) back to the client.
-    error_log('delete_permanently failed: ' . $e->getMessage());
+    error_log('[reports] delete_permanently failed: ' . $e->getMessage());
     jsonResponse(['error' => __('api.report.delete_db_error')], 500);
 }
 

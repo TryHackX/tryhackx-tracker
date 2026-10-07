@@ -20,6 +20,11 @@
  * lower-cased name, modulo twelve: the same four lines as the PHP, so a person has the same colour
  * whichever side drew them.
  *
+ * A letter is DRAWN without a request (1.74.0): the element carries the SVG api/user_avatar_default.php
+ * would serve, as a `data:` address — userAvatarDrawn() / userAvatarLetterSrc() in includes/usermedia.php,
+ * byte for byte (the twelve colours are below for that). Rows and replies still carry the letter's
+ * ADDRESS; img() and set() swap it at the moment of drawing, and kind() knows both forms.
+ *
  * ── the two facts the page supplies ────────────────────────────────────────────────────────────
  * Whether pictures are on at all, and the site default's address prefix: APP_MEDIA on the public
  * pages (templates/layout.php), or this script tag's own data-avatars / data-def / data-base in the
@@ -31,6 +36,9 @@
 (function () {
     'use strict';
     var SIZES = [64, 128, 256];
+    // USER_AVATAR_COLOURS in includes/usermedia.php, in the same order: the index is the colour() below.
+    var COLOURS = ['#1565c0', '#2e7d32', '#c62828', '#6a1b9a', '#d84315', '#00695c',
+                   '#283593', '#ad1457', '#4e342e', '#37474f', '#558b2f', '#00838f'];
     // Read while this file is executing: afterwards document.currentScript is somebody else's.
     var tag = document.currentScript;
     function media() {
@@ -57,13 +65,40 @@
     function generated(name) { return base() + 'api.php?endpoint=user_avatar_default&l=' + letter(name) + '&c=' + colour(name); }
     function siteUrl() { return base() + 'assets/img/favicon.svg'; }
     function quote(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    /** userAvatarDefaultSvg(): the letter on its colour, character for character. */
+    function letterSvg(l, c) {
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">'
+             + '<rect width="128" height="128" fill="' + COLOURS[c] + '"/>'
+             + '<text x="64" y="64" dy="0.35em" text-anchor="middle" fill="#ffffff" '
+             + 'font-family="Segoe UI, Helvetica Neue, Arial, sans-serif" font-size="62" font-weight="600">'
+             + l + '</text></svg>';
+    }
+    // PHP's rawurlencode(): encodeURIComponent() leaves ! ' ( ) * as they are, rawurlencode() does not.
+    function enc(s) {
+        return encodeURIComponent(s).replace(/[!'()*]/g, function (ch) { return '%' + ch.charCodeAt(0).toString(16).toUpperCase(); });
+    }
+    /** userAvatarLetterSrc(): the drawn letter, a data: address. */
+    function letterSrc(l, c) { return 'data:image/svg+xml,' + enc(letterSvg(l, c)); }
+    function letterAddr(u) {
+        return new RegExp('^' + quote(base()) + 'api\\.php\\?endpoint=user_avatar_default&l=([A-Z0-9])&c=([0-9]|1[01])$').exec(String(u || ''));
+    }
+    /** userAvatarDrawn(): what an <img> draws for an address — a letter as its picture, anything else as it is. */
+    function drawn(u) { var m = letterAddr(u); return m ? letterSrc(m[1], Number(m[2])) : String(u || ''); }
+    /** userAvatarLetterSrcParse(): exactly one of the drawn letters, rebuilt and compared whole — nothing else passes. */
+    function isLetterSrc(u) {
+        u = String(u || '');
+        if (u.indexOf('data:image/svg+xml,') !== 0) return false;
+        var m = /fill%3D%22%23([0-9a-f]{6})%22%2F%3E.*%3E([A-Z0-9])%3C%2Ftext%3E%3C%2Fsvg%3E$/.exec(u);
+        var c = m ? COLOURS.indexOf('#' + m[1]) : -1;
+        return c >= 0 && letterSrc(m[2], c) === u;
+    }
     /** userAvatarUrlKind(): which of the server's three shapes an address is, or null. */
     function kind(u) {
         u = String(u || '');
         var b = quote(base());
         var m = new RegExp('^(' + b + 'api\\.php\\?endpoint=user_media&h=[0-9a-f]{16}&s=)[0-9]{1,3}$').exec(u);
         if (m) return { kind: 'media', prefix: m[1] };
-        if (new RegExp('^' + b + 'api\\.php\\?endpoint=user_avatar_default&l=[A-Z0-9]&c=(?:[0-9]|1[01])$').test(u)) return { kind: 'letter' };
+        if (letterAddr(u) || isLetterSrc(u)) return { kind: 'letter' };
         return u === siteUrl() ? { kind: 'site' } : null;
     }
     /** userAvatarSized(): the same picture at the size it is drawn at, or null for a foreign address. */
@@ -106,11 +141,13 @@
         // same row drawn by the server serialise to the same markup.
         var el = document.createElement('img');
         el.className = ((cls || 'avatar') + ' js-avatar').trim();
-        var src = url(u, size);
+        // The address is decided first and only then drawn: a letter goes in as its data: picture.
+        var addr = url(u, size);
+        var src = drawn(addr);
         el.setAttribute('src', src);
-        var ss = srcset(src, size);
+        var ss = srcset(addr, size);
         if (ss) el.setAttribute('srcset', ss);
-        var fb = generated(u.username);
+        var fb = drawn(generated(u.username));
         if (fb !== src) el.dataset.fallback = fb;
         el.width = size;
         el.height = size;
@@ -127,13 +164,15 @@
     function set(el, u) {
         if (!el || typeof u !== 'string' || u === '') return;
         var size = Number(el.getAttribute('width')) || 32;
-        var src = sized(u, size);
-        if (!src) return;
+        var addr = sized(u, size);
+        if (!addr) return;
+        var src = drawn(addr);
         var was = el.getAttribute('src') || '';
-        // The letter it falls back to: the one it carries or, when it WAS the letter, that one.
-        var fb = el.getAttribute('data-fallback') || ((kind(was) || {}).kind === 'letter' ? was : '');
+        // The letter it falls back to: the one it carries or, when it WAS the letter, that one — drawn,
+        // so a letter's address left by a page from before 1.74.0 becomes its picture too.
+        var fb = drawn(el.getAttribute('data-fallback') || ((kind(was) || {}).kind === 'letter' ? was : ''));
         el.setAttribute('src', src);
-        var ss = srcset(src, size);
+        var ss = srcset(addr, size);
         if (ss) el.setAttribute('srcset', ss); else el.removeAttribute('srcset');
         if (fb && fb !== src) el.setAttribute('data-fallback', fb); else el.removeAttribute('data-fallback');
     }
@@ -170,6 +209,7 @@
         return frag;
     }
     window.userAvatarUrl = url;
+    window.userAvatarDrawn = drawn;
     window.userAvatarImg = img;
     window.userAvatarSet = set;
     window.userAvatarSlot = slot;

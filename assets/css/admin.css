@@ -182,24 +182,24 @@
    layout below it outweighed them, and an icon button marked d-hidden was shown (Backups' "Cancel run",
    the API ban's "Lift ban"). Bootstrap's own `.btn` / `.dropdown-item` display comes from an earlier
    stylesheet, so this still wins over it. */
-:is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn):where(:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))),
+:is(.btn, .dropdown-item, .source-tab, .settings-group-btn):where(:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))),
 .admin-pagination :where(button:has(> .bi):not(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) { display: inline-flex; }
 .dropdown-item:where(:has(> .bi)) { display: flex; }
 /* The row's layout, at the weight it needs over the controls' own rules (the settings chips centre
    their items and have a gap of their own). text-align: start — words that wrap (a narrow phone) start
    right after their icon, line under line; centred, the first line of a two-line label stood a whole
    column's width away from its icon. */
-:is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn, .admin-pagination button):has(> .bi):not(:where(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) {
+:is(.btn, .dropdown-item, .source-tab, .settings-group-btn, .admin-pagination button):has(> .bi):not(:where(:has(> .bi[class*=" fa-"]:only-child:not([data-label])))) {
     align-items: baseline; justify-content: center; text-align: start;
     column-gap: max(0px, var(--bi-gap, 0.275em) - var(--bi-sb));
 }
 .dropdown-item:has(> .bi) { justify-content: flex-start; }
-:is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn, .admin-pagination button):has(> .bi) > .bi { margin-inline: 0; }
+:is(.btn, .dropdown-item, .source-tab, .settings-group-btn, .admin-pagination button):has(> .bi) > .bi { margin-inline: 0; }
 /* A menu button's caret is a row item too: centred as its inline-block was raised, the gap its margin. */
 .dropdown-toggle:has(> .bi)::after { align-self: center; margin-left: 0; }
 /* The gap each kind of control had with a space and its own margin: a space (0.275em of the panel's
    face), and the tabs' 0.3rem and the menus' 0.35rem on top; the settings chips their 0.35rem. */
-.source-tab, .source-tab-link { --bi-gap: calc(0.275em + 0.3rem); }
+.source-tab { --bi-gap: calc(0.275em + 0.3rem); }
 .dropdown-item { --bi-gap: calc(0.275em + 0.35rem); }
 .settings-group-btn { --bi-gap: 0.35rem; }
 /* The gap is what the eye sees: from the glyph's INK. A Bootstrap glyph stands in a 1em square with
@@ -297,13 +297,17 @@
     gap: 0.5rem;
 }
 
-.admin-header h2 {
+/* The page's title is its one <h1> (1.74.0 — it was an <h2> on every page, with no <h1> at all), drawn exactly as the
+   <h2> was: Bootstrap's own h1 size and weight do not apply here. */
+.admin-header :is(h1, h2) {
     color: #4a9eff;
     margin: 0;
     font-size: 1.4rem;
+    font-weight: 500;
+    line-height: 1.2;
 }
 
-.admin-header h2 i {
+.admin-header :is(h1, h2) i {
     margin-right: 0.3rem;
 }
 
@@ -396,8 +400,7 @@
     border-bottom: 2px solid #333;
 }
 
-.source-tab,
-.source-tab-link {
+.source-tab {
     background: none;
     border: none;
     color: #888;
@@ -409,8 +412,7 @@
     transition: all 0.2s;
 }
 
-.source-tab:hover,
-.source-tab-link:hover {
+.source-tab:hover {
     color: #ccc;
 }
 
@@ -420,28 +422,14 @@
 }
 
 /* (A tab's icon keeps its 0.3rem as the row's gap, at the top of the file — 1.69.0.) */
+/* (1.74.0, QUAL-12: `.source-tab-link`, a plain page link in the tab row, went with its last use — the tab bars hold
+   tabs only, tests/ui_traffic_nav_test.py.) */
 
-/* Plain navigation link that sits in the tab row but is not a data-source tab (no data-source, not
-   bound by admin.js). The first link is pushed to the right end of the row; any further links sit
-   right next to it (two auto margins would centre the first one). */
-.source-tab-link {
-    display: inline-flex;
-    align-items: center;
-    text-decoration: none;
-    color: #9aa4b2;
-}
-.source-tab + .source-tab-link { margin-left: auto; }
-.source-tab-link + .source-tab-link { margin-left: 0.25rem; }
-.source-tab-link:hover,
-.source-tab-link:focus-visible {
-    color: #4a9eff;
-    border-bottom-color: rgba(74, 158, 255, 0.5);
-    outline: none;
-}
-
+/* #c0392b, not #e74c3c (1.74.0): white on the lighter red was 3.82:1 at this size, under the 4.5:1 a number has to
+   be read at; the darker red is 5.4:1 and still the same alarm. */
 .appeals-count-badge {
     display: inline-block;
-    background: #e74c3c;
+    background: #c0392b;
     color: #fff;
     font-size: 0.65rem;
     font-weight: 700;
@@ -544,14 +532,21 @@
     line-height: 1;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.2s, text-shadow 0.2s, color 0.2s;
+    /* Hidden, not only see-through (1.74.0): at opacity 0 it was still a stop of the Tab key — a press that landed on
+       nothing visible in every toolbar with an empty search. `visibility` takes it out of the order and leaves its
+       box where it was; it turns hidden only once the fade has finished. */
+    visibility: hidden;
+    transition: opacity 0.2s, text-shadow 0.2s, color 0.2s, visibility 0s linear 0.2s;
     text-shadow: 0 0 4px rgba(255, 68, 68, 0.4);
 }
 
 .search-clear-btn.visible {
     opacity: 1;
     pointer-events: auto;
+    visibility: visible;
+    transition: opacity 0.2s, text-shadow 0.2s, color 0.2s, visibility 0s;
 }
+.search-clear-btn:focus-visible { outline: 2px solid #4a9eff; outline-offset: 1px; border-radius: 3px; }
 
 .search-clear-btn:hover {
     color: #ff2222;
@@ -677,8 +672,14 @@
     font-family: inherit;
     outline: none;
 }
+/* #9aa4b2 (1.74.0): the old grey at 75 % on the panel's near-black was 1.84:1 — the explanations of the panel's most
+   important page were all but unreadable; this is 7.4:1, the colour of the panel's other quiet text. Inside an alert
+   a hint takes the alert's own colour, which is made to be read on it. */
 .settings-hint {
-    color: rgb(84 87 91 / 75%);
+    color: #9aa4b2;
+}
+.alert .settings-hint {
+    color: inherit;
 }
 
 .d-hidden {
@@ -1052,13 +1053,6 @@
 
 .confirm-modal.show .modal-dialog {
     opacity: 1;
-}
-
-.confirm-modal-content {
-    background: #1e1e1e !important;
-    border: 1px solid #444 !important;
-    border-radius: 10px !important;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 /* ---- Modal placement (all admin pages) ----
@@ -1660,7 +1654,7 @@ input[type="number"] {
 .tl-range-btn.active { background: rgba(74, 158, 255, 0.22); color: #fff; font-weight: 600; }
 .tl-meta { font-size: 0.75rem; color: #888; text-align: right; }
 .tl-subtitle { font-size: 0.75rem; color: #888; margin: 0.6rem 0 0.2rem; }
-.tl-hint { display: block; font-size: 0.72rem; color: #666; margin-top: 0.5rem; }
+.tl-hint { display: block; font-size: 0.72rem; color: #8b949e; margin-top: 0.5rem; }   /* 6.2:1, not #666's 3.3 (1.74.0) */
 .tl-empty { padding: 1.5rem 1rem; text-align: center; color: #888; font-size: 0.9rem; border: 1px dashed #2a2a3a; border-radius: 6px; }
 .tl-chart { width: 100%; }
 .tl-chart .u-legend { font-size: 0.78rem; color: #bbb; text-align: left; padding: 0.25rem 0 0; }
@@ -1713,9 +1707,6 @@ input[type="number"] {
 .idx-mkv-k { color: #8a8a9a; } .idx-mkv-v { color: #e6e6ee; font-family: 'JetBrains Mono', Consolas, monospace; text-align: right; word-break: break-all; }
 .idx-magnet { display: flex; gap: 0.4rem; } .idx-magnet input { font-size: 0.72rem; }
 .wl-copybox .wl-copybox-btn + .wl-copybox-btn { margin-left: 0.18rem; }
-.idx-file-list { list-style: none; margin: 0.25rem 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
-.idx-file-list li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.15rem 0.25rem; border-bottom: 1px solid #171724; font-size: 0.78rem; }
-.idx-file-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .idx-file-size { flex: 0 0 auto; }
 .wl-bulkbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #222; }
 .wl-bulkbar #idx-sel-count { color: #9aa; font-size: 0.85rem; margin-right: auto; }
 @media (max-width: 992px) { .idx-mgrid { grid-template-columns: 1fr; } }
@@ -1861,6 +1852,9 @@ input[type="number"] {
    recognise, so the WebKit and Gecko halves can never be merged. */
 .nl-slider { -webkit-appearance: none; appearance: none; width: 100%; margin: 0; height: 1.1rem; background: transparent; }
 .nl-slider:focus { outline: none; }
+/* The keyboard's focus is drawn round the whole slider (1.74.0): the thumb's glow alone, the same as under the
+   pointer, was the one focus in the panel that did not show itself. */
+.nl-slider:focus-visible { outline: 2px solid #4a9eff; outline-offset: 3px; border-radius: 4px; }
 /* `--nl-fill` is set from setPps() in admin-netlimit.js: WebKit has no ::-moz-range-progress
    equivalent, so the filled part of the rail is a hard-stop gradient on the track itself. */
 /* Two layers: the fill up to the thumb on top (translucent, so the zones read through it) and the
@@ -2632,20 +2626,24 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
  * checklist and the traffic notes already use: danger 4.02 -> 7.59:1, success 4.01 -> 8.50:1.
  * Buttons are deliberately untouched — `btn-outline-danger` carries its meaning in the border and is
  * read against a border, not against the page. */
+/* EVERY page of the panel (1.74.0), not only the .wl-page ones and the dialogs: Settings and Reports kept the light
+   slabs, and on them the panel's light link colour — "Security → CAPTCHA" in the warning every installation without
+   a CAPTCHA shows — was 2.03:1, a quiet text 2.28:1. */
+.admin-body .alert,
 .wl-page .alert,
 .modal .alert {
     border: 1px solid;
     border-radius: 6px;
     line-height: 1.5;
 }
-.wl-page .alert-info,      .modal .alert-info      { background: rgba(74, 158, 255, 0.08); border-color: rgba(74, 158, 255, 0.35); color: #cfe3ff; }
-.wl-page .alert-warning,   .modal .alert-warning   { background: rgba(255, 183, 77, 0.08); border-color: rgba(255, 183, 77, 0.35); color: #ffe0b2; }
-.wl-page .alert-danger,    .modal .alert-danger    { background: rgba(255, 82, 82, 0.08);  border-color: rgba(255, 82, 82, 0.35);  color: #ffcdd2; }
-.wl-page .alert-success,   .modal .alert-success   { background: rgba(108, 195, 138, 0.08); border-color: rgba(108, 195, 138, 0.35); color: #c8e6c9; }
-.wl-page .alert-secondary, .modal .alert-secondary { background: rgba(138, 148, 162, 0.08); border-color: rgba(138, 148, 162, 0.30); color: #c3ccd8; }
-.wl-page .alert strong, .modal .alert strong { color: inherit; }
-.wl-page .alert code, .modal .alert code { color: #9ecbff; }
-.wl-page .alert a, .modal .alert a { color: #9ecbff; }
+.admin-body .alert-info,      .wl-page .alert-info,      .modal .alert-info      { background: rgba(74, 158, 255, 0.08); border-color: rgba(74, 158, 255, 0.35); color: #cfe3ff; }
+.admin-body .alert-warning,   .wl-page .alert-warning,   .modal .alert-warning   { background: rgba(255, 183, 77, 0.08); border-color: rgba(255, 183, 77, 0.35); color: #ffe0b2; }
+.admin-body .alert-danger,    .wl-page .alert-danger,    .modal .alert-danger    { background: rgba(255, 82, 82, 0.08);  border-color: rgba(255, 82, 82, 0.35);  color: #ffcdd2; }
+.admin-body .alert-success,   .wl-page .alert-success,   .modal .alert-success   { background: rgba(108, 195, 138, 0.08); border-color: rgba(108, 195, 138, 0.35); color: #c8e6c9; }
+.admin-body .alert-secondary, .wl-page .alert-secondary, .modal .alert-secondary { background: rgba(138, 148, 162, 0.08); border-color: rgba(138, 148, 162, 0.30); color: #c3ccd8; }
+.admin-body .alert strong, .wl-page .alert strong, .modal .alert strong { color: inherit; }
+.admin-body .alert code, .wl-page .alert code, .modal .alert code { color: #9ecbff; }
+.admin-body .alert a, .wl-page .alert a, .modal .alert a { color: #9ecbff; }
 
 /* Semantic values inside the panel's cards and tables. */
 .wl-page .text-danger,  .modal .text-danger  { color: #f08a94 !important; }
@@ -3384,3 +3382,63 @@ img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255
     .ip-report-list { grid-template-columns: 1fr; }
     .ip-report-list dd { margin-bottom: 0.25rem; }
 }
+
+/* ══ 1.74.0 — what the audit found in the panel's looks (part D) ══════════════════════════════════════════════ */
+
+/* A SESSION THAT HAS ENDED, said once at the top of the page (assets/js/admin-common.js apiCall()): above everything
+   the panel draws — its dialogs (1055), the toasts (1080) — so it is read before anything else is tried; the sentence
+   and the way back in one line that wraps on a phone. Amber on near-black, 11:1. */
+.session-expired-bar {
+    position: sticky; top: 0; z-index: 1090;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.4rem 0.75rem;
+    padding: 0.55rem 1rem;
+    background: #2b2109; border-bottom: 1px solid #ffb74d; color: #ffe0b2;
+    font-size: 0.9rem; line-height: 1.4; text-align: center;
+}
+.session-expired-bar > .bi { color: #ffb74d; }
+.session-expired-bar .btn { --bs-btn-padding-y: 0.15rem; }
+
+/* A table that could not be loaded says so in its own row (assets/js/admin.js tableFailed()), in the alert's hue. */
+.table-error-state { color: #ffcdd2; font-size: 0.92rem; }
+.table-error-state .bi { color: #ff8a80; margin-right: 0.2rem; }
+
+/* THE ACTIONS COLUMN STAYS IN SIGHT. The Reports table has a floor of 1224px (1.73.0, so its headers fit) inside a
+   box of 1062px at 1280 wide and 1114px at 1440 — and its last column holds the ONE way into a report, the "…": it was
+   past the right edge until the table was scrolled sideways (the Whitelist's, the Index's and the Users' at 1280 by
+   13–48px). The column sticks to the right edge of the table's visible box instead, over the columns that scroll under
+   it, on the row's own opaque ground (the hover's too: Bootstrap paints it as an inset shadow, kept below), with a line
+   at its left. The columns keep their order — panel_fixes_check.js compares the PHP and the JS headers in order. */
+.admin-wide .dash-table :is(th.th-actions, td.td-actions, td.th-actions, td.wl-actions),
+.wl-page .wl-table :is(th.th-actions, td.td-actions, td.th-actions, td.wl-actions) {
+    position: sticky; right: 0; z-index: 2;
+    box-shadow: inset 1px 0 0 #2f3b4a, inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
+}
+.admin-wide .dash-table td:is(.td-actions, .th-actions, .wl-actions),
+.wl-page .wl-table td:is(.td-actions, .th-actions, .wl-actions) { background-color: var(--bs-table-bg, #1e1e1e); }
+/* A dimmed row (banned, muted) dims what is IN its sticky cell, not the cell: a see-through cell would show the
+   columns scrolling under it. */
+:is(.wl-row-banned, .wl-row-muted) td:is(.td-actions, .th-actions, .wl-actions) { opacity: 1; }
+:is(.wl-row-banned, .wl-row-muted) td:is(.td-actions, .th-actions, .wl-actions) > * { opacity: 0.65; }
+.admin-hc .table-dark tbody tr:is(.wl-row-banned, .wl-row-muted):hover td:is(.td-actions, .th-actions, .wl-actions) { opacity: 1; }
+.admin-hc .table-dark tbody tr:is(.wl-row-banned, .wl-row-muted):hover td:is(.td-actions, .th-actions, .wl-actions) > * { opacity: 0.9; }
+
+/* A SORTABLE HEADER IS A BUTTON (assets/js/admin.js, admin-common.js makeSortStack(), every panel table's thead): the
+   keyboard reaches it and Enter or Space sorts — a header that only listened for a click could not be sorted without
+   a mouse. Drawn as the header's text it always was; the focus ring is its only look of its own. */
+.th-sort {
+    background: none; border: 0; padding: 0; margin: 0; border-radius: 2px;
+    color: inherit; font: inherit; line-height: inherit; text-transform: inherit; letter-spacing: inherit;
+    text-align: inherit; white-space: inherit; text-wrap: inherit; cursor: pointer; max-width: 100%;
+}
+.th-sort:focus-visible { outline: 2px solid #4a9eff; outline-offset: 2px; }
+
+/* BOOTSTRAP'S OUTLINE BUTTONS ON A DARK PAGE. Their words are the light theme's colours — grey #6c757d 3.56:1 on the
+   panel's ground ("Show me where", 60 times in Settings; "Refresh", "Test", "View"), red #dc3545 3.68:1 ("Delete",
+   "Purge"), green #198754 3.68–3.84:1, blue #0d6efd 3.7:1 — under the 4.5:1 a word needs. The words take the lighter
+   shade of the same hue (8:1, 6:1, 9.3:1, 6.9:1); the border and the filled look under the pointer stay Bootstrap's. */
+.admin-body .btn-outline-secondary { --bs-btn-color: #adb5bd; --bs-btn-disabled-color: #8a939b; }
+.admin-body .btn-outline-danger    { --bs-btn-color: #ff6b6b; --bs-btn-disabled-color: #e0707a; }
+.admin-body .btn-outline-success   { --bs-btn-color: #3ddc84; --bs-btn-disabled-color: #4fbf80; }
+.admin-body .btn-outline-primary   { --bs-btn-color: #6ea8fe; --bs-btn-disabled-color: #6ea8fe; }
+/* An inline <code> (an IP in the Log, a path in a hint) in Bootstrap's dark-theme pink: 6.7:1, not #d63384's 3.7. */
+.admin-body { --bs-code-color: #e685b5; }

@@ -16,7 +16,8 @@ $_SESSION['admin_login_form_at'] = time();
 <p class="text-muted"><?= __('adminlogin.staff_area', ['site' => sanitize($cfg['site_name'] ?? __('adminlogin.this_tracker'))]) ?></p>
 
 <div class="user-card">
-    <div id="admin-login-alert" class="alert"></div>
+    <?php /* role="alert" (1.74.0): a refused sign-in is said aloud the moment it is written, not only shown. */ ?>
+    <div id="admin-login-alert" class="alert" role="alert"></div>
     <form id="admin-login-form" class="user-form" novalidate>
         <input type="hidden" name="csrf_token" value="<?= $csrfToken ?>">
         <div class="form-group">
@@ -42,7 +43,7 @@ $_SESSION['admin_login_form_at'] = time();
         </div>
         <div class="form-center"><button type="submit" class="btn" id="al-code-submit"><?= _h('adminlogin.continue') ?></button></div>
     </form>
-    <p class="user-links"><a href="<?= $baseUrl ?>"><?= _h('adminlogin.back_tracker') ?></a></p>
+    <p class="user-links"><a href="<?= sanitize((string)$baseUrl) ?>"><?= _h('adminlogin.back_tracker') ?></a></p>
 </div>
 
 <script<?= nonceAttr() ?>>
@@ -60,7 +61,8 @@ $_SESSION['admin_login_form_at'] = time();
     const said = (s) => t.find(s, 'api.login.');
     const form = document.getElementById('admin-login-form');
     const alertEl = document.getElementById('admin-login-alert');
-    const api = '<?= $baseUrl ?>api.php?endpoint=';
+    // Through json_encode() with every HEX flag (1.74.0), as langJsBridge() writes the base: never raw into a script.
+    const api = <?= json_encode((string)$baseUrl . 'api.php?endpoint=', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
     const fail = (msg) => { alertEl.className = 'alert alert-error show'; alertEl.textContent = msg; };
     const twofaForm = document.getElementById('admin-2fa-form');
     const codeInput = document.getElementById('al-code');

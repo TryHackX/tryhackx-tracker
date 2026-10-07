@@ -30,15 +30,15 @@ add('lists', {
     'vis_private': ('Private', 'Prywatna'),
     'vis_friends': ('Friends', 'Dla znajomych'),
     'vis_public': ('Public', 'Publiczna'),
-    'vis_private_hint': ('Only you see it.', 'Widzisz ją tylko ty.'),
+    'vis_private_hint': ('Only you see it.', 'Widzisz ją tylko Ty.'),
     'vis_friends_hint': (
         'You and your friends — on your profile, through its link and in a torrent’s “Who has this”. '
         'Nobody else learns that it exists.',
-        'Ty i twoi znajomi — na twoim profilu, pod jej linkiem i w „Kto ma to u siebie” torrenta. '
+        'Ty i Twoi znajomi — na Twoim profilu, pod jej linkiem i w „Kto ma to u siebie” torrenta. '
         'Nikt inny nie dowie się, że istnieje.'),
     'vis_public_hint': (
         'Everybody who may see profiles — on your profile, through its link and in a torrent’s “Who has this”.',
-        'Każdy, kto może oglądać profile — na twoim profilu, pod jej linkiem i w „Kto ma to u siebie” torrenta.'),
+        'Każdy, kto może oglądać profile — na Twoim profilu, pod jej linkiem i w „Kto ma to u siebie” torrenta.'),
     'vis_why_sharing_off': (
         'This site keeps every list private: sharing lists is switched off.',
         'Ta strona trzyma każdą listę jako prywatną: udostępnianie list jest wyłączone.'),
@@ -47,17 +47,17 @@ add('lists', {
         'Dla znajomych: funkcja znajomych jest na tej stronie wyłączona.'),
     'vis_why_no_friends': (
         'For friends: none of your groups may use the friends feature (<code>friends.use</code>).',
-        'Dla znajomych: żadna z twoich grup nie ma dostępu do funkcji znajomych (<code>friends.use</code>).'),
+        'Dla znajomych: żadna z Twoich grup nie ma dostępu do funkcji znajomych (<code>friends.use</code>).'),
     'vis_why_no_grant': (
         'Public: none of your groups grants <code>:perm</code>. An administrator grants it in the panel, '
         'under Users → Groups.',
-        'Publiczna: żadna z twoich grup nie ma uprawnienia <code>:perm</code>. Administrator nadaje je w panelu, '
+        'Publiczna: żadna z Twoich grup nie ma uprawnienia <code>:perm</code>. Administrator nadaje je w panelu, '
         'w Użytkownicy → Grupy.'),
     'vis_section_hidden': (
         '“Show my lists on my profile” is off (Account → Privacy): nobody else sees any of your lists, '
         'your friends included.',
         '„Pokazuj moje listy na moim profilu” jest wyłączone (Konto → Prywatność): nikt inny nie widzi żadnej '
-        'z twoich list, także twoi znajomi.'),
+        'z Twoich list, także Twoi znajomi.'),
 })
 
 # ── the owner's cards and the list's window (assets/js/favourites.js) ─────────
@@ -87,7 +87,7 @@ add('account', {
     'lists_friends_only': (
         'None of your groups grants <code>:perm</code>, so no list of yours is public — this switch shows your '
         'friends the lists you share with them. An administrator grants it in the panel, under Users → Groups.',
-        'Żadna z twoich grup nie ma uprawnienia <code>:perm</code>, więc żadna twoja lista nie jest publiczna — ten '
-        'przełącznik pokazuje twoim znajomym listy, które im udostępniasz. Administrator nadaje je w panelu, '
+        'Żadna z Twoich grup nie ma uprawnienia <code>:perm</code>, więc żadna Twoja lista nie jest publiczna — ten '
+        'przełącznik pokazuje Twoim znajomym listy, które im udostępniasz. Administrator nadaje je w panelu, '
         'w Użytkownicy → Grupy.'),
 })

@@ -95,19 +95,10 @@ $clean = function () use ($db, $H, $H2): void {
     $db->exec("DELETE FROM user_list_items WHERE info_hash LIKE 'f5f5%'");
 };
 $clean();
-$rateClean = function () use ($root): void {
-    // The bucket this run spent (its own addresses), taken out of the shared file under the file's own lock.
-    $file = $root . '/config/rate_limits.json';
-    $lock = @fopen($file . '.lock', 'c');
-    if ($lock) @flock($lock, LOCK_EX);
-    try {
-        $data = is_file($file) ? (json_decode((string)@file_get_contents($file), true) ?: []) : [];
-        $changed = false;
-        foreach (array_keys($data) as $k) {
-            if (str_ends_with((string)$k, '|' . WHO_TEST_IP) || str_ends_with((string)$k, '|' . WHO_TEST_IP_LIMIT)) { unset($data[$k]); $changed = true; }
-        }
-        if ($changed) @file_put_contents($file, json_encode($data));
-    } finally { if ($lock) { @flock($lock, LOCK_UN); @fclose($lock); } }
+$rateClean = function (): void {
+    // The bucket this run spent (its own addresses), taken back from every action's file it was counted in
+    // (config/ratelimit/, one file and one lock per action since 1.74.0).
+    rateLimitForgetWhere(fn(string $a, string $s): bool => $s === WHO_TEST_IP || $s === WHO_TEST_IP_LIMIT);
 };
 register_shutdown_function(function () use ($db, $clean, $adminBefore, &$tmpFiles, $rateClean) {
     $clean();
@@ -375,18 +366,10 @@ check('… and a rating taken back leaves the ratings the same way (22 → 21, w
       json_encode([$tb['error'] ?? null, $after['total']]));
 $vIns->execute([$H, (string)$M[25], -1]);
 $vIns->execute([$H, (string)$S1, 7]);
-$rlKeys = ['repvote|user:' . $M[25], 'repvote|user:' . $S1];
-register_shutdown_function(function () use ($root, $rlKeys) {
-    // the hour's budget the two removals spent, out of the shared file under its lock
-    $file = $root . '/config/rate_limits.json';
-    $lock = @fopen($file . '.lock', 'c');
-    if ($lock) @flock($lock, LOCK_EX);
-    try {
-        $data = is_file($file) ? (json_decode((string)@file_get_contents($file), true) ?: []) : [];
-        $n0 = count($data);
-        foreach ($rlKeys as $k) unset($data[$k]);
-        if (count($data) !== $n0) @file_put_contents($file, json_encode($data));
-    } finally { if ($lock) { @flock($lock, LOCK_UN); @fclose($lock); } }
+$rlKeys = ['user:' . $M[25], 'user:' . $S1];
+register_shutdown_function(function () use ($rlKeys) {
+    // the hour's budget the two removals spent, taken back from the vote's own file (config/ratelimit/, 1.74.0)
+    rateLimitForget('repvote', fn(string $s): bool => in_array($s, $rlKeys, true));
 });
 check('… (both put back for what follows: 25 likes, 22 ratings)', $votes()['total'] === 25 && $votes($cfgStars)['total'] === 22);
 $fjWho = $src('assets/js/favourites.js');
@@ -690,6 +673,60 @@ $css = $src('assets/css/style.css');
 check('the look: the sections\' rule, head and search, and the chips as before (a name that was opened stays the link colour)',
       str_contains($css, '.who-sec:not([hidden]) ~ .who-sec:not([hidden])') && str_contains($css, '.who-sec-head .who-sec-search')
       && preg_match('/:visited\s*[,{]/', $css) === 0);
+
+/* ══ 11. ONE gate, two views of it (1.74.0, QUAL-13) ═════════════════════
+ * The profile asks userIdHasGrantedPermission() of one account; this section asks SQL of all of them. Until 1.74.0
+ * the two disagreed: an account with the verified flag and no address was listed here by name while its own profile
+ * refused it, a membership ended a second earlier here, and an Admin-group member (exempt from the e-mail gate in
+ * PHP) was missing here. Now both come from one generator (userMembershipSql() / userEmailGateSql(), includes/
+ * favourites.php) — walked here account by account: the profile's answer IS the list's. */
+$mx = [];
+$mkx = function (string $name, array $gids, ?string $email, int $flag) use ($db, $cfgOn, $H2, &$mx): int {
+    $r = userCreate($db, $cfgOn, $name, '', 'Password123!', '127.0.0.1');
+    $id = (int)($r['user']['id'] ?? 0);
+    $db->prepare("UPDATE users SET email = ?, email_verified = ?, status = 'active', fav_public = 1, fav_listed = 1 WHERE id = ?")->execute([$email, $flag, $id]);
+    $db->prepare("DELETE FROM user_group_members WHERE user_id = ?")->execute([$id]);
+    foreach ($gids as $g) $db->prepare("INSERT INTO user_group_members (user_id, group_id, granted_at) VALUES (?, ?, '2000-01-01 00:00:00')")->execute([$id, $g]);
+    $db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)")->execute([$id, $H2]);
+    userPermissionsForget($id);
+    return $mx[$name] = $id;
+};
+$adminGx = (int)$db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn();
+$mkx('whot_q_ok', [$gGrant], 'whot_q_ok@example.org', 1);           // an address, verified
+$mkx('whot_q_unver', [$gGrant], 'whot_q_unver@example.org', 0);     // an address, not verified
+$mkx('whot_q_noemail', [$gGrant], null, 1);                         // the flag and NO address (the admin page could write it)
+$mkx('whot_q_empty', [$gGrant], '', 1);                             // the flag and an empty address
+$mkx('whot_q_admin', [$gGrant, $adminGx], null, 0);                 // the Admin group: exempt from the e-mail gate
+$mkx('whot_q_bare', [$gBare], 'whot_q_bare@example.org', 1);        // verified, no grant
+$listed = $names(whoFavPage($db, $cfgOn, $H2, $reader, ['page' => 1, 'per_page' => 50, 'search' => '']));
+$disagree = [];
+foreach ($mx as $nm => $id) {
+    $php = userIdHasGrantedPermission($db, $cfgOn, $id, 'favourites.public');
+    if ($php !== in_array($nm, $listed, true)) $disagree[] = $nm . ' (profile ' . ($php ? 'yes' : 'no') . ', list ' . ($php ? 'no' : 'yes') . ')';
+}
+check('QUAL-13: for every account, the profile\'s grant (PHP) and "who has this" (SQL) give the same answer — the e-mail gate on',
+      $disagree === [] && count($mx) === 6, implode(' | ', $disagree) . ' — listed: ' . implode(',', $listed));
+check('… which is: an address AND the flag, or the Admin group; never the flag alone, never an empty address, never without the grant',
+      array_values(array_intersect(['whot_q_admin', 'whot_q_bare', 'whot_q_empty', 'whot_q_noemail', 'whot_q_ok', 'whot_q_unver'], $listed)) === ['whot_q_admin', 'whot_q_ok'],
+      implode(',', $listed));
+$cfgNoGate = array_merge($cfgOn, ['users_require_email_verify' => '0']);
+$listedNg = $names(whoFavPage($db, $cfgNoGate, $H2, $reader, ['page' => 1, 'per_page' => 50, 'search' => '']));
+userPermissionsForget();
+$disagreeNg = [];
+foreach ($mx as $nm => $id) {
+    if (userIdHasGrantedPermission($db, $cfgNoGate, $id, 'favourites.public') !== in_array($nm, $listedNg, true)) $disagreeNg[] = $nm;
+}
+check('… and with the gate off, the same agreement (everybody the grant reaches)', $disagreeNg === [] && in_array('whot_q_unver', $listedNg, true)
+      && !in_array('whot_q_bare', $listedNg, true), implode(',', $disagreeNg) . ' — listed: ' . implode(',', $listedNg));
+// The Users page can no longer write the flag for an account without an address — its endpoint, as a request.
+$owner = ['loggedin' => true, 'login_time' => time(), 'last_activity' => time(), 'csrf_token' => 'who-child-token'];
+$j = $run('api/admin/user_update.php', 'POST', [], ['id' => $mx['whot_q_noemail'], 'email_verified' => 1], $owner);
+$j2 = $run('api/admin/user_update.php', 'POST', [], ['id' => $mx['whot_q_unver'], 'email_verified' => 1], $owner);
+check('… the Users page\'s "verified" is said of an ADDRESS: asked for an account without one, it leaves it unverified; with one, it verifies',
+      !empty($j['success']) && (int)$db->query("SELECT email_verified FROM users WHERE id = " . $mx['whot_q_noemail'])->fetchColumn() === 0
+      && !empty($j2['success']) && (int)$db->query("SELECT email_verified FROM users WHERE id = " . $mx['whot_q_unver'])->fetchColumn() === 1,
+      json_encode([$j, $j2]));
+$db->prepare("DELETE FROM user_favourites WHERE info_hash = ?")->execute([$H2]);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

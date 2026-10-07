@@ -54,7 +54,7 @@ add('unsub', {
     # its inline script as json_encode(__(...)) and land in textContent, so they stay plain text --
     # no markup, no entities. The button label is also rendered in the markup itself.
     'save':      ('Save Preferences', 'Zapisz ustawienia'),
-    'saving':    ('Saving...', 'Zapisywanie...'),
+    'saving':    ('Saving...', 'Zapisywanie…'),
     'saved':     ('Preferences saved successfully.', 'Ustawienia zostały zapisane.'),
     'save_failed': ('Failed to save preferences.', 'Nie udało się zapisać ustawień.'),
     'net_error': ('Network error. Please try again.', 'Błąd sieci. Spróbuj ponownie.'),

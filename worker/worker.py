@@ -12,7 +12,9 @@ web app can stat. Runs as the unprivileged `tracker` user under systemd (see tra
 
 Requires: python3-libtorrent (libtorrent-rasterbar 2.x bindings), python3-pymysql.
 """
-import configparser, json, logging, os, re, secrets, signal, sys, time
+import collections, configparser, ipaddress, json, logging, os, re, secrets, signal, socket, sys, time
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlsplit, urlunsplit
 
 # The parallel-fetch ceiling, in ONE place. It used to be written as a literal in two of them, which
 # is how a build enforcing 16 and a panel offering 64 ended up in the same install.
@@ -108,6 +110,178 @@ CLAIM_LANES = ("priority", "bulk", "any")
 # whitelist 0 = keep absolute priority (the behaviour every earlier release had).
 ORDER_MIX_DEFAULT = {"whitelist": 0, "oldest": 0, "newest": 15, "seeders": 70,
                      "seen": 0, "completed": 0, "random": 15}
+
+# The "any" lane is the un-split query: cheap when nothing is pending, 1.2-3.7 s of the database when rows ARE
+# pending but none is due yet (the daily budget spreads meta_requested_at over the next 24 h) — and claim() is
+# asked every half second. So after it comes back empty it rests this long for that queue (1.74.0, PERF-16).
+ANY_LANE_EVERY = 60
+
+# ── what a fetch is worth (1.74.0, PERF-16) ─────────────────────────────────
+#
+# A hash nobody seeds any more costs a slot for the whole timeout (180 s on production) while libtorrent keeps
+# DHT lookups, tracker announces and connection attempts going — ~0.5-0.7 of a core in total, and the yield fell
+# from ~19 000 names a day to ~2 000 while the cost did not move. Two levers:
+#
+#   * a fetch that has found NOBODY after NO_PEERS_SECONDS — not one peer connected, none even known — is given up
+#     ("no peers within 60 s") instead of waiting out the timeout: a dead hash holds its slot a third as long;
+#   * the working concurrency follows the yield of the last ADAPT_WINDOW fetches (within ADAPT_MAX_AGE): below
+#     ADAPT_LOW of them successful it halves, below ADAPT_VERY_LOW it quarters — never under min(configured, 4).
+#     What the operator set is still what the heartbeat reports as `concurrency` (the panel compares it with the
+#     setting); what is running now is `concurrency_now`, beside the yield it follows.
+NO_PEERS_SECONDS = 60
+ADAPT_WINDOW = 200
+ADAPT_MIN_OUTCOMES = 50
+ADAPT_MAX_AGE = 3600
+ADAPT_LOW = 0.10
+ADAPT_VERY_LOW = 0.03
+
+
+def adaptive_concurrency(base, outcomes, now):
+    """The concurrency to run with: `base` (the configured / panel value) scaled by the recent yield.
+
+    `outcomes` is an iterable of (finished_at, ok). Fewer than ADAPT_MIN_OUTCOMES recent ones say nothing yet, so the
+    configured number stands; so does a base of 2 or less, which has nothing to give back."""
+    base = max(1, int(base))
+    recent = [ok for at, ok in outcomes if now - at <= ADAPT_MAX_AGE]
+    if base <= 2 or len(recent) < ADAPT_MIN_OUTCOMES:
+        return base
+    rate = sum(1 for ok in recent if ok) / float(len(recent))
+    if rate >= ADAPT_LOW:
+        return base
+    floor = min(base, 4)
+    return max(floor, base // 2) if rate >= ADAPT_VERY_LOW else max(floor, base // 4)
+
+
+def gave_up_without_peers(started, now, list_peers, num_peers):
+    """True when a fetch has run NO_PEERS_SECONDS and libtorrent has neither a connected peer nor a known one."""
+    return (now - started) >= NO_PEERS_SECONDS and int(list_peers or 0) == 0 and int(num_peers or 0) == 0
+
+
+# ── trackers from a magnet are somebody else's words (1.74.0, SRV-1) ─────────
+#
+# A magnet stored from a web submission, a partner's API call or a forum post may carry its own `tr=` — and the
+# worker used to announce to every one of them: an HTTP GET or a UDP packet from this server to any host:port the
+# submitter named (169.254.169.254, 127.0.0.1:<anything>, the LAN). Blind, but a server-side request all the same.
+# So a magnet's tracker is used only when it is http(s) or udp, carries no credentials, and its host — resolved
+# here, every address it has — is on the public internet. A UDP tracker is then PINNED to the address that was
+# checked, so libtorrent's own lookup cannot be answered differently a second later (DNS rebinding); an HTTP one
+# keeps its name (virtual hosts, TLS) and libtorrent's ssrf_mitigation is set for it. The operator's own trackers
+# (the conf's `trackers`) are trusted as written and always added. Web seeds (ws=) are dropped — metadata never
+# comes from one — and so are direct peers (x.pe=) that are not public. includes/whitelist.php also strips tr= / xs=
+# / ws= from untrusted magnets as they are stored; this is the half that covers the ones stored before.
+TRACKER_SCHEMES = ("http", "https", "udp")
+TRACKER_DNS_TIMEOUT = 3.0
+TRACKER_DNS_TTL = 600
+TRACKER_DNS_FAIL_TTL = 60
+_dns_pool = None
+_dns_cache = {}
+
+
+def address_is_public(addr):
+    """True for an address the open internet routes to: not loopback, private, link-local (169.254/16 — the cloud
+    metadata address), shared (100.64/10), unique-local (fc00::/7), site-local, multicast, reserved, documentation or
+    unspecified; an IPv4 address inside IPv6 (mapped, 6to4, Teredo) is judged as itself."""
+    try:
+        ip = ipaddress.ip_address(str(addr).split('%', 1)[0].strip('[]'))
+    except ValueError:
+        return False
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip.sixtofour is not None and not ip.sixtofour.is_global:
+            return False
+        elif ip.teredo is not None and not ip.teredo[1].is_global:
+            return False
+    return bool(ip.is_global) and not ip.is_multicast and not ip.is_reserved
+
+
+def resolve_host(host, port, timeout=TRACKER_DNS_TIMEOUT):
+    """Every address `host` resolves to (cached TRACKER_DNS_TTL), or [] when it does not resolve within `timeout`.
+
+    In a small pool so a slow name server costs the claim loop at most `timeout`, never the libc default."""
+    global _dns_pool
+    key = (str(host).lower(), int(port))
+    now = time.time()
+    hit = _dns_cache.get(key)
+    if hit and hit[0] > now:
+        return list(hit[1])
+    if _dns_pool is None:
+        _dns_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="dns")
+    fut = _dns_pool.submit(socket.getaddrinfo, host, port, 0, socket.SOCK_STREAM)
+    try:
+        addrs = sorted({ai[4][0] for ai in fut.result(timeout=timeout)})
+    except Exception:
+        addrs = []
+    _dns_cache[key] = (now + (TRACKER_DNS_TTL if addrs else TRACKER_DNS_FAIL_TTL), addrs)
+    if len(_dns_cache) > 5000:
+        for k in [k for k, v in _dns_cache.items() if v[0] <= now]:
+            _dns_cache.pop(k, None)
+    return addrs
+
+
+def tracker_allowed(url, resolve=resolve_host):
+    """(True, the URL to use) or (False, why) for one tracker named by a magnet."""
+    try:
+        parts = urlsplit(str(url or "").strip())
+        scheme = parts.scheme.lower()
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return False, "not an address"
+    if scheme not in TRACKER_SCHEMES:
+        return False, "scheme %r" % scheme
+    if not host:
+        return False, "no host"
+    if parts.username is not None or parts.password is not None:
+        return False, "credentials in the address"
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    if not port:
+        return False, "no port"
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    addrs = [str(literal)] if literal is not None else resolve(host, port)
+    if not addrs:
+        return False, "does not resolve"
+    bad = [a for a in addrs if not address_is_public(a)]
+    if bad:
+        return False, "resolves to a non-public address (%s)" % bad[0]
+    if scheme == "udp" and literal is None:
+        a = addrs[0]
+        netloc = ("[%s]" % a if ":" in a else a) + ":%d" % port
+        return True, urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return True, str(url).strip()
+
+
+def filter_magnet_trackers(trackers, own=(), resolve=resolve_host):
+    """(kept, dropped) of a magnet's trackers: kept = the URLs to use, dropped = [(url, why)]. The operator's own
+    trackers are left out of both — the caller adds them, as written."""
+    kept, dropped, own = [], [], set(own or ())
+    for t in trackers or ():
+        t = str(t or "").strip()
+        if not t or t in own:
+            continue
+        ok, val = tracker_allowed(t, resolve)
+        if ok:
+            kept.append(val)
+        else:
+            dropped.append((t, val))
+    return list(dict.fromkeys(kept)), dropped
+
+
+def public_peers(peers):
+    """A magnet's direct peers (x.pe=) that are on the public internet; the rest would be a connection from this
+    server to wherever the submitter pointed."""
+    out = []
+    for p in peers or ():
+        try:
+            if address_is_public(p[0]):
+                out.append(p)
+        except Exception:
+            continue
+    return out
 
 
 def order_rotation(shares, length=ORDER_ROTATION):
@@ -291,6 +465,9 @@ class Worker:
         self._order_seq = 0          # which slot of the rotation the next claim takes
         self._order_indexes = None   # which selectors the database can actually serve
         self._order_indexes_at = 0.0
+        self._outcomes = collections.deque(maxlen=ADAPT_WINDOW)   # (finished_at, ok) — the yield the concurrency follows
+        self._working = None         # the last working concurrency, so a change is logged once
+        self._any_empty_at = {}      # queue table -> when its "any" lane last came back empty (ANY_LANE_EVERY)
         self.running = True
         os.makedirs(cfg.tmp_dir, exist_ok=True)
         os.makedirs(os.path.dirname(cfg.heartbeat), exist_ok=True)
@@ -305,6 +482,16 @@ class Worker:
             "dht_bootstrap_nodes": ",".join(cfg.dht_routers),
         }
         self.ses = lt.session(settings)
+        # Two settings applied one by one, because an older libtorrent that does not know one refuses the whole pack
+        # (1.74.0): `listen_queue_size` — the accept backlog of :6881 was libtorrent's default 5, and the kernel counted
+        # 1 300 refused connections a second on it (AUDIT 2.8); `ssrf_mitigation` — a tracker on a local address must
+        # end in /announce and carry no query of its own (the default where it exists; said here so it is not left to
+        # a build's default). See SRV-1 below for the rest.
+        for key, value in (("listen_queue_size", 128), ("ssrf_mitigation", True)):
+            try:
+                self.ses.apply_settings({key: value})
+            except Exception as e:
+                log.info("libtorrent setting %s not available in this build (%s)", key, e)
         # Queues drained in order: the whitelist first, then (if configured) the observed-hash index —
         # so an index fetch never delays a whitelist one. Each descriptor says how to claim/finish rows.
         #   key_col : the WHERE key for finish()/claim re-select (whitelist has a numeric id; index is keyed
@@ -365,6 +552,26 @@ class Worker:
                          val if val is not None else "none", why, self.cfg.concurrency)
                 self._conc_override = val
         return self._conc_override or self.cfg.concurrency
+
+    def working_concurrency(self, now=None):
+        """What runs NOW: effective_concurrency() scaled by the recent yield (adaptive_concurrency(), PERF-16).
+
+        A change is logged once; the heartbeat carries both numbers."""
+        now = time.time() if now is None else now
+        base = self.effective_concurrency()
+        n = adaptive_concurrency(base, self._outcomes, now)
+        if n != self._working:
+            recent = [ok for at, ok in self._outcomes if now - at <= ADAPT_MAX_AGE]
+            log.info("working concurrency %d of %d (yield %s over the last %d fetches)", n, base,
+                     ("%.1f%%" % (100.0 * sum(1 for ok in recent if ok) / len(recent))) if recent else "n/a", len(recent))
+            self._working = n
+        return n
+
+    def yield_pct(self, now=None):
+        """The share of recent fetches that stored metadata, in per cent, or None before there are any."""
+        now = time.time() if now is None else now
+        recent = [ok for at, ok in self._outcomes if now - at <= ADAPT_MAX_AGE]
+        return round(100.0 * sum(1 for ok in recent if ok) / len(recent), 1) if recent else None
 
     def adopt_max_files(self, raw):
         """Take the panel's `meta_max_files`. Returns True when the effective value changed.
@@ -598,6 +805,11 @@ class Worker:
                 "max_files_config": self.cfg.max_files,
                 "max_files_max": MAX_FILES_MAX,
                 "active": len(self.active),
+                # 1.74.0 (PERF-16): what runs now — `concurrency` above stays what was asked, which the panel
+                # compares with the setting — and the yield it follows, over how many recent fetches.
+                "concurrency_now": self.working_concurrency(),
+                "yield_pct": self.yield_pct(),
+                "outcomes": len(self._outcomes),
                 # Reported for the same reason the effective concurrency is: the panel must be able
                 # to show what the worker is DOING, not read a setting back to the operator.
                 "order": self._order_mode,
@@ -632,10 +844,22 @@ class Worker:
         """
         for q, selector in self.claim_targets():
             for lane in CLAIM_LANES:
+                if lane == "any" and not self.any_lane_due(q):
+                    continue
                 row = self.claim_from(q, selector, lane)
+                if lane == "any":
+                    self._any_empty_at[q["table"]] = 0.0 if row is not None else time.time()
                 if row is not None:
                     return row
         return None
+
+    def any_lane_due(self, q, now=None):
+        """May the "any" lane run for this queue now? Not within ANY_LANE_EVERY of coming back empty (PERF-16).
+
+        The lane exists for a row whose priority neither real lane matches; when it found nothing a moment ago, asking
+        again twice a second only repeats its full sort of the pending set."""
+        now = time.time() if now is None else now
+        return now - self._any_empty_at.get(q["table"], 0.0) >= ANY_LANE_EVERY
 
     def claim_from(self, q, selector, lane):
         """One (queue, selector, lane) combination. None means "nothing here, try the next"."""
@@ -682,8 +906,29 @@ class Worker:
         # manager, so we MUST clear `paused` too — otherwise it never connects to anyone and every
         # fetch ends in a timeout.
         params.flags &= ~(lt.torrent_flags.auto_managed | lt.torrent_flags.paused)
+        # The magnet's own trackers only where they are on the public internet (SRV-1, filter_magnet_trackers()); the
+        # operator's own (the conf's `trackers`) as written.
         try:
-            params.trackers = list(dict.fromkeys(list(params.trackers) + self.cfg.trackers))
+            magnet_trackers = list(params.trackers)
+        except Exception:
+            magnet_trackers = []
+        kept, dropped = filter_magnet_trackers(magnet_trackers, self.cfg.trackers)
+        for t, why in dropped:
+            log.warning("tracker from the magnet of %s refused: %s (%s)", row["info_hash"], t[:200], why)
+        try:
+            params.trackers = list(dict.fromkeys(kept + self.cfg.trackers))
+        except Exception:
+            pass
+        # No web seeds — metadata never comes from one, and each is an HTTP request to wherever the magnet points —
+        # and no direct peer that is not public.
+        try:
+            params.url_seeds = []
+        except Exception:
+            pass
+        try:
+            peers = list(params.peers)
+            if peers:
+                params.peers = public_peers(peers)
         except Exception:
             pass
         h = self.ses.add_torrent(params)
@@ -706,6 +951,8 @@ class Worker:
         kc = q["key_col"]                 # 'id' (whitelist) or 'info_hash' (index)
         kv = row[kc]
         keep_files = self.cfg.index_keep_files if q["table"] == self.cfg.index_table else True
+        # The yield the working concurrency follows (PERF-16): stored metadata is a success, anything else is not.
+        stored = bool(ok and ti is not None)
         if ok and ti is not None:
             try:
                 name = ti.name()[:255]
@@ -756,6 +1003,7 @@ class Worker:
                     conn.rollback()
                     raise
                 log.info("done %s:%s %s name=%r size=%d files=%d in %ds", q["table"], kv, row["info_hash"], name, total, count, time.time() - item["started"])
+                self._outcomes.append((time.time(), stored))
                 return
             except Exception as e:
                 error = f"store failed: {e}"
@@ -766,6 +1014,7 @@ class Worker:
         except Exception as e:
             log.warning("mark failed %s:%s: %s", q["table"], kv, e)
         log.info("failed %s:%s %s: %s", q["table"], kv, row["info_hash"], err)
+        self._outcomes.append((time.time(), False))
 
     # ── main loop ──────────────────────────────────────────────────────────
     def run(self):
@@ -810,13 +1059,17 @@ class Worker:
                         if ti is not None:
                             self.finish(token, True, ti)
                             continue
+                    # Nobody found at all after NO_PEERS_SECONDS: the slot goes to the next hash (PERF-16).
+                    if gave_up_without_peers(item["started"], time.time(), getattr(st, "list_peers", 0), getattr(st, "num_peers", 0)):
+                        self.finish(token, False, None, f"no peers within {NO_PEERS_SECONDS} s")
+                        continue
                 except Exception:
                     pass
                 if time.time() > item["deadline"]:
                     self.finish(token, False, None, f"timeout (no metadata within {self.cfg.timeout} s)")
-            # claim new work
+            # claim new work — as many as the yield earns (working_concurrency(), PERF-16)
             try:
-                while len(self.active) < self.effective_concurrency():
+                while len(self.active) < self.working_concurrency():
                     row = self.claim()
                     if not row:
                         break

@@ -176,19 +176,24 @@ add('info', {
     'a_groups_shop': ('It is granted by the operator, or bought through a partner shop.',
                       'Nadaje ją operator albo można ją kupić w sklepie partnera.'),
     'a_notify':  ('Notifications tell you about replies, friend requests, changes to your groups and moderators\' '
-                  'decisions; a read one is deleted 90 days after it arrived, any one after a year.',
-                  'Powiadomienia mówią o odpowiedziach, zaproszeniach do znajomych, zmianach w twoich grupach '
+                  'decisions; a read one is deleted 90 days after it arrived, any one after a year. One about a '
+                  'comment quotes its first words: when the comment is edited the quote changes with it, and when '
+                  'it is deleted — or its author\'s account is — the quote goes. A friend request goes with the '
+                  'account that sent it.',
+                  'Powiadomienia mówią o odpowiedziach, zaproszeniach do znajomych, zmianach w Twoich grupach '
                   'i decyzjach moderatorów; przeczytane powiadomienie jest usuwane 90 dni po nadejściu, każde inne '
-                  'po roku.'),
+                  'po roku. Powiadomienie o komentarzu cytuje jego pierwsze słowa: gdy komentarz zostanie '
+                  'poprawiony, cytat zmienia się razem z nim, a gdy zostanie usunięty — albo usunięte zostanie konto '
+                  'jego autora — cytat znika. Zaproszenie do znajomych znika razem z kontem, które je wysłało.'),
     'a_sounds':  ('A sound for what arrives can be chosen on the account page; none plays until you choose one.',
                   'Dźwięk dla tego, co przychodzi, można wybrać na stronie konta; żaden nie gra, dopóki go nie '
                   'wybierzesz.'),
     'a_bridge':  ('You can also sign in through a partner site (the sign-in bridge). That site vouches for you, so '
                   'no password and no second factor are asked here, and it receives your account name, e-mail '
                   'address and groups.',
-                  'Można też zalogować się przez serwis partnera (mostek logowania). Ten serwis za ciebie '
+                  'Można też zalogować się przez serwis partnera (mostek logowania). Ten serwis za Ciebie '
                   'poręcza, więc nie jesteś tu pytany ani o hasło, ani o drugi składnik, a on sam dostaje nazwę '
-                  'twojego konta, adres e-mail i grupy.'),
+                  'Twojego konta, adres e-mail i grupy.'),
 
     # ── profiles, favourites, lists ─────────────────────────────────────────
     'q_profiles': ('Profiles', 'Profile'),
@@ -199,31 +204,31 @@ add('info', {
                    'nazwę członka i to, od kiedy nim jest, nigdy jego adresu e-mail, grup ani ostatniego '
                    'logowania.'),
     'a_profiles_bio': ('A few words of your own can stand under your name.',
-                       'Pod nazwą może stać kilka twoich słów.'),
+                       'Pod nazwą może stać kilka Twoich słów.'),
     'a_profiles_choice': ('Your favourites, lists, likes or ratings, the descriptions you wrote and the torrents '
                           'you registered appear on it only if you switch them on on the account page and your '
                           'group allows it; every one of them starts switched off.',
-                          'Twoje ulubione, listy, polubienia albo oceny, napisane przez ciebie opisy i '
+                          'Twoje ulubione, listy, polubienia albo oceny, napisane przez Ciebie opisy i '
                           'zarejestrowane torrenty pojawiają się na nim tylko wtedy, gdy włączysz je na stronie '
-                          'konta i pozwala na to twoja grupa; każde z nich jest na początku wyłączone.'),
+                          'konta i pozwala na to Twoja grupa; każde z nich jest na początku wyłączone.'),
     'a_pictures': ('A picture or a cover you upload is re-encoded by the site, which strips its metadata — a '
                    'location included — and is kept in the site\'s database. Changing or removing it deletes the '
                    'old one at once, though a browser or a cache that already has it may show it for a while.',
                    'Wgrane zdjęcie profilowe albo okładka są przekodowywane przez stronę (co usuwa ich metadane, '
                    'łącznie z lokalizacją) i przechowywane w bazie danych strony. Zmiana albo usunięcie od razu '
-                   'kasuje poprzedni plik, choć przeglądarka albo pamięć podręczna, która już go ma, może go '
+                   'usuwa poprzedni plik, choć przeglądarka albo pamięć podręczna, która już go ma, może go '
                    'jeszcze przez chwilę pokazywać.'),
     'q_saved':   ('Favourites and lists', 'Ulubione i listy'),
     'a_favourites': ('The star keeps a torrent among your favourites.',
-                     'Gwiazdka zapisuje torrent w twoich ulubionych.'),
+                     'Gwiazdka zapisuje torrent w Twoich ulubionych.'),
     'a_lists':   ('A list is a collection you make yourself; each one is private until you share it.',
                   'Lista to zbiór, który tworzysz sam; każda jest prywatna, dopóki jej nie udostępnisz.'),
     'a_lists_public': ('A public list can be read by signed-in members, once you allow public lists on the '
                        'account page and your group allows it.',
                        'Publiczną listę mogą czytać zalogowani, gdy tylko pozwolisz na publiczne listy na '
-                       'stronie konta i pozwala na to twoja grupa.'),
+                       'stronie konta i pozwala na to Twoja grupa.'),
     'a_lists_friends': ('A list for friends is read by your friends only.',
-                        'Listę dla znajomych czytają wyłącznie twoi znajomi.'),
+                        'Listę dla znajomych czytają wyłącznie Twoi znajomi.'),
 
     # ── people ──────────────────────────────────────────────────────────────
     'q_people':  ('Friends, blocks and private messages', 'Znajomi, blokady i prywatne wiadomości'),
@@ -232,8 +237,8 @@ add('info', {
                   'comments away for you; it can also hide your profile from them. It does not reach the '
                   'shoutbox.',
                   'Obserwowanie kogoś wysyła mu zaproszenie do znajomych; gdy je przyjmie albo zacznie '
-                  'obserwować ciebie, jesteście znajomymi. Blokada kończy znajomość, zatrzymuje wiadomości '
-                  'w obie strony i zwija dla ciebie komentarze tej osoby; może też ukryć przed nią twój profil. '
+                  'obserwować Ciebie, jesteście znajomymi. Blokada kończy znajomość, zatrzymuje wiadomości '
+                  'w obie strony i zwija dla Ciebie komentarze tej osoby; może też ukryć przed nią Twój profil. '
                   'Nie sięga do shoutboksa.'),
     'a_directory': ('The member directory lists only the members who asked to be in it, with their name and '
                     'picture.',
@@ -257,18 +262,18 @@ add('info', {
     'a_messages_trash': ('Delete moves it to the Trash, where it can be restored for :days before it is '
                          'deleted for you; Delete forever and Empty the Trash do that at once.',
                          'Usunięcie przenosi ją do Kosza, skąd można ją przywrócić przez :days, zanim '
-                         'zostanie usunięta dla ciebie; „Usuń na zawsze” i opróżnienie Kosza robią to od razu.'),
-    'a_messages_now': ('Delete deletes it for you at once.', 'Usunięcie od razu usuwa ją dla ciebie.'),
+                         'zostanie usunięta dla Ciebie; „Usuń na zawsze” i opróżnienie Kosza robią to od razu.'),
+    'a_messages_now': ('Delete deletes it for you at once.', 'Usunięcie od razu usuwa ją dla Ciebie.'),
     'a_messages_keep': ('Deleting only ever removes a conversation for you — the other person keeps it — and the '
                         'messages themselves stay in the database until one of the two accounts is deleted, which '
                         'deletes the conversation for both; a moderator may delete a single message that was '
                         'reported.',
-                        'Usuwanie zawsze usuwa rozmowę wyłącznie dla ciebie — druga osoba ją zachowuje — a same '
+                        'Usuwanie zawsze usuwa rozmowę wyłącznie dla Ciebie — druga osoba ją zachowuje — a same '
                         'wiadomości zostają w bazie danych do czasu usunięcia jednego z dwóch kont, co usuwa rozmowę '
                         'dla obu stron; moderator może usunąć pojedynczą zgłoszoną wiadomość.'),
     'a_messages_private': ('Nobody else sees your Archive or your Trash.',
-                           'Nikt inny nie widzi twojego Archiwum ani Kosza.'),
-    'a_messages_private_archive': ('Nobody else sees your Archive.', 'Nikt inny nie widzi twojego Archiwum.'),
+                           'Nikt inny nie widzi Twojego Archiwum ani Kosza.'),
+    'a_messages_private_archive': ('Nobody else sees your Archive.', 'Nikt inny nie widzi Twojego Archiwum.'),
 
     # ── comments, descriptions, ratings, the shoutbox ───────────────────────
     'q_words':   ('Comments, descriptions and ratings', 'Komentarze, opisy i oceny'),
@@ -278,7 +283,7 @@ add('info', {
                    'when — and, for a moderator, why.',
                    'Zalogowani mogą komentować torrent w jego panelu Info i odpowiadać na komentarze. Swój '
                    'komentarz możesz przez krótką chwilę poprawić, a przez nieco dłuższą cofnąć. Komentarz usunięty '
-                   'przez ciebie albo przez moderatora znika dla wszystkich, ale zostaje zachowany razem '
+                   'przez Ciebie albo przez moderatora znika dla wszystkich, ale zostaje zachowany razem '
                    'z informacją, kto go usunął i kiedy — a w przypadku moderatora także dlaczego.'),
     'a_comments_guest': ('Visitors who are not signed in may comment too, signed as "Guest #" and four characters '
                          'that change every day. A guest solves a CAPTCHA every time, cannot post links, and their '
@@ -347,7 +352,7 @@ add('info', {
                         'wrote and short fingerprints of your last words, never the words themselves, and forgets '
                         'them after two days without writing.',
                         'Aby to działało, strona przechowuje dla konta — a dla gościa dla grupy adresów — kiedy '
-                        'ostatnio pisałeś i krótkie odciski twoich ostatnich słów, nigdy same słowa, i zapomina '
+                        'ostatnio pisałeś i krótkie odciski Twoich ostatnich słów, nigdy same słowa, i zapomina '
                         'o nich po dwóch dniach bez pisania.'),
 
     # ── what is kept ────────────────────────────────────────────────────────
@@ -379,10 +384,14 @@ add('info', {
     'd_account': ('<strong>An account:</strong> its name; the password as a salted hash, never the password; the '
                   'e-mail address; the address it was created from and the one it last signed in from; its groups '
                   'with their end dates; its language, time zone and your choices on the account page — until the '
-                  'account is deleted.',
+                  'account is deleted. In the panel the e-mail address and those two addresses are shown in full '
+                  'only to the operator and to the staff who may edit accounts; other staff who may see the list of '
+                  'members see them shortened.',
                   '<strong>Konto:</strong> jego nazwa; hasło jako solony skrót, nigdy samo hasło; adres e-mail; '
                   'adres, z którego je założono, i ten, z którego ostatnio się logowało; jego grupy z datami '
-                  'końca; jego język, strefa czasowa i twoje wybory na stronie konta — do czasu usunięcia konta.'),
+                  'końca; jego język, strefa czasowa i Twoje wybory na stronie konta — do czasu usunięcia konta. '
+                  'W panelu adres e-mail i oba te adresy widzą w całości tylko operator i obsługa, która może '
+                  'edytować konta; pozostała obsługa z dostępem do listy członków widzi je skrócone.'),
     'd_twofa':   ('<strong>A second factor:</strong> the authenticator\'s secret and the recovery codes, those as '
                   'hashes, until you switch it off.',
                   '<strong>Drugi składnik:</strong> sekret aplikacji uwierzytelniającej i kody odzyskiwania, te '
@@ -394,7 +403,7 @@ add('info', {
     'd_messages': ('<strong>Messages:</strong> until one of the two accounts is deleted — deleting a conversation '
                    'hides it from you, it does not remove the messages.',
                    '<strong>Wiadomości:</strong> do czasu usunięcia jednego z dwóch kont — usunięcie rozmowy ukrywa ją '
-                   'przed tobą, ale nie kasuje wiadomości.'),
+                   'przed Tobą, ale nie usuwa wiadomości.'),
     'd_comments': ('<strong>Comments:</strong> the ones taken back or removed included, until their author\'s '
                    'account is deleted; a guest\'s comment is kept with the address group it came from.',
                    '<strong>Komentarze:</strong> także te cofnięte albo usunięte, do czasu usunięcia konta autora; '
@@ -451,23 +460,26 @@ add('info', {
                       'i adresami — tak długo, jak operator je trzyma.'),
     'd_csp':     ('<strong>Security reports:</strong> when your browser blocks something on a page, it may tell the '
                   'site which rule and which page — never your address.',
-                  '<strong>Raporty bezpieczeństwa:</strong> gdy twoja przeglądarka zablokuje coś na stronie, może '
-                  'powiadomić o tym stronę — którą regułę i na której stronie — nigdy z twoim adresem.'),
+                  '<strong>Raporty bezpieczeństwa:</strong> gdy Twoja przeglądarka zablokuje coś na stronie, może '
+                  'powiadomić o tym stronę — którą regułę i na której stronie — nigdy z Twoim adresem.'),
     'd_weblog':  ('<strong>The web server:</strong> its own access log of the pages requested, with the address, '
                   'kept as the server is configured — that is not up to this software.',
                   '<strong>Serwer WWW:</strong> jego własny log dostępu do żądanych stron, z adresem, przechowywany '
                   'tak, jak serwer jest skonfigurowany — to już nie zależy od tego oprogramowania.'),
     'a_delete':  ('To have an account and its data deleted, write to the operator from the account\'s e-mail '
                   'address — there is no button for it. Deleting an account deletes its messages (for both sides), '
-                  'favourites, lists, notifications, votes and comments (where somebody replied, an empty placeholder '
-                  'stays); the torrents it registered and the descriptions it wrote stay, without its name.',
+                  'favourites, lists, notifications, the friend requests it sent, votes and comments (where somebody '
+                  'replied, an empty placeholder stays) — and the words of its comments quoted in other people\'s '
+                  'notifications; the torrents it registered and the descriptions it wrote stay, without its name.',
                   'Aby usunąć konto i jego dane, napisz do operatora z adresu e-mail przypisanego do konta — nie '
                   'ma na to przycisku. Usunięcie konta usuwa jego wiadomości (po obu stronach), ulubione, listy, '
-                  'powiadomienia, głosy i komentarze (tam, gdzie ktoś odpowiedział, zostaje puste miejsce); '
-                  'zarejestrowane przez nie torrenty i napisane opisy zostają, bez jego nazwy.'),
+                  'powiadomienia, wysłane przez nie zaproszenia do znajomych, głosy i komentarze (tam, gdzie ktoś '
+                  'odpowiedział, zostaje puste miejsce) — razem ze słowami jego komentarzy cytowanymi '
+                  'w powiadomieniach innych osób; zarejestrowane przez nie torrenty i napisane opisy zostają, bez '
+                  'jego nazwy.'),
 
     # ── cookies and the browser ─────────────────────────────────────────────
-    'q_cookies': ('Cookies and your browser', 'Ciasteczka i twoja przeglądarka'),
+    'q_cookies': ('Cookies and your browser', 'Ciasteczka i Twoja przeglądarka'),
     'c_session': ('<code>PHPSESSID</code> is set on every visit. It holds a random identifier and nothing else; '
                   'what it points to — the forms\' security token, whether you are signed in — stays on the server. '
                   'It normally ends when you close the browser.',
@@ -477,7 +489,7 @@ add('info', {
     'c_remember': ('<code>thx_remember</code> is set only when you choose to stay signed in: your account\'s number '
                    'and a random token, until the time you chose.',
                    '<code>thx_remember</code> jest ustawiane tylko wtedy, gdy zdecydujesz się pozostać zalogowanym: '
-                   'numer twojego konta i losowy token, do wybranego przez ciebie czasu.'),
+                   'numer Twojego konta i losowy token, do wybranego przez Ciebie czasu.'),
     'c_lang':    ('<code>lang</code> is set only when you pick a language with the switcher: the language\'s code, '
                   'until the browser closes.',
                   '<code>lang</code> jest ustawiane tylko wtedy, gdy wybierzesz język przełącznikiem: kod języka, '
@@ -485,22 +497,22 @@ add('info', {
     'c_storage': ('Your browser\'s own storage keeps a few conveniences on your device and nowhere else: the emoji '
                   'you used recently, how many results a page shows, a chart\'s range and — signed in — the last '
                   'counts of what is unread.',
-                  'Pamięć twojej przeglądarki trzyma kilka ułatwień na twoim urządzeniu i nigdzie indziej: ostatnio '
+                  'Pamięć Twojej przeglądarki trzyma kilka ułatwień na Twoim urządzeniu i nigdzie indziej: ostatnio '
                   'używane emoji, ile wyników pokazuje strona, zakres wykresu i — po zalogowaniu — ostatnie liczby '
                   'nieprzeczytanych.'),
     'c_cdn':     ('The icon font is loaded from cdn.jsdelivr.net, which therefore sees your address.',
-                  'Czcionka ikon jest ładowana z cdn.jsdelivr.net, który przez to widzi twój adres.'),
+                  'Czcionka ikon jest ładowana z cdn.jsdelivr.net, który przez to widzi Twój adres.'),
     'c_captcha': ('A page that asks you to prove you are human loads the CAPTCHA provider\'s script, and checking '
                   'the answer sends the provider your address; the provider may set cookies of its own.',
                   'Strona, która prosi o udowodnienie, że jesteś człowiekiem, ładuje skrypt dostawcy CAPTCHY, '
-                  'a sprawdzenie odpowiedzi wysyła temu dostawcy twój adres; dostawca może ustawić własne '
+                  'a sprawdzenie odpowiedzi wysyła temu dostawcy Twój adres; dostawca może ustawić własne '
                   'ciasteczka.'),
     'c_images':  ('A picture in a description or in the shoutbox is loaded from wherever its author put it, so that '
                   'site sees your address.',
                   'Obrazek w opisie albo w shoutboksie jest ładowany stamtąd, gdzie umieścił go autor, więc tamta '
-                  'strona widzi twój adres.'),
+                  'strona widzi Twój adres.'),
     'c_none':    ('None of the site\'s own cookies follows you to other sites, and the site shows no advertising.',
-                  'Żadne z ciasteczek samej strony nie podąża za tobą na inne strony, a strona nie wyświetla '
+                  'Żadne z ciasteczek samej strony nie podąża za Tobą na inne strony, a strona nie wyświetla '
                   'reklam.'),
 
     # ── the questions ───────────────────────────────────────────────────────
@@ -543,7 +555,7 @@ add('info', {
     'faq_q7':    ('Can I delete my account?', 'Czy mogę usunąć swoje konto?'),
     'faq_a7':    ('Yes — write to the operator from the account\'s e-mail address. What deleting removes, and what '
                   'stays, is listed above.',
-                  'Tak — napisz do operatora z adresu e-mail przypisanego do konta. Co usunięcie kasuje, a co '
+                  'Tak — napisz do operatora z adresu e-mail przypisanego do konta. Co usunięcie usuwa, a co '
                   'zostaje, jest opisane wyżej.'),
 
     # ── a number of days, the whitelist hours (includes/pagecontent.php) ────

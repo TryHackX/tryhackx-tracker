@@ -8,8 +8,9 @@ if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
     jsonResponse(['error' => __('api.csrf.invalid')], 403);
 }
 
-// Per-IP rate limit (appeals were previously unthrottled — open to spam flooding the queue).
-if (!rateLimitAllow('appeal', getClientIp($cfg), (int)($cfg['rate_limit_appeal'] ?? 5))) {
+// Per-address-group rate limit (appeals were previously unthrottled — open to spam flooding the queue). An IPv6
+// host is its /64 (ipBucket(), 1.74.0): counted by the full address, every address of it was a fresh count.
+if (!rateLimitAllow('appeal', ipBucket(getClientIp($cfg)), (int)($cfg['rate_limit_appeal'] ?? 5))) {
     jsonResponse(['error' => 'rate_limit'], 429);
 }
 
@@ -21,13 +22,13 @@ if (isCaptchaRequired($cfg, 'appeal')) {
     onCaptchaSolved();
 }
 
-// Sanitize & validate
-$infoHash = strtolower(trim($input['infoHash'] ?? ''));
-$reportId = (int)($input['report_id'] ?? 0);
-$appealType = trim($input['appeal_type'] ?? 'unblock');
-$name = sanitize(trim($input['name'] ?? ''));
-$email = trim($input['email'] ?? '');
-$rawMessage = trim($input['message'] ?? '');
+// Sanitize & validate (strInput(), 1.74.0: an array where a string belongs is an empty field, not a TypeError)
+$infoHash = strtolower(trim(strInput($input, 'infoHash')));
+$reportId = (int)strInput($input, 'report_id', '0');
+$appealType = trim(strInput($input, 'appeal_type', 'unblock'));
+$name = sanitize(trim(strInput($input, 'name')));
+$email = trim(strInput($input, 'email'));
+$rawMessage = trim(strInput($input, 'message'));
 
 $errors = [];
 if (!isValidInfoHash($infoHash)) $errors[] = 'infoHash';
@@ -70,11 +71,12 @@ if ($reportId > 0) {
     $reportId = (int)$report['id'];
 }
 
-// Rate limit (reuse existing)
-$ip = getClientIp();
+// Rate limit (reuse existing) — this address GROUP's appeals in the last hour (ipBucketSql(), 1.74.0)
+$ip = getClientIp($cfg);
 $maxPerHour = (int)($cfg['rate_limit'] ?? 5);
-$stmt = $db->prepare("SELECT COUNT(*) FROM appeals WHERE ip = ? AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
-$stmt->execute([$ip]);
+$where = ipBucketSql('ip', $ip);   // a literal condition on the literal column; the address is bound
+$stmt = $db->prepare("SELECT COUNT(*) FROM appeals WHERE " . $where['sql'] . " AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+$stmt->execute([$where['arg']]);
 if ((int)$stmt->fetchColumn() >= $maxPerHour) {
     jsonResponse(['error' => 'rate_limit'], 429);
 }
@@ -110,9 +112,10 @@ $stmt->execute([$infoHash, $reportId, $name, $email, $message, $appealType, $ip]
 
 $appealId = (int)$db->lastInsertId();
 
-// Send confirmation email to appellant
+// Send confirmation email to appellant — while today's site-wide count of confirmation mails is under
+// `confirm_mail_daily_cap` (confirmMailAllow(), 1.74.0, PUB-1); the appeal itself is taken either way.
 try {
-    @sendAppealConfirmation($db, $appealId, $cfg);
+    if (confirmMailAllow($cfg)) @sendAppealConfirmation($db, $appealId, $cfg);
 } catch (\Throwable $e) {
     // Email failure should not block the appeal submission
 }

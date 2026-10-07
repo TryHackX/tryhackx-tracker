@@ -10,4 +10,5 @@ if (!$row) jsonResponse(['error' => __('api.groups.not_found')], 404);
 if ((int)$row['is_system'] === 1) jsonResponse(['error' => __('api.groups.system_undeletable')], 400);
 $db->prepare("DELETE FROM user_group_members WHERE group_id = ?")->execute([$id]);
 $db->prepare("DELETE FROM user_groups WHERE id = ?")->execute([$id]);
+userPermissionsForget();   // every account's memberships, as this request remembers them (userGroups(), 1.74.0)
 jsonResponse(['success' => true]);

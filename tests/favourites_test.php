@@ -384,7 +384,13 @@ $j = $fpGet('api/user_uploads.php', $fpNoMag, ['user' => 'favprobe_owner', 'sear
 check('uploads, a stranger without index.magnet, a hash prefix: nothing matches',
       !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
 $j = $fpGet('api/user_uploads.php', $fpNoMag, ['user' => 'favprobe_owner', 'search' => 'favprobe']);
-check('… by name: both rows, neither with a hash', ($j['total'] ?? -1) === 2 && $hashes($j) === [null, null], json_encode($j));
+// 1.74.0 (PRIV-4): somebody else's list is what the tracker serves — the banned row is the owner's alone.
+check('… by name: the live row only — a stranger is never shown the banned one — and without its hash',
+      ($j['total'] ?? -1) === 1 && $hashes($j) === [null] && ($j['rows'][0]['status'] ?? '') === 'live', json_encode($j));
+$j = $fpGet('api/user_uploads.php', $fpNoMag, ['user' => 'favprobe_owner', 'search' => 'favprobe', 'status' => 'blocked']);
+check('… and asking a stranger\'s list for its blocked rows finds none', !empty($j['success']) && ($j['total'] ?? -1) === 0, json_encode($j));
+$j = $fpGet('api/user_uploads.php', $fpOwner, ['search' => 'favprobe']);
+check('… while the owner\'s own list still has both', ($j['total'] ?? -1) === 2, json_encode($j));
 $j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner', 'search' => $pfxLive]);
 check('… with index.magnet the prefix finds the live row, hash and all', ($j['total'] ?? -1) === 1 && $hashes($j) === [$fpHashLive], json_encode($j));
 $j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner', 'search' => $pfxBan]);
@@ -481,10 +487,11 @@ check('… and the owner\'s own list carries none: every row of it is on',
 
 $j = $fpGet('api/user_uploads.php', $fpStar, ['user' => 'favprobe_owner'], $starCfg);
 $m = $favBy($j);
-check('§13 uploads: the reader\'s own state (on / off); the banned row, its hash withheld, carries none',
-      !empty($j['success']) && count($j['rows'] ?? []) === 3 && $is($m, $fpHashLive, [true]) && $is($m, $fpHashOther, [false]) && $is($m, 'null', ['none']), json_encode($j['rows'] ?? $j));
+// 1.74.0 (PRIV-4): somebody else's uploads are what the tracker serves — the banned row is the owner's alone.
+check('§13 uploads: the reader\'s own state (on / off), on the two rows a stranger is shown (the banned one is not theirs to see)',
+      !empty($j['success']) && count($j['rows'] ?? []) === 2 && $is($m, $fpHashLive, [true]) && $is($m, $fpHashOther, [false]) && !isset($m['null']), json_encode($j['rows'] ?? $j));
 $j = $fpGet('api/user_uploads.php', $fpMag, ['user' => 'favprobe_owner'], $starCfg);
-check('… and none at all for a reader who may not keep favourites', count($j['rows'] ?? []) === 3 && $favOf($j) === ['none', 'none', 'none'], json_encode($j['rows'] ?? $j));
+check('… and none at all for a reader who may not keep favourites', count($j['rows'] ?? []) === 2 && $favOf($j) === ['none', 'none'], json_encode($j['rows'] ?? $j));
 
 $j = $fpGet('api/user_list_items.php', $fpStar, ['list' => (string)$fpList], $starCfg);
 $m = $favBy($j);

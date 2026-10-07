@@ -94,7 +94,9 @@ if ($op === 'remove_avatar' || $op === 'remove_cover') {
     auditNote(['summary' => ($what === 'cover' ? 'cover' : 'picture') . ' removed from ' . (string)$u['username'],
                'target_type' => 'user', 'target_id' => (int)$u['id'], 'detail' => ['what' => $what, 'rows' => (int)$r['removed']]]);
     // Told, not left to discover it: the extension this follows changed a member's cover without a word.
-    if ($had) userNotify($db, (int)$u['id'], 'account', __('notify.media_removed_' . $what), __('notify.media_removed_body'));
+    // …in THEIR language (1.74.0), not the moderator's.
+    $uLang = recipientLang($cfg, $u);
+    if ($had) userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.media_removed_' . $what), langFor($uLang, 'notify.media_removed_body'));
     jsonResponse(['success' => true, 'message' => __('api.media.removed_' . $what), 'user' => $userState(userFindById($db, (int)$u['id']) ?? $u)]);
 }
 

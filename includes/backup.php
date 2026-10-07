@@ -342,21 +342,43 @@ function backupScheduleDescribe(?string $json, string $tz): string {
 //
 // An archive holds every password on the machine, so the download URL must not be a plain id: the
 // token is bound to one archive, expires in BACKUP_TOKEN_TTL seconds and is signed with the site's
-// HMAC secret. The endpoint additionally burns it in the session, so a link that leaks from a proxy
-// log or a shoulder cannot be replayed even inside its lifetime.
+// HMAC secret. The endpoint additionally burns it, so a link that leaks from a proxy log or a
+// shoulder cannot be replayed even inside its lifetime.
+//
+// AND IT MUST HAVE BEEN ISSUED (1.74.0, PANEL-1). A signature proves only that whoever made the token knew
+// `hmac_secret` — and the Settings page showed that secret in full to every session that reached it, an
+// admin-group account's or a stolen cookie's, none of which had typed the owner's password. Anybody holding it
+// could sign a token for any archive, for any expiry, and download every database password on the box without
+// the password admin/backup_action asks for. So a token now carries a NONCE (`<exp>.<nonce>.<signature>`), and
+// backupIssueToken() — called only by backup_action op `token`, behind the password — records the nonce's
+// SHA-256 in config/backup_state.json; backup_download redeems it there, once (backupRedeemToken()). A token whose
+// nonce was never issued for that archive is refused however well it is signed, and an `exp` further away than
+// one lifetime is refused before anything is looked up. (Settings no longer prints the secret either.)
 
-function backupMintToken(string $id, string $secret, ?int $now = null): string {
+/** A new token: `<exp>.<32-hex nonce>.<hmac(id|exp|nonce)>`. Pure — backupIssueToken() is what makes one usable. */
+function backupMintToken(string $id, string $secret, ?int $now = null, ?string $nonce = null): string {
     $now = $now ?? time();
     $exp = $now + BACKUP_TOKEN_TTL;
-    return $exp . '.' . hash_hmac('sha256', $id . '|' . $exp, $secret);
+    $nonce = ($nonce !== null && preg_match('/^[0-9a-f]{32}$/', $nonce)) ? $nonce : bin2hex(random_bytes(16));
+    return $exp . '.' . $nonce . '.' . hash_hmac('sha256', $id . '|' . $exp . '|' . $nonce, $secret);
 }
 
-function backupVerifyToken(string $token, string $id, string $secret, ?int $now = null): bool {
+/** The token's parts when its shape is ours: ['exp' => int, 'nonce' => string, 'sig' => string], else null. */
+function backupTokenParts(mixed $token): ?array {
+    if (!is_string($token) || !preg_match('/^(\d{1,12})\.([0-9a-f]{32})\.([0-9a-f]{64})$/', $token, $m)) return null;
+    return ['exp' => (int)$m[1], 'nonce' => $m[2], 'sig' => $m[3]];
+}
+
+/**
+ * Signed for this archive with this secret, not expired, and not dated further ahead than one lifetime. Says
+ * nothing about whether it was ISSUED — backupRedeemToken() is that half, and backup_download asks both.
+ */
+function backupVerifyToken(mixed $token, string $id, string $secret, ?int $now = null): bool {
     $now = $now ?? time();
-    if ($token === '' || !str_contains($token, '.')) return false;
-    [$exp, $sig] = explode('.', $token, 2);
-    if (!ctype_digit($exp) || (int)$exp <= $now) return false;
-    return hash_equals(hash_hmac('sha256', $id . '|' . $exp, $secret), $sig);
+    $p = backupTokenParts($token);
+    if ($p === null || $secret === '') return false;
+    if ($p['exp'] <= $now || $p['exp'] > $now + BACKUP_TOKEN_TTL) return false;
+    return hash_equals(hash_hmac('sha256', $id . '|' . $p['exp'] . '|' . $p['nonce'], $secret), $p['sig']);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -374,7 +396,7 @@ function backupStateDefaults(): array {
     return [
         'last_run_at' => 0, 'last_run_id' => '', 'last_run_source' => '', 'last_run_result' => null,
         'last_schedule_at' => 0, 'last_error' => null, 'last_error_at' => 0,
-        'status' => null, 'status_at' => 0, 'used_tokens' => [],
+        'status' => null, 'status_at' => 0, 'used_tokens' => [], 'minted_tokens' => [],
     ];
 }
 
@@ -405,22 +427,69 @@ function backupStateUpdate(callable $fn): array {
     }
 }
 
-/** Burn a download token so the same link cannot be used twice. Returns false when already used. */
-function backupBurnToken(string $token, ?int $now = null): bool {
+/**
+ * Mint a download token AND record that it was issued (PANEL-1): the nonce's SHA-256, the archive and the expiry go
+ * into config/backup_state.json `minted_tokens`, under the state's lock. Only admin/backup_action op `token` — which
+ * has just asked for the owner's password — calls this. Null when the record could not be written: a token nobody
+ * can redeem is not worth handing out.
+ */
+function backupIssueToken(string $id, string $secret, ?int $now = null): ?string {
     $now = $now ?? time();
+    $token = backupMintToken($id, $secret, $now);
+    $p = backupTokenParts($token);
     $ok = false;
-    backupStateUpdate(function (array &$s) use ($token, $now, &$ok) {
-        $used = [];
-        foreach ((array)($s['used_tokens'] ?? []) as $t => $at) {
-            if ((int)$at > $now - BACKUP_TOKEN_TTL * 2) $used[$t] = (int)$at;   // prune the expired ones
-        }
-        if (isset($used[$token])) { $s['used_tokens'] = $used; $ok = false; return true; }
-        $used[$token] = $now;
-        $s['used_tokens'] = $used;
+    backupStateUpdate(function (array &$s) use ($p, $id, $now, &$ok) {
+        $s['minted_tokens'] = backupTokensPruned((array)($s['minted_tokens'] ?? []), $now);
+        $s['minted_tokens'][hash('sha256', $p['nonce'])] = ['id' => $id, 'exp' => $p['exp']];
         $ok = true;
         return true;
     });
-    return $ok;
+    // backupStateUpdate() writes and does not say whether the write landed: read it back.
+    $kept = (array)(backupStateRead()['minted_tokens'] ?? []);
+    return ($ok && isset($kept[hash('sha256', $p['nonce'])])) ? $token : null;
+}
+
+/** The entries of `minted_tokens` / `used_tokens` still worth keeping at $now (expired ones go; used ones after two lifetimes). */
+function backupTokensPruned(array $list, int $now): array {
+    $out = [];
+    foreach ($list as $k => $v) {
+        if (is_array($v)) { if ((int)($v['exp'] ?? 0) > $now) $out[$k] = $v; }
+        elseif ((int)$v > $now - BACKUP_TOKEN_TTL * 2) $out[$k] = (int)$v;
+    }
+    return $out;
+}
+
+/**
+ * Spend a download token, once: 'ok' — issued for this archive, not yet used (now it is); 'used' — this link was
+ * already used; 'unknown' — never issued for this archive by this panel (forged with the secret, made for another
+ * archive, or from before 1.74.0); 'unrecorded' — the spend could not be written down. Call after backupVerifyToken().
+ */
+function backupRedeemToken(string $token, string $id, ?int $now = null): string {
+    $now = $now ?? time();
+    $p = backupTokenParts($token);
+    if ($p === null) return 'unknown';
+    $key = hash('sha256', $p['nonce']);
+    $res = 'unknown';
+    backupStateUpdate(function (array &$s) use ($key, $id, $now, &$res) {
+        $minted = backupTokensPruned((array)($s['minted_tokens'] ?? []), $now);
+        $used = backupTokensPruned((array)($s['used_tokens'] ?? []), $now);
+        if (isset($used[$key])) {
+            $res = 'used';
+        } elseif (isset($minted[$key]) && hash_equals((string)($minted[$key]['id'] ?? ''), $id)) {
+            unset($minted[$key]);
+            $used[$key] = $now;
+            $res = 'ok';
+        }
+        $s['minted_tokens'] = $minted;
+        $s['used_tokens'] = $used;
+        return true;
+    });
+    if ($res === 'ok') {
+        // The same read-back as backupIssueToken(): a spend that was not recorded is a link that works twice.
+        $after = backupStateRead();
+        if (!isset(((array)($after['used_tokens'] ?? []))[$key])) return 'unrecorded';
+    }
+    return $res;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -11,8 +11,13 @@ $rawBody = $_SERVER['REQUEST_METHOD'] === 'POST' ? apiReadRawBody() : '';
 $client = apiAuthenticate($db, $cfg, 'v1/federation/ping', $rawBody);
 apiRequireScope($client, 'federation');
 
-$exportable = 0;
-try { $exportable = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'done'")->fetchColumn(); } catch (\Throwable $e) {}
+// A database that cannot count is not a healthy node: 503, never "ok, 0 rows to export" (1.74.0, QUAL-26).
+try { $exportable = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status = 'done'")->fetchColumn(); }
+catch (\Throwable $e) {
+    error_log('[api v1] federation/ping: the count failed: ' . $e->getMessage());
+    if (!headers_sent()) header('Retry-After: 60');
+    jsonResponse(['ok' => false, 'error' => __('api.db_unavailable')], 503);
+}
 
 jsonResponse([
     'ok' => true,

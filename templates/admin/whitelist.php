@@ -17,9 +17,9 @@
 </head>
 <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-api-ban-days="<?= (int)($cfg['api_ban_days'] ?? 30) ?>" data-service="<?= sanitize($svcName) ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>" data-files-mode="<?= sanitize(indexFilesAdminMode($cfg)) ?>" data-bridge-on="<?= (function_exists('authBridgeEnabled') && authBridgeEnabled($cfg)) ? '1' : '0' ?>">
-    <div class="admin-container admin-wide wl-page">
+    <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
-            <h2><i class="bi bi-list-check"></i> <?= _h('a.wl.title') ?></h2>
+            <h1 class="admin-title"><i class="bi bi-list-check"></i> <?= _h('a.wl.title') ?></h1>
             <?php $current = 'admin-whitelist'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
@@ -229,16 +229,16 @@
                     </colgroup>
                     <thead><tr>
                         <th class="wl-th-check"><input type="checkbox" class="form-check-input" id="wl-select-all" title="<?= _h('a.wl.select_all_title') ?>"></th>
-                        <th class="sortable" data-sort="id"><?= _h('a.wl.col_id') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="hash"><?= _h('a.wl.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="name"><?= _h('a.wl.col_name') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="size"><?= _h('a.wl.col_size') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="files" title="<?= _h('a.wl.col_files_title') ?>"><?= _h('a.wl.col_files') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable col-badge" data-sort="source"><?= _h('a.wl.col_source') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="ip"><?= _h('a.wl.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable col-badge" data-sort="meta"><?= _h('a.wl.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="seeders" title="<?= _h('a.wl.col_sl_title') ?>"><?= _h('a.wl.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="date"><?= _h('a.wl.col_date') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="id"><button type="button" class="th-sort"><?= _h('a.wl.col_id') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="hash"><button type="button" class="th-sort"><?= _h('a.wl.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('a.wl.col_name') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="size"><button type="button" class="th-sort"><?= _h('a.wl.col_size') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="files" title="<?= _h('a.wl.col_files_title') ?><button type="button" class="th-sort">"><?= _h('a.wl.col_files') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable col-badge" data-sort="source"><button type="button" class="th-sort"><?= _h('a.wl.col_source') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="ip"><button type="button" class="th-sort"><?= _h('a.wl.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable col-badge" data-sort="meta"><button type="button" class="th-sort"><?= _h('a.wl.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="seeders" title="<?= _h('a.wl.col_sl_title') ?><button type="button" class="th-sort">"><?= _h('a.wl.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="date"><button type="button" class="th-sort"><?= _h('a.wl.col_date') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions wl-th-actions"><?= _h('a.wl.col_actions') ?></th>
                     </tr></thead>
                     <tbody id="wl-body"></tbody>
@@ -270,11 +270,11 @@
                         <col class="wl-c-hash"><col class="wl-c-flex"><col class="wl-c-flex"><col class="wl-c-source"><col class="wl-c-date"><col class="wl-c-actions-2">
                     </colgroup>
                     <thead><tr>
-                        <th class="sortable" data-sort="hash"><?= _h('a.wl.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="hash"><button type="button" class="th-sort"><?= _h('a.wl.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th><?= _h('a.wl.col_name') ?></th>
-                        <th class="sortable" data-sort="reason"><?= _h('a.wl.col_reason') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable col-badge" data-sort="source"><?= _h('a.wl.col_source') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="date"><?= _h('a.wl.col_date') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="reason"><button type="button" class="th-sort"><?= _h('a.wl.col_reason') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable col-badge" data-sort="source"><button type="button" class="th-sort"><?= _h('a.wl.col_source') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="date"><button type="button" class="th-sort"><?= _h('a.wl.col_date') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions wl-th-actions"><?= _h('a.wl.col_actions') ?></th>
                     </tr></thead>
                     <tbody id="bn-body"></tbody>
@@ -326,7 +326,7 @@
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ab-search" placeholder="<?= _h('a.wl.ab_search_ph') ?>">
                             <button type="button" class="search-clear-btn" id="ab-search-clear" title="<?= _h('a.wl.clear_search') ?>"><i class="bi bi-x-lg"></i></button>
                         </div>
-                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="ab-status">
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="ab-status" aria-label="<?= _h('status.f_status') ?>">
                             <option value="active"><?= _h('a.wl.ab_active') ?></option>
                             <option value="all"><?= _h('a.wl.ab_all') ?></option>
                         </select>
@@ -343,13 +343,13 @@
                         <col class="wl-c-ipv6"><col class="wl-c-bucket"><col class="wl-c-flex"><col class="wl-c-keyid"><col class="wl-c-flex"><col class="wl-c-date"><col class="wl-c-date"><col class="wl-c-date-lg"><col class="wl-c-actions-2">
                     </colgroup>
                     <thead><tr>
-                        <th class="sortable" data-sort="ip"><?= _h('a.wl.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="ip"><button type="button" class="th-sort"><?= _h('a.wl.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th><?= _h('a.wl.col_bucket') ?></th>
-                        <th class="sortable" data-sort="reason"><?= _h('a.wl.col_reason') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="reason"><button type="button" class="th-sort"><?= _h('a.wl.col_reason') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th><?= _h('a.wl.col_keyid') ?></th>
                         <th><?= _h('a.wl.col_endpoint') ?></th>
-                        <th class="sortable" data-sort="date"><?= _h('a.wl.col_created') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="expires"><?= _h('a.wl.col_expires') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="date"><button type="button" class="th-sort"><?= _h('a.wl.col_created') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="expires"><button type="button" class="th-sort"><?= _h('a.wl.col_expires') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th><?= _h('a.wl.col_lifted') ?></th>
                         <th class="th-actions wl-th-actions"><?= _h('a.wl.col_actions') ?></th>
                     </tr></thead>
@@ -366,7 +366,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-plus-circle text-info"></i> <?= _h('a.wl.add_modal_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-muted wl-hint"><?= __('a.wl.add_modal_note') ?></p>
@@ -387,7 +387,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-slash-circle text-danger"></i> <?= _h('a.wl.ban_hashes') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-muted wl-hint"><?= __('a.wl.bn_modal_note') ?></p>
@@ -412,7 +412,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-file-earmark-text"></i> <?= _h('a.wl.details_title') ?> <span id="wd-title-id" class="text-muted"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body" id="wd-body"></div>
             </div>
@@ -425,13 +425,13 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-info"></i> <?= _h('a.wl.reload_modal_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-light mb-2" style="font-size:0.9rem;"><?= __('a.wl.reload_modal_note', ['svc' => sanitize($svcName !== '' ? $svcName : '<service>')]) ?></p>
                     <form id="wl-reload-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.wl.admin_password') ?></label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="wl-reload-password"><?= _h('a.wl.admin_password') ?></label>
                             <?php // For the browser's password manager: this form has a password field, so without a named
                                   // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                             <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -454,7 +454,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-key text-warning"></i> <?= _h('a.wl.token_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="wl-hint"><strong><?= _h('a.wl.col_label') ?>:</strong> <span id="token-label"></span> &nbsp; <strong><?= _h('a.wl.col_keyid') ?>:</strong> <code id="token-keyid"></code></p>
@@ -486,7 +486,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-key text-warning"></i> <span id="cl-opts-title"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body cl-opts">
                     <div class="cl-field">
@@ -604,7 +604,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-shield-x text-danger"></i> <?= _h('a.wl.snapshot_title') ?> <span id="snapshot-title-id" class="text-muted"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div id="snapshot-meta" class="wl-kv wl-kv-cols mb-3"></div>
@@ -628,7 +628,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-shield-x text-danger"></i> <?= _h('a.wl.ab_modal_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <form id="ab-add-form">

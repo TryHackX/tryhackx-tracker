@@ -11,7 +11,7 @@
  * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
  */
 
-const TRACKER_SCHEMA_VERSION = 92;  // 92 = the packets lost OUTSIDE this machine (1.73.3, includes/netlimit.php, tools/tuner.py): `net_samples`.tcp_retrans_x10 (SMALLINT UNSIGNED NULL — TCP segments resent per 1 000 sent over the sample's span, from /proc/net/snmp; NULL when unreadable or fewer than 300 were sent; one guarded ALTER of only what is missing) and the stability probe's settings `tuner_loss_targets` ('1.1.1.1 9.9.9.9'), `tuner_retrans_max` ('5.0') and `tuner_ping_loss_max` ('10'); 91 = what a deleted account left behind, and one missing default (1.73.0): once (schemaOnce 'v91_account_orphans', schemaAccountOrphans()) the `user_twofa` rows (TOTP secret, recovery hashes) and `message_typing` rows whose account is gone deleted, a bulk mail still QUEUED for a gone account skipped ('account deleted'), and a vote of a gone account (`hash_votes` voter_type 'user', from before 1.42.0's cascade) deleted with the stored totals of its hashes counted again (repRecount()) — userDeleteCascade() covers all four from now on; and the setting `transparency_enabled` ('1' — the nav link and the page's text read a missing row as on, the page's data endpoint as off) — no table changes; 90 = a messages' Archive and Trash, per side (includes/people.php, 1.73.0): `message_threads`.u_low_trash_upto / u_high_trash_upto (BIGINT UNSIGNED, the last message id that side put in its Trash, 0 = an empty trash) and u_low_trashed_at / u_high_trashed_at (DATETIME, when — NULL exactly when the trash is empty) + KEY idx_thread_trash_low / idx_thread_trash_high (the janitor's purge, oldest first), every existing row an empty trash (schemaPmTrashMigration(): one ALTER of only what is missing) — the Archive is u_*_hidden under its new name, the watermark u_*_cleared_id stays what deletes for good; and the settings `pm_archive_returns` (1: a new message brings an archived conversation back to the inbox, as hiding did) and `pm_trash_days` (30, 0-365; 0 = no Trash, Delete deletes at once); 89 = the Admin group's stored list says what its blanket holds (includes/users.php, 1.72.0): every registered CAPABILITY written into the admin group's permissions — schemaAdminGrant(), on every data-migration pass and by every schemaGrantOnce(), idempotent, never a consent id (userConsentPermissions(): content.public, favourites.public, lists.public, rating.public, uploads.public — what others may see of an administrator stays a grant somebody gives, tools/groups.php --consent or the panel's tick), never a removal — so the Users page's matrix is true on every install; and the moderator's fresh-install seed is the moderator every existing install has (without index.files_all, favourites.use/.public/.view_others and uploads.public, which the INSERT text gained at v42/v47 for new installs only — a moderator is a member too); no table changes; 88 = replies to comments, as a tree (includes/comments.php): `hash_comments`.parent_id (the comment answered; NULL = top level), root_id (the thread's top-level comment; NULL for it) and depth (0 for the top level, a reply its parent's + 1) + KEY idx_hc_thread (info_hash, root_id, id, status) — the page's top-level comments and one thread's replies, each one keyed range; users.comment_notify's fifth bit, 16 = a reply to one of my comments, ON for every account (guarded on the column's live DEFAULT 15, which becomes 31); the settings `comments_reply_depth` (3: the deepest reply level — 0 = no replies, at most 8) and `sound_default_comment_reply` (''); and granted once (v88_replies) comment.reply to member and moderator — the guest group nothing; 87 = who sees a list (includes/lists.php): `user_lists.visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private' in place of the boolean `is_public` (a public list stays public, every other one private — none loses its meaning) and KEY idx_list_visibility in place of idx_list_public; 'friends' = the owner and the members they are friends with (schemaListVisibilityMigration(): guarded on the old column, a NULL while unconverted, so a stop anywhere is safe); 86 = where the Info panel's comments stand and whether they open folded (includes/comments.php): `comments_position` ('after_files' — the panel's very end —, 'before_files', or 'after_rating', 1.71.0's place) and `comments_expanded` ('0': folded until opened) — settings only; 85 = one anti-spam layer for everything people write (includes/antispam.php): `antispam_state` (a row per context and subject — the account, or a guest's address group: the ladder's level, the last write and the earliest next one as unix seconds by the database's clock, the hits at the top of the ladder and whether a CAPTCHA is due, the refusals in a row, the last correction, the fingerprints of the last words, a revision counter; '*' rows throttle the audit), the settings antispam_enabled (1) / antispam_captcha_after (3) / antispam_guest_captcha (1) / antispam_staff_exempt (1) / antispam_new_days (3) / antispam_new_factor (2) / antispam_new_links (1) / antispam_dup_seconds (600) / antispam_pm_new_hour (8) / _day (20) / _hour_new (2) / _day_new (4) / antispam_pm_spread (2) and per context (shout, message, comment, description, report, list, bio, emote, vote) antispam_<context>_burst / _steps / _reset, rate_limit_pm (240: messages' own address ceiling instead of the favourites' one), and — defaults at last — the five recaptcha_on_<form> switches the Settings page always showed (report 1, login / status / appeal / block_check 0); 84 = reports of what people write in public, and warnings (includes/reports.php): `content_reports` (a comment, a torrent's description or a shout — kind, target id, the torrent's hash, whose words they were, the reporter and their reason, the words AS REPORTED and their format, open | closed with `open_slot` 1 / NULL so a UNIQUE key allows one OPEN report per member per target, what closed it, who and when, the note for the log and the answer to the reporter), `user_warnings` (the member, the moderator's reason, what it was about — kind, id, torrent —, what came with it, who gave it, when), and granted once (v84_reports) content.report to member and panel.reports.{comments,descriptions,shouts}.{view,handle} to moderator — the message queue (panel.messages.*) still to nobody, the guest group nothing; 83 = comments on a torrent (includes/comments.php): `hash_comments` (by info hash; the source as typed + its format, a guest's tag and address group, status visible | pending — a guest's, held for a moderator — | deleted, and who edited, let through or took it down, when and why; keys for a thread's page and count, a member's comments, the guest queue), users.comment_notify (15: the four kinds of news a member is told of), user_notifications.link (where a notification happened, site-relative), the settings comments_enabled (1) / comment_max_chars (500) / comment_links (1) / comment_edit_minutes (15) / comment_delete_own_minutes (60) / comments_per_page (20) / comment_rate_per_hour (30) / captcha_pts_comment (1) / comments_guest_review (1) and the two sound defaults sound_default_comment / sound_default_comment_mention (''), and granted once (v83_comments) comment.view + comment.post + comment.edit_own + comment.delete_own to member and comment.view + comment.post + comment.moderate to moderator — the guest group nothing; 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+const TRACKER_SCHEMA_VERSION = 93;  // 93 = the audit of 1.73.2 (1.74.0): `user_notifications`.sender_id (INT UNSIGNED NULL — the account a friend request or its acceptance is from) + KEY idx_un_sender (sender_id) + KEY idx_un_link (link(100)), one guarded ALTER of only what is missing; once (schemaOnce 'v93_notify_senders', schemaNotifySenders()) the friend notifications already written get their sender read from the title by the sentence of every installed language, those of an account already deleted deleted, unreadable ones left; the table `index_catalog` (info_hash PK, name, eff_seeders / eff_leechers, total_size, files_count, last_seen; a key per sort column with info_hash, FULLTEXT on the name) created EMPTY by schemaIndexCatalogDdl() — the janitor fills it and the search reads it only after a whole pass (config/index_state.json → catalog_pass_at); and the setting `confirm_mail_daily_cap` ('200': the site's daily cap on report and appeal confirmation mails, 0 = none); 92 = the packets lost OUTSIDE this machine (1.73.3, includes/netlimit.php, tools/tuner.py): `net_samples`.tcp_retrans_x10 (SMALLINT UNSIGNED NULL — TCP segments resent per 1 000 sent over the sample's span, from /proc/net/snmp; NULL when unreadable or fewer than 300 were sent; one guarded ALTER of only what is missing) and the stability probe's settings `tuner_loss_targets` ('1.1.1.1 9.9.9.9'), `tuner_retrans_max` ('5.0') and `tuner_ping_loss_max` ('10'); 91 = what a deleted account left behind, and one missing default (1.73.0): once (schemaOnce 'v91_account_orphans', schemaAccountOrphans()) the `user_twofa` rows (TOTP secret, recovery hashes) and `message_typing` rows whose account is gone deleted, a bulk mail still QUEUED for a gone account skipped ('account deleted'), and a vote of a gone account (`hash_votes` voter_type 'user', from before 1.42.0's cascade) deleted with the stored totals of its hashes counted again (repRecount()) — userDeleteCascade() covers all four from now on; and the setting `transparency_enabled` ('1' — the nav link and the page's text read a missing row as on, the page's data endpoint as off) — no table changes; 90 = a messages' Archive and Trash, per side (includes/people.php, 1.73.0): `message_threads`.u_low_trash_upto / u_high_trash_upto (BIGINT UNSIGNED, the last message id that side put in its Trash, 0 = an empty trash) and u_low_trashed_at / u_high_trashed_at (DATETIME, when — NULL exactly when the trash is empty) + KEY idx_thread_trash_low / idx_thread_trash_high (the janitor's purge, oldest first), every existing row an empty trash (schemaPmTrashMigration(): one ALTER of only what is missing) — the Archive is u_*_hidden under its new name, the watermark u_*_cleared_id stays what deletes for good; and the settings `pm_archive_returns` (1: a new message brings an archived conversation back to the inbox, as hiding did) and `pm_trash_days` (30, 0-365; 0 = no Trash, Delete deletes at once); 89 = the Admin group's stored list says what its blanket holds (includes/users.php, 1.72.0): every registered CAPABILITY written into the admin group's permissions — schemaAdminGrant(), on every data-migration pass and by every schemaGrantOnce(), idempotent, never a consent id (userConsentPermissions(): content.public, favourites.public, lists.public, rating.public, uploads.public — what others may see of an administrator stays a grant somebody gives, tools/groups.php --consent or the panel's tick), never a removal — so the Users page's matrix is true on every install; and the moderator's fresh-install seed is the moderator every existing install has (without index.files_all, favourites.use/.public/.view_others and uploads.public, which the INSERT text gained at v42/v47 for new installs only — a moderator is a member too); no table changes; 88 = replies to comments, as a tree (includes/comments.php): `hash_comments`.parent_id (the comment answered; NULL = top level), root_id (the thread's top-level comment; NULL for it) and depth (0 for the top level, a reply its parent's + 1) + KEY idx_hc_thread (info_hash, root_id, id, status) — the page's top-level comments and one thread's replies, each one keyed range; users.comment_notify's fifth bit, 16 = a reply to one of my comments, ON for every account (guarded on the column's live DEFAULT 15, which becomes 31); the settings `comments_reply_depth` (3: the deepest reply level — 0 = no replies, at most 8) and `sound_default_comment_reply` (''); and granted once (v88_replies) comment.reply to member and moderator — the guest group nothing; 87 = who sees a list (includes/lists.php): `user_lists.visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private' in place of the boolean `is_public` (a public list stays public, every other one private — none loses its meaning) and KEY idx_list_visibility in place of idx_list_public; 'friends' = the owner and the members they are friends with (schemaListVisibilityMigration(): guarded on the old column, a NULL while unconverted, so a stop anywhere is safe); 86 = where the Info panel's comments stand and whether they open folded (includes/comments.php): `comments_position` ('after_files' — the panel's very end —, 'before_files', or 'after_rating', 1.71.0's place) and `comments_expanded` ('0': folded until opened) — settings only; 85 = one anti-spam layer for everything people write (includes/antispam.php): `antispam_state` (a row per context and subject — the account, or a guest's address group: the ladder's level, the last write and the earliest next one as unix seconds by the database's clock, the hits at the top of the ladder and whether a CAPTCHA is due, the refusals in a row, the last correction, the fingerprints of the last words, a revision counter; '*' rows throttle the audit), the settings antispam_enabled (1) / antispam_captcha_after (3) / antispam_guest_captcha (1) / antispam_staff_exempt (1) / antispam_new_days (3) / antispam_new_factor (2) / antispam_new_links (1) / antispam_dup_seconds (600) / antispam_pm_new_hour (8) / _day (20) / _hour_new (2) / _day_new (4) / antispam_pm_spread (2) and per context (shout, message, comment, description, report, list, bio, emote, vote) antispam_<context>_burst / _steps / _reset, rate_limit_pm (240: messages' own address ceiling instead of the favourites' one), and — defaults at last — the five recaptcha_on_<form> switches the Settings page always showed (report 1, login / status / appeal / block_check 0); 84 = reports of what people write in public, and warnings (includes/reports.php): `content_reports` (a comment, a torrent's description or a shout — kind, target id, the torrent's hash, whose words they were, the reporter and their reason, the words AS REPORTED and their format, open | closed with `open_slot` 1 / NULL so a UNIQUE key allows one OPEN report per member per target, what closed it, who and when, the note for the log and the answer to the reporter), `user_warnings` (the member, the moderator's reason, what it was about — kind, id, torrent —, what came with it, who gave it, when), and granted once (v84_reports) content.report to member and panel.reports.{comments,descriptions,shouts}.{view,handle} to moderator — the message queue (panel.messages.*) still to nobody, the guest group nothing; 83 = comments on a torrent (includes/comments.php): `hash_comments` (by info hash; the source as typed + its format, a guest's tag and address group, status visible | pending — a guest's, held for a moderator — | deleted, and who edited, let through or took it down, when and why; keys for a thread's page and count, a member's comments, the guest queue), users.comment_notify (15: the four kinds of news a member is told of), user_notifications.link (where a notification happened, site-relative), the settings comments_enabled (1) / comment_max_chars (500) / comment_links (1) / comment_edit_minutes (15) / comment_delete_own_minutes (60) / comments_per_page (20) / comment_rate_per_hour (30) / captcha_pts_comment (1) / comments_guest_review (1) and the two sound defaults sound_default_comment / sound_default_comment_mention (''), and granted once (v83_comments) comment.view + comment.post + comment.edit_own + comment.delete_own to member and comment.view + comment.post + comment.moderate to moderator — the guest group nothing; 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
                                     // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
                                     // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
                                     // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
@@ -480,6 +480,8 @@ function trackerSchemaStatements(): array {
             KEY `idx_if_hash` (`info_hash`),
             FULLTEXT KEY `ft_if_path` (`path`)
         ) $engine",
+        // v93 (1.74.0): the public catalogue's narrow twin of index_hashes — see schemaIndexCatalogDdl().
+        schemaIndexCatalogDdl($engine),
 
         // ── User accounts (schema v7, includes/users.php): registration/login, groups with JSON
         //    permissions, timed memberships, in-app notifications and remember/reset tokens.
@@ -665,8 +667,15 @@ function trackerSchemaStatements(): array {
             -- page offers as a button (Show the comment); NULL for the ones that are about the account
             -- itself. Only this code writes it (userNotify()), never somebody's text.
             `link` VARCHAR(255) DEFAULT NULL,
+            -- v93: the account it is FROM, where there is one (a friend request, its acceptance) — so it goes
+            -- with that account (userDeleteCascade()), and a second request is not announced while the first is
+            -- unread. NULL for everything else.
+            `sender_id` INT UNSIGNED DEFAULT NULL,
             KEY `idx_un_user` (`user_id`, `read_at`),
-            KEY `idx_un_created` (`created_at`)
+            KEY `idx_un_created` (`created_at`),
+            KEY `idx_un_sender` (`sender_id`),
+            -- v93: the copies of a comment's words follow the comment by this address (commentNotifyFollow()).
+            KEY `idx_un_link` (`link`(100))
         ) $engine",
         "CREATE TABLE IF NOT EXISTS `user_tokens` (
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -1701,6 +1710,15 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $out[] = "ALTER TABLE `user_notifications` ADD COLUMN `link` VARCHAR(255) DEFAULT NULL";
     }
 
+    // v93 (1.74.0, PRIV-1): who a notification is from, and the address it carries keyed — see the CREATE above.
+    // One ALTER of only what is missing, AFTER the v83 one (the key is on `link`). The friend notifications already
+    // written get their sender once, from their titles (schemaNotifySenders(), trackerSchemaDataMigrations()).
+    $un = [];
+    if (!schemaColumnExists($db, 'user_notifications', 'sender_id')) $un[] = "ADD COLUMN `sender_id` INT UNSIGNED DEFAULT NULL";
+    if (!schemaIndexExists($db, 'user_notifications', 'idx_un_sender')) $un[] = "ADD KEY `idx_un_sender` (`sender_id`)";
+    if (!schemaIndexExists($db, 'user_notifications', 'idx_un_link')) $un[] = "ADD KEY `idx_un_link` (`link`(100))";
+    if ($un) $out[] = "ALTER TABLE `user_notifications` " . implode(', ', $un);
+
     // v56: a message no longer leaves a notification behind.
     //
     // It used to leave two records of one event — a row in user_notifications and an unread message
@@ -1997,6 +2015,11 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         KEY `idx_warn_user` (`user_id`, `created_at`),
         KEY `idx_warn_by` (`by_id`)
     ) $engine";
+
+    // v93 (1.74.0): the narrow catalogue (includes/index.php, indexCatalog*). The same DDL as the CREATE list — one
+    // function, so the two cannot split. An empty table, so this is instant anywhere; it is FILLED by the janitor
+    // (indexCatalogWalk()), never here, and the search does not read it until a whole pass has been made.
+    $out[] = schemaIndexCatalogDdl($engine);
 
     // v85: one anti-spam layer (includes/antispam.php). Same definition as the CREATE above — a split between
     // the two lists is the bug that once stopped a fresh install at version 0.
@@ -2966,6 +2989,16 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         schemaAccountOrphans($db, $cfg);
     }
 
+    // v93 (1.74.0, PRIV-1): the friend notifications written before `sender_id` existed — once
+    // (schemaNotifySenders() below says how and why).
+    if (schemaOnce($db, 'v93_notify_senders')) {
+        try {
+            schemaNotifySenders($db, $cfg);
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v93 notification senders: ' . $e->getMessage());
+        }
+    }
+
     // panel admin → users row (username from settings, hash from config/app.php, email = the
     // site contact address — verified, it is the owner's own)
     $adminUser = trim((string)($cfg['admin_username'] ?? ''));
@@ -3390,6 +3423,9 @@ function trackerSchemaDefaultSettings(): array {
         // be at least HEALTH_TOKEN_MIN characters or it is treated as empty, because a guessable
         // token is not a smaller secret — it is a public endpoint.
         'health_token'                => '',
+        // The site's daily cap on report and appeal confirmation mails (1.74.0, PUB-1, confirmMailAllow() in
+        // includes/functions.php): each goes to an address the sender typed and nobody verified. 0 = none sent.
+        'confirm_mail_daily_cap'      => '200',
         // ── A second factor for member accounts (v53, includes/user2fa.php) ──────────────────
         // Off, like everything else that is new. `user_2fa_required` is 'off' | 'panel' | 'all':
         // 'panel' means an account that can open the admin panel must carry one — and until it does,
@@ -3797,6 +3833,61 @@ function schemaAccountOrphans(PDO $db, array $cfg): array {
     return $out;
 }
 
+/**
+ * v93 (1.74.0, PRIV-1): a friend request and its acceptance written before `user_notifications`.sender_id existed
+ * name the account they are from only in their TITLE — ":user would like to be your friend", in the language of
+ * whoever wrote it (until 1.74.0, the sender's request). So the name is read back out of the title by the sentence
+ * of EVERY installed language (notify.friend_request / notify.friend_accepted, the `:user` in it a name), and:
+ *   - the account still exists → `sender_id` is set, and the row goes with that account from now on;
+ *   - no account has that name any more → the row is deleted: it named a person whose account is gone — exactly
+ *     what userDeleteCascade() removes from now on;
+ *   - no sentence matches (a title from a language since removed) → left alone.
+ * Only rows still without a sender; so a second run (the local bootstrap wipes the marker) changes nothing.
+ * Returns ['linked' => n, 'deleted' => n, 'unread' => n] (unread: matched no sentence).
+ */
+function schemaNotifySenders(PDO $db, array $cfg): array {
+    $out = ['linked' => 0, 'deleted' => 0, 'unread' => 0];
+    if (!schemaTableExists($db, 'user_notifications') || !schemaColumnExists($db, 'user_notifications', 'sender_id')) return $out;
+    if (!function_exists('langFor') && is_file(__DIR__ . '/lang.php')) require_once __DIR__ . '/lang.php';
+    $codes = function_exists('langAvailable') ? array_keys(langAvailable()) : ['en'];
+    $patterns = [];   // type => [regex]
+    foreach (['friend_request', 'friend_accepted'] as $type) {
+        foreach ($codes as $code) {
+            $sentence = function_exists('langFor') ? langFor($code, 'notify.' . $type) : '';
+            if (substr_count($sentence, ':user') !== 1) continue;
+            [$before, $after] = explode(':user', $sentence, 2);
+            $patterns[$type][] = '/^' . preg_quote($before, '/') . '(.+?)' . preg_quote($after, '/') . '$/u';
+        }
+        $patterns[$type] = array_values(array_unique($patterns[$type] ?? []));
+    }
+    $rows = $db->query("SELECT id, type, title FROM user_notifications
+                         WHERE type IN ('friend_request', 'friend_accepted') AND sender_id IS NULL
+                         ORDER BY id LIMIT 100000")->fetchAll(PDO::FETCH_ASSOC);
+    $find = $db->prepare("SELECT id FROM users WHERE username = ?");
+    $link = $db->prepare("UPDATE user_notifications SET sender_id = ? WHERE id = ? AND sender_id IS NULL");
+    $drop = $db->prepare("DELETE FROM user_notifications WHERE id = ? AND sender_id IS NULL");
+    $known = [];
+    foreach ($rows as $r) {
+        $name = null;
+        foreach ($patterns[(string)$r['type']] ?? [] as $re) {
+            if (preg_match($re, (string)$r['title'], $m)) { $name = $m[1]; break; }
+        }
+        if ($name === null) { $out['unread']++; continue; }
+        if (!array_key_exists($name, $known)) {
+            $find->execute([$name]);
+            $known[$name] = (int)($find->fetchColumn() ?: 0);
+        }
+        if ($known[$name] > 0) {
+            $link->execute([$known[$name], (int)$r['id']]);
+            $out['linked'] += $link->rowCount();
+        } else {
+            $drop->execute([(int)$r['id']]);
+            $out['deleted'] += $drop->rowCount();
+        }
+    }
+    return $out;
+}
+
 function schemaColumnExists(PDO $db, string $table, string $column): bool {
     $st = $db->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
     $st->execute([$table, $column]);
@@ -3971,6 +4062,40 @@ function schemaPmTrashMigration(PDO $db, string $table = 'message_threads'): arr
 }
 
 /**
+ * v93 (1.74.0, PERF-2/PERF-3): `index_catalog`, the public catalogue's narrow twin of index_hashes.
+ *
+ * The search page lists only NAMED rows — about 714 000 of production's 4.75 million — and sorts them by six columns.
+ * Out of index_hashes that meant a full scan and a filesort for every order but seeders (4.4 s warm, 7.6–8.4 s at a
+ * small pool, on one click of any signed-in member) and, for a common word, a random read of a wide row per hit (13 s).
+ * This holds the same rows with only what is searched and sorted on: the name (with its own FULLTEXT index) and the
+ * six sort columns, each with an index ending in the key, so every order of the page is an index walk that stops
+ * after a page. Display values still come from index_hashes, joined by the key for the one page shown.
+ *
+ * Membership is the catalogue's own rule (IDX_CATALOG_MEMBER in includes/index.php): `done`, or a name. Kept by the
+ * code that writes those rows (the poll's batches, the scrapes, the deletes, the prune) and, for what the metadata
+ * worker and federation write from Python, by the janitor following meta_fetched_at; the janitor's rolling walk
+ * fills it and puts right anything that drifted.
+ */
+function schemaIndexCatalogDdl(string $engine): string {
+    return "CREATE TABLE IF NOT EXISTS `index_catalog` (
+        `info_hash` CHAR(40) NOT NULL PRIMARY KEY,
+        `name` VARCHAR(255) NOT NULL DEFAULT '',
+        `eff_seeders` INT UNSIGNED NOT NULL DEFAULT 0,
+        `eff_leechers` INT UNSIGNED NOT NULL DEFAULT 0,
+        `total_size` BIGINT UNSIGNED DEFAULT NULL,
+        `files_count` INT UNSIGNED DEFAULT NULL,
+        `last_seen` DATETIME NOT NULL,
+        KEY `idx_cat_seed` (`eff_seeders`, `info_hash`),
+        KEY `idx_cat_leech` (`eff_leechers`, `info_hash`),
+        KEY `idx_cat_size` (`total_size`, `info_hash`),
+        KEY `idx_cat_files` (`files_count`, `info_hash`),
+        KEY `idx_cat_last` (`last_seen`, `info_hash`),
+        KEY `idx_cat_name` (`name`, `info_hash`),
+        FULLTEXT KEY `ft_cat_name` (`name`)
+    ) $engine";
+}
+
+/**
  * Is this a context that may spend minutes rebuilding a large table? Only the CLI is.
  *
  * Every migration in this file is cheap except the ones that rebuild index_hashes, and those are
@@ -3994,12 +4119,41 @@ function schemaDeferHeavy(?string $what = null): array {
 }
 
 /**
+ * THE WEB'S PAUSE AFTER AN UPGRADE IT COULD NOT FINISH (1.74.0, QUAL-24). An upgrade that failed, or that left its
+ * heavy part to the janitor, does not record the version — so every web request that won the lock ran the whole
+ * list again: ~0.3 s of building the guarded statements plus their UPDATE … JOINs over the big tables, one request
+ * after another, for as long as the cause lasted. Now such an attempt writes a time a minute ahead into
+ * config/schema_retry.marker, and until then the web runs on the schema it has (as it already did whenever the
+ * lock was taken). The CLI never pauses — the janitor is what finishes a deferred upgrade, and a test migrates
+ * when it asks — and a recorded version removes the marker. An unwritable config/ means no pause: as before.
+ */
+const SCHEMA_WEB_RETRY_SECONDS = 60;
+function schemaRetryMarker(): string {
+    return defined('TRACKER_SCHEMA_RETRY_MARKER') ? (string)TRACKER_SCHEMA_RETRY_MARKER : dirname(__DIR__) . '/config/schema_retry.marker';
+}
+/** Is the web inside its pause at $now? */
+function schemaRetryPaused(?int $now = null): bool {
+    $f = schemaRetryMarker();
+    if (!is_file($f)) return false;
+    $until = (int)trim((string)@file_get_contents($f));
+    return $until > ($now ?? time());
+}
+function schemaRetryPause(?int $now = null): void {
+    @file_put_contents(schemaRetryMarker(), (string)(($now ?? time()) + SCHEMA_WEB_RETRY_SECONDS), LOCK_EX);
+}
+function schemaRetryClear(): void {
+    if (is_file(schemaRetryMarker())) @unlink(schemaRetryMarker());
+}
+
+/**
  * Bring the database up to TRACKER_SCHEMA_VERSION. Cheap when current (one array lookup).
- * Never throws — a failure leaves the version untouched so the next request retries, and the
- * error is logged. $cfg is refreshed in place so callers see the seeded defaults immediately.
+ * Never throws — a failure leaves the version untouched so a later request retries (the web after its pause, see
+ * schemaRetryPaused()), and the error is logged. $cfg is refreshed in place so callers see the seeded defaults
+ * immediately.
  */
 function ensureSchema(PDO $db, array &$cfg): void {
     if ((int)($cfg['schema_version'] ?? 0) >= TRACKER_SCHEMA_VERSION) return;
+    if (PHP_SAPI !== 'cli' && schemaRetryPaused()) return;
     try {
         // The web never waits for this lock. While a deferred heavy migration is running (the janitor
         // rebuilding index_hashes, which takes minutes) schema_version stays stale, so EVERY request
@@ -4048,12 +4202,16 @@ function ensureSchema(PDO $db, array &$cfg): void {
             if (!schemaDeferHeavy()) {
                 $db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")
                    ->execute([(string)TRACKER_SCHEMA_VERSION]);
+                schemaRetryClear();
+            } else {
+                schemaRetryPause();      // the janitor finishes it; the web waits a minute before it looks again
             }
             $cfg = getSettings($db, true);
         } finally {
             $db->query("SELECT RELEASE_LOCK('tracker_schema')");
         }
     } catch (\Throwable $e) {
-        error_log('[tracker schema] upgrade failed: ' . $e->getMessage());
+        error_log('[tracker schema] upgrade failed: ' . $e->getMessage() . ' — the web retries in ' . SCHEMA_WEB_RETRY_SECONDS . ' s');
+        schemaRetryPause();
     }
 }

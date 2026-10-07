@@ -33,7 +33,7 @@ add('a.reports', {
 
     # toolbar
     'search_ph':       ('Search name, company, entity, email, hash, link...',
-                        'Szukaj po nazwisku, firmie, podmiocie, e-mailu, hashu, linku...'),
+                        'Szukaj po nazwisku, firmie, podmiocie, e-mailu, hashu, linku…'),
     'f_all':           ('All statuses', 'Wszystkie statusy'),
     'archive_reviewed': ('Archive reviewed', 'Archiwizuj rozpatrzone'),
 
@@ -57,7 +57,7 @@ add('a.reports', {
     'm_email_ph':    ('e.g. We have reviewed your report and would like to request additional '
                       'documentation...',
                       'np. Rozpatrzyliśmy Twoje zgłoszenie i prosimy o dodatkową '
-                      'dokumentację...'),
+                      'dokumentację…'),
     'm_send':        ('Send Message', 'Wyślij wiadomość'),
 
     # appeal modal
@@ -70,12 +70,9 @@ add('a.reports', {
     'ap_resp_head': ('Admin Response (sent to appellant)',
                      'Odpowiedź administratora (wysyłana do odwołującego się)'),
     'ap_resp_ph':   ('Optional response message to the appellant...',
-                     'Opcjonalna wiadomość zwrotna do odwołującego się...'),
+                     'Opcjonalna wiadomość zwrotna do odwołującego się…'),
 
-    # confirm dialog
-    'confirm': ('Confirm', 'Potwierdź'),
-
-    # permanent deletion
+    # permanent deletion  (the page's own "confirm" dialog went in 1.74.0: admin-common.js asks for it)
     'admin_pass':     ('Admin Password *', 'Hasło administratora *'),
     'del_title':      ('Permanent Deletion', 'Trwałe usunięcie'),
     'del_warn':       ('<strong>Warning:</strong> This will permanently delete the report and all '

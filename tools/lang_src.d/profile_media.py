@@ -131,8 +131,9 @@ add('api.media', {
     'no_permission_cover': ('Your account may not set a profile cover.', 'Twoje konto nie może ustawić okładki profilu.'),
     'no_file': ('No image was uploaded.', 'Nie przesłano żadnego obrazu.'),
     'upload_failed': ('The upload did not arrive whole. Please try again.', 'Plik nie dotarł w całości. Spróbuj ponownie.'),
-    'too_large': ('That file is larger than :kb KB, the most this site takes.',
-                  'Ten plik ma więcej niż :kb KB, a więcej ta strona nie przyjmuje.'),
+    # KiB (1.74.0): the limit is counted in 1024s (includes/usermedia.php), as every other size on the site says.
+    'too_large': ('That file is larger than :kb KiB, the most this site takes.',
+                  'Ten plik ma więcej niż :kb KiB, a więcej ta strona nie przyjmuje.'),
     'too_small': ('That file is too small to be a picture.', 'Ten plik jest za mały, żeby był obrazem.'),
     'not_image': ('That file is not a picture this site can read. Use a JPEG, PNG, WebP or GIF.',
                   'Tego pliku nie da się odczytać jako obrazu. Użyj pliku JPEG, PNG, WebP albo GIF.'),
@@ -176,8 +177,8 @@ add('account', {
     'media_drop_aria_cover': ('Choose a cover image, or drop one here', 'Wybierz obraz na okładkę albo upuść go tutaj'),
     'media_drop_choose': ('Choose an image', 'Wybierz obraz'),
     'media_drop_or': ('or drop it here', 'albo upuść go tutaj'),
-    'media_drop_sub': ('JPEG, PNG, WebP or GIF, up to :kb KB. You frame it before anything is sent.',
-                       'JPEG, PNG, WebP albo GIF, do :kb KB. Najpierw go kadrujesz, dopiero potem cokolwiek jest wysyłane.'),
+    'media_drop_sub': ('JPEG, PNG, WebP or GIF, up to :kb KiB. You frame it before anything is sent.',
+                       'JPEG, PNG, WebP albo GIF, do :kb KiB. Najpierw go kadrujesz, dopiero potem cokolwiek jest wysyłane.'),
     'media_adjust': ('Adjust position', 'Dostosuj pozycję'),
     'media_remove': ('Remove', 'Usuń'),
     # 1.71.0: each block is a card of the Overview, and what it IS moved into the line under its heading
@@ -186,12 +187,12 @@ add('account', {
         'Location data and every other hidden detail are stripped from the file, and an animated GIF keeps only '
         'its first frame. Removing it deletes it for good.',
         'Z pliku znikają dane o miejscu i wszystkie inne ukryte informacje, a animowany GIF zachowuje tylko '
-        'pierwszą klatkę. Usunięcie kasuje je na zawsze.'),
+        'pierwszą klatkę. Usunięcie usuwa je na zawsze.'),
     'media_cover_note': (
         'The whole image is kept and you choose the part that shows; the same point stays in view on a phone. '
         'Removing it deletes it for good.',
         'Cały obraz zostaje zachowany, a Ty wybierasz, która część jest widoczna; ten sam punkt widać także na '
-        'telefonie. Usunięcie kasuje ją na zawsze.'),
+        'telefonie. Usunięcie usuwa ją na zawsze.'),
     'media_cover_none': ('No cover yet', 'Brak okładki'),
     'media_cover_default': ('The site default', 'Domyślna okładka serwisu'),
     'media_no_grant': (
@@ -254,14 +255,14 @@ add('js.media', {
     'note_cover': ('The whole image is kept; you choose what the header shows. The crosshair marks the point every screen keeps in view.',
                    'Cały obraz zostaje zachowany, a Ty wybierasz, co pokazuje nagłówek. Celownik wskazuje punkt, który widać na każdym ekranie.'),
     'not_image': ('That file is not a JPEG, PNG, WebP or GIF.', 'Ten plik nie jest obrazem JPEG, PNG, WebP ani GIF.'),
-    'too_large': ('That file is larger than :kb KB, the most this site takes.', 'Ten plik ma więcej niż :kb KB, a więcej ta strona nie przyjmuje.'),
+    'too_large': ('That file is larger than :kb KiB, the most this site takes.', 'Ten plik ma więcej niż :kb KiB, a więcej ta strona nie przyjmuje.'),
     'failed': ('Something went wrong. Please try again.', 'Coś poszło nie tak. Spróbuj ponownie.'),
     'saved': ('Saved.', 'Zapisano.'),
     'removed': ('Removed.', 'Usunięto.'),
     'first_frame': ('Saved. It was an animated GIF, so its first frame is what everybody sees.',
                     'Zapisano. To był animowany GIF, więc wszyscy zobaczą jego pierwszą klatkę.'),
-    'remove_q_avatar': ('Remove your picture? It is deleted for good.', 'Usunąć zdjęcie profilowe? Zostanie skasowane na zawsze.'),
-    'remove_q_cover': ('Remove your cover? It is deleted for good.', 'Usunąć okładkę? Zostanie skasowana na zawsze.'),
+    'remove_q_avatar': ('Remove your picture? It is deleted for good.', 'Usunąć zdjęcie profilowe? Zostanie usunięte na zawsze.'),
+    'remove_q_cover': ('Remove your cover? It is deleted for good.', 'Usunąć okładkę? Zostanie usunięta na zawsze.'),
     'yes_remove': ('Remove', 'Usuń'),
     'no': ('No', 'Nie'),
 })
@@ -279,13 +280,13 @@ add('js.mediaadmin', {
                    'Pokazywana na każdym profilu bez własnej okładki. Zapisanie działa od razu.'),
     'remove_title': ('Remove', 'Usuń'),
     'remove_q_avatar': ('Remove the site default picture? It is deleted for good, and everybody without a picture gets their letter again.',
-                        'Usunąć domyślne zdjęcie serwisu? Zostanie skasowane na zawsze, a każdy bez zdjęcia znów dostanie swoją literę.'),
+                        'Usunąć domyślne zdjęcie serwisu? Zostanie usunięte na zawsze, a każdy bez zdjęcia znów dostanie swoją literę.'),
     'remove_q_cover': ('Remove the default cover? It is deleted for good, and profiles without a cover go back to the plain header.',
-                       'Usunąć domyślną okładkę? Zostanie skasowana na zawsze, a profile bez okładki wrócą do zwykłego nagłówka.'),
+                       'Usunąć domyślną okładkę? Zostanie usunięta na zawsze, a profile bez okładki wrócą do zwykłego nagłówka.'),
     'user_remove_avatar_q': ('Remove the picture of :user? It is deleted for good, and they are told in a notification.',
-                             'Usunąć zdjęcie profilowe użytkownika :user? Zostanie skasowane na zawsze, a użytkownik dostanie powiadomienie.'),
+                             'Usunąć zdjęcie profilowe użytkownika :user? Zostanie usunięte na zawsze, a użytkownik dostanie powiadomienie.'),
     'user_remove_cover_q': ('Remove the profile cover of :user? It is deleted for good, and they are told in a notification.',
-                            'Usunąć okładkę profilu użytkownika :user? Zostanie skasowana na zawsze, a użytkownik dostanie powiadomienie.'),
+                            'Usunąć okładkę profilu użytkownika :user? Zostanie usunięta na zawsze, a użytkownik dostanie powiadomienie.'),
     'removed': ('Removed.', 'Usunięto.'),
     'failed': ('Something went wrong. Please try again.', 'Coś poszło nie tak. Spróbuj ponownie.'),
 })
@@ -294,5 +295,5 @@ add('a.users', {
     'media_remove_avatar': ('Remove picture', 'Usuń zdjęcie'),
     'media_remove_cover': ('Remove cover', 'Usuń okładkę'),
     'media_note': ('Taken down at once, not on Save: deleted for good, and the member is told in a notification.',
-                   'Usuwane od razu, bez czekania na Zapisz: kasowane na zawsze, a członek dostaje o tym powiadomienie.'),
+                   'Usuwane od razu, bez czekania na Zapisz: usuwane na zawsze, a członek dostaje o tym powiadomienie.'),
 })

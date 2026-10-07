@@ -34,7 +34,8 @@ if (!profileBioClear($db, (int)$u['id'])) {
 auditNote(['summary' => 'profile description cleared for ' . (string)$u['username'],
            'target_type' => 'user', 'target_id' => (int)$u['id'],
            'detail' => ['chars' => mb_strlen($was, 'UTF-8'), 'excerpt' => mb_substr($was, 0, 300, 'UTF-8')]]);
-// Told, not left to discover it — the same courtesy as a picture taken down.
-userNotify($db, (int)$u['id'], 'account', __('notify.bio_cleared'), __('notify.bio_cleared_body'));
+// Told, not left to discover it — the same courtesy as a picture taken down. In THEIR language (1.74.0).
+$uLang = recipientLang($cfg, $u);
+userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.bio_cleared'), langFor($uLang, 'notify.bio_cleared_body'));
 jsonResponse(['success' => true, 'cleared' => true, 'message' => __('api.bio.admin_cleared'),
               'user' => $bioState(userFindById($db, (int)$u['id']) ?? $u)]);

@@ -110,7 +110,8 @@
         }
         state.us.rows.forEach(u => {
             const tr = el('tr', {});
-            const pick = el('input', { type: 'checkbox', className: 'us-pick' });
+            // A name for the row's box (1.74.0, UX-11).
+            const pick = el('input', { type: 'checkbox', className: 'us-pick', 'aria-label': t.key('js.users.pick_row', { name: u.username }) });
             pick.checked = state.picked.has(u.id);
             pick.addEventListener('change', () => {
                 if (pick.checked) state.picked.add(u.id); else state.picked.delete(u.id);

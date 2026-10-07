@@ -33,7 +33,7 @@ add('settings', {
         'while the emotes above are on. Off: there, <code>:code:</code> is the text it was typed as; the '
         'shoutbox is not affected. In an e-mail an emote is always its code.',
         'Te same emote i naklejki w prywatnych wiadomościach, opisach torrentów (i propozycjach, które je '
-        'zmieniają), opisach list i opisie profilu: wybierak emotek w każdym edytorze je pokazuje, a strona, '
+        'zmieniają), opisach list i opisie profilu: selektor emotek w każdym edytorze je pokazuje, a strona, '
         'która wyświetla tekst, je rysuje — naklejkę w wiadomości w rozmiarze z shoutboxa, w opisie mniejszą, '
         'w profilu jako emote. Tylko zatwierdzone i włączone emote i tylko wtedy, gdy emote powyżej są '
         'włączone. Wyłączone: tam <code>:code:</code> jest tekstem, jak go wpisano; shoutboxa to nie dotyczy. '

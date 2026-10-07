@@ -190,6 +190,11 @@ def pic(name, size):
                + "], " + str(size) + ", '/', $cfg);")
 
 
+def drawn(address):
+    """What an element DRAWS for that address (1.74.0, MAIN-3): a letter is its data: picture, anything else itself."""
+    return php("echo userAvatarDrawn(" + phpstr(address) + ", '/');")
+
+
 def keys(rows):
     return {tuple(sorted(r.keys())) for r in rows}
 
@@ -266,8 +271,9 @@ try:
 
     s, html = me.page("?action=shoutbox")
     who = re.search(r'<a class="shout-who" title="' + ALICE + r'" href="[^"]+">(<img [^>]+>)' + ALICE + "</a>", html)
+    # The letter behind a picture is DRAWN (1.74.0): a data: picture, not an address to fetch.
     want = ('<img class="avatar shout-av js-avatar" src="' + pic(ALICE, 20).replace("&", "&amp;") + '" data-fallback="'
-            + php("echo userAvatarGeneratedUrl('" + ALICE + "', '/');").replace("&", "&amp;")
+            + drawn(php("echo userAvatarGeneratedUrl('" + ALICE + "', '/');")).replace("&", "&amp;")
             + '" width="20" height="20" alt="" loading="lazy" decoding="async">')
     check("the first page draws that picture INSIDE the name's link, the one element userAvatarHtml() draws",
           bool(who) and who.group(1) == want, who.group(0) if who else html[:0])
@@ -364,9 +370,15 @@ try:
 
     # ── 7. the pages the server draws ───────────────────────────────────────────────────────────
     s, html = me.page("?action=account")
-    nav = re.search(r'<a href="/\?action=account" class="nav-user[^"]*">(<img [^>]+>)' + CAROL, html)
-    check("the navigation: the reader's own picture before her name", bool(nav) and "nav-av" in nav.group(1)
-          and 'src="' + pic(CAROL, 20).replace("&", "&amp;") + '"' in nav.group(1), nav.group(0) if nav else "")
+    # [^>]* after the class: the link may carry more attributes (1.74.0, part D: aria-current on the page you are on)
+    nav = re.search(r'<a href="/\?action=account" class="nav-user[^"]*"[^>]*>(<img [^>]+>)' + CAROL, html)
+    check("the navigation: the reader's own picture before her name — her letter, drawn in place (1.74.0)",
+          bool(nav) and "nav-av" in nav.group(1) and "user_avatar_default" in pic(CAROL, 20)
+          and 'src="' + drawn(pic(CAROL, 20)).replace("&", "&amp;") + '"' in nav.group(1)
+          and 'src="data:image/svg+xml,' in nav.group(1), nav.group(0) if nav else "")
+    check("… and no element on the page fetches a letter: none points at user_avatar_default",
+          not re.search(r'<img[^>]+(?:src|data-fallback)="[^"]*user_avatar_default', html),
+          (re.search(r'<img[^>]+user_avatar_default[^>]*>', html) or [""])[0][:300])
     h1 = re.search(r"<h1>(.*?)</h1>", html, re.S)
     check("the account heading: the same, at 32, inside the sentence where the name is", bool(h1) and "acc-h1-av" in h1.group(1)
           and re.search(r'<span class="av-who"><img [^>]*acc-h1-av[^>]*>' + CAROL + "</span>", h1.group(1)), h1.group(1) if h1 else "")

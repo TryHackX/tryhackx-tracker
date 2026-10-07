@@ -59,6 +59,30 @@
             return await r.json();
         } catch (e) { return null; }
     }
+    /**
+     * A people action that did not go through SAYS so (1.74.0): the limit in its own words, anything else as the star's
+     * "That did not go through." — a toast (app.js siteToast()). Remove friend, Decline, Unblock and the rest used to
+     * end in silence, the row standing as if it had worked, and the next click sent the same request again.
+     */
+    function peopleFailed(r) {
+        if (typeof window.siteToast !== 'function') return;
+        window.siteToast({ text: r && r.error === 'rate_limit' ? 'js.people.rate_limited' : 'js.fav.failed', key: 'people-failed' });
+    }
+    /**
+     * Why a message cannot be sent, as the dictionary says it (1.74.0). The server's code was glued to `js.pm.why_`, and
+     * two codes are named otherwise in the dictionary (`pm_disabled` is `why_disabled`) or had no sentence at all
+     * (`login_required`): "js.pm.why_pm_disabled" stood under Send when messages were switched off with a conversation
+     * open. A code without a sentence says "That did not go through."; an answer that is a sentence already (a refused
+     * CSRF token) is said as it is.
+     */
+    var PM_WHY = { pm_disabled: 'disabled', own_message: 'failed', unknown_op: 'failed' };
+    function pmWhy(code) {
+        code = String(code || 'failed');
+        var k = 'js.pm.why_' + (PM_WHY[code] || code);
+        if (/^[a-z_]+$/.test(code) && t.has(k)) return t.key(k);
+        if (/\s/.test(code)) return code;
+        return t.key('js.pm.why_failed');
+    }
     function when(s) { return String(s || '').replace('T', ' ').slice(0, 16); }
     // The reader's clock (1.73.0 part E): the server sends each moment as 'Y-m-d H:i' in the reader's zone (`time`,
     // `last_time`, `until_time`, `since_time` — api/user_messages.php, api/user_people.php), the way the shoutbox's
@@ -359,7 +383,9 @@
             // left of what they last said, the way every inbox reads.
             var pic = face(x.with, x.avatar, 32, 'pm-av');
             if (pic) { row.classList.add('pm-row-av'); row.appendChild(pic); }
-            row.appendChild(el('span', { className: 'pm-who', text: x.with }));
+            // A long name is cut with "…" (1.74.0, style.css) — the whole of it in the tooltip; it used to run under the
+            // unread count and the time, and off the side of a phone.
+            row.appendChild(el('span', { className: 'pm-who', text: x.with, title: x.with }));
             // The count and the time are one cell, on the right of the name. Appended as two
             // children of the row they were two grid items, and the count — landing in the
             // column that holds the name — was stretched into a bar the width of the row.
@@ -682,7 +708,7 @@
                 // what is in the Trash stays there (the bar then says so, with its Restore).
                 mountComposer(pane, name, function () { openThread(name); });
             } else {
-                pane.appendChild(el('div', { className: 'pm-closed', text: t.key('js.pm.why_' + (j.reason || 'nobody')) }));
+                pane.appendChild(el('div', { className: 'pm-closed', text: pmWhy(j.reason || 'nobody') }));
             }
             body.scrollTop = body.scrollHeight;
             // Only once the conversation is on screen: a timer started before the first draw would
@@ -712,6 +738,7 @@
                 var rs = barBtn('pm-bar-restore', 'bi bi-arrow-counterclockwise', 'js.pm.act_restore');
                 rs.addEventListener('click', function () { userOp('restore', name, {}, rs); });
                 var pg = barBtn('pm-bar-purge', 'bi bi-trash-fill', 'js.pm.act_purge');
+                pg.classList.replace('btn-secondary', 'btn-danger-soft');   // looks like what it does (1.74.0)
                 var l1 = line(st.until ? words('js.pm.bar_trash', { date: localTime(st.until_time, st.until) }) : words('js.pm.bar_trash_plain'), [rs, pg]);
                 pg.addEventListener('click', function () {
                     confirmThen(pg, 'js.pm.q_purge', l1, function () { return userOp('purge', name, {}); });
@@ -942,7 +969,7 @@
                 if (r && (r.antispam || r.error === 'captcha_cancelled')) {
                     if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t.key('js.pm.why_failed');
                 } else {
-                    msg.textContent = t.key('js.pm.why_' + ((r && r.error) || 'failed'));
+                    msg.textContent = pmWhy(r && r.error);
                 }
                 return;
             }
@@ -1007,15 +1034,24 @@
             if (kind === 'blocks' && p.hide_profile) main.appendChild(el('span', { className: 'pf-badge', text: t.key('js.people.hidden') }));
             row.appendChild(main);
             var acts = el('div', { className: 'pf-acts' });
-            var act = function (label, op, extra) {
-                var b = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: label });
-                b.addEventListener('click', async function () {
+            // `ask` (1.74.0): a question in the row first — for what the other person would have to undo (a friendship
+            // removed, a request declined: only a new request and their yes bring it back). Those buttons look like
+            // what they do (.btn-danger-soft), not like "Message" beside them. A failure says so (peopleFailed()).
+            var act = function (label, op, extra, ask) {
+                var b = el('button', { type: 'button', className: 'btn btn-small ' + (ask ? 'btn-danger-soft' : 'btn-secondary'), text: label });
+                var go = async function () {
                     b.disabled = true;
                     var body = { op: op, user: p.username };
                     if (extra) Object.keys(extra).forEach(function (k) { body[k] = extra[k]; });
                     var r = await post('user_people', body);
                     b.disabled = false;
-                    if (r && r.success) reload();
+                    if (r && r.success) { reload(); return; }
+                    peopleFailed(r);
+                    return false;
+                };
+                b.addEventListener('click', function () {
+                    if (ask && typeof window.askInPlace === 'function') window.askInPlace(b, ask, go, { host: row });
+                    else go();
                 });
                 return b;
             };
@@ -1033,9 +1069,9 @@
                 });
                 acts.appendChild(w);
             }
-            if (kind === 'incoming') { acts.appendChild(act(t.key('js.people.accept'), 'accept')); acts.appendChild(act(t.key('js.people.decline'), 'decline')); }
+            if (kind === 'incoming') { acts.appendChild(act(t.key('js.people.accept'), 'accept')); acts.appendChild(act(t.key('js.people.decline'), 'decline', null, t.key('js.people.decline_q'))); }
             if (kind === 'pending')  acts.appendChild(act(t.key('js.people.cancel'), 'unfollow'));
-            if (kind === 'friends')  acts.appendChild(act(t.key('js.people.unfriend'), 'unfollow'));
+            if (kind === 'friends')  acts.appendChild(act(t.key('js.people.unfriend'), 'unfollow', null, t.key('js.people.unfriend_q')));
             if (kind === 'blocks') {
                 acts.appendChild(act(p.hide_profile ? t.key('js.people.show_profile') : t.key('js.people.hide_profile'),
                                      'block_hide', { value: p.hide_profile ? 0 : 1 }));
@@ -1107,7 +1143,7 @@
                         f.disabled = true;
                         var r = await post('user_people', { op: 'follow', user: p.username });
                         if (r && r.success) load(page);
-                        else f.disabled = false;
+                        else { f.disabled = false; peopleFailed(r); }
                     });
                     acts.appendChild(f);
                 }
@@ -1163,27 +1199,41 @@
                 var label = state === 'friends' ? 'unfriend' : state === 'following' ? 'cancel'
                           : state === 'follower' ? 'accept' : 'follow';
                 var op = label === 'accept' ? 'accept' : (state === 'none' ? 'follow' : 'unfollow');
-                var b = el('button', { type: 'button', className: 'btn btn-secondary btn-small', text: t.key('js.people.' + label) });
-                b.addEventListener('click', async function () {
+                // Remove friend asks first and looks like what it does (1.74.0, see personRow()); a failure says so.
+                var b = el('button', { type: 'button', className: 'btn btn-small ' + (label === 'unfriend' ? 'btn-danger-soft' : 'btn-secondary'),
+                                       text: t.key('js.people.' + label) });
+                var go = async function () {
                     b.disabled = true;
                     var r = await post('user_people', { op: op, user: name });
                     b.disabled = false;
-                    if (r && r.success) { state = r.state || 'none'; draw(); }
+                    if (r && r.success) { state = r.state || 'none'; draw(); return; }
+                    peopleFailed(r);
+                    return false;
+                };
+                b.addEventListener('click', function () {
+                    if (label === 'unfriend' && typeof window.askInPlace === 'function') window.askInPlace(b, t.key('js.people.unfriend_q'), go, { host: box });
+                    else go();
                 });
                 box.appendChild(b);
                 if (state !== 'none') box.appendChild(el('span', { className: 'pf-badge', text: t.key('js.people.state_' + state) }));
             }
             if (box.dataset.block === '1') {
-                var bb = el('button', { type: 'button', className: 'btn btn-secondary btn-small',
+                var bb = el('button', { type: 'button', className: 'btn btn-secondary btn-small pp-block',
                                         text: t.key(blocked ? 'js.people.unblock' : 'js.people.block') });
                 bb.addEventListener('click', function () {
                     if (blocked) {
                         post('user_people', { op: 'unblock', user: name }).then(function (r) {
                             if (r && r.success) { blocked = false; draw(); }
+                            else peopleFailed(r);
                         });
                         return;
                     }
-                    openBlockDialog(name, function () { blocked = true; state = 'none'; draw(); });
+                    // Drawn again, the button is a new one: the focus goes to it (now "Unblock"), not to <body>.
+                    openBlockDialog(name, function () {
+                        blocked = true; state = 'none'; draw();
+                        var again = box.querySelector('.pp-block');
+                        if (again) again.focus();
+                    });
                 });
                 box.appendChild(bb);
             }
@@ -1202,7 +1252,7 @@
         var box = document.getElementById('block-overlay');
         if (!box) {
             // No markup on this page: block without the second question rather than not at all.
-            post('user_people', { op: 'block', user: name }).then(function (r) { if (r && r.success && onDone) onDone(); });
+            post('user_people', { op: 'block', user: name }).then(function (r) { if (r && r.success && onDone) onDone(); else if (!(r && r.success)) peopleFailed(r); });
             return;
         }
         var who = document.getElementById('bk-who');
@@ -1210,10 +1260,17 @@
         var go = document.getElementById('bk-go');
         if (who) who.textContent = name;
         if (hide) hide.checked = false;
-        box.hidden = false;
-        function close() { box.hidden = true; document.removeEventListener('keydown', esc); }
+        // A window like the others (1.74.0, app.js escLayer()): the focus goes into it as it opens, Tab stays in it,
+        // and Esc or the × give it back to the Block button — it stayed on that button, Tab walked the page under the
+        // window, and Esc left the focus on another part of the page.
+        var layer = typeof escLayer === 'function' ? escLayer(box, close) : null;
+        function close() {
+            box.hidden = true;
+            if (layer) layer.off(); else document.removeEventListener('keydown', esc);
+        }
         function esc(e) { if (e.key === 'Escape') close(); }
-        document.addEventListener('keydown', esc);
+        box.hidden = false;
+        if (layer) layer.on(); else document.addEventListener('keydown', esc);
         var x = document.getElementById('bk-close');
         if (x) x.onclick = close;
         // See the report dialog above: the press has to have STARTED on the backdrop (1.64.0).
@@ -1225,6 +1282,7 @@
             var r = await post('user_people', { op: 'block', user: name, hide_profile: hide && hide.checked ? 1 : 0 });
             go.disabled = false;
             if (r && r.success) { close(); if (onDone) onDone(); }
+            else peopleFailed(r);
         };
     }
 

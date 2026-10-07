@@ -112,11 +112,20 @@
         }
     }
 
+    // The site's one size rule (1.74.0, t.bytes() in assets/js/i18n.js): the page language's decimal separator and the
+    // same digits as the search results and the Info panel — this copy wrote "1000.0 MiB" where they wrote "1000 MiB".
     function fmtBytes(n) {
-        if (n === null || n === undefined) return '—';
-        var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'], i = 0, v = Number(n);
-        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-        return (i === 0 ? v : v.toFixed(1)) + ' ' + u[i];
+        return t.bytes(n);
+    }
+
+    /**
+     * A change to a list or a setting that did not go through SAYS so (1.74.0), in the toast the star uses: the limit
+     * in its own words, anything else "That did not go through." Deleting a list, taking a torrent out of one and the
+     * "who may write to me" choice ended in silence, the thing on the screen standing as if it had worked.
+     */
+    function listFailed(r) {
+        if (typeof window.siteToast !== 'function') return;
+        window.siteToast({ text: r && r.error === 'rate_limit' ? 'js.lists.rate_limited' : 'js.fav.failed', key: 'lists-failed' });
     }
 
     function magnetFor(hash, name, trackers) {
@@ -646,7 +655,7 @@
                             var body = { op: 'remove', list: list.id };
                             if (r.info_hash) body.hash = r.info_hash; else body.id = r.id;
                             var rr = await post('user_list_items', body);
-                            if (!rr || !rr.success) { rm.disabled = false; return; }
+                            if (!rr || !rr.success) { rm.disabled = false; listFailed(rr); return; }
                             list.items = rr.items;
                             var c2 = countHolder.querySelector('.list-count');
                             if (c2) c2.textContent = t.key(rr.items === 1 ? 'js.lists.count_one' : 'js.lists.count_many', { n: rr.items });
@@ -736,18 +745,25 @@
                     edit.addEventListener('click', function () { openEdit(list, edit, ''); });
                     acts.appendChild(edit);
                 }
-                var del = el('button', { type: 'button', className: 'btn btn-secondary btn-small list-del', text: t.key('js.lists.delete') });
+                // Looks like what it does (1.74.0, .btn-danger-soft): it stood in the same grey as Edit beside it.
+                var del = el('button', { type: 'button', className: 'btn btn-danger-soft btn-small list-del', text: t.key('js.lists.delete') });
+                var disarmTimer = 0;
+                var disarm = function () { clearTimeout(disarmTimer); del.dataset.armed = '0'; del.textContent = t.key('js.lists.delete'); };
                 del.addEventListener('click', async function () {
                     // Two clicks, no dialog: the second click is the confirmation, and the button
                     // says so in between. A list is somebody's work and one stray click is not consent.
                     if (del.dataset.armed !== '1') {
                         del.dataset.armed = '1';
                         del.textContent = t.key('js.lists.delete_sure');
-                        setTimeout(function () { if (del.dataset.armed === '1') { del.dataset.armed = '0'; del.textContent = t.key('js.lists.delete'); } }, 4000);
+                        disarmTimer = setTimeout(function () { if (del.dataset.armed === '1') disarm(); }, 4000);
                         return;
                     }
+                    del.disabled = true;
                     var r = await post('user_lists', { op: 'delete', id: list.id });
-                    if (!r || !r.success) return;
+                    del.disabled = false;
+                    // A refusal disarms it at once and says so (1.74.0): it stayed "Click again to delete" with a
+                    // second request one click away, and nothing on the screen said the first had failed.
+                    if (!r || !r.success) { disarm(); listFailed(r); return; }
                     state.lists = state.lists.filter(function (x) { return x.id !== list.id; });
                     render();
                 });
@@ -2225,7 +2241,7 @@
                 who.disabled = true;
                 var r = await post('user_privacy', { pm_who: who.value });
                 who.disabled = false;
-                if (!r || !r.success) return;
+                if (!r || !r.success) { listFailed(r); return; }
             });
         }
         [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'], ['acc-votes-public', 'votes_public'], ['acc-votes-listed', 'votes_listed'],

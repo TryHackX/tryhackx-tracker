@@ -103,6 +103,9 @@ function adminHiddenBehavior(array $cfg): string {
     return in_array($m, ['home', 'login', '404'], true) ? $m : 'home';
 }
 
+/** The pause before the panel session's account is asked about a second time after a database error (QUAL-22). */
+const ADMIN_RECHECK_RETRY_US = 200000;
+
 /**
  * Full admin-session check: logged in AND within the idle + absolute lifetime limits. An expired
  * session is destroyed here so a stolen/forgotten session cookie can't be used indefinitely.
@@ -126,25 +129,38 @@ function adminSessionValid(array $cfg): bool {
     // long as that user is still active AND still in the admin group (a revoke/ban takes effect
     // on the next panel request, not at the next login). Never invalidate the classic session.
     if (!empty($_SESSION['admin_via_user']) && function_exists('userIsAdminGroup') && function_exists('getDb')) {
-        try {
-            $db = getDb();
-            $u = userFindById($db, (int)$_SESSION['admin_via_user']);
-            // Admin group OR panel.access: a moderator holds a panel session on the strength of a
-            // granted permission rather than of admin membership. Losing either one closes the panel
-            // on the next request, which is the property this block existed for.
-            // "Sign out everywhere else", a password change and a reset stamp users.sessions_valid_from.
-            // A panel session that rode in on that account is over at that instant too — otherwise the
-            // one browser the person is worried about keeps the panel until the idle limit, which is
-            // exactly the scenario the stamp exists for. Both sides are unix times PHP wrote.
-            $stillAllowed = $u && (function_exists('userIsActive') ? userIsActive($u) : $u['status'] === 'active')
-                && (int)($u['sessions_valid_from'] ?? 0) <= (int)($_SESSION['login_time'] ?? 0)
-                && (userIsAdminGroup($db, (int)$u['id'])
-                    || (function_exists('userHasPanelAccess') && userHasPanelAccess($db, (int)$u['id'])));
-            if (!$stillAllowed) {
-                unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+        // A database error used to fall through as "still allowed" — a banned moderator, or one taken out of the
+        // group, kept the panel for as long as that one query failed (QUAL-22). Now: asked again once, a moment
+        // later, and when it still cannot be answered THIS request is refused (requireAuth() says 503, "try
+        // again") — but the session stays, so a hiccup does not sign everybody out: the next request asks again.
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $db = getDb();
+                $u = userFindById($db, (int)$_SESSION['admin_via_user']);
+                // Admin group OR panel.access: a moderator holds a panel session on the strength of a
+                // granted permission rather than of admin membership. Losing either one closes the panel
+                // on the next request, which is the property this block existed for.
+                // "Sign out everywhere else", a password change and a reset stamp users.sessions_valid_from.
+                // A panel session that rode in on that account is over at that instant too — otherwise the
+                // one browser the person is worried about keeps the panel until the idle limit, which is
+                // exactly the scenario the stamp exists for. Both sides are unix times PHP wrote.
+                $stillAllowed = $u && (function_exists('userIsActive') ? userIsActive($u) : $u['status'] === 'active')
+                    && (int)($u['sessions_valid_from'] ?? 0) <= (int)($_SESSION['login_time'] ?? 0)
+                    && (userIsAdminGroup($db, (int)$u['id'])
+                        || (function_exists('userHasPanelAccess') && userHasPanelAccess($db, (int)$u['id'])));
+                if (!$stillAllowed) {
+                    unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+                    return false;
+                }
+                break;
+            } catch (\Throwable $e) {
+                if ($attempt < 2) { usleep(ADMIN_RECHECK_RETRY_US); continue; }
+                error_log('[auth] the panel session of account #' . (int)$_SESSION['admin_via_user']
+                          . ' could not be re-checked (' . $e->getMessage() . ') — refused for this request');
+                $GLOBALS['__admin_session_unchecked'] = true;
                 return false;
             }
-        } catch (\Throwable $e) { /* DB hiccup — fall through, the idle limits still guard */ }
+        }
     }
 
     $_SESSION['last_activity'] = $now;
@@ -182,6 +198,12 @@ function adminPanelSessionExpire(): void {
 function requireAuth(?array $cfg = null): void {
     $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
     if (!adminSessionValid($cfg)) {
+        // The account behind a panel session could not be re-checked (the database failed twice): not "signed
+        // out" — the session is still there — but not answered either. 503 and a moment's wait (QUAL-22).
+        if (!empty($GLOBALS['__admin_session_unchecked'])) {
+            if (!headers_sent()) header('Retry-After: 5');
+            jsonResponse(['error' => __('api.auth.recheck_failed'), 'code' => 'session_unchecked'], 503);
+        }
         jsonResponse(['error' => __('api.auth.unauthorized')], 401);
     }
 }
@@ -227,28 +249,35 @@ function twofaPendingActive(): bool {
     return true;
 }
 
-// --- Brute-force throttle (file-based, per client IP) -----------------------
+// --- Brute-force throttle (file-based, per ADDRESS GROUP) --------------------
 // Self-contained: no DB schema change. State lives in config/login_attempts.json
 // (that directory is denied to the web by config/.htaccess).
+//
+// Keyed by ipBucket() since 1.74.0 (AUTH-3): an IPv4 address as it is, an IPv6 host by its /64. Counted by the full
+// address, the lockout did nothing against IPv6 — a host holds 2^64 addresses of its own allocation, and five
+// failures per address was five failures times as many addresses as it cared to use. The callers still pass the
+// address; the grouping happens here, so no caller (the two sign-in steps, adminReauth()) can count it differently.
+// The price, the same as behind a household's IPv4 NAT: one /64 shares one count.
 
 function loginAttemptsFile(): string {
     return __DIR__ . '/../config/login_attempts.json';
 }
 
-/** Returns [allData, timestampsForIp] with entries older than the window pruned. */
+/** Returns [allData, timestampsForThisAddressGroup] with entries older than the window pruned. */
 function loginThrottleState(string $ip, int $windowSec): array {
     $file = loginAttemptsFile();
     $data = [];
     if (is_file($file)) {
         $raw  = @file_get_contents($file);
-        $data = $raw ? (json_decode($raw, true) ?: []) : [];
+        $data = $raw ? json_decode($raw, true) : [];
+        if (!is_array($data)) $data = [];
     }
     $now = time();
     foreach ($data as $k => $times) {
         $data[$k] = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < $windowSec));
         if (empty($data[$k])) unset($data[$k]);
     }
-    return [$data, $data[$ip] ?? []];
+    return [$data, $data[ipBucket($ip)] ?? []];
 }
 
 function loginLockWindowSec(array $cfg): int {
@@ -269,18 +298,31 @@ function isLoginLocked(string $ip, array $cfg): bool {
  * so a burst of parallel guesses is recorded as one failure and the lockout never trips. That is the
  * exact case the lockout exists for. Every other state file in this panel is updated this way; this
  * one was not.
+ *
+ * Returns true when nothing needed writing or the write landed, false when it did not (1.74.0): the lockout still
+ * fails open — a disk problem must not lock the owner out — but recordLoginFailure() makes the guess cost time
+ * instead (AUTH-7), and rateLimitHealth() says so on the dashboard. A file that is not a JSON map is set aside as
+ * <file>.bad.<time> with an error_log line, like the limiter's (rateLimitReadJson()).
  */
-function loginAttemptsUpdate(callable $fn): void {
+function loginAttemptsUpdate(callable $fn): bool {
     $file = loginAttemptsFile();
     $lock = $file . '.lock';
     $h = @fopen($lock, 'c');
     if ($h) @flock($h, LOCK_EX);
     try {
-        $raw  = is_file($file) ? @file_get_contents($file) : '';
-        $data = $raw ? (json_decode($raw, true) ?: []) : [];
-        if ($fn($data) === false) return;
+        if (function_exists('rateLimitReadJson')) {
+            $r = rateLimitReadJson($file, true);
+            $data = $r['data'];
+        } else {
+            $raw  = is_file($file) ? @file_get_contents($file) : '';
+            $data = $raw ? (json_decode($raw, true) ?: []) : [];
+        }
+        if ($fn($data) === false) return true;
         $tmp = $file . '.tmp.' . getmypid();
-        if (@file_put_contents($tmp, json_encode($data)) !== false) @rename($tmp, $file);
+        if (@file_put_contents($tmp, json_encode($data)) === false) { @unlink($tmp); return false; }
+        if (@rename($tmp, $file)) return true;
+        @unlink($tmp);
+        return false;
     } finally {
         if ($h) { @flock($h, LOCK_UN); @fclose($h); }
     }
@@ -288,23 +330,35 @@ function loginAttemptsUpdate(callable $fn): void {
 
 function recordLoginFailure(string $ip, array $cfg): void {
     $window = loginLockWindowSec($cfg);
-    loginAttemptsUpdate(function (array &$data) use ($ip, $window) {
+    $key = ipBucket($ip);
+    $count = 0;
+    $written = loginAttemptsUpdate(function (array &$data) use ($key, $window, &$count) {
         $cut = time() - $window;
-        $times = array_values(array_filter((array)($data[$ip] ?? []), fn($t) => (int)$t >= $cut));
+        $times = array_values(array_filter((array)($data[$key] ?? []), fn($t) => (int)$t >= $cut));
         $times[] = time();
-        $data[$ip] = $times;
+        $data[$key] = $times;
+        $count = count($times);
         return true;
     });
+    // AUTH-7: a failure that could not be recorded is a lockout that will never trip, so it costs the time a wrong
+    // re-entered password costs — by the failures this address group already has, at least one; three when the
+    // file could not even be read. adminReauth() waits its own delay on top of this; the sign-in page has none.
+    if (!$written) {
+        $f = loginAttemptsFile();
+        $readable = !file_exists($f) ? is_writable(dirname($f)) : (is_file($f) && is_readable($f));
+        usleep(adminReauthDelayUs($readable ? min(5, max(1, $count)) : 3));
+    }
 }
 
 function clearLoginFailures(string $ip): void {
     if (!is_file(loginAttemptsFile())) return;
+    $key = ipBucket($ip);
     // Under the SAME lock the failures are recorded with. An unlocked read-then-rewrite of the
     // whole map could land between another request's read and write and erase the failure that
     // request had just recorded — a lost failure is a lockout that never trips.
-    loginAttemptsUpdate(function (array &$data) use ($ip) {
-        if (!isset($data[$ip])) return false;
-        unset($data[$ip]);
+    loginAttemptsUpdate(function (array &$data) use ($key) {
+        if (!isset($data[$key])) return false;
+        unset($data[$key]);
         return true;
     });
 }

@@ -17,7 +17,7 @@ let sortStack = [{ col: 'date', dir: 'desc' }];
 // The dashboard fired a request on the click itself. The header row is rebuilt whenever the source
 // changes, so this timer has to live out here — one created inside the forEach would give every
 // column its own, and debounce nothing at all.
-const SORT_DEBOUNCE_MS = 1200;   // the same number as AdminCommon.DEBOUNCE.sort — this file does not load admin-common.js
+const SORT_DEBOUNCE_MS = 1200;   // the same number as AdminCommon.DEBOUNCE.sort (admin-common.js, loaded before this file)
 let sortTimer = null;
 function reloadAfterSort() {
     clearTimeout(sortTimer);
@@ -31,32 +31,15 @@ let filterStatus = 'all';
 let source = 'reports';
 let searchTimeout = null;
 
-function confirmAction(message) {
-    return new Promise((resolve) => {
-        const modalEl = document.getElementById('confirmModal');
-        document.getElementById('confirmModal-msg').textContent = message;
-        const modal = new bootstrap.Modal(modalEl);
-
-        const okBtn = document.getElementById('confirmModal-ok');
-        const cancelBtn = document.getElementById('confirmModal-cancel');
-
-        function cleanup() {
-            okBtn.removeEventListener('click', onOk);
-            cancelBtn.removeEventListener('click', onCancel);
-            modalEl.removeEventListener('hidden.bs.modal', onHidden);
-        }
-
-        let resolved = false;
-        function onOk() { resolved = true; cleanup(); modal.hide(); resolve(true); }
-        function onCancel() { resolved = true; cleanup(); modal.hide(); resolve(false); }
-        function onHidden() { if (!resolved) { cleanup(); resolve(false); } }
-
-        okBtn.addEventListener('click', onOk);
-        cancelBtn.addEventListener('click', onCancel);
-        modalEl.addEventListener('hidden.bs.modal', onHidden);
-
-        modal.show();
-    });
+/**
+ * "Are you sure?" — the panel's one question (1.74.0). This page had a dialog of its own, with a red Cancel and a
+ * green Confirm — the colours every other page of the panel uses the other way round, for the same "Block this
+ * hash". It asks through admin-common.js now: a grey Cancel and the action's own colour on OK (red where it takes
+ * something away, `danger: false` where it gives something back), stacked over the report's window it is asked
+ * from, and the focus goes back to the button that asked once it closes.
+ */
+function confirmAction(message, danger = true) {
+    return window.AdminCommon.confirmAction(t.key('js.common.please_confirm'), message, { danger });
 }
 
 // The four tabs this file owns (1.71.0): the torrent reports, their archive, the appeals and theirs. The other
@@ -115,21 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTrackerService();
 
     // Multi-level sorting
-    document.querySelectorAll('.sortable').forEach(th => {
-        th.addEventListener('click', () => {
-            const col = th.dataset.sort;
-            const idx = sortStack.findIndex(s => s.col === col);
-            if (idx === -1) {
-                sortStack.push({ col, dir: 'asc' });
-            } else if (sortStack[idx].dir === 'asc') {
-                sortStack[idx].dir = 'desc';
-            } else {
-                sortStack.splice(idx, 1);
-            }
-            updateSortIcons();
-            reloadAfterSort();
-        });
-    });
+    document.querySelectorAll('.sortable').forEach(bindSortHeader);
 
     // Search with debounce
     const searchInput = document.getElementById('search-input');
@@ -196,17 +165,61 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
-async function apiCall(endpoint, method = 'GET', body = null) {
-    const opts = { method, headers: {} };
-    // Attach the CSRF token to every admin request; the server enforces it on writes.
-    const csrf = document.body.dataset.csrf;
-    if (csrf) opts.headers['X-CSRF-Token'] = csrf;
-    if (body) {
-        opts.headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify(body);
+/**
+ * The panel's one request (1.74.0): admin-common.js's, which the dashboard loads before this file. This page had its
+ * own, older than the shared one — no `res.ok`, no try — and read the 401 of an ended session as an empty queue: "No
+ * reports found. Total: 0", the badges gone. The shared one answers with an object whatever came back (an error page's
+ * HTML too: `error` and `__status`), and says an ended session once for the page: a bar at its top (`__expired`).
+ */
+function apiCall(endpoint, method = 'GET', body = null) {
+    return window.AdminCommon.apiCall(endpoint, method, body);
+}
+
+/*
+ * WHAT THE TABLE SAYS WHILE IT WAITS AND WHEN IT CANNOT LOAD (1.74.0). The reports and the appeals share one table, so
+ * one counter tells the last request from an earlier one still on its way (a fast filter change, a tab clicked twice):
+ * only the last answer is drawn. An answer that is not a list — the session gone, the rate limit, a server error, no
+ * connection — draws an ERROR ROW and leaves everything else as it was: the counts it could not read stay what they
+ * were (a badge set from `undefined` hid itself), and the total and the pages too.
+ */
+let tableSeq = 0;
+const STATE_ROW = 'table-state-row';
+function tableLoading(tbody) {
+    // Rows already on the screen stay until the new ones come; an empty table (the first load, after an error or
+    // "nothing found") says that it is loading instead of standing as a bare header.
+    if (tbody.querySelector('tr:not(.' + STATE_ROW + ')')) return;
+    tbody.innerHTML = '<tr class="' + STATE_ROW + ' table-loading-row"><td colspan="11" class="text-center py-4 table-empty-state">'
+        + '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>' + esc(t.key('js.common.loading')) + '</td></tr>';
+}
+function tableFailed(json, failed) {
+    const tbody = document.getElementById('reports-body');
+    let words;
+    if (json && json.__expired) {
+        words = esc(t.key('js.common.session_expired'));
+    } else {
+        // The server's reason when it gave one in words (a sentence, or "HTTP 502"); a bare code says nothing.
+        const why = failed ? t.key('js.reports.network_error') : (json ? json.error : '');
+        const said = why && (t.isKey(why) || !/^[a-z0-9_.]+$/i.test(String(why)));
+        words = esc(t.key('js.reports.load_failed')) + (said ? ' ' + esc(why) : '');
     }
-    const res = await fetch(API_BASE + endpoint, opts);
-    return res.json();
+    tbody.innerHTML = '<tr class="' + STATE_ROW + '"><td colspan="11" class="text-center py-4 table-error-state">'
+        + '<div role="alert"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> ' + words + '</div></td></tr>';
+}
+/** The answer as a list (`reports` / `appeals`), or null when it is not one — see tableFailed(). */
+function listOf(json, field) {
+    if (!json || json.error !== undefined || (json.__status && json.__status >= 400) || !Array.isArray(json[field])) return null;
+    return json[field];
+}
+/**
+ * The "…" that opens a row (1.74.0): the one way into a report or an appeal, so it has a name a screen reader says
+ * ("Open report #12") — the same words as its tooltip — and its column stays in sight on a laptop's width (admin.css:
+ * the actions column is sticky at the table's right edge).
+ */
+function openButton(kind, id) {
+    const n = parseInt(id, 10) || 0;
+    const key = kind === 'appeal' ? 'js.reports.open_appeal' : 'js.reports.open_report';
+    return '<button type="button" class="btn btn-sm btn-outline-info" ' + (kind === 'appeal' ? 'data-appeal-id' : 'data-report-id') + '="' + n + '"'
+        + t.ah({ 'aria-label': key, title: key }, { id: n }) + '><i class="bi bi-three-dots" aria-hidden="true"></i></button>';
 }
 
 async function loadReports() {
@@ -221,17 +234,23 @@ async function loadReports() {
     if (searchTerm) params.set('search', searchTerm);
     if (filterStatus !== 'all') params.set('status', filterStatus);
 
-    const json = await apiCall('admin/fetch_reports&' + params.toString());
+    const tbody = document.getElementById('reports-body');
+    const totalEl = document.getElementById('total-count');
+    const seq = ++tableSeq;
+    tableLoading(tbody);
+    let json;
+    try { json = await apiCall('admin/fetch_reports&' + params.toString()); }
+    catch (e) { if (seq === tableSeq) tableFailed(null, true); return; }
+    if (seq !== tableSeq) return;            // a later request owns the table now
+    const reports = listOf(json, 'reports');
+    if (!reports) { tableFailed(json, false); return; }
 
     // Update pending badges
     updateBadge('reports-badge', json.pending_reports);
     updateBadge('archives-badge', json.pending_archives);
 
-    const tbody = document.getElementById('reports-body');
-    const totalEl = document.getElementById('total-count');
-
-    if (!json.reports || json.reports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t.key('js.reports.no_reports_found')) + '</td></tr>';
+    if (reports.length === 0) {
+        tbody.innerHTML = '<tr class="' + STATE_ROW + '"><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t.key('js.reports.no_reports_found')) + '</td></tr>';
         totalEl.textContent = t.key('js.reports.total', {n: 0});
         document.getElementById('pagination').innerHTML = '';
         return;
@@ -239,7 +258,7 @@ async function loadReports() {
 
     totalEl.textContent = t.key('js.reports.total', {n: json.total});
 
-    tbody.innerHTML = json.reports.map(r => {
+    tbody.innerHTML = reports.map(r => {
         let statusBadge;
         if (r.blocked) {
             statusBadge = '<span class="badge-table badge-blocked">' + esc(t.key('js.reports.status_blocked')) + '</span>';
@@ -250,17 +269,17 @@ async function loadReports() {
         }
         return `
         <tr>
-            <td class="dash-id">${r.id}</td>
+            <td class="dash-id">${esc(String(r.id))}</td>
             <td title="${escAttr(r.name)}">${esc(r.name)}${r.api_client_label ? '<span class="cell-sub cell-sub-api"' + t.ah('title', 'js.reports.partner_title', {partner: t.key('js.wl.partner', {name: r.api_client_label}), why: t.key('js.reports.via_api_title')}) + '>' + esc(t.key('js.wl.partner', {name: r.api_client_label})) + '</span>' : ''}</td>
             <td title="${escAttr(r.email)}"><small>${esc(r.email)}</small></td>
             <td class="editable-cell" title="${escAttr(r.company)}" data-edit-id="${r.id}" data-edit-field="company">${esc(r.company)}</td>
             <td class="editable-cell" title="${escAttr(r.representative)}" data-edit-id="${r.id}" data-edit-field="representative">${esc(r.representative)}</td>
             <td title="${escAttr(r.objectTitle)}">${esc(r.objectTitle)}</td>
-            <td class="hash-cell hash-copy"${t.ah('title', 'js.reports.click_to_copy', {hash: r.infoHash})} data-copy-hash="${r.infoHash}">${r.infoHash}</td>
+            <td class="hash-cell hash-copy"${t.ah('title', 'js.reports.click_to_copy', {hash: r.infoHash})} data-copy-hash="${escAttr(r.infoHash)}">${esc(r.infoHash)}</td>
             <td title="${escAttr(r.ip)}"><small>${esc(r.ip)}</small></td>
             <td class="col-badge">${statusBadge}</td>
-            <td class="dash-date"><small>${r.timestamp}</small></td>
-            <td class="td-actions"><button class="btn btn-sm btn-outline-info" data-report-id="${r.id}"><i class="bi bi-three-dots"></i></button></td>
+            <td class="dash-date"><small>${esc(r.timestamp)}</small></td>
+            <td class="td-actions">${openButton('report', r.id)}</td>
         </tr>`;
     }).join('');
 
@@ -306,12 +325,57 @@ function renderMessage(raw) {
     return s;
 }
 
+/**
+ * A submitter's link as a link only when it is one (1.74.0): http or https, as the public status page already checks
+ * the same field (assets/js/app.js). The server validates it when a report is written (richtextSafeUrl()), but a row
+ * written before that check, restored from an old backup or typed into the database would otherwise be a clickable
+ * `javascript:` in the moderator's window — anything else is shown as text. The link opens through the panel's
+ * "you are leaving" question (data-external, admin-common.js).
+ */
+function linkHtml(url) {
+    const u = String(url || '');
+    if (!/^https?:\/\//i.test(u)) return esc(u);
+    return `<a href="${escAttr(u)}" rel="noopener noreferrer" target="_blank" class="text-info" data-external>${esc(u)}</a>`;
+}
+
+/*
+ * WHERE THE FOCUS GOES BACK (1.74.0). The report's and the appeal's windows are opened by this script, not by a
+ * data-bs-toggle — and Bootstrap gives the focus back only to a toggle, so after Esc it fell to <body> and somebody
+ * working through the queue with the keyboard was back at the top of the page. The button that opened the window is
+ * remembered, and the focus goes back to it when the window has closed; if the table was drawn again meanwhile (a
+ * block, an archive), to the same row's new button, else to the table.
+ */
+function rememberOpener(modalId, attr, id) {
+    const modalEl = document.getElementById(modalId);
+    if (!modalEl) return;
+    const from = document.activeElement;
+    if (modalEl.__opener) modalEl.removeEventListener('hidden.bs.modal', modalEl.__opener);
+    const back = () => {
+        modalEl.removeEventListener('hidden.bs.modal', back);
+        modalEl.__opener = null;
+        // Somebody who has moved on (another window opened from this one, a click elsewhere) keeps their place.
+        const now = document.activeElement;
+        if (now && now !== document.body && !modalEl.contains(now)) return;
+        if (document.querySelector('.modal.show')) return;
+        // Still on the page and drawn (a button inside a window that has closed since is neither).
+        let target = from && from.isConnected && from !== document.body && from.getClientRects().length ? from : null;
+        if (!target && attr) target = document.querySelector('[' + attr + '="' + (parseInt(id, 10) || 0) + '"]');
+        if (!target) target = document.getElementById('reports-table');
+        if (target) { if (target.id === 'reports-table' && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1'); target.focus(); }
+    };
+    modalEl.__opener = back;
+    modalEl.addEventListener('hidden.bs.modal', back);
+}
+
 async function openModal(id) {
     const endpoint = source === 'archives'
         ? 'admin/fetch_reports&id=' + id + '&source=archives'
         : 'admin/fetch_reports&id=' + id;
     const json = await apiCall(endpoint);
-    if (!json.report) return;
+    if (!json.report) {
+        if (!json.__expired && json.error) showToast('error', json.error);
+        return;
+    }
 
     currentReport = json.report;
     const r = currentReport;
@@ -323,17 +387,17 @@ async function openModal(id) {
 
     document.getElementById('modal-report-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>${esc(t.key('js.reports.col_id'))}:</strong> ${r.id}</p>
+            <p><strong>${esc(t.key('js.reports.col_id'))}:</strong> ${esc(String(r.id))}</p>
             <p><strong>${esc(t.key('js.reports.col_name'))}:</strong> ${esc(r.name)}</p>
             <p><strong>${esc(t.key('js.reports.col_email'))}:</strong> ${esc(r.email)}</p>
             <p><strong>${esc(t.key('js.reports.col_company'))}:</strong> ${esc(r.company)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
             ${r.api_client_label ? '<p><strong>' + esc(t.key('js.reports.via_api')) + ':</strong> ' + esc(r.api_client_label) + '</p>' : ''}
             <p><strong>${esc(t.key('js.reports.col_object'))}:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>${esc(t.key('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
-            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>' + esc(t.key('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn"' + t.ah('title', 'js.reports.copy_magnet_link') + '><i class="bi bi-clipboard"></i></button></div>' : ''}
-            <p><strong>${esc(t.key('js.reports.col_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t.key('js.reports.col_date'))}:</strong> ${r.timestamp}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_link'))}:</strong> ${linkHtml(r.link)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${esc(r.infoHash)}</code></p>
+            ${r.magnet_link ? '<p><strong>' + esc(t.key('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn"' + t.ah({ title: 'js.reports.copy_magnet_link', 'aria-label': 'js.reports.copy_magnet_link' }) + '><i class="bi bi-copy" aria-hidden="true"></i></button></div>' : ''}
+            <p><strong>${esc(t.key('js.reports.col_ip'))}:</strong> ${esc(r.ip)} &nbsp; <strong>${esc(t.key('js.reports.col_date'))}:</strong> ${esc(r.timestamp)}</p>
         </div>
         ${messageHtml}
     `;
@@ -366,7 +430,8 @@ async function openModal(id) {
         document.getElementById('modal-send-email').closest('.text-center').style.display = '';
     }
 
-    const modal = new bootstrap.Modal(document.getElementById('actionModal'));
+    rememberOpener('actionModal', 'data-report-id', r.id);
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('actionModal'));
     modal.show();
 
     // Auto-mark as reviewed and send "under review" notification for pending reports
@@ -408,7 +473,7 @@ async function handleBlock() {
 
 async function handleUnblock() {
     if (!currentReport) return;
-    if (!await confirmAction(t.key('js.reports.confirm_unblock'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_unblock'), false)) return;
     const json = await apiCall('admin/unblock_hash', 'POST', { id: currentReport.id });
     if (json.success) {
         let unblockMsg = json.message || t.key('js.reports.hash_unblocked');
@@ -429,7 +494,7 @@ async function handleUnblock() {
 
 async function handleArchive() {
     if (!currentReport) return;
-    if (!await confirmAction(t.key('js.reports.confirm_archive'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_archive'), false)) return;
     const json = await apiCall('admin/delete_report', 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
@@ -442,7 +507,7 @@ async function handleArchive() {
 
 async function handleRestore() {
     if (!currentReport) return;
-    if (!await confirmAction(t.key('js.reports.confirm_restore'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_restore'), false)) return;
     const json = await apiCall('admin/restore_report', 'POST', { id: currentReport.id });
     if (json.success) {
         bootstrap.Modal.getInstance(document.getElementById('actionModal')).hide();
@@ -508,21 +573,15 @@ function showModalAlert(type, msg) {
     setTimeout(() => el.innerHTML = '', 5000);
 }
 
+/**
+ * A toast — the panel's one (1.74.0, admin-common.js showToast()): its × has a name, and its clock stops while it is
+ * pointed at or holds the focus. This page built its own, which went after four seconds whatever the reader was doing.
+ */
 function showToast(type, msg) {
-    const container = document.getElementById('toast-container');
-    const icon = type === 'success' ? 'bi-check-circle-fill text-success' : 'bi-exclamation-circle-fill text-danger';
-    const id = 'toast-' + Date.now();
-    container.insertAdjacentHTML('beforeend', `
-        <div id="${id}" class="toast align-items-center border-0 show toast-dark" role="alert">
-            <div class="d-flex">
-                <div class="toast-body text-light"><i class="bi ${icon}"></i> ${esc(msg)}</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-toast-close></button>
-            </div>
-        </div>
-    `);
-    setTimeout(() => document.getElementById(id)?.remove(), 4000);
+    window.AdminCommon.showToast(msg, type);
 }
 
+// The order is told to a screen reader too (1.74.0): `aria-sort` on the column that decides it (admin-common.js sortMark()).
 function updateSortIcons() {
     document.querySelectorAll('.sortable').forEach(th => {
         const icon = th.querySelector('.sort-icon');
@@ -538,13 +597,42 @@ function updateSortIcons() {
             if (sortStack.length > 1) {
                 const badge = document.createElement('sup');
                 badge.className = 'sort-priority';
+                badge.setAttribute('aria-hidden', 'true');
                 badge.textContent = idx + 1;
                 icon.after(badge);
             }
+            window.AdminCommon.sortMark(th, s.dir, idx === 0);
         } else {
             icon.className = 'bi bi-arrow-down-up sort-icon';
+            window.AdminCommon.sortMark(th, null, false);
         }
     });
+}
+
+/** A click on a sortable header (or Enter / Space on its button): asc → desc → off, then one request after a pause. */
+function bindSortHeader(th) {
+    th.addEventListener('click', () => {
+        const col = th.dataset.sort;
+        const idx = sortStack.findIndex(s => s.col === col);
+        if (idx === -1) {
+            sortStack.push({ col, dir: 'asc' });
+        } else if (sortStack[idx].dir === 'asc') {
+            sortStack[idx].dir = 'desc';
+        } else {
+            sortStack.splice(idx, 1);
+        }
+        updateSortIcons();
+        reloadAfterSort();
+    });
+}
+
+/**
+ * One sortable header of the table this script redraws, as the server draws the first one (templates/admin/
+ * dashboard.php, 1.74.0): its words in a <button>, which the keyboard reaches.
+ */
+function sortTh(col, key, extraClass, first) {
+    return `<th class="sortable${extraClass ? ' ' + extraClass : ''}" data-sort="${col}"><button type="button" class="th-sort">${esc(t.key(key))} `
+        + `<i class="bi ${first ? 'bi-arrow-down sort-icon active' : 'bi-arrow-down-up sort-icon'}" aria-hidden="true"></i></button></th>`;
 }
 
 function updateTableHeaders(src) {
@@ -566,51 +654,22 @@ function updateTableHeaders(src) {
     if (table) table.classList.toggle('dash-appeals', isAppeal);
 
     if (isAppeal) {
-        thead.innerHTML = `
-            <th class="sortable" data-sort="id">${esc(t.key('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="name">${esc(t.key('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="email">${esc(t.key('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th>${esc(t.key('js.reports.col_description'))}</th>
-            <th class="sortable col-badge" data-sort="type">${esc(t.key('js.reports.col_type'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="report">${esc(t.key('js.reports.col_report'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="hash">${esc(t.key('js.reports.col_info_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="ip">${esc(t.key('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable col-badge" data-sort="status">${esc(t.key('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="date">${esc(t.key('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
-            <th class="th-actions">${esc(t.key('js.reports.col_actions'))}</th>
-        `;
+        thead.innerHTML = sortTh('id', 'js.reports.col_id') + sortTh('name', 'js.reports.col_name') + sortTh('email', 'js.reports.col_email')
+            + `<th>${esc(t.key('js.reports.col_description'))}</th>`
+            + sortTh('type', 'js.reports.col_type', 'col-badge') + sortTh('report', 'js.reports.col_report')
+            + sortTh('hash', 'js.reports.col_info_hash') + sortTh('ip', 'js.reports.col_ip')
+            + sortTh('status', 'js.reports.col_status', 'col-badge') + sortTh('date', 'js.reports.col_date', '', true)
+            + `<th class="th-actions">${esc(t.key('js.reports.col_actions'))}</th>`;
     } else {
-        thead.innerHTML = `
-            <th class="sortable" data-sort="id">${esc(t.key('js.reports.col_id'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="name">${esc(t.key('js.reports.col_name'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="email">${esc(t.key('js.reports.col_email'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="company">${esc(t.key('js.reports.col_company'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="representative">${esc(t.key('js.reports.col_entity'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="object">${esc(t.key('js.reports.col_object'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="hash">${esc(t.key('js.reports.col_hash'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="ip">${esc(t.key('js.reports.col_ip'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable col-badge" data-sort="blocked">${esc(t.key('js.reports.col_status'))} <i class="bi bi-arrow-down-up sort-icon"></i></th>
-            <th class="sortable" data-sort="date">${esc(t.key('js.reports.col_date'))} <i class="bi bi-arrow-down sort-icon active"></i></th>
-            <th class="th-actions">${esc(t.key('js.reports.col_actions'))}</th>
-        `;
+        thead.innerHTML = sortTh('id', 'js.reports.col_id') + sortTh('name', 'js.reports.col_name') + sortTh('email', 'js.reports.col_email')
+            + sortTh('company', 'js.reports.col_company') + sortTh('representative', 'js.reports.col_entity')
+            + sortTh('object', 'js.reports.col_object') + sortTh('hash', 'js.reports.col_hash') + sortTh('ip', 'js.reports.col_ip')
+            + sortTh('blocked', 'js.reports.col_status', 'col-badge') + sortTh('date', 'js.reports.col_date', '', true)
+            + `<th class="th-actions">${esc(t.key('js.reports.col_actions'))}</th>`;
     }
 
     // Re-attach sort handlers
-    thead.querySelectorAll('.sortable').forEach(th => {
-        th.addEventListener('click', () => {
-            const col = th.dataset.sort;
-            const idx = sortStack.findIndex(s => s.col === col);
-            if (idx === -1) {
-                sortStack.push({ col, dir: 'asc' });
-            } else if (sortStack[idx].dir === 'asc') {
-                sortStack[idx].dir = 'desc';
-            } else {
-                sortStack.splice(idx, 1);
-            }
-            updateSortIcons();
-            reloadAfterSort();
-        });
-    });
+    thead.querySelectorAll('.sortable').forEach(bindSortHeader);
 
     // Reset sort stack and update icons
     sortStack = [{ col: 'date', dir: 'desc' }];
@@ -748,10 +807,10 @@ function inlineEdit(td, id, field) {
 let currentAppeal = null;
 
 async function loadAppealsBadge() {
-    try {
-        const json = await apiCall('admin/fetch_appeals&page=1');
-        updateBadge('appeals-badge', json.pending_count);
-    } catch {}
+    let json;
+    try { json = await apiCall('admin/fetch_appeals&page=1'); } catch { return; }
+    // The count it could not read is left as it was (1.74.0): an error said nothing about how many wait.
+    if (listOf(json, 'appeals')) updateBadge('appeals-badge', json.pending_count);
 }
 
 async function loadAppeals() {
@@ -763,15 +822,22 @@ async function loadAppeals() {
     if (searchTerm) params.set('search', searchTerm);
     if (filterStatus !== 'all') params.set('status', filterStatus);
 
-    const json = await apiCall('admin/fetch_appeals&' + params.toString());
     const tbody = document.getElementById('reports-body');
     const totalEl = document.getElementById('total-count');
+    const seq = ++tableSeq;
+    tableLoading(tbody);
+    let json;
+    try { json = await apiCall('admin/fetch_appeals&' + params.toString()); }
+    catch (e) { if (seq === tableSeq) tableFailed(null, true); return; }
+    if (seq !== tableSeq) return;            // a later request owns the table now
+    const appeals = listOf(json, 'appeals');
+    if (!appeals) { tableFailed(json, false); return; }
 
     // Update badge
     updateBadge('appeals-badge', json.pending_count);
 
-    if (!json.appeals || json.appeals.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t.key('js.reports.no_appeals')) + '</td></tr>';
+    if (appeals.length === 0) {
+        tbody.innerHTML = '<tr class="' + STATE_ROW + '"><td colspan="11" class="text-center py-4 table-empty-state">' + esc(t.key('js.reports.no_appeals')) + '</td></tr>';
         totalEl.textContent = t.key('js.reports.total', {n: 0});
         document.getElementById('pagination').innerHTML = '';
         return;
@@ -779,27 +845,28 @@ async function loadAppeals() {
 
     totalEl.textContent = t.key('js.reports.total', {n: json.total});
 
-    tbody.innerHTML = json.appeals.map(a => {
+    tbody.innerHTML = appeals.map(a => {
         const statusMap = { pending: 'badge-pending', accepted: 'badge-reviewed', rejected: 'badge-blocked', reviewed: 'badge-reviewed' };
         const labelMap = { pending: t.key('js.reports.status_pending'), accepted: t.key('js.reports.status_accepted'), rejected: t.key('js.reports.status_rejected'), reviewed: t.key('js.reports.status_reviewed') };
         const badge = `<span class="badge-table ${statusMap[a.status] || 'badge-pending'}">${esc(labelMap[a.status] || a.status)}</span>`;
         const typeBadge = a.appeal_type === 'block'
             ? '<span class="badge-table badge-type-block">' + esc(t.key('js.reports.type_block')) + '</span>'
             : '<span class="badge-table badge-type-unblock">' + esc(t.key('js.reports.type_unblock')) + '</span>';
-        const shortMsg = a.message ? (a.message.length > 50 ? esc(a.message.substring(0, 50)) + '...' : esc(a.message)) : '';
+        const shortMsg = a.message ? (a.message.length > 50 ? esc(a.message.substring(0, 50)) + '…' : esc(a.message)) : '';
+        const rid = parseInt(a.report_id, 10) || 0;
         return `
         <tr>
-            <td class="dash-id">${a.id}</td>
+            <td class="dash-id">${esc(String(a.id))}</td>
             <td title="${escAttr(a.name)}">${esc(a.name)}</td>
             <td title="${escAttr(a.email)}"><small>${esc(a.email)}</small></td>
             <td class="col-desc" title="${escAttr(a.message)}"><small>${shortMsg}</small></td>
             <td class="col-badge">${typeBadge}</td>
-            <td>${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</td>
-            <td class="hash-cell hash-copy"${t.ah('title', 'js.reports.click_to_copy', {hash: a.infoHash})} data-copy-hash="${a.infoHash}">${a.infoHash}</td>
+            <td>${rid ? '<a href="#" class="text-info" data-appeal-report="' + rid + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + rid + '</a>' : '—'}</td>
+            <td class="hash-cell hash-copy"${t.ah('title', 'js.reports.click_to_copy', {hash: a.infoHash})} data-copy-hash="${escAttr(a.infoHash)}">${esc(a.infoHash)}</td>
             <td title="${escAttr(a.ip)}"><small>${esc(a.ip)}</small></td>
             <td class="col-badge">${badge}</td>
-            <td class="dash-date"><small>${a.timestamp}</small></td>
-            <td class="td-actions"><button class="btn btn-sm btn-outline-info" data-appeal-id="${a.id}"><i class="bi bi-three-dots"></i></button></td>
+            <td class="dash-date"><small>${esc(a.timestamp)}</small></td>
+            <td class="td-actions">${openButton('appeal', a.id)}</td>
         </tr>`;
     }).join('');
 
@@ -837,16 +904,16 @@ async function openReportFromAppeal(reportId, infoHash) {
 
     document.getElementById('modal-report-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>${esc(t.key('js.reports.lbl_id'))}:</strong> ${r.id}${isArchive ? ' <span class="badge bg-secondary badge-archived-sm">' + esc(t.key('js.reports.archived')) + '</span>' : ''}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_id'))}:</strong> ${esc(String(r.id))}${isArchive ? ' <span class="badge bg-secondary badge-archived-sm">' + esc(t.key('js.reports.archived')) + '</span>' : ''}</p>
             <p><strong>${esc(t.key('js.reports.lbl_name'))}:</strong> ${esc(r.name)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_email'))}:</strong> ${esc(r.email)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_company'))}:</strong> ${esc(r.company)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_representative'))}:</strong> ${esc(r.representative)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_object'))}:</strong> ${esc(r.objectTitle)}</p>
-            <p><strong>${esc(t.key('js.reports.lbl_link'))}:</strong> <a href="${escAttr(r.link)}" rel="noopener noreferrer" target="_blank" class="text-info">${esc(r.link)}</a></p>
-            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${r.infoHash}</code></p>
-            ${r.magnet_link ? '<p><strong>' + esc(t.key('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn"' + t.ah('title', 'js.reports.copy_magnet') + '><i class="bi bi-clipboard"></i></button></div>' : ''}
-            <p><strong>${esc(t.key('js.reports.lbl_ip'))}:</strong> ${r.ip} &nbsp; <strong>${esc(t.key('js.reports.lbl_date'))}:</strong> ${r.timestamp}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_link'))}:</strong> ${linkHtml(r.link)}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${esc(r.infoHash)}</code></p>
+            ${r.magnet_link ? '<p><strong>' + esc(t.key('js.reports.lbl_magnet')) + ':</strong></p><div class="magnet-wrapper"><code id="modal-magnet-code" class="text-info magnet-code">' + esc(r.magnet_link) + '</code><button type="button" data-copy-magnet class="btn btn-sm magnet-copy-btn"' + t.ah({ title: 'js.reports.copy_magnet', 'aria-label': 'js.reports.copy_magnet' }) + '><i class="bi bi-copy" aria-hidden="true"></i></button></div>' : ''}
+            <p><strong>${esc(t.key('js.reports.lbl_ip'))}:</strong> ${esc(r.ip)} &nbsp; <strong>${esc(t.key('js.reports.lbl_date'))}:</strong> ${esc(r.timestamp)}</p>
         </div>
         ${messageHtml}
     `;
@@ -861,7 +928,8 @@ async function openReportFromAppeal(reportId, infoHash) {
     document.getElementById('modal-email-msg').style.display = 'none';
     document.getElementById('modal-send-email').closest('.text-center').style.display = 'none';
 
-    const modal = new bootstrap.Modal(document.getElementById('actionModal'));
+    rememberOpener('actionModal', 'data-appeal-id', currentAppeal ? currentAppeal.id : 0);
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('actionModal'));
     modal.show();
 
     // Restore source when modal closes
@@ -874,7 +942,10 @@ async function openReportFromAppeal(reportId, infoHash) {
 async function openAppealModal(id) {
     const appealSource = source === 'appeal_archives' ? '&source=archives' : '';
     const json = await apiCall('admin/fetch_appeals&id=' + id + appealSource);
-    if (!json.appeal) return;
+    if (!json.appeal) {
+        if (!json.__expired && json.error) showToast('error', json.error);
+        return;
+    }
 
     currentAppeal = json.appeal;
     const a = currentAppeal;
@@ -887,12 +958,12 @@ async function openAppealModal(id) {
 
     document.getElementById('appeal-modal-info').innerHTML = `
         <div class="report-info-grid">
-            <p><strong>${esc(t.key('js.reports.lbl_appeal_id'))}:</strong> ${a.id} ${typeBadge}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_appeal_id'))}:</strong> ${esc(String(a.id))} ${typeBadge}</p>
             <p><strong>${esc(t.key('js.reports.lbl_name'))}:</strong> ${esc(a.name)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_email'))}:</strong> ${esc(a.email)}</p>
-            <p><strong>${esc(t.key('js.reports.lbl_report_no'))}:</strong> ${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + a.report_id + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + a.report_id + '</a>' : '—'}</p>
-            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${a.infoHash}</code></p>
-            <p><strong>${esc(t.key('js.reports.lbl_ip'))}:</strong> ${a.ip} &nbsp; <strong>${esc(t.key('js.reports.lbl_date'))}:</strong> ${a.timestamp}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_report_no'))}:</strong> ${a.report_id ? '<a href="#" class="text-info" data-appeal-report="' + (parseInt(a.report_id, 10) || 0) + '" data-appeal-hash="' + escAttr(a.infoHash) + '">#' + (parseInt(a.report_id, 10) || 0) + '</a>' : '—'}</p>
+            <p><strong>${esc(t.key('js.reports.lbl_hash'))}:</strong> <code class="text-info">${esc(a.infoHash)}</code></p>
+            <p><strong>${esc(t.key('js.reports.lbl_ip'))}:</strong> ${esc(a.ip)} &nbsp; <strong>${esc(t.key('js.reports.lbl_date'))}:</strong> ${esc(a.timestamp)}</p>
             <p><strong>${esc(t.key('js.reports.lbl_status'))}:</strong> ${esc(statusLabels[a.status] || a.status)}</p>
         </div>
         <div class="report-message-block">
@@ -937,16 +1008,18 @@ async function openAppealModal(id) {
     document.getElementById('appeal-response-msg').value = '';
     document.getElementById('appeal-modal-alert').innerHTML = '';
 
-    const modal = new bootstrap.Modal(document.getElementById('appealModal'));
+    rememberOpener('appealModal', 'data-appeal-id', a.id);
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('appealModal'));
     modal.show();
 }
 
 async function handleResolveAppeal(status) {
     if (!currentAppeal) return;
     const confirmMsg = status === 'accepted' ? t.key('js.reports.confirm_accept_appeal') : t.key('js.reports.confirm_reject_appeal');
-    if (!await confirmAction(confirmMsg)) return;
-
     const appealType = currentAppeal.appeal_type || 'unblock';
+    // Red where the answer takes something away: a rejection, or an accepted request to BLOCK a hash.
+    if (!await confirmAction(confirmMsg, !(status === 'accepted' && appealType !== 'block'))) return;
+
     const body = {
         id: currentAppeal.id,
         status: status,
@@ -982,7 +1055,7 @@ async function handleResolveAppeal(status) {
 
 async function handleRestoreAppeal() {
     if (!currentAppeal) return;
-    if (!await confirmAction(t.key('js.reports.confirm_restore_appeal'))) return;
+    if (!await confirmAction(t.key('js.reports.confirm_restore_appeal'), false)) return;
 
     const json = await apiCall('admin/restore_appeal', 'POST', { id: currentAppeal.id });
     if (json.success) {
@@ -1010,9 +1083,10 @@ function handleDeletePermOpen() {
     document.getElementById('del-reason').value = '';
     document.getElementById('del-modal-alert').innerHTML = '';
 
-    // Show deletePermModal
+    // Show deletePermModal — its way back is the row's "…" (the button that asked is in the window just closed)
+    rememberOpener('deletePermModal', 'data-report-id', currentReport.id);
     const deletePermModalEl = document.getElementById('deletePermModal');
-    const deletePermModal = new bootstrap.Modal(deletePermModalEl);
+    const deletePermModal = bootstrap.Modal.getOrCreateInstance(deletePermModalEl);
     deletePermModal.show();
 }
 
@@ -1105,7 +1179,8 @@ function initTrackerService() {
             document.getElementById('restart-modal-alert').innerHTML = '';
             // Mirror the live recommendations into the modal so the admin sees why they're restarting.
             renderRestartModalWarnings();
-            new bootstrap.Modal(document.getElementById('restartTrackerModal')).show();
+            rememberOpener('restartTrackerModal', null, 0);
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('restartTrackerModal')).show();
         });
     }
     if (form) form.addEventListener('submit', handleRestartTracker);
@@ -1119,7 +1194,8 @@ function initTrackerService() {
             if (pw) pw.value = '';
             document.getElementById('reload-modal-alert').innerHTML = '';
             renderReloadModalWarnings();
-            new bootstrap.Modal(document.getElementById('reloadTrackerModal')).show();
+            rememberOpener('reloadTrackerModal', null, 0);
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('reloadTrackerModal')).show();
         });
     }
     if (reloadForm) reloadForm.addEventListener('submit', handleReloadTracker);

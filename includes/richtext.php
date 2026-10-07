@@ -240,12 +240,13 @@ function richtextAutoSourceUrl(?string $sourceRefJson, array $cfg): ?string {
  * Is the person this render is FOR signed in? One answer, so every caller gives the same one.
  *
  * Without this every caller left $signedIn at its default and [hide] hid its content from members
- * too — the tag withheld from everybody, which is not what it means. A panel session counts: a
- * moderator reviewing a description has to see what they are approving, or the review is of half a
- * text.
+ * too — the tag withheld from everybody, which is not what it means. The owner's own panel session counts:
+ * reviewing a description means seeing what is approved, or the review is of half a text. A panel session
+ * opened THROUGH an account (`admin_via_user`) is that account (1.74.0, AUTH-1 — userCan() reads it the same
+ * way): signed in exactly while the account is.
  */
 function richtextViewerSignedIn(?PDO $db = null): bool {
-    if (function_exists('isLoggedIn') && isLoggedIn()) return true;          // panel session
+    if (function_exists('isLoggedIn') && isLoggedIn() && empty($_SESSION['admin_via_user'])) return true;   // the owner's panel session
     if ($db instanceof PDO && function_exists('currentUser')) {
         return currentUser($db) !== null;
     }

@@ -23,7 +23,7 @@ add('transparency', {
                 'outcomes.',
                 'Ta strona pokazuje wszystkie organizacje, które złożyły wnioski o usunięcie, oraz '
                 'wyniki tych wniosków.'),
-    'loading': ('Loading data...', 'Wczytywanie danych...'),
+    'loading': ('Loading data...', 'Wczytywanie danych…'),
     'company': ('Company / Organization', 'Firma / Organizacja'),
     'represented': ('Represented Entity', 'Reprezentowany podmiot'),
     'total':   ('Total Requests', 'Wszystkich wniosków'),

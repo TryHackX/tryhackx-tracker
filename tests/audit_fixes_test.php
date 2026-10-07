@@ -144,15 +144,18 @@ check('the pathological quote input renders instead of vanishing', strlen($html)
 check('… with every quote rendered', substr_count($html, '<blockquote') === 400, (string)substr_count($html, '<blockquote'));
 check('… in well under a second', $ms < 1000, sprintf('%.0f ms', $ms));
 
-$lock = $root . '/config/rate_limits.json.lock';
-@unlink($lock);
 // A per-run action name: the window is 60 s, and a fixed key made a second run inside a minute
-// find the bucket already full.
+// find the bucket already full. Since 1.74.0 every action has its own file and its own lock
+// (config/ratelimit/<action>.json + .lock) — tests/rate_limit_test.php holds the rest of that down.
 $act = 'audit_fixes_test_' . getmypid() . '_' . mt_rand();
+$lock = rateLimitFile($act) . '.lock';
+@unlink($lock);
 rateLimitAllow($act, '203.0.113.9', 5, 60);
 check('rateLimitAllow leaves its lock file behind, which is where the flock lives', is_file($lock));
 $ok = 0; for ($i = 0; $i < 10; $i++) $ok += rateLimitAllow($act, '203.0.113.10', 5, 60) ? 1 : 0;
 check('the limit still counts: 5 of 10 allowed', $ok === 5, (string)$ok);
+rateLimitForget($act);
+@unlink($lock);
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

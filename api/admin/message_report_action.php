@@ -59,12 +59,16 @@ if (!$rep) jsonResponse(['error' => __('api.report.not_found')], 404);
 
 $who = $rep['reporter_name'] . ' → ' . $rep['reported_name'];
 
-/** The reporter hears what became of the report: the moderator's answer when there is one. */
-$tellReporter = function (string $titleKey) use ($db, $rep, $reply): void {
+/** The reporter hears what became of the report: the moderator's answer when there is one — in THEIR language
+ *  (1.74.0, QUAL-18: until then the moderator's, whose request this is). */
+$tellReporter = function (string $titleKey) use ($db, $cfg, $rep, $reply): void {
+    $lang = recipientLangOf($db, $cfg, (int)$rep['reporter_id']);
     userNotify($db, (int)$rep['reporter_id'], 'report',
-        __($titleKey, ['user' => $rep['reported_name']]),
-        $reply !== '' ? __('notify.report_reply', ['reply' => $reply]) : __('notify.report_no_reply'));
+        langFor($lang, $titleKey, ['user' => $rep['reported_name']]),
+        $reply !== '' ? langFor($lang, 'notify.report_reply', ['reply' => $reply]) : langFor($lang, 'notify.report_no_reply'));
 };
+/** The reported account's own notices, in its language too. */
+$authorLang = recipientLangOf($db, $cfg, (int)$rep['reported_user_id']);
 
 if ($action === 'close' || $action === 'reopen') {
     $to = $action === 'close' ? 'closed' : 'open';
@@ -112,7 +116,7 @@ if ($action === 'delete_message') {
     $tellReporter('notify.report_message_removed');
     $warning = null;
     if ($mode === '') {
-        userNotify($db, (int)$rep['reported_user_id'], 'account', __('notify.message_removed'), __('notify.message_removed_body'));
+        userNotify($db, (int)$rep['reported_user_id'], 'account', langFor($authorLang, 'notify.message_removed'), langFor($authorLang, 'notify.message_removed_body'));
     } elseif ($mode === 'loud') {
         $warning = userWarn($db, $cfg, (int)$rep['reported_user_id'], $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'remove');
     }
@@ -168,10 +172,10 @@ if (in_array($action, ['mute', 'unmute', 'ban', 'unban'], true)) {
         // a silence comes as a warning with the reason, and lifting one is said plainly (good news is no warning).
         if ($mode === '' || ($mode === 'loud' && $action === 'unmute')) {
             userNotify($db, $target, 'account',
-                __($action === 'mute' ? 'notify.muted' : 'notify.unmuted'),
+                langFor($authorLang, $action === 'mute' ? 'notify.muted' : 'notify.unmuted'),
                 $action === 'mute'
-                    ? ($until !== null ? __('notify.muted_until', ['date' => $until]) : __('notify.muted_forever'))
-                    : __('notify.unmuted_body'));
+                    ? ($until !== null ? langFor($authorLang, 'notify.muted_until', ['date' => $until]) : langFor($authorLang, 'notify.muted_forever'))
+                    : langFor($authorLang, 'notify.unmuted_body'));
         } elseif ($mode === 'loud') {
             $warning = userWarn($db, $cfg, $target, $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'mute',
                                 $days > 0 ? time() + $days * 86400 : null);
@@ -192,7 +196,7 @@ if (in_array($action, ['mute', 'unmute', 'ban', 'unban'], true)) {
         // A banned account's sessions end on their next request anyway (currentUser() refuses a
         // status that is not 'active'), and its remembered devices are worth taking with it.
         if ($ban && function_exists('userSignOutOthers')) userSignOutOthers($db, $target, false);
-        if (!$ban && $mode !== 'silent') userNotify($db, $target, 'account', __('notify.unbanned'), __('notify.unbanned_body'));
+        if (!$ban && $mode !== 'silent') userNotify($db, $target, 'account', langFor($authorLang, 'notify.unbanned'), langFor($authorLang, 'notify.unbanned_body'));
         // A ban told as a warning (1.71.0): read when the account can read again, and kept on it.
         if ($ban && $mode === 'loud') {
             $warning = userWarn($db, $cfg, $target, $reason, ['kind' => 'message', 'id' => (int)$rep['message_id']], 'ban',

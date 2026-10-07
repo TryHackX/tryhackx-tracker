@@ -159,8 +159,12 @@ if ($submitUser !== null) {
     // The per-row visibility choice, and only where all three gates agree. It applies to the rows
     // this submission CREATES — a hash that already existed belongs to whoever registered it first,
     // and the reply says `exists` so the form can tell the submitter that.
+    // 1.74.0 (PRIV-5): the GRANT of the submitter's account — uploads.public is consent, what others may see of
+    // them — never userCan(), which says yes to the Admin group's blanket and, until 1.74.0, to any panel
+    // session: an administrator's account whose groups grant nothing ticked the box, and the shoutbox put its
+    // name on the line. Every reader of a profile asks the same grant (userIdHasGrantedPermission()).
     $addCtx['submitter_public'] = uploadsPublicEnabled($cfg)
-        && userCan($db, $cfg, 'uploads.public')
+        && userIdHasGrantedPermission($db, $cfg, (int)$submitUser['id'], 'uploads.public')
         && !empty($input['submitter_public']);
 }
 $r = whitelistAddHashes($db, $cfg, $items, $addCtx);

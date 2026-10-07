@@ -31,11 +31,13 @@ if (isset($target['error'])) jsonResponse(['ok' => false, 'error' => $target['er
 $u = $target['user'];
 
 $eff = userGrantEffective($db, $cfg, $u);
+// The memberships as a partner needs them (1.74.0, PRIV-7) — userGroupsForPartner(), never the panel's notes.
+$groups = userGroupsForPartner($db, (int)$u['id']);
 jsonResponse([
     'ok' => true, 'found' => true,
     'user' => ['id' => (int)$u['id'], 'username' => $u['username'], 'email' => $u['email'],
                'status' => $u['status'], 'created_at' => $u['created_at']],
-    'groups' => userGroupsAll($db, (int)$u['id']),
+    'groups' => $groups,
     'effective' => $eff['effective'], 'reason' => $eff['reason'],
     'server_time' => time(),
 ]);

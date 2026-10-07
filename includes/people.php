@@ -199,6 +199,25 @@ function areFriends(PDO $db, int $a, int $b): bool
     return (bool)$st->fetchColumn();
 }
 
+/**
+ * Is a friend request from $fromId still waiting UNREAD in $toId's notifications (1.74.0, PUB-5)? Then a new one
+ * says nothing it does not, and api/user_people.php writes none: following, unfollowing and following again used
+ * to deliver a notification per turn. Read through `sender_id` (v93) on the account's own key (idx_un_user); before
+ * that column exists it answers no — the behaviour from before.
+ */
+function friendRequestUnread(PDO $db, int $toId, int $fromId): bool
+{
+    if ($toId <= 0 || $fromId <= 0) return false;
+    try {
+        $st = $db->prepare("SELECT 1 FROM user_notifications
+                             WHERE user_id = ? AND read_at IS NULL AND type = 'friend_request' AND sender_id = ? LIMIT 1");
+        $st->execute([$toId, $fromId]);
+        return (bool)$st->fetchColumn();
+    } catch (\Throwable $e) {
+        return false;
+    }
+}
+
 /* ── blocks ───────────────────────────────────────────────────────────────── */
 
 /** Has $owner blocked $other? Returns the row (so `hide_profile` travels with it) or null. */
@@ -247,9 +266,9 @@ function pmCanWrite(PDO $db, array $cfg, array $sender, ?array $target): array
     if (!userIsActive($target)) return ['ok' => false, 'reason' => 'not_found'];
     // The SENDER's permission, asked about the sender — not userCan(), which answers about whoever
     // is making the request. They are the same person when this runs behind the endpoint, and are
-    // not the same person anywhere else: a CLI test has no session at all, and a panel session
-    // answers yes to everything. A gate that cannot be asked about a named account is a gate that
-    // cannot be tested.
+    // not the same person anywhere else: a CLI test has no session at all, and the owner's panel
+    // session answers yes to everything. A gate that cannot be asked about a named account is a gate
+    // that cannot be tested.
     if (!userIdHasPermission($db, $cfg, $sid, 'pm.send')) return ['ok' => false, 'reason' => 'no_permission'];
     // Silenced by a moderator. Asked about the SENDER and before anything about the recipient: a
     // mute is about this account writing at all, not about who it is writing to — and the person
@@ -482,8 +501,22 @@ function pmTrashUntil(array $cfg, $at): ?string
 }
 
 /**
+ * "The other person has not hidden their profile from this reader", as SQL over the column holding the
+ * counterpart's id — one `?` to spend on the reader's id (1.74.0, PRIV-3). A block with `hide_profile` makes the
+ * account not there for the person it hides from: the profile, `with=` and `can=` have said not-found since 1.45.0,
+ * and the inbox, its counts, its search and the poll listed the conversation all the same. Every read path of the
+ * inbox carries this clause now, so what the conversation page refuses to say no list says either. One lookup on
+ * the block's pair key (uq_block_once).
+ */
+function pmNotHiddenSql(string $otherCol): string
+{
+    return "NOT EXISTS (SELECT 1 FROM user_blocks hb WHERE hb.user_id = $otherCol AND hb.blocked_id = ? AND hb.hide_profile = 1)";
+}
+
+/**
  * The three places' sizes for this reader, and what is waiting unread in the two that are counted — one query.
- * The counterpart's account active, as everywhere here: a conversation nobody can open is not a number.
+ * The counterpart's account active, as everywhere here: a conversation nobody can open is not a number — nor is one
+ * with somebody who hid their profile from this reader (pmNotHiddenSql(), 1.74.0).
  *   inbox / archive / trash   conversations there (one with a Trash and a live part is in two)
  *   unread_inbox / unread_archive   unread messages; their sum IS pmUnreadCount() — the badge, explained
  */
@@ -501,8 +534,8 @@ function pmBoxCounts(PDO $db, int $userId): array
                                                  AND m.read_at IS NULL AND m.id > " . pmVisibleSql() . ") AS unread
                                   FROM message_threads t
                                   JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
-                                 WHERE (t.u_low = ? OR t.u_high = ?) AND u.status = 'active') x");
-    $st->execute(array_fill(0, 9, $userId));
+                                 WHERE (t.u_low = ? OR t.u_high = ?) AND u.status = 'active' AND " . pmNotHiddenSql('u.id') . ") x");
+    $st->execute(array_fill(0, 10, $userId));
     $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
     $out = [];
     foreach (['inbox', 'archive', 'trash', 'unread_inbox', 'unread_archive'] as $k) $out[$k] = (int)($r[$k] ?? 0);
@@ -521,20 +554,27 @@ function pmUnreadCount(PDO $db, int $userId): int
     // its number (pmBoxCounts), and opening it there reads it. Until 1.72.x a hidden conversation was not
     // counted — and could not have anything unread in it, because every new message un-hid it; with
     // pm_archive_returns off it stays archived, and a message nobody is told about is the one they miss.
+    // 1.74.0 (PRIV-3): nor from somebody who hid their profile from this reader — a number the page could not
+    // explain, about a conversation it will not open.
     $st = $db->prepare("SELECT COUNT(*) FROM user_messages m
                           JOIN message_threads t ON t.id = m.thread_id
                           JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
                          WHERE m.sender_id <> ? AND m.read_at IS NULL AND u.status = 'active'
                            AND (t.u_low = ? OR t.u_high = ?)
-                           AND m.id > " . pmVisibleSql() . "");
-    $st->execute([$userId, $userId, $userId, $userId, $userId]);
+                           AND m.id > " . pmVisibleSql() . "
+                           AND " . pmNotHiddenSql('u.id'));
+    $st->execute(array_fill(0, 6, $userId));
     return (int)$st->fetchColumn();
 }
 
 /**
  * Of the messages waiting (pmUnreadCount), how many are from a FRIEND — the sounds tell the two
- * apart (includes/sounds.php). Same rows, same rule about the counterpart being active, one more
- * condition: an accepted friendship in either direction.
+ * apart (includes/sounds.php). Same rows, same rules about the counterpart (active, not hiding from this
+ * reader), one more condition: an accepted friendship in either direction.
+ *
+ * 1.74.0 (the twin of PERF-1): the friends are ONE set, read once — `u.id IN (this reader's friends)` — where an
+ * `EXISTS (… OR …)` over user_friends ran once for every unread message (measured: 409 friendships and 324 unread
+ * messages, 362 ms on every pulse of that reader, against 5 ms for the plain count).
  */
 function pmUnreadCountFriends(PDO $db, int $userId): int
 {
@@ -544,9 +584,10 @@ function pmUnreadCountFriends(PDO $db, int $userId): int
                          WHERE m.sender_id <> ? AND m.read_at IS NULL AND u.status = 'active'
                            AND (t.u_low = ? OR t.u_high = ?)
                            AND m.id > " . pmVisibleSql() . "
-                           AND EXISTS (SELECT 1 FROM user_friends f WHERE f.status = 'accepted'
-                                          AND ((f.user_id = ? AND f.friend_id = u.id) OR (f.user_id = u.id AND f.friend_id = ?)))");
-    $st->execute([$userId, $userId, $userId, $userId, $userId, $userId, $userId]);
+                           AND " . pmNotHiddenSql('u.id') . "
+                           AND u.id IN (SELECT IF(f.user_id = ?, f.friend_id, f.user_id) FROM user_friends f
+                                         WHERE f.status = 'accepted' AND (f.user_id = ? OR f.friend_id = ?))");
+    $st->execute(array_fill(0, 9, $userId));
     return (int)$st->fetchColumn();
 }
 
@@ -570,13 +611,15 @@ function pmUnreadCountFriends(PDO $db, int $userId): int
  */
 function pmInboxStamp(PDO $db, int $userId): string
 {
+    // 1.74.0 (PRIV-3): a conversation with somebody hiding from this reader is not on any list it draws, so its
+    // newest line is no reason to redraw one (and would be the one moment that conversation could be noticed).
     $one = $db->prepare("SELECT MAX(t.last_message_at) FROM message_threads t JOIN users u ON u.id = t.u_high
-                          WHERE t.u_low = ? AND u.status = 'active'");
-    $one->execute([$userId]);
+                          WHERE t.u_low = ? AND u.status = 'active' AND " . pmNotHiddenSql('u.id'));
+    $one->execute([$userId, $userId]);
     $a = (string)($one->fetchColumn() ?: '');
     $two = $db->prepare("SELECT MAX(t.last_message_at) FROM message_threads t JOIN users u ON u.id = t.u_low
-                          WHERE t.u_high = ? AND u.status = 'active'");
-    $two->execute([$userId]);
+                          WHERE t.u_high = ? AND u.status = 'active' AND " . pmNotHiddenSql('u.id'));
+    $two->execute([$userId, $userId]);
     $b = (string)($two->fetchColumn() ?: '');
     return $a > $b ? $a : $b;
 }
@@ -613,10 +656,10 @@ function pmListThreads(PDO $db, int $userId, string $view, ?array $ids = null, i
                       JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
                      WHERE ((t.u_low = ? AND t.u_low_trash_upto > t.u_low_cleared_id)
                          OR (t.u_high = ? AND t.u_high_trash_upto > t.u_high_cleared_id))
-                       AND u.status = 'active'" . $in . ") z
+                       AND u.status = 'active' AND " . pmNotHiddenSql('u.id') . $in . ") z
               JOIN user_messages lm ON lm.id = z.last_id
              ORDER BY z.trashed_at DESC, z.id DESC LIMIT " . $limit);
-        $st->execute(array_merge(array_fill(0, 9, $userId), $ids ?? []));
+        $st->execute(array_merge(array_fill(0, 10, $userId), $ids ?? []));
         return $st->fetchAll(PDO::FETCH_ASSOC);
     }
     $archived = $view === 'archive' ? 1 : 0;
@@ -630,10 +673,10 @@ function pmListThreads(PDO $db, int $userId, string $view, ?array $ids = null, i
                   FROM message_threads t
                   JOIN users u ON u.id = IF(t.u_low = ?, t.u_high, t.u_low)
                  WHERE ((t.u_low = ? AND t.u_low_hidden = ?) OR (t.u_high = ? AND t.u_high_hidden = ?))
-                   AND u.status = 'active'" . $in . ") z
+                   AND u.status = 'active' AND " . pmNotHiddenSql('u.id') . $in . ") z
           JOIN user_messages lm ON lm.id = z.last_id
          ORDER BY z.last_message_at DESC, z.id DESC LIMIT " . $limit);
-    $st->execute(array_merge([$userId, $userId, $userId, $userId, $userId, $userId, $archived, $userId, $archived], $ids ?? []));
+    $st->execute(array_merge([$userId, $userId, $userId, $userId, $userId, $userId, $archived, $userId, $archived, $userId], $ids ?? []));
     return $st->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -644,20 +687,24 @@ function pmListThreads(PDO $db, int $userId, string $view, ?array $ids = null, i
 function pmDeepSearchIds(PDO $db, int $userId, string $view, string $search): array
 {
     $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $search) . '%';
+    // 1.74.0 (PRIV-3): never a conversation with somebody hiding from this reader — the hit would name it.
+    $notHidden = pmNotHiddenSql('IF(t.u_low = ?, t.u_high, t.u_low)');
     if ($view === 'trash') {
         $st = $db->prepare("SELECT DISTINCT m.thread_id FROM user_messages m
                               JOIN message_threads t ON t.id = m.thread_id
                              WHERE (t.u_low = ? OR t.u_high = ?) AND m.body LIKE ?
                                AND m.id > " . pmClearedSql() . " AND m.id <= " . pmTrashUptoSql() . "
+                               AND $notHidden
                              LIMIT 200");
-        $st->execute([$userId, $userId, $like, $userId, $userId]);
+        $st->execute([$userId, $userId, $like, $userId, $userId, $userId, $userId]);
     } else {
         $st = $db->prepare("SELECT DISTINCT m.thread_id FROM user_messages m
                               JOIN message_threads t ON t.id = m.thread_id
                              WHERE (t.u_low = ? OR t.u_high = ?) AND m.body LIKE ?
                                AND m.id > " . pmVisibleSql() . "
+                               AND $notHidden
                              LIMIT 200");
-        $st->execute([$userId, $userId, $like, $userId]);
+        $st->execute([$userId, $userId, $like, $userId, $userId, $userId]);
     }
     return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
 }

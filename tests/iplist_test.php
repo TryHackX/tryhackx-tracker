@@ -266,29 +266,32 @@ check('coverage: 8 810 /24s are 2.25 million addresses, so entries and addresses
       ipListCoverage($cnLike)['addr4'] === 8810 * 256);
 
 // ── 6. registration: four places, or it does not exist ───────────────────────
-$schema  = (string)file_get_contents($root . '/includes/schema.php');
-$save    = (string)file_get_contents($root . '/api/admin/save_settings.php');
-$catalog = (string)file_get_contents($root . '/includes/settings_catalog.php');
-$tpl     = (string)file_get_contents($root . '/templates/admin/settings.php');
-foreach (['net_lists_enabled', 'net_lists_ttl_default'] as $key) {
-    check("$key: has a schema default", str_contains($schema, "'$key'"));
-    check("$key: is saveable", str_contains($save, "'$key'"));
-    check("$key: is findable in the settings search", str_contains($catalog, "'$key'"));
+// Asked of the code where it can answer (1.74.0, QUAL-7: these were greps of the files): the schema's defaults and
+// statements, the settings search's catalogue, the router's table and map, the audit's names. The save allow-list
+// and the page's controls are read as the lists they are.
+require_once $root . '/includes/schema.php';
+require_once $root . '/includes/settings_catalog.php';
+require_once $root . '/includes/audit.php';
+$defaults = trackerSchemaDefaultSettings();
+$catalog  = settingsCatalogKeywords();
+$save     = (string)file_get_contents($root . '/api/admin/save_settings.php');
+$allowed  = [];
+if (preg_match('~\$allowed\s*=\s*\[(.*?)\n\];~s', $save, $am)) {
+    foreach (token_get_all('<?php ' . $am[1]) as $t) if (is_array($t) && $t[0] === T_CONSTANT_ENCAPSED_STRING) $allowed[] = trim($t[1], "'\"");
+}
+$tpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+foreach (['net_lists_enabled', 'net_lists_ttl_default', 'net_limit_blocked'] as $key) {
+    check("$key: has a schema default", array_key_exists($key, $defaults));
+    check("$key: is saveable", in_array($key, $allowed, true));
+    check("$key: is findable in the settings search", isset($catalog[$key]) && trim((string)$catalog[$key]) !== '');
     check("$key: has a control on the settings page", str_contains($tpl, 'name="' . $key . '"'));
 }
-check('net_lists_stamp is internal — not exposed to the save allow-list',
-      str_contains($schema, "'net_lists_stamp'") && !str_contains($save, "'net_lists_stamp'"));
-check('the schema version was bumped for the new tables',
-      (bool)preg_match('/TRACKER_SCHEMA_VERSION = (\d+)/', $schema, $m) && (int)$m[1] >= 34, $m[1] ?? '?');
-check('both tables are created', str_contains($schema, 'CREATE TABLE IF NOT EXISTS `ip_lists`')
-    && str_contains($schema, 'CREATE TABLE IF NOT EXISTS `ip_list_entries`'));
-
-foreach (['net_limit_blocked'] as $key) {
-    check("$key: has a schema default", str_contains($schema, "'$key'"));
-    check("$key: is saveable", str_contains($save, "'$key'"));
-    check("$key: is findable in the settings search", str_contains($catalog, "'$key'"));
-    check("$key: has a control on the settings page", str_contains($tpl, 'name="' . $key . '"'));
-}
+check('net_lists_stamp is internal — a default, but not in the save allow-list',
+      array_key_exists('net_lists_stamp', $defaults) && !in_array('net_lists_stamp', $allowed, true));
+check('the schema version was bumped for the new tables', TRACKER_SCHEMA_VERSION >= 34, (string)TRACKER_SCHEMA_VERSION);
+$stmts = implode("\n", array_map(fn($s) => is_array($s) ? implode("\n", $s) : (string)$s, trackerSchemaStatements()));
+check('both tables are created', str_contains($stmts, 'CREATE TABLE IF NOT EXISTS `ip_lists`')
+    && str_contains($stmts, 'CREATE TABLE IF NOT EXISTS `ip_list_entries`'));
 $helper = (string)file_get_contents($root . '/tools/opentracker/tracker-netlimit.sh');
 check('the helper accepts --blocked', str_contains($helper, '--blocked=*)'));
 check('… and forwards all four optional arguments',
@@ -296,18 +299,26 @@ check('… and forwards all four optional arguments',
 check('the hand-typed block is its own set, not mixed into the lists',
       str_contains($helper, 'set denied4') && str_contains($helper, 'set denied6'));
 
+// The router's table and its permission map, read as tables (the same reading as tests/routes_ratchet_test.php).
 $api = (string)file_get_contents($root . '/api.php');
-check('the read endpoint is routed', str_contains($api, "'admin/ip_lists'"));
-check('the write endpoint is routed', str_contains($api, "'admin/ip_list_action'"));
-check('reading is part of reading the Traffic page', str_contains($api, "'admin/ip_lists'           => 'panel.traffic.view'"));
+$routes = []; $permMap = [];
+if (preg_match('~\$apiRoutes\s*=\s*\[(.*?)\n\];~s', $api, $rm)) {
+    preg_match_all("~^\s*'([a-z0-9_/]+)'\s*=>\s*'(api/[a-z0-9_/]+\.php)'\s*,~m", $rm[1], $rr, PREG_SET_ORDER);
+    foreach ($rr as $x) $routes[$x[1]] = $x[2];
+}
+if (preg_match('~function adminEndpointPermission\(string \$endpoint\): \?string \{(.*?)\n\}~s', $api, $pm)) {
+    preg_match_all("~'(admin/[a-z0-9_]+)'\s*=>\s*'([a-z0-9_.]+)'~", $pm[1], $mm, PREG_SET_ORDER);
+    foreach ($mm as $x) $permMap[$x[1]] = $x[2];
+}
+check('the read endpoint is routed, to its file', ($routes['admin/ip_lists'] ?? '') === 'api/admin/ip_lists.php' && is_file($root . '/api/admin/ip_lists.php'));
+check('the write endpoint is routed, to its file', ($routes['admin/ip_list_action'] ?? '') === 'api/admin/ip_list_action.php' && is_file($root . '/api/admin/ip_list_action.php'));
+check('reading is part of reading the Traffic page', ($permMap['admin/ip_lists'] ?? '') === 'panel.traffic.view', (string)($permMap['admin/ip_lists'] ?? 'none'));
 // The controls stay with the owner. An endpoint absent from the permission map is owner-only, which
 // is how every other control on that page behaves; an entry here would be a quiet promotion.
-check('writing is owner-only (no permission entry)',
-      !preg_match("/'admin\\/ip_list_action'\\s*=>\\s*'panel\\./", $api));
+check('writing is owner-only (no permission entry)', count($permMap) > 40 && !isset($permMap['admin/ip_list_action']));
 
-$audit = (string)file_get_contents($root . '/includes/audit.php');
-check('changes are audited', str_contains($audit, "'admin/ip_list_action'        => 'iplist.change'"));
-check('… under the machine group', str_contains($audit, "'iplist.change'"));
+check('changes are audited', auditEndpointAction('admin/ip_list_action') === 'iplist.change', (string)auditEndpointAction('admin/ip_list_action'));
+check('… under the machine group', auditGroupOf('iplist.change') === 'machine', auditGroupOf('iplist.change'));
 
 $janitor = (string)file_get_contents($root . '/tools/janitor.php');
 check('the janitor refreshes URL lists', str_contains($janitor, 'ipListTick('));

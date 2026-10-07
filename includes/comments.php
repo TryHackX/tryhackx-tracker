@@ -93,7 +93,9 @@
  * E (reports, includes/reports.php): commentDelete() takes `$opts['notify']` — false is the silent removal —
  * and `$opts['authority'] = 'panel'` for the Reports page; every row the page is handed carries `can_report` /
  * `reported`, and the page's actions row takes the Report button through window.Comments.onActions()
- * (assets/js/reports.js); the held guest comments are commentPendingList() / commentApprove().
+ * (assets/js/reports.js); a held guest comment is shown to a moderator in its own thread with an Approve button
+ * (commentApprove()) — there is no separate queue (1.74.0: commentPendingList(), written for one and never
+ * called, was removed).
  * F (one anti-spam layer, includes/antispam.php): commentFloodCheck() is the ONE call every write here makes,
  * and it is the layer's now — a guest's CAPTCHA every time, a member's ladder and its CAPTCHA at the top, the
  * same words again refused, a correction a few seconds from the last; a new account's links are drawn as text
@@ -1108,17 +1110,11 @@ function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
     return $out;
 }
 
-/* ── notifications ─────────────────────────────────────────────────────────────────────────────── */
-
-/** The language a notification is written in for THIS account: theirs, else the site's, else English. */
-function commentLangFor(array $cfg, ?array $user): string
-{
-    $mine = strtolower(trim((string)($user['language'] ?? '')));
-    if ($mine !== '' && function_exists('langSupported') && langSupported($cfg, $mine)) return $mine;
-    $site = strtolower(trim((string)($cfg['default_language'] ?? '')));
-    if ($site !== '' && $site !== 'auto' && function_exists('langSupported') && langSupported($cfg, $site)) return $site;
-    return defined('LANG_FALLBACK') ? LANG_FALLBACK : 'en';
-}
+/* ── notifications ─────────────────────────────────────────────────────────────────────────────── *
+ *
+ * Every one is written in the RECIPIENT's language — recipientLang() (includes/users.php), the one helper this file
+ * and includes/reports.php shared a copy each of until 1.74.0.
+ */
 
 /** The address a notification about a comment points at: the search page's Info panel, at the comment. */
 function commentLink(string $hash, int $id): string
@@ -1230,7 +1226,7 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
             $st->execute([$uid, '?action=search&hash=' . $hash . '#%']);
             if ($st->fetchColumn()) continue;
         }
-        $lang = commentLangFor($cfg, $u);
+        $lang = recipientLang($cfg, $u);
         $name = $who ?? langFor($lang, 'notify.comment_guest');
         $key = 'notify.comment_' . $reason;
         userNotify($db, $uid, $type, langFor($lang, $key, ['user' => $name, 'name' => $torrent]),
@@ -1462,6 +1458,8 @@ function commentEditRequest(PDO $db, array $cfg, ?array $me, array $input, strin
         }
         antispamRecord($db, $ticket);
         $hash = (string)$row['info_hash'];
+        // What other people's notifications quote of it is the new words now (1.74.0, PRIV-1) — whoever edited it.
+        commentNotifyFollow($db, $cfg, [$row], 'edited', $clean);
         if ($authorId !== $uid) {
             if (function_exists('auditLog')) {
                 auditLog($db, 'comment.edit', ['target_type' => 'comment', 'target_id' => (string)$row['id'],
@@ -1472,7 +1470,7 @@ function commentEditRequest(PDO $db, array $cfg, ?array $me, array $input, strin
             if ($authorId > 0 && ($opts['notify'] ?? true) !== false) {
                 $author = userFindById($db, $authorId);
                 if ($author !== null) {
-                    $lang = commentLangFor($cfg, $author);
+                    $lang = recipientLang($cfg, $author);
                     userNotify($db, $authorId, 'comment_mod', langFor($lang, 'notify.comment_edited', ['name' => commentTorrentName($db, $hash)]),
                                $reason !== '' ? langFor($lang, 'notify.comment_reason', ['reason' => $reason]) : '', commentLink($hash, (int)$row['id']));
                 }
@@ -1506,7 +1504,7 @@ function commentNotifyMentions(PDO $db, array $cfg, array $row, array $ids): arr
         if (((int)($u['comment_notify'] ?? COMMENT_NOTIFY_ALL) & COMMENT_NOTIFY_MENTION) === 0) continue;
         if (function_exists('blockRow') && (blockRow($db, $uid, $author) !== null || blockRow($db, $author, $uid) !== null)) continue;
         if (!commentCan($db, $cfg, $u, 'comment.view')) continue;
-        $lang = commentLangFor($cfg, $u);
+        $lang = recipientLang($cfg, $u);
         $st = $db->prepare("SELECT username FROM users WHERE id = ?");
         $st->execute([$author]);
         $name = (string)($st->fetchColumn() ?: langFor($lang, 'notify.comment_guest'));
@@ -1515,6 +1513,75 @@ function commentNotifyMentions(PDO $db, array $cfg, array $row, array $ids): arr
         $told[$uid] = 'comment_mention';
     }
     return $told;
+}
+
+/**
+ * THE COPIES FOLLOW THE COMMENT (1.74.0, PRIV-1). A notification about a comment keeps a copy of its first words
+ * (notify.comment_body, written by commentNotifyNew() and commentNotifyMentions()) in the account of everybody told —
+ * the author of the comment answered, the torrent's registrant, its description's author, up to fifty earlier
+ * participants, up to five people named. Until 1.74.0 nothing ever touched those copies: a comment its author
+ * deleted, one a moderator took down for the personal data in it, one corrected, and every comment of an account
+ * that was deleted went on being quoted, word for word, in other people's notifications for up to a year.
+ *
+ * Now each copy follows what happened to the comment:
+ *   'edited'    — the quote is the new words' excerpt ($newBody, the clean source);
+ *   'deleted'   — the quote is "[deleted]". The notification itself stays: a 'comment' one stands for its whole
+ *                 unread thread (commentNotifyNew()), and taking it away would announce the thread again;
+ *   'forgotten' — the author's account is being deleted (commentForgetAccount()): the quote goes, and so does the
+ *                 title that names them — "a comment on … — its author's account was deleted".
+ * Bound by the exact address the notification carries (`link` = commentLink(), keyed since v93) and only for the
+ * three kinds that quote — 'comment', 'comment_reply', 'comment_mention'. 'comment_mod', the author's own notice of
+ * a moderator's decision, is never touched. Each copy is rewritten in ITS reader's language (recipientLang()).
+ * $comments: rows with `info_hash` and `id`. Returns how many copies changed; a failure is logged, never thrown —
+ * the act on the comment itself has already happened.
+ */
+function commentNotifyFollow(PDO $db, array $cfg, array $comments, string $what, string $newBody = ''): int
+{
+    if (!in_array($what, ['edited', 'deleted', 'forgotten'], true)) return 0;
+    $hashOf = [];   // link => hash
+    foreach ($comments as $c) {
+        $id = (int)($c['id'] ?? 0);
+        $hash = strtolower((string)($c['info_hash'] ?? ''));
+        if ($id > 0 && preg_match('/^[0-9a-f]{40}$/', $hash)) $hashOf[commentLink($hash, $id)] = $hash;
+    }
+    if (!$hashOf) return 0;
+    $excerpt = $what === 'edited' ? commentExcerpt($newBody) : '';
+    $names = [];
+    $changed = 0;
+    try {
+        foreach (array_chunk(array_keys($hashOf), 200) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $db->prepare("SELECT n.id, n.user_id, n.link, u.language FROM user_notifications n
+                                  LEFT JOIN users u ON u.id = n.user_id
+                                 WHERE n.link IN ($in) AND n.type IN ('comment', 'comment_reply', 'comment_mention')");
+            $st->execute($chunk);
+            // One UPDATE per language (and, for a forgotten account, per torrent — the title names it).
+            $groups = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $lang = recipientLang($cfg, ['id' => (int)$r['user_id'], 'language' => $r['language']]);
+                $hash = $what === 'forgotten' ? ($hashOf[(string)$r['link']] ?? '') : '';
+                $groups[$lang . '|' . $hash][] = (int)$r['id'];
+            }
+            foreach ($groups as $k => $nids) {
+                [$lang, $hash] = explode('|', $k, 2);
+                $ph = implode(',', array_fill(0, count($nids), '?'));
+                if ($what === 'forgotten') {
+                    $names[$hash] ??= commentTorrentName($db, $hash);
+                    $up = $db->prepare("UPDATE user_notifications SET title = ?, body = ? WHERE id IN ($ph)");
+                    $up->execute(array_merge([mb_substr(langFor($lang, 'notify.comment_gone', ['name' => $names[$hash]]), 0, 190),
+                                              langFor($lang, 'notify.comment_body_gone')], $nids));
+                } else {
+                    $body = $what === 'edited' ? langFor($lang, 'notify.comment_body', ['text' => $excerpt]) : langFor($lang, 'notify.comment_body_gone');
+                    $up = $db->prepare("UPDATE user_notifications SET body = ? WHERE id IN ($ph)");
+                    $up->execute(array_merge([$body], $nids));
+                }
+                $changed += $up->rowCount();
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[comments] the notifications quoting a comment (' . $what . '): ' . $e->getMessage());
+    }
+    return $changed;
 }
 
 /**
@@ -1549,6 +1616,8 @@ function commentDelete(PDO $db, array $cfg, ?array $me, array $row, string $reas
                          WHERE id = ? AND status <> 'deleted'");
     $st->execute([$uid > 0 ? $uid : null, $reason !== '' ? $reason : null, (int)$row['id']]);
     if ($st->rowCount() < 1) return ['ok' => false, 'error' => 'not_found', 'status' => 404];
+    // Nobody's notifications go on quoting it (1.74.0, PRIV-1) — the author's own deletion, a moderator's, a silent one.
+    commentNotifyFollow($db, $cfg, [$row], 'deleted');
     if ($right['right'] === 'any') {
         $authorId = $row['user_id'] === null ? 0 : (int)$row['user_id'];
         $hash = (string)$row['info_hash'];
@@ -1563,7 +1632,7 @@ function commentDelete(PDO $db, array $cfg, ?array $me, array $row, string $reas
         if ($authorId > 0 && !$silent) {
             $author = userFindById($db, $authorId);
             if ($author !== null) {
-                $lang = commentLangFor($cfg, $author);
+                $lang = recipientLang($cfg, $author);
                 userNotify($db, $authorId, 'comment_mod', langFor($lang, 'notify.comment_removed', ['name' => commentTorrentName($db, $hash)]),
                            langFor($lang, 'notify.comment_reason', ['reason' => $reason]), '?action=search&hash=' . $hash);
             }
@@ -1630,24 +1699,6 @@ function commentApproveRequest(PDO $db, array $cfg, ?array $me, array $input): a
     $shaped = $fresh !== null ? commentShape($db, $cfg, $me, [$fresh]) : [];
     return ['status' => 200, 'body' => ['success' => true, 'comment' => $shaped[0] ?? null, 'count' => commentCount($db, (string)$row['info_hash']),
                                         'message' => __('api.comment.approved')]];
-}
-
-/**
- * The held guest comments, oldest first — for part E's Reports page (and anything else that works the
- * queue): [id, info_hash, guest_tag, body, created_at]. The moderator's permission is the caller's to ask.
- */
-function commentPendingList(PDO $db, int $limit = 50, int $offset = 0): array
-{
-    $limit = max(1, min(200, $limit));
-    $offset = max(0, $offset);
-    try {
-        $st = $db->prepare("SELECT id, info_hash, guest_tag, body, created_at FROM hash_comments WHERE status = 'pending'
-                             ORDER BY created_at ASC, id ASC LIMIT $limit OFFSET $offset");
-        $st->execute();
-        return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    } catch (\Throwable $e) {
-        return [];
-    }
 }
 
 /* ── reading ───────────────────────────────────────────────────────────────────────────────────── */
@@ -1847,12 +1898,23 @@ function commentPrefsRequest(PDO $db, array $cfg, ?array $me, array $input, bool
  * and every trace of whose it was gone (author, guest tag, address group, edit stamps), a moderator's reason kept
  * if it had been taken down already. Their own replies under it go like the rest of their comments, unless
  * somebody else's reply hangs below those too (commentAccountTombstones()).
+ *
+ * 1.74.0 (PRIV-1): and what other people's notifications quoted of them — every one of the account's comments,
+ * deleted or kept as a tombstone — is forgotten too (commentNotifyFollow() 'forgotten': the quote and the name in
+ * the title go). ['comment_quotes' => n] says how many copies. $cfg: the settings (the readers' languages); null —
+ * the request's.
  */
-function commentForgetAccount(PDO $db, int $userId): array
+function commentForgetAccount(PDO $db, int $userId, ?array $cfg = null): array
 {
-    $out = ['comments' => 0, 'comment_tombstones' => 0, 'comment_stamps' => 0];
+    $out = ['comments' => 0, 'comment_tombstones' => 0, 'comment_stamps' => 0, 'comment_quotes' => 0];
     if ($userId <= 0) return $out;
+    $cfg = $cfg ?? (is_array($GLOBALS['cfg'] ?? null) ? $GLOBALS['cfg'] : []);
     try {
+        // Read before anything is deleted: the addresses the copies carry are made of these.
+        $st = $db->prepare("SELECT id, info_hash FROM hash_comments WHERE user_id = ?");
+        $st->execute([$userId]);
+        $theirs = $st->fetchAll(PDO::FETCH_ASSOC);
+        if ($theirs) $out['comment_quotes'] = commentNotifyFollow($db, $cfg, $theirs, 'forgotten');
         $keep = commentAccountTombstones($db, $userId);
         if ($keep) {
             $in = implode(',', array_fill(0, count($keep), '?'));

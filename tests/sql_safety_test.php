@@ -169,6 +169,24 @@ $REVIEWED = [
     // are built here from $where — literal fragments chosen by key — plus one clause the same
     // function wrote ('name LIKE ?', a MATCH(), or 'info_hash IN (?,?,…)' whose length is the count
     // of the bound array). Nothing from the request reaches the text; the hashes are bound.
+    // 1.74.0 (PERF-6): the panel's whitelist search "in the name or a file" as two branches and a UNION.
+    'api/admin/fetch_whitelist.php:$wA'        => 'WHERE + the literal filter fragments + the name branch (name LIKE ? or a MATCH(name) AGAINST(?)) written in the same file; values bound',
+    'api/admin/fetch_whitelist.php:$wB'        => 'WHERE + the literal filter fragments + the files branch (id IN (SELECT … path LIKE ?) or its MATCH(path)) written in the same file; values bound',
+    // 1.74.0 (PERF-3, the narrow catalogue). indexRefetchGraceSql() is literal SQL whose only number is
+    // indexGraceDays() — an int clamped to [1, 90]; the catalogue's upsert spells one "(?, …)" group per row,
+    // one ? per IDX_CATALOG_COLS entry (a constant); the page's wide rows are read by key from one of two
+    // literal [columns, table, membership] triples written in the foreach that uses them.
+    'includes/index.php:$grace'                => 'indexRefetchGraceSql(): literal SQL, the only number indexGraceDays() — an int in [1, 90]',
+    'includes/index.php:$tuple'                => 'one "(?, ?, …)" placeholder group per row, its length the constant IDX_CATALOG_COLS; every value bound',
+    'includes/index.php:$wideCols'             => 'one of the two column lists (index / whitelist), both literal in indexSearchCatalogue()',
+    'includes/index.php:$wideTable'            => "one of two literal table names ('index_hashes', 'whitelist') from the foreach's own array",
+    'includes/index.php:$wideMember'           => "IDX_CATALOG_MEMBER (a constant) or ' AND banned = 0', from the foreach's own array",
+    // 1.74.0 (PRIV-3): pmNotHiddenSql() is a literal NOT EXISTS with one ? (the reader's id) over a column
+    // expression the caller writes as a literal.
+    'includes/people.php:$notHidden'           => "pmNotHiddenSql('IF(t.u_low = ?, t.u_high, t.u_low)'): literal SQL, the reader's id bound",
+    // 1.74.0 (PERF-1): the reader's friends fetched once, as integers in the text (a sorted IN list the
+    // server binary-searches per line) — or the literal '0' for nobody.
+    'includes/shout.php:$isFriend'             => "'s.user_id IN (…)' over shoutFriendIds(): intval()ed ids > 0 read from user_friends, or the literal '0'",
     // Both are built from a fixed vocabulary in the same file: $sets holds literal `fav_public = ?` /
     // `fav_listed = ?` fragments chosen by an allow-list of two names, and $order is a column looked
     // up in $sortCols plus one of two literal directions. Nothing from the request reaches either.

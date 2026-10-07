@@ -16,16 +16,17 @@ if (isCaptchaRequired($cfg, 'report')) {
     onCaptchaSolved();
 }
 
-// Sanitize & validate
-$name = sanitize($input['name'] ?? '');
-$representative = sanitize($input['representative'] ?? '');
-$company = sanitize($input['company'] ?? '');
-$email = trim($input['email'] ?? '');
-$objectTitle = sanitize($input['objectTitle'] ?? '');
-$link = trim($input['link'] ?? '');
-$infoHash = strtolower(trim($input['infoHash'] ?? ''));
-$rawMagnet = trim($input['magnet_link'] ?? '');
-$rawMessage = trim($input['add_message'] ?? '');
+// Sanitize & validate. Every field through strInput() (1.74.0, PUB-3): an array where a string belongs is a field
+// left empty — the validation below says which — and no longer an uncaught TypeError.
+$name = sanitize(strInput($input, 'name'));
+$representative = sanitize(strInput($input, 'representative'));
+$company = sanitize(strInput($input, 'company'));
+$email = trim(strInput($input, 'email'));
+$objectTitle = sanitize(strInput($input, 'objectTitle'));
+$link = trim(strInput($input, 'link'));
+$infoHash = strtolower(trim(strInput($input, 'infoHash')));
+$rawMagnet = trim(strInput($input, 'magnet_link'));
+$rawMessage = trim(strInput($input, 'add_message'));
 
 // Required fields
 $errors = [];
@@ -85,10 +86,10 @@ if (mb_strlen($rawMessage) > $maxMsg) {
 }
 $message = sanitize($rawMessage);
 
-$ip = getClientIp();
+$ip = getClientIp($cfg);
 $maxPerHour = (int)($cfg['rate_limit'] ?? 5);
 
-// Rate limit
+// Rate limit — the reports from this address GROUP in the last hour (checkRateLimit(): an IPv6 host's /64, 1.74.0)
 if (!checkRateLimit($db, $ip, $maxPerHour)) {
     jsonResponse(['error' => 'rate_limit'], 429);
 }
@@ -117,11 +118,16 @@ $stmt->execute([$name, $representative, $company, $email, $objectTitle, $link, $
 $reportId = (int)$db->lastInsertId();
 
 // Send submission confirmation email (non-blocking — don't fail the response if mail fails)
-// Use output buffering to prevent any stray PHP warnings from corrupting the JSON response
+// Use output buffering to prevent any stray PHP warnings from corrupting the JSON response.
+// Only while today's site-wide count of confirmation mails is under `confirm_mail_daily_cap` (1.74.0, PUB-1:
+// the address is the sender's word, and every confirmation is a mail from this domain to it) — the report itself
+// is taken either way, and its status page answers the same.
 try {
-    ob_start();
-    @sendSubmissionConfirmation($db, $reportId, $cfg);
-    ob_end_clean();
+    if (confirmMailAllow($cfg)) {
+        ob_start();
+        @sendSubmissionConfirmation($db, $reportId, $cfg);
+        ob_end_clean();
+    }
 } catch (\Throwable $e) {
     if (ob_get_level()) ob_end_clean();
 }

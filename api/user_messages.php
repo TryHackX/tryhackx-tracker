@@ -223,7 +223,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $them = userValidUsername((string)($input['with'] ?? '')) ? userFindByLogin($db, (string)$input['with']) : null;
         if (!$them) jsonResponse(['error' => 'not_found'], 404);
         $gate = pmCanWrite($db, $cfg, $me, $them);
-        if (!$gate['ok']) jsonResponse(['error' => $gate['reason']], 403);
+        // not_found is a 404, as `send` answers it (1.74.0, PRIV-3): a profile hidden from this writer and a name
+        // nobody has must not be told apart by the status code.
+        if (!$gate['ok']) jsonResponse(['error' => $gate['reason']], $gate['reason'] === 'not_found' ? 404 : 403);
         $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
         if ($thread) pmTypingTouch($db, $cfg, (int)$thread['id'], $uid);
         jsonResponse(['success' => true, 'typing' => true]);
@@ -280,6 +282,10 @@ if ((string)($_GET['poll'] ?? '') === '1') {
     }
     $them = userValidUsername($with) ? userFindByLogin($db, $with) : null;
     if (!$them) jsonResponse(['error' => 'not_found'], 404);
+    // Hidden from this reader by a block: the same not-found `with=` gives (1.74.0, PRIV-3) — the poll used to
+    // hand the whole old conversation to a reader the conversation page refused.
+    $hidPoll = blockRow($db, (int)$them['id'], $uid);
+    if ($hidPoll !== null && !empty($hidPoll['hide_profile'])) jsonResponse(['error' => 'not_found'], 404);
     $thread = pmThreadFor($db, $uid, (int)$them['id'], false);
     if (!$thread) jsonResponse(['success' => true, 'rows' => [], 'typing' => false, 'unread' => 0, 'read_upto' => 0]);
 

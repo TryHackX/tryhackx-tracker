@@ -82,7 +82,7 @@ function settingsCatalogGroups(): array {
         // profile's), and they had become most of that card: somebody looking for "emotes in messages" would
         // not open a chip called Shoutbox. Two sections, the picker and the pictures; the keys did not move.
         ['id' => 'emoji',        'title' => 'Emoji & emotes',     'icon' => 'bi-emoji-smile',
-         'keywords' => 'emoji emoticons smileys faces picker font awesome fontawesome icons categories emotes custom pictures images stickers upload approve approval queue waiting everywhere messages descriptions lists profile emotki naklejki buzki ikony wybierak'],
+         'keywords' => 'emoji emoticons smileys faces picker font awesome fontawesome icons categories emotes custom pictures images stickers upload approve approval queue waiting everywhere messages descriptions lists profile emotki naklejki buzki ikony wybierak selektor'],
         ['id' => 'sounds',       'title' => 'Sounds',             'icon' => 'bi-volume-up',
          'keywords' => 'sound sounds audio chime notification alert ping mute volume upload library dzwieki'],
         ['id' => 'index',        'title' => 'Index',              'icon' => 'bi-collection',
@@ -156,6 +156,7 @@ function settingsCatalogKeywords(): array {
         'contact_visible'           => 'show hide contact email public page',
         'contact_obfuscate'         => 'hide email scraping spam harvesting javascript obfuscation',
         'hmac_secret'               => 'signing key unsubscribe token secret hmac links tamper',
+        'confirm_mail_daily_cap'    => 'confirmation mail email report appeal daily cap limit per day abuse flood bomb',
         // #section-digest
         'digest_enabled'            => 'digest email summary queues waiting review operator janitor daily',
         'digest_to'                 => 'digest email address recipient operator summary',
@@ -187,7 +188,6 @@ function settingsCatalogKeywords(): array {
         'captcha_pts_status'        => 'smart captcha points weight status action',
         'captcha_pts_block_check'   => 'smart captcha points weight block check action',
         'captcha_pts_appeal'        => 'smart captcha points weight appeal action',
-        'captcha_pts_login_fail'    => 'smart captcha points weight failed login attempt',
         'delete_captcha_attempts'   => 'report deletion password mistakes before captcha protection',
         'delete_lockout_attempts'   => 'report deletion password mistakes before lockout protection',
         'delete_lockout_minutes'    => 'report deletion lockout duration cooldown minutes',
@@ -354,7 +354,7 @@ function settingsCatalogKeywords(): array {
         // #section-whitelist
         'tracker_mode'              => 'blacklist whitelist open closed accesslist which torrents served',
         'whitelist_path'            => 'opentracker whitelist file accesslist path disk generated',
-        'blacklist_path'            => 'opentracker blacklist file accesslist path blocked hashes disk',
+        'blacklist_path'            => 'opentracker blacklist file accesslist path blocked hashes disk blacklista blacklisty czarna lista czarnej listy',
         'whitelist_public_enabled'  => 'public registration form add torrent whitelist page visible',
         'whitelist_submit_mode'     => 'who can register torrents public visitors accounts members captcha',
         'whitelist_max_per_submission' => 'hashes per form submission batch limit',
@@ -531,7 +531,7 @@ function settingsCatalogKeywords(): array {
 
         // ── Emoji & emotes (1.71.0; the keys are the room's names, where they were born) ──
         // #section-emoji
-        'shout_emoji_fa'            => 'emoji picker font awesome pro faces smileys icons mixed instead of ordinary shoutbox messages descriptions everywhere emotikony buzki twarze mieszane wybierak',
+        'shout_emoji_fa'            => 'emoji picker font awesome pro faces smileys icons mixed instead of ordinary shoutbox messages descriptions everywhere emotikony buzki twarze mieszane wybierak selektor',
         'shout_emoji_fa_style'      => 'emoji font awesome faces icons style family duotone sharp light thin solid default styl rodzina',
         'shout_emoji_fa_scope'      => 'emoji picker font awesome every any icon icons all categories category chips search find catalogue pro wszystkie ikony kategorie wyszukiwarka zakres',
         // #section-emotes

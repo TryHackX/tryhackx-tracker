@@ -17,9 +17,9 @@
       data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>"
       data-backup-db="<?= sanitize(backupDbName($cfg)) ?>"
       data-backup-enabled="<?= backupEnabled($cfg) ? '1' : '0' ?>">
-    <div class="admin-container admin-wide wl-page">
+    <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
-            <h2><i class="bi bi-archive"></i> <?= _h('a.backups.h1') ?> <span class="idx-subtitle"><?= __('a.backups.subtitle') ?></span></h2>
+            <h1 class="admin-title"><i class="bi bi-archive"></i> <?= _h('a.backups.h1') ?> <span class="idx-subtitle"><?= __('a.backups.subtitle') ?></span></h1>
             <?php $current = 'admin-backups'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
@@ -78,11 +78,11 @@
                 </colgroup>
                 <thead>
                     <tr>
-                        <th class="sortable" data-sort="when"><?= _h('a.backups.col_when') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="profile"><?= _h('a.backups.col_profile') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="size"><?= _h('a.backups.col_size') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="when"><button type="button" class="th-sort"><?= _h('a.backups.col_when') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="profile"><button type="button" class="th-sort"><?= _h('a.backups.col_profile') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="size"><button type="button" class="th-sort"><?= _h('a.backups.col_size') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th><?= _h('a.backups.col_contents') ?></th>
-                        <th class="sortable" data-sort="integrity"><?= _h('a.backups.col_integrity') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="integrity"><button type="button" class="th-sort"><?= _h('a.backups.col_integrity') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions"><?= _h('a.backups.col_actions') ?></th>
                     </tr>
                 </thead>
@@ -105,7 +105,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="bk-modal-title"><?= _h('a.backups.modal_title') ?></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-light mb-2" style="font-size:0.9rem;" id="bk-modal-text"></p>
@@ -123,11 +123,11 @@
                             <div class="wl-small text-muted mt-1" id="bk-confirm-profile-hint"></div>
                         </div>
                         <div class="mb-3 d-hidden" id="bk-confirm-name-row">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.backups.type_db_name') ?> *</label>
+                            <label for="bk-confirm-name" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.backups.type_db_name') ?> *</label>
                             <input type="text" class="form-control bg-dark text-light border-secondary" id="bk-confirm-name" autocomplete="off" spellcheck="false">
                         </div>
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.backups.admin_password') ?> *</label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="bk-confirm-password"><?= _h('a.backups.admin_password') ?> *</label>
                             <?php // For the browser's password manager: this form has a password field, so without a named
                                   // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                             <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -150,7 +150,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise text-warning"></i> <?= _h('a.backups.restore_from') ?> <span id="bk-restore-id" class="text-info"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-light mb-2" style="font-size:0.88rem;">

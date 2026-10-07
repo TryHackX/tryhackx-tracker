@@ -15,9 +15,9 @@
     <?= langJsBridge($baseUrl, ['js.', 'a.users.rec_', 'perm.']) ?>
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
-    <div class="admin-container admin-wide wl-page">
+    <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
-            <h2><i class="bi bi-people"></i> <?= _h('a.users.title') ?> <span class="idx-subtitle"><?= __('a.users.subtitle') ?></span></h2>
+            <h1 class="admin-title"><i class="bi bi-people"></i> <?= _h('a.users.title') ?> <span class="idx-subtitle"><?= __('a.users.subtitle') ?></span></h1>
             <?php $current = 'admin-users'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
@@ -73,13 +73,13 @@
                     </colgroup>
                     <thead><tr>
                         <th class="us-c-pick"><label class="search-check" title="<?= _h('a.users.pick_all_title') ?>"><input type="checkbox" id="us-pick-all"><span class="search-check-box" aria-hidden="true"></span></label></th>
-                        <th class="sortable" data-sort="id">ID <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="username"><?= _h('a.users.username') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="email"><?= _h('a.users.email') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable col-badge" data-sort="status"><?= _h('a.users.status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="group" title="<?= _h('a.users.sort_group_title') ?>"><?= _h('a.users.groups') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="created"><?= _h('a.users.created') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
-                        <th class="sortable" data-sort="login"><?= _h('a.users.last_login') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="id"><button type="button" class="th-sort">ID <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="username"><button type="button" class="th-sort"><?= _h('a.users.username') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="email"><button type="button" class="th-sort"><?= _h('a.users.email') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable col-badge" data-sort="status"><button type="button" class="th-sort"><?= _h('a.users.status') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="group" title="<?= _h('a.users.sort_group_title') ?><button type="button" class="th-sort">"><?= _h('a.users.groups') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="created"><button type="button" class="th-sort"><?= _h('a.users.created') ?> <i class="bi bi-arrow-down sort-icon active" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="login"><button type="button" class="th-sort"><?= _h('a.users.last_login') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions"><?= _h('a.users.actions') ?></th>
                     </tr></thead>
                     <tbody id="us-body"></tbody>
@@ -97,7 +97,7 @@
 
                 <div class="row g-3 mt-1">
                     <div class="col-md-4">
-                        <label class="form-label"><?= _h('a.users.who') ?></label>
+                        <label for="bm-mode" class="form-label"><?= _h('a.users.who') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bm-mode">
                             <option value="selected"><?= _h('a.users.who_selected') ?></option>
                             <option value="group"><?= _h('a.users.who_group') ?></option>
@@ -105,7 +105,7 @@
                         </select>
                     </div>
                     <div class="col-md-4" id="bm-group-wrap" style="display:none">
-                        <label class="form-label"><?= _h('a.users.group') ?></label>
+                        <label for="bm-group" class="form-label"><?= _h('a.users.group') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bm-group"></select>
                     </div>
                     <div class="col-md-4">
@@ -116,7 +116,7 @@
                         </div>
                     </div>
                     <div class="col-12">
-                        <label class="form-label"><?= _h('a.users.subject') ?></label>
+                        <label for="bm-subject" class="form-label"><?= _h('a.users.subject') ?></label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-subject" maxlength="200" placeholder="<?= _h('a.users.subject_ph') ?>">
                     </div>
                     <div class="col-12">
@@ -237,18 +237,18 @@
                 <div class="modal-body">
                     <div class="alert alert-danger py-2 wl-small d-none" id="ua-error"></div>
                     <div class="mb-3">
-                        <label class="form-label wl-label"><?= _h('a.users.username') ?></label>
+                        <label for="ua-username" class="form-label wl-label"><?= _h('a.users.username') ?></label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-username" autocomplete="off" maxlength="32">
                         <div class="invalid-feedback ua-msg" id="ua-username-msg"></div>
                     <small class="text-muted wl-small"><?= __('a.users.username_hint') ?></small>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label wl-label"><?= _h('a.users.email') ?> <small class="text-muted wl-small" id="ua-email-req"><?= _h('a.users.required_paren') ?></small></label>
+                        <label for="ua-email" class="form-label wl-label"><?= _h('a.users.email') ?> <small class="text-muted wl-small" id="ua-email-req"><?= _h('a.users.required_paren') ?></small></label>
                         <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-email" autocomplete="off" maxlength="190">
                     <div class="invalid-feedback ua-msg" id="ua-email-msg"></div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label wl-label"><?= _h('a.users.password') ?></label>
+                        <label for="ua-password" class="form-label wl-label"><?= _h('a.users.password') ?></label>
                         <div class="input-group">
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-password" autocomplete="new-password">
                             <button type="button" class="btn btn-sm btn-outline-secondary" id="ua-gen" title="<?= _h('a.users.gen_title') ?>">
@@ -259,7 +259,7 @@
                         <small class="text-muted wl-small"><?= __('a.users.pw_clear_note') ?></small>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label wl-label"><?= _h('a.users.verify_label') ?></label>
+                        <label for="ua-verify" class="form-label wl-label"><?= _h('a.users.verify_label') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ua-verify">
                             <option value="auto" selected><?= __('a.users.verify_auto') ?></option>
                             <option value="send"><?= __('a.users.verify_send') ?></option>
@@ -268,7 +268,7 @@
                         <small class="text-muted wl-small" id="ua-verify-hint"></small>
                     </div>
                     <div class="mb-1">
-                        <label class="form-label wl-label"><?= _h('a.users.status') ?></label>
+                        <label for="ua-status" class="form-label wl-label"><?= _h('a.users.status') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ua-status">
                             <option value="active" selected><?= _h('a.users.active') ?></option>
                             <option value="banned"><?= _h('a.users.banned_created') ?></option>
@@ -291,33 +291,33 @@
 
 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-person-gear"></i> <?= _h('a.users.edit_title') ?> <span id="ue-name" class="text-info"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.status') ?></label>
+                        <label for="ue-status" class="form-label wl-label"><?= _h('a.users.status') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ue-status">
                             <option value="active"><?= _h('a.users.active') ?></option>
                             <option value="banned"><?= _h('a.users.banned_nologin') ?></option>
                         </select>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.email') ?> <small class="text-muted"><?= _h('a.users.empty_none') ?></small></label>
+                        <label for="ue-email" class="form-label wl-label"><?= _h('a.users.email') ?> <small class="text-muted"><?= _h('a.users.empty_none') ?></small></label>
                         <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email" maxlength="190">
                         <div class="invalid-feedback"><?= _h('a.users.email_invalid') ?></div>
                     </div>
                     <div class="mb-2 d-hidden" id="ue-email2-wrap">
-                        <label class="form-label wl-label"><?= _h('a.users.email2') ?></label>
+                        <label for="ue-email2" class="form-label wl-label"><?= _h('a.users.email2') ?></label>
                         <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email2" maxlength="190" autocomplete="off">
                         <div class="invalid-feedback"><?= _h('a.users.email2_err') ?></div>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.new_pass') ?> <small class="text-muted"><?= _h('a.users.new_pass_note') ?></small></label>
+                        <label for="ue-password" class="form-label wl-label"><?= _h('a.users.new_pass') ?> <small class="text-muted"><?= _h('a.users.new_pass_note') ?></small></label>
                         <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password" maxlength="200" autocomplete="new-password">
                         <div class="invalid-feedback"><?= _h('a.users.pw_rule') ?></div>
                     </div>
                     <div class="mb-2 d-hidden" id="ue-password2-wrap">
-                        <label class="form-label wl-label"><?= _h('a.users.new_pass2') ?></label>
+                        <label for="ue-password2" class="form-label wl-label"><?= _h('a.users.new_pass2') ?></label>
                         <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password2" maxlength="200" autocomplete="new-password">
                         <div class="invalid-feedback"><?= _h('a.users.pass2_err') ?></div>
                     </div>
@@ -371,15 +371,15 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-award"></i> <?= _h('a.users.grant_title') ?> <span id="ug-name" class="text-info"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.group') ?></label>
+                        <label for="ug-group" class="form-label wl-label"><?= _h('a.users.group') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ug-group"></select>
                     </div>
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.duration') ?> <small class="text-muted"><?= _h('a.users.duration_note') ?></small></label>
+                        <label for="ug-duration" class="form-label wl-label"><?= _h('a.users.duration') ?> <small class="text-muted"><?= _h('a.users.duration_note') ?></small></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ug-duration">
                             <option value="1d"><?= _h('a.users.d_1d') ?></option>
                             <option value="7d"><?= _h('a.users.d_7d') ?></option>
@@ -393,13 +393,13 @@
                         </select>
                     </div>
                     <div class="row g-2 d-hidden" id="ug-custom">
-                        <div class="col-6"><label class="form-label wl-label"><?= _h('a.users.from') ?> <small class="text-muted"><?= _h('a.users.from_note') ?></small></label>
+                        <div class="col-6"><label for="ug-from" class="form-label wl-label"><?= _h('a.users.from') ?> <small class="text-muted"><?= _h('a.users.from_note') ?></small></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ug-from" placeholder="YYYY-MM-DD [HH:MM]"></div>
-                        <div class="col-6"><label class="form-label wl-label"><?= _h('a.users.to') ?> <small class="text-muted"><?= _h('a.users.to_note') ?></small></label>
+                        <div class="col-6"><label for="ug-to" class="form-label wl-label"><?= _h('a.users.to') ?> <small class="text-muted"><?= _h('a.users.to_note') ?></small></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ug-to" placeholder="YYYY-MM-DD [HH:MM]"></div>
                     </div>
                     <div class="mb-2 mt-2">
-                        <label class="form-label wl-label"><?= _h('a.users.note') ?> <small class="text-muted"><?= _h('a.users.note_hint') ?></small></label>
+                        <label for="ug-note" class="form-label wl-label"><?= _h('a.users.note') ?> <small class="text-muted"><?= _h('a.users.note_hint') ?></small></label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ug-note" maxlength="255" placeholder="<?= _h('a.users.note_ph') ?>">
                     </div>
                     <div class="form-check">
@@ -422,15 +422,15 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-bell"></i> <?= _h('a.users.notify_title') ?> <span id="un-name" class="text-info"></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.n_title') ?></label>
+                        <label for="un-title" class="form-label wl-label"><?= _h('a.users.n_title') ?></label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="un-title" maxlength="190">
                     </div>
                     <div class="mb-2">
-                        <label class="form-label wl-label"><?= _h('a.users.message') ?> <small class="text-muted"><?= _h('a.users.optional') ?></small></label>
+                        <label for="un-body" class="form-label wl-label"><?= _h('a.users.message') ?> <small class="text-muted"><?= _h('a.users.optional') ?></small></label>
                         <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="un-body" rows="4" maxlength="5000"></textarea>
                     </div>
                     <div class="form-check">
@@ -453,20 +453,20 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-people-fill"></i> <span id="ge-title"><?= _h('a.users.group') ?></span></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div class="row g-2">
-                        <div class="col-md-4"><label class="form-label wl-label"><?= _h('a.users.name') ?></label>
+                        <div class="col-md-4"><label for="ge-name" class="form-label wl-label"><?= _h('a.users.name') ?></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-name" maxlength="64"></div>
-                        <div class="col-md-4"><label class="form-label wl-label"><?= _h('a.users.slug') ?> <small class="text-muted">(a-z 0-9 _ -)</small></label>
+                        <div class="col-md-4"><label for="ge-slug" class="form-label wl-label"><?= _h('a.users.slug') ?> <small class="text-muted">(a-z 0-9 _ -)</small></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-slug" maxlength="64"></div>
-                        <div class="col-md-2"><label class="form-label wl-label"><?= _h('a.users.color') ?></label>
+                        <div class="col-md-2"><label for="ge-color" class="form-label wl-label"><?= _h('a.users.color') ?></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-color" maxlength="9" placeholder="#4a9eff"></div>
-                        <div class="col-md-2"><label class="form-label wl-label"><?= _h('a.users.priority') ?></label>
+                        <div class="col-md-2"><label for="ge-priority" class="form-label wl-label"><?= _h('a.users.priority') ?></label>
                             <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-priority" min="-1000" max="1000" value="0"></div>
                     </div>
-                    <div class="mb-2 mt-2"><label class="form-label wl-label"><?= _h('a.users.description') ?> <small class="text-muted"><?= _h('a.users.desc_note') ?></small></label>
+                    <div class="mb-2 mt-2"><label for="ge-desc" class="form-label wl-label"><?= _h('a.users.description') ?> <small class="text-muted"><?= _h('a.users.desc_note') ?></small></label>
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-desc" maxlength="255"></div>
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" id="ge-default">

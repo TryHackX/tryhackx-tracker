@@ -1,8 +1,8 @@
 /**
  * The client-side half of the dictionary.
  *
- * The page carries a JSON bundle of every `js.*` string for the active language (see
- * langJsBridge() in includes/lang.php); t() reads it. A miss returns the KEY, exactly like the
+ * The page names a bundle of every `js.*` string for the active language — since 1.74.0 a cached file of its own,
+ * loaded just before this script (see langJsBridge() in includes/lang.php); t() reads it. A miss returns the KEY, exactly like the
  * PHP side: a blank label tells nobody what is missing, `js.wl.nothing_waiting` on the screen says
  * where to look.
  *
@@ -34,6 +34,9 @@
  *   t.num(n)                         a count in the page's language ("2,251,367" / "2 251 367", 1.73.1), written like
  *                                    a t.key() word and said again in the new language's grouping by a live switch;
  *                                    t.num(n, 'compact'): a million or more compact ("100.82M" / "100,82 mln")
+ *   t.plural(n, base, params)        a counted word in the language's form ("2 pliki", "5 plików", 1.74.0) — and any
+ *                                    `X_many` asked with a count `n` takes it by itself (say())
+ *   t.bytes(n)                       a size in the page's language ("1,27 GiB" / "1.27 GiB", 1.74.0), keyed like t.num()
  *
  * The keys live on the node, so a node that is cloned, moved, or taken out and put back keeps them, and nothing has to
  * be registered or forgotten. A plain word written later where a key was drops that key: the node no longer says it.
@@ -43,7 +46,35 @@
  */
 (function () {
     'use strict';
-    var strings = {}, prev = {}, lang = 'en', prevLang = 'en', swap = false;
+    var strings = {}, prev = {}, lang = 'en', prevLang = 'en', swap = false, noFew = {}, prevNoFew = {};
+    /*
+     * THE STRINGS ARE A FILE OF THEIR OWN (1.74.0, includes/lang.php langJsBridge()): #i18n-data names the language,
+     * the swap flag and the dictionary's file — `id` (language and content hash) and `src` — and that file, loaded
+     * just before this one, has put the strings in window.I18N_DICT[id]. A page that carries the strings inline (an
+     * older render) is read as before. Should the file not have arrived, it is asked for once, here, before anything
+     * is said: a page of keys is worse than a page that waited a moment.
+     */
+    function dictFor(data) {
+        if (data.strings) return data.strings;
+        var all = window.I18N_DICT || {};
+        if (data.id && all[data.id]) return all[data.id];
+        if (data.src) {
+            try {
+                var x = new XMLHttpRequest();
+                x.open('GET', data.src, false);
+                x.send(null);
+                var body = x.status === 200 ? String(x.responseText || '') : '';
+                var at = body.indexOf(']=');
+                if (at > 0) {
+                    var json = body.slice(at + 2).replace(/;\s*$/, '');
+                    var got = JSON.parse(json);
+                    (window.I18N_DICT = window.I18N_DICT || {})[data.id] = got;
+                    return got;
+                }
+            } catch (e) { /* the keys, then */ }
+        }
+        return {};
+    }
     // Read (or re-read) the bundle the page carries. assets/js/lang-swap.js replaces the contents
     // of #i18n-data with the other language's bundle and calls this, so a string asked for after
     // an in-place switch is answered in the language now on the screen. The bundle it replaces is
@@ -55,14 +86,19 @@
             var data = JSON.parse(node.textContent || '{}');
             prev = strings;
             prevLang = lang;
-            strings = data.strings || {};
+            prevNoFew = noFew;
+            strings = dictFor(data);
             lang = data.lang || String(document.documentElement.lang || 'en').toLowerCase();
             swap = data.swap === true;
+            // The "2–4" forms this language did not write itself — the English fallback's in the bundle (say()).
+            noFew = {};
+            (Array.isArray(data.few) ? data.few : []).forEach(function (k) { noFew[k] = 1; });
         } catch (e) { strings = {}; }
     }
     load();
     prev = {};
     prevLang = lang;
+    prevNoFew = noFew;
 
     /*
      * A COUNT IN THE PAGE'S LANGUAGE (1.73.1): "2,251,367" on an English page, "2 251 367" on a Polish one, from the
@@ -94,10 +130,75 @@
         }
         return f.format(v || 0);
     }
+    /*
+     * A SIZE IN THE PAGE'S LANGUAGE (1.74.0). Three formatters (app.js, favourites.js, admin-common.js) wrote sizes with
+     * toFixed(): a decimal point on a Polish page beside counts in Polish ("1.27 GiB" next to "200 000"). One rule now:
+     * IEC units — torrent sizes are powers of 1024 — with 0, 1 or 2 decimals by size (100 and more, 10 and more, else),
+     * the page language's decimal separator ("1,27 GiB"), no grouping ("1000 MiB"), whole bytes. Like t.num() it is
+     * written as a keyed word (t.bytes()) the live switch says again in the new language.
+     */
+    var BYTES = '#b', byteFmt = {};
+    function fmtBytes(n, code) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v) || v <= 0) return '—';
+        var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'], i = 0;
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        var d = i === 0 ? 0 : (v >= 100 ? 0 : v >= 10 ? 1 : 2);
+        code = String(code || 'en').toLowerCase();
+        var id = code + ':' + d, f = byteFmt[id];
+        if (!f) {
+            var opt = { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false };
+            try { f = new Intl.NumberFormat(code, opt); } catch (e) { f = new Intl.NumberFormat('en', opt); }
+            byteFmt[id] = f;
+        }
+        return f.format(v) + ' ' + u[i];
+    }
+    /*
+     * THE FORM OF A WORD AFTER A NUMBER (1.74.0), as includes/lang.php langPluralKey() chooses it on the server: a
+     * key `X_many` asked with a count in `n` is said by the rule of the language of the dictionary it is said from —
+     * Intl.PluralRules, the same CLDR data PHP's intl carries — `X_few` for Polish 2–4, 22–24… ("2 pliki", never
+     * "2 plików"), `X_one` for a one that says its count; anything else as asked. Only a counted word's family (it
+     * has `X_one`), only a third form the language wrote itself (`few` in the bundle names the English fallback's),
+     * only a whole count: a number, digits, digits grouped ("2 251 367"), a t.num() word or its stored form. A word
+     * written with t.key('…_many', {n}) keeps that key on the element, so the live switch chooses again in the new
+     * language. t.plural(n, base) is the short way to ask.
+     */
+    var plRules = {};
+    function countOf(v) {
+        if (v instanceof Keyed) {
+            if (v.key === NUM && v.params) return Number(v.params['#']);
+            v = String(v);
+        } else if (v && typeof v === 'object' && v.$t === NUM && v.$p) return Number(v.$p['#']);
+        if (typeof v === 'number') return v;
+        if (typeof v !== 'string') return NaN;
+        var s = v.trim().replace(/[\s  ]/g, '').replace(/(\d),(?=\d{3}(?:,|$))/g, '$1');
+        return /^-?\d{1,15}$/.test(s) ? Number(s) : NaN;
+    }
+    function pluralCat(code, n) {
+        var r = plRules[code];
+        if (r === undefined) {
+            try { r = new Intl.PluralRules(code); } catch (e) { r = null; }
+            plRules[code] = r;
+        }
+        if (r) return r.select(n);
+        return n === 1 ? 'one' : 'other';
+    }
+    function pluralKey(from, key, params) {
+        var n = countOf(params.n);
+        if (!isFinite(n) || Math.floor(n) !== n) return key;
+        var base = key.slice(0, -5), has = function (k) { return Object.prototype.hasOwnProperty.call(from, k); };
+        if (!has(base + '_one')) return key;
+        var old = from === prev, cat = pluralCat(old ? prevLang : lang, Math.abs(n));
+        if ((cat === 'few' || cat === 'two') && has(base + '_few') && !(old ? prevNoFew : noFew)[base + '_few']) return base + '_few';
+        if (cat === 'one' && (Math.abs(n) === 1 || String(from[base + '_one']).indexOf(':n') !== -1)) return base + '_one';
+        return key;
+    }
     function say(from, key, params) {
         // A number written with t.num() is said in the language of the dictionary it is said from (the old one when
         // a swap asks which words still say what the page says, the new one once it is loaded).
         if (key === NUM) return fmtNum(params ? params['#'] : null, from === prev ? prevLang : lang, !!(params && params.c));
+        if (key === BYTES) return fmtBytes(params ? params['#'] : null, from === prev ? prevLang : lang);
+        if (params && typeof params === 'object' && params.n !== undefined && key.slice(-5) === '_many') key = pluralKey(from, key, params);
         var s = Object.prototype.hasOwnProperty.call(from, key) ? from[key] : key;
         if (params && typeof params === 'object') {
             // Longest name first. ":page" is a prefix of ":pages", so replacing in the order the
@@ -147,6 +248,26 @@
         p['#'] = v;
         if (style === 'compact') p.c = 1;
         return new Keyed(NUM, p);
+    };
+    /**
+     * A counted word in the page language's form (1.74.0): t.plural(3, 'js.app.files') says "3 pliki" on a Polish page
+     * and "3 files" on an English one — `base + '_one'` for 1, else `base + '_many'`, which say() refines to `_few` /
+     * `_one` by the language's rule (pluralKey()). `n` is the count written with t.num() unless the caller gives it.
+     * A t.key() word: written into the page, it keeps its key, and a live switch chooses the form again.
+     */
+    t.plural = function (n, base, params) {
+        var p = {}, k;
+        for (k in (params || {})) if (Object.prototype.hasOwnProperty.call(params, k)) p[k] = params[k];
+        if (p.n === undefined) p.n = t.num(n);
+        return new Keyed(base + (Number(n) === 1 ? '_one' : '_many'), p);
+    };
+    /** A size in the page's language (1.74.0, fmtBytes() above): "1,27 GiB" / "1.27 GiB", a keyed word; '—' for nothing. */
+    t.bytes = function (n) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v) || v <= 0) return '—';
+        var p = {};
+        p['#'] = v;
+        return new Keyed(BYTES, p);
     };
     t.words = words;
     t.isKey = function (v) { return v instanceof Keyed; };

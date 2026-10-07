@@ -295,8 +295,50 @@ function userGroupIdsWithPermission(PDO $db, string $perm): array {
     return $ids;
 }
 
+/* ── THE GRANT AS SQL — one generator for every view of it (1.74.0, QUAL-13) ──────────────────────
+ *
+ * "Does a group of this account GRANT it" was answered twice until 1.74.0, and the two answers disagreed: the
+ * "who has this" lists (includes/who.php) in SQL — a membership whose end is AFTER now, and the bare
+ * `email_verified` flag — and every profile in PHP (userIdHasGrantedPermission()) — a membership whose end is
+ * now OR later, an address that is there AND verified, and the Admin group exempt from the e-mail gate. An
+ * account with the flag and no address was listed by name on a torrent while its own profile refused it. The
+ * pieces are written once, here, as SQL; who.php puts them into its lists and userIdHasGrantedPermission() runs
+ * them for one account — so the two cannot disagree again (tests/who_test.php compares them account by account).
+ */
+
+/** "A membership of $userCol in force now in one of these groups" — userGroups()'s own rule (`>=`). */
+function userMembershipSql(array $groupIds, string $userCol): string {
+    $in = implode(',', array_map('intval', $groupIds)) ?: '0';
+    return "EXISTS (SELECT 1 FROM user_group_members m WHERE m.user_id = $userCol AND m.group_id IN ($in)
+                     AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at >= NOW()))";
+}
+
+/**
+ * The e-mail gate over the account table aliased $u — '' when the site does not ask for a verified address. When
+ * it does: the address is there and verified (userIsEmailTrusted()), or the account is in the Admin group (by its
+ * slug, a membership in force), whose blanket passes every check, this one included (userEffectivePermissions()).
+ */
+function userEmailGateSql(array $cfg, string $u = 'u'): string {
+    if (!userEmailVerifyRequired($cfg)) return '';
+    return "((TRIM(COALESCE($u.email, '')) <> '' AND $u.email_verified = 1)"
+         . " OR EXISTS (SELECT 1 FROM user_group_members am JOIN user_groups ag ON ag.id = am.group_id"
+         . " WHERE am.user_id = $u.id AND ag.slug = 'admin' AND am.granted_at <= NOW() AND (am.expires_at IS NULL OR am.expires_at >= NOW())))";
+}
+
+/** The whole grant over the account table aliased $u: a membership in one of $groupIds (those whose JSON grants
+ *  the permission — userGroupIdsWithPermission()) in force now, and the e-mail gate. Null: no group grants it. */
+function userGrantSql(array $cfg, array $groupIds, string $u = 'u'): ?string {
+    if (!$groupIds) return null;
+    $gate = userEmailGateSql($cfg, $u);
+    return userMembershipSql($groupIds, "$u.id") . ($gate !== '' ? " AND $gate" : '');
+}
+
 /**
  * The grant itself, for a NAMED user — no blanket, no special cases.
+ *
+ * 1.74.0 (QUAL-13): asked as SQL, through the generator above — the very statement the "who has this" lists use,
+ * for one account: two small reads (which groups grant it, then the one account), read fresh every time, so a group
+ * changed a moment ago answers at once.
  *
  * ── why this exists next to userIdHasPermission() ─────────────────────────────────────────────
  *
@@ -318,12 +360,11 @@ function userGroupIdsWithPermission(PDO $db, string $perm): array {
 function userIdHasGrantedPermission(PDO $db, array $cfg, int $userId, string $perm): bool {
     if (!usersEnabled($cfg)) return userLegacyDefault($perm);
     if ($userId <= 0) return false;
-    if (!userIdHasPermission($db, $cfg, $userId, $perm)) return false;
-    foreach (userGroups($db, $userId) as $g) {
-        $p = userGroupPermissions($g['permissions'] ?? '');
-        if (!empty($p[$perm])) return true;
-    }
-    return false;
+    $sql = userGrantSql($cfg, userGroupIdsWithPermission($db, $perm), 'u');
+    if ($sql === null) return false;
+    $st = $db->prepare("SELECT 1 FROM users u WHERE u.id = ? AND $sql LIMIT 1");
+    $st->execute([$userId]);
+    return (bool)$st->fetchColumn();
 }
 
 /**
@@ -372,7 +413,8 @@ function favContext(PDO $db, array $cfg, ?array $viewer): array {
         // beside it saying who has to change what.
         'publish_blocked' => favPublicEnabled($cfg) && $uid > 0 && !$favGrant,
         'who_ok'       => favWhoEnabled($cfg),
-        'may_view'     => $viewer !== null && userCan($db, $cfg, 'favourites.view_others'),
+        // The READER's account (1.74.0, PRIV-6), as every endpoint that serves somebody else's rows asks it.
+        'may_view'     => $uid > 0 && userIdHasPermission($db, $cfg, $uid, 'favourites.view_others'),
         'profiles'     => profilesEnabled($cfg),
         'uploads'      => uploadsPossible($cfg),
         'uploads_pub'  => uploadsPublicEnabled($cfg) && $upGrant,

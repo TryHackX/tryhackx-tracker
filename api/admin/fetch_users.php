@@ -1,5 +1,13 @@
 <?php
 // Admin user browser: pagination, username/email search, status filter, sort. Groups summarised per row.
+//
+// WHO SEES WHAT (1.74.0, PRIV-2): the page is `panel.users.view` (api.php) — the moderator's preset has it, "seeing
+// the user list" (v25). The members' e-mail addresses, the addresses they signed up and last signed in from, and
+// the accounts a partner site links them to are shown IN FULL only with `panel.users.edit` — the staff who change
+// them, and the owner. Everybody else gets the address masked (maskEmail()), the network instead of the address
+// (/24, /48 — userIpShort()), the partner's name without the ids, and a search by name only: a search by part of an
+// address was an oracle for "has this mailbox an account here", and a sort by it the same list in another order.
+$fullPii = panelCan($db, $cfg, 'panel.users.edit');
 $page = max(1, (int)($_GET['page'] ?? 1));
 $perPage = max(1, (int)($cfg['items_per_page'] ?? 25));
 $offset = ($page - 1) * $perPage;
@@ -10,6 +18,7 @@ $groupSortExpr = "(SELECT g2.name FROM user_group_members m2 JOIN user_groups g2
                    ORDER BY g2.priority DESC, g2.name LIMIT 1)";
 $allowedSorts = ['id' => 'id', 'username' => 'username', 'email' => 'email', 'status' => 'status',
                  'created' => 'created_at', 'login' => 'last_login_at', 'group' => $groupSortExpr];
+if (!$fullPii) unset($allowedSorts['email']);
 $orderParts = [];
 foreach (explode(',', trim((string)($_GET['sort'] ?? 'created:desc'))) as $part) {
     $pieces = explode(':', trim($part));
@@ -23,8 +32,13 @@ $orderParts[] = 'id DESC';
 $where = []; $params = [];
 $search = trim((string)($_GET['search'] ?? ''));
 if ($search !== '') {
-    $where[] = "(username LIKE ? OR email LIKE ?)";
-    $params[] = '%' . $search . '%'; $params[] = '%' . $search . '%';
+    if ($fullPii) {
+        $where[] = "(username LIKE ? OR email LIKE ?)";
+        $params[] = '%' . $search . '%'; $params[] = '%' . $search . '%';
+    } else {
+        $where[] = "username LIKE ?";
+        $params[] = '%' . $search . '%';
+    }
 }
 $status = (string)($_GET['status'] ?? '');
 if (in_array($status, ['active', 'banned'], true)) { $where[] = "status = ?"; $params[] = $status; }
@@ -73,8 +87,10 @@ if ($ids) {
         $bs->execute($ids);
         foreach ($bs->fetchAll(PDO::FETCH_ASSOC) as $b) {
             $bridgeBy[(int)$b['user_id']][] = [
-                'provider' => (string)$b['provider'], 'external_id' => (string)$b['external_id'],
-                'external_name' => $b['external_name'], 'last_login_at' => $b['last_login_at'],
+                'provider' => (string)$b['provider'],
+                // The partner's own id and name for the person — the full view only (PRIV-2 above).
+                'external_id' => $fullPii ? (string)$b['external_id'] : '',
+                'external_name' => $fullPii ? $b['external_name'] : null, 'last_login_at' => $b['last_login_at'],
                 'signed_out_there' => $b['logout_at'] !== null,
             ];
         }
@@ -112,6 +128,13 @@ foreach ($rows as &$r) {
     $r['bio_html'] = $bioSrc !== '' ? profileBioRender($bioSrc, $cfg, $db) : '';
     $r['bio_shown'] = $bioSrc !== '' && profileBioFor($db, $cfg, $r) !== '';
     unset($r['avatar_sha'], $r['cover_sha'], $r['bio']);
+    // The masked view (PRIV-2, the header): last, after everything above has read the row as it is.
+    if (!$fullPii) {
+        $mail = trim((string)($r['email'] ?? ''));
+        $r['email'] = $mail !== '' ? maskEmail($mail) : $r['email'];
+        $r['created_ip'] = userIpShort($r['created_ip'] ?? '');
+        $r['last_login_ip'] = userIpShort($r['last_login_ip'] ?? '');
+    }
 }
 unset($r);
 
@@ -121,7 +144,11 @@ try {
         $counts['total'] += (int)$c['c'];
         if (isset($counts[$c['status']])) $counts[$c['status']] = (int)$c['c'];
     }
-} catch (\Throwable $e) {}
+} catch (\Throwable $e) {
+    // Not "0 accounts" (1.74.0, QUAL-26): the panel says it could not load and keeps what it had.
+    error_log('[admin] fetch_users: the status counts failed: ' . $e->getMessage());
+    jsonResponse(['error' => __('api.db_unavailable')], 503);
+}
 
 jsonResponse(['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)),
               'counts' => $counts, 'enabled' => usersEnabled($cfg)]);

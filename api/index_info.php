@@ -28,6 +28,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && session_status() === PHP_SESSION_ACT
 }
 if (!preg_match('/^[0-9a-f]{40}$/', $hash)) jsonResponse(['error' => __('api.common.invalid_hash')], 400);
 
+/**
+ * A moment of the catalogue in the reader's clock, 'Y-m-d H:i' (1.74.0): the column holds the database session's
+ * clock, which is PHP's offset (config/database.php), so it is read in that and written in the reader's zone.
+ */
+function infoReaderTime($dt, ?array $me, array $cfg): string {
+    if (!is_string($dt) || $dt === '' || !function_exists('userDisplayTimezone')) return '';
+    try {
+        return (new DateTimeImmutable($dt, new DateTimeZone(date('P'))))->setTimezone(userDisplayTimezone($me, $cfg))->format('Y-m-d H:i');
+    } catch (\Throwable $e) { return ''; }
+}
+
 /** Everything about this hash from both tables, whichever has it. */
 $loadRow = function () use ($db, $hash): array {
     $out = ['index' => null, 'whitelist' => null];
@@ -226,6 +237,10 @@ jsonResponse([
     'stats' => [
         'first_seen'  => $idx['first_seen'] ?? ($wl['created_at'] ?? null),
         'last_seen'   => $idx['last_seen'] ?? null,
+        // In the READER's clock and the site's short format (1.74.0, part D — UX-23): the script read the raw DATETIME
+        // as the browser's time, in the browser's language. The columns hold the database session's clock (date('P')).
+        'first_seen_time' => infoReaderTime($idx['first_seen'] ?? ($wl['created_at'] ?? null), $me, $cfg),
+        'last_seen_time'  => infoReaderTime($idx['last_seen'] ?? null, $me, $cfg),
         'seen_count'  => $idx ? (int)$idx['seen_count'] : null,
         'seeders'     => $idx ? (int)$idx['last_seeders'] : ($wl ? (int)$wl['scrape_seeders'] : null),
         'leechers'    => $idx ? (int)$idx['last_leechers'] : ($wl ? (int)$wl['scrape_leechers'] : null),

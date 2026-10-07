@@ -17,7 +17,11 @@
  * Turning it off does NOT ask for a code. Somebody who has lost the phone and has a recovery code
  * left can sign in with it and then disable — asking for the very thing they no longer have would
  * make the recovery codes useless at exactly the moment they exist for.
+ *
+ * With accounts switched off (`users_enabled` 0) it answers `accounts_disabled` like every other account endpoint
+ * (1.74.0, PUB-8) — it asked only whether the second factor was on.
  */
+if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
 $me = currentUser($db);
 if (!$me) jsonResponse(['error' => 'login_required'], 401);
 if (!user2faFeatureEnabled($cfg)) jsonResponse(['error' => 'twofa_disabled'], 404);
@@ -65,7 +69,7 @@ switch ($op) {
             require_once dirname(__DIR__) . '/includes/qr.php';
             $qr = qrSvg(qrMatrix((string)$setup['uri']));
         } catch (\Throwable $e) {
-            error_log('2FA QR could not be drawn: ' . $e->getMessage());
+            error_log('[2fa] the QR could not be drawn: ' . $e->getMessage());
         }
         // The secret leaves the server exactly once, to the person who just proved they own the
         // account, over the same channel their password came in on.
@@ -75,7 +79,7 @@ switch ($op) {
     case 'confirm':
         $r = user2faConfirmSetup($db, $uid, (string)($input['code'] ?? ''));
         if (!$r['ok']) jsonResponse(['error' => $r['error']], $r['error'] === 'bad_code' ? 400 : 409);
-        userNotify($db, $uid, 'account', __('notify.twofa_on'), __('notify.twofa_on_body'));
+        userNotify($db, $uid, 'account', langFor(recipientLang($cfg, $me), 'notify.twofa_on'), langFor(recipientLang($cfg, $me), 'notify.twofa_on_body'));
         // The panel may have been shut waiting for this — see userMaybeOpenPanelSession(). Opening
         // it here rather than making them sign in again is the difference between a setting that
         // works and one that appears not to.
@@ -85,7 +89,7 @@ switch ($op) {
     case 'disable':
         if (!user2faEnabled($db, $uid)) jsonResponse(['error' => 'not_on'], 409);
         user2faDisable($db, $uid);
-        userNotify($db, $uid, 'account', __('notify.twofa_off'), __('notify.twofa_off_body'));
+        userNotify($db, $uid, 'account', langFor(recipientLang($cfg, $me), 'notify.twofa_off'), langFor(recipientLang($cfg, $me), 'notify.twofa_off_body'));
         // If this account needed one to open the panel, it does not have a panel session any more.
         if ($need['required'] && !empty($_SESSION['admin_via_user'])) {
             unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);

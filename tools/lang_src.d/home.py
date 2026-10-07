@@ -20,7 +20,7 @@ def add(prefix, pairs):
 add('home', {
     'tagline':       ('Public BitTorrent tracker powered by OpenTracker',
                       'Publiczny tracker BitTorrent napędzany przez OpenTracker'),
-    'stats_syncing': ('Synchronizing tracker telemetry...', 'Synchronizacja telemetrii trackera...'),
+    'stats_syncing': ('Synchronizing tracker telemetry...', 'Synchronizacja telemetrii trackera…'),
     'stat_torrents': ('Torrents', 'Torrenty'),
     'stat_seeds':    ('Seeds', 'Seedy'),
     'stat_peers':    ('Peers', 'Peery'),

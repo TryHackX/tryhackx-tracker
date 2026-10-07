@@ -173,20 +173,3 @@ function wlMaintTick(PDO $db, array $cfg): array {
     return $out;
 }
 
-/** What the panel shows about all of this. Reads the cached state; never scrapes. */
-function wlMaintStatus(PDO $db, array $cfg): array {
-    $s = wlMaintState();
-    return [
-        'refresh_hours' => wlMaintRefreshHours($cfg),
-        'batch' => wlMaintBatch($cfg),
-        'last_refresh_at' => (int)($s['last_refresh_at'] ?? 0),
-        'last_refresh' => $s['last_refresh'] ?? null,
-        'dead_days' => wlMaintDeadDays($cfg),
-        'dead_action' => wlMaintDeadAction($cfg),
-        'dead_every_days' => wlMaintDeadEveryDays($cfg),
-        'last_dead_at' => (int)($s['last_dead_at'] ?? 0),
-        'last_dead' => $s['last_dead'] ?? null,
-        // The number an operator needs BEFORE switching a delete rule on.
-        'would_match' => wlMaintDeadCount($db, $cfg),
-    ];
-}

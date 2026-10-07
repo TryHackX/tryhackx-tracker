@@ -100,64 +100,126 @@
     };
     const tip = (anchor, text) => { if (typeof window.pubTip === 'function') window.pubTip(anchor, text); };
 
-    /**
-     * What a READER will see, counted as the server counts it (commentParse() in includes/comments.php): the
-     * text and any literal tags, not the tags that format it, in code points. A twin for the counter while
-     * typing; the server's count — shown after a Preview, and the one a send is judged by — decides.
+    // ── TWIN: commentClean() + commentParse()['chars'] (includes/comments.php) — tests/comment_twin_test.php runs this block ──
+    /*
+     * What a READER will see, counted AS THE SERVER COUNTS IT (1.74.0 — it counted the raw text): first the server's
+     * cleaning (commentClean(): a tab is four spaces, the invisible characters go, spaces before a line's end go, three
+     * or more line breaks are two, the ends are trimmed), then commentParse()'s walk — the text and any literal tags,
+     * not the tags that format it, in code points; a link only for an address the server accepts (http(s) with a host,
+     * no white space, at most 500 bytes, three at most), and a link with no words shows — and counts — its address.
+     * 130 words between tabs counted 649 here and 1036 on the server against a limit of 500: "too long" under a counter
+     * that said there was room. The server's count — shown after a Preview, the one a send is judged by — decides.
      */
+    const CM_CC = (a, b) => String.fromCharCode(a) + (b === undefined ? '' : '-' + String.fromCharCode(b));
+    // Built from code points, not written as escapes: a line separator left inside a literal would end it.
+    const CM_STRIP = new RegExp('[' + CM_CC(0x00, 0x09) + CM_CC(0x0B, 0x1F) + CM_CC(0x7F, 0x9F) + CM_CC(0x180E) + CM_CC(0x200B)
+        + CM_CC(0x202A, 0x202E) + CM_CC(0x2060, 0x2064) + CM_CC(0x2066, 0x2069) + CM_CC(0xFEFF) + CM_CC(0xFFF9, 0xFFFB) + ']', 'g');
+    const CM_NL = new RegExp('\r\n|\r|' + CM_CC(0x2028) + '|' + CM_CC(0x2029), 'g');
+    const CM_MAX_LINKS = 3, CM_MAX_DEPTH = 8;
+    function commentCleanJs(raw) {
+        let s = String(raw == null ? '' : raw).replace(CM_NL, '\n').replace(/\t/g, '    ');
+        s = s.replace(CM_STRIP, '').replace(/ +\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+        return s.replace(/^[ \n]+|[ \n]+$/g, '');
+    }
+    const cmTrim = (s) => s.replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, '');
+    const cmBytes = (s) => { try { return new TextEncoder().encode(s).length; } catch (e) { return s.length; } };
+    /** commentUrl() + richtextSafeUrl(): the address a link may have, or null. */
+    function commentUrlJs(raw) {
+        let u = cmTrim(String(raw));
+        if (u.length >= 2 && (u[0] === '"' || u[0] === "'") && u[u.length - 1] === u[0]) u = cmTrim(u.slice(1, -1));
+        if (u === '' || /[\s\x00-\x1F\x7F]/.test(u) || cmBytes(u) > 500) return null;
+        const m = /^https?:\/\/([^\/?#]*)/i.exec(u);
+        if (!m) return null;
+        let auth = m[1];
+        const at = auth.lastIndexOf('@');
+        if (at === 0) return null;
+        if (at > 0) auth = auth.slice(at + 1);
+        const port = /:(\d*)$/.exec(auth);
+        if (port && !(auth[0] === '[' && !/\]:\d*$/.test(auth))) {
+            if (port[1] !== '' && Number(port[1]) > 65535) return null;
+            auth = auth.slice(0, port.index);
+        }
+        return auth !== '' ? u : null;
+    }
+    /** commentTitle(): a quote's or a spoiler's title as it is drawn. */
+    function commentTitleJs(raw, max) {
+        let t = cmTrim(String(raw));
+        if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t[t.length - 1] === t[0]) t = cmTrim(t.slice(1, -1));
+        return [...t].slice(0, max).join('');
+    }
     function visibleChars(src, links) {
-        const LS = String.fromCharCode(0x2028), PS = String.fromCharCode(0x2029);
-        const s = String(src || '').split(LS).join('\n').split(PS).join('\n').replace(/\r\n?/g, '\n');
+        const s = commentCleanJs(src);
         const re = /\[(?:(b|i|u|s)|\/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?)\]/gi;
         const len = (x) => [...x].length;
-        let n = 0, pos = 0, m;
+        let n = 0, pos = 0, m, nLinks = 0, nextUrlCloser = -1;
         const stack = [], lit = { quote: 0, spoiler: 0 };
-        const has = (tag) => stack.includes(tag);
+        const has = (tag) => stack.some((f) => f.tag === tag);
+        const text = (x) => { n += len(x); };
+        // A link whose words were empty shows its address as its words (commentParse()'s $close).
+        const close = (f) => { if (f.tag === 'url' && n === f.mark) text(f.url); };
         re.lastIndex = 0;
         while ((m = re.exec(s)) !== null) {
-            n += len(s.slice(pos, m.index));
+            text(s.slice(pos, m.index));
             pos = m.index + m[0].length;
             const tok = m[0];
-            if (m[1]) { if (stack.length >= 8) n += len(tok); else stack.push(m[1].toLowerCase()); continue; }
+            if (m[1]) { if (stack.length >= CM_MAX_DEPTH) text(tok); else stack.push({ tag: m[1].toLowerCase(), mark: n }); continue; }
             if (m[2]) {
                 const name = m[2].toLowerCase();
-                if (name === 'code') { n += len(tok); continue; }
-                if ((name === 'quote' || name === 'spoiler') && lit[name] > 0) { lit[name]--; n += len(tok); continue; }
-                const idx = stack.lastIndexOf(name);
-                if (idx < 0) { n += len(tok); continue; }
-                const reopen = stack.splice(idx + 1).filter((x) => ['b', 'i', 'u', 's'].includes(x));
-                stack.splice(idx, 1);
-                stack.push(...reopen);
+                if (name === 'code') { text(tok); continue; }
+                if ((name === 'quote' || name === 'spoiler') && lit[name] > 0) { lit[name]--; text(tok); continue; }
+                let idx = -1;
+                for (let k = stack.length - 1; k >= 0; k--) if (stack[k].tag === name) { idx = k; break; }
+                if (idx < 0) { text(tok); continue; }
+                const reopen = [];
+                while (stack.length - 1 > idx) {
+                    const f = stack.pop();
+                    close(f);
+                    if (['b', 'i', 'u', 's'].includes(f.tag)) reopen.unshift(f.tag);
+                }
+                close(stack.pop());
+                reopen.forEach((tg) => stack.push({ tag: tg, mark: n }));
                 continue;
             }
             if (m[3]) {
                 const kind = m[3].toLowerCase();
-                if (has(kind)) { lit[kind]++; n += len(tok); continue; }
-                if (has('url') || stack.length >= 8) { n += len(tok); continue; }
-                if (m[4]) n += len(m[4].trim().replace(/^(["'])(.*)\1$/, '$2').slice(0, kind === 'quote' ? 64 : 80));
-                stack.push(kind);
+                if (has(kind)) { lit[kind]++; text(tok); continue; }
+                if (has('url') || stack.length >= CM_MAX_DEPTH) { text(tok); continue; }
+                if (m[4] !== undefined) text(commentTitleJs(m[4], kind === 'quote' ? 64 : 80));
+                stack.push({ tag: kind, mark: n });
                 continue;
             }
             if (m[5]) {
-                const close = s.slice(pos).search(/\[\/code\]/i);
-                if (close < 0) { n += len(tok); continue; }
-                n += len(s.slice(pos, pos + close).replace(/^\n+|\n+$/g, ''));
-                pos += close + '[/code]'.length;
+                const c = s.slice(pos).search(/\[\/code\]/i);
+                if (c < 0) { text(tok); continue; }
+                text(s.slice(pos, pos + c).replace(/^\n+|\n+$/g, ''));
+                pos += c + '[/code]'.length;
                 re.lastIndex = pos;
                 continue;
             }
             // [url] / [url=…]: only a writer who may link makes a link of it; otherwise it is text
-            if (!links || has('url') || stack.length >= 8) { n += len(tok); continue; }
-            if (m[6]) { stack.push('url'); continue; }
-            const close = s.slice(pos).search(/\[\/url\]/i);
-            if (close < 0) { n += len(tok); continue; }
-            n += len(s.slice(pos, pos + close).trim());
-            pos += close + '[/url]'.length;
+            if (!links || has('url') || stack.length >= CM_MAX_DEPTH) { text(tok); continue; }
+            if (m[6]) {
+                const url = commentUrlJs(m[7] || '');
+                if (url === null || ++nLinks > CM_MAX_LINKS) { text(tok); continue; }
+                stack.push({ tag: 'url', mark: n, url });
+                continue;
+            }
+            if (nextUrlCloser < pos) {
+                const c = s.slice(pos).search(/\[\/url\]/i);
+                nextUrlCloser = c < 0 ? Infinity : pos + c;
+            }
+            if (nextUrlCloser === Infinity) { text(tok); continue; }
+            const url = commentUrlJs(s.slice(pos, nextUrlCloser));
+            if (url === null || ++nLinks > CM_MAX_LINKS) { text(tok); continue; }
+            text(url);
+            pos = nextUrlCloser + '[/url]'.length;
             re.lastIndex = pos;
         }
-        n += len(s.slice(pos));
+        text(s.slice(pos));
+        while (stack.length) close(stack.pop());
         return n;
     }
+    // ── TWIN END ──
 
     /**
      * The editor: the markup window.RichText.mount() finds by convention round an id (`<id>-count`,

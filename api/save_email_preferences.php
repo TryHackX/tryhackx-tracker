@@ -6,8 +6,8 @@ if (!$input || !is_array($input)) {
     jsonResponse(['error' => __('api.account.invalid_input')], 400);
 }
 
-$email = trim($input['email'] ?? '');
-$token = trim($input['token'] ?? '');
+$email = trim(strInput($input, 'email'));
+$token = trim(strInput($input, 'token'));
 $preferences = $input['preferences'] ?? [];
 
 if (!$email || !$token) {

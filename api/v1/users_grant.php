@@ -128,8 +128,10 @@ if ($orderId !== '') {
 $note = mb_substr(trim((string)($payload['note'] ?? '')), 0, 255);
 userGrantGroup($db, $uid, $gid, $expiresAt, 'api:' . $client['label'], $note);
 if (!empty($payload['email'])) {
-    userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — you are now in the "' . $group['name'] . '" group',
-        'Access granted ' . ($expiresAt === null ? 'permanently' : 'until ' . $expiresAt) . '.' . ($note !== '' ? "\nNote: " . $note : ''));
+    // In the member's language (1.74.0) — the same sentence their notification carries.
+    $uLang = recipientLang($cfg, $u);
+    userNotifyMail($db, $cfg, $u, langFor($uLang, 'mail.group_granted_subject', ['site' => $cfg['site_name'] ?? 'Tracker', 'group' => $group['name']]),
+        userGrantSentence($uLang, null, $expiresAt, $note, "\n"), ['lang' => $uLang]);
 }
 
 // Recorded whether or not it does anything today: the shop paid for it, and an account that verifies

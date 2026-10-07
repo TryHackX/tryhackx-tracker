@@ -364,12 +364,16 @@ relang(['lang_swap_enabled' => '0']);
 $bundleOff = langJsBundle(['js.common.']);
 check('… and false when it is off', ($bundleOff['swap'] ?? null) === false, var_export($bundleOff['swap'] ?? null, true));
 relang([]);
-check('… and false when the setting has never been written', (langJsBundle(['js.common.'])['swap'] ?? null) === false);
+// 1.74.0 (QUAL-2): a row nobody wrote reads as the schema's default — ON since 1.41.0 — in every reader
+// (langSwapEnabled()); it read OFF here and in the Settings field while a fresh install has it on.
+check('… and true when the setting has never been written (the schema\'s default, one reader: langSwapEnabled())',
+    (langJsBundle(['js.common.'])['swap'] ?? null) === true && langSwapEnabled([]) === true && langSwapEnabled(['lang_swap_enabled' => '0']) === false);
 check('the flag is a real boolean, so JSON.parse hands the script a boolean',
-    json_decode(json_encode(langJsBundle(['js.common.'])), true)['swap'] === false);
+    json_decode(json_encode(langJsBundle(['js.common.'])), true)['swap'] === true);
 
 // The script has to be on the page with the swap OFF as well: it is the only thing that keeps the
 // reader's place across the full reload the switcher still does in that case.
+relang(['lang_swap_enabled' => '0']);
 $bridgeOff = langJsBridge('/');
 check('the bridge loads lang-swap.js with the swap off', str_contains($bridgeOff, 'assets/js/lang-swap.js'), $bridgeOff);
 relang(['lang_swap_enabled' => '1']);

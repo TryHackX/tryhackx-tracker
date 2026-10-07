@@ -96,11 +96,11 @@ add('account', {
     'votes_listed_hint_thumbs': (
         'Thumbs down too. It needs the switch above as well; off, you are not on that list and not in its '
         'count either.',
-        'Także kciuki w dół. Potrzebny jest też przełącznik powyżej; wyłączone — nie ma cię na tej liście ani '
+        'Także kciuki w dół. Potrzebny jest też przełącznik powyżej; wyłączone — nie ma Cię na tej liście ani '
         'w jej liczniku.'),
     'votes_listed_hint_stars': (
         'Low ratings too. It needs the switch above as well; off, you are not on that list and not in its '
         'count either.',
-        'Także niskie oceny. Potrzebny jest też przełącznik powyżej; wyłączone — nie ma cię na tej liście ani '
+        'Także niskie oceny. Potrzebny jest też przełącznik powyżej; wyłączone — nie ma Cię na tej liście ani '
         'w jej liczniku.'),
 })

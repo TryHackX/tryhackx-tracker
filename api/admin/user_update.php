@@ -88,10 +88,15 @@ try {
         $changed[] = 'password';
     }
     if (isset($input['email_verified'])) {
-        $db->prepare("UPDATE users SET email_verified = ? WHERE id = ?")->execute([!empty($input['email_verified']) ? 1 : 0, $id]);
+        // "Verified" is said of an ADDRESS (1.74.0, QUAL-13): an account without one is never marked so. The flag
+        // alone used to let a member with no address pass the e-mail gate of "who has this" (includes/who.php)
+        // while its own profile, asking for an address too, refused it — one gate with two answers.
+        $db->prepare("UPDATE users SET email_verified = IF(TRIM(COALESCE(email, '')) <> '', ?, 0) WHERE id = ?")
+           ->execute([!empty($input['email_verified']) ? 1 : 0, $id]);
         $changed[] = 'email_verified';
     }
     $db->commit();
+    userPermissionsForget($id);   // status, address and its verification are what its permissions are read by
 } catch (PDOException $e) {
     if ($db->inTransaction()) $db->rollBack();
     if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => __('api.users.email_in_use')], 400);

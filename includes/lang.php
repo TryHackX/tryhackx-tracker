@@ -204,8 +204,15 @@ function langInit(array $cfg, ?string $userLanguage = null): void {
     // Recorded here, and nowhere else, because this is the one function every entry point calls
     // with $cfg in hand before it renders. langJsBridge() has no $cfg of its own, and threading one
     // through nine call sites to carry a single boolean would be nine chances to forget.
-    $GLOBALS['__lang']['swap'] = ($cfg['lang_swap_enabled'] ?? '0') === '1';
+    $GLOBALS['__lang']['swap'] = langSwapEnabled($cfg);
 }
+
+/**
+ * The in-place language switch is on (`lang_swap_enabled`). ONE reader with the schema's default, ON since 1.41.0
+ * (1.74.0, QUAL-2): this file said '0' for a missing row and the Settings field said '0' too, while the schema seeds
+ * '1' — a row deleted by hand turned the feature off and showed it off, against what a fresh install does.
+ */
+function langSwapEnabled(array $cfg): bool { return (string)($cfg['lang_swap_enabled'] ?? '1') === '1'; }
 
 /** The active code. Falls back to English before langInit() has run. */
 function langCurrent(): string { return $GLOBALS['__lang']['current'] ?? LANG_FALLBACK; }
@@ -324,8 +331,86 @@ function langEnsure(): void {
     $GLOBALS['__lang']['fallback'] = $GLOBALS['__lang']['strings'];
 }
 
+/**
+ * THE FORM OF A WORD AFTER A NUMBER, BY THE LANGUAGE'S OWN RULE (1.74.0).
+ *
+ * The dictionary had two forms of a counted word — `X_one` ("1 plik") and `X_many` (":n plików") — and the code chose
+ * between them by n === 1. Polish needs three: 1 plik, 2–4 pliki (and 22–24, 32–34…, but 12–14 plików), 5+ plików;
+ * "2 plików" stood in the search results' chips, the Info panel and the panel's lists. So a family may have a third
+ * form, `X_few`, and the choice is made HERE, where the word is looked up, by the rule of the language it is said in
+ * — every caller that asks for `X_many` with a count in `n` gets the right one, in every file, without being changed:
+ *
+ *   · the CATEGORY is CLDR's (one / two / few / many / other) for that language and that number — PHP's intl
+ *     (MessageFormatter, the data the browser's Intl.PluralRules carries too) when it is there, else a table of the
+ *     languages that need more than two forms (langPluralCategory());
+ *   · `few` (or `two`) takes `X_few` — only where the language's OWN dictionary has the whole family (`X_one`, `X_few`,
+ *     `X_many`): a language that never wrote a third form keeps its `X_many`, and never borrows the English fallback's;
+ *   · `one` takes `X_one` when the count is 1 or the one-form says the count (":n"): Russian's 21 is "one", but a
+ *     one-form that reads "1 file" must not be said for 21;
+ *   · anything else keeps what was asked. A key that is not a counted word (`too_many`, a family without `X_one`) is
+ *     never touched, and nor is a count that is not a whole number written as one (n = "1,000+", "1.5").
+ * The client does the same in assets/js/i18n.js (say()), so a word a script writes and its refresh agree.
+ */
+function langPluralCategory(string $code, int|float $n): string {
+    $code = strtolower($code);
+    if (is_int($n) || (is_float($n) && floor($n) === $n && abs($n) < 1e15)) {
+        $i = abs((int)$n);
+        static $fmt = [];
+        if (class_exists('MessageFormatter') && preg_match('/^[a-z]{2,3}$/', $code)) {
+            if (!array_key_exists($code, $fmt)) {
+                try {
+                    $fmt[$code] = \MessageFormatter::create($code, '{0,plural,zero{zero} one{one} two{two} few{few} many{many} other{other}}') ?: null;
+                } catch (\Throwable $e) { $fmt[$code] = null; }
+            }
+            if ($fmt[$code]) {
+                $c = $fmt[$code]->format([$i]);
+                if (is_string($c) && in_array($c, ['zero', 'one', 'two', 'few', 'many', 'other'], true)) return $c;
+            }
+        }
+        $m10 = $i % 10; $m100 = $i % 100;
+        $fewSlav = $m10 >= 2 && $m10 <= 4 && ($m100 < 12 || $m100 > 14);
+        switch ($code) {
+            case 'pl': return $i === 1 ? 'one' : ($fewSlav ? 'few' : 'many');
+            case 'ru': case 'uk': case 'be':
+                return ($m10 === 1 && $m100 !== 11) ? 'one' : ($fewSlav ? 'few' : 'many');
+            case 'hr': case 'sr': case 'bs':
+                return ($m10 === 1 && $m100 !== 11) ? 'one' : ($fewSlav ? 'few' : 'other');
+            case 'cs': case 'sk': return $i === 1 ? 'one' : (($i >= 2 && $i <= 4) ? 'few' : 'other');
+            default: return $i === 1 ? 'one' : 'other';
+        }
+    }
+    return 'other';
+}
+
+/** A count as a number, from what a caller passes as `n`: a number, digits, or digits grouped ("2 251 367", "1,234"). */
+function langCountOf(mixed $v): int|float|null {
+    if (is_int($v) || is_float($v)) return $v;
+    if (!is_string($v)) return null;
+    // Group separators only: a space of any width, and a comma before a group of three ("1,5" is not 1 234's kind).
+    $s = str_replace(["\u{00A0}", "\u{202F}", ' '], '', trim($v));
+    $s = (string)preg_replace('/(?<=\d),(?=\d{3}(?:,|$))/', '', $s);
+    return preg_match('/^-?\d{1,15}$/', $s) ? (int)$s : null;
+}
+
+/**
+ * The key a counted word is said by (see langPluralCategory()): `$key` as asked, or its family's `_few` / `_one` by the
+ * language's rule. `$own` is the language's own dictionary (never merged with the fallback).
+ */
+function langPluralKey(string $key, array $params, string $code, array $own): string {
+    if (!isset($params['n']) || !str_ends_with($key, '_many')) return $key;
+    $n = langCountOf($params['n']);
+    if ($n === null) return $key;
+    $base = substr($key, 0, -5);
+    if (!isset($own[$base . '_one'])) return $key;              // not a counted word's family in this language
+    $cat = langPluralCategory($code, $n);
+    if (($cat === 'few' || $cat === 'two') && isset($own[$base . '_few'])) return $base . '_few';
+    if ($cat === 'one' && ($n == 1 || str_contains((string)$own[$base . '_one'], ':n'))) return $base . '_one';
+    return $key;
+}
+
 function __(string $key, array $params = []): string {
     langEnsure();
+    if ($params) $key = langPluralKey($key, $params, langCurrent(), $GLOBALS['__lang']['strings'] ?? []);
     $s = $GLOBALS['__lang']['strings'][$key] ?? $GLOBALS['__lang']['fallback'][$key] ?? $key;
     if ($params) {
         $repl = [];
@@ -333,6 +418,18 @@ function __(string $key, array $params = []): string {
         $s = strtr($s, $repl);
     }
     return $s;
+}
+
+/**
+ * A counted word, its form chosen by the language (1.74.0): `plural(3, 'js.app.files')` is "3 pliki" on a Polish page,
+ * "3 files" on an English one — `$base . '_one'` for 1, else `$base . '_many'`, which the lookup refines to `_few` /
+ * `_one` by the language's rule (langPluralKey()). `n` is the count unless the caller gives it written its own way
+ * (langNumber()). `$lang`: say it in that language (a mail to a member) instead of the page's.
+ */
+function plural(int|float $n, string $base, array $params = [], ?string $lang = null): string {
+    if (!array_key_exists('n', $params)) $params['n'] = $n;
+    $key = $base . ($n == 1 ? '_one' : '_many');
+    return $lang === null ? __($key, $params) : langFor($lang, $key, $params);
 }
 
 /** Translate and HTML-escape — the default for template output. */
@@ -355,6 +452,8 @@ function langHas(string $key): bool {
 function langFor(?string $code, string $key, array $params = []): string {
     $code = strtolower(trim((string)$code));
     if (!preg_match('/^[a-z]{2,3}$/', $code) || !langInstalled($code)) $code = LANG_FALLBACK;
+    // A counted word in THAT language's form (1.74.0, langPluralKey()): a mail's "2 pliki" for a Polish member.
+    if ($params) $key = langPluralKey($key, $params, $code, langLoad($code));
     $s = langLoad($code)[$key] ?? langLoad(LANG_FALLBACK)[$key] ?? $key;
     if ($params) {
         $repl = [];
@@ -384,7 +483,71 @@ function langJsBundle(array $prefixes = ['js.']): array {
     }
     // `swap` travels with the bundle rather than on <body>, so the page ALREADY answers "which
     // language is this and may it be swapped" in one place that lang-swap.js re-reads after a swap.
-    return ['lang' => langCurrent(), 'strings' => $out, 'swap' => (bool)($GLOBALS['__lang']['swap'] ?? false)];
+    $b = ['lang' => langCurrent(), 'strings' => $out, 'swap' => (bool)($GLOBALS['__lang']['swap'] ?? false)];
+    // The third forms this language did not write itself (1.74.0): in the bundle they are the English fallback's,
+    // and a counted word must never take one of those for its "2–4" form (assets/js/i18n.js, langPluralKey()).
+    $own = $GLOBALS['__lang']['strings'] ?? [];
+    $few = [];
+    foreach ($out as $k => $_) if (str_ends_with((string)$k, '_few') && !isset($own[$k])) $few[] = (string)$k;
+    if ($few) $b['few'] = $few;
+    return $b;
+}
+
+/**
+ * THE SCRIPTS' DICTIONARY AS A FILE (1.74.0). Every page carried its whole `js.*` bundle inline — 52 KB of a 75 KB home
+ * page (15 KB of 20 compressed), on every view and never cached (the HTML is no-store). It is a file now, one per
+ * language and set of prefixes, named by its content: `i18n.php?l=pl&p=<prefixes>&v=<hash>` answers
+ * `(window.I18N_DICT=window.I18N_DICT||{})["pl.<hash>"]=<the strings>;`, cached for a year and immutable while `v` is
+ * that content's hash (a new dictionary is a new address), not cached at all when it is not. The page keeps only a
+ * few words about it inline (#i18n-data: the language, whether the swap is on, the file's id and address) and loads
+ * the file before i18n.js reads it; the live language switch loads the other language's file the same way — the same
+ * address a page in that language asks for, so it is cached across them.
+ */
+const LANG_JS_JSON = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+
+/** Every string under the prefixes in a language, the fallback filled in — what one page's scripts read. */
+function langJsStrings(string $code, array $prefixes): array {
+    $out = [];
+    foreach (langLoad($code) + langLoad(LANG_FALLBACK) as $k => $v) {
+        foreach ($prefixes as $p) { if (str_starts_with((string)$k, $p)) { $out[$k] = (string)$v; break; } }
+    }
+    return $out;
+}
+
+/** The content's name: 16 hex of its SHA-256, as the file writes it. */
+function langJsHash(array $strings): string {
+    return substr(hash('sha256', (string)json_encode($strings, LANG_JS_JSON)), 0, 16);
+}
+
+/** The prefixes of an address (`p=js.common.,js.app.`), or null when they are not dictionary prefixes. */
+function langJsPrefixes(mixed $p): ?array {
+    if (!is_string($p) || $p === '' || strlen($p) > 1000) return null;
+    $list = explode(',', $p);
+    if (count($list) > 40) return null;
+    foreach ($list as $one) if (!preg_match('/^[a-z0-9_]+(?:\.[a-z0-9_]+)*\.?$/', $one)) return null;
+    return $list;
+}
+
+/**
+ * What `i18n.php` answers (the file only sends it): status, headers and body. GET or HEAD; an installed language;
+ * well-formed prefixes. Nothing here reads a session, a cookie or the database — a dictionary is the same for everyone.
+ */
+function langJsServeRequest(array $get, array $server): array {
+    $js = ['Content-Type: text/javascript; charset=utf-8', 'X-Content-Type-Options: nosniff'];
+    $method = strtoupper((string)($server['REQUEST_METHOD'] ?? 'GET'));
+    if ($method !== 'GET' && $method !== 'HEAD') return ['status' => 405, 'headers' => array_merge($js, ['Allow: GET, HEAD', 'Cache-Control: no-store']), 'body' => ''];
+    $code = is_string($get['l'] ?? null) ? strtolower($get['l']) : '';
+    $prefixes = langJsPrefixes($get['p'] ?? null);
+    if (!preg_match('/^[a-z]{2,3}$/', $code) || !langInstalled($code) || $prefixes === null) {
+        return ['status' => 404, 'headers' => array_merge($js, ['Cache-Control: no-store']), 'body' => "/* no such dictionary */\n"];
+    }
+    $strings = langJsStrings($code, $prefixes);
+    $json = (string)json_encode($strings, LANG_JS_JSON);
+    $hash = substr(hash('sha256', $json), 0, 16);
+    $fresh = is_string($get['v'] ?? null) && hash_equals($hash, (string)$get['v']);
+    $headers = array_merge($js, [$fresh ? 'Cache-Control: public, max-age=31536000, immutable' : 'Cache-Control: no-store']);
+    $body = '(window.I18N_DICT=window.I18N_DICT||{})[' . json_encode($code . '.' . $hash) . ']=' . $json . ";\n";
+    return ['status' => 200, 'headers' => $headers, 'body' => $body];
 }
 
 /**
@@ -410,15 +573,25 @@ const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 
  * every visitor would have cost more than the page. Default is everything, for the panel.
  */
 function langJsBridge(string $baseUrl, ?array $prefixes = null): string {
-    $json = json_encode(langJsBundle($prefixes ?? ['js.']), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $prefixes = array_values($prefixes ?? ['js.']);
+    $bundle = langJsBundle($prefixes);
+    // The dictionary itself is a file (1.74.0, see langJsServeRequest()): inline only what names it — the language,
+    // the swap flag, the file's id (language and content hash, the key it registers itself under) and its address.
+    $hash = langJsHash($bundle['strings']);
+    $src = $baseUrl . 'i18n.php?' . http_build_query(['l' => $bundle['lang'], 'p' => implode(',', $prefixes), 'v' => $hash]);
+    $meta = ['lang' => $bundle['lang'], 'swap' => $bundle['swap'], 'id' => $bundle['lang'] . '.' . $hash, 'src' => $src];
+    if (!empty($bundle['few'])) $meta['few'] = $bundle['few'];
+    $json = json_encode($meta, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $ver = function_exists('assetVer') ? assetVer('assets/js/i18n.js') : '';
     $swapVer = function_exists('assetVer') ? assetVer('assets/js/lang-swap.js') : '';
     $base = htmlspecialchars($baseUrl, ENT_QUOTES, 'UTF-8');
     // lang-swap.js rides along with the bridge because it needs exactly what the bridge provides —
     // the bundle node and t() — and because every page that has a switcher has a bridge. It keeps
     // the reader's place on a full reload even when the in-place swap is off, so it is not
-    // conditional on the setting.
+    // conditional on the setting. The dictionary's file comes first: i18n.js reads it as it loads.
     return '<script' . nonceAttr() . ' id="i18n-data" type="application/json">' . $json . '</script>' . "
+"
+         . '    <script src="' . htmlspecialchars($src, ENT_QUOTES, 'UTF-8') . '"></script>' . "
 "
          . '    <script src="' . $base . 'assets/js/i18n.js' . $ver . '"></script>' . "
 "

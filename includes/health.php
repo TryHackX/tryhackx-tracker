@@ -40,12 +40,14 @@ function healthToken(array $cfg): string
  * what makes the address unguessable, and an operator who pastes "test" in there has not switched
  * the feature on — they have opened it to everybody.
  */
-function healthAuthorised(array $cfg, ?string $header, ?string $query): bool
+function healthAuthorised(array $cfg, mixed $header, mixed $query): bool
 {
     $want = healthToken($cfg);
     if ($want === '') return false;
-    foreach ([(string)$header, (string)$query] as $given) {
-        if ($given !== '' && hash_equals($want, $given)) return true;
+    // Strings only (1.74.0, PUB-3): `?action=health&token[]=x` reached a ?string parameter as an array — an
+    // uncaught TypeError where the ordinary page belongs.
+    foreach ([$header, $query] as $given) {
+        if (is_string($given) && $given !== '' && hash_equals($want, $given)) return true;
     }
     return false;
 }
@@ -80,6 +82,13 @@ function healthReport(PDO $db, array $cfg): array
         $raise(($w['level'] ?? 'warn') === 'danger' ? 'fail' : 'warn');
         // The panel's warnings carry markup for the dashboard; a monitor's alert wants a sentence.
         $problems[] = trim(preg_replace('/\s+/', ' ', strip_tags((string)($w['text'] ?? ''))));
+    }
+
+    // 2b. The limits and the panel's sign-in lockout (1.74.0, QUAL-20). They let everything through while their
+    //     state cannot be written — the contract, so a disk problem locks nobody out — which made a broken config/
+    //     the one failure nobody heard about: every limit open, the dashboard green. A warning, not a failure.
+    if (function_exists('rateLimitHealth')) {
+        foreach (rateLimitHealth() as $p) { $raise('warn'); $problems[] = rateLimitHealthText($p); }
     }
 
     // 3. Panel mode versus what is actually running. The CACHED answer — the janitor refreshes it

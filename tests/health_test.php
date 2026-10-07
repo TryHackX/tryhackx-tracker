@@ -57,6 +57,7 @@ check('a prefix of the token is not the token', !healthAuthorised($on, substr($G
 // tracker service — on a developer's machine those are legitimately unhealthy, and a test that
 // depends on them is a test that fails for being right.
 $clean = array_merge($cfg, ['tracker_mode' => 'blacklist', 'tracker_schedule_enabled' => '0']);
+@unlink(rateLimitDir() . '/_health.json');   // the limiter's storage is judged afresh, not from a minute-old answer (1.74.0)
 $r = healthReport($db, $clean);
 check('a healthy tracker answers ok, with 200', $r['status'] === 'ok' && $r['http'] === 200,
     $r['status'] . ' ' . json_encode($r['body']['problems']));
@@ -85,6 +86,33 @@ $whitelistish = array_merge($cfg, ['tracker_mode' => 'whitelist']);
 $r3 = healthReport($db, $whitelistish);
 $markup = array_filter($r3['body']['problems'], static fn($p) => str_contains((string)$p, '<'));
 check('problems reach the monitor as sentences, not as dashboard markup', $markup === [], json_encode($markup));
+
+// ── 3. the limits' storage (1.74.0, QUAL-20) ─────────────────────────────────
+//
+// The limits let everything through when their state cannot be written — the contract, so a disk problem locks
+// nobody out — and until 1.74.0 nothing said so: every limit open, every monitor green. A state file that cannot be
+// written, and one set aside as unreadable, are each a WARNING here (still 200), named, until they are gone.
+rateLimitEnsureDir();
+$hAct = 'healthtest_' . getmypid();
+$hFile = rateLimitFile($hAct);
+@mkdir($hFile, 0777, true);                                  // a directory where the action's file belongs
+@unlink(rateLimitDir() . '/_health.json');
+$r4 = healthReport($db, $clean);
+$named = preg_grep('/' . preg_quote(basename($hFile), '/') . '/', $r4['body']['problems']);
+check('a limit\'s state that cannot be written is a warning — 200, "warn" — that names the file',
+      $r4['status'] === 'warn' && $r4['http'] === 200 && $named, $r4['status'] . ' ' . json_encode($r4['body']['problems']));
+@rmdir($hFile);
+$hBad = $hFile . '.bad.20260101-000000';
+file_put_contents($hBad, '{not a map');
+@unlink(rateLimitDir() . '/_health.json');
+$r5 = healthReport($db, $clean);
+check('… and so is one that was set aside as unreadable, until somebody deletes it',
+      $r5['status'] === 'warn' && preg_grep('/' . preg_quote(basename($hBad), '/') . '/', $r5['body']['problems']), json_encode($r5['body']['problems']));
+@unlink($hBad);
+@unlink(rateLimitDir() . '/_health.json');
+$r6 = healthReport($db, $clean);
+check('… then the report is ok again', $r6['status'] === 'ok', json_encode($r6['body']['problems']));
+check('a token sent as an array is no token — and no TypeError (PUB-3)', !healthAuthorised($on, [$GOOD], null) && !healthAuthorised($on, null, [$GOOD]));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

@@ -687,15 +687,17 @@ check('… as a warning: ONE warning in the author\'s language, kept on the acco
       && $nbm[0]['title'] === 'Warning: one of your private messages was removed' && str_contains($nbm[0]['body'], 'Mind your words')
       && ($db->query("SELECT source_kind FROM user_warnings WHERE user_id = $bob ORDER BY id DESC LIMIT 1")->fetchColumn()) === 'message', json_encode([$j, $nbm]));
 $j = $run('admin/message_report_action', 'POST', ['id' => $mr3, 'action' => 'warn', 'reason' => 'Last warning'], [], $panel);
-// (The message card writes to the reporter in the language of the request, as it did before 1.71.0.)
-check('… Warn: a warning, the report answered (not closed), the reporter told it was handled', !empty($j['success']) && ($notes($bob, $f)[1]['type'] ?? '') === 'warning'
-      && $db->query("SELECT status FROM message_reports WHERE id = $mr3")->fetchColumn() === 'open' && str_contains((string)($lastOf($notes($alice, $f))['title'] ?? ''), 'was handled'), json_encode($j));
+// 1.74.0 (QUAL-18): the message card writes to the reporter in THEIR language — Alice reads Polish — not in the
+// language of the moderator's request (English here), as it did until 1.74.0.
+check('… Warn: a warning, the report answered (not closed), the reporter told it was handled — in Polish, her language', !empty($j['success']) && ($notes($bob, $f)[1]['type'] ?? '') === 'warning'
+      && $db->query("SELECT status FROM message_reports WHERE id = $mr3")->fetchColumn() === 'open'
+      && ($lastOf($notes($alice, $f))['title'] ?? '') === langFor('pl', 'notify.report_handled', ['user' => 'crtest_bob']), json_encode([$j, $lastOf($notes($alice, $f))]));
 $j = $run('admin/message_report_action', 'POST', ['id' => $mr3, 'action' => 'mute', 'days' => 1], [], $panel);
 $nlast = $lastOf($notes($bob, $f));
 check('… and WITHOUT a mode, what it always did: the silenced account told the plain fact ("account")', !empty($j['success']) && ($nlast['type'] ?? '') === 'account'
       && str_contains((string)$nlast['title'], 'silenced'), json_encode($nlast));
-check('… the card\'s endpoint names the choice and keeps its pre-1.71 path', str_contains($src('api/admin/message_report_action.php'), "\$mode   = in_array(\$input['mode'] ?? null, ['silent', 'loud'], true) ? (string)\$input['mode'] : '';")
-      && str_contains($src('api/admin/message_report_action.php'), "if (\$mode === '') {\n        userNotify(\$db, (int)\$rep['reported_user_id'], 'account', __('notify.message_removed'), __('notify.message_removed_body'));"));
+check('… the card\'s endpoint names the choice and keeps its pre-1.71 path (1.74.0: in the author\'s language)', str_contains($src('api/admin/message_report_action.php'), "\$mode   = in_array(\$input['mode'] ?? null, ['silent', 'loud'], true) ? (string)\$input['mode'] : '';")
+      && str_contains($src('api/admin/message_report_action.php'), "if (\$mode === '') {\n        userNotify(\$db, (int)\$rep['reported_user_id'], 'account', langFor(\$authorLang, 'notify.message_removed'), langFor(\$authorLang, 'notify.message_removed_body'));"));
 $db->prepare("DELETE FROM message_reports WHERE thread_id = ?")->execute([(int)$t['id']]);
 
 /* ══ 10. the source ═══════════════════════════════════════════════════════ */
@@ -715,7 +717,7 @@ check('the public script: loaded after comments.js for a reader who may report, 
       ($p1 = strpos($src('templates/layout.php'), 'assets/js/comments.js')) !== false && strpos($src('templates/layout.php'), 'assets/js/reports.js') > $p1
       && in_array('js.report.', LANG_JS_PUBLIC, true) && str_contains($src('assets/js/reports.js'), 'csrf_token: csrfToken(box)')
       && str_contains($src('assets/js/reports.js'), 'window.Comments.onActions('));
-check('the author\'s warning is written in THEIR language and names nobody who reported', str_contains($lib, '$lang = reportLangFor($cfg, $user);')
+check('the author\'s warning is written in THEIR language and names nobody who reported', str_contains($lib, '$lang = recipientLang($cfg, $user);')
       && !preg_match('/userWarn\([^;]*reporter/', $lib));
 
 /* ══ 11. (1.72.0) a reply is a comment ═══════════════════════════════════ */

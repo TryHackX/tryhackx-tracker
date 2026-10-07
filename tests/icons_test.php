@@ -412,7 +412,7 @@ foreach (['assets/css/style.css', 'assets/css/admin.css'] as $css) {
     // "Cancel run" and, on a phone, the pagers' First and Last.
     $onlyIcon = ':has(> .bi[class*=" fa-"]:only-child:not([data-label]))';
     $dispAt = max((int)strpos($c, '.btn:where(:has(> .bi):not(' . $onlyIcon . ')) { display: inline-flex; }'),
-                  (int)strpos($c, ':is(.btn, .dropdown-item, .source-tab, .source-tab-link, .settings-group-btn):where(:has(> .bi):not(' . $onlyIcon . ')),'));
+                  (int)strpos($c, ':is(.btn, .dropdown-item, .source-tab, .settings-group-btn):where(:has(> .bi):not(' . $onlyIcon . ')),'));
     check("$css: … a control holding an icon and words is a row with one gap, the icon's margin gone; an icon-only one is not",
           (bool)preg_match('/:is\(\.btn, [^)]*\):has\(> \.bi\):not\(:where\(:has\(> \.bi\[class\*=" fa-"\]:only-child:not\(\[data-label\]\)\)\)\) \{\s*align-items: baseline; justify-content: center; text-align: start;\s*column-gap: max\(0px, var\(--bi-gap, [0-9.]+em\) - var\(--bi-sb\)\);/', $c)
           && (bool)preg_match('/:is\(\.btn, [^)]*\):has\(> \.bi\) > \.bi \{ margin-inline: 0; \}/', $c)

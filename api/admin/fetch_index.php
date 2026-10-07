@@ -27,6 +27,11 @@ try {
     }, 15);
     $counts['protected'] = (int)($c['protected'] ?? 0);
     $counts['pending_meta'] = (int)($c['pending_meta'] ?? 0);
-} catch (\Throwable $e) {}
+} catch (\Throwable $e) {
+    // Unknown, not zero (1.74.0, QUAL-26): full-table counts that can run into max_statement_time on a big index must
+    // not take the list with them, so the rows go out and the counts say null — and the log says why.
+    error_log('[admin] fetch_index: the list counts failed: ' . $e->getMessage());
+    $counts = ['total' => null, 'protected' => null, 'pending_meta' => null];
+}
 
 jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'], 'counts' => $counts, 'enabled' => indexEnabled($cfg)]);

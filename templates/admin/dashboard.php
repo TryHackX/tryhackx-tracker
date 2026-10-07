@@ -16,10 +16,12 @@
     <?php endif; ?>
 </head>
 <body class="admin-body admin-hc" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
-    <div class="admin-container admin-wide">
+    <?php /* A landmark and a page title for a screen reader (1.74.0): the container is the page's main region and its
+             heading the one <h1> — every page of the panel had an <h2> and no main. Drawn exactly as before. */ ?>
+    <div class="admin-container admin-wide" role="main">
         <?php $svcName = trim($cfg['opentracker_service_name'] ?? ''); ?>
         <div class="admin-header">
-            <h2><i class="bi bi-flag"></i> <?= _h('a.reports.title') ?> <span class="idx-subtitle"><?= __('a.reports.subtitle') ?></span></h2>
+            <h1 class="admin-title"><i class="bi bi-flag"></i> <?= _h('a.reports.title') ?> <span class="idx-subtitle"><?= __('a.reports.subtitle') ?></span></h1>
             <?php $current = 'admin'; $navExtra = $svcName !== '' ? __DIR__ . '/_tracker_service.php' : null; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
@@ -77,7 +79,7 @@
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="msgrep-search" placeholder="<?= _h('a.reports.search_ph') ?>">
                         </div>
                     </div>
-                    <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="msgrep-status">
+                    <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="msgrep-status" aria-label="<?= _h('status.f_status') ?>">
                         <option value="open"><?= _h('status.b_pending') ?></option>
                         <option value="closed"><?= _h('status.b_checked') ?></option>
                         <option value="all"><?= _h('a.reports.f_all') ?></option>
@@ -132,7 +134,7 @@
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="search-input" placeholder="<?= _h('a.reports.search_ph') ?>">
                         <button type="button" class="search-clear-btn" id="search-clear" title="<?= _h('search.clear') ?>"><i class="bi bi-x-lg"></i></button>
                     </div>
-                    <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="filter-status">
+                    <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="filter-status" aria-label="<?= _h('status.f_status') ?>">
                         <option value="all"><?= _h('a.reports.f_all') ?></option>
                         <option value="pending"><?= _h('status.b_pending') ?></option>
                         <option value="reviewed"><?= _h('status.b_checked') ?></option>
@@ -156,16 +158,16 @@
                          column said "Zgłaszający" until a tab was clicked and "Imię i nazwisko" after, the
                          object column "Utwór" and then "Obiekt" — and one set cannot drift from itself. */ ?>
                 <thead><tr>
-                    <th class="sortable" data-sort="id"><?= _h('js.reports.col_id') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="name"><?= _h('js.reports.col_name') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="email"><?= _h('js.reports.col_email') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="company"><?= _h('js.reports.col_company') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="representative"><?= _h('js.reports.col_entity') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="object"><?= _h('js.reports.col_object') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="hash"><?= _h('js.reports.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="ip"><?= _h('js.reports.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable col-badge" data-sort="blocked"><?= _h('js.reports.col_status') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                    <th class="sortable" data-sort="date"><?= _h('js.reports.col_date') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
+                    <th class="sortable" data-sort="id"><button type="button" class="th-sort"><?= _h('js.reports.col_id') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('js.reports.col_name') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="email"><button type="button" class="th-sort"><?= _h('js.reports.col_email') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="company"><button type="button" class="th-sort"><?= _h('js.reports.col_company') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="representative"><button type="button" class="th-sort"><?= _h('js.reports.col_entity') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="object"><button type="button" class="th-sort"><?= _h('js.reports.col_object') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="hash"><button type="button" class="th-sort"><?= _h('js.reports.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="ip"><button type="button" class="th-sort"><?= _h('js.reports.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable col-badge" data-sort="blocked"><button type="button" class="th-sort"><?= _h('js.reports.col_status') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                    <th class="sortable" data-sort="date"><button type="button" class="th-sort"><?= _h('js.reports.col_date') ?> <i class="bi bi-arrow-down sort-icon active" aria-hidden="true"></i></button></th>
                     <th class="th-actions"><?= _h('js.reports.col_actions') ?></th>
                 </tr></thead>
                 <tbody id="reports-body"></tbody>
@@ -181,7 +183,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-file-earmark-text"></i> <?= _h('a.reports.m_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div id="modal-report-info" class="mb-3"></div>
@@ -214,7 +216,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-megaphone"></i> <?= _h('a.reports.ap_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <div id="appeal-modal-info" class="mb-3"></div>
@@ -234,20 +236,8 @@
         </div>
     </div>
 
-    <!-- Confirm Modal -->
-    <div class="modal confirm-modal" id="confirmModal" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered modal-sm">
-            <div class="modal-content confirm-modal-content">
-                <div class="modal-body text-center py-4">
-                    <p id="confirmModal-msg" class="text-light mb-3 confirm-msg"></p>
-                    <div class="d-flex justify-content-center gap-2">
-                        <button class="btn btn-sm btn-outline-danger" id="confirmModal-cancel"><i class="bi bi-x-lg"></i> <?= _h('common.cancel') ?></button>
-                        <button class="btn btn-sm btn-success" id="confirmModal-ok"><i class="bi bi-check-lg"></i> <?= _h('a.reports.confirm') ?></button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <?php /* "Are you sure?" is the panel's one dialog now (1.74.0, admin-common.js confirmAction()): this page's own,
+             with a red Cancel and a green Confirm, is gone. */ ?>
 
     <!-- Permanent Delete Modal -->
     <div class="modal fade" id="deletePermModal" tabindex="-1">
@@ -255,20 +245,20 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-trash text-danger"></i> <?= _h('a.reports.del_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-warning mb-3" style="font-size:0.9rem;"><?= __('a.reports.del_warn') ?></p>
                     <form id="delete-perm-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="del-password"><?= _h('a.reports.admin_pass') ?></label>
                             <?php // For the browser's password manager: this form has a password field, so without a named
                                   // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                             <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
                             <input type="password" autocomplete="current-password" class="form-control bg-dark text-light border-secondary" id="del-password" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.reports.del_reason') ?></label>
+                            <label for="del-reason" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.reports.del_reason') ?></label>
                             <textarea class="form-control bg-dark text-light border-secondary" id="del-reason" rows="3" placeholder="<?= _h('a.reports.del_reason_ph') ?>"></textarea>
                         </div>
                         <div class="d-flex justify-content-center gap-2 mt-3">
@@ -303,14 +293,14 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-warning"></i> <?= _h('a.reports.restart_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-light mb-2" style="font-size:0.9rem;"><?= __('a.reports.restart_body', ['svc' => sanitize($svcName)]) ?></p>
                     <div id="restart-warn-list" class="mb-2"></div>
                     <form id="restart-tracker-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="restart-password"><?= _h('a.reports.admin_pass') ?></label>
                             <?php // For the browser's password manager: this form has a password field, so without a named
                                   // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                             <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -333,14 +323,14 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-arrow-clockwise text-info"></i> <?= _h('a.reports.reload_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
                     <p class="text-light mb-2" style="font-size:0.9rem;"><?= __('a.reports.reload_body', ['svc' => sanitize($svcName)]) ?></p>
                     <div id="reload-warn-list" class="mb-2"></div>
                     <form id="reload-tracker-form">
                         <div class="mb-3">
-                            <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.reports.admin_pass') ?></label>
+                            <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="reload-password"><?= _h('a.reports.admin_pass') ?></label>
                             <?php // For the browser's password manager: this form has a password field, so without a named
                                   // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                             <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -365,7 +355,8 @@
     <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/captcha.js<?= assetVer('assets/js/captcha.js') ?>"></script>
-    <!-- admin-common.js only defines window.AdminCommon (shared pagination renderer); admin.js keeps its own globals -->
+    <?php /* admin-common.js first: admin.js asks through it (the request that says an ended session, the toast, the
+             "Are you sure?" dialog, the pager — 1.74.0); admin.js keeps its own globals. */ ?>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin.js<?= assetVer('assets/js/admin.js') ?>"></script>
     <?php /* The reported-messages view. Loaded only where the permission is held, because the tab

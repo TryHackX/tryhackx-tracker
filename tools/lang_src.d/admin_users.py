@@ -29,7 +29,7 @@ add('a.users', {
                        'użytkowników</a>.'),
 
     # toolbar / filters
-    'search_ph':      ('Search username or email...', 'Szukaj nazwy lub e-maila...'),
+    'search_ph':      ('Search username or email...', 'Szukaj nazwy lub e-maila…'),
     'search_clear':   ('Clear search', 'Wyczyść wyszukiwanie'),
     'status':         ('Status', 'Status'),
     'all':            ('All', 'Wszystkie'),

@@ -125,6 +125,11 @@ or trust starts off. The built-in Info and Terms pages describe exactly the feat
   *Automatic* (`Accept-Language`) — see [Languages](#languages).
 - **Health check** (`?action=health`) — one JSON answer for an uptime monitor. *Needs:* `health_token`
   [''] of 16+ characters.
+- **For the keyboard and screen readers** (1.74.0) — a "skip to the content" link; windows (Info, the file
+  list, Block, the panel's dialogs) take the focus as they open, keep Tab inside the top one and give the
+  focus back on Esc; every sortable column header is a button that says how it sorts; form errors are said
+  aloud and tied to their field; every field of the panel's Settings has its own label (a click on the words
+  reaches the field) and a table row's selection box says which row it selects.
 
 ### Accounts (all need `users_enabled`)
 - **Registration and sign-in** (`users_registration_enabled` [1]) with CAPTCHA, e-mail verification
@@ -209,7 +214,9 @@ or trust starts off. The built-in Info and Terms pages describe exactly the feat
   Free from jsDelivr or your own Pro package, `fa_source` [cdn6]); the **operator's digest**
   (`digest_enabled` [0]); the build line (`version_display` [panel]).
 - **Moderators** — a panel session opened from a member account reaches exactly what its groups grant
-  (`panel.*` permissions); settings, backups, groups and the machine stay with the owner.
+  (`panel.*` permissions), and on the public pages it is that account, no more (1.74.0); settings, backups,
+  groups and the machine stay with the owner. The members' e-mail and IP addresses on the Users page are shown
+  in full only to staff who may edit accounts (`panel.users.edit`), shortened to the rest (1.74.0).
 - **The panel's own security** — a movable sign-in address, a second factor, the owner's password asked
   again for everything that changes the machine.
 
@@ -235,25 +242,33 @@ or trust starts off. The built-in Info and Terms pages describe exactly the feat
 
 ### Email System
 Mail goes out through PHP's `mail()` — the machine needs an MTA (INSTALL §1).
-- **Submission Confirmation** — sent when a report is filed
+- **Submission Confirmation** — sent when a report is filed: that it was received, its number, the info hash,
+  the date, its state and where to check it — and nothing the sender typed (1.74.0: the confirmation goes to an
+  address nobody verified, so it carries no name, company, title or message; an appeal's carries no reason)
 - **Under Review** — sent when an admin first opens a report
 - **Status Updates** — sent on every status change (reviewed, blocked, archived, restored)
 - **Custom Messages** — admin can send freeform messages to reporters
 - **Appeal Confirmation** — sent when an appeal is submitted
-- **Appeal Decision** — sent when an appeal is accepted/rejected, with colored status and object title
+- **Appeal Decision** — sent when an appeal is accepted/rejected, with colored status and object title; also
+  when an appeal is reopened, or closed because another one for the same hash was resolved (1.74.0: these
+  three through the dictionary, in the site's default language — an appeal has no account to ask)
 - **Notification Preferences** — users can manage per-type email preferences via HMAC-secured link
 - **One-Click Unsubscribe** — RFC 8058 compliant `List-Unsubscribe-Post` header for Gmail/Yahoo; the
   unsubscribe page records the client's one-click POST (1.73.0 — it used to render the page and record nothing)
 - **Member mail** — verification, password reset, e-mail change, group expiry and security notices, the
   operator's announcements to members (bulk mail, `bulk_mail_enabled` [0])
+- **In the recipient's language** (1.74.0) — a member's mail and notifications in the account's language
+  (else, for the account's own request, the page's; else the site's default); a report's or an appeal's
+  confirmation in the language of the page the form was sent from; what the panel sends a reporter or an
+  appellant later in the site's default language
 
 ### Security
 - **Smart CAPTCHA** — point-based CAPTCHA with a modal overlay; it appears only after a configurable
   activity threshold, with a grace period after solving
 - **CSRF Protection** — token validation on all public form submissions and on every admin write (via the `X-CSRF-Token` header); every public page publishes the session's token once (`<meta name="csrf-token">`) and every public script reads it through one helper, so a button works on whichever page it turns up (1.71.0)
-- **Login Hardening** — per-IP brute-force lockout on admin login (attempts + window admin-configurable) + constant-time username/password comparison
+- **Login Hardening** — brute-force lockout on admin login per address group (an IPv4 address; an IPv6 host's whole /64, since 1.74.0 — attempts + window admin-configurable) + constant-time username/password comparison
 - **Admin Session Timeouts** — idle timeout and absolute lifetime cap; an expired session is destroyed server-side so a stale cookie can't be reused
-- **Rate Limiting** — per-IP throttling on report submission **and** on status checks, block lookups and appeal submissions (all admin-tunable, `0` = off), plus a duplicate-appeal guard
+- **Rate Limiting** — per-address throttling on report submission **and** on status checks, block lookups and appeal submissions (all admin-tunable, `0` = off), plus a duplicate-appeal guard and a site-wide daily cap on confirmation mails — see [Rate limits](#rate-limits-1740)
 - **Prepared Statements** — all database queries use PDO with parameterized queries; dynamic `ORDER BY`/table names are whitelisted
 - **Input Sanitization** — `htmlspecialchars` on all output, server-side validation on all input; untrusted upstream stats data is escaped before it touches the DOM
 - **Password Hashing** — bcrypt via `password_hash()`
@@ -262,7 +277,7 @@ Mail goes out through PHP's `mail()` — the machine needs an MTA (INSTALL §1).
 - **Generic Error Responses** — raw database/exception messages are logged server-side, never returned to clients
 - **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, dotfiles and `*.sql|log|bak|old|ini|sh|env|lock`; `assets/` blocks server-side script execution and directory listing. `.git/`, `tests/`, `tools/`, `worker/` and `lang/` are **not** denied by the shipped files — the vhost does that (INSTALL §4; [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for nginx)
 - **Security Headers** — `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
-- **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'`, a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported. On Apache the `.htaccess` fallback policy is enforced beside it — see [Content-Security-Policy](#content-security-policy)
+- **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'` (the one exception: with reCAPTCHA configured, `'unsafe-eval'` where its widget can be drawn — 1.74.0), a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported. On Apache the `.htaccess` fallback policy is enforced beside it — see [Content-Security-Policy](#content-security-policy)
 - **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons or Font Awesome) loaded with `integrity` hashes
 - **Reverse-Proxy Aware** — optional trusted-proxy allow-list (single addresses **or CIDR ranges**, so a CDN's published ranges can be pasted in) + configurable client-IP header so per-IP limits work correctly behind Cloudflare / nginx without opening a spoofing hole; a block wider than /8 (v4) or /16 (v6) is refused and ignored
 - **Transport security** — `Secure` on the session, language and remember-me cookies, decided once for all of them (automatic detection, or forced on/off), plus optional HSTS with its own `max-age`, `includeSubDomains` and `preload` switches, off by default and never sent over plain HTTP
@@ -446,7 +461,8 @@ Upload all files to your web server document root or a subdirectory.
 The `config/` and `lang/` directories **must be writable by the web-server user** — the app persists
 its credentials, caches, locks and rate-limit/login-throttle state in `config/`, and writes a language
 installed from the panel into `lang/`. If `config/` isn't writable, stats never refresh and rate
-limiting silently fails open.
+limiting fails open — it lets everything through rather than lock anybody out — which since 1.74.0 is
+no longer silent: the dashboard's warning card and `?action=health` say so (see [Rate limits](#rate-limits-1740)).
 
 ```bash
 # Linux with Apache/Nginx + php-fpm (adjust user:group to your PHP process, often www-data)
@@ -668,7 +684,8 @@ How it works (`includes/stats_timeline.php`):
   returns `{t:[…], seeds:[…], leechers:[…], peers:[…], torrents:[…], whitelist_count:[…], mode:[0|1…],
   udp_rps:[…], tcp_rps:[…], connect_rps:[…], scrape_rps:[…], step, table, points}`; the table is
   picked per range (raw → 5m → 1h so a payload stays below ~4 500 points) and each range is cached
-  for 30 s in `config/`. Public while `stats_timeline_public=1`, otherwise admins only (the chart
+  for 90 s in `config/` (longer than the chart's 60-second poll, so one viewer does not rebuild the range on
+  every poll). Public while `stats_timeline_public=1`, otherwise admins only (the chart
   disappears from the public page too).
 - **CLI** — `sudo -u www-data php tools/whitelist_cli.php timeline [--tick]` prints the state and row
   counts (`--tick` samples / rolls up right now). `tools/janitor.php -v` prints the tick result.
@@ -700,7 +717,8 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   (`meta_worker_concurrency`, 1.7.0): how many hashes the worker resolves at once (1–64, both
   queues); the worker re-reads the setting every ~60 s — no restart — when its DB user has
   `SELECT` on `settings` (see [worker/README.md](worker/README.md)); empty keeps the worker's own
-  config-file value.
+  config-file value (3 without one). The whitelist form's per-submitter probe limit follows the same number:
+  this setting, else what the worker's heartbeat says it runs with, else 3 (1.74.0; it assumed 8).
 - **Lifecycle** — a new row lives until `grace_until` (`index_grace_days`) unless its metadata resolves;
   a resolved row lives until `protected_until` (`index_protect_days`), extended on every poll where it
   still has ≥ 1 seeder. The hourly pruner (also forced on the tick after a poll that overshoots the cap
@@ -708,7 +726,26 @@ How it works (`includes/index.php`, all off unless `index_enabled=1`):
   table over the cap from this side, and asking the state file is free where counting the catalogue is
   939 ms) drops expired rows and caps the table at `index_max_rows` (oldest unprotected `last_seen` first);
   it first backfills the protection window for rows whose metadata resolved since the last poll, and runs
-  under a lock so two prunes can never over-delete. A 200 000-row cap is ~100–150 MB on disk.
+  under a lock so two prunes can never over-delete. A 200 000-row cap is ~100–150 MB on disk. Since
+  1.74.0 every row the pruner deletes takes its file rows (and its search-catalogue row) with it by key
+  (`DELETE … RETURNING`); the sweep for file rows whose torrent is gone some other way runs once a day.
+  Asking for a resolved row again (*Fetch metadata*, or the *all* scope) gives it at least
+  `index_grace_days` from that moment and never less than its protection — it used to be deleted by the
+  next prune for a grace that had run out long before.
+- **The search catalogue (`index_catalog`, 1.74.0)** — the public search lists only *named* rows (about
+  714 k of production's 4.75 M) and sorts them six ways. `index_catalog` holds exactly those rows with
+  only what is searched and sorted on — the name with its own FULLTEXT index, seeders, leechers, size,
+  file count, last seen, an index on each — so every order and every page is an index walk (a sort by
+  size or name used to be a full scan and a filesort: 4–8 s and more at a small pool, one click of any
+  member); the page's wide rows are then read by key. It is kept by the poll's batches, the scrapes, the
+  deletes and the pruner, and — for what the metadata worker and federation store from Python — by the
+  janitor following `meta_fetched_at`; the janitor's rolling walk (`[catalog]` in `janitor.php -v`)
+  fills it after the upgrade (~100 s of 20-second ticks on a production-sized table) and then keeps
+  re-checking it, a stretch a tick. The search reads it only once a whole pass has been made over a
+  catalogue of at least 250 000 rows (smaller ones are fast without it). A search's count stops at
+  max(1 000, ten pages past the current one) and the page says *1 000+*; a search the database stops at
+  its time limit (`max_statement_time`, 20 s on the web) answers *the search took too long — narrow it*
+  (`503`, `code: search_timeout`) instead of a bare 500.
 - **Keep what people kept** (`index_keep_saved`, 1.45.1, **off** by default) — what the pruner does with
   a hash somebody has starred or put on a list: `off` leaves the lifecycle above exactly as it is,
   `forever` spares it while anybody still has it, `extend` gives it `index_keep_saved_days` (1–3650) on
@@ -911,8 +948,13 @@ default — with it off, everything behaves exactly like the classic single-admi
   address unsubscribed from, and with no unsubscribe at all (1.73.0). The menu links can be hidden
   (`users_links_visible=0`; the nav shows one **Account** entry). Signing in as an `admin`-group
   member also opens the **admin panel session** (no second login; the panel's own idle/absolute
-  limits still apply, and panel logout leaves the site session alone). The mirrored owner account
-  is protected — it cannot be deleted, banned or stripped of the admin group.
+  limits still apply, and panel logout leaves the site session alone). Every panel request asks again
+  whether that account is still active and still in its group; when the database cannot answer, the
+  question is asked once more and then THAT request is refused with `503` ("try again in a moment") —
+  the session stays for the next one (1.74.0; it used to let the request through). The mirrored owner account
+  is protected — it cannot be deleted, banned or stripped of the admin group. With accounts switched off
+  (`users_enabled=0`) every account endpoint answers `accounts_disabled` — since 1.74.0 the list of devices
+  (`user_sessions`) and the second factor (`user_2fa`) too.
 - **Groups with permissions** (Admin → **Users** → *Groups*): each group carries a set of
   permissions — `index.view` / `index.files` / `index.files_all` / `index.magnet` (the member search;
   `files_all` loads a file list past its first batch — `index_files_batch`, 2 000 rows as shipped —
@@ -1727,8 +1769,18 @@ different helper command (`*_cmd`), interpreter or script path (`tuner_python`,
 `backup_script_path`), the tracker's service name or sudo switch, the reverse-proxy trust pair
 (`trusted_proxy_ips`, `client_ip_header`) or the `hmac_secret` asks for the owner's password —
 an admin-group account holds a panel session too, and on that session alone it could quietly change
-what www-data runs on the next schedule tick. Only a value that differs from the stored one triggers
-the prompt; an untouched field never does.
+what www-data runs on the next schedule tick. Since 1.74.0 so does switching on what the janitor then
+does by itself as root — the tracker-mode schedule, the inbound limit and its automatic band, the
+traffic monitor, scheduled backups — because each of those deeds asks for the password when it is done
+by hand. Only a value that differs from the stored one triggers the prompt; an untouched field never does.
+
+**Secrets are never printed (1.74.0).** The HMAC key, the four CAPTCHA secrets and the health token are
+write-only fields: the page says whether one is set, an empty field keeps what is stored, and a new value
+is typed in (the HMAC key's still behind the password). Until 1.74.0 the page showed them in full to every
+session that reached Settings — and a backup download link needed nothing but the HMAC key to be forged.
+A download link now has to have been **issued** by *Download* (behind the password): its nonce is recorded
+in `config/backup_state.json` and redeemed once, so a link signed with the key alone is refused (403).
+After upgrading, consider a new HMAC key: it also invalidates the unsubscribe links in mails already sent.
 
 The session gate keeps strangers out of the panel. This is for whoever is already sitting at the
 machine: a borrowed laptop, an unlocked screen, a stolen cookie — which is the case the password
@@ -1744,7 +1796,14 @@ from any authenticator app. **Off by default.**
 - **Ten single-use recovery codes**, shown once, stored as SHA-256, with regeneration behind the
   password and a code. Fewer than three left and the panel says so without being asked.
 - **A code works once.** It is valid for its 30-second step plus one either side; the last accepted
-  step is recorded and never accepted again — including the code that confirmed the setup.
+  step is recorded and never accepted again — including the code that confirmed the setup. Since
+  1.74.0 the check and the record are one step under the state file's lock (and, for a member's
+  account, one guarded `UPDATE`), so two sign-ins carrying the same code at the same moment open one
+  session, not two — a recovery code likewise.
+- **A damaged state file fails closed (1.74.0).** `config/admin_2fa.json` that exists but cannot be read
+  as the state this panel wrote (empty, truncated, not JSON, "enabled" without a secret) counts as two-factor
+  **on**: no code can be checked against it, so the sign-in stops at the code until the file is repaired —
+  or deleted, which is what "never set up" looks like. Until 1.74.0 such a file silently meant *off*.
 - **Turning it off needs the password AND a code.** This exists for the case where somebody else has
   the password, so the password alone must not be able to switch it off.
 - The password step **grants nothing on its own**: no session exists until the second factor is done,
@@ -2246,6 +2305,8 @@ Content-Type: application/json
         "summary":{"added":1,"exists":0,"banned":0,"invalid":0},"active_in_seconds":37,"server_time":1755500000}
 
 GET  /api.php?endpoint=v1/whitelist/ping   → {"ok":true,"server_time":..,"mode":"whitelist","whitelist_count":159,"api_version":1,"client":"label"}
+                                           → 503 {"ok":false,"error":"…"} + Retry-After when the database cannot count
+                                             (1.74.0: it used to answer "ok" with a count of 0; v1/federation/ping the same)
 
 GET  /api.php?endpoint=v1/whitelist/status&hash=<40 hex>[,<40 hex>…]
 POST /api.php?endpoint=v1/whitelist/status   {"items":["<40 hex>","magnet:?xt=urn:btih:…"]}
@@ -2684,6 +2745,37 @@ any sign-in from a session that never opened the sign-in page. It is **not** a r
 password: brute-force protection is the lockout (*Login lockout attempts / window*) plus
 *CAPTCHA → On Admin Login*. **Write the new address down before saving it.**
 
+### Rate limits (1.74.0)
+
+Every per-address limit of the site — sign-in, registration, password reset, reports, appeals, the status
+and block lookups, search, favourites, messages, the shoutbox, comments, the health endpoint, about fifty
+places — is one call to `rateLimitAllow()` (`includes/functions.php`), and the panel's sign-in lockout
+(`includes/auth.php`) works the same way:
+
+- **An address means an address group.** An IPv4 address counts as itself; an IPv6 host counts as its
+  whole /64 (`ipBucket()`), because a host holds every address of its allocation and rotates through them.
+  Until 1.74.0 the status lookup, the block lookup, appeals, the report form's hourly limit and the panel's
+  lockout counted the full address — on IPv6 each address was a fresh count. The price is the one IPv4 behind
+  a household's NAT already pays: one /64 shares one count.
+- **One file and one lock per action** in `config/ratelimit/`, with a hard cap of subjects per file (the ones
+  whose last hit is oldest go first). Until 1.74.0 every limit shared one file, rewritten whole under one lock
+  on every call — the shoutbox's poll and the sign-in queued behind each other's addresses.
+- **`config/rate_limits.json` is the reset switch.** Deleting it (or one action's line in it) forgets those
+  counts at once, as it always did — the troubleshooting step below still works.
+- **A broken disk never locks anybody out.** If `config/` or a state file cannot be written, the limits let
+  everything through — and say so: a line on the dashboard's warning card and in `?action=health`. A state file
+  that cannot be read is set aside as `<file>.bad.<time>` (logged as `[ratelimit] …`) and the count starts over;
+  delete it once you have looked at it (the janitor does after a week). The two sign-ins are the exception to
+  "silently open": a sign-in whose count cannot be written costs the delay a wrong panel password costs.
+- **The block lookup by GET** (`api.php?endpoint=check_block&hash=…`) never asks for a CAPTCHA, by design: it is
+  the old address scripts use, its answer is read-only and the same for everybody, and the limit above
+  (*Block lookups / hour*, per address group) is what guards it. The status page's form uses POST, which
+  asks for a CAPTCHA when that context is on.
+- **Confirmation mails have a daily cap** (*Contact & email → Report and appeal confirmations per day*, 200 by
+  default, 0 = none): a report or an appeal confirms itself to the address typed into the form, which nobody
+  verified, so the whole site sends at most that many a day. Past it the report or appeal is still taken —
+  without the mail. A mail that cannot be counted is not sent.
+
 ### Reverse proxy / Nginx notes
 
 The bundled `.htaccess` files (URL rewriting, directory `deny`, security headers) are **Apache only**.
@@ -2705,6 +2797,17 @@ location / { try_files $uri $uri/ /index.php?action=$request_uri; }
 #    same `location ~ \.php$` block as the other fastcgi_param lines.
 fastcgi_param HTTPS $https if_not_empty;
 fastcgi_param REQUEST_SCHEME $scheme;
+
+# 4. The static files' caching (1.74.0, what assets/.htaccess says to Apache): a stylesheet or script asked for
+#    with its version (?v=…, every one a page links) never changes — a year, immutable; anything without one
+#    (the favicon, emoji data) revalidates. No ETag (Last-Modified is enough). The map goes in http {}; the
+#    location AFTER the deny rules above. nginx drops the server's add_header lines in a location that has its
+#    own, so repeat the security headers (below) inside it.
+map $arg_v $asset_cache { default ""; "~." "public, max-age=31536000, immutable"; }
+location ~* ^/assets/.+\.(css|js)$ {
+    etag off;
+    add_header Cache-Control $asset_cache;      # an empty value adds no header
+}
 ```
 
 Also port the security headers from `.htaccess` into an `add_header … always;` block —
@@ -2801,7 +2904,7 @@ only place a **nonce** can come from, because a nonce has to change on every res
 `add_header` cannot mint one.
 
 Every inline `<script>` this application emits carries that request's nonce, and `script-src` has
-**no `'unsafe-inline'` and no `'unsafe-eval'`**. An injected `<script>` — in a description, in a
+**no `'unsafe-inline'` and no `'unsafe-eval'`** (one exception, reCAPTCHA's, below). An injected `<script>` — in a description, in a
 whitelist submission, in anything a visitor can write — is then inert text: it has no nonce, so the
 browser refuses to run it.
 
@@ -2823,6 +2926,14 @@ browser refuses to run it.
 * **Only the CAPTCHA provider you configured.** The `.htaccess` list allowed all four providers on
   every install, because a static file cannot read a setting. `captchaCspHosts()` adds the hosts of
   the one that is actually switched on.
+* **Google's reCAPTCHA needs two more things (1.74.0)**, both seen in production's reports: the
+  stylesheet its loader adds (`style-src https://www.gstatic.com`) and the `eval` its code tries
+  (`script-src 'unsafe-eval'`). Both only while reCAPTCHA (v2 or v3) is the configured provider, and the
+  eval only where a CAPTCHA can be drawn — every public page (a form, or an answer that asks for one) and
+  the panel's dashboard — never on another panel page; Turnstile and hCaptcha need neither. The rest of
+  what production reported in its report-only weeks (inline scripts and an inline handler on the front
+  page, a `blob:` worker, `blob:` images) was browser extensions and a picture editor fixed in 1.63.1 —
+  not this site.
 * **Extra allowed hosts** is for an analytics script or a CDN of your own. A host there may run
   scripts on every page of this site, in every visitor's session, so it asks for the owner password;
   the value goes into a response header verbatim, so anything that is not a plain host name (with an
@@ -3039,21 +3150,40 @@ fails the same day.
 
 **What is translated (1.35.0).** Everything: the public site, every admin template including the
 settings page (nearly 6 000 lines), and every browser script. Scripts get their strings through a small
-bridge — `langJsBridge()` in `includes/lang.php` writes a JSON bundle of every `js.*` key for the
-active language into the page head, and `assets/js/i18n.js` defines `t('js.area.key', {n: 5})`,
-which reads it and replaces `:n` placeholders the way `__()` does. Only the `js.` prefix is sent, and a public page only the areas its own scripts read (the nineteen
-prefixes of `LANG_JS_PUBLIC`), so a visitor never downloads the panel's dictionary; a script string lives under `js.` by
-definition; the source module is `tools/lang_src.d/js.py`. The settings sub-menu group names come
-from the catalogue in `includes/settings_catalog.php` and are translated at the output point
+bridge — `langJsBridge()` in `includes/lang.php` names the bundle of every `js.*` key for the active
+language, and `assets/js/i18n.js` defines `t('js.area.key', {n: 5})`, which reads it and replaces `:n`
+placeholders the way `__()` does. Since 1.74.0 the bundle is a file of its own, `i18n.php?l=<code>&p=…&v=<hash>`
+— cached for a year and immutable while `v` is its content's hash, so a page carries under 2 KB for it
+instead of ~52 KB of JSON, and a changed dictionary is a new address; the live switch loads the other
+language's file before it swaps. Only the `js.` prefix is sent, and a public page only the areas its own
+scripts read (the prefixes of `LANG_JS_PUBLIC`), so a visitor never downloads the panel's dictionary; a script
+string lives under `js.` by definition; the source module is `tools/lang_src.d/js.py`. The settings sub-menu
+group names come from the catalogue in `includes/settings_catalog.php` and are translated at the output point
 (`settingsGroupTitle()`), so the keyword index and the tests keep the English source.
 A missing key falls back to English, so a partial translation reads as English rather than as
 blanks — which is also what happens to any language installed from a JSON file that is not yet
 complete.
 
-**Switching without a reload (1.40.0).** With `lang_swap_enabled`
-[1] the switcher fetches the same page in the other language and rewrites the text of the living page
-(`assets/js/lang-swap.js`) — nothing typed is lost, and a plain navigation is the fallback whenever the
-swap cannot be planned. The place on the page is kept either way (by the element nearest the top, not
+**A word after a number (1.74.0).** A counted word is a family of keys — `X_one`, `X_many` and, for a
+language that has one, `X_few` — and the form is chosen by the language's own rule where the word is said:
+`__()` / `langFor()` and `plural($n, 'base')` on the server, `t()` and `t.plural(n, 'base')` in the scripts
+(CLDR's rules through PHP's intl and the browser's `Intl.PluralRules`). Polish says "2 pliki", "5 plików";
+a translation into Russian or Czech gets its forms by writing `X_few` (and its one-form) — a language that
+never wrote a third form keeps its `X_many`. `tests/lang_plural_test.php` checks that every Polish counted
+family has its "2–4" form. The Polish terms the dictionary keeps to (Ty/Twój with a capital, administrator,
+blacklista, selektor, one-character ellipsis) are listed at the top of `tools/lang_src.d/common.py`.
+
+**What people receive is in THEIR language (1.74.0).** A notification and a mail are written once, when
+they are sent, in the recipient's language — the account's own setting, else (for the account's own request)
+the page's, else the site's default (`recipientLang()`, `includes/users.php`); somebody without an account (a
+reporter, an appellant) gets the confirmation in the language of the page the form was sent from, and what
+the panel sends them later in the site's default. Until 1.74.0 most notifications and every mail were
+English, and a friend request was in the language of whoever sent it.
+
+**Switching without a reload (1.40.0).** With `lang_swap_enabled` (on as shipped; a missing row reads as
+on too since 1.74.0) the switcher fetches the same page in the other language and rewrites the text of the
+living page (`assets/js/lang-swap.js`) — nothing typed is lost, and a plain navigation is the fallback whenever
+the swap cannot be planned. The place on the page is kept either way (by the element nearest the top, not
 by pixels), in `sessionStorage` for the one navigation.
 
 ---
@@ -3066,6 +3196,7 @@ tracker/
 ├── api.php             # the API router: every endpoint name → its file, and each admin endpoint's permission
 ├── install.php         # the web installer (delete it after setup)
 ├── csp-report.php      # where browsers send Content-Security-Policy violation reports (when collection is on)
+├── i18n.php            # serves the scripts' dictionary for one language as a cached, versioned file (1.74.0)
 ├── iconpack.php        # serves an installed Font Awesome package from config/iconpacks/
 ├── .htaccess           # URL rewriting, security headers, the fallback CSP, what the web may not reach
 ├── README.md · INSTALL.md · CHANGELOG.md · LICENSE (MIT)
@@ -3107,10 +3238,12 @@ tracker/
 ```
 
 Runtime files in `config/` (all regenerated as needed): `database.php`, `hash.txt`, `installed.lock`,
-`admin_2fa.json`, `stats_cache.json`, `stats_fetch.lock`, `rate_limits.json`, `login_attempts.json`,
+`admin_2fa.json`, `stats_cache.json`, `stats_fetch.lock`, `rate_limits.json` and `ratelimit/` (the limits — see
+[Rate limits](#rate-limits-1740)), `login_attempts.json`,
 `blacklist_changes.json`, the whitelist, index, statistics-timeline, network, backup, database-memory,
 probe and accounts state files (`*_state.json`), `proc_usage.json`, caches and locks, `*.marker` files
-and `iconpacks/`.
+(among them `schema_retry.marker`: after a schema upgrade that failed, or left its heavy part to the janitor,
+the web waits a minute before it tries again — 1.74.0) and `iconpacks/`.
 
 ---
 
@@ -3212,7 +3345,7 @@ All API endpoints are accessed via `api.php?endpoint=<name>` (or `/api/<name>` w
 |----------|--------|-------------|
 | `submit_report` | POST | Submit a new abuse report |
 | `check_status` | POST | Check report status (requires email + report ID or hash) |
-| `check_block` | POST/GET | Check if an info hash is blocked |
+| `check_block` | POST/GET | Check if an info hash is blocked (POST asks for the CAPTCHA when its context is on; GET never does — see [Rate limits](#rate-limits-1740)) |
 | `submit_appeal` | POST | Submit a block/unblock appeal |
 | `unsubscribe` | GET/POST | Unsubscribe from emails (GET = link click, POST = one-click) |
 | `save_email_preferences` | POST | Save per-type notification preferences |
@@ -3278,7 +3411,7 @@ Prefix: `admin/`. Each needs a panel session **and** that endpoint's own panel p
 | `admin/backup_status` | GET | Backups page: what this machine can back up, the run state (with log tail), the archives, the schedule (1.11.0) |
 | `admin/backup_action` | POST | `op=run\|cancel\|verify\|prune\|delete\|restore\|restore-db\|token` — every one behind the admin password; `restore-db` also needs the exact database name typed |
 | `admin/backup_test_path` | POST | Read-only test of the backup directory and the tooling |
-| `admin/backup_download` | GET | Streams one archive; `?id=&token=` with a single-use, five-minute token |
+| `admin/backup_download` | GET | Streams one archive; `?id=&token=` with a single-use, five-minute token that `admin/backup_action` op `token` issued (1.74.0: a token signed with the HMAC key alone is refused) |
 | `admin/check_whitelist_path` | POST | Test the whitelist file / directory permissions |
 | `admin/whitelist_status` | GET | Status card data (file, state, counts, worker heartbeat, warnings) |
 | `admin/fetch_whitelist` | GET | Paginated whitelist (`sort=col:dir,…`, `search`, `search_files`, `source`, `meta`, `banned`, `ip`, `group=ip`) |

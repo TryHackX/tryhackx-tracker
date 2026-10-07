@@ -203,7 +203,6 @@ add('js.antispam', {
     'u_s':   ('s', 's'),
     'u_min': ('min', 'min'),
     'u_h':   ('h', 'godz.'),
-    'again': ('You can send again.', 'Możesz wysłać ponownie.'),
     'solving': ('Sending again…', 'Wysyłam ponownie…'),
 })
 add('js.captcha', {

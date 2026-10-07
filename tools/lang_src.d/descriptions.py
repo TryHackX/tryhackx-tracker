@@ -28,7 +28,7 @@ add('descs', {
     'public_named': (
         'A description is public: whoever can open this torrent reads it, with your name beside it — '
         '“Description by :name”. You can hide your name in <a href=":url">Privacy</a>.',
-        'Opis jest publiczny: przeczyta go każdy, kto może otworzyć ten torrent, a obok będzie twoja nazwa — '
+        'Opis jest publiczny: przeczyta go każdy, kto może otworzyć ten torrent, a obok będzie Twoja nazwa — '
         '„Autor opisu: :name”. Nazwę możesz ukryć w <a href=":url">ustawieniach prywatności</a>.'),
     'public_hidden': (
         'A description is public: whoever can open this torrent reads it. Your name is hidden — it says '
@@ -46,7 +46,7 @@ add('descs', {
     'col_date': ('Date', 'Data'),
     'col_date_title': (
         'When it was written, published or edited — in your time zone',
-        'Kiedy go napisano, opublikowano albo zmieniono — w twojej strefie czasowej'),
+        'Kiedy go napisano, opublikowano albo zmieniono — w Twojej strefie czasowej'),
 })
 
 # ── the account page: the tab, its heading, the two privacy switches ────────────────
@@ -57,16 +57,16 @@ add('account', {
     'descs_public_hint': (
         'Only published ones — yours and those you co-wrote with an edit — with your part in each. Off, nobody but '
         'you sees the list.',
-        'Tylko opublikowane — twoje i te, które współtworzysz edycjami — z twoją rolą przy każdym. Wyłączone — tej '
-        'listy nie widzi nikt poza tobą.'),
+        'Tylko opublikowane — Twoje i te, które współtworzysz edycjami — z Twoją rolą przy każdym. Wyłączone — tej '
+        'listy nie widzi nikt poza Tobą.'),
     'descs_public_name_hidden': (
         'Your name is hidden on your descriptions right now, so this list is shown to nobody else either.',
-        'Twoja nazwa jest teraz ukryta przy opisach, więc tej listy też nie widzi nikt poza tobą.'),
+        'Twoja nazwa jest teraz ukryta przy opisach, więc tej listy też nie widzi nikt poza Tobą.'),
     'credit_public_label': ('Show my name on the descriptions I write and edit', 'Pokazuj moją nazwę przy opisach, które piszę i zmieniam'),
     'credit_public_hint': (
         'Off, every description and every edit of yours says “a member” instead of your name — no link, no picture. '
         'Moderators still see who wrote it.',
-        'Wyłączone — przy każdym twoim opisie i każdej twojej edycji zamiast nazwy widać „użytkownik”, bez linku '
+        'Wyłączone — przy każdym Twoim opisie i każdej Twojej edycji zamiast nazwy widać „użytkownik”, bez linku '
         'i bez zdjęcia. Moderatorzy nadal widzą, kto jest autorem.'),
 })
 
@@ -132,11 +132,11 @@ add('notify', {
     'content_edit_applied': ('Your edit of ":name" was accepted', 'Twoja edycja opisu „:name” została przyjęta'),
     'content_edit_applied_body': (
         'It changed :pct% of the description, and you are credited beside its author.',
-        'Zmieniła :pct% opisu, a pod opisem widać teraz twój udział obok autora.'),
+        'Zmieniła :pct% opisu, a pod opisem widać teraz Twój udział obok autora.'),
     'content_edited': ('Your description of ":name" was edited', 'Twój opis „:name” został zmieniony'),
     'content_edited_body': (
         'A moderator accepted an edit that changed :pct% of it. You are still its author.',
-        'Moderator przyjął edycję, która zmieniła :pct% tekstu. Autorstwo zostaje przy tobie.'),
+        'Moderator przyjął edycję, która zmieniła :pct% tekstu. Autorstwo zostaje przy Tobie.'),
     'content_edit_rejected': ('Your edit of ":name" was not accepted', 'Twoja edycja opisu „:name” nie została przyjęta'),
     'content_deleted': ('Your description of ":name" was deleted', 'Twój opis „:name” został usunięty'),
     'content_deleted_body': (
@@ -154,7 +154,7 @@ add('js.app', {
     'credit_first': ('first', 'pierwsza wersja'),
     'credit_edit': (':pct% edit', 'edycja :pct%'),
     'credit_hidden': ('a member', 'użytkownik'),
-    'credit_hidden_you': ('a member (you)', 'użytkownik (ty)'),
+    'credit_hidden_you': ('a member (you)', 'użytkownik (Ty)'),
     'credit_deleted': ('a deleted account', 'usunięte konto'),
     'credit_more_title': ('Show everyone', 'Pokaż wszystkich'),
     'desc_propose_title': (
@@ -164,7 +164,7 @@ add('js.app', {
     'desc_edit_title': (
         'Change this description: the editor opens with its text, and a moderator decides. Its author stays, and '
         'you are credited with the share you changed',
-        'Zmień ten opis: edytor otworzy się z jego tekstem, a zdecyduje moderator. Autor zostaje, a tobie zostanie '
+        'Zmień ten opis: edytor otworzy się z jego tekstem, a zdecyduje moderator. Autor zostaje, a Tobie zostanie '
         'przypisany udział w zmianach'),
     'desc_delete': ('Delete description', 'Usuń opis'),
     'desc_delete_sure': ('Click again to delete', 'Kliknij ponownie, aby usunąć'),

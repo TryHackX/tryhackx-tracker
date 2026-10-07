@@ -76,6 +76,21 @@ function janitorHeavy(PDO $db, array $cfg, array $argv): void
             $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
     }
 
+    // the public catalogue's narrow table (1.74.0, includes/index.php indexCatalogTick()): what the metadata worker and
+    // federation resolved since the last run, then a stretch of the rolling walk — the walk that fills it the first time
+    // (up to IDX_CATALOG_FILL_SECONDS a run) and keeps putting it right after that. After the poll and the prune, so it
+    // walks what they left; only while the index is on, like everything above.
+    if ($ix['enabled']) {
+        $ct = indexCatalogTick($db);
+        $cw = $ct['walk'] ?? null;
+        if ($ct['error'] !== null || ($cw && $cw['passed']) || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[catalog] recent=%d walked=%d written=%d removed=%d%s ms=%d%s', (int)$ct['recent'],
+                (int)($cw['rows'] ?? 0), (int)($cw['written'] ?? 0), (int)($cw['removed'] ?? 0),
+                ($cw && $cw['passed']) ? ' PASS-COMPLETE' : '', (int)($cw['ms'] ?? 0),
+                $ct['error'] !== null ? ' error=' . $ct['error'] : ''), "\n";
+        }
+    }
+
     // whitelist upkeep: refresh stale swarm counts, and the dead-row pass on its own schedule
     // submissions proving themselves: metadata in, at least one peer, or give up with a reason
     $wp = wlProbeTick($db, $cfg);

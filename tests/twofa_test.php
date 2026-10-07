@@ -156,6 +156,34 @@ check('disabling clears the secret and every code',
       !empty($run('disable')['ok']) && ($run('enabled')['on'] ?? true) === false
       && ($run('state')['secret'] ?? 'x') === '');
 
+/* ── 5. a damaged state file fails CLOSED (1.74.0, AUTH-4) ───────────────── */
+//
+// Until 1.74.0 every one of these read as "two-factor off", and the sign-in went through on the password alone: a bad
+// restore, a full disk or a hand edit took the second factor away without a word. Now a file that EXISTS but is not
+// a state this panel wrote counts as ON — no code can be checked against it, so the sign-in stops at the code — and
+// only a MISSING file means "never set up".
+$stateFile = $tmpDir . '/config/admin_2fa.json';
+$broken = ['an empty file' => '', 'a truncated file' => '{"enabled": true, "secret": "GEZD', 'garbage' => "\x00\x01not json",
+           'JSON that is not an object' => '[1,2,3]', '"enabled" with no secret' => '{"enabled": true}',
+           'a state without its "enabled" key' => '{"secret": "GEZDGNBVGY3TQOJQ"}'];
+foreach ($broken as $what => $body) {
+    file_put_contents($stateFile, $body);
+    check("$what counts as two-factor ON — fail-closed", ($run('enabled')['on'] ?? false) === true);
+}
+file_put_contents($stateFile, '{"enabled": true, "secret": "GEZD');
+$recBroken = $run('rec', 'AAAAA-BBBBB');
+check('… and no code can pass against it, nor a recovery code', ($run('check', '123456')['ok'] ?? true) === false
+      && is_array($recBroken) && array_key_exists('left', $recBroken) && $recBroken['left'] === null);
+$s = $run('state');
+check('… the state says it is broken, and nothing reads a secret out of it', ($s['broken'] ?? false) === true && ($s['secret'] ?? 'x') === '');
+$run('regen');
+check('… a path that saves the state (re-issuing codes, cancelling a setup) cannot turn it into a valid "off"',
+      (string)@file_get_contents($stateFile) === '{"enabled": true, "secret": "GEZD');
+@unlink($stateFile);
+check('a MISSING file is what "never set up" looks like: off', ($run('enabled')['on'] ?? true) === false);
+check('the state twofaDisable() writes is a valid "off", not a broken one',
+      !empty($run('disable')['ok']) && ($run('enabled')['on'] ?? true) === false && ($run('state')['broken'] ?? true) === false);
+
 $rm = static function (string $d) use (&$rm) {
     foreach (glob($d . '/*') ?: [] as $f) { is_dir($f) ? $rm($f) : @unlink($f); }
     @rmdir($d);

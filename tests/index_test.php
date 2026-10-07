@@ -777,7 +777,11 @@ foreach (['indexPoll' => 'the poll history is the total AFTER the poll',
           'indexTick' => 'this number stands one call away from that DELETE'] as $fn => $why) {
     check("$fn() reads the exact count, never the cache", !$callsCached($fn), $why);
 }
-check('control: the same check does see a cached read where one belongs (indexStatus)', $callsCached('indexStatus'));
+// The control is the pager's unfiltered count, the one place the cached total is MEANT to be read (its doc comment
+// above indexTotalCacheFile()). It used to be indexStatus(); 1.74.0 (PERF-4) makes the status card's total the sum of
+// the one GROUP BY pass it already makes, kept in the status cache for five minutes, so that function no longer
+// touches indexTotalCached() at all — a control that names a function which does not call it can only fail.
+check('control: the same check does see a cached read where one belongs (indexListSelect, the pager\'s count)', $callsCached('indexListSelect'));
 
 $db->exec("TRUNCATE TABLE index_polls");
 @unlink($fileH);

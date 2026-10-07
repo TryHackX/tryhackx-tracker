@@ -31,16 +31,6 @@ add('nav', {
 })
 
 
-# ── recovered 2026-09-13 ────────────────────────────────────────────────────
-# These strings were added straight to lang/en.php and lang/pl.php between 1.43 and 1.50 and never to
-# these sources, so the first regeneration since then (1.50.1) dropped all of them. They are written
-# back here, where the generator reads from. tests/lang_test.php now checks that the generated files
-# match the sources, so a string added to the generated file alone fails the battery on the spot.
-add('', {
-    'nav.members': ('Members',
-        'Użytkownicy'),
-})
-
 # ── 1.56.0: the note beside the account link while the browser will not let the page play ──
 add('nav', {
     'sounds_locked': ('sounds: click to enable', 'dźwięki: kliknij, by włączyć'),

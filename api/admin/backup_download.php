@@ -5,7 +5,9 @@
  * Auth is enforced by the router (admin/*), so this is never reachable without an admin session.
  * On top of that the link carries a token minted by admin/backup_action (which asks for the admin
  * password): bound to this one archive, valid for BACKUP_TOKEN_TTL seconds and burned on first use,
- * so a URL that ends up in a proxy log or a browser history cannot be replayed.
+ * so a URL that ends up in a proxy log or a browser history cannot be replayed. Since 1.74.0 (PANEL-1)
+ * the token must also have been ISSUED there — its nonce recorded by backupIssueToken() — so one signed
+ * with `hmac_secret` alone, by somebody who knows the secret but not the password, is refused (403).
  *
  * The archives are 0600 root inside a 0700 root directory — the web user cannot read them at all.
  * The bytes come out of the root helper's stdout and are copied to the client in chunks, so the
@@ -14,8 +16,8 @@
  * Query: ?endpoint=admin/backup_download&id=<archive id>&token=<token>
  */
 
-$id    = trim((string)($_GET['id'] ?? ''));
-$token = trim((string)($_GET['token'] ?? ''));
+$id    = trim(strInput($_GET, 'id'));
+$token = trim(strInput($_GET, 'token'));
 
 $deny = function (string $msg, int $code = 403) {
     // No JSON here: the browser navigated to this URL, so a plain sentence is what a person sees.
@@ -34,8 +36,12 @@ if ($secret === '') $deny(__('api.backup.dl_no_secret'), 500);
 if (!backupVerifyToken($token, $id, $secret)) {
     $deny(__('api.backup.dl_invalid', ['ttl' => BACKUP_TOKEN_TTL]), 410);
 }
-if (!backupBurnToken($token)) {
-    $deny(__('api.backup.dl_used'), 410);
+// Issued here, for this archive, and not used yet — spent in the same step (backupRedeemToken()).
+switch (backupRedeemToken($token, $id)) {
+    case 'ok':         break;
+    case 'used':       $deny(__('api.backup.dl_used'), 410);
+    case 'unrecorded': $deny(__('api.backup.state_unwritable'), 500);
+    default:           $deny(__('api.backup.dl_not_issued'), 403);
 }
 
 if (backupCommand($cfg) === '' || !trackerExecAvailable()) {

@@ -137,6 +137,10 @@ try:
     st, b = call("v1/users/lookup", {"login": "shoptest_buyer"}, SHOP)
     check("a shop key may look an account up", st == 200 and b.get("found") is True, b)
     check("… and is told whether a grant would do anything", b.get("effective") is True, b)
+    # 1.74.0 (PRIV-7): a membership as a partner needs it — never the panel's notes, who granted it or row ids.
+    grp = b.get("groups") or []
+    check("… its memberships say which group, from and until when, and whether in force — and nothing else",
+          len(grp) >= 1 and all(sorted(g.keys()) == ["active", "expires_at", "granted_at", "name", "slug"] for g in grp), grp)
     st, b = call("v1/users/provision", {"username": "shoptest_new", "email": "shoptest_new@example.org"}, SHOP)
     check("a shop key may NOT create accounts", st == 403 and b.get("error") == "forbidden", (st, b))
     st, b = call("v1/auth/merge", {"external_id": "1", "login": "shoptest_buyer"}, SHOP)

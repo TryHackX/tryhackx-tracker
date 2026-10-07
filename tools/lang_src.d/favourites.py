@@ -27,7 +27,7 @@ add('profile', {
     # edit box, which nobody else gets, and it always showed your favourites, likes, registered torrents
     # and lists whether or not you had made them public. What stays true in every case, about as short.
     'this_is_you':    ('this is your profile — others see only what you show',
-                       'to twój profil — inni widzą tylko to, co pokazujesz'),
+                       'to Twój profil — inni widzą tylko to, co pokazujesz'),
     'nothing_shared': ('This account does not share anything publicly.',
                        'To konto nie udostępnia niczego publicznie.'),
     'favourites':     ('Favourites', 'Ulubione'),
@@ -58,18 +58,16 @@ add('account', {
     'fav_public_label': ('Show my favourites on my profile',
                          'Pokazuj moje ulubione na moim profilu'),
     'fav_public_hint': ('Your profile is at <code>?action=u&amp;name=:name</code>. Off, it shows nothing but your name.',
-                        'Twój profil jest pod <code>?action=u&amp;name=:name</code>. Wyłączone — widać na nim tylko twoją nazwę.'),
+                        'Twój profil jest pod <code>?action=u&amp;name=:name</code>. Wyłączone — widać na nim tylko Twoją nazwę.'),
     'fav_listed_label': ('Let my name appear in “who has this in favourites”',
                          'Pozwól, by moja nazwa pojawiała się na liście „kto ma to w ulubionych”'),
     'fav_listed_hint': ('Off, you are not on that list and you are not in its count either — nobody can work out that somebody is missing.',
-                        'Wyłączone — nie ma cię na tej liście ani w jej liczniku; nikt nie wywnioskuje, że kogoś brakuje.'),
+                        'Wyłączone — nie ma Cię na tej liście ani w jej liczniku; nikt nie wywnioskuje, że kogoś brakuje.'),
     # 1.72.1: the star stands beside a torrent wherever its actions are, not only in the search results.
     'fav_none':       ('Nothing here yet. The star beside a torrent puts it here — in the search results, a list or on a profile.',
                        'Na razie pusto. Gwiazdka przy torrencie dodaje go tutaj — w wynikach wyszukiwania, na liście albo na profilu.'),
-    'fav_count':      (':n of :max kept', ':n z :max'),
     'uploads_none':   ('You have not registered anything while signed in.',
                        'Nie zarejestrowałeś niczego będąc zalogowanym.'),
-    'uploads_public': ('On my profile', 'Na moim profilu'),
 })
 
 # ── strings the browser scripts need ────────────────────────────────────────
@@ -93,8 +91,8 @@ add('js.fav', {
                        'Osoby, które mają to w ulubionych, które to polubiły lub oceniły, i publiczne listy, na których to jest — ci, którzy zgodzili się pokazywać nazwę'),
     'nothing':        ('Nothing here.', 'Nic tu nie ma.'),
     'load_failed':    ('Could not load the list.', 'Nie udało się wczytać listy.'),
-    'public_on':      ('Shown on your profile', 'Pokazywane na twoim profilu'),
-    'public_off':     ('Not on your profile', 'Nie na twoim profilu'),
+    'public_on':      ('Shown on your profile', 'Pokazywane na Twoim profilu'),
+    'public_off':     ('Not on your profile', 'Nie na Twoim profilu'),
     'status_live':    ('Served', 'Serwowane'),
     'status_waiting': ('Being checked', 'Sprawdzane'),
     'status_refused': ('Did not pass the check', 'Nie przeszło sprawdzenia'),
@@ -140,7 +138,7 @@ add('whitelist', {
 
 add('js.app', {
     'wl_exists_not_yours': ('already registered — those will not appear on your profile',
-                            'już zarejestrowane — te nie pojawią się na twoim profilu'),
+                            'już zarejestrowane — te nie pojawią się na Twoim profilu'),
 })
 
 # ── the page title ──────────────────────────────────────────────────────────

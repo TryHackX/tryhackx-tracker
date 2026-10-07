@@ -25,8 +25,19 @@ if ($viewer !== null && profilesEnabled($cfg) && userValidUsername($want)) {
     if ($candidate && ($candidate['status'] ?? '') === 'active') {
         $isSelf = (int)$candidate['id'] === (int)$viewer['id'];
         // Somebody may always read their own profile, exactly as a stranger would see it — that is
-        // the only honest way to answer "what does this look like to other people?".
-        if ($isSelf || userCan($db, $cfg, 'favourites.view_others')) $profile = $candidate;
+        // the only honest way to answer "what does this look like to other people?". Anybody else's:
+        // the READER's account holds favourites.view_others (1.74.0, PRIV-6 — a panel session in the
+        // same browser is not the member's permission), and the owner has not hidden it from them.
+        //
+        // A block with `hide_profile` closes the page for that one reader, and closes it the way every
+        // other "no" closes it: right here, so it is the SAME not-found page below a name nobody has
+        // renders — byte for byte (1.74.0, PRIV-3: it used to be a second, differently written one).
+        // Telling them "you have been blocked" would answer a question they did not ask and confirm the
+        // account exists.
+        if ($isSelf || (userIdHasPermission($db, $cfg, (int)$viewer['id'], 'favourites.view_others')
+                        && !profileHiddenFrom($db, (int)$candidate['id'], (int)$viewer['id']))) {
+            $profile = $candidate;
+        }
     }
 }
 
@@ -78,14 +89,6 @@ $profFav = favContext($db, $cfg, $viewer);
 $profExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
                                      array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')])));
 $mayFileSearch = userCan($db, $cfg, 'index.files');   // see the account page: the same gate, asked once
-// A block with `hide_profile` closes the page for that one reader, and closes it the way every
-// other "no" closes it: the same not-found page a name nobody has renders. Telling them "you have
-// been blocked" here would answer a question they did not ask and confirm the account exists.
-if (!$isSelf && profileHiddenFrom($db, (int)$profile['id'], (int)$viewer['id'])) {
-    echo '<h1>' . _h('profile.h1') . '</h1><p>' . _h('profile.not_found') . '</p>';
-    echo '<p><a class="btn btn-secondary" href="' . $baseUrl . '">' . _h('common.back_home') . '</a></p>';
-    return;
-}
 $profState   = $profPeople['may_friend'] && !$isSelf ? friendState($db, (int)$viewer['id'], (int)$profile['id']) : 'none';
 $profBlocked = !$isSelf && blockRow($db, (int)$viewer['id'], (int)$profile['id']) !== null;
 $showLists = $profLists['enabled'] && ($isSelf ? $profLists['may_use'] : ($profLists['may_view'] && listsVisibleFor($db, $cfg, $profile, (int)$viewer['id'])));
@@ -248,6 +251,9 @@ if ($profCover !== null) {
         <h2><?= _h('profile.uploads') ?></h2>
         <div class="profile-toolbar">
             <input type="text" class="profile-search" id="pf-up-search" maxlength="120" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
+            <?php /* The states on your own profile only (1.74.0, PRIV-4): anybody else is shown the registrations the
+                     tracker serves and nothing else, so a choice among the others would always find nothing. */ ?>
+            <?php if ($isSelf): ?>
             <select id="pf-up-status" title="<?= _h('profile.status') ?>">
                 <option value=""><?= _h('profile.status_any') ?></option>
                 <option value="live"><?= _h('profile.status_live') ?></option>
@@ -255,6 +261,7 @@ if ($profCover !== null) {
                 <option value="refused"><?= _h('profile.status_refused') ?></option>
                 <option value="blocked"><?= _h('profile.status_blocked') ?></option>
             </select>
+            <?php endif; ?>
             <select id="pf-up-sort" title="<?= _h('profile.sort') ?>">
                 <option value="added:desc"><?= _h('profile.sort_added') ?></option>
                 <option value="name:asc"><?= _h('profile.sort_name') ?></option>

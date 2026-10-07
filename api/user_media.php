@@ -22,7 +22,10 @@
 // after this is a read, and an image request must not hold this browser's session lock while it
 // streams — a profile with twenty avatars on it is twenty of these at once.
 $viewer = usersEnabled($cfg) ? currentUser($db) : null;
-$panel = function_exists('isLoggedIn') && isLoggedIn();
+// "A panel session" is the owner's own, or one through an account of the Admin group — the two panelCan() answers
+// yes for a permission nobody holds (1.74.0, PANEL-3). Until 1.74.0 it was any panel session at all: a moderator
+// with one queue could stream the uncropped source of anybody's picture.
+$panel = function_exists('panelCan') && panelCan($db, $cfg, 'panel.owner.__never__');
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 
 $row = userMediaFind($db, $cfg, strtolower((string)($_GET['h'] ?? '')), (int)($_GET['s'] ?? 0),

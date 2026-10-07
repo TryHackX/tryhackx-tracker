@@ -752,6 +752,12 @@ function userAuthenticate(PDO $db, string $login, string $password): ?array {
 /** $ttlSeconds bounds this sign-in (login form choice); null = no deadline ("forever"). */
 function userSessionStart(PDO $db, array $user, string $ip = '', ?int $ttlSeconds = null): void {
     session_regenerate_id(true);
+    // A panel session that rode in on ANOTHER account does not outlive this sign-in (1.74.0): it is that account's —
+    // userCan() and panelCan() answer for it — and userMaybeOpenPanelSession() opens one for this account only when
+    // this account may have one. The owner's own session (no account behind it) is a different person's and stays.
+    if (!empty($_SESSION['admin_via_user']) && (int)$_SESSION['admin_via_user'] !== (int)$user['id']) {
+        unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+    }
     $_SESSION['user_id'] = (int)$user['id'];
     $_SESSION['user_login_time'] = time();
     if ($ttlSeconds !== null && $ttlSeconds > 0) $_SESSION['user_expires_at'] = time() + $ttlSeconds;
@@ -1072,15 +1078,36 @@ function userGroupPermissions(?string $json): array {
     return $out;
 }
 
-/** ACTIVE memberships of a user with the group rows joined (expired and not-yet-started ignored). */
+/**
+ * ACTIVE memberships of a user with the group rows joined (expired and not-yet-started ignored), the highest priority
+ * first.
+ *
+ * 1.74.0 (PERF-10): the columns its callers read and no others, put in order here rather than by the database — `g.*`
+ * with an ORDER BY made a temporary table of every call, on disk because of the TEXT column (2–3 ms each, eleven calls
+ * on one profile) — and kept for the rest of the request (userGroupsMemoRef()). The memo is forgotten together with the
+ * permission memo (userPermissionsForget()), which everything that changes a membership calls: userGrantGroup(),
+ * userRevokeGroup(), the janitor's expiry (usersTick()), the cascade, a group deleted.
+ */
 function userGroups(PDO $db, int $userId): array {
+    $memo = &userGroupsMemoRef();
+    if (isset($memo[$userId])) return $memo[$userId];
     $st = $db->prepare(
-        "SELECT g.*, m.granted_at, m.expires_at, m.granted_by, m.note
+        "SELECT g.id, g.slug, g.name, g.description, g.color, g.priority, g.is_default, g.is_system, g.permissions,
+                m.granted_at, m.expires_at, m.granted_by, m.note
          FROM user_group_members m JOIN user_groups g ON g.id = m.group_id
-         WHERE m.user_id = ? AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at >= NOW())
-         ORDER BY g.priority DESC, g.name");
+         WHERE m.user_id = ? AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at >= NOW())");
     $st->execute([$userId]);
-    return $st->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    // ORDER BY g.priority DESC, g.name — the name compared as the table's case-insensitive collation compares it.
+    usort($rows, static fn(array $a, array $b): int => ((int)$b['priority'] <=> (int)$a['priority'])
+        ?: strcmp(mb_strtolower((string)$a['name'], 'UTF-8'), mb_strtolower((string)$b['name'], 'UTF-8')));
+    return $memo[$userId] = $rows;
+}
+
+/** The per-request memo behind userGroups() (1.74.0) — reachable, so userPermissionsForget() can forget it. */
+function &userGroupsMemoRef(): array {
+    static $memo = [];
+    return $memo;
 }
 
 /** Every membership of a user, active or not (admin view / account page). */
@@ -1097,6 +1124,36 @@ function userGroupsAll(PDO $db, int $userId): array {
 }
 
 /**
+ * An address shortened to its network (1.74.0, PRIV-2): an IPv4 address to its /24 ("203.0.113.0/24"), an IPv6 one
+ * to its /48 ("2001:db8:1::/48"); '' stays '', and anything that is not an address becomes "—". What the panel's
+ * Users page shows the staff who may see the list but not edit accounts — enough to tell two networks apart, not
+ * enough to name a household.
+ */
+function userIpShort(?string $ip): string {
+    $ip = trim((string)$ip);
+    if ($ip === '') return '';
+    $bin = @inet_pton($ip);
+    if ($bin === false) return '—';
+    // An IPv4 address written the IPv6 way (::ffff:a.b.c.d) is the IPv4 address.
+    if (strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") $bin = substr($bin, 12);
+    if (strlen($bin) === 4) return (string)inet_ntop(substr($bin, 0, 3) . "\0") . '/24';
+    return (string)inet_ntop(substr($bin, 0, 6) . str_repeat("\0", 10)) . '/48';
+}
+
+/**
+ * Every membership of a user as a PARTNER site is told it (1.74.0, PRIV-7) — v1/users/lookup, the sign-in bridge's
+ * v1/auth/status and v1/auth/verify: which group (slug, name), from when, until when, in force or not. Never the
+ * panel's view (userGroupsAll()): the notes the operator and other partners wrote on a grant, who granted it and
+ * the rows' own ids are the panel's business — a second shop's key read the first one's notes.
+ */
+function userGroupsForPartner(PDO $db, int $userId): array {
+    return array_map(static fn(array $g): array => [
+        'slug' => (string)$g['slug'], 'name' => (string)$g['name'],
+        'granted_at' => $g['granted_at'], 'expires_at' => $g['expires_at'], 'active' => (bool)$g['active'],
+    ], userGroupsAll($db, $userId));
+}
+
+/**
  * The per-request memo behind userEffectivePermissions(), reachable so it can be FORGOTTEN.
  *
  * It was a `static` inside that function, which made it unforgettable: a request that changed
@@ -1109,10 +1166,15 @@ function &userPermCacheRef(): array {
     return $cache;
 }
 
-/** Drop the memo for one account (0 = all of them). Called wherever a membership changes. */
+/**
+ * Drop the memo for one account (0 = all of them). Called wherever a membership changes. The memberships themselves
+ * (userGroups(), 1.74.0) are forgotten with it — one call, so no caller can forget one and keep the other.
+ */
 function userPermissionsForget(int $userId = 0): void {
     $cache = &userPermCacheRef();
-    if ($userId <= 0) { $cache = []; return; }
+    $groups = &userGroupsMemoRef();
+    if ($userId <= 0) { $cache = []; $groups = []; return; }
+    unset($groups[$userId]);
     foreach (array_keys($cache) as $k) {
         // the key is the id, optionally followed by the verification flag: "7", "7|vt", "7|vu" — and PHP
         // stores the plain "7" as the INTEGER key 7, so both sides are compared as strings (1.71.0: the
@@ -1207,6 +1269,10 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $del("DELETE FROM shout_mentions WHERE user_id = ?", [$userId], 'mentions');
     $del("DELETE FROM shouts WHERE user_id = ?", [$userId], 'shouts');
     $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
+    // …and what it SENT that sits in other people's notifications (1.74.0, PRIV-1): a friend request or its acceptance
+    // names the account and nothing else, so it goes with it (v93 `sender_id`). What its comments said is emptied below,
+    // with the comments (commentForgetAccount()).
+    $del("DELETE FROM user_notifications WHERE sender_id = ? AND type IN ('friend_request', 'friend_accepted')", [$userId], 'notifications_sent');
     $del("DELETE FROM user_tokens WHERE user_id = ?", [$userId], 'tokens');
     $del("DELETE FROM user_favourites WHERE user_id = ?", [$userId], 'favourites');
     // Lists, and the rows inside them. The items are keyed by list, not by user, so they have to go
@@ -1275,7 +1341,7 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     // v88 a comment of theirs that OTHER people replied to stays as a tombstone instead — "[deleted]", no
     // author, no words — so the replies under it keep their place and their sense.
     if (function_exists('commentForgetAccount')) {
-        foreach (commentForgetAccount($db, $userId) as $label => $n) if ($n > 0) $gone[$label] = $n;
+        foreach (commentForgetAccount($db, $userId, $cfg) as $label => $n) if ($n > 0) $gone[$label] = $n;
     }
     // Reports and warnings (v84, includes/reports.php). The reports this account FILED go — a report is its
     // reporter's word, and it is answered to them. So do the reports ABOUT its comments and shouts, which went
@@ -1298,6 +1364,7 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $del("UPDATE mail_queue SET status = 'skipped', last_error = 'account deleted' WHERE user_id = ? AND status = 'queued'",
          [$userId], 'mail_skipped');
     $del("DELETE FROM users WHERE id = ?", [$userId], 'user');
+    userPermissionsForget($userId);   // its memberships are gone: nothing in this request answers from before
     return $gone;
 }
 
@@ -1318,12 +1385,23 @@ function userIsRootAdmin(array $user, array $cfg): bool {
 }
 
 /**
- * THE permission check. Admin panel session → always true. Users feature off → the legacy public
+ * THE permission check. The owner's own panel session → always true. Users feature off → the legacy public
  * behaviour. Otherwise: the guest group for anonymous visitors, the union of the signed-in user's
  * groups for everyone else (see userEffectivePermissions).
+ *
+ * A panel session OPENED THROUGH AN ACCOUNT (`admin_via_user`, userMaybeOpenPanelSession()) is that account, on the
+ * site as in the panel (1.74.0, AUTH-1): what its groups give — the admin group's blanket included, as panelCan()
+ * reads it — and nothing more. Until 1.74.0 every panel session passed every check here, so a moderator whose group
+ * gave `panel.access` and one queue was, on the public pages, everybody: deleting anybody's emotes, reading every
+ * profile, any public permission at all — while panelCan() in the panel itself refused them.
  */
 function userCan(PDO $db, array $cfg, string $perm): bool {
-    if (function_exists('isLoggedIn') && isLoggedIn()) return true;   // panel admin
+    if (function_exists('isLoggedIn') && isLoggedIn()) {
+        $via = (int)($_SESSION['admin_via_user'] ?? 0);
+        if ($via <= 0) return true;                       // the owner's own (classic) panel session
+        if (userIsAdminGroup($db, $via)) return true;     // panelCan()'s shortcut, for the same account
+        return userIdHasPermission($db, $cfg, $via, $perm);
+    }
     if (!usersEnabled($cfg)) return userLegacyDefault($perm);
     $u = currentUser($db);
     $perms = userEffectivePermissions($db, $u ? (int)$u['id'] : null, $cfg);
@@ -1358,10 +1436,10 @@ function userHasPanelAccess(PDO $db, int $userId): bool {
 /**
  * THE PANEL permission check. Deliberately NOT userCan().
  *
- * userCan() begins with `if (isLoggedIn()) return true;` — any panel session passes every check,
- * which is right for the public site (the owner should see everything) and catastrophic here: it
- * would make a moderator omnipotent the moment they held a panel session, which is the whole point
- * of having one.
+ * userCan() let the owner's panel session pass every check — right for the public site (the owner should see
+ * everything) and catastrophic here, where the question is which part of the PANEL a session may work. Until
+ * 1.74.0 it let ANY panel session pass, a moderator's too; since then it reads a session opened through an account
+ * as that account (AUTH-1), the same way this function does.
  *
  * So this asks a different question. A CLASSIC panel session — signed in with the owner's password —
  * keeps its total bypass; there is one owner and the panel is theirs. A session opened by
@@ -1375,15 +1453,6 @@ function panelCan(PDO $db, array $cfg, string $perm): bool {
     if (userIsAdminGroup($db, $viaUser)) return true;
     $p = userEffectivePermissions($db, $viaUser, $cfg);   // the same gate userIdHasPermission() applies
     return !empty($p[$perm]);
-}
-
-/** panelCan() or a 403. For endpoints; mirrors requireAuth()'s shape. */
-function panelRequire(string $perm): void {
-    global $db, $cfg;
-    if (!($db instanceof PDO) || !is_array($cfg)) { jsonResponse(['error' => __('api.users.forbidden')], 403); }
-    if (!panelCan($db, $cfg, $perm)) {
-        jsonResponse(['error' => __('api.users.panel_no_access')], 403);
-    }
 }
 
 /**
@@ -1419,12 +1488,23 @@ function userGrantGroup(PDO $db, int $userId, int $groupId, ?string $expiresAt, 
     $g->execute([$groupId]);
     $group = $g->fetch(PDO::FETCH_ASSOC) ?: ['name' => '?', 'slug' => '?'];
     if ($notify) {
-        $when = ($grantedAt !== null ? 'from ' . $grantedAt . ' ' : '');
-        $until = $expiresAt === null ? 'permanently' : 'until ' . $expiresAt;
-        userNotify($db, $userId, 'group-granted', 'You are now in the "' . $group['name'] . '" group',
-            'Access granted ' . $when . $until . '.' . ($note !== '' ? ' Note: ' . $note : ''));
+        // In the member's language (1.74.0, QUAL-18) — the request granting it is usually the panel's or a shop's.
+        $lang = recipientLangOf($db, null, $userId);
+        userNotify($db, $userId, 'group-granted', langFor($lang, 'notify.group_granted', ['group' => $group['name']]),
+            userGrantSentence($lang, $grantedAt, $expiresAt, $note, ' '));
     }
     return ['group' => $group['slug'], 'granted_at' => $grantedAt, 'expires_at' => $expiresAt];
+}
+
+/**
+ * "Access granted from … until …. Note: …" in one language (1.74.0): the notification's body above, and the body of
+ * the mail the panel and a shop may send with a grant (api/admin/user_grant.php, api/v1/users_grant.php). $glue
+ * joins the note on: a space in a notification, a new line in a mail.
+ */
+function userGrantSentence(string $lang, ?string $grantedAt, ?string $expiresAt, string $note = '', string $glue = ' '): string {
+    $key = 'notify.group_granted_' . ($grantedAt !== null ? 'from_' : '') . ($expiresAt === null ? 'permanent' : 'until');
+    $s = langFor($lang, $key, ['from' => (string)$grantedAt, 'until' => (string)$expiresAt]);
+    return $note !== '' ? $s . $glue . langFor($lang, 'notify.group_note', ['note' => $note]) : $s;
 }
 
 function userRevokeGroup(PDO $db, int $userId, int $groupId, bool $notify = true): bool {
@@ -1435,7 +1515,7 @@ function userRevokeGroup(PDO $db, int $userId, int $groupId, bool $notify = true
     $st->execute([$userId, $groupId]);
     userPermissionsForget($userId);   // and not from before the revoke either
     if ($st->rowCount() > 0 && $notify) {
-        userNotify($db, $userId, 'group-revoked', 'Your "' . $name . '" group access was removed');
+        userNotify($db, $userId, 'group-revoked', langFor(recipientLangOf($db, null, $userId), 'notify.group_revoked', ['group' => $name]));
         return true;
     }
     return $st->rowCount() > 0;
@@ -1562,21 +1642,85 @@ function userValidOrderId(string $id): bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * THE LANGUAGE OF WHAT AN ACCOUNT RECEIVES (1.74.0, QUAL-18 / QUAL-15) — a notification, a mail. Decided when it is
+ * written, by its RECIPIENT, never by whichever request happens to write it (includes/lang.php: "Mail sent to a user
+ * has to speak that user's language"): until 1.74.0 a friend request arrived in the sender's language and the group,
+ * password and e-mail notices and mails in English. In this order:
+ *   1. the account's own language (Account → Language), while the site still offers it;
+ *   2. when the account is the one making this request — signing up, setting its address, switching on two factors —
+ *      the language this request is in: an account that never chose one reads the site in whatever the request
+ *      resolved to (its cookie, its browser), and a welcome in another language would contradict the page under it;
+ *   3. the site's default (`default_language` — not "auto": a browser that is not here cannot be asked);
+ *   4. English.
+ * The ONE helper — comments and reports had a copy each until 1.74.0 (commentLangFor(), reportLangFor()). $user is
+ * any row with `id` and `language`; null is nobody in particular (a report's sender, who has no account): the site's.
+ */
+function recipientLang(array $cfg, ?array $user): string
+{
+    $ok = static fn(string $c): bool => $c !== '' && function_exists('langSupported') && langSupported($cfg, $c);
+    $mine = strtolower(trim((string)($user['language'] ?? '')));
+    if ($ok($mine)) return $mine;
+    $uid = (int)($user['id'] ?? 0);
+    // langInit() has run (a request with a language of its own, not the CLI) and this request is the account's own.
+    if ($uid > 0 && isset($_SESSION) && is_array($_SESSION) && (int)($_SESSION['user_id'] ?? 0) === $uid
+        && !empty($GLOBALS['__lang']['current']) && function_exists('langCurrent')) {
+        $now = strtolower(langCurrent());
+        if ($ok($now)) return $now;
+    }
+    $site = strtolower(trim((string)($cfg['default_language'] ?? '')));
+    if ($site !== 'auto' && $ok($site)) return $site;
+    return defined('LANG_FALLBACK') ? LANG_FALLBACK : 'en';
+}
+
+/** recipientLang() for an account known by its id — one narrow read. $cfg null: the request's (`$GLOBALS['cfg']`). */
+function recipientLangOf(PDO $db, ?array $cfg, int $userId): string
+{
+    $cfg = $cfg ?? (is_array($GLOBALS['cfg'] ?? null) ? $GLOBALS['cfg'] : []);
+    $row = null;
+    if ($userId > 0) {
+        try {
+            $st = $db->prepare("SELECT id, language FROM users WHERE id = ?");
+            $st->execute([$userId]);
+            $row = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        } catch (\Throwable $e) { $row = null; }
+    }
+    return recipientLang($cfg, $row);
+}
+
+/**
  * One notification. `$link` (v83) is where it happened, as a SITE-RELATIVE address the account page offers
  * as a button — `?action=…` and nothing else: anything that is not one is dropped rather than stored, so
  * this column can never carry an off-site address or a script into the page. It is written only when there
  * is one, so every caller from before it (and a database whose migration has not run) is untouched.
+ *
+ * `$senderId` (v93, 1.74.0) is the account it is FROM, where one is — a friend request, its acceptance — so that it
+ * goes with that account (userDeleteCascade()) instead of naming a deleted person for a year, and so a second request
+ * is not announced while the first is unread (api/user_people.php). Written only when given, like the link.
+ *
+ * Write the title and the body in the RECIPIENT's language (recipientLang()) — never a literal, never __(): a
+ * notification is stored as words, and the request that writes it is usually somebody else's.
  */
-function userNotify(PDO $db, int $userId, string $type, string $title, string $body = '', ?string $link = null): void {
+function userNotify(PDO $db, int $userId, string $type, string $title, string $body = '', ?string $link = null, ?int $senderId = null): void {
     $link = ($link !== null && preg_match('/^\?action=[A-Za-z0-9_\-]+(?:&[A-Za-z0-9_\-]+=[A-Za-z0-9_.\-%]*)*(?:#[A-Za-z0-9_\-]+)?$/', $link)
              && strlen($link) <= 255) ? $link : null;
-    if ($link === null) {
-        $db->prepare("INSERT INTO user_notifications (user_id, type, title, body) VALUES (?, ?, ?, ?)")
-           ->execute([$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null]);
-        return;
+    $cols = ['user_id', 'type', 'title', 'body'];
+    $vals = [$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null];
+    if ($link !== null) { $cols[] = 'link'; $vals[] = $link; }
+    $insert = static function (array $cols, array $vals) use ($db): void {
+        $db->prepare("INSERT INTO user_notifications (" . implode(', ', $cols) . ") VALUES ("
+                     . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute($vals);
+    };
+    if ($senderId !== null && $senderId > 0) {
+        try {
+            $insert(array_merge($cols, ['sender_id']), array_merge($vals, [$senderId]));
+            return;
+        } catch (PDOException $e) {
+            // A database whose v93 migration has not run yet (a request served while another one migrates): the
+            // notification all the same, without its sender. Anything else is an error, as it always was.
+            if ((string)$e->getCode() !== '42S22') throw $e;
+        }
     }
-    $db->prepare("INSERT INTO user_notifications (user_id, type, title, body, link) VALUES (?, ?, ?, ?, ?)")
-       ->execute([$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null, $link]);
+    $insert($cols, $vals);
 }
 
 /**
@@ -1602,6 +1746,9 @@ function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, strin
     if ($email === '' || !function_exists('sendEmail')) return;
     $transactional = !empty($opts['transactional']);
     if (!$transactional && function_exists('isUnsubscribed') && isUnsubscribed($db, $email, 'account')) return;
+    // The mail's own words — the greeting, the button's fallback line, the footer — in the language the caller
+    // wrote the subject and the body in: the RECIPIENT's (1.74.0, recipientLang()), unless the caller says.
+    $lang = (string)($opts['lang'] ?? recipientLang($cfg, $user));
     try {
         ob_start();
         // One address for both the footer's preferences link and the List-Unsubscribe header — and none
@@ -1610,11 +1757,11 @@ function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, strin
         $plain = $bodyText . (!empty($opts['action_url']) ? "\n\n" . $opts['action_url'] : '');
         $html = buildEmailHtml([
             'title' => $opts['title'] ?? $subject,
-            'greeting' => 'Hello ' . sanitize($user['username'] ?? '') . ',',
+            'greeting' => langFor($lang, 'mail.hello', ['name' => sanitize($user['username'] ?? '')]),
             'body' => nl2br(sanitize($bodyText)),
             'action_url' => $opts['action_url'] ?? '',
             'action_label' => $opts['action_label'] ?? '',
-            'details' => [], 'unsubscribe_url' => $unsub,
+            'details' => [], 'unsubscribe_url' => $unsub, 'lang' => $lang,
         ], $cfg);
         @sendEmail($email, $subject, $plain, $html, $cfg, $unsub);
         ob_end_clean();
@@ -1649,9 +1796,11 @@ function userResetSend(PDO $db, array $cfg, ?array $u): bool {
     if (!$u || ($u['status'] ?? '') !== 'active' || trim((string)($u['email'] ?? '')) === '') return false;
     $reset = userResetCreate($db, (int)$u['id']);
     $link = mailAbsoluteUrl($cfg, '?action=reset&token=' . $reset);
-    userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — password reset',
-        'A password reset was requested for your account. The link below sets a new password and is valid for ' . USER_RESET_TTL_MIN . " minutes.\nIf this was not you, ignore this message — your password stays unchanged.",
-        ['title' => 'Password reset', 'action_url' => $link, 'action_label' => 'Set a new password', 'transactional' => true]);
+    $lang = recipientLang($cfg, $u);   // the account's language, not the form's (1.74.0)
+    userNotifyMail($db, $cfg, $u, langFor($lang, 'mail.reset_subject', ['site' => $cfg['site_name'] ?? 'Tracker']),
+        langFor($lang, 'mail.reset_body', ['minutes' => USER_RESET_TTL_MIN]) . "\n" . langFor($lang, 'mail.reset_ignore'),
+        ['title' => langFor($lang, 'mail.reset_title'), 'action_url' => $link, 'action_label' => langFor($lang, 'mail.reset_button'),
+         'transactional' => true, 'lang' => $lang]);
     return true;
 }
 
@@ -1688,6 +1837,7 @@ function userVerifyConsume(PDO $db, string $token): ?int {
     if (!$row) return null;
     $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
     $db->prepare("UPDATE users SET email_verified = 1 WHERE id = ?")->execute([(int)$row['user_id']]);
+    userPermissionsForget((int)$row['user_id']);   // the e-mail gate opened: nothing in this request answers from before
     return (int)$row['user_id'];
 }
 
@@ -1702,16 +1852,21 @@ function userVerifySend(PDO $db, array $cfg, array $user): bool {
     $token = userVerifyCreate($db, (int)$user['id']);
     $link = mailAbsoluteUrl($cfg, '?action=verify&token=' . $token);
     $site = $cfg['site_name'] ?? 'Tracker';
-    $text = "Hello {$user['username']},\n\nConfirm that this address belongs to your $site account by opening:\n$link\n\nThe link is valid for " . USER_VERIFY_TTL_H . " hours. If you did not request this, ignore this message.";
+    // In the account's language (1.74.0): the one it chose, else — signing up, setting a first address — the one
+    // the page it did that on was in, else the site's (recipientLang()).
+    $lang = recipientLang($cfg, $user);
+    $say = langFor($lang, 'mail.verify_body', ['site' => $site, 'hours' => USER_VERIFY_TTL_H]);
+    $text = langFor($lang, 'mail.hello', ['name' => $user['username']]) . "\n\n" . $say . "\n\n" . $link;
     try {
         // Transactional (1.73.0): no preferences link and no List-Unsubscribe header — there is nothing in a
         // confirmation to unsubscribe from, and a one-click "unsubscribe" offered on it is a way to stop the
         // mail a member must not miss (userNotifyMail() says which mail is which).
-        $html = buildEmailHtml(['title' => 'Confirm your email address', 'greeting' => 'Hello ' . sanitize($user['username']) . ',',
-            'body' => 'Confirm that this address belongs to your ' . sanitize($site) . ' account. The link is valid for ' . USER_VERIFY_TTL_H . ' hours. If you did not request this, simply ignore this message.',
-            'action_url' => $link, 'action_label' => 'Confirm email address',
-            'details' => [], 'unsubscribe_url' => ''], $cfg);
-        return (bool)@sendEmail($email, $site . ' — confirm your email address', $text, $html, $cfg, '');
+        $html = buildEmailHtml(['title' => langFor($lang, 'mail.verify_title'),
+            'greeting' => langFor($lang, 'mail.hello', ['name' => sanitize($user['username'])]),
+            'body' => langFor($lang, 'mail.verify_body', ['site' => sanitize($site), 'hours' => USER_VERIFY_TTL_H]),
+            'action_url' => $link, 'action_label' => langFor($lang, 'mail.verify_button'),
+            'details' => [], 'unsubscribe_url' => '', 'lang' => $lang], $cfg);
+        return (bool)@sendEmail($email, langFor($lang, 'mail.verify_subject', ['site' => $site]), $text, $html, $cfg, '');
     } catch (\Throwable $e) { return false; }
 }
 
@@ -1786,11 +1941,12 @@ function userEmailChangeStart(PDO $db, array $cfg, array $user, string $newEmail
     $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL " . USER_ECHANGE_TTL_H . " HOUR)")
        ->execute([(int)$user['id'], hash('sha256', $token)]);
     $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $token);
-    userNotifyMail($db, $cfg, $user, ($cfg['site_name'] ?? 'Tracker') . ' — confirm your email change',
-        'A change of your account email address was requested' . ($newEmail === '' ? ' (address REMOVAL)' : ' to: ' . $newEmail)
-        . ".\nStep 1 of 2: confirm from THIS (current) address. The link is valid for " . USER_ECHANGE_TTL_H . " hours.\nIf this was not you, change your password immediately.",
-        ['title' => 'Confirm your email change', 'action_url' => $link, 'action_label' => 'Yes, continue the change',
-         'transactional' => true]);
+    $lang = recipientLang($cfg, $user);   // every step in the account's language (1.74.0)
+    userNotifyMail($db, $cfg, $user, langFor($lang, 'mail.echange_subject', ['site' => $cfg['site_name'] ?? 'Tracker']),
+        ($newEmail === '' ? langFor($lang, 'mail.echange_body_removal') : langFor($lang, 'mail.echange_body_to', ['email' => $newEmail]))
+        . "\n" . langFor($lang, 'mail.echange_step1', ['hours' => USER_ECHANGE_TTL_H]) . "\n" . langFor($lang, 'mail.echange_not_you'),
+        ['title' => langFor($lang, 'mail.echange_title'), 'action_url' => $link, 'action_label' => langFor($lang, 'mail.echange_button'),
+         'transactional' => true, 'lang' => $lang]);
     return ['stage' => 'old'];
 }
 
@@ -1805,20 +1961,26 @@ function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
     if (!$u || ($u['pending_email'] ?? null) === null) return ['error' => 'invalid'];
     $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
     $pending = (string)$u['pending_email'];
+    // Every mail and notice of the change in the ACCOUNT's language (1.74.0) — the link is opened from a mailbox,
+    // in whatever browser, and the page that opens it is not the account's own request. The mails go to an
+    // address that is not (yet, or any more) the row's `email`, so the row travels with that address in it.
+    $site = $cfg['site_name'] ?? 'Tracker';
+    $lang = recipientLang($cfg, $u);
     if ($row['type'] === 'echange_old') {
         if ($pending === '') {   // removal — the old mailbox has spoken, done
             $db->prepare("UPDATE users SET email = NULL, email_verified = 0, pending_email = NULL, email_changed_at = NOW() WHERE id = ?")->execute([(int)$u['id']]);
-            userNotify($db, (int)$u['id'], 'account', 'Your email address was removed', 'Confirmed from your previous address.');
+            userPermissionsForget((int)$u['id']);   // the address its e-mail gate is read from changed
+            userNotify($db, (int)$u['id'], 'account', langFor($lang, 'notify.email_removed'), langFor($lang, 'notify.email_removed_body'));
             return ['stage' => 'removed'];
         }
         $t2 = bin2hex(random_bytes(32));
         $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_new', ?, NOW() + INTERVAL " . USER_ECHANGE_TTL_H . " HOUR)")
            ->execute([(int)$u['id'], hash('sha256', $t2)]);
         $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $t2);
-        userNotifyMail($db, $cfg, ['email' => $pending, 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — confirm your new email address',
-            "The change was approved from the previous address.\nStep 2 of 2: confirm that THIS new address is yours. The link is valid for " . USER_ECHANGE_TTL_H . " hours.",
-            ['title' => 'Confirm your new address', 'action_url' => $link, 'action_label' => 'Confirm new address',
-             'transactional' => true]);
+        userNotifyMail($db, $cfg, array_merge($u, ['email' => $pending]), langFor($lang, 'mail.echange_new_subject', ['site' => $site]),
+            langFor($lang, 'mail.echange_new_body') . "\n" . langFor($lang, 'mail.echange_step2', ['hours' => USER_ECHANGE_TTL_H]),
+            ['title' => langFor($lang, 'mail.echange_new_title'), 'action_url' => $link, 'action_label' => langFor($lang, 'mail.echange_new_button'),
+             'transactional' => true, 'lang' => $lang]);
         return ['stage' => 'old_ok', 'pending' => $pending];
     }
     // echange_new — finalise (new address arrives already verified; cooldown clock restarts)
@@ -1827,17 +1989,18 @@ function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
     } catch (PDOException $e) {
         return ['error' => 'email_taken'];
     }
-    userNotify($db, (int)$u['id'], 'account', 'Your email address was changed', 'New address: ' . $pending . ' (verified).');
+    userPermissionsForget((int)$u['id']);   // the address its e-mail gate is read from changed
+    userNotify($db, (int)$u['id'], 'account', langFor($lang, 'notify.email_changed'), langFor($lang, 'notify.email_changed_body', ['email' => $pending]));
     // A security notice to the address that just stopped being the account's — the one mail that tells a
     // member whose mailbox was taken over what happened — so it is transactional, like the steps before it.
-    userNotifyMail($db, $cfg, ['email' => (string)$u['email'], 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — your email address was changed',
-        'The email on your account is now: ' . $pending . "\nIf this was not you, reset your password immediately.",
-        ['transactional' => true]);
+    userNotifyMail($db, $cfg, array_merge($u, ['email' => (string)$u['email']]), langFor($lang, 'mail.echange_done_old_subject', ['site' => $site]),
+        langFor($lang, 'mail.echange_done_old_body', ['email' => $pending]) . "\n" . langFor($lang, 'mail.echange_done_old_not_you'),
+        ['transactional' => true, 'lang' => $lang]);
     // …and a written confirmation lands in the NEW mailbox too (the trail used to end with just
     // the browser page — pkt: "na nowym tylko link, nie ma potwierdzenia")
-    userNotifyMail($db, $cfg, ['email' => $pending, 'username' => $u['username']], ($cfg['site_name'] ?? 'Tracker') . ' — email change confirmed',
-        'Done! This address is now active and verified on your account. Account notices and password resets arrive here from now on.',
-        ['transactional' => true]);
+    userNotifyMail($db, $cfg, array_merge($u, ['email' => $pending]), langFor($lang, 'mail.echange_done_new_subject', ['site' => $site]),
+        langFor($lang, 'mail.echange_done_new_body'),
+        ['transactional' => true, 'lang' => $lang]);
     return ['stage' => 'done', 'email' => $pending];
 }
 
@@ -1865,7 +2028,10 @@ function usersTick(PDO $db, array $cfg, ?int $now = null): array {
              WHERE m.expires_at IS NOT NULL AND m.expires_at < NOW() LIMIT 500");
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
             $db->prepare("DELETE FROM user_group_members WHERE id = ?")->execute([(int)$m['id']]);
-            userNotify($db, (int)$m['user_id'], 'group-expired', 'Your "' . $m['name'] . '" group access expired');
+            userPermissionsForget((int)$m['user_id']);
+            // The janitor has no language of its own: each member is told in theirs (1.74.0).
+            userNotify($db, (int)$m['user_id'], 'group-expired',
+                       langFor(recipientLangOf($db, $cfg, (int)$m['user_id']), 'notify.group_expired', ['group' => $m['name']]));
             $out['expired']++;
         }
         // expiry warnings, once per membership
@@ -1878,11 +2044,12 @@ function usersTick(PDO $db, array $cfg, ?int $now = null): array {
             $st->execute([$days]);
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
                 $db->prepare("UPDATE user_group_members SET warned_at = NOW() WHERE id = ?")->execute([(int)$m['id']]);
-                userNotify($db, (int)$m['user_id'], 'group-expiring', 'Your "' . $m['name'] . '" group access expires soon',
-                    'Access ends ' . $m['expires_at'] . '.');
                 $u = userFindById($db, (int)$m['user_id']);
-                if ($u) userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — your "' . $m['name'] . '" access expires soon',
-                    'Your "' . $m['name'] . '" group access ends ' . $m['expires_at'] . '.');
+                $lang = recipientLang($cfg, $u);
+                userNotify($db, (int)$m['user_id'], 'group-expiring', langFor($lang, 'notify.group_expiring', ['group' => $m['name']]),
+                    langFor($lang, 'notify.group_expiring_body', ['until' => $m['expires_at']]));
+                if ($u) userNotifyMail($db, $cfg, $u, langFor($lang, 'mail.group_expiring_subject', ['site' => $cfg['site_name'] ?? 'Tracker', 'group' => $m['name']]),
+                    langFor($lang, 'mail.group_expiring_body', ['group' => $m['name'], 'until' => $m['expires_at']]), ['lang' => $lang]);
                 $out['warned']++;
             }
         }

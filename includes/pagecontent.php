@@ -304,7 +304,7 @@ function pageContentConditions(array $cfg, ?PDO $db = null): array {
         'stats'        => [($cfg['tracker_stats_enabled'] ?? '0') === '1', __('api.pages.cond_stats')],
         'donations'    => [($cfg['donations_enabled'] ?? '0') === '1', __('api.pages.cond_donations')],
         'contact'      => [($cfg['contact_visible'] ?? '1') === '1', __('api.pages.cond_contact')],
-        'transparency' => [($cfg['transparency_enabled'] ?? '1') === '1', __('api.pages.cond_transparency')],
+        'transparency' => [transparencyEnabled($cfg), __('api.pages.cond_transparency')],
         'languages'    => [$langs > 1, __('api.pages.cond_languages')],
         'ratings'      => [$ratings, __('api.pages.cond_ratings')],
         'descriptions' => [$content, __('api.pages.cond_descriptions')],

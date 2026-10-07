@@ -114,12 +114,13 @@ function whoLikeArg(string $s): string
  * "A group of theirs GRANTS it, and that membership is in force today", as SQL over `$userCol` (a column
  * named by the code, never by a request). The ids are integers read from the group rows; `granted_at <= NOW()`
  * for the reason userGroups() has it — a membership that starts next week is not a membership today.
+ *
+ * 1.74.0 (QUAL-13): userMembershipSql() (includes/favourites.php) — the one generator every view of a grant uses,
+ * the profile's included. It ended a membership a second earlier than userGroups() did (`> NOW()`).
  */
 function whoGrantedSql(array $groupIds, string $userCol): string
 {
-    $in = implode(',', array_map('intval', $groupIds));
-    return "EXISTS (SELECT 1 FROM user_group_members m WHERE m.user_id = $userCol AND m.group_id IN ($in)
-                     AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at > NOW()))";
+    return userMembershipSql($groupIds, $userCol);
 }
 
 /**
@@ -160,12 +161,16 @@ function whoFriendOfSql(int $viewerId): array
  * verified where the site demands it (an unverified account runs at guest level, so its membership counts for
  * nothing), and not hiding their profile from this reader — the directory's clause. Returns [sql, args];
  * the account table is always joined as `u`.
+ *
+ * 1.74.0 (QUAL-13): "verified" is userEmailGateSql() — the profile's own rule (includes/favourites.php): an address
+ * that is there AND verified, the Admin group exempt. The bare flag let an account with no address onto the list.
  */
 function whoPersonSql(array $cfg, int $viewerId): array
 {
     $sql = "u.status = 'active'"
          . " AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id = u.id AND b.blocked_id = ? AND b.hide_profile = 1)";
-    if (userEmailVerifyRequired($cfg)) $sql .= " AND u.email_verified = 1";
+    $gate = userEmailGateSql($cfg, 'u');
+    if ($gate !== '') $sql .= " AND $gate";
     return [$sql, [$viewerId]];
 }
 

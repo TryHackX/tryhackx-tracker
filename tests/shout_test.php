@@ -1256,16 +1256,26 @@ check('both renderers give a row an id, which is what the live language switch m
 // `langswap:begin`); the switcher's own press is not a press "outside". shout_check / people_check press them all.
 $askSrc = preg_match('/const askInPlace = \(btn, question, onYes, opts\) => \{.*?\n\};\n/s', $appJs, $am) ? $am[0] : '';
 $askFinish = preg_match('/const finish = \(putBack\) => \{.*?\n    \};\n/s', $askSrc, $am) ? $am[0] : '';
+// 1.74.0 (UX-14): the clock no longer calls finish(true) itself but expire(), which is finish(true) plus the focus —
+// when the reader's focus was inside the question as it ran out, it goes back to the button that asked (it fell to
+// <body>). The pin that said `setTimeout(() => finish(true), …)` follows it; what expire() does is pinned below.
+$askExpire = preg_match('/const expire = \(\) => \{.*?\n    \};\n/s', $askSrc, $am) ? $am[0] : '';
 check('the question in a row hides the row\'s other controls and takes itself away again — but not on a language switch, which says it again where it stands',
       str_contains($css, '.shout-asking .shout-pin { display: none; }')
       && str_contains($askSrc, "opts.host.classList.add('shout-asking')")
       && str_contains($askFinish, "opts.host.classList.remove('shout-asking')")
       && str_contains($askFinish, 'ask.remove();') && str_contains($askFinish, 'btn.hidden = wasHidden;')
-      && str_contains($askSrc, 'timer = setTimeout(() => finish(true), Number(opts.life) > 0 ? Number(opts.life) : 5000);')
+      && str_contains($askSrc, 'timer = setTimeout(expire, Number(opts.life) > 0 ? Number(opts.life) : 5000);')
+      && str_contains($askExpire, 'finish(true);')
       && str_contains($askSrc, 'btn.after(ask);') && str_contains($askSrc, 'btn.hidden = true;')
       && str_contains($askSrc, "t.key('js.shout.yes')") && str_contains($askSrc, "t.key('js.shout.no')")
       && str_contains($askSrc, '!(window.LangSwap && window.LangSwap.isSwitch(e.target))')
       && !str_contains($askSrc, 'langswap'));
+check('… and when the five seconds run out under the reader\'s focus, the focus goes back to the button that asked — as Esc and No already do (UX-14)',
+      str_contains($askExpire, 'const held = ask.contains(document.activeElement);')
+      && strpos($askExpire, 'const held') < strpos($askExpire, 'finish(true);')
+      && str_contains($askExpire, 'if (held && btn.isConnected) btn.focus();')
+      && strpos($askExpire, 'finish(true);') < strpos($askExpire, 'btn.focus()'));
 // Every listener askInPlace() puts on the document is taken off in finish(), and every exit calls finish(): the two
 // it has (a press outside, Esc) and no other — besides the Yes / No buttons' own clicks.
 preg_match_all("/document\\.addEventListener\\('([a-z]+)', (\\w+), true\\);/", $askSrc, $askAdds, PREG_SET_ORDER);

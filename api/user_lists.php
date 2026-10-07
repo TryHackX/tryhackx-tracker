@@ -173,7 +173,8 @@ if ($who === '') {
     // Somebody else's: every gate, and one 404 for all of them.
     // profilesEnabled() among them — a list of somebody else's is read on their PROFILE, and with
     // profiles off there is no page for it to be on. Favourites and uploads already say so.
-    if (!$me || !profilesEnabled($cfg) || !userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
+    // The READER's account (1.74.0, PRIV-6), not a panel session in the same browser.
+    if (!$me || !profilesEnabled($cfg) || !userIdHasPermission($db, $cfg, (int)$me['id'], 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
     if (!userValidUsername($who)) jsonResponse(['error' => 'not_found'], 404);
     $cand = userFindByLogin($db, $who);
     if (!$cand || ($cand['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);

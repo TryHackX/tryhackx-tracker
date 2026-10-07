@@ -64,8 +64,9 @@ if ($duration === 'custom') {
 $note = mb_substr(trim((string)($input['note'] ?? '')), 0, 255);
 $res = userGrantGroup($db, $id, (int)$group['id'], $expiresAt, 'admin', $note, true, $grantedAt);
 if (!empty($input['email'])) {
-    $until = $expiresAt === null ? 'permanently' : 'until ' . $expiresAt;
-    userNotifyMail($db, $cfg, $u, ($cfg['site_name'] ?? 'Tracker') . ' — you are now in the "' . $group['name'] . '" group',
-        'Access granted ' . ($grantedAt !== null ? 'from ' . $grantedAt . ' ' : '') . $until . '.' . ($note !== '' ? "\nNote: " . $note : ''));
+    // In the member's language (1.74.0) — the same sentence their notification carries.
+    $uLang = recipientLang($cfg, $u);
+    userNotifyMail($db, $cfg, $u, langFor($uLang, 'mail.group_granted_subject', ['site' => $cfg['site_name'] ?? 'Tracker', 'group' => $group['name']]),
+        userGrantSentence($uLang, $grantedAt, $expiresAt, $note, "\n"), ['lang' => $uLang]);
 }
 jsonResponse(['success' => true, 'group' => $group['slug'], 'granted_at' => $res['granted_at'], 'expires_at' => $res['expires_at']]);

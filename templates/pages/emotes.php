@@ -183,7 +183,7 @@ $emPer   = max(1, min(200, (int)($cfg['shout_emote_per_user'] ?? 20) ?: 20));
             <i class="bi bi-file-earmark-image emote-drop-icon" aria-hidden="true"></i>
             <span class="emote-drop-main"><u><?= _h('shout.emote_drop_choose') ?></u> <?= _h('shout.emote_drop_or') ?></span>
             <span class="emote-drop-sub"><?= __('shout.emote_drop_sub', ['kb' => $emMaxKb, 'px' => $emMaxPx]) ?></span>
-            <input type="file" id="emote-file" class="emote-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp">
+            <input type="file" id="emote-file" class="emote-drop-input" accept=".svg,.png,.gif,.webp,image/svg+xml,image/png,image/gif,image/webp" aria-label="<?= _h('shout.emote_drop_aria') ?>">
         </div>
         <div class="emote-fields">
             <div class="form-group">

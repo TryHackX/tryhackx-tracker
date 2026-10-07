@@ -86,15 +86,15 @@ if ($newPass !== '') {
     // a password change invalidates every remember-me token (stolen-cookie hygiene)
     $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([(int)$u['id']]);
     $changed[] = 'password';
-    userNotify($db, (int)$u['id'], 'account', 'Your password was changed',
-        'If this was not you, reset it immediately and contact the site admin.');
+    $uLang = recipientLang($cfg, $u);   // the account's language (1.74.0)
+    userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.password_changed'), langFor($uLang, 'notify.password_changed_body'));
 }
 if ($emailStage === 'done_direct') {
     // first address on an account that had none — standard verification mail guards it
     $fresh = userFindById($db, (int)$u['id']);
     if ($fresh && trim((string)$fresh['email']) !== '') $verifySent = userVerifySend($db, $cfg, $fresh);
-    userNotify($db, (int)$u['id'], 'account', 'Your email was set',
-        'A verification link was sent to the new address.');
+    $uLang = recipientLang($cfg, $fresh ?? $u);
+    userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.email_set'), langFor($uLang, 'notify.email_set_body'));
 }
 
 jsonResponse(['success' => true, 'changed' => $changed, 'email_stage' => $emailStage, 'verify_sent' => $verifySent]);

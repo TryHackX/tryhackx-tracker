@@ -24,23 +24,26 @@ $regTermsText = trim((string)($cfg['users_terms_text'] ?? ''));
     <div class="form-group">
         <label for="reg-username"><?= _h('register.username') ?> <small class="form-hint"><?= _h('register.username_hint') ?></small></label>
         <input type="text" id="reg-username" name="username" maxlength="32" autocomplete="username" required>
-        <div class="error-msg"><?= _h('register.username_err') ?></div>
+        <?php /* The messages have their ids from the server (1.74.0, UX-12): liveValidate() names each as its field's description,
+                 and an id a script adds after load has no counterpart in the fetched page — the live language switch pairs by id
+                 first (assets/js/lang-swap.js) and left the words in the old language. The ids are the ones the script makes. */ ?>
+        <div class="error-msg" id="reg-username-error"><?= _h('register.username_err') ?></div>
     </div>
     <div class="form-group">
         <label for="reg-email"><?= _h('register.email') ?> <small class="form-hint"><?= _h($regEmailRequired ? 'register.email_hint_req' : 'register.email_hint_opt') ?></small></label>
         <input type="email" id="reg-email" name="email" maxlength="190" autocomplete="email"<?= $regEmailRequired ? ' required' : '' ?>>
-        <div class="error-msg"><?= _h($regEmailRequired ? 'register.email_err_req' : 'register.email_err_opt') ?></div>
+        <div class="error-msg" id="reg-email-error"><?= _h($regEmailRequired ? 'register.email_err_req' : 'register.email_err_opt') ?></div>
     </div>
     <div class="form-group">
         <label for="reg-password"><?= _h('register.password') ?></label>
         <input type="password" id="reg-password" name="password" maxlength="200" autocomplete="new-password" required>
         <div class="pw-checklist" id="reg-pw-checklist"></div>
-        <div class="error-msg"><?= _h('register.password_err') ?></div>
+        <div class="error-msg" id="reg-password-error"><?= _h('register.password_err') ?></div>
     </div>
     <div class="form-group">
         <label for="reg-password2"><?= _h('register.password2') ?></label>
         <input type="password" id="reg-password2" name="password2" maxlength="200" autocomplete="new-password" required>
-        <div class="error-msg"><?= _h('register.password2_err') ?></div>
+        <div class="error-msg" id="reg-password2-error"><?= _h('register.password2_err') ?></div>
     </div>
     <div class="form-group">
         <label class="search-check reg-terms"><input type="checkbox" id="reg-terms"><span class="search-check-box" aria-hidden="true"></span>

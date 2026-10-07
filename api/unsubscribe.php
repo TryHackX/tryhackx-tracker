@@ -1,7 +1,8 @@
 <?php
-// Supports both GET (link click) and POST (one-click unsubscribe from email clients)
-$email = $_GET['email'] ?? ($_POST['email'] ?? '');
-$token = $_GET['token'] ?? ($_POST['token'] ?? '');
+// Supports both GET (link click) and POST (one-click unsubscribe from email clients). Strings only (strInput(),
+// 1.74.0): `email[]=a` was an uncaught TypeError; now it is a missing parameter.
+$email = strInput($_GET, 'email', strInput($_POST, 'email'));
+$token = strInput($_GET, 'token', strInput($_POST, 'token'));
 
 if (!$email || !$token) {
     jsonResponse(['error' => __('api.unsubscribe.missing_params')], 400);

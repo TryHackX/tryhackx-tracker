@@ -111,18 +111,20 @@ switch ($op) {
         $r = backupRestoreDb($cfg, $id, $dbName, $confirm, $dryRun);
         if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.backup.db_restore_failed'), 'output' => $r['output']], 500);
         if ($dryRun) {
-            jsonResponse(['success' => true, 'dry_run' => true, 'db' => $db,
+            jsonResponse(['success' => true, 'dry_run' => true, 'db' => $dbName,
                           'dump_bytes' => (int)($r['json']['dump_bytes'] ?? 0),
                           'message' => (string)($r['json']['message'] ?? __('api.backup.db_dry_run_done'))]);
         }
-        jsonResponse(['success' => true, 'db' => $db, 'safety_dump' => (string)($r['json']['safety_dump'] ?? ''),
+        jsonResponse(['success' => true, 'db' => $dbName, 'safety_dump' => (string)($r['json']['safety_dump'] ?? ''),
                       'message' => __('api.backup.db_restored', ['db' => $dbName])]);
 
     case 'token':
-        // Single use, five minutes, bound to this one archive. The GET endpoint burns it.
+        // Single use, five minutes, bound to this one archive, and recorded as issued (1.74.0, PANEL-1): the GET
+        // endpoint redeems it against that record, so a token signed with the secret alone opens nothing.
         $secret = (string)($cfg['hmac_secret'] ?? '');
         if ($secret === '') jsonResponse(['error' => __('api.backup.no_hmac')], 500);
-        $token = backupMintToken($id, $secret);
+        $token = backupIssueToken($id, $secret);
+        if ($token === null) jsonResponse(['error' => __('api.backup.state_unwritable')], 500);
         jsonResponse(['success' => true, 'id' => $id, 'token' => $token, 'expires_in' => BACKUP_TOKEN_TTL,
                       'url' => getBaseUrl() . 'api.php?endpoint=admin/backup_download&id=' . rawurlencode($id) . '&token=' . rawurlencode($token)]);
 }

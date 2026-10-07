@@ -74,16 +74,23 @@ if ($search !== '') {
         $where[] = "ip LIKE ?";
         $params[] = $search . '%';
     } else {
+        // "Name, or one of its files" is TWO branches and a UNION (1.74.0, PERF-6), never `MATCH(name) … OR id IN
+        // (SELECT … MATCH(path) …)`: MariaDB cannot serve that OR from either index, so it walked the whole whitelist
+        // and ran the file subquery once per row — 20 s for a page at 30 000 rows and 431 000 files, the count past
+        // the 20-second limit. Each branch on its own is one index (the name's fulltext, or the files' fulltext joined
+        // by key) — the same split indexListSelect() and the public search made in 1.40.0.
         $like = ['sql' => "name LIKE ?", 'params' => ['%' . $search . '%']];
         if ($searchFiles) {
-            $like = ['sql' => "(name LIKE ? OR id IN (SELECT whitelist_id FROM whitelist_files WHERE path LIKE ?))", 'params' => ['%' . $search . '%', '%' . $search . '%']];
+            $like = ['split' => ["name LIKE ?", ['%' . $search . '%'],
+                                 "id IN (SELECT whitelist_id FROM whitelist_files WHERE path LIKE ?)", ['%' . $search . '%']]];
         }
         $likeClause = $like;
         $ft = mb_strlen($search) >= 3 ? whitelistFulltextTerm($search) : '';
         if ($ft !== '') {
             $fulltextClause = ['sql' => "MATCH(name) AGAINST(? IN BOOLEAN MODE)", 'params' => [$ft]];
             if ($searchFiles) {
-                $fulltextClause = ['sql' => "(MATCH(name) AGAINST(? IN BOOLEAN MODE) OR id IN (SELECT whitelist_id FROM whitelist_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE)))", 'params' => [$ft, $ft]];
+                $fulltextClause = ['split' => ["MATCH(name) AGAINST(? IN BOOLEAN MODE)", [$ft],
+                                               "id IN (SELECT whitelist_id FROM whitelist_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE))", [$ft]]];
             }
         }
     }
@@ -132,10 +139,30 @@ $columns = "id, info_hash, name, source, source_ref, api_client_id, ip, ip_bucke
             review_status, review_note, reviewed_at, submitter_id, submitter_public";
 $orderClause = implode(', ', $orderParts);
 
-/** Run count + page query for a given extra search clause (null = none). Throws on SQL error. */
+/**
+ * Run count + page query for a given extra search clause (null = none; ['sql', 'params'] one more condition;
+ * ['split' => [nameSql, nameParams, filesSql, filesParams]] the two branches of a name-or-files search, as a UNION —
+ * a row matching both is one row, which is what the OR meant). Throws on SQL error.
+ */
 $runQuery = function (?array $extra) use ($db, $where, $params, $columns, $orderClause, $perPage, $offset): array {
     $w = $where;
     $p = $params;
+    if ($extra && isset($extra['split'])) {
+        [$nameSql, $nameParams, $filesSql, $filesParams] = $extra['split'];
+        $wA = 'WHERE ' . implode(' AND ', array_merge($w, [$nameSql]));
+        $wB = 'WHERE ' . implode(' AND ', array_merge($w, [$filesSql]));
+        $countStmt = $db->prepare("SELECT COUNT(*) FROM ((SELECT id FROM whitelist $wA) UNION (SELECT id FROM whitelist $wB)) c");
+        $countStmt->execute(array_merge($p, $nameParams, $p, $filesParams));
+        $total = (int)$countStmt->fetchColumn();
+        $stmt = $db->prepare("SELECT * FROM ((SELECT $columns FROM whitelist $wA) UNION (SELECT $columns FROM whitelist $wB)) arm
+                              ORDER BY $orderClause LIMIT ? OFFSET ?");
+        $paramIdx = 1;
+        foreach (array_merge($p, $nameParams, $p, $filesParams) as $v) $stmt->bindValue($paramIdx++, $v, PDO::PARAM_STR);
+        $stmt->bindValue($paramIdx++, $perPage, PDO::PARAM_INT);
+        $stmt->bindValue($paramIdx, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        return [$total, $stmt->fetchAll()];
+    }
     if ($extra) {
         $w[] = $extra['sql'];
         $p = array_merge($p, $extra['params']);
@@ -225,7 +252,11 @@ try {
     $counts['active'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn();
     $counts['banned'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 1")->fetchColumn();
     $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status IN ('pending','fetching')")->fetchColumn();
-} catch (\Throwable $e) {}
+} catch (\Throwable $e) {
+    // Unknown, not zero (1.74.0, QUAL-26): the page's rows go out, the three whole-table counts say null, the log why.
+    error_log('[admin] fetch_whitelist: the counts failed: ' . $e->getMessage());
+    $counts = ['active' => null, 'banned' => null, 'pending_meta' => null];
+}
 
 // HOW MANY PARTNER SUBMISSIONS ARE WAITING — of the whole table, not of this page and not of the
 // current filter. A queue nobody is told about is a queue nobody works: the Review filter existed

@@ -62,7 +62,7 @@ add('shout', {
     'emotes_intro':  ('Write the code between colons in a shout — <code>:flame:</code> — and it becomes the picture. '
                       'The button beside the send button inserts them for you, and a code below copies itself when you click it.',
                       'Wpisz kod między dwukropkami — <code>:flame:</code> — a zamieni się w obrazek. '
-                      'Przycisk obok „Wyślij” wstawia je za ciebie, a kod poniżej kopiuje się po kliknięciu.'),
+                      'Przycisk obok „Wyślij” wstawia je za Ciebie, a kod poniżej kopiuje się po kliknięciu.'),
     'emotes_head':   ('Emotes', 'Emote'),
     'emotes_none':   ('Nothing here yet.', 'Na razie nic tu nie ma.'),
     'stickers_head': ('Stickers', 'Naklejki'),

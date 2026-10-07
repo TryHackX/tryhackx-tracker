@@ -55,6 +55,6 @@ jsonResponse([
                'status' => $user['status'], 'email_verified' => (int)($user['email_verified'] ?? 0) === 1,
                'created_at' => $user['created_at']],
     'external_id' => $identity ? (string)$identity['external_id'] : null,
-    'groups' => userGroupsAll($db, (int)$user['id']),
+    'groups' => userGroupsForPartner($db, (int)$user['id']),   // 1.74.0 (PRIV-7): never the panel's notes on a grant
     'server_time' => time(),
 ]);

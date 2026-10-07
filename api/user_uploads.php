@@ -62,7 +62,8 @@ if ($who === '') {
 } else {
     if (!$me) jsonResponse(['error' => 'not_found'], 404);
     if (!profilesEnabled($cfg) || !uploadsPublicEnabled($cfg)) jsonResponse(['error' => 'not_found'], 404);
-    if (!userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
+    // The READER's account (1.74.0, PRIV-6), not a panel session in the same browser.
+    if (!userIdHasPermission($db, $cfg, (int)$me['id'], 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
     if (!userValidUsername($who)) jsonResponse(['error' => 'not_found'], 404);
     $owner = userFindByLogin($db, $who);
     if (!$owner || ($owner['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);
@@ -89,6 +90,12 @@ $params = [(int)$owner['id']];
 // The visibility flag is enforced HERE and in the profile's own render, and nowhere else. It decides
 // whose list a torrent appears on — never what the tracker serves, never what the search finds.
 if (!$isOwn) $where[] = 'submitter_public = 1';
+// Somebody else's profile shows only what the tracker SERVES of theirs (1.74.0, PRIV-4) — the rule favourites
+// and lists have had since 1.57.0 ("no row the tracker refuses to serve"): never a banned registration, nor one
+// whose probe failed or is still running. Those, and what moderators decided about the words attached to it, are
+// the member's own business, on their own page. In SQL, before the count — so `total` counts the same rows.
+$liveSql = "banned = 0 AND (probe_status IS NULL OR probe_status NOT IN ('failed', 'probing'))";
+if (!$isOwn) $where[] = $liveSql;
 // A row's hash goes out only with `index.magnet`, and never for a banned row (the loop below). The
 // hash half of the search asks exactly that, in SQL, BEFORE a row is counted (1.69.0): a prefix matched
 // on a hash the answer then blanks is a hash read back sixteen answers at a time. Hex only, so a `%` or
@@ -109,13 +116,16 @@ $statusSql = [
     'blocked' => 'banned = 1',
     'refused' => "banned = 0 AND probe_status = 'failed'",
     'waiting' => "banned = 0 AND probe_status = 'probing'",
-    'live'    => "banned = 0 AND (probe_status IS NULL OR probe_status NOT IN ('failed', 'probing'))",
+    'live'    => $liveSql,
 ];
 $status = (string)($_GET['status'] ?? '');
-if (isset($statusSql[$status])) $where[] = $statusSql[$status];
+// For somebody else's list every filter but `live` is empty (1.74.0, PRIV-4): the rows it would pick are not on it.
+if (isset($statusSql[$status])) $where[] = $isOwn || $status === 'live' ? $statusSql[$status] : '0 = 1';
 
 $sortCols = ['added' => 'created_at', 'name' => 'name', 'size' => 'total_size',
              'seeders' => 'scrape_seeders', 'content' => 'content_status', 'visibility' => 'submitter_public'];
+// …and its order says nothing about what is withheld (1.74.0): the owner's columns sort the owner's page only.
+if (!$isOwn) unset($sortCols['content'], $sortCols['visibility']);
 [$col, $dir] = array_pad(explode(':', (string)($_GET['sort'] ?? 'added:desc'), 2), 2, 'desc');
 $order = ($sortCols[$col] ?? 'created_at') . (strtolower($dir) === 'asc' ? ' ASC' : ' DESC') . ', id DESC';
 
@@ -146,7 +156,9 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         // Three separate claims, deliberately not folded into one badge: what the tracker does with
         // it, what happened to the words attached to it, and whose list it shows up on.
         'status'         => whitelistDisplayStatus($r, $cfg),
-        'content_status' => (string)($r['content_status'] ?? 'none'),
+        // A description waiting for a moderator or turned down is its author's business (1.74.0, PRIV-4): to
+        // anybody else a row's words are published ('approved') or there are none.
+        'content_status' => $isOwn || ($r['content_status'] ?? '') === 'approved' ? (string)($r['content_status'] ?? 'none') : 'none',
         'public'         => (int)$r['submitter_public'] === 1,
     ];
 }

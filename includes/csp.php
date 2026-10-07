@@ -27,7 +27,8 @@
  * --------------------------------
  *  * script-src has NO 'unsafe-inline' and NO 'unsafe-eval'. Every inline block carries the nonce
  *    (nonceAttr(), below) and there is not one eval()/new Function() in assets/js or in the
- *    vendored uPlot. That part is real.
+ *    vendored uPlot. That part is real. The one exception since 1.74.0 is not ours: with reCAPTCHA
+ *    configured, 'unsafe-eval' where its widget can be drawn (see cspPolicy()).
  *  * style-src KEEPS 'unsafe-inline' and will keep it until includes/richtext.php stops building
  *    style="color:…" / style="font-size:…" from author BBCode (richtext.php:442-458) and the ~104
  *    style="" attributes in templates/ move into stylesheets. The panel's page-content preview is a
@@ -219,8 +220,19 @@ function cspReportUri(string $scope): string {
  *     be framed by anything, ever.
  *   * frame-src gains 'self' in the panel for the page-content preview iframe.
  * Returns '' when the mode is 'off'.
+ *
+ * GOOGLE'S CAPTCHA, READY FOR `enforce` (1.74.0, XSS-1). Production's report-only policy (10–29.09) recorded eight
+ * kinds of violation. Two were this site's own, both reCAPTCHA's: the stylesheet its loader puts into the page
+ * (style-src https://www.gstatic.com) and the eval its code tries (script-src 'unsafe-eval'). Both are granted only
+ * while a Google provider is configured (captchaCspHosts()), the eval only where a CAPTCHA can be drawn: every public
+ * page — assets/js/captcha.js draws one wherever an answer asks for it — and the panel's dashboard (its deletion
+ * CAPTCHA, $page 'admin'); never another panel page. The rest were NOT the site's: inline scripts and an inline
+ * handler on the front page (the site has no on*= and every inline block carries the nonce — browser extensions),
+ * a worker from blob: (nothing here makes one), and img-src blob: on the account page and Settings (the picture
+ * editor of 1.63.0, drawing from data: since 1.63.1). scratchpad/shots/csp_enforce_check.js renders the CAPTCHA
+ * pages, the account and Settings under `enforce` and counts what is still refused.
  */
-function cspPolicy(array $cfg, string $scope): string {
+function cspPolicy(array $cfg, string $scope, ?string $page = null): string {
     if (cspMode($cfg) === 'off') return '';
 
     // A JSON body has no subresources at all, so the API gets the strictest policy there is and it
@@ -247,6 +259,10 @@ function cspPolicy(array $cfg, string $scope): string {
     foreach ($cap['style']   as $h) $style[]   = $h;
     foreach ($cap['connect'] as $h) $connect[] = $h;
     foreach ($cap['frame']   as $h) $frame[]   = $h;
+    // Where reCAPTCHA can be drawn (see above): every public page, and in the panel the dashboard only. The page is
+    // index.php's own $action when the caller does not say — 'admin' is the dashboard.
+    $page = $page ?? (string)($GLOBALS['action'] ?? '');
+    if (!empty($cap['eval']) && (!$panel || $page === 'admin')) $script[] = "'unsafe-eval'";
 
     // The operator's own hosts go into the four fetch directives a third-party widget needs. Not
     // into img-src (already `https:`) and not into font-src (a font is fetched by a stylesheet from

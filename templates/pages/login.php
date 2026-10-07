@@ -35,12 +35,16 @@ $bridgeName = $bridgeLogin !== '' ? authBridgeProviderName($db, $cfg) : '';
         <div class="form-group">
             <label for="login-login"><?= _h('login.login_label') ?></label>
             <input type="text" id="login-login" name="login" maxlength="190" autocomplete="username" required>
-            <div class="error-msg"><?= _h('login.login_err') ?></div>
+            <?php /* The message has its id from the server (1.74.0, UX-12): liveValidate() names it as the field's description,
+                     and an id a SCRIPT added after load has no counterpart in the fetched page, so the live language
+                     switch (assets/js/lang-swap.js pairs by id first) left these words in the old language. The ids are
+                     the ones the script would have made: <field id>-error. */ ?>
+            <div class="error-msg" id="login-login-error"><?= _h('login.login_err') ?></div>
         </div>
         <div class="form-group">
             <label for="login-password"><?= _h('login.password') ?></label>
             <input type="password" id="login-password" name="password" maxlength="200" autocomplete="current-password" required>
-            <div class="error-msg"><?= _h('login.password_err') ?></div>
+            <div class="error-msg" id="login-password-error"><?= _h('login.password_err') ?></div>
         </div>
         <?php /* The second factor, hidden until the server asks for it.
                  Always in the markup, never shown first: a form that opens with a code box tells

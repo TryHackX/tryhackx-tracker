@@ -32,8 +32,6 @@ add('', {
         'Lista to zbiór, który tworzysz świadomie — paczka plików, własne wrzutki zebrane w jednym miejscu, cokolwiek chcesz trzymać razem albo komuś podać. Dodawaj torrenty z panelu przy wyniku wyszukiwania albo wklej info hash lub link magnet prosto do listy.'),
     'lists.new': ('New list',
         'Nowa lista'),
-    'lists.new_ph': ('Name this list…',
-        'Nazwij tę listę…'),
     'lists.pick_title': ('Put this in a list',
         'Dodaj to do listy'),
     'lists.search_ph': ('Filter lists by name…',

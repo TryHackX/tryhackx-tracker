@@ -65,7 +65,9 @@ if ($who === '') {
     // Somebody else's. Every gate below answers with the same 404 as a name that does not exist.
     if (!$me) jsonResponse(['error' => 'not_found'], 404);                       // profiles are for signed-in readers
     if (!profilesEnabled($cfg) || !favPublicEnabled($cfg)) jsonResponse(['error' => 'not_found'], 404);
-    if (!userCan($db, $cfg, 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
+    // The READER's account (1.74.0, PRIV-6), as includes/who.php asks it: a panel session in the same browser is
+    // not the member's permission to read other people.
+    if (!userIdHasPermission($db, $cfg, (int)$me['id'], 'favourites.view_others')) jsonResponse(['error' => 'not_found'], 404);
     if (!userValidUsername($who)) jsonResponse(['error' => 'not_found'], 404);
     $owner = userFindByLogin($db, $who);
     if (!$owner || ($owner['status'] ?? '') !== 'active') jsonResponse(['error' => 'not_found'], 404);

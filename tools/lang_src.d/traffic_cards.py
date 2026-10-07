@@ -152,7 +152,7 @@ add('js.coverage', {
     'estimate_one': ('At the last full pass’s pace (:rate entries/s) the scrape (:scrape torrents) needs about :needs s — with the budget at :budget s one poll walks it.',
         'W tempie ostatniego pełnego przebiegu (:rate wpisów/s) scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s wystarczy jedno odpytanie.'),
     'estimate_many': ('At the last full pass’s pace (:rate entries/s) the scrape (:scrape torrents) needs about :needs s — with the budget at :budget s it takes :polls polls.',
-        'W tempie ostatniego pełnego przebiegu (:rate wpisów/s) scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s potrzeba :polls odpytań.'),
+        'W tempie ostatniego pełnego przebiegu (:rate wpisów/s) scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s potrzeba odpytań: :polls.'),
     'estimate_at_max': ('At :max s one poll would walk it.',
         'Przy :max s wystarczyłoby jedno odpytanie.'),
 })
@@ -170,7 +170,8 @@ _EST = {
     'one': ('The last full pass walked :rate entries/s; the current scrape (:scrape torrents) needs about :needs s — with the budget at :budget s one poll walks it.',
             'Ostatni pełny przebieg szedł w tempie :rate wpisów/s; obecny scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s wystarczy jedno odpytanie.'),
     'many': ('The last full pass walked :rate entries/s; the current scrape (:scrape torrents) needs about :needs s — with the budget at :budget s it takes :polls polls.',
-             'Ostatni pełny przebieg szedł w tempie :rate wpisów/s; obecny scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s potrzeba :polls odpytań.'),
+             # "odpytań: :polls" (1.74.0): a count as a label reads right for every number — "potrzeba 3 odpytań" did not.
+             'Ostatni pełny przebieg szedł w tempie :rate wpisów/s; obecny scrape (torrentów: :scrape) potrzebuje około :needs s — przy budżecie :budget s potrzeba odpytań: :polls.'),
 }
 add('settings', {
     'index_poll_estimate_one': _EST['one'],

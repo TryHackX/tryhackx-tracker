@@ -538,10 +538,14 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
     return ['ok' => true, 'saved' => true, 'pending' => $status === 'pending', 'proposed' => false, 'kind' => $rec['kind']];
 }
 
-/** Tell the person, when there is a person: type 'content', one line and a body. */
-function contentNotify(PDO $db, ?int $userId, string $title, string $body): void {
+/**
+ * Tell the person, when there is a person: type 'content', one line and a body — the two dictionary keys and their
+ * values, written in THEIR language (1.74.0, QUAL-18: until then in the moderator's, whose request writes it).
+ */
+function contentNotify(PDO $db, array $cfg, ?int $userId, string $titleKey, string $bodyKey, array $vars = []): void {
     if ($userId === null || $userId < 1 || !function_exists('userNotify')) return;
-    userNotify($db, $userId, 'content', $title, $body);
+    $lang = recipientLangOf($db, $cfg, $userId);
+    userNotify($db, $userId, 'content', langFor($lang, $titleKey, $vars), langFor($lang, $bodyKey, $vars));
 }
 
 /** The record behind a review action, or null. */
@@ -562,9 +566,8 @@ function contentApprove(PDO $db, array $cfg, string $kind, int $id): bool {
     $db->prepare("UPDATE `$table` SET content_status = 'approved', content_reviewed_at = NOW(),
                          content_rejected_note = NULL WHERE id = ?")->execute([$id]);
     $name = contentNameFor($db, (string)$row['info_hash']);
-    contentNotify($db, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
-        __('notify.content_published', ['name' => $name]),
-        __('notify.content_published_body', ['name' => $name, 'hash' => $row['info_hash']]));
+    contentNotify($db, $cfg, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
+        'notify.content_published', 'notify.content_published_body', ['name' => $name, 'hash' => $row['info_hash']]);
     return true;
 }
 
@@ -577,10 +580,9 @@ function contentReject(PDO $db, array $cfg, string $kind, int $id, ?string $note
     $db->prepare("UPDATE `$table` SET content_status = 'rejected', content_reviewed_at = NOW(),
                          content_rejected_note = ? WHERE id = ?")->execute([$note !== '' ? $note : null, $id]);
     $name = contentNameFor($db, (string)$row['info_hash']);
-    contentNotify($db, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
-        __('notify.content_rejected', ['name' => $name]),
-        $note !== '' ? __('notify.content_rejected_body_note', ['name' => $name, 'note' => $note])
-                     : __('notify.content_rejected_body', ['name' => $name]));
+    contentNotify($db, $cfg, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
+        'notify.content_rejected', $note !== '' ? 'notify.content_rejected_body_note' : 'notify.content_rejected_body',
+        ['name' => $name, 'note' => $note]);
     return true;
 }
 
@@ -670,19 +672,17 @@ function contentEditApply(PDO $db, array $cfg, array $e): bool {
     $db->prepare("UPDATE wl_content_edits SET status = 'applied', reviewed_at = NOW() WHERE id = ?")->execute([(int)$e['id']]);
     $name = contentNameFor($db, (string)$e['info_hash']);
     if ($edit) {
-        contentNotify($db, $proposer, __('notify.content_edit_applied', ['name' => $name]),
-                      __('notify.content_edit_applied_body', ['name' => $name, 'pct' => $pv['share']]));
+        contentNotify($db, $cfg, $proposer, 'notify.content_edit_applied', 'notify.content_edit_applied_body',
+                      ['name' => $name, 'pct' => $pv['share']]);
         if ($previous !== null && $previous !== $proposer) {
-            contentNotify($db, $previous, __('notify.content_edited', ['name' => $name]),
-                          __('notify.content_edited_body', ['name' => $name, 'pct' => $pv['share']]));
+            contentNotify($db, $cfg, $previous, 'notify.content_edited', 'notify.content_edited_body',
+                          ['name' => $name, 'pct' => $pv['share']]);
         }
         return true;
     }
-    contentNotify($db, $proposer, __('notify.content_proposal_applied', ['name' => $name]),
-                  __('notify.content_proposal_applied_body', ['name' => $name]));
+    contentNotify($db, $cfg, $proposer, 'notify.content_proposal_applied', 'notify.content_proposal_applied_body', ['name' => $name]);
     if ($previous !== null && $previous !== $proposer) {
-        contentNotify($db, $previous, __('notify.content_replaced', ['name' => $name]),
-                      __('notify.content_replaced_body', ['name' => $name]));
+        contentNotify($db, $cfg, $previous, 'notify.content_replaced', 'notify.content_replaced_body', ['name' => $name]);
     }
     return true;
 }
@@ -715,9 +715,9 @@ function contentEditReject(PDO $db, array $cfg, array $e): bool {
     $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW() WHERE id = ?")->execute([(int)$e['id']]);
     $name = contentNameFor($db, (string)$e['info_hash']);
     $isEdit = ($e['edit_kind'] ?? 'rewrite') === 'edit';
-    contentNotify($db, $e['user_id'] !== null ? (int)$e['user_id'] : null,
-                  __($isEdit ? 'notify.content_edit_rejected' : 'notify.content_proposal_rejected', ['name' => $name]),
-                  __('notify.content_proposal_rejected_body', ['name' => $name]));
+    contentNotify($db, $cfg, $e['user_id'] !== null ? (int)$e['user_id'] : null,
+                  $isEdit ? 'notify.content_edit_rejected' : 'notify.content_proposal_rejected',
+                  'notify.content_proposal_rejected_body', ['name' => $name]);
     return true;
 }
 
@@ -775,14 +775,12 @@ function contentDelete(PDO $db, array $cfg, array $rec, array $me, string $right
             $pid = $w['user_id'] !== null ? (int)$w['user_id'] : 0;
             if ($pid > 0 && $pid !== $meId && !isset($told[$pid])) {
                 $told[$pid] = true;
-                contentNotify($db, $pid, __('notify.content_proposal_withdrawn', ['name' => $name]),
-                              __('notify.content_proposal_withdrawn_body', ['name' => $name]));
+                contentNotify($db, $cfg, $pid, 'notify.content_proposal_withdrawn', 'notify.content_proposal_withdrawn_body', ['name' => $name]);
             }
         }
     }
     if ($right === 'any' && $author !== null && (int)$author !== $meId && ($opts['notify'] ?? true) !== false) {
-        contentNotify($db, (int)$author, __('notify.content_deleted', ['name' => $name]),
-                      __('notify.content_deleted_body', ['name' => $name]));
+        contentNotify($db, $cfg, (int)$author, 'notify.content_deleted', 'notify.content_deleted_body', ['name' => $name]);
     }
     if (function_exists('auditLog')) {
         $authorName = null;

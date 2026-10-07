@@ -37,7 +37,7 @@ add('a.traffic', {
     'tl_meta':           ('one sample / :sec s · raw :raw d · 5-min :keep d · :vis',
                           'jedna próbka / :sec s · surowe :raw d · 5-min :keep d · :vis'),
     'tl_public':         ('public', 'publiczna'),
-    'tl_admins':         ('admins only', 'tylko dla adminów'),
+    'tl_admins':         ('admins only', 'tylko dla administratorów'),
     'tl_settings_title': ('Timeline settings', 'Ustawienia osi czasu'),
 })
 

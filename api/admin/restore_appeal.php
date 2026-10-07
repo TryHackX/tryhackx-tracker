@@ -32,42 +32,20 @@ try {
     ]);
     $db->prepare("DELETE FROM appeal_archives WHERE id = ?")->execute([$id]);
 } catch (PDOException $e) {
-    error_log('restore_appeal failed: ' . $e->getMessage());
+    error_log('[appeal] restore_appeal failed: ' . $e->getMessage());
     jsonResponse(['error' => __('api.appeal.restore_db_error')], 500);
 }
 
-// Send email notification
-if (!isUnsubscribed($db, $appeal['email'], 'appeal')) {
-    try {
-        ob_start();
-        $appealType = $appeal['appeal_type'] ?? 'unblock';
-        $subject = 'Appeal Reopened for Review — ' . ($cfg['site_name'] ?? 'Tracker');
-        $body = "Your " . ($appealType === 'block' ? 'block request' : 'unblock appeal') .
-                " for the info hash below has been reopened and will be reviewed again.";
-
-        $details = [
-            'Info Hash' => '<code>' . sanitize($appeal['infoHash']) . '</code>',
-            'Request Type' => $appealType === 'block' ? 'Block Request' : 'Unblock Appeal',
-            'Status' => '<strong>Reopened for Review</strong>',
-        ];
-
-        $unsubUrl = getUnsubscribeUrl($appeal['email'], $cfg);
-
-        $htmlBody = buildEmailHtml([
-            'title' => $subject,
-            'greeting' => 'Hello ' . sanitize($appeal['name']),
-            'body' => $body,
-            'details' => $details,
-            'unsubscribe_url' => $unsubUrl,
-        ], $cfg);
-
-        $plainText = 'Your appeal for hash ' . $appeal['infoHash'] . ' has been reopened for review.';
-        @sendEmail($appeal['email'], $subject, $plainText, $htmlBody, $cfg, $unsubUrl);
-        ob_end_clean();
-    } catch (\Throwable $e) {
-        if (ob_get_level()) ob_end_clean();
-    }
+// Tell the appellant — through the dictionary, in the site's language (1.74.0, QUAL-18; includes/mail.php
+// mailAppealDecisionParts()). A failure is logged, never the answer.
+$obLevel = ob_get_level();
+ob_start();
+try {
+    sendAppealDecision($db, $appeal, 'reopened', $cfg);
+} catch (\Throwable $e) {
+    error_log('[appeal] the "reopened" mail of appeal #' . $id . ' failed: ' . $e->getMessage());
 }
+while (ob_get_level() > $obLevel) ob_end_clean();
 
 jsonResponse([
     'success' => true,

@@ -690,16 +690,10 @@ $db->prepare("INSERT INTO user_groups (slug, name, description, color, priority,
 pvOnlyIn($db, $ownT, 'pvtest_rate');
 $GLOBALS['__current_user_loaded'] = true;
 $GLOBALS['__current_user_cache'] = userFindById($db, $ownT);
-$rlKey = 'repvote|user:' . $ownT;
-register_shutdown_function(function () use ($root, $rlKey) {
-    // the hour's budget the two removals spent, out of the shared file under its lock
-    $file = $root . '/config/rate_limits.json';
-    $lock = @fopen($file . '.lock', 'c');
-    if ($lock) @flock($lock, LOCK_EX);
-    try {
-        $data = is_file($file) ? (json_decode((string)@file_get_contents($file), true) ?: []) : [];
-        if (array_key_exists($rlKey, $data)) { unset($data[$rlKey]); @file_put_contents($file, json_encode($data)); }
-    } finally { if ($lock) { @flock($lock, LOCK_UN); @fclose($lock); } }
+$rlKey = 'user:' . $ownT;
+register_shutdown_function(function () use ($rlKey) {
+    // the hour's budget the two removals spent, taken back from the vote's own file (config/ratelimit/, 1.74.0)
+    rateLimitForget('repvote', fn(string $s): bool => $s === $rlKey);
 });
 $before = $list($cfgOn, $ownT, [], $me);
 $beforeOther = $list($cfgOn, $ownT, [], $stranger);   // a reader of the profile (who is not shown every row the owner is)

@@ -672,11 +672,15 @@ function shoutRowInstant(PDO $db, array $r): ?int
     }
 }
 
-/** The newest id in the room — the baseline a freshly drawn widget starts polling from. */
+/**
+ * The newest id in the room — the baseline a freshly drawn widget starts polling from. Asked in every reply of the
+ * room's poll, so it walks the primary key down from its end (1.74.0, PERF-15): MAX(id) with a condition on a column
+ * no index carries read the whole table instead — 18–21 ms a poll at the largest retention.
+ */
 function shoutNewestId(PDO $db): int
 {
     try {
-        return (int)($db->query("SELECT COALESCE(MAX(id), 0) FROM shouts WHERE deleted_at IS NULL")->fetchColumn() ?: 0);
+        return (int)($db->query("SELECT id FROM shouts WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 1")->fetchColumn() ?: 0);
     } catch (\Throwable $e) {
         return 0;   // the table arrives with schema 63; a page rendered mid-upgrade has no room yet
     }
@@ -1262,6 +1266,46 @@ function shoutSeen(PDO $db, int $userId, int $id): void
 }
 
 /**
+ * The reader's accepted friends as ids, each once — asked once per count (1.74.0, PERF-1) instead of once per line.
+ * A friendship is one row whichever side asked, so it is read from both of its keys (idx_friend_mine, idx_friend_of).
+ */
+function shoutFriendIds(PDO $db, int $meId): array
+{
+    if ($meId <= 0) return [];
+    $st = $db->prepare("SELECT friend_id AS id FROM user_friends WHERE user_id = ? AND status = 'accepted'
+                        UNION
+                        SELECT user_id FROM user_friends WHERE friend_id = ? AND status = 'accepted'");
+    $st->execute([$meId, $meId]);
+    $ids = array_values(array_unique(array_filter(array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)), fn($v) => $v > 0)));
+    sort($ids);
+    return $ids;
+}
+
+/**
+ * An account that has never looked at the room (`shout_seen_id` 0, which is where every account starts) is caught
+ * up at its first count (1.74.0, PERF-1): what others said BEFORE the account existed was never new to it. Its mark
+ * moves to the newest such line, once and for good, so a new member's badge does not open on the room's whole
+ * backlog and its pulses walk only what came after. A line said after the account was made is still new — which is
+ * also why an account the tests put back at 0 still counts everything it has not read. The reader's OWN lines are
+ * left out of it: they are never counted anyway, and one dated before the account (a test ages a line to close an
+ * edit window) must not carry the mark past other people's later words.
+ *
+ * Returns the mark to count from. GREATEST, so a widget stamping the mark at the same moment is never moved back.
+ */
+function shoutCatchUpNew(PDO $db, int $meId): int
+{
+    $st = $db->prepare("SELECT COALESCE(MAX(s.id), 0) FROM shouts s
+                         WHERE s.created_at < (SELECT u.created_at FROM users u WHERE u.id = ?)
+                           AND (s.user_id IS NULL OR s.user_id <> ?)");
+    $st->execute([$meId, $meId]);
+    $mark = (int)($st->fetchColumn() ?: 0);
+    if ($mark > 0) {
+        $db->prepare("UPDATE users SET shout_seen_id = GREATEST(shout_seen_id, ?) WHERE id = ?")->execute([$mark, $meId]);
+    }
+    return $mark;
+}
+
+/**
  * How much is new: ['shout' => n, 'shout_friend' => n, 'mention' => n].
  *
  * `shout` is the TOTAL; the other two are subsets of it (a friend's shout that mentions me is in
@@ -1285,17 +1329,24 @@ function shoutUnreadCounts(PDO $db, array $cfg, array $me): array
             $st->execute([$meId]);
             $seen = (int)($st->fetchColumn() ?: 0);
         }
+        if ($seen === 0) $seen = shoutCatchUpNew($db, $meId);
         // One pass over the tail of the primary key. `shouts` is bounded by retention, so the worst
         // case here is a reader who has never looked at a full room.
+        //
+        // A friend is decided against the reader's friends fetched ONCE (1.74.0, PERF-1): the old
+        // correlated EXISTS (… OR …) ran an index_merge over every friendship of the reader for every
+        // unread line — 1 s a minute at 2 000 unread lines and 400 friendships, 15 s at 30 000, killed
+        // by max_statement_time (and answered as zeros) above that. A list of ids is a binary search
+        // per line, the same three numbers.
+        $friends = shoutFriendIds($db, $meId);
+        $isFriend = $friends ? 's.user_id IN (' . implode(',', $friends) . ')' : '0';
         $st = $db->prepare(
             "SELECT COUNT(*) AS total,
-                    COALESCE(SUM(EXISTS(SELECT 1 FROM user_friends f WHERE f.status = 'accepted'
-                                          AND ((f.user_id = ? AND f.friend_id = s.user_id)
-                                            OR (f.user_id = s.user_id AND f.friend_id = ?)))), 0) AS friends,
+                    COALESCE(SUM($isFriend), 0) AS friends,
                     COALESCE(SUM(EXISTS(SELECT 1 FROM shout_mentions m WHERE m.shout_id = s.id AND m.user_id = ?)), 0) AS mentions
                FROM shouts s
               WHERE s.id > ? AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
-        $st->execute([$meId, $meId, $meId, $seen, $meId]);
+        $st->execute([$meId, $seen, $meId]);
         $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
         $out = ['shout' => (int)($r['total'] ?? 0), 'shout_friend' => (int)($r['friends'] ?? 0),
                 'mention' => (int)($r['mentions'] ?? 0)];
@@ -1311,13 +1362,11 @@ function shoutUnreadCounts(PDO $db, array $cfg, array $me): array
     try {
         $st = $db->prepare(
             "SELECT COUNT(*) AS total,
-                    COALESCE(SUM(EXISTS(SELECT 1 FROM user_friends f WHERE f.status = 'accepted'
-                                          AND ((f.user_id = ? AND f.friend_id = s.user_id)
-                                            OR (f.user_id = s.user_id AND f.friend_id = ?)))), 0) AS friends
+                    COALESCE(SUM($isFriend), 0) AS friends
                FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id
               WHERE m.user_id = ? AND m.late = 1 AND m.shout_id <= ?
                 AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
-        $st->execute([$meId, $meId, $meId, $seen, $meId]);
+        $st->execute([$meId, $seen, $meId]);
         $late = $st->fetch(PDO::FETCH_ASSOC) ?: [];
         $n = (int)($late['total'] ?? 0);
         $out['shout'] += $n;

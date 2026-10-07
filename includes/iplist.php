@@ -318,7 +318,11 @@ function ipListRefresh(PDO $db, int $id, bool $force = false): array {
     try {
         $db->prepare("UPDATE ip_lists SET last_error = ?, last_try_at = NOW() WHERE id = ?")
            ->execute([mb_substr($fail, 0, 190), $id]);
-    } catch (\Throwable $e) {}
+    } catch (\Throwable $e) {
+        // The caller gets the failure either way; the list's own "last error" line is the part that could not be
+        // written — said in the log (1.74.0, QUAL-26).
+        error_log('[iplist] list #' . $id . ': its last error could not be recorded (' . $e->getMessage() . '); it was: ' . $fail);
+    }
     return ['error' => $fail];
 }
 
@@ -361,30 +365,6 @@ function ipListPack(string $cidr): ?array {
     if ($bits === null) $bits = $max;
     if ($bits < 0 || $bits > $max) return null;
     return [$bin, $bits, $len];
-}
-
-/**
- * Do two CIDRs share any address at all?
- *
- * Two blocks overlap exactly when the shorter prefix contains the longer one's network address —
- * there is no partial case: CIDR blocks are either nested or disjoint. So the test is "compare the
- * first min(bits) bits". `/0` therefore contains everything of its family, `/32` and `/128` are
- * single hosts, and a v4 entry can never meet a v6 one, which is settled by the length check before
- * any bit is looked at.
- */
-function ipListOverlaps(string $a, string $b): bool {
-    $pa = ipListPack($a);
-    $pb = ipListPack($b);
-    if ($pa === null || $pb === null) return false;
-    if ($pa[2] !== $pb[2]) return false;                  // different families never meet
-    $bits = min($pa[1], $pb[1]);
-    if ($bits === 0) return true;                         // one of them is /0
-    $whole = intdiv($bits, 8);
-    $rest = $bits % 8;
-    if ($whole > 0 && strncmp($pa[0], $pb[0], $whole) !== 0) return false;
-    if ($rest === 0) return true;
-    $mask = (0xFF << (8 - $rest)) & 0xFF;
-    return (ord($pa[0][$whole]) & $mask) === (ord($pb[0][$whole]) & $mask);
 }
 
 /**

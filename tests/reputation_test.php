@@ -297,17 +297,10 @@ if ($db === null) {
         $db->exec("DELETE FROM user_groups WHERE slug LIKE 'reptest\\_%'");
         $db->prepare("DELETE FROM hash_votes WHERE info_hash IN (?, ?)")->execute([$T, $S]);
         $db->prepare("DELETE FROM index_hashes WHERE info_hash IN (?, ?)")->execute([$T, $S]);
-        // The hour's budget this run spent — its own accounts and addresses — out of the shared file, under its lock.
-        $file = $root . '/config/rate_limits.json';
-        $lock = @fopen($file . '.lock', 'c');
-        if ($lock) @flock($lock, LOCK_EX);
-        try {
-            $data = is_file($file) ? (json_decode((string)@file_get_contents($file), true) ?: []) : [];
-            $mine = array_merge(array_map(fn($ip) => 'repvote|ip:' . $ip, $repTestIps), array_map(fn($id) => 'repvote|user:' . $id, array_unique($repTestUsers)));
-            $changed = false;
-            foreach ($mine as $k) if (array_key_exists($k, $data)) { unset($data[$k]); $changed = true; }
-            if ($changed) @file_put_contents($file, json_encode($data));
-        } finally { if ($lock) { @flock($lock, LOCK_UN); @fclose($lock); } }
+        // The hour's budget this run spent — its own accounts and addresses — taken back from the vote's own file
+        // (config/ratelimit/, one per action since 1.74.0), under that file's lock.
+        $mine = array_merge(array_map(fn($ip) => 'ip:' . $ip, $repTestIps), array_map(fn($id) => 'user:' . $id, array_unique($repTestUsers)));
+        rateLimitForget('repvote', fn(string $s): bool => in_array($s, $mine, true));
     };
     $repClean();
     register_shutdown_function($repClean);
@@ -441,9 +434,9 @@ if ($db === null) {
         $as(null, $ip4);
         $looks = [];
         for ($i = 0; $i < 10; $i++) $looks[] = repVoteRefusal($db, $c3);
-        $rl = json_decode((string)@file_get_contents($root . '/config/rate_limits.json'), true) ?: [];
+        $rl = rateLimitHits('repvote');
         check('ten looks at whether a visitor may vote (the Info panel asks twice an opening) spend nothing',
-              $looks === array_fill(0, 10, null) && empty($rl['repvote|ip:' . $ip4]), json_encode($rl['repvote|ip:' . $ip4] ?? null));
+              $looks === array_fill(0, 10, null) && empty($rl['ip:' . $ip4]), json_encode($rl['ip:' . $ip4] ?? null));
         $acts = [repCastVote($db, $c3, $T, 1), repRemoveVote($db, $c3, $T), repCastVote($db, $c3, $T, -1)];
         $fourth = repRemoveVote($db, $c3, $T);
         check('three actions spend the three an hour allows — a vote, taking it back, a vote — and the fourth is refused',

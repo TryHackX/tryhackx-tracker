@@ -86,69 +86,29 @@ if ($appealType === 'block' && $newStatus === 'accepted' && !empty($input['do_bl
     $blocked = true;
 }
 
-// Send email notification to appellant
-if (!isUnsubscribed($db, $appeal['email'], 'appeal')) {
-    try {
-        ob_start();
-        $statusLabel = $newStatus === 'accepted' ? 'Accepted' : 'Rejected';
-        $statusColor = $newStatus === 'accepted' ? '#22c55e' : '#ef4444';
-
-        // Fetch objectTitle from reports or archives
-        $objectTitle = '';
-        $stmt = $db->prepare("SELECT objectTitle FROM reports WHERE infoHash = ? LIMIT 1");
+// Tell the appellant — through the dictionary, in the site's language (1.74.0, QUAL-18: an appeal has no account
+// and stores no language; includes/mail.php mailAppealDecisionParts()). A failure is logged, never the answer.
+$obLevel = ob_get_level();
+ob_start();
+try {
+    // The reported object's title, from the report or its archive.
+    $stmt = $db->prepare("SELECT objectTitle FROM reports WHERE infoHash = ? LIMIT 1");
+    $stmt->execute([$appeal['infoHash']]);
+    $objectTitle = $stmt->fetchColumn();
+    if ($objectTitle === false) {
+        $stmt = $db->prepare("SELECT objectTitle FROM archives WHERE infoHash = ? LIMIT 1");
         $stmt->execute([$appeal['infoHash']]);
-        $row = $stmt->fetch();
-        if ($row) {
-            $objectTitle = $row['objectTitle'];
-        } else {
-            $stmt = $db->prepare("SELECT objectTitle FROM archives WHERE infoHash = ? LIMIT 1");
-            $stmt->execute([$appeal['infoHash']]);
-            $row = $stmt->fetch();
-            if ($row) $objectTitle = $row['objectTitle'];
-        }
-
-        if ($appealType === 'block') {
-            $subject = 'Block Request ' . $statusLabel . ' — ' . ($cfg['site_name'] ?? 'Tracker');
-            $body = "Your request to block the info hash below has been <strong style=\"color:{$statusColor}\">" . $statusLabel . "</strong>.";
-            if ($blocked) {
-                $body .= " The hash has been added to the tracker blacklist.";
-            }
-        } else {
-            $subject = 'Unblock Appeal ' . $statusLabel . ' — ' . ($cfg['site_name'] ?? 'Tracker');
-            $body = "Your appeal to unblock the info hash below has been <strong style=\"color:{$statusColor}\">" . $statusLabel . "</strong>.";
-            if ($unblocked) {
-                $body .= " The hash has been removed from the tracker blacklist.";
-            }
-        }
-
-        $details = [
-            'Info Hash' => '<code>' . sanitize($appeal['infoHash']) . '</code>',
-            'Request Type' => $appealType === 'block' ? 'Block Request' : 'Unblock Appeal',
-            'Decision' => '<strong style="color:' . $statusColor . '">' . $statusLabel . '</strong>',
-        ];
-        if (!empty($objectTitle)) {
-            $details = ['Object' => sanitize($objectTitle)] + $details;
-        }
-
-        $unsubUrl = getUnsubscribeUrl($appeal['email'], $cfg);
-
-        $htmlBody = buildEmailHtml([
-            'title' => $subject,
-            'greeting' => 'Hello ' . sanitize($appeal['name']),
-            'body' => $body,
-            'details' => $details,
-            'custom_message' => $adminResponse,
-            'unsubscribe_url' => $unsubUrl,
-        ], $cfg);
-
-        $plainObj = !empty($objectTitle) ? " ({$objectTitle})" : '';
-        $plainText = 'Your ' . ($appealType === 'block' ? 'block request' : 'unblock appeal') . ' for hash ' . $appeal['infoHash'] . $plainObj . ' has been ' . $statusLabel . '.';
-        @sendEmail($appeal['email'], $subject, $plainText, $htmlBody, $cfg, $unsubUrl);
-        ob_end_clean();
-    } catch (\Throwable $e) {
-        if (ob_get_level()) ob_end_clean();
+        $objectTitle = $stmt->fetchColumn();
     }
+    sendAppealDecision($db, $appeal, $newStatus, $cfg, [
+        'listed' => $appealType === 'block' ? $blocked : $unblocked,
+        'title' => (string)($objectTitle ?: ''),
+        'response' => $adminResponse,
+    ]);
+} catch (\Throwable $e) {
+    error_log('[appeal] the decision mail of appeal #' . $id . ' failed: ' . $e->getMessage());
 }
+while (ob_get_level() > $obLevel) ob_end_clean();
 
 // Archive this resolved appeal
 $stmt = $db->prepare("SELECT * FROM appeals WHERE id = ?");

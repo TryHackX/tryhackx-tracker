@@ -79,7 +79,9 @@ $verify = ['verify' => fn(string $tok): bool => $tok === 'good-token'];
 // ── what this run changes, and how it is put back ─────────────────────────────────────────────
 const CM_USERS = ['cmtest_alice', 'cmtest_bob', 'cmtest_carol', 'cmtest_dave', 'cmtest_erin', 'cmtest_mod', 'cmtest_mute', 'cmtest_rate', 'cmtest_http',
                   // 13. replies (1.72.0)
-                  'cmtest_rp_a', 'cmtest_rp_b', 'cmtest_rp_c', 'cmtest_rp_x', 'cmtest_rp_mod', 'cmtest_rp_n'];
+                  'cmtest_rp_a', 'cmtest_rp_b', 'cmtest_rp_c', 'cmtest_rp_x', 'cmtest_rp_mod', 'cmtest_rp_n',
+                  // 10b. the copies follow the comment (1.74.0)
+                  'cmtest_gone'];
 const CM_H1 = 'c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1';   // the thread's torrent: an index row + a whitelist row
 const CM_H2 = 'c0c2c0c2c0c2c0c2c0c2c0c2c0c2c0c2c0c2c0c2';   // a hash nobody may see (no row at all)
 const CM_H3 = 'c0c5c0c5c0c5c0c5c0c5c0c5c0c5c0c5c0c5c0c5';   // 13. the replies' torrent: an index row
@@ -845,14 +847,75 @@ check('the account\'s Sounds tab and Settings → Sounds have words for all thre
       && str_contains($tpl, 'name="sound_default_comment_reply"')
       && str_contains($src('api/user_pulse.php'), "\$out['unread_comment_reply'] = \$cc['comment_reply'];")
       && str_contains($src('api/user_me.php'), "\$out['unread_comment_reply'] = \$cc['comment_reply'];"));
-check('a notification\'s link is only ever a site-relative address: anything else is dropped',
-      str_contains($src('includes/users.php'), "function userNotify(PDO \$db, int \$userId, string \$type, string \$title, string \$body = '', ?string \$link = null): void {")
-      && (bool)preg_match('/^\?action=/', commentLink(CM_H1, 5)));
+check('a notification\'s link is only ever a site-relative address — a comment\'s is one', (bool)preg_match('/^\?action=/', commentLink(CM_H1, 5)));
 $lf = $noteFloor();
 userNotify($db, $erinId, 'comment', 't', 'b', 'https://evil.example/');
 userNotify($db, $erinId, 'comment', 't', 'b', '?action=search&hash=' . CM_H1 . '#comment-1');
 $ln = $db->query("SELECT link FROM user_notifications WHERE id > $lf ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
 check('… stored: an off-site address never, the site\'s own yes', $ln === [null, '?action=search&hash=' . CM_H1 . '#comment-1'], json_encode($ln));
+// 1.74.0 (v93): a notification may say whose it is — a friend request does, so it goes with that account.
+$lf = $noteFloor();
+userNotify($db, $erinId, 'friend_request', 'from dave', '', null, $daveId);
+userNotify($db, $erinId, 'comment', 'from nobody in particular', 'b');
+$sn = $db->query("SELECT sender_id FROM user_notifications WHERE id > $lf ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+check('… and the account it is from, when there is one (sender_id, v93); none otherwise', array_map(fn($v) => $v === null ? null : (int)$v, $sn) === [$daveId, null], json_encode($sn));
+$db->exec("DELETE FROM user_notifications WHERE id > $lf");
+
+/* ══ 10b. the copies of the words follow the comment (1.74.0, PRIV-1) ═════ */
+// A notification about a comment quotes its first words. Until 1.74.0 the quote outlived everything that happened
+// to the comment: its author deleting it, a moderator taking it down for the personal data in it, a correction, the
+// author's account being deleted — the words stayed in up to fifty-odd other people's notifications for a year.
+$db->exec("UPDATE user_notifications SET read_at = NOW() WHERE user_id IN ($aliceId, $bobId, $carolId, $daveId, $erinId) AND read_at IS NULL");
+$db->prepare("UPDATE users SET language = 'pl' WHERE id = ?")->execute([$erinId]);
+$floorP = $noteFloor();
+$quoted = fn(string $needle): int => (int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE id > $floorP AND body LIKE "
+                                                     . $db->quote('%' . $needle . '%'))->fetchColumn();
+$cOf = fn(array $r): int => (int)($r['body']['comment']['id'] ?? 0);
+$cSelf = $cOf($post($u($daveId), 'PRIVONE self 555-0142 @cmtest_erin'));
+$cMod  = $cOf($post($u($daveId), 'PRIVONE mod 12 Example Street @cmtest_erin'));
+$cEdit = $cOf($post($u($daveId), 'PRIVONE edit d.private@example.net @cmtest_erin'));
+check('before: each comment\'s words are quoted in other people\'s notifications — erin, named, has all three',
+      $cSelf > 0 && $cMod > 0 && $cEdit > 0 && $quoted('555-0142') >= 2 && $quoted('Example Street') >= 1 && $quoted('d.private') >= 1,
+      json_encode([$quoted('555-0142'), $quoted('Example Street'), $quoted('d.private')]));
+$erinNote = function (int $cid) use ($db, $erinId, $floorP): ?array {
+    $st = $db->prepare("SELECT type, title, body FROM user_notifications WHERE user_id = ? AND id > ? AND link = ?");
+    $st->execute([$erinId, $floorP, commentLink(CM_H1, $cid)]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+};
+$d = commentDeleteRequest($db, $cfgOn, $u($daveId), ['csrf_token' => $T, 'id' => $cSelf]);
+check('its author deletes it: no notification quotes it any more — erin\'s copy says "[deleted]" in HER language, the notification itself stays',
+      $d['status'] === 200 && $quoted('555-0142') === 0 && ($erinNote($cSelf)['body'] ?? '') === langFor('pl', 'notify.comment_body_gone')
+      && ($erinNote($cSelf)['type'] ?? '') === 'comment_mention', json_encode($erinNote($cSelf)));
+$floorMod = $noteFloor();
+$d = commentDeleteRequest($db, $cfgOn, $u($modId), ['csrf_token' => $T, 'id' => $cMod, 'reason' => 'personal data (address)']);
+$daveMod = $notes($daveId, $floorMod);
+check('a moderator takes one down: its words go from every copy — and the author\'s own notice of the decision (comment_mod) is untouched',
+      $d['status'] === 200 && $quoted('Example Street') === 0 && count($daveMod) === 1 && $daveMod[0]['type'] === 'comment_mod'
+      && str_contains((string)$daveMod[0]['body'], 'personal data (address)'), json_encode($daveMod));
+$e = commentEditRequest($db, $cfgOn, $u($daveId), ['csrf_token' => $T, 'id' => $cEdit, 'body' => 'PRIVONE corrected, nothing private'], '127.0.0.44');
+check('its author corrects it: the copies quote the NEW words — none the old ones',
+      $e['status'] === 200 && $quoted('d.private') === 0 && $quoted('nothing private') >= 1
+      && ($erinNote($cEdit)['body'] ?? '') === langFor('pl', 'notify.comment_body', ['text' => 'PRIVONE corrected, nothing private']), json_encode($erinNote($cEdit)));
+$cQuiet = $cOf($post($u($daveId), 'PRIVONE quiet 0048-111 @cmtest_erin'));
+commentDelete($db, $cfgOn, $u($modId), commentRow($db, $cQuiet), 'Spam', ['notify' => false]);
+check('… and a SILENT removal takes the words out of the copies all the same', $cQuiet > 0 && $quoted('0048-111') === 0);
+// An account deleted: its comments' words AND its name leave other people's notifications, and so does its friend request.
+$goneId = cmUser($db, $cfgOn, 'cmtest_gone');
+userPermissionsForget($goneId);
+$cGone = $cOf($post($u($goneId), 'PRIVONE my real name is Jan Testowy @cmtest_erin'));
+userNotify($db, $erinId, 'friend_request', langFor('pl', 'notify.friend_request', ['user' => 'cmtest_gone']), '', null, $goneId);
+check('before the account goes: erin has its words, its name and its friend request',
+      $cGone > 0 && $quoted('Jan Testowy') >= 1 && str_starts_with((string)($erinNote($cGone)['title'] ?? ''), 'cmtest_gone')
+      && (int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE user_id = $erinId AND sender_id = $goneId")->fetchColumn() === 1);
+$gone = userDeleteCascade($db, $goneId, $cfgOn);
+check('the account deleted: no notification quotes its words or names it — the title is "a comment on …, its author\'s account was deleted"',
+      $quoted('Jan Testowy') === 0 && ($gone['comment_quotes'] ?? 0) >= 1
+      && ($erinNote($cGone)['title'] ?? '') === langFor('pl', 'notify.comment_gone', ['name' => 'Comments test torrent'])
+      && ($erinNote($cGone)['body'] ?? '') === langFor('pl', 'notify.comment_body_gone')
+      && !(int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE title LIKE 'cmtest_gone %'")->fetchColumn(), json_encode([$gone, $erinNote($cGone)]));
+check('… and the friend request it sent went with it (sender_id)', !(int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE sender_id = $goneId")->fetchColumn()
+      && ($gone['notifications_sent'] ?? 0) === 1, json_encode($gone));
+$db->exec("UPDATE users SET language = NULL WHERE id = $erinId");
 
 /* ══ 11. the account going ═══════════════════════════════════════════════ */
 $modStamped = (int)$db->query("SELECT COUNT(*) FROM hash_comments WHERE deleted_by = $modId OR edited_by = $modId")->fetchColumn();
@@ -863,7 +926,10 @@ $aliceCount = (int)$db->query("SELECT COUNT(*) FROM hash_comments WHERE user_id 
 $gone = userDeleteCascade($db, $aliceId);
 check('an author\'s account going: its comments go with it (their own words, like shouts and messages)',
       $aliceCount > 5 && ($gone['comments'] ?? 0) === $aliceCount && !(int)$db->query("SELECT COUNT(*) FROM hash_comments WHERE user_id = $aliceId")->fetchColumn());
-check('… and the cascade names comments beside the shouts', str_contains($src('includes/users.php'), "foreach (commentForgetAccount(\$db, \$userId) as \$label => \$n) if (\$n > 0) \$gone[\$label] = \$n;"));
+// 1.74.0 (PRIV-1): and what other people's notifications quoted of them — counted beside the comments.
+check('… and the words of them other people\'s notifications quoted go too, counted in the cascade\'s answer',
+      ($gone['comment_quotes'] ?? 0) >= 1 && !(int)$db->query("SELECT COUNT(*) FROM user_notifications WHERE body LIKE '%Fan-out: hello%'")->fetchColumn(),
+      json_encode($gone));
 
 /* ══ 12. the endpoints, as requests ══════════════════════════════════════ */
 $api = $src('api.php');

@@ -24,9 +24,10 @@
     <?php endif; ?>
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
-    <div class="admin-container admin-wide wl-page">
+    <?php /* The page's main region and its one <h1> (1.74.0, part D — UX-16), drawn as the <h2> was. */ ?>
+    <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
-            <h2><i class="bi bi-speedometer2"></i> <?= _h('a.traffic.title') ?> <span class="idx-subtitle"><?= _h('a.traffic.subtitle') ?></span></h2>
+            <h1 class="admin-title"><i class="bi bi-speedometer2"></i> <?= _h('a.traffic.title') ?> <span class="idx-subtitle"><?= _h('a.traffic.subtitle') ?></span></h1>
             <?php $current = 'admin-traffic'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
@@ -148,14 +149,14 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="net-modal-title"><?= _h('a.traffic.net_modal_title') ?></span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-light mb-2" style="font-size:0.9rem;" id="net-modal-text"></p>
                         <div class="nl-undo" id="net-modal-undo"></div>
                         <form id="net-confirm-form">
                             <div class="mb-3">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="net-confirm-password"><?= _h('a.traffic.admin_password') ?></label>
                                 <?php // For the browser's password manager: this form has a password field, so without a named
                                       // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                                 <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -178,7 +179,7 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-eye text-info"></i> <?= _h('a.traffic.rules_preview') ?></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-light mb-2" style="font-size:0.85rem;"><?= __('a.traffic.rules_preview_note', ['file' => '<span id="net-preview-file" class="text-info"></span>']) ?></p>
@@ -220,23 +221,23 @@
                 <div class="modal-content bg-dark text-light">
                     <div class="modal-header">
                         <h5 class="modal-title"><i class="bi bi-shield-plus text-info"></i> <?= _h('a.traffic.ipl_modal_title') ?></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-2">
-                            <label class="form-label wl-small"><?= _h('a.traffic.name') ?></label>
+                            <label for="ipl-name" class="form-label wl-small"><?= _h('a.traffic.name') ?></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-name" maxlength="64" placeholder="<?= _h('a.traffic.ipl_name_ph') ?>">
                         </div>
                         <div class="row g-2 mb-2">
                             <div class="col-6">
-                                <label class="form-label wl-small"><?= _h('a.traffic.ipl_kind') ?></label>
+                                <label for="ipl-kind" class="form-label wl-small"><?= _h('a.traffic.ipl_kind') ?></label>
                                 <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ipl-kind">
                                     <option value="block"><?= _h('a.traffic.ipl_block') ?></option>
                                     <option value="allow"><?= __('a.traffic.ipl_allow') ?></option>
                                 </select>
                             </div>
                             <div class="col-6" id="ipl-mode-wrap">
-                                <label class="form-label wl-small"><?= _h('a.traffic.ipl_when') ?></label>
+                                <label for="ipl-mode" class="form-label wl-small"><?= _h('a.traffic.ipl_when') ?></label>
                                 <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ipl-mode">
                                     <option value="hard"><?= _h('a.traffic.ipl_always') ?></option>
                                     <option value="soft"><?= _h('a.traffic.ipl_soft') ?></option>
@@ -244,7 +245,7 @@
                             </div>
                         </div>
                         <div class="mb-2">
-                            <label class="form-label wl-small"><?= _h('a.traffic.ipl_source') ?></label>
+                            <label for="ipl-source" class="form-label wl-small"><?= _h('a.traffic.ipl_source') ?></label>
                             <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ipl-source">
                                 <option value="url"><?= _h('a.traffic.ipl_src_url') ?></option>
                                 <option value="manual"><?= _h('a.traffic.ipl_src_manual') ?></option>
@@ -255,7 +256,7 @@
                             <input type="url" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-url"
                                    maxlength="500" placeholder="https://www.ipdeny.com/ipblocks/data/countries/cn.zone">
                             <div class="mt-2">
-                                <label class="form-label wl-small"><?= _h('a.traffic.ipl_ttl') ?></label>
+                                <label for="ipl-ttl" class="form-label wl-small"><?= _h('a.traffic.ipl_ttl') ?></label>
                                 <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-ttl"
                                        min="<?= IPLIST_TTL_MIN ?>" max="<?= IPLIST_TTL_MAX ?>" step="15" value="<?= (int)($cfg['net_lists_ttl_default'] ?? IPLIST_TTL_DEFAULT) ?>">
                             </div>
@@ -264,7 +265,7 @@
                             <!-- The browser's own file input is a grey box with a Polish system label
                                  that does not belong to this page. This is the same control, dressed
                                  to match, and it takes a dropped file as well as a chosen one. -->
-                            <label class="form-label wl-small"><?= __('a.traffic.ipl_upload') ?></label>
+                            <label for="ipl-file" class="form-label wl-small"><?= __('a.traffic.ipl_upload') ?></label>
                             <div class="ipl-drop" id="ipl-drop" tabindex="0" role="button"
                                  aria-label="<?= _h('a.traffic.ipl_drop_aria') ?>">
                                 <i class="bi bi-file-earmark-arrow-up ipl-drop-icon"></i>
@@ -273,7 +274,7 @@
                                 <input type="file" id="ipl-file" class="ipl-drop-input"
                                        accept=".txt,.zone,.list,.cidr,text/plain">
                             </div>
-                            <label class="form-label wl-small mt-2"><?= __('a.traffic.ipl_paste') ?></label>
+                            <label for="ipl-text" class="form-label wl-small mt-2"><?= __('a.traffic.ipl_paste') ?></label>
                             <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="ipl-text" rows="6"
                                       placeholder="1.2.3.0/24&#10;2001:db8::/32&#10;<?= _h('a.traffic.ipl_text_ph') ?>"></textarea>
                             <!-- What was actually understood, before anything is stored. The whole
@@ -320,18 +321,18 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="ot-modal-title"><?= _h('a.traffic.ot_modal_title') ?></span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-light mb-2" style="font-size:0.9rem;" id="ot-modal-text"></p>
                         <div class="nl-undo" id="ot-modal-undo"></div>
                         <form id="ot-confirm-form">
                             <div class="mb-2 d-hidden" id="ot-workers-row">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.ot_workers_label') ?></label>
+                                <label for="ot-workers-input" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.ot_workers_label') ?></label>
                                 <input type="number" class="form-control bg-dark text-light border-secondary" id="ot-workers-input" min="1" max="64" value="4">
                             </div>
                             <div class="mb-3">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="ot-confirm-password"><?= _h('a.traffic.admin_password') ?></label>
                                 <?php // For the browser's password manager: this form has a password field, so without a named
                                       // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                                 <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -354,7 +355,7 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-file-earmark-code"></i> <span id="ot-preview-title"><?= _h('a.traffic.ot_dropin_preview') ?></span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <pre class="nl-preview" id="ot-preview-body"></pre>
@@ -439,7 +440,7 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-shield-lock text-warning"></i> <span id="sy-modal-title"><?= _h('a.traffic.sy_modal_title') ?></span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-light mb-2" style="font-size:0.9rem;" id="sy-modal-text"></p>
@@ -448,7 +449,7 @@
                         <form id="sy-confirm-form">
                             <div id="sy-modal-acks"></div>
                             <div class="mb-3">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="sy-confirm-password"><?= _h('a.traffic.admin_password') ?></label>
                                 <?php // For the browser's password manager: this form has a password field, so without a named
                                       // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                                 <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -470,7 +471,7 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-file-earmark-code"></i> <span id="sy-preview-title"><?= _h('a.traffic.sy_file_preview') ?></span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body"><pre class="nl-preview" id="sy-preview-body"></pre></div>
                 </div>
@@ -526,37 +527,37 @@
                 <div class="modal-content bg-dark">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-plus-circle text-success"></i> <?= _h('a.traffic.cl_modal_title') ?></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">
                         <p class="text-light mb-2" style="font-size:0.9rem;"><?= __('a.traffic.cl_note') ?></p>
                         <form id="cl-add-form">
                             <div class="row g-2">
                                 <div class="col-6">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.name') ?></label>
+                                    <label for="cl-name" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.name') ?></label>
                                     <input type="text" class="form-control bg-dark text-light border-secondary" id="cl-name" maxlength="16" placeholder="edge-a" required>
                                     <small class="settings-hint"><?= __('a.traffic.cl_name_hint') ?></small>
                                 </div>
                                 <div class="col-3">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.cl_udp') ?></label>
+                                    <label for="cl-udp" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.cl_udp') ?></label>
                                     <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-udp" min="1024" max="65535" required>
                                 </div>
                                 <div class="col-3">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.cl_tcp') ?></label>
+                                    <label for="cl-tcp" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.cl_tcp') ?></label>
                                     <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-tcp" min="1024" max="65535" required>
                                 </div>
                                 <div class="col-6">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.traffic.cl_affinity') ?></label>
+                                    <label for="cl-affinity" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.traffic.cl_affinity') ?></label>
                                     <input type="text" class="form-control bg-dark text-light border-secondary" id="cl-affinity" placeholder="<?= _h('a.traffic.cl_affinity_ph') ?>">
                                 </div>
                                 <div class="col-6">
-                                    <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.traffic.cl_workers') ?></label>
+                                    <label for="cl-workers" class="form-label" style="font-size:0.85rem;color:#bbb;"><?= __('a.traffic.cl_workers') ?></label>
                                     <input type="number" class="form-control bg-dark text-light border-secondary" id="cl-workers" min="0" max="64" value="0">
                                 </div>
                             </div>
                             <div id="cl-plan" class="mt-2"></div>
                             <div class="mb-3 mt-2">
-                                <label class="form-label" style="font-size:0.85rem;color:#bbb;"><?= _h('a.traffic.admin_password') ?></label>
+                                <label class="form-label" style="font-size:0.85rem;color:#bbb;" for="cl-password"><?= _h('a.traffic.admin_password') ?></label>
                                 <?php // For the browser's password manager: this form has a password field, so without a named
                                       // username it pairs the page's search box with it. Visually hidden, never submitted. ?>
                                 <input type="text" value="<?= sanitize($cfg['admin_username'] ?? 'admin') ?>" autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" readonly>
@@ -605,7 +606,10 @@
                         <option value="outbound"><?= _h('a.traffic.tn_outbound') ?></option>
                         <option value="both"><?= _h('a.traffic.tn_both') ?></option>
                     </select>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="tn-dry" title="<?= __('a.traffic.tn_dry_title') ?>"><i class="bi bi-check2-circle"></i> <?= _h('a.traffic.tn_dry') ?></button>
+                    <?php /* Escaped (1.74.0, XSS-7): a language pack is somebody else's file, and a `"` in this title was
+                             an attribute of its own. Decoded first — the shipped text carries `&mdash;` — so the escaping
+                             does not print the entity's name. */ ?>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="tn-dry" title="<?= htmlspecialchars(html_entity_decode(__('a.traffic.tn_dry_title'), ENT_QUOTES | ENT_HTML5, 'UTF-8'), ENT_QUOTES, 'UTF-8') ?>"><i class="bi bi-check2-circle"></i> <?= _h('a.traffic.tn_dry') ?></button>
                     <button type="button" class="btn btn-sm btn-outline-warning" id="tn-start"><?= __('a.traffic.tn_start') ?></button>
                     <button type="button" class="btn btn-sm btn-outline-danger d-hidden" id="tn-cancel"><?= _h('a.traffic.tn_cancel') ?></button>
                 </div>

@@ -113,9 +113,15 @@ $input = readJsonBody();
 $op = strtolower(trim((string)($input['op'] ?? 'save')));
 
 if ($op === 'reset') {
+    // A full reset: every section's own text goes too — the dialog says so before asking. The texts go FIRST, and
+    // when they cannot be removed nothing is reset and the answer says so (1.74.0, QUAL-26: a failed DELETE was
+    // swallowed and the panel was told "removed every custom section text").
+    try { $db->prepare("DELETE FROM page_content WHERE page LIKE 'home:%'")->execute(); }
+    catch (\Throwable $e) {
+        error_log('[admin] home_layout reset: the section texts could not be removed: ' . $e->getMessage());
+        jsonResponse(['error' => __('api.db_unavailable')], 503);
+    }
     setSetting($db, 'home_layout', '');
-    // A full reset: every section's own text goes too — the dialog says so before asking.
-    try { $db->prepare("DELETE FROM page_content WHERE page LIKE 'home:%'")->execute(); } catch (\Throwable $e) {}
     auditNote(['summary' => 'restored the built-in home page layout and removed every custom section text']);
     jsonResponse(['success' => true, 'message' => __('api.pages.layout_reset')]);
 }
@@ -156,7 +162,11 @@ try {
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $pg) {
         if (!in_array($pg, $keep, true)) $db->prepare("DELETE FROM page_content WHERE page = ?")->execute([$pg]);
     }
-} catch (\Throwable $e) {}
+} catch (\Throwable $e) {
+    // Before the layout is stored (1.74.0, QUAL-26): a section whose text could not go is not dropped from it.
+    error_log('[admin] home_layout save: a removed section\'s text could not be removed: ' . $e->getMessage());
+    jsonResponse(['error' => __('api.db_unavailable')], 503);
+}
 
 setSetting($db, 'home_layout', $r['json']);
 

@@ -13,9 +13,9 @@
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>"
       data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
-    <div class="admin-container admin-wide wl-page">
+    <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
-            <h2><i class="bi bi-journal-text"></i> <?= _h('a.audit.title') ?> <span class="idx-subtitle"><?= _h('a.audit.subtitle') ?></span></h2>
+            <h1 class="admin-title"><i class="bi bi-journal-text"></i> <?= _h('a.audit.title') ?> <span class="idx-subtitle"><?= _h('a.audit.subtitle') ?></span></h1>
             <?php $current = 'admin-audit'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 

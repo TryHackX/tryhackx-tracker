@@ -63,15 +63,11 @@ function authBridgeLogoutBoth(array $cfg): bool { return ($cfg['auth_bridge_logo
  *
  * These two settings become a redirect the browser follows, so the scheme check is the whole point:
  * `javascript:` in a settings field would be a stored XSS with an operator's own hand on it, and a
- * scheme-relative `//evil.example` reads as a path to a person and as a host to a browser.
+ * scheme-relative `//evil.example` reads as a path to a person and as a host to a browser. The check
+ * itself is safeHttpUrl() (includes/functions.php) since 1.74.0 — the footer's addresses use it too.
  */
 function authBridgeSafeUrl(string $url): string {
-    $url = trim($url);
-    if ($url === '' || strlen($url) > 500) return '';
-    if (!preg_match('#^https?://#i', $url)) return '';
-    $p = parse_url($url);
-    if (!is_array($p) || empty($p['host'])) return '';
-    return $url;
+    return safeHttpUrl($url, 500);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -230,6 +226,11 @@ function authHandoffPrune(PDO $db, ?int $now = null, int $limit = 5000): int {
 function authBridgeResolve(PDO $db, array $cfg, array $client, array $ext): array {
     if (!usersEnabled($cfg)) return ['error' => 'users_off'];
     if (!authBridgeEnabled($cfg)) return ['error' => 'bridge_off'];
+    // The handoff link the partner sends a browser to is built from `site_url` (apiAbsoluteBase()). Without one it
+    // was built from the request's own Host header — a header of the PARTNER's request, which whatever sits between
+    // the two servers can set — and the person would be sent wherever it said, with a ticket in the address (1.74.0,
+    // AUTH-6). So no site_url, no bridge: the operator's own statement of where this site lives, as the mails need.
+    if (safeHttpUrl((string)($cfg['site_url'] ?? '')) === '') return ['error' => 'bridge_needs_site_url'];
     $externalId = trim((string)($ext['external_id'] ?? ''));
     if ($externalId === '' || strlen($externalId) > 191) return ['error' => 'invalid_external_id'];
     $ext['external_id'] = $externalId;
@@ -332,14 +333,15 @@ function authBridgeMarkSession(int $identityId): void {
  *
  * A `next` that is not a plain path on this site is dropped rather than corrected: "?next=" on a
  * login endpoint is the classic open-redirect, and the only safe reading of `//evil.example` here
- * is "not ours".
+ * is "not ours". Nor may it hold a backslash anywhere (1.74.0, PUB-4): a browser reads `/\evil.example`
+ * as `//evil.example` — another host — and no path on this site needs one.
  */
 function authBridgeNext(string $raw, string $baseUrl): string {
     $raw = trim($raw);
     if ($raw === '' || $raw[0] !== '/' || str_starts_with($raw, '//') || strlen($raw) > 300) {
         return $baseUrl;
     }
-    if (strpbrk($raw, "\r\n\t") !== false) return $baseUrl;
+    if (strpbrk($raw, "\r\n\t\\") !== false) return $baseUrl;
     return $raw;
 }
 
@@ -397,7 +399,7 @@ function authBridgeHandleRoute(PDO $db, array $cfg, string $action, string $base
     if (!authBridgeEnabled($cfg)) { header('Location: ' . $home, true, 302); exit; }
 
     if ($action === 'bridge') {
-        $token = (string)($_GET['token'] ?? '');
+        $token = strInput($_GET, 'token');   // strings only (1.74.0, PUB-3): `token[]=x` is no ticket, not "Array"
         $row = authHandoffRedeem($db, $token, 'in');
         if (!$row) {
             // Expired, spent or invented. The login page says so in words the person can act on
@@ -432,7 +434,7 @@ function authBridgeHandleRoute(PDO $db, array $cfg, string $action, string $base
         // the bridge is signed in to the SITE and signs in to the panel the usual way.
         auditLog($db, 'auth.bridge.login', ['target_type' => 'user', 'target_id' => (int)$user['id'],
             'summary' => $user['username'], 'detail' => ['client_id' => (int)$row['client_id']]]);
-        header('Location: ' . authBridgeNext((string)($_GET['next'] ?? ''), $home), true, 302);
+        header('Location: ' . authBridgeNext(strInput($_GET, 'next'), $home), true, 302);
         exit;
     }
 

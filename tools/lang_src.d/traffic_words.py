@@ -50,12 +50,12 @@ add('api.net', {
                          'choose what you are willing to hand OpenTracker, with some headroom. Packets above it cost you nothing, '
                          'because the firewall drops them before the tracker ever sees them.',
                          'W tej chwili naprawdę przechodzi :passed pps i TO jest liczba, od której trzeba wychodzić: wybierz tyle, '
-                         'ile chcesz oddać OpenTrackerowi, z pewnym zapasem. Pakiety ponad nią nic cię nie kosztują, bo zapora '
+                         'ile chcesz oddać OpenTrackerowi, z pewnym zapasem. Pakiety ponad nią nic Cię nie kosztują, bo zapora '
                          'odrzuca je, zanim tracker w ogóle je zobaczy.'),
     'rec_flood_pick': ('Pick the number you are willing to hand OpenTracker, not one taken from the arrivals above. Packets over it '
                        'cost you nothing, because the firewall drops them before the tracker ever sees them.',
                        'Wybierz liczbę, którą chcesz oddać OpenTrackerowi, a nie wziętą z przychodzących powyżej. Pakiety ponad nią '
-                       'nic cię nie kosztują, bo zapora odrzuca je, zanim tracker w ogóle je zobaczy.'),
+                       'nic Cię nie kosztują, bo zapora odrzuca je, zanim tracker w ogóle je zobaczy.'),
     'rec_flood_ref':  ('(For reference, a limit above the arrivals would be around :n pps.)',
                        '(Dla porównania: limit powyżej przychodzących wynosiłby około :n pps.)'),
     'rec_normal':     ('A limit at :suggested pps (P95 + 5 %) would essentially never trigger; below roughly :floor pps you start '
@@ -148,7 +148,7 @@ add('api.ot', {
                        'Jądro ogranicza każdy bufor gniazda do :bytes B (net.core.rmem_max). Pakiet odrzucony w tym miejscu '
                        'kosztował maszynę wszystko poza odpowiedzią — w przeciwieństwie do odrzuconego przez zaporę, który nic '
                        'nie kosztuje. Podniesienie limitu to ustawienie sysctl dla całego systemu, więc panel nie robi tego za '
-                       'ciebie: sudo sysctl -w net.core.rmem_max=8388608'),
+                       'Ciebie: sudo sysctl -w net.core.rmem_max=8388608'),
     'adv_rmem_drops': ('The kernel caps every socket buffer at :bytes bytes (net.core.rmem_max), and this socket has already '
                        'discarded :drops packets because its queue was full. A packet dropped there cost the machine '
                        'everything except the answer — unlike one the firewall drops, which costs nothing. Raising it is a '
@@ -156,7 +156,7 @@ add('api.ot', {
                        'Jądro ogranicza każdy bufor gniazda do :bytes B (net.core.rmem_max), a to gniazdo, bo jego kolejka była '
                        'pełna, odrzuciło już pakiety w liczbie :drops. Pakiet odrzucony w tym miejscu kosztował maszynę wszystko '
                        'poza odpowiedzią — w przeciwieństwie do odrzuconego przez zaporę, który nic nie kosztuje. Podniesienie '
-                       'limitu to ustawienie sysctl dla całego systemu, więc panel nie robi tego za ciebie: '
+                       'limitu to ustawienie sysctl dla całego systemu, więc panel nie robi tego za Ciebie: '
                        'sudo sysctl -w net.core.rmem_max=8388608'),
     'adv_dropins':    ('Other drop-ins are present and are never touched by the panel: :files. systemd merges them, and the '
                        'highest-numbered file wins a conflict.',

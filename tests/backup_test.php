@@ -119,15 +119,48 @@ check('the next run is the next configured day', $next !== null && $next === $we
 
 // ── 5. download tokens ───────────────────────────────────────────────────────
 // An archive holds every password on the box, so the download link is single-use, short-lived and
-// bound to the id it was minted for.
+// bound to the id it was minted for — and, since 1.74.0 (PANEL-1), it must have been ISSUED here:
+// knowing the HMAC secret is no longer enough to make one (the Settings page showed that secret to
+// every session that reached it, none of which had typed the owner's password).
 $tok = backupMintToken('backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000);
 check('token is opaque and long enough', strlen($tok) >= 32 && !str_contains($tok, 'backup-tryhackx'));
+check('token carries an expiry, a nonce and a signature', (bool)preg_match('/^\d+\.[0-9a-f]{32}\.[0-9a-f]{64}$/', $tok), $tok);
+check('two tokens for the same archive and moment differ (the nonce)', backupMintToken('backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) !== $tok);
 check('token verifies for its own id', backupVerifyToken($tok, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000 + 10) === true);
 check('token refused for another id', backupVerifyToken($tok, 'backup-tryhackx-20260101-000000', 'secret-hmac', 1800000000 + 10) === false);
 check('token refused with another secret', backupVerifyToken($tok, 'backup-tryhackx-20260827-010203', 'other', 1800000000 + 10) === false);
 check('token expires', backupVerifyToken($tok, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000 + BACKUP_TOKEN_TTL + 5) === false);
 check('a mangled token is refused', backupVerifyToken(substr($tok, 0, -2) . 'xx', 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000 + 10) === false);
 check('an empty token is refused', backupVerifyToken('', 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+check('… and so is one that is not a string at all (`token[]=x`)', backupVerifyToken(['x'], 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+// The verifier's PoC: a token put together OUTSIDE the panel from the secret alone, for an expiry in the year 2100.
+$far = 4102444800;
+$forgedFar = $far . '.' . str_repeat('ab', 16) . '.' . hash_hmac('sha256', 'backup-tryhackx-20260827-010203|' . $far . '|' . str_repeat('ab', 16), 'secret-hmac');
+check('a correctly signed token that expires further away than one lifetime is refused', backupVerifyToken($forgedFar, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+$oldShape = (1800000000 + 60) . '.' . hash_hmac('sha256', 'backup-tryhackx-20260827-010203|' . (1800000000 + 60), 'secret-hmac');
+check('a token of the old shape (expiry.signature, no nonce) is refused', backupVerifyToken($oldShape, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+// Issued and redeemed against the panel's own record (config/backup_state.json) — put back as it was.
+$bsFile = backupStateFile();
+$bsWas = is_file($bsFile) ? (string)file_get_contents($bsFile) : null;
+try {
+    $bid = 'backup-tryhackx-20260827-010203';
+    $now = time();
+    $forged = backupMintToken($bid, 'secret-hmac', $now);          // signed right, never recorded
+    check('a token signed with the secret but never issued passes the signature check…', backupVerifyToken($forged, $bid, 'secret-hmac', $now + 1) === true);
+    check('… and is refused at redemption: not issued here (403 at the endpoint)', backupRedeemToken($forged, $bid, $now + 1) === 'unknown');
+    $issued = backupIssueToken($bid, 'secret-hmac', $now);
+    check('an issued token is recorded by the SHA-256 of its nonce, never the token itself',
+          is_string($issued) && isset(backupStateRead()['minted_tokens'][hash('sha256', explode('.', (string)$issued)[1] ?? '')])
+          && !str_contains((string)@file_get_contents($bsFile), (string)$issued));
+    check('an issued token is redeemed once for its own archive…', backupRedeemToken((string)$issued, 'tracker-db-20260101-000000', $now + 1) === 'unknown'
+          && backupRedeemToken((string)$issued, $bid, $now + 2) === 'ok');
+    check('… and the second time says "already used" (410 at the endpoint)', backupRedeemToken((string)$issued, $bid, $now + 3) === 'used');
+    $late = backupIssueToken($bid, 'secret-hmac', $now - BACKUP_TOKEN_TTL - 10);
+    check('an issued token that has run out is no longer on the list', backupRedeemToken((string)$late, $bid, $now) === 'unknown'
+          && !isset(backupStateRead()['minted_tokens'][hash('sha256', explode('.', (string)$late)[1] ?? '')]));
+} finally {
+    if ($bsWas === null) @unlink($bsFile); else file_put_contents($bsFile, $bsWas);
+}
 
 // ── 6. ids ───────────────────────────────────────────────────────────────────
 check('a real id is accepted', backupValidId('backup-tryhackx-20260827-010203'));

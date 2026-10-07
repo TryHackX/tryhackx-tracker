@@ -44,20 +44,44 @@ $restore = function () use ($saved) {
 };
 
 try {
-    // ── config/rate_limits.json ─────────────────────────────────────────────────────────────────
+    // ── the limits: config/ratelimit/ (one file per action since 1.74.0), config/rate_limits.json the reset switch ──
+    // Actions of this run's own, with generations and times on the test's clock; the site's real files are newer
+    // than that clock and stay out of every assertion below.
     $rl = $files[0];
-    file_put_contents($rl, json_encode([
-        'appeal|203.0.113.7'       => [$NOW - 7200, $NOW - 5000],          // nobody called "appeal" again: both stale
-        'idxsearch|198.51.100.0/24' => [$NOW - 4000, $NOW - 120, $NOW - 5], // one stale, two live
-        'health|192.0.2.1'         => [$NOW - 30],                          // live
-    ]));
+    $P = 'rttest_' . getmypid() . '_';
+    $aStale = $P . 'appeal'; $aLive = $P . 'idxsearch'; $aGone = $P . 'forgotten';
+    $map = rateLimitReadJson($rl, false)['data'];
+    $map[$aStale . '|*'] = ['aaaa0001', $NOW - 100];
+    $map[$aLive . '|*'] = ['aaaa0002', $NOW - 100];
+    $map[$P . 'nofile|*'] = ['aaaa0004', $NOW - 7200];        // no file, minted two hours ago
+    $map[$P . 'nofile_new|*'] = ['aaaa0005', $NOW - 60];      // no file, minted a minute ago — a request may be writing it
+    $map[$P . 'oldshape|203.0.113.7'] = [$NOW - 7200, $NOW - 5000];   // the pre-1.74.0 map's "<action>|<address>" key
+    rateLimitWrite($rl, $map);
+    rateLimitEnsureDir();
+    rateLimitWrite(rateLimitFile($aStale), ['a' => $aStale, 'g' => 'aaaa0001', 'h' => ['203.0.113.7' => [$NOW - 7200, $NOW - 5000]]]);
+    rateLimitWrite(rateLimitFile($aLive), ['a' => $aLive, 'g' => 'aaaa0002',
+        'h' => ['198.51.100.0/24' => [$NOW - 4000, $NOW - 120, $NOW - 5], '192.0.2.1' => [$NOW - 30]]]);
+    rateLimitWrite(rateLimitFile($aGone), ['a' => $aGone, 'g' => 'aaaa0003', 'h' => ['192.0.2.2' => [$NOW - 10]]]);   // its line is gone
+    $badOld = rateLimitFile($P . 'x') . '.bad.20260101-000000';
+    $badNew = rateLimitFile($P . 'x') . '.bad.20260920-000000';
+    $tmpOld = rateLimitFile($P . 'y') . '.tmp.12345';
+    foreach ([$badOld => $NOW - 8 * 86400, $badNew => $NOW - 86400, $tmpOld => $NOW - 7200] as $f => $mt) { file_put_contents($f, 'x'); touch($f, $mt); }
     $dropped = rateLimitPrune($NOW);
-    $after = json_decode((string)file_get_contents($rl), true);
-    check('the limits\' file: every hit older than the longest window goes, whatever the action', $dropped === 3, (string)$dropped);
-    check('… a key left with nothing goes with them (the address of an action nobody called again)', !isset($after['appeal|203.0.113.7']), json_encode($after));
-    check('… the live hits stay', ($after['idxsearch|198.51.100.0/24'] ?? null) === [$NOW - 120, $NOW - 5]
-          && ($after['health|192.0.2.1'] ?? null) === [$NOW - 30], json_encode($after));
+    $after = rateLimitReadJson($rl, false)['data'];
+    check('the limits: every hit older than the longest window goes — an action nobody called again, the old map\'s address keys,
+           and a file of a generation its line no longer names (6 of this run\'s own)', $dropped >= 6, (string)$dropped);
+    check('… a file left with nothing goes, and so does one of a forgotten generation', !is_file(rateLimitFile($aStale)) && !is_file(rateLimitFile($aGone)));
+    check('… the live hits stay', rateLimitHits($aLive) === ['198.51.100.0/24' => [$NOW - 120, $NOW - 5], '192.0.2.1' => [$NOW - 30]],
+          json_encode(rateLimitHits($aLive)));
+    check('… in the reset switch, the old shape\'s address key goes, as does the line of an action with no file for an hour',
+          !isset($after[$P . 'oldshape|203.0.113.7']) && !isset($after[$P . 'nofile|*']), json_encode(array_keys($after)));
+    check('… but not a line minted a minute ago (a request may be writing its first hit)', isset($after[$P . 'nofile_new|*']) && isset($after[$aLive . '|*']));
+    check('… a set-aside file goes after a week, not before; a stale temporary file goes', !is_file($badOld) && is_file($badNew) && !is_file($tmpOld));
+    @unlink($badNew);
+    touch(rateLimitFile($aStale) . '.lock', $NOW - 7200);
     check('… and a pass with nothing left to drop drops nothing', rateLimitPrune($NOW) === 0);
+    check('… while the lock of a file gone for an hour goes with it', !is_file(rateLimitFile($aStale) . '.lock'));
+    foreach ([$aStale, $aLive, $aGone, $P . 'nofile', $P . 'nofile_new'] as $a) { rateLimitForget($a); @unlink(rateLimitFile($a) . '.lock'); }
     check('the longest window is an hour', RATE_LIMIT_KEEP_SECONDS === 3600);
     // Every caller's window, read out of the code with PHP's own tokeniser (a call's arguments, at their own
     // depth): a window longer than the prune keeps would be forgotten early. No 4th argument = the default, 3600.
@@ -148,15 +172,25 @@ try {
     check('tools/janitor.php loads the step and runs it', str_contains($jan, "require_once \$root . '/includes/retention.php';")
           && str_contains($jan, '$rt = retentionTick($db, $cfg);'));
     check('… outside any tracker-mode condition', !preg_match('/if\s*\(\s*trackerMode[^\n]*\n[^\n]*retentionTick/', $jan));
-    $ret = (string)file_get_contents($root . '/includes/retention.php');
-    $aa = (string)file_get_contents($root . '/includes/api_auth.php');
-    $ab = (string)file_get_contents($root . '/includes/authbridge.php');
-    check('the table prunes are bounded', str_contains($aa, 'LIMIT " . max(1, $limit)') && str_contains($ab, 'LIMIT " . max(1, $limit)'));
+    // The table prunes are bounded — asked to (1.74.0, QUAL-7: this was a grep for their LIMIT): three rows each that
+    // the rule would take, a limit of one, exactly one gone; inside a transaction, so nothing of the database moves.
+    $db->beginTransaction();
+    try {
+        $ins->execute(['192.0.2.20', '192.0.2.20', 'bound 1', $NOW - 200 * 86400, $NOW - 150 * 86400]);
+        $ins->execute(['192.0.2.21', '192.0.2.21', 'bound 2', $NOW - 200 * 86400, $NOW - 150 * 86400]);
+        $ins->execute(['192.0.2.22', '192.0.2.22', 'bound 3', $NOW - 200 * 86400, $NOW - 150 * 86400]);
+        $bansOne = apiBansPrune($db, $NOW, 1);
+        foreach (['rt-b1', 'rt-b2', 'rt-b3'] as $t) $tk->execute([hash('sha256', $t), $NOW - 7200, null]);
+        $ticketsOne = authHandoffPrune($db, $NOW, 1);
+    } finally {
+        $db->rollBack();
+    }
+    check('the table prunes are bounded: a limit of one takes one row of the three it would take (bans, tickets)',
+          $bansOne === 1 && $ticketsOne === 1, json_encode([$bansOne, $ticketsOne]));
     check('the files are rewritten under their own locks',
           (bool)preg_match('/function rateLimitPrune.*?flock\(\$lockH, LOCK_EX\)/s', (string)file_get_contents($root . '/includes/functions.php'))
           && (bool)preg_match('/function loginAttemptsPrune.*?loginAttemptsUpdate\(/s', (string)file_get_contents($root . '/includes/auth.php')));
-    check('the step module names what it prunes', str_contains($ret, 'apiBansPrune') && str_contains($ret, 'authHandoffPrune')
-          && str_contains($ret, 'loginAttemptsPrune') && str_contains($ret, 'rateLimitPrune'));
+    // What the step module prunes is what retentionTick() reports, each by name — checked above by its answer.
 } finally {
     $restore();
     $db->exec("DELETE FROM api_bans WHERE reason = 'retention_test'");

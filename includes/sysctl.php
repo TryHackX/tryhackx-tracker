@@ -92,8 +92,6 @@ function sysctlKeys(): array {
     ];
 }
 
-function sysctlKeyNames(): array { return array_keys(sysctlKeys()); }
-
 /* ── settings ────────────────────────────────────────────────────────────── */
 
 /**

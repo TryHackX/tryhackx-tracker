@@ -32,7 +32,7 @@ add('settings', {
         'emote\'s <code>:code:</code> counts as it is typed. :min–:max. The text as typed, tags included, may '
         'be at most :factor times as long, and never more than :cap characters. No pictures from other '
         'sites — the site\'s own emotes and stickers only.',
-        'Opis listy to BBCode albo Markdown, jak opisy na tej stronie, z wybierakiem emotek. Liczy się to, co '
+        'Opis listy to BBCode albo Markdown, jak opisy na tej stronie, z selektorem emotek. Liczy się to, co '
         'widzi czytelnik — słowa, nie znaczniki wokół nich; emoji to jeden znak, a <code>:code:</code> emote '
         'liczy się tak, jak go wpisano. Od :min do :max. Tekst w postaci wpisanej, razem ze znacznikami, może '
         'być najwyżej :factor razy dłuższy, a liczba jego znaków nigdy nie przekracza :cap. Bez obrazków '
@@ -65,7 +65,6 @@ add('js.lists', {
     'edit': ('Edit', 'Edytuj'),
     'edit_title': ('Edit the name and the description', 'Edytuj nazwę i opis'),
     'saving': ('Saving…', 'Zapisywanie…'),
-    'saved': ('Saved.', 'Zapisano.'),
     'edit_failed': ('The list could not be saved. Please try again.', 'Nie udało się zapisać listy. Spróbuj ponownie.'),
     'rate_limited': ('You are saving too often. Wait a while and try again.',
                      'Zapisujesz zbyt często. Odczekaj chwilę i spróbuj ponownie.'),

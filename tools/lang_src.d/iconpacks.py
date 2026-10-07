@@ -35,7 +35,7 @@ add('settings', {
         'jsDelivr, pinned and checked by their hash. A package is your own copy — Font Awesome Pro 6 or 7 '
         'with the styles you bought — installed below and served by this site itself.',
         'Free 6.7.2 to to, co strona rysuje od wersji 1.68; 7.3.1 to nowsze wydanie Free. Oba pochodzą '
-        'z jsDelivr, przypięte do wersji i sprawdzane po sumie kontrolnej. Paczka to twoja własna kopia — '
+        'z jsDelivr, przypięte do wersji i sprawdzane po sumie kontrolnej. Paczka to Twoja własna kopia — '
         'Font Awesome Pro 6 lub 7 ze stylami, które kupiłeś — instalowana niżej i serwowana przez samą stronę.'),
     'fa_pack': ('Package', 'Paczka'),
     'fa_pack_none': ('(no package installed)', '(brak zainstalowanej paczki)'),
@@ -216,7 +216,6 @@ add('js.iconpack', {
     'core_fontawesome': ('Always loaded with fontawesome.css (the site’s solid, outlines and brand need them):',
                          'Ładowane zawsze z fontawesome.css (potrzebne ikonom pełnym, konturom i marce strony):'),
     'no_extra': ('Every style of this package is in all.css.', 'Każdy styl tej paczki jest w all.css.'),
-    'in_all': ('in all.css', 'w all.css'),
     'size_title': ('The stylesheet, and the font a browser fetches for the first icon drawn with it',
                    'Arkusz stylów oraz czcionka, którą przeglądarka pobiera przy pierwszej ikonie w tym stylu'),
     'two_layers': ('2 layers', '2 warstwy'),

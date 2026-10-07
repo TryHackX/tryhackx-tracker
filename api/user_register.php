@@ -51,8 +51,10 @@ if (isset($r['error'])) {
 }
 $user = $r['user'];
 userSessionStart($db, $user, $ip);
-userNotify($db, (int)$user['id'], 'welcome', 'Welcome to ' . ($cfg['site_name'] ?? 'the tracker') . '!',
-    'Your account is ready. Your groups and their expiry dates are listed on this page.');
+// In the language this page was signed up in — the account has chosen none yet (recipientLang(), 1.74.0).
+$uLang = recipientLang($cfg, $user);
+userNotify($db, (int)$user['id'], 'welcome', langFor($uLang, 'notify.welcome', ['site' => $cfg['site_name'] ?? 'Tracker']),
+    langFor($uLang, 'notify.welcome_body'));
 // best-effort verification mail when an address was given (account works without confirming)
 $verifySent = trim((string)$user['email']) !== '' ? userVerifySend($db, $cfg, $user) : false;
 

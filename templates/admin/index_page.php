@@ -16,9 +16,9 @@
     <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/detail-panel.css<?= assetVer('assets/css/detail-panel.css') ?>">
 </head>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>" data-near-pages="<?= max(1, min(20, (int)($cfg['admin_near_pages'] ?? 2))) ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>" data-files-mode="<?= sanitize(indexFilesAdminMode($cfg)) ?>">
-    <div class="admin-container admin-wide wl-page">
+    <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
-            <h2><i class="bi bi-collection"></i> <?= _h('a.index.title') ?> <span class="idx-subtitle"><?= __('a.index.subtitle') ?></span></h2>
+            <h1 class="admin-title"><i class="bi bi-collection"></i> <?= _h('a.index.title') ?> <span class="idx-subtitle"><?= __('a.index.subtitle') ?></span></h1>
             <?php $current = 'admin-index'; include __DIR__ . '/_header_actions.php'; ?>
         </div>
 
@@ -159,14 +159,14 @@
                     </colgroup>
                     <thead><tr>
                         <th class="idx-th-check"><input type="checkbox" id="idx-check-all" title="<?= _h('a.index.check_all') ?>"></th>
-                        <th class="sortable" data-sort="hash"><?= _h('a.index.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="name"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="size"><?= _h('search.col_size') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="files" title="<?= _h('a.index.col_files_title') ?>"><?= _h('search.files_head') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="seeders"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="seen"><?= _h('a.index.col_seen') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
-                        <th class="sortable" data-sort="last"><?= _h('a.index.col_first_last') ?> <i class="bi bi-arrow-down sort-icon active"></i></th>
-                        <th class="sortable col-badge" data-sort="meta"><?= _h('a.index.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon"></i></th>
+                        <th class="sortable" data-sort="hash"><button type="button" class="th-sort"><?= _h('a.index.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="size"><button type="button" class="th-sort"><?= _h('search.col_size') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="files" title="<?= _h('a.index.col_files_title') ?><button type="button" class="th-sort">"><?= _h('search.files_head') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="seeders"><button type="button" class="th-sort"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="seen"><button type="button" class="th-sort"><?= _h('a.index.col_seen') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="last"><button type="button" class="th-sort"><?= _h('a.index.col_first_last') ?> <i class="bi bi-arrow-down sort-icon active" aria-hidden="true"></i></button></th>
+                        <th class="sortable col-badge" data-sort="meta"><button type="button" class="th-sort"><?= _h('a.index.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions"><?= _h('a.index.col_actions') ?></th>
                     </tr></thead>
                     <tbody id="idx-body"></tbody>
@@ -182,7 +182,7 @@
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-collection"></i> <?= _h('a.index.modal_title') ?></h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body" id="idx-modal-body"></div>
             </div>

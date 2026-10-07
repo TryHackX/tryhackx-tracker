@@ -69,7 +69,7 @@ add('a.index', {
                     'przycięte, wciąż trwa.'),
 
     # toolbar: search and filters
-    'search_ph':   ('Search hash prefix or name...', 'Szukaj prefiksu hasha lub nazwy...'),
+    'search_ph':   ('Search hash prefix or name...', 'Szukaj prefiksu hasha lub nazwy…'),
     'f_meta_title': ('Metadata status', 'Status metadanych'),
     'm_all':       ('All meta', 'Wszystkie meta'),
     'm_none':      ('No metadata', 'Brak metadanych'),
