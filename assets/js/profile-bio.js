@@ -288,7 +288,9 @@
     function grow() {
         if (!ta) return;
         ta.style.height = 'auto';
-        ta.style.height = Math.min(ta.scrollHeight + 2, 320) + 'px';
+        // The box is border-box and scrollHeight leaves its borders out: what is added is what the stylesheet gives it — since 1.74.2
+        // 1px at the top and 5px at the bottom (the frame's 1 and the resize grip's inset of 4) — read, not written here. It was 2.
+        ta.style.height = Math.min(ta.scrollHeight + (ta.offsetHeight - ta.clientHeight), 320) + 'px';
     }
 
     /**

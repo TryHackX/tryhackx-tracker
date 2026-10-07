@@ -4074,26 +4074,47 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    The scrollbar's gutter is kept whether or not the text scrolls yet (1.68.0): without it the bar
    would arrive with the first line too many and every line above it would re-wrap under the cursor. */
 .shout-input-wrap .shout-input { padding-right: 5.6rem; scrollbar-gutter: stable; }
-/* THE FIELD'S RESIZE GRIP SITS INSIDE ITS FRAME (1.74.1). The browser draws a textarea's grip in the corner of the
-   field's own box, flush against the frame — and here ~10px too high as well: the field was an inline-block standing
-   on a line 27px tall, so the room a line keeps under its letters lay under the field, inside the editor's frame.
-   The field is a block now (no strip), and keeps 4px of transparent border on its right and bottom: the grip, and the
-   scrollbar beside it, stand 4px in from the frame on both sides. The box itself does not move, so the buttons' place,
-   the text, and the frame's colour stay (the field's ground is the frame's). The plain composer's frame was the field's
-   own border: it is drawn over its wrapper (::after) in the same place, with the same colours. */
-.shout-input-wrap .shout-input, .shout-editor textarea { display: block; }
-.shout-editor textarea { border-style: solid; border-color: transparent; border-width: 0 4px 4px 0; }
-.shout-compose > .shout-input-wrap > .shout-input { border-width: 1px 4px 4px 1px; }
+/* THE RESIZE GRIP OF EVERY EDITOR SITS INSIDE ITS FRAME (1.74.1: the shoutbox's composer; 1.74.2: all the rest).
+   The browser draws a textarea's grip in the corner of the field's own box — flush against the frame, and in an editor (a
+   frame round a field) 8-10px too high besides: the field was an inline-block standing on a line 27px tall, so the room a
+   line keeps under its letters lay under the field, inside the frame. So at the editor's own level — .rt-editor, which the
+   descriptions (the Info window's, the Whitelist form's), a list's, the messages, the comments and the shoutbox are built
+   on — the field is a block (no strip) and keeps 4px of TRANSPARENT border at the end of its lines and at its bottom
+   (logical, so a right-to-left text's grip, which stands at the other corner, is inset too): the grip, and the scrollbar
+   beside it, stand 4px in from the frame on both sides. The box itself does not move, so nothing else does (the shoutbox's
+   buttons are placed from it), and the field's ground is the frame's, so the border shows no seam. Later than every
+   per-editor rule above (.form-group .rt-editor, .pm-editor, .cm-editor all said `border: 0`), at their weight. */
+.rt-editor textarea, .form-group .rt-editor textarea {
+    display: block; border: 0 solid transparent; border-inline-end-width: 4px; border-block-end-width: 4px;
+}
+.rt-editor textarea:focus, .form-group .rt-editor textarea:focus { border-color: transparent; }
+/* Where no editor frames the field and its own edge is the frame — the shoutbox's plain composer and its plain in-place
+   editor, the message box where the editor's template is missing, the profile bio — the same inset, with the frame drawn
+   without the border: over the wrapper for the composer (a textarea takes no ::after), as an outline just inside the
+   box's edge for the others (it follows the radius; the focus colours it). The frame is the box's outer 1px, so the
+   border is 5px there, 1px more than in an editor, whose frame lies outside the field: the grip is 4px from the frame's
+   inside either way. */
+.shout-input-wrap .shout-input { display: block; }
+.shout-compose > .shout-input-wrap > .shout-input { border-width: 1px 5px 5px 1px; }
 .shout-compose > .shout-input-wrap > .shout-input, .shout-compose > .shout-input-wrap > .shout-input:focus { border-color: transparent; }
 .shout-compose > .shout-input-wrap::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     border: 1px solid var(--field-border); border-radius: var(--radius);
 }
 .shout-compose > .shout-input-wrap:focus-within::after { border-color: var(--accent); }
-/* A forced-colours scheme (Windows high contrast) can paint even a transparent border: there the field keeps no inset (the
-   grip stands at its corner, as before 1.74.1) rather than show two thick bars. Not measured here — no such scheme at hand. */
+.shout-edit-form > textarea.shout-input, .pm-composer > .pm-input, .profile-bio-input {
+    display: block; border-width: 1px 5px 5px 1px; border-color: transparent;
+    outline: 1px solid var(--field-border); outline-offset: -1px;
+}
+.profile-bio-input { outline-color: rgba(255, 255, 255, 0.22); }
+.shout-edit-form > textarea.shout-input:focus, .pm-composer > .pm-input:focus, .profile-bio-input:focus {
+    border-color: transparent; outline: 1px solid var(--accent); outline-offset: -1px;
+}
+/* A forced-colours scheme (Windows high contrast) can paint even a transparent border: there the fields keep no inset (the
+   grip stands at the corner, as before 1.74.1) rather than show thick bars. Not measured — no such scheme at hand. */
 @media (forced-colors: active) {
-    .shout-editor textarea, .shout-compose > .shout-input-wrap > .shout-input { border-width: 0; }
+    .rt-editor textarea, .form-group .rt-editor textarea, .shout-compose > .shout-input-wrap > .shout-input,
+    .shout-edit-form > textarea.shout-input, .pm-composer > .pm-input, .profile-bio-input { border-width: 0; }
 }
 /* 1.67.0: a Bootstrap Icons face rather than the emoji character, so it is drawn in the site's own
    colour by the site's icon font instead of in whatever the device's emoji font makes of it. */

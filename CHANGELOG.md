@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.74.2] — 2026-10-07
+
+The resize grip of every BBCode and Markdown editor, as 1.74.1 gave the shoutbox's composer. Schema 93, no migration.
+
+- **The resize grip of every editor sits inside its frame (a follow-up of the shoutbox composer's, 1.74.1).** The torrent
+  description editor (the Info window's — add, edit and propose a rewrite — and the Whitelist form's), a list's description,
+  the message editor, the comment composer with its replies and edit form, and the profile bio had the grip against the right
+  edge and — in the first three — 9–11px above the bottom, because the field stood on a line's room inside the frame. The field
+  is a block now and keeps a 4px inset at its right and bottom, at the shared editor's level, so every editor gets it at once and
+  the grip stands 4px from the frame on both sides (the plain-format boxes — the shoutbox's, with its in-place editor, and the
+  bio — included); the frames are 8–10px shorter where the dead strip was and 3–4px taller where they were flush, the writing
+  areas themselves within 4px of what they were.
+
 ## [1.74.1] — 2026-10-07
 
 The owner's look at 1.74.0 on production: one bug of 1.74.0 (the panel's table headers) and small things.
