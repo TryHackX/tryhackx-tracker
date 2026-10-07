@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.74.3] — 2026-10-07
+
+The panel's Reports button counts what waits, and the resize grip of every remaining textarea. Schema 93, no migration.
+
+- **The panel's "Reports" button shows what is waiting.** Every panel page carries one number on its Reports button — everything waiting
+  on the Reports page's tabs that the session may handle (torrent reports and appeals, reported messages, comments, descriptions,
+  shouts), in the tab badges' own style and hidden at 0 — drawn by the server on every page and kept in step with the tab badges on the
+  Reports page itself (a handled report lowers both at once); before, a waiting report showed only on its own tab. The tab badges are all
+  the same size now (two were 1.2px narrower in a crowded tab bar).
+- **The resize grip of the panel's text fields, and of the plain public boxes, stands inside the frame (a follow-up of 1.74.2).** The
+  bulk-mail composer, the notify window, the Whitelist add boxes, Settings' text fields and the pages editor, the Reports page's windows,
+  the Traffic address-list box and the prompt window — and, on the public pages, the report form's message, the appeal reasons, the
+  Whitelist form's list of magnets and a reported message's reason — had the grip hard against the frame's corner. It stands 4px in now, with
+  the scrollbar beside it, by one rule for the panel's `.form-control` textareas and one for the public boxes; the text, where it wraps, the
+  field's size and its focus ring are what they were.
+
 ## [1.74.2] — 2026-10-07
 
 The resize grip of every BBCode and Markdown editor, as 1.74.1 gave the shoutbox's composer. Schema 93, no migration.

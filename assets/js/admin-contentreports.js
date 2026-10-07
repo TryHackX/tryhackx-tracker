@@ -371,6 +371,8 @@
     }
 
     function badge(k, n) {
+        // the header's one Reports number takes this tab's count (admin-common.js reportsWaiting(), 1.74.3)
+        if (window.AdminCommon && window.AdminCommon.reportsWaiting) window.AdminCommon.reportsWaiting(k, n);
         var b = document.getElementById('crep-badge-' + k);
         if (!b) return;
         b.textContent = n ? String(n) : '';

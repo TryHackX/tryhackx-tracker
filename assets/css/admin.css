@@ -440,6 +440,10 @@
     min-width: 1.1rem;
     text-align: center;
     line-height: 1.3;
+    /* A badge never gives up width (1.74.3): inside a tab that is a flex row the Active Reports and Reported messages
+       badges were squeezed to their min-width, 1.2px narrower than the others', whenever the tab bar was crowded
+       (Polish labels, a few badges at once). */
+    flex: 0 0 auto;
 }
 
 .admin-toolbar-card {
@@ -1010,7 +1014,8 @@
 
 #modal-email-msg.form-control {
     background-color: #121212 !important;
-    border-color: #333 !important;
+    border-color: transparent !important;   /* its frame, #333, is the outline below (1.74.3) */
+    --grip-frame: #333;
     color: #c9d1d9 !important;
 }
 
@@ -1021,6 +1026,32 @@
 .form-control.bg-dark::placeholder {
     color: #6a7a8a;
     opacity: 1;
+}
+
+/* THE RESIZE GRIP OF THE PANEL'S TEXTAREAS SITS INSIDE THEIR FRAME (1.74.3; the public editors' is 1.74.2's, in style.css).
+   A textarea's grip is drawn in the corner of its own box, flush against the frame — and here Bootstrap's `.form-control` IS the
+   frame: a border of its own. So the border is 4px wider at the right and the bottom and transparent, and the frame is drawn as an
+   outline just inside the box's edge (it follows the radius; the focus keeps it, Bootstrap's `outline: 0` aside), in the colour the
+   border had: `.border-secondary`'s, which says it with !important, so it is said again here (`!important`) and read from the same
+   variables. The ground has to show under the transparent border (a `.form-control` paints to its padding box only). The padding at
+   the right and the bottom gives the 4px back, so the text, where it wraps and the box's height are what they were; the focus ring
+   (a box-shadow outside the box) is untouched. The grip and the scrollbar beside it stand 4px in from the frame. */
+textarea.form-control {
+    --grip-frame: rgba(var(--bs-secondary-rgb), var(--bs-border-opacity, 1));
+    border-width: 1px 5px 5px 1px;
+    border-color: transparent !important;
+    background-clip: border-box;
+    padding-right: calc(0.75rem - 4px);
+    padding-bottom: calc(0.375rem - 4px);
+    outline: 1px solid var(--grip-frame);
+    outline-offset: -1px;
+}
+textarea.form-control-sm { padding-right: calc(0.5rem - 4px); padding-bottom: calc(0.25rem - 4px); }
+textarea.form-control:focus { outline: 1px solid var(--grip-frame); outline-offset: -1px; }
+/* A forced-colours scheme (Windows high contrast) can paint even a transparent border: there the field is Bootstrap's own again. */
+@media (forced-colors: active) {
+    textarea.form-control { border-width: 1px; padding-right: 0.75rem; padding-bottom: 0.375rem; outline: 0; }
+    textarea.form-control-sm { padding-right: 0.5rem; padding-bottom: 0.25rem; }
 }
 
 .btn {

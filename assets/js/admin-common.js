@@ -1,6 +1,6 @@
 // === Shared admin helpers (every panel page; the dashboard's admin.js asks through them too since 1.74.0) ===
 // Exposes window.AdminCommon = { apiCall, esc, el, emptyState, showToast, confirmAction, promptModal, flashTip, makeSortStack,
-// renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, el }. Everything renders via textContent /
+// renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, el, reportsWaiting, … }. Everything renders via textContent /
 // createElement — values shown here (torrent names, file paths, IPs, snapshots) come from untrusted sources.
 (function () {
     'use strict';
@@ -819,6 +819,26 @@
     // switcher too and never load this file — and which restores by anchor element rather than by
     // scroll pixel, because the page is still growing when the old timers fired.
 
+    /**
+     * The header's "Reports" button carries ONE number (1.74.3): everything waiting on the Reports page's tabs that this
+     * session may handle. Every panel page draws it from the server (templates/admin/_header_actions.php;
+     * panelReportsWaiting() in includes/reports.php), its `data-parts` the numbers of the tabs' badges one by one — torrent
+     * reports, archived ones, appeals, reported messages, comments, descriptions, shouts. The Reports page's own scripts
+     * say a part as soon as they have a fresh count (the number their tab badge shows: admin.js updateBadge(),
+     * admin-messages.js, admin-contentreports.js) and the total follows, hidden at 0, as the tab badges are.
+     */
+    function reportsWaiting(part, n) {
+        const b = document.getElementById('nav-reports-badge');
+        if (!b || !part) return;
+        let parts;
+        try { parts = JSON.parse(b.dataset.parts || '{}') || {}; } catch (e) { parts = {}; }
+        parts[part] = Math.max(0, Math.floor(Number(n)) || 0);
+        b.dataset.parts = JSON.stringify(parts);
+        const total = Object.values(parts).reduce((sum, v) => sum + (Number(v) || 0), 0);
+        b.textContent = total > 0 ? String(total) : '';
+        b.classList.toggle('d-hidden', total <= 0);
+    }
+
     // The close button on a toast built with insertAdjacentHTML (assets/js/admin.js and the inline
     // block in templates/admin/settings.php both do). It used to be
     // onclick="this.closest('.toast').remove()", which an enforcing script-src blocks — and
@@ -831,5 +851,5 @@
         if (btn) btn.closest('.toast')?.remove();
     });
 
-    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot };
+    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting };
 })();

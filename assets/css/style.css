@@ -4665,3 +4665,23 @@ a.btn.btn-danger-soft { color: #ff8a80; }
 }
 .th-sort:hover { color: #fff; }
 .th-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* THE RESIZE GRIP OF THE PLAIN FIELDS SITS INSIDE THEIR FRAME (1.74.3; the editors' is 1.74.2's, above): the report form's message,
+   the two appeal reasons, the Whitelist form's list of magnets, a reported message's reason — a textarea whose own border is the
+   frame. The remedy of the profile bio's box (1.74.2): the border 4px wider at the right and the bottom and transparent, the frame an
+   outline just inside the box's edge, and the padding taking the 4px back there — so the text, where it wraps and the field's height
+   stay what they were, and the grip and the scrollbar beside it stand 4px in from the frame. Last in the file: the field-border list
+   and the focus rule further up say `border-color` at the same weight. */
+.form-group > textarea, .pmreport-box textarea.pm-input {
+    border-width: 1px 5px 5px 1px; border-color: transparent;
+    outline: 1px solid var(--field-border); outline-offset: -1px;
+}
+.form-group > textarea { padding-right: calc(0.8rem - 4px); padding-bottom: calc(0.6rem - 4px); transition: outline-color 0.2s; }
+.pmreport-box textarea.pm-input { padding-right: calc(0.6rem - 4px); padding-bottom: calc(0.5rem - 4px); }
+.form-group > textarea:focus, .pmreport-box textarea.pm-input:focus { border-color: transparent; outline: 1px solid var(--accent); outline-offset: -1px; }
+/* A forced-colours scheme (Windows high contrast) can paint even a transparent border: there the fields are as they were. */
+@media (forced-colors: active) {
+    .form-group > textarea, .pmreport-box textarea.pm-input { border-width: 1px; outline: 0; }
+    .form-group > textarea { padding-right: 0.8rem; padding-bottom: 0.6rem; }
+    .pmreport-box textarea.pm-input { padding-right: 0.6rem; padding-bottom: 0.5rem; }
+}

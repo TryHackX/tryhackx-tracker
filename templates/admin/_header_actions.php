@@ -24,10 +24,20 @@ $navExtra = $navExtra ?? null;   // an optional block rendered first, inside the
         // added to that list without a key here keeps showing its English label rather than a key.
         $labelKey = 'a.head.nav.' . str_replace('-', '_', $item['action']);
         $label = langHas($labelKey) ? _h($labelKey) : htmlspecialchars($item['label'], ENT_QUOTES, 'UTF-8');
+        // The Reports button carries ONE number (1.74.3): everything waiting on the Reports page's tabs that this session
+        // may handle, in the tab badges' own look, hidden at 0 — so a queue nobody has opened shows from every page of
+        // the panel (panelReportsWaiting(), includes/reports.php). `data-parts` is what assets/js/admin-common.js
+        // reportsWaiting() keeps the total from while the Reports page's tabs refresh their own badges.
+        $navBadge = '';
+        if ($item['action'] === 'admin' && function_exists('panelReportsWaiting')) {
+            $wait = panelReportsWaiting($db, $cfg);
+            $navBadge = ' <span id="nav-reports-badge" class="appeals-count-badge' . ($wait['total'] > 0 ? '' : ' d-hidden') . '" data-parts="'
+                      . sanitize((string)json_encode($wait['parts'])) . '">' . ($wait['total'] > 0 ? (int)$wait['total'] : '') . '</span>';
+        }
         ?>
         <a href="<?= $baseUrl ?>?action=<?= $item['action'] ?>"
            class="btn btn-sm btn-outline-info<?= $isHere ? ' active' : '' ?>"
-           <?= $isHere ? 'aria-current="page"' : '' ?>><i class="bi <?= $item['icon'] ?>"></i> <?= $label ?></a>
+           <?= $isHere ? 'aria-current="page"' : '' ?>><i class="bi <?= $item['icon'] ?>"></i> <?= $label ?><?= $navBadge ?></a>
     <?php endforeach; ?>
     <?php
     // The anchor belongs to the page you are LEAVING, not to Settings itself: from Users, "Settings"

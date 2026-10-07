@@ -307,6 +307,8 @@
             badge.textContent = j.open ? String(j.open) : '';
             badge.classList.toggle('d-hidden', !j.open);
         }
+        // the header's one Reports number takes this tab's count (admin-common.js reportsWaiting(), 1.74.3)
+        if (window.AdminCommon && window.AdminCommon.reportsWaiting) window.AdminCommon.reportsWaiting('messages', j.open);
         if (!j.reports.length) { listEl.appendChild(el('div', 'text-muted py-3', t.key('js.msgrep.empty'))); return; }
         j.reports.forEach(function (r) { listEl.appendChild(card(r)); });
 

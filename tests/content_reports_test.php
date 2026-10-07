@@ -378,11 +378,24 @@ check('a session holding only the comments\' view: that one tab, not handled; th
       array_keys($kinds) === ['comment'] && $kinds['comment']['handle'] === false && adminPageAllowed($db, $cfgOn, 'admin') && !panelCan($db, $cfgOn, 'panel.reports.view'));
 $r = contentReportActionRequest($db, $cfgOn, ['kind' => 'comment', 'target_id' => $c1, 'hash' => CR_H1, 'action' => 'close']);
 check('… and acting there is refused: 403 no_permission', $r['status'] === 403 && $r['body']['error'] === 'no_permission');
+// The header's one Reports number (1.74.3, panelReportsWaiting()): the tabs' own numbers added, each only where the session sees that tab.
+$w = panelReportsWaiting($db, $cfgOn);
+check('the header\'s Reports number, for the comments-only session: the comments\' open targets and nothing of the torrent, message or other queues',
+      $w['parts'] === ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 3, 'description' => 0, 'shout' => 0] && $w['total'] === 3, json_encode($w));
 $asNobody();
 check('no panel session: no tab at all, and the page closed', contentReportPanelKinds($db, $cfgOn) === [] && !adminPageAllowed($db, $cfgOn, 'admin'));
+check('… and nothing waits for it either (the header number is 0)', panelReportsWaiting($db, $cfgOn)['total'] === 0);
 $asOwner();
 check('the badges count open TARGETS (comment 1 reported twice is one)', contentReportOpenCounts($db, ['comment', 'description', 'shout']) === ['comment' => 3, 'description' => 1, 'shout' => 1],
       json_encode(contentReportOpenCounts($db, ['comment', 'description', 'shout'])));
+$w = panelReportsWaiting($db, $cfgOn);
+$tq = fn(string $t) => (int)$db->query("SELECT COUNT(*) FROM `$t` WHERE checked = 0 AND blocked = 0")->fetchColumn();
+check('the header\'s Reports number for the owner is the tabs\' numbers added: the torrent reports and archived ones unreviewed, the appeals pending, the open messages, the content kinds',
+      $w['parts']['comment'] === 3 && $w['parts']['description'] === 1 && $w['parts']['shout'] === 1
+      && $w['parts']['reports'] === $tq('reports') && $w['parts']['archives'] === $tq('archives')
+      && $w['parts']['appeals'] === (int)$db->query("SELECT COUNT(*) FROM appeals WHERE status = 'pending'")->fetchColumn()
+      && $w['parts']['messages'] === (pmEnabled($cfgOn) ? (int)$db->query("SELECT COUNT(*) FROM message_reports WHERE status = 'open'")->fetchColumn() : 0)
+      && $w['total'] === array_sum($w['parts']), json_encode($w));
 $list = fn(array $f) => contentReportList($db, $cfgOn, 'comment', contentReportFilters($f), 1, 25);
 $L = $list(['status' => 'open']);
 $g1 = null; foreach ($L['groups'] as $g) if ($g['target_id'] === $c1) $g1 = $g;

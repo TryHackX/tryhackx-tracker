@@ -491,6 +491,39 @@ function contentReportOpenCounts(PDO $db, array $kinds): array
     return $out;
 }
 
+/**
+ * EVERYTHING WAITING on the Reports page, as its tabs count it (1.74.3) — the one number the header's "Reports" button
+ * carries on every panel page, so a queue nobody has opened this morning shows from wherever the panel is open (the
+ * Shouts tab's badge was the only place a waiting shout report showed).
+ *
+ * The parts are the tab badges' own numbers, from the same questions the tabs' endpoints ask: the torrent reports and the
+ * archived ones nobody reviewed (api/admin/fetch_reports.php `pending_reports` / `pending_archives`: checked = 0 and
+ * blocked = 0), the appeals (fetch_appeals.php `pending_count`), the open reported messages (fetch_message_reports.php
+ * `open`) and the open TARGETS of each content kind (content_reports.php `counts`: contentReportOpenCounts()). And each is
+ * counted for a session only where its tab is drawn (templates/admin/dashboard.php): the torrent three behind
+ * `panel.reports.view`, the messages behind `panel.messages.view` while messages are on, a content kind behind its view
+ * while its feature is on. [ 'parts' => [part => n], 'total' => n ]; a table not there yet (an older schema) counts 0.
+ * assets/js/admin-common.js reportsWaiting() keeps the number up to date from the same parts as their badges change.
+ */
+function panelReportsWaiting(PDO $db, array $cfg): array
+{
+    $parts = ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 0, 'description' => 0, 'shout' => 0];
+    $count = static function (string $sql) use ($db): int {
+        try { return (int)$db->query($sql)->fetchColumn(); } catch (\Throwable $e) { return 0; }
+    };
+    if (panelCan($db, $cfg, 'panel.reports.view')) {
+        $parts['reports']  = $count("SELECT COUNT(*) FROM reports WHERE checked = 0 AND blocked = 0");
+        $parts['archives'] = $count("SELECT COUNT(*) FROM archives WHERE checked = 0 AND blocked = 0");
+        $parts['appeals']  = $count("SELECT COUNT(*) FROM appeals WHERE status = 'pending'");
+    }
+    if (function_exists('pmEnabled') && pmEnabled($cfg) && panelCan($db, $cfg, 'panel.messages.view')) {
+        $parts['messages'] = $count("SELECT COUNT(*) FROM message_reports WHERE status = 'open'");
+    }
+    $on = array_keys(array_filter(contentReportPanelKinds($db, $cfg), fn($k) => $k['on']));
+    foreach (contentReportOpenCounts($db, $on) as $k => $n) $parts[(string)$k] = (int)$n;
+    return ['parts' => $parts, 'total' => array_sum($parts)];
+}
+
 /** The filters a listing takes, cleaned: status, author, reporter, from, to (Y-m-d), q. */
 function contentReportFilters(array $q): array
 {

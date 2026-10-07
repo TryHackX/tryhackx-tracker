@@ -710,7 +710,14 @@ function updateFilterOptions(src) {
     filter.innerHTML = options.map(o => `<option value="${o.value}">${esc(o.text)}</option>`).join('');
 }
 
+// Which part of the header's one Reports number each of this file's tab badges is (admin-common.js reportsWaiting(), 1.74.3):
+// the number a tab shows is the number the header adds up, so they cannot differ.
+const REPORTS_PARTS = { 'reports-badge': 'reports', 'archives-badge': 'archives', 'appeals-badge': 'appeals' };
+
 function updateBadge(id, count) {
+    if (REPORTS_PARTS[id] && typeof count === 'number' && window.AdminCommon && window.AdminCommon.reportsWaiting) {
+        window.AdminCommon.reportsWaiting(REPORTS_PARTS[id], count);
+    }
     const badge = document.getElementById(id);
     if (!badge) return;
     if (count > 0) {
