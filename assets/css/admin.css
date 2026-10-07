@@ -435,8 +435,12 @@
     font-weight: 700;
     padding: 0.1rem 0.4rem;
     border-radius: 10px;
-    margin-left: 0.3rem;
     vertical-align: top;
+    /* 1.74.4: every badge stands in a tab or a button that is a flex row with its own column-gap, so a margin of its
+       own pushed it a gap and a third away from its words; and the row aligns its items on the text's BASELINE (the
+       icons are measured to sit on it), where a 0.65rem badge's baseline hung its box below the words — the badge
+       alone is centred, the icons keep the baseline. */
+    align-self: center;
     min-width: 1.1rem;
     text-align: center;
     line-height: 1.3;

@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.74.4] — 2026-10-07
+
+The Reports badge, placed. Schema 93, no migration.
+
+- **The Reports badge sits beside its word, at its middle.** In the header's Reports button and on the Reports page's
+  tabs the count stood a gap and a third away from its word (its own margin on top of the row's gap) and hung 2–3px
+  low (the row aligns on the text's baseline, for the icons); the badge alone is centred now and has no margin of its
+  own — the icons keep the baseline.
+
 ## [1.74.3] — 2026-10-07
 
 The panel's Reports button counts what waits, and the resize grip of every remaining textarea. Schema 93, no migration.
