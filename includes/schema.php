@@ -3696,7 +3696,11 @@ function trackerSchemaDefaultSettings(): array {
         // The CAPTCHA's per-form switches (v85): on the Settings page, in the save list and in install.php
         // since they exist, but never among the defaults — an install whose settings came from the migration
         // was shown "Yes" for the abuse report form (the form's own fallback) while the code read the missing
-        // key as no. The values here are what the page shows for a missing key.
+        // key as no. The values here are what the page shows for a missing key. Since 1.74.1 they are also the
+        // ONLY place that names them: install.php lists no switch of its own (its sign-in one said 1 where this
+        // says 0, so a site answered differently by how it had been installed) and takes these through
+        // `$defaults += trackerSchemaDefaultSettings()`; whether the CAPTCHA is on at all is `recaptcha_enabled`,
+        // which the installer sets from the keys.
         'recaptcha_on_report'         => '1',
         'recaptcha_on_login'          => '0',
         'recaptcha_on_status'         => '0',

@@ -378,6 +378,9 @@ body.page-stats .container {
     opacity: 1;
     color: var(--accent);
 }
+/* The sorted column's arrow as near its name as the others' (1.74.1; see .search-sort-icon below for why): the one-way
+   Bootstrap arrow has 0.22em of room each side that the two-way one has not — 2.6px further from its words here. */
+.trans-sort-icon:is(.bi-arrow-down, .bi-arrow-up):not([class*=" fa-"]) { margin-left: calc(0.25rem - 0.22em); }
 
 .trans-sort-priority {
     font-size: 0.55rem;
@@ -4071,6 +4074,27 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
    The scrollbar's gutter is kept whether or not the text scrolls yet (1.68.0): without it the bar
    would arrive with the first line too many and every line above it would re-wrap under the cursor. */
 .shout-input-wrap .shout-input { padding-right: 5.6rem; scrollbar-gutter: stable; }
+/* THE FIELD'S RESIZE GRIP SITS INSIDE ITS FRAME (1.74.1). The browser draws a textarea's grip in the corner of the
+   field's own box, flush against the frame — and here ~10px too high as well: the field was an inline-block standing
+   on a line 27px tall, so the room a line keeps under its letters lay under the field, inside the editor's frame.
+   The field is a block now (no strip), and keeps 4px of transparent border on its right and bottom: the grip, and the
+   scrollbar beside it, stand 4px in from the frame on both sides. The box itself does not move, so the buttons' place,
+   the text, and the frame's colour stay (the field's ground is the frame's). The plain composer's frame was the field's
+   own border: it is drawn over its wrapper (::after) in the same place, with the same colours. */
+.shout-input-wrap .shout-input, .shout-editor textarea { display: block; }
+.shout-editor textarea { border-style: solid; border-color: transparent; border-width: 0 4px 4px 0; }
+.shout-compose > .shout-input-wrap > .shout-input { border-width: 1px 4px 4px 1px; }
+.shout-compose > .shout-input-wrap > .shout-input, .shout-compose > .shout-input-wrap > .shout-input:focus { border-color: transparent; }
+.shout-compose > .shout-input-wrap::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    border: 1px solid var(--field-border); border-radius: var(--radius);
+}
+.shout-compose > .shout-input-wrap:focus-within::after { border-color: var(--accent); }
+/* A forced-colours scheme (Windows high contrast) can paint even a transparent border: there the field keeps no inset (the
+   grip stands at its corner, as before 1.74.1) rather than show two thick bars. Not measured here — no such scheme at hand. */
+@media (forced-colors: active) {
+    .shout-editor textarea, .shout-compose > .shout-input-wrap > .shout-input { border-width: 0; }
+}
 /* 1.67.0: a Bootstrap Icons face rather than the emoji character, so it is drawn in the site's own
    colour by the site's icon font instead of in whatever the device's emoji font makes of it. */
 .shout-emoji-btn {
@@ -4566,9 +4590,11 @@ main:focus { outline: none; }
 
 /* A FIELD'S EDGE IS A CONTROL'S, NOT A SEPARATOR'S. The fields were drawn in --border (#222, the colour of the rules
    between paragraphs) — 1.23–1.31:1 against the card, an edge nobody with weaker sight could find — and the account's
-   and profile's filters in --control-border, 2.04:1. One token of their own, 3.3:1 on the card and 3.5:1 on the page
-   (WCAG 1.4.11 asks 3:1); the focus and an error keep their own colours (their rules are more specific). */
-:root { --field-border: #5b6577; }
+   and profile's filters in --control-border, 2.04:1. One token of their own; the focus and an error keep their own
+   colours (their rules are more specific). 1.74.0 drew it at #5b6577 (3.3:1 on the card, 3.5:1 on the page); the owner
+   found that frame too bright, and 1.74.1 sets it at #3c414b (1.9:1 on the card, 2.0:1 on the page) — the page is dark
+   only, so there is no other theme's value to keep. */
+:root { --field-border: #3c414b; }
 .form-group input, .form-group textarea, .form-group select, .search-box input, .search-toolbar select,
 .trans-pagination .pg-input, .form-group .rt-editor select.rt-format, .rt-editor, .profile-search, .profile-toolbar select,
 .pm-input, .pm-editor .rt-format, .snd-row select, .shout-edit-form > .shout-input, .shout-compose > .shout-input,

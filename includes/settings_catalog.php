@@ -264,6 +264,8 @@ function settingsCatalogKeywords(): array {
         'csp_extra_hosts'           => 'csp extra hosts cdn analytics allow script-src trusted origin dodatkowe zaufane hosty',
         'csp_report_enabled'        => 'csp report uri violation collect reports raporty naruszenia zbieraj',
         'csp_report_keep_rows'      => 'csp violations rows keep prune janitor limit wiersze naruszen',
+        // the table of what browsers reported, under the fields above (a block of its own since 1.74.1)
+        'csp_reports'               => 'csp reports violations table list what browsers reported blocked inline eval directive refresh clear raporty naruszenia przegladarki zglosily lista tabela zablokowane dyrektywa odswiez wyczysc',
 
         // ── User accounts ──
         // #section-users

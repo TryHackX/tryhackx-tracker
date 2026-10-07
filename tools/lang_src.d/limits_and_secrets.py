@@ -50,6 +50,11 @@ add('settings', {
         'Nieustawiony — wpisz, aby go ustawić'),
     'secret_hint': ('Never shown again once saved, not even here. An empty field keeps what is stored; a new value asks for the owner password.',
         'Po zapisaniu nie jest już nigdzie pokazywany, także tutaj. Puste pole zachowuje zapisaną wartość; nowa wartość wymaga hasła właściciela.'),
+    # 1.74.1: the button beside the HMAC key, and the note that appears once the field holds a new one
+    'hmac_generate': ('Generate new',
+        'Wygeneruj nowy'),
+    'hmac_generate_note': ('A new key is in the field. It takes effect when you save the settings (the owner password is asked), and backup download links and unsubscribe links signed with the old key stop working.',
+        'Nowy klucz jest w polu. Zacznie działać po zapisaniu ustawień (zapytamy o hasło właściciela), a linki do pobrania kopii zapasowych i linki wypisania podpisane starym kluczem przestaną działać.'),
     'health_token_clear': ('Switch the endpoint off (remove the token)',
         'Wyłącz endpoint (usuń token)'),
     'health_token_in_url': ('YOUR_TOKEN',

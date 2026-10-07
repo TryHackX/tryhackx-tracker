@@ -48,6 +48,7 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PORT = int(os.environ.get("TRACKER_INSTALL_PORT", "8097"))
 DB_NAME = os.environ.get("TRACKER_INSTALL_DB", "tracker_fresh_web")
+CAPTCHA_KEYS = os.environ.get("TRACKER_INSTALL_CAPTCHA_KEYS", "")   # "" none | "1" both | "half" the site key only
 
 fails = 0
 n = 0
@@ -285,8 +286,10 @@ try:
         "announce_url": "",
         "announce_url_https": "",
         "captcha_provider": "recaptcha",
-        "captcha_site_key": "",
-        "captcha_secret": "",
+        # 1.74.1: the keys are optional. None (the default here) leaves the CAPTCHA off; TRACKER_INSTALL_CAPTCHA_KEYS=1
+        # gives both and turns it on; TRACKER_INSTALL_CAPTCHA_KEYS=half gives only the site key — off as well.
+        "captcha_site_key": "" if CAPTCHA_KEYS not in ("1", "half") else "installer-test-site-key",
+        "captcha_secret": "" if CAPTCHA_KEYS != "1" else "installer-test-secret",
         "blacklist_path": os.path.join(site, "config", "blacklist"),
     })
     flat = re.sub(r"\s+", " ", body)
@@ -317,6 +320,25 @@ try:
     check("the browser install lands on the current schema version",
           rc == 0 and landed.strip() == str(SCHEMA_VERSION),
           "%s vs %d (%s)" % (landed.strip() or "nothing", SCHEMA_VERSION, err[:120]))
+
+    # The CAPTCHA (1.74.1): switched on by the keys alone — both or nothing — and which forms it guards is the schema's
+    # own list of defaults, not a second list in the installer (its sign-in switch used to say 1 where the schema said 0).
+    switches = ["recaptcha_on_report", "recaptcha_on_login", "recaptcha_on_status", "recaptcha_on_appeal", "recaptcha_on_block_check"]
+    rc, out, err = mysql("SELECT `key`, `value` FROM `settings` WHERE `key` IN ('recaptcha_enabled', '%s')" % "', '".join(switches), DB_NAME)
+    got = dict(line.split("\t", 1) for line in out.splitlines() if "\t" in line)
+    check("the CAPTCHA is %s, as the keys given say" % ("on" if CAPTCHA_KEYS == "1" else "off"),
+          got.get("recaptcha_enabled") == ("1" if CAPTCHA_KEYS == "1" else "0"), got)
+    schema = subprocess.run(["php", "-d", "display_errors=0", "-r",
+                             "require 'includes/functions.php'; require 'includes/schema.php'; echo json_encode(trackerSchemaDefaultSettings());"],
+                            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    try:
+        import json
+        schema_defaults = json.loads(schema.stdout)
+    except ValueError:
+        schema_defaults = {}
+    check("… and its five per-form switches are the schema's own defaults (the installer lists none of its own)",
+          bool(schema_defaults) and all(got.get(k) == schema_defaults.get(k) for k in switches),
+          {k: (got.get(k), schema_defaults.get(k)) for k in switches})
 
     def columns(table):
         rc, out, err = mysql("SHOW COLUMNS FROM `%s`" % table, DB_NAME)

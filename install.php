@@ -340,12 +340,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'captcha_provider' => $captchaProvider,
                 $captchaKeys[0] => $captchaSiteKey,
                 $captchaKeys[1] => $captchaSecret,
+                // The CAPTCHA's master switch is the keys: on only when the chosen provider has BOTH its site key and
+                // its secret, off otherwise (the keys are optional, and a half pair protects nothing). Which forms it
+                // guards is not decided here: the five `recaptcha_on_*` switches come from trackerSchemaDefaultSettings()
+                // below — their one home. (This list used to carry its own copies, and its sign-in switch said 1 where
+                // the schema said 0: the same site answered differently by how it had been installed.)
                 'recaptcha_enabled' => ($captchaSiteKey !== '' && $captchaSecret !== '') ? '1' : '0',
-                'recaptcha_on_report' => '1',
-                'recaptcha_on_login' => '1',
-                'recaptcha_on_status' => '0',
-                'recaptcha_on_appeal' => '0',
-                'recaptcha_on_block_check' => '0',
                 'captcha_threshold' => '6',
                 'captcha_grace_minutes' => '5',
                 'captcha_pts_report' => '2',
@@ -675,7 +675,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
 
             <hr>
             <?php $cpSel = $_POST['captcha_provider'] ?? 'recaptcha'; ?>
-            <h3 style="color:#4a9eff;margin-bottom:0.5rem;font-size:0.95rem;">CAPTCHA <small style="color:#666;">(optional &mdash; leave the keys empty to set it up later)</small></h3>
+            <h3 style="color:#4a9eff;margin-bottom:0.5rem;font-size:0.95rem;">CAPTCHA <small style="color:#666;">(optional &mdash; switched on only when both keys are given)</small></h3>
             <div class="form-group">
                 <label>Provider</label>
                 <select name="captcha_provider">
@@ -695,7 +695,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                     <input type="password" name="captcha_secret" value="<?= htmlspecialchars($_POST['captcha_secret'] ?? '') ?>" autocomplete="off">
                 </div>
             </div>
-            <p style="color:#666;font-size:0.8rem;margin:-0.4rem 0 0;">The keys of the other providers can be added later in Admin &rarr; Settings &rarr; CAPTCHA. If your site sits behind a strict Content-Security-Policy of your own, remember to allow the provider's script host.</p>
+            <p style="color:#666;font-size:0.8rem;margin:-0.4rem 0 0;">Leave both keys empty to keep the CAPTCHA off and set it up later; with both given it is on and guards the abuse-report form (the other forms' switches are in Admin &rarr; Settings &rarr; CAPTCHA). The keys of the other providers can be added there too. If your site sits behind a strict Content-Security-Policy of your own, remember to allow the provider's script host.</p>
 
             <hr>
             <h3 style="color:#4a9eff;margin-bottom:0.5rem;font-size:0.95rem;">Blacklist File <small style="color:#666;">(newline-separated hash list)</small></h3>

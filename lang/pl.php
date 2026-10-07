@@ -6664,6 +6664,8 @@ Można je ponownie pobrać z DHT albo zaimportować jeszcze raz, jeśli zachowas
     'settings.health_url' => 'Adres do monitorowania',
     'settings.health_url_hint' => 'Wklej to do Uptime Kuma (albo czegokolwiek, co pilnuje serwera). Słowo kluczowe <code>"status":"ok"</code> wyłapie też ostrzeżenie, nie tylko awarię.',
     'settings.health_url_token_note' => 'Sam token nie jest pokazywany: wstaw zapisany token w miejsce TWOJ_TOKEN — albo, lepiej, wysyłaj go w nagłówku <code>X-Health-Token</code> i pomiń go w adresie.',
+    'settings.hmac_generate' => 'Wygeneruj nowy',
+    'settings.hmac_generate_note' => 'Nowy klucz jest w polu. Zacznie działać po zapisaniu ustawień (zapytamy o hasło właściciela), a linki do pobrania kopii zapasowych i linki wypisania podpisane starym kluczem przestaną działać.',
     'settings.home_arrange' => 'Ułóż sekcje',
     'settings.home_badge_builtin' => 'układ wbudowany',
     'settings.home_badge_rearranged' => 'zmieniony',

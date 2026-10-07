@@ -77,7 +77,7 @@
                         <th class="sortable" data-sort="username"><button type="button" class="th-sort"><?= _h('a.users.username') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="email"><button type="button" class="th-sort"><?= _h('a.users.email') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable col-badge" data-sort="status"><button type="button" class="th-sort"><?= _h('a.users.status') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
-                        <th class="sortable" data-sort="group" title="<?= _h('a.users.sort_group_title') ?><button type="button" class="th-sort">"><?= _h('a.users.groups') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="group" title="<?= _h('a.users.sort_group_title') ?>"><button type="button" class="th-sort"><?= _h('a.users.groups') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="created"><button type="button" class="th-sort"><?= _h('a.users.created') ?> <i class="bi bi-arrow-down sort-icon active" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="login"><button type="button" class="th-sort"><?= _h('a.users.last_login') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions"><?= _h('a.users.actions') ?></th>

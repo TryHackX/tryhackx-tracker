@@ -629,6 +629,11 @@
     opacity: 1;
     color: #4a9eff;
 }
+/* The sorted column's arrow as near its name as the others' (1.74.1 — the remedy 1.71.0 gave the search page's arrows,
+   style.css .search-sort-icon): Bootstrap draws the two-way arrow edge to edge in its square and a one-way arrow with
+   0.22em of room on each side, so the sorted column's arrow stood 2.3px further from its words than the arrows beside
+   it. The one-way arrow gives that room back. Font Awesome draws each glyph in a box of its own width and needs nothing. */
+.sort-icon:is(.bi-arrow-down, .bi-arrow-up):not([class*=" fa-"]) { margin-left: calc(0.2rem - 0.22em); }
 
 .sort-priority {
     font-size: 0.55rem;
@@ -1317,6 +1322,9 @@ input[type="number"] {
 .wl-group-first td { border-top: 2px solid #2a3a4c; }
 .wl-ref-link { color: #4a9eff; margin-left: 0.2rem; }
 .wl-badge { display: inline-block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.15rem 0.45rem; border-radius: 4px; border: 1px solid #444; color: #bbb; white-space: nowrap; }
+/* A badge whose words are a sentence (1.74.1: the Index page's Poll card — "cut by the time budget — the next poll
+   continues where this one stopped") wraps inside its card instead of running out of it; the plain badges keep one line. */
+.wl-badge.wl-badge-wrap { white-space: normal; max-width: 100%; }
 .wl-b-ok { color: #4caf50; border-color: #4caf50; background: rgba(76,175,80,0.12); }
 .wl-b-bad { color: #ff5252; border-color: #ff5252; background: rgba(244,67,54,0.12); }
 .wl-b-warn { color: #ffb74d; border-color: #ffb74d; background: rgba(255,152,0,0.12); }

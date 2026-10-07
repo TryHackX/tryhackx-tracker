@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.74.1] — 2026-10-07
+
+The owner's look at 1.74.0 on production: one bug of 1.74.0 (the panel's table headers) and small things.
+Schema 93, no migration.
+
+- **The fields' frame is a step calmer.** Every field's border — forms, search boxes, the shoutbox composer, the message
+  editors — is `#3c414b` (the owner found 1.74.0's too bright).
+- **The shoutbox composer's resize grip sits inside the frame.** It stood against the right edge and ~10px above the bottom
+  (the field was an inline element with a line's room under it); the field is a block now and keeps a 4px inset at its right
+  and bottom, so the grip and the scrollbar beside it stand evenly inside the frame, in the editor and in the plain box; the
+  composer is 6px shorter for the strip that is gone.
+- **Panel table headers read right again (a bug of 1.74.0, UX-13).** On Index ("Files"), Whitelist ("Files", "S / L") and
+  Users ("Groups") the sort button had been opened inside the header's tooltip: the header showed `">` before its name and
+  the tooltip ended in `<button type=`. Fixed on all four; every panel header checked in both languages.
+- **The Index page's Poll card no longer overflows.** The badge for a poll the time budget cut wraps inside the card, in
+  English and in Polish, instead of running out of it (and, on a phone, widening the page).
+- **Settings → HMAC key: Generate new.** A button beside the field makes a new key in the browser (32 random bytes, 64 hex
+  characters) and puts it in the field; it takes effect when the settings are saved — behind the owner's password, as
+  before — and the backup download links and unsubscribe links signed with the old key stop working, as a note says.
+- **The sorted column's arrow sits as near its name as the others', in the panel's tables and on Transparency** — the
+  remedy 1.71.0 gave the search page: Bootstrap's one-way arrow stood 2.3–2.6px further from its words than the two-way ones.
+- **The installer switches the CAPTCHA by its keys, and has no list of its own for the forms.** The provider and its keys
+  are optional; the CAPTCHA is on only when both are given. Which forms it guards are the schema's own defaults, one list —
+  the installer used to turn the admin sign-in's switch on where every other site has it off; it is off now, as in Settings.
+- **Settings search finds the CSP reports table.** Searching `CSP`, `raport` or "browsers reported" shows "What browsers
+  reported" with its table, like a field; before, the fields were found and the table was hidden.
+
 ## [1.74.0] — 2026-10-06
 
 Every fix from the full audit of 1.73.2 (`AUDIT-REPORT-1.73.2.md`, kept outside the repository), in one release, as

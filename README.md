@@ -1781,6 +1781,9 @@ session that reached Settings — and a backup download link needed nothing but 
 A download link now has to have been **issued** by *Download* (behind the password): its nonce is recorded
 in `config/backup_state.json` and redeemed once, so a link signed with the key alone is refused (403).
 After upgrading, consider a new HMAC key: it also invalidates the unsubscribe links in mails already sent.
+Since 1.74.1 a **Generate new** button beside the field makes one in the browser (32 random bytes, 64 hex
+characters) and puts it in the field; it takes effect when the settings are saved — behind the password, like any
+new value — and the backup download links and unsubscribe links signed with the old key stop working.
 
 The session gate keeps strangers out of the panel. This is for whoever is already sitting at the
 machine: a borrowed laptop, an unlocked screen, a stolen cookie — which is the case the password

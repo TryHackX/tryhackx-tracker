@@ -138,7 +138,7 @@
         const lpShort = !!(lp && lp.truncated && st.last_partial && st.last_partial.at === lp.at);
         grid.appendChild(kv(t.key('js.index.poll'), [
             st.last_poll_at ? el('span', { text: fmtDate(new Date(st.last_poll_at * 1000).toISOString()) }) : badge(t.key('js.index.never'), 'wl-b-muted'),
-            ...(lp && lp.truncated ? [' ', badge(lpShort ? t.key('js.index.ended_early_badge') : t.key('js.index.truncated_resumes'), 'wl-b-pending')] : []),
+            ...(lp && lp.truncated ? [' ', badge(lpShort ? t.key('js.index.ended_early_badge') : t.key('js.index.truncated_resumes'), 'wl-b-pending wl-badge-wrap')] : []),
             el('div', { className: 'wl-small text-muted' }, [lp ? t.key('js.index.poll_stats', { seen: num(lp.entries), kept: num(lp.kept), s: (lp.ms / 1000).toFixed(1) }) : '', t.key('js.index.every_n_min', { n: s.poll_minutes })]),
         ]));
         grid.appendChild(kv(t.key('js.index.last_error'), st.last_error

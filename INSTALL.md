@@ -364,8 +364,10 @@ Open `https://tracker.example.org/install.php` and work through the four steps:
    administrator when it is a valid username) and password (10+ characters with lower case, upper
    case, a digit and a symbol); the site name, its URL (no trailing slash) and contact address; an
    optional From address (on the site's own domain or a parent of it); the announce URLs; the
-   CAPTCHA provider (reCAPTCHA v2 or v3, Turnstile or hCaptcha) and its two keys — CAPTCHA is only
-   switched on when both are given; and the blacklist path — enter
+   CAPTCHA provider (reCAPTCHA v2 or v3, Turnstile or hCaptcha) and its two keys, both optional —
+   CAPTCHA is only switched on when both are given, and it then guards the abuse-report form; the
+   sign-in's and the other forms' switches are in Settings → *Security & CAPTCHA*, at the defaults
+   every site has (off until you turn them on); and the blacklist path — enter
    `/home/tracker/accesslist/blacklist`, the file section 5 made.
    It writes `config/hash.txt` (bcrypt), `config/database.php` (with a 3-second connect timeout and
    the session time zone), the settings, and then builds the schema by running the ordinary

@@ -233,11 +233,11 @@
                         <th class="sortable" data-sort="hash"><button type="button" class="th-sort"><?= _h('a.wl.col_hash') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('a.wl.col_name') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="size"><button type="button" class="th-sort"><?= _h('a.wl.col_size') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
-                        <th class="sortable" data-sort="files" title="<?= _h('a.wl.col_files_title') ?><button type="button" class="th-sort">"><?= _h('a.wl.col_files') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="files" title="<?= _h('a.wl.col_files_title') ?>"><button type="button" class="th-sort"><?= _h('a.wl.col_files') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable col-badge" data-sort="source"><button type="button" class="th-sort"><?= _h('a.wl.col_source') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="ip"><button type="button" class="th-sort"><?= _h('a.wl.col_ip') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable col-badge" data-sort="meta"><button type="button" class="th-sort"><?= _h('a.wl.col_meta') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
-                        <th class="sortable" data-sort="seeders" title="<?= _h('a.wl.col_sl_title') ?><button type="button" class="th-sort">"><?= _h('a.wl.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="seeders" title="<?= _h('a.wl.col_sl_title') ?>"><button type="button" class="th-sort"><?= _h('a.wl.col_sl') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="sortable" data-sort="date"><button type="button" class="th-sort"><?= _h('a.wl.col_date') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions wl-th-actions"><?= _h('a.wl.col_actions') ?></th>
                     </tr></thead>

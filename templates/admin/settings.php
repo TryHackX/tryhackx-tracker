@@ -538,11 +538,18 @@
                              owner's password. Each is now an empty "replace" field that says only whether one is set;
                              saving it empty keeps what is stored (api/admin/save_settings.php), and a new value still asks
                              for the owner's password where it did before. */ ?>
+                    <?php /* "Generate new" (1.74.1): the key is made in the browser (crypto.getRandomValues, 32 bytes -> 64 hex
+                             characters) and only put in the field, as if it had been typed — it is saved by Save like any
+                             new secret, behind the owner's password, and the note says what the swap breaks. */ ?>
                     <div class="col-12">
                         <label for="set-hmac_secret" class="form-label"><?= _h('settings.mail_hmac') ?></label>
-                        <input id="set-hmac_secret" type="password" autocomplete="new-password" class="form-control bg-dark text-light border-secondary" name="hmac_secret" value="" data-secret="1"
-                               placeholder="<?= _h(trim((string)($cfg['hmac_secret'] ?? '')) !== '' ? 'settings.secret_set' : 'settings.secret_unset') ?>">
+                        <div class="input-group">
+                            <input id="set-hmac_secret" type="password" autocomplete="new-password" class="form-control bg-dark text-light border-secondary" name="hmac_secret" value="" data-secret="1"
+                                   placeholder="<?= _h(trim((string)($cfg['hmac_secret'] ?? '')) !== '' ? 'settings.secret_set' : 'settings.secret_unset') ?>">
+                            <button class="btn btn-outline-info" type="button" id="btn-hmac-generate"><i class="bi bi-key" aria-hidden="true"></i> <?= _h('settings.hmac_generate') ?></button>
+                        </div>
                         <small class="settings-hint"><?= _h('settings.secret_hint') ?></small>
+                        <div class="mt-1" id="hmac-new-note" role="status" hidden><small class="settings-hint text-warning"><?= _h('settings.hmac_generate_note') ?></small></div>
                     </div>
                     <?php /* The daily cap on report and appeal confirmations (1.74.0, PUB-1, confirmMailAllow()): every one
                              is a mail from this domain to an address the sender typed and nobody verified. */ ?>
@@ -1220,6 +1227,12 @@
                         <small class="settings-hint"><?= __('settings.csp_report_keep_rows_hint') ?></small>
                     </div>
                 </div>
+                <?php /* ONE BLOCK for the settings search (1.74.1): the rule, the title, the hint and the table used to be five
+                         loose children of this section, each indexed on its own — so a search that found the CSP fields
+                         (`csp`, `raport`) hid every one of them, the table with them. Wrapped, it is one item with a
+                         name of its own (data-setting, and its words in includes/settings_catalog.php): found by its
+                         title, its hint or the section it belongs to, shown with its table, like a field. */ ?>
+                <div class="csp-reports-block" data-setting="csp_reports">
                 <hr class="border-secondary my-3">
                 <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
                     <strong><?= _h('settings.csp_reports_title') ?></strong>
@@ -1242,6 +1255,7 @@
                         </thead>
                         <tbody id="csp-reports-body"></tbody>
                     </table>
+                </div>
                 </div>
             </div>
 
@@ -5661,6 +5675,25 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         row.querySelectorAll('input').forEach(i => i.addEventListener('input', () => schedSyncRow(row)));
     });
 
+    // "Generate new" beside the HMAC key (1.74.1): 32 random bytes from the browser, as 64 hex characters, put in the
+    // field as if they had been typed — an input and a change event tell whatever listens that the form changed — and the
+    // note under it (it is in the markup, so the live language switch translates it) says what the swap breaks. Saving is
+    // the page's ordinary save: a new secret asks for the owner's password (api/admin/save_settings.php).
+    (function () {
+        const field = document.getElementById('set-hmac_secret');
+        const btn = document.getElementById('btn-hmac-generate');
+        const note = document.getElementById('hmac-new-note');
+        if (!field || !btn) return;
+        field.addEventListener('input', () => { if (note) note.hidden = field.value === ''; });
+        btn.addEventListener('click', () => {
+            const bytes = new Uint8Array(32);
+            crypto.getRandomValues(bytes);
+            field.value = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            field.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+    })();
+
     let settingsPayloadToSubmit = null;
 
     // The password modal, opened for one of two reasons. The deletion limits are known to this page
@@ -5701,6 +5734,8 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                 });
                 const tokClear = document.getElementById('health-token-clear');
                 if (tokClear) tokClear.checked = false;
+                const hmacNote = document.getElementById('hmac-new-note');
+                if (hmacNote) hmacNote.hidden = true;     // the new key is saved: the field is empty again
                 // A save can succeed and still leave the machine disagreeing with what was saved --
                 // switching the tracker mode writes a row, it does not move the symlinks. That is a
                 // warning, not an error, and it must not be dressed up as a success and forgotten.
