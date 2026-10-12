@@ -26,6 +26,28 @@ function reloadAfterSort() {
     }, SORT_DEBOUNCE_MS);
 }
 let currentReport = null;
+/**
+ * The team's words to a reporter (the report window) and the answer to an appellant (the appeal window) take a format
+ * (1.75.0): plain, and BBCode / Markdown where the site has them on — adminRichField(), assets/js/admin-common.js, the box
+ * every window shares (select, toolbar, the server's preview). Made on first use; the textareas keep their old ids.
+ */
+let emailField = null, appealField = null;
+function emailBox() {
+    if (!emailField) {
+        emailField = window.AdminCommon.adminRichField({ textId: 'modal-email-msg', formatId: 'modal-email-format', rows: 3, compact: true,
+            maxLength: 2000, countMax: 2000, placeholder: t.key('js.reports.email_ph') });
+        document.getElementById('modal-email-rich').appendChild(emailField.el);
+    }
+    return emailField;
+}
+function appealBox() {
+    if (!appealField) {
+        appealField = window.AdminCommon.adminRichField({ textId: 'appeal-response-msg', formatId: 'appeal-response-format', rows: 3, compact: true,
+            maxLength: 2000, countMax: 2000, placeholder: t.key('js.reports.appeal_response_ph') });
+        document.getElementById('appeal-response-rich').appendChild(appealField.el);
+    }
+    return appealField;
+}
 let searchTerm = '';
 let filterStatus = 'all';
 let source = 'reports';
@@ -402,7 +424,7 @@ async function openModal(id) {
         ${messageHtml}
     `;
 
-    document.getElementById('modal-email-msg').value = '';
+    emailBox().reset();
     document.getElementById('modal-alert').innerHTML = '';
     document.getElementById('modal-blacklist-warning').style.display = 'none';
 
@@ -415,7 +437,7 @@ async function openModal(id) {
         document.getElementById('modal-delete-perm').style.display = '';
         document.getElementById('modal-actions').style.display = '';
         document.getElementById('modal-email-section').style.display = 'none';
-        document.getElementById('modal-email-msg').style.display = 'none';
+        emailBox().el.style.display = 'none';
         document.getElementById('modal-send-email').closest('.text-center').style.display = 'none';
     } else {
         // Active reports view
@@ -426,7 +448,7 @@ async function openModal(id) {
         document.getElementById('modal-delete-perm').style.display = '';
         document.getElementById('modal-actions').style.display = '';
         document.getElementById('modal-email-section').style.display = '';
-        document.getElementById('modal-email-msg').style.display = '';
+        emailBox().el.style.display = '';
         document.getElementById('modal-send-email').closest('.text-center').style.display = '';
     }
 
@@ -521,7 +543,7 @@ async function handleRestore() {
 
 async function handleSendEmail() {
     if (!currentReport) return;
-    const msg = document.getElementById('modal-email-msg').value.trim();
+    const msg = emailBox().getValue().trim();
     if (!msg) {
         showModalAlert('error', t.key('js.reports.enter_message'));
         return;
@@ -529,10 +551,11 @@ async function handleSendEmail() {
     const json = await apiCall('admin/send_email', 'POST', {
         id: currentReport.id,
         message: msg,
+        format: emailBox().getFormat(),
     });
     if (json.success) {
         showToast('success', t.key('js.reports.email_sent'));
-        document.getElementById('modal-email-msg').value = '';
+        emailBox().reset();
     } else {
         showModalAlert('error', json.error || t.key('js.reports.email_failed'));
     }
@@ -925,14 +948,14 @@ async function openReportFromAppeal(reportId, infoHash) {
         ${messageHtml}
     `;
 
-    document.getElementById('modal-email-msg').value = '';
+    emailBox().reset();
     document.getElementById('modal-alert').innerHTML = '';
     document.getElementById('modal-blacklist-warning').style.display = 'none';
 
     // Hide all action buttons — this is read-only from appeal context
     document.getElementById('modal-actions').style.display = 'none';
     document.getElementById('modal-email-section').style.display = 'none';
-    document.getElementById('modal-email-msg').style.display = 'none';
+    emailBox().el.style.display = 'none';
     document.getElementById('modal-send-email').closest('.text-center').style.display = 'none';
 
     rememberOpener('actionModal', 'data-appeal-id', currentAppeal ? currentAppeal.id : 0);
@@ -977,7 +1000,7 @@ async function openAppealModal(id) {
             <p class="msg-block-header">${esc(t.key('js.reports.appeal_message'))}</p>
             <div class="report-message-content">${renderMessage(a.message)}</div>
         </div>
-        ${a.admin_response ? '<div class="report-message-block admin-response"><p class="msg-block-header admin-response">' + esc(t.key('js.reports.admin_response')) + '</p><div class="report-message-content">' + renderMessage(a.admin_response) + '</div></div>' : ''}
+        ${a.admin_response ? '<div class="report-message-block admin-response"><p class="msg-block-header admin-response">' + esc(t.key('js.reports.admin_response')) + '</p><div class="report-message-content">' + (a.admin_response_html || renderMessage(a.admin_response)) + '</div></div>' : ''}
     `;
 
     const isPending = a.status === 'pending';
@@ -992,7 +1015,7 @@ async function openAppealModal(id) {
         document.getElementById('appeal-accept').style.display = 'none';
         document.getElementById('appeal-reject').style.display = 'none';
         document.getElementById('appeal-restore').style.display = '';
-        document.getElementById('appeal-response-msg').style.display = 'none';
+        appealBox().el.style.display = 'none';
         if (responseHr) responseHr.style.display = 'none';
         if (responseHeader) responseHeader.style.display = 'none';
     } else if (isPending) {
@@ -1001,18 +1024,18 @@ async function openAppealModal(id) {
         document.getElementById('appeal-accept').style.display = '';
         document.getElementById('appeal-reject').style.display = '';
         document.getElementById('appeal-restore').style.display = 'none';
-        document.getElementById('appeal-response-msg').style.display = '';
+        appealBox().el.style.display = '';
         if (responseHr) responseHr.style.display = '';
         if (responseHeader) responseHeader.style.display = '';
     } else {
         // Active non-pending: hide all actions
         document.getElementById('appeal-modal-actions').style.display = 'none';
-        document.getElementById('appeal-response-msg').style.display = 'none';
+        appealBox().el.style.display = 'none';
         if (responseHr) responseHr.style.display = 'none';
         if (responseHeader) responseHeader.style.display = 'none';
     }
 
-    document.getElementById('appeal-response-msg').value = '';
+    appealBox().reset();
     document.getElementById('appeal-modal-alert').innerHTML = '';
 
     rememberOpener('appealModal', 'data-appeal-id', a.id);
@@ -1030,7 +1053,8 @@ async function handleResolveAppeal(status) {
     const body = {
         id: currentAppeal.id,
         status: status,
-        admin_response: document.getElementById('appeal-response-msg').value.trim(),
+        admin_response: appealBox().getValue().trim(),
+        admin_response_format: appealBox().getFormat(),
     };
 
     // Accepting an appeal automatically performs the requested action

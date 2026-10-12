@@ -457,7 +457,11 @@ $r = $act(['kind' => 'comment', 'target_id' => $c1, 'hash' => CR_H1, 'action' =>
 $row = commentRow($db, $c1);
 check('remove, silently: the comment taken down through commentDelete() — soft, stamped as the owner\'s session, with why',
       $r['status'] === 200 && $row['status'] === 'deleted' && $row['deleted_by'] === null && str_starts_with((string)$row['delete_reason'], 'after a report (#'), json_encode([$r, $row]));
-check('… the author told NOTHING — no notice, no warning, no warning kept', $notes($carol, $f) === [] && !(int)$db->query("SELECT COUNT(*) FROM user_warnings WHERE user_id = $carol")->fetchColumn());
+// 1.75.0: a silent action is RECORDED (loud 0 — the Moderation page's log, "Restricted now"), but it is no warning: nobody is told and nothing counts.
+check('… the author told NOTHING — no notice, no warning that counts; the removal is kept in the log as a SILENT row',
+      $notes($carol, $f) === [] && !(int)$db->query("SELECT COUNT(*) FROM user_warnings WHERE user_id = $carol AND loud = 1")->fetchColumn()
+      && (int)$db->query("SELECT COUNT(*) FROM user_warnings WHERE user_id = $carol AND loud = 0 AND action = 'remove' AND source_kind = 'comment'")->fetchColumn() === 1
+      && userWarningsSummary($db, [$carol])[$carol]['count'] === 0);
 check('… the reporters told it was removed, in their languages', str_contains($notes($alice, $f)[0]['title'] ?? '', 'został usunięty') && str_contains($notes($bob, $f)[0]['title'] ?? '', 'was removed'));
 $del = $auditSince('comment.delete');
 check('… audited twice: the removal (comment.delete, marked silent) and the report\'s action (creport.remove)',
@@ -608,7 +612,7 @@ $rq($dave, ['kind' => 'description', 'hash' => CR_H1, 'reason' => 'dave reports 
 $daveFiled = (int)$db->query("SELECT COUNT(*) FROM content_reports WHERE reporter_id = $dave")->fetchColumn();
 $gone = userDeleteCascade($db, $dave);
 check('a reporter leaving: their reports go, their warnings go', $daveFiled === 1 && !(int)$db->query("SELECT COUNT(*) FROM content_reports WHERE reporter_id = $dave")->fetchColumn()
-      && !(int)$db->query("SELECT COUNT(*) FROM user_warnings WHERE user_id = $dave")->fetchColumn() && ($gone['warnings'] ?? 0) === 2, json_encode($gone));
+      && !(int)$db->query("SELECT COUNT(*) FROM user_warnings WHERE user_id = $dave")->fetchColumn() && ($gone['warnings'] ?? 0) === 3, json_encode($gone));   // (3: since 1.75.0 a silent action is a row too)
 $descBefore = (int)$db->query("SELECT COUNT(*) FROM content_reports WHERE kind = 'description' AND author_id = $carol")->fetchColumn();
 $gone = userDeleteCascade($db, $carol);
 check('an author leaving: the reports about their comments and shouts go with them; a description\'s stay, without an author',
@@ -730,8 +734,8 @@ check('the public script: loaded after comments.js for a reader who may report, 
       ($p1 = strpos($src('templates/layout.php'), 'assets/js/comments.js')) !== false && strpos($src('templates/layout.php'), 'assets/js/reports.js') > $p1
       && in_array('js.report.', LANG_JS_PUBLIC, true) && str_contains($src('assets/js/reports.js'), 'csrf_token: csrfToken(box)')
       && str_contains($src('assets/js/reports.js'), 'window.Comments.onActions('));
-check('the author\'s warning is written in THEIR language and names nobody who reported', str_contains($lib, '$lang = recipientLang($cfg, $user);')
-      && !preg_match('/userWarn\([^;]*reporter/', $lib));
+check('the author\'s warning is written in THEIR language and names nobody who reported', str_contains($src('includes/moderation.php'), '$lang = recipientLang($cfg, $user);')
+      && !preg_match('/userModerate\(\$db, \$cfg, \[[^;]*reporter/', $lib));
 
 /* ══ 11. (1.72.0) a reply is a comment ═══════════════════════════════════ */
 $cleanRate();

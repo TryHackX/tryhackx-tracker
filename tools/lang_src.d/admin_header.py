@@ -31,6 +31,7 @@ add('a.head.nav', {
     'admin_index':     ('Index', 'Indeks'),
     'admin_traffic':   ('Traffic', 'Ruch'),
     'admin_users':     ('Users', 'Użytkownicy'),
+    'admin_moderation': ('Moderation', 'Moderacja'),
     'admin_backups':   ('Backups', 'Kopie zapasowe'),
     'admin_audit':     ('Log', 'Log'),
 })

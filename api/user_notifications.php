@@ -47,6 +47,15 @@ try {
 } catch (\Throwable $e) {
     $cols = 'id, type, title, body, created_at, UNIX_TIMESTAMP(created_at) AS created_ts, read_at, NULL AS link';
 }
+// `rich` / `rich_format` (v94, 1.75.0): the source of a notification that has formatting — read with the rest, and turned
+// into `rich_html` below; the source itself is not sent on. A database whose migration has not run has neither.
+$hasRich = true;
+try {
+    $db->query("SELECT rich, rich_format FROM user_notifications LIMIT 0");
+} catch (\Throwable $e) {
+    $hasRich = false;
+}
+$cols .= $hasRich ? ', rich, rich_format' : ', NULL AS rich, NULL AS rich_format';
 $st = $db->prepare("SELECT $cols FROM user_notifications
                     WHERE user_id = ? ORDER BY (read_at IS NULL) DESC, id DESC LIMIT ? OFFSET ?");
 $st->bindValue(1, (int)$u['id'], PDO::PARAM_INT);
@@ -62,6 +71,28 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $n) {
     $n['id'] = (int)$n['id'];
     $n['created_ts'] = is_numeric($n['created_ts'] ?? null) ? (int)$n['created_ts'] : null;
     $n['created_time'] = $n['created_ts'] !== null ? userDisplayTime($n['created_ts'], $readerTz, 'Y-m-d H:i') : '';
+    // Words with a format (1.75.0), drawn from their source NOW — so a renderer fixed later reaches what was sent earlier:
+    //   bbcode, markdown  our own renderer (the input is escaped before a rule runs, richtext.php): `rich_html`, which the
+    //                     page may put into the document;
+    //   html              a campaign's HTML through the sanitizer for the SITE (htmlSafeClean(), includes/htmlsafe.php) —
+    //                     and then NOT into the page: `rich_doc` is the whole document for an <iframe sandbox="allow-same-origin
+    //                     allow-popups allow-popups-to-escape-sandbox" srcdoc>, with no allow-scripts, so a miss of the
+    //                     sanitizer still runs nothing. Prod's CSP is report-only and allows 'unsafe-inline' (includes/csp.php).
+    //                     `rich_html` stays EMPTY for it: a field the page could put into its own DOM is a field somebody
+    //                     will one day put there (the page has no such path, and this keeps it that way).
+    // A plain notification has none of these keys filled: it is `body`, drawn with textContent, exactly as before.
+    $src = (string)($n['rich'] ?? '');
+    $fmt = (string)($n['rich_format'] ?? '');
+    unset($n['rich']);
+    $n['rich_format'] = $src !== '' ? $fmt : null;
+    $n['rich_html'] = '';
+    $n['rich_doc'] = '';
+    if ($src !== '' && ($fmt === 'bbcode' || $fmt === 'markdown')) {
+        $n['rich_html'] = richtextRender($src, $fmt, $cfg, true);
+    } elseif ($src !== '' && $fmt === 'html') {
+        $clean = htmlSafeClean($src, 'site');
+        if ($clean !== '') $n['rich_doc'] = htmlSafeSiteFrame($clean);     // nothing that survived the cleaner = no frame at all
+    }
     $rows[] = $n;
 }
 jsonResponse(['success' => true, 'notifications' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages,

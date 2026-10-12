@@ -37,7 +37,8 @@
  * the words are simply gone, the silence simply applies. Loud: ONE notification of type 'warning', in the
  * author's own language, with the moderator's reason (required) and how many warnings the account has had, and
  * a row in `user_warnings`. A Warn on its own is loud by definition. Lifting a silence or a ban says so only
- * when loud, and is no warning.
+ * when loud, and is no warning. Since 1.75.0 a SILENT action is a row too (`loud` 0: it never counts, and the
+ * Moderation page can say who was silenced for what) — all of it through userModerate() (includes/moderation.php).
  *
  * ── who hears what ──────────────────────────────────────────────────────────────────────────────
  * The reporters hear the outcome — closed, removed, handled — with the moderator's answer when there is one,
@@ -46,6 +47,9 @@
  * functions write themselves.
  */
 require_once __DIR__ . '/antispam.php';
+// Every punishment — warn, silence, ban and the lifts — goes through ONE function, with the automatic penalties inside it
+// (1.75.0). It lives in its own file; this one is where the report cards call it from.
+require_once __DIR__ . '/moderation.php';
 
 const CONTENT_REPORT_KINDS         = ['comment', 'description', 'shout'];
 const CONTENT_REPORT_REASON_MAX    = 300;     // a member's reason
@@ -53,8 +57,7 @@ const CONTENT_REPORT_TEXT_MAX      = 500;     // a moderator's note, answer and 
 const CONTENT_REPORT_RATE_PER_HOUR = 20;      // reports an account may file in an hour (contentReportFloodCheck())
 const CONTENT_REPORT_SNAPSHOT_BYTES = 60000;  // the words kept with a report (a TEXT column holds 65 535 bytes)
 const CONTENT_REPORT_WARNINGS_SHOWN = 3;      // the latest warnings on a card
-const CONTENT_REPORT_FOREVER       = '2099-12-31 23:59:59';   // "until somebody lifts it", as the message card writes it
-const CONTENT_REPORT_ACTIONS       = ['close', 'reopen', 'remove', 'warn', 'mute', 'unmute', 'ban', 'unban'];
+const CONTENT_REPORT_ACTIONS      = ['close', 'reopen', 'remove', 'warn', 'mute', 'unmute', 'ban', 'unban'];
 
 /* ── the switches ─────────────────────────────────────────────────────────────────────────────────── */
 
@@ -91,6 +94,89 @@ function contentReportClean($s, int $max): string
     $s = (string)preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $s);   // no bidi tricks in a name for the panel
     $s = trim((string)preg_replace('/\s{2,}/u', ' ', $s));
     return mb_substr($s, 0, $max, 'UTF-8');
+}
+
+/* ── what a moderator writes when acting on a report (1.75.0) ─────────────────────────────────────────
+ *
+ * Until 1.75.0 a moderator's reason (to the author) and answer (to the reporters) were ONE line of at most 500
+ * characters, plain: contentReportClean() folds every line break into a space. They are now texts of up to
+ * REPORT_TEXT_MAX characters with LINES, in a format of their own — plain, or BBCode / Markdown where the site has them
+ * switched on — and are stored RAW (the source as typed, escaped on output, never twice) beside that format.
+ * The note stays what it was: the panel's own, plain, one line.
+ */
+
+const REPORT_TEXT_MAX = 2000;          // a moderator's reason or answer, in characters
+const REPORT_TEXT_MAX_LINKS = 5;       // … and the links in it
+const REPORT_TEXT_MAX_IMAGES = 0;      // … and the pictures (a warning is words)
+
+/** A text a moderator typed, as it is kept: its lines stay; control characters, tabs and bidi tricks go; cut to $max characters. */
+function reportTextClean($s, int $max = REPORT_TEXT_MAX): string
+{
+    if (!is_string($s)) return '';
+    if (!mb_check_encoding($s, 'UTF-8')) $s = (string)mb_convert_encoding($s, 'UTF-8', 'UTF-8');
+    $s = str_replace(["\r\n", "\r", "\t"], ["\n", "\n", ' '], $s);
+    $s = (string)preg_replace('/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]+/u', ' ', $s);
+    $s = (string)preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $s);
+    $s = implode("\n", array_map('rtrim', explode("\n", $s)));
+    $s = trim((string)preg_replace('/\n{3,}/', "\n\n", $s));
+    return mb_substr($s, 0, $max, 'UTF-8');
+}
+
+/** The format a moderator chose: plain, or BBCode / Markdown where the site accepts it; anything else is plain. */
+function reportTextFormat($f, array $cfg): string
+{
+    $f = is_string($f) ? $f : 'plain';
+    return ($f === 'bbcode' || $f === 'markdown') && in_array($f, richtextFormats($cfg), true) ? $f : 'plain';
+}
+
+/**
+ * Everything wrong with a moderator's text, in the moderator's language, or null: too long, a format the site does not
+ * accept, a picture (none are allowed), too many links. richtextValidate() does the rendering-based counting (what a
+ * reader would SEE, not what the source syntax says) with the limits of a short message instead of a description —
+ * the same wrapping api/user_messages.php uses — and refuses 'plain' as a format and says "description": so plain is
+ * judged here, and the sentences are the dictionary's. Empty text is fine (the caller decides whether one is required).
+ * $max: the length this window allows (REPORT_TEXT_MAX; the member notification window keeps its 5 000) — the pictures
+ * and links are the same everywhere: a moderator's text is words, and a remote picture in it is fetched from a host of the
+ * moderator's choosing with the reader's address.
+ */
+function reportTextValidate(string $text, string $format, array $cfg, int $max = REPORT_TEXT_MAX): ?string
+{
+    $text = trim($text);
+    if ($text === '') return null;
+    $len = mb_strlen($text, 'UTF-8');
+    if ($len > $max) return __('api.report_text.too_long', ['n' => $len, 'max' => $max]);
+    if ($format === 'plain') return null;
+    if (!in_array($format, richtextFormats($cfg), true)) return __('api.report_text.bad_format');
+    $c = richtextCount($text, $format, $cfg);
+    if ($c['images'] > REPORT_TEXT_MAX_IMAGES) return __('api.report_text.no_images');
+    if ($c['links'] > REPORT_TEXT_MAX_LINKS) return __('api.report_text.too_many_links', ['n' => $c['links'], 'max' => REPORT_TEXT_MAX_LINKS]);
+    // …and the rule itself, last, so a limit added to it later cannot be missed here.
+    $msg = richtextValidate($text, $format, array_merge($cfg, ['desc_max_chars' => (string)$max,
+        'desc_max_images' => (string)REPORT_TEXT_MAX_IMAGES, 'desc_max_links' => (string)REPORT_TEXT_MAX_LINKS]));
+    return $msg !== null ? __('api.report_text.refused', ['why' => $msg]) : null;
+}
+
+/** A moderator's text as HTML for the panel: plain is escaped text with its lines, BBCode / Markdown go through the site's renderer ([hide] shows: a moderator is signed in). */
+function reportTextHtml(string $text, string $format, array $cfg): string
+{
+    if (trim($text) === '') return '';
+    if (($format === 'bbcode' || $format === 'markdown') && function_exists('richtextRender')) {
+        $html = richtextRender($text, $format, $cfg, true);
+        if ($html !== '') return $html;
+    }
+    return nl2br(htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false);
+}
+
+/**
+ * A text for the audit log: an excerpt and its length, never the whole of it — a log line's detail is cut at 4 000
+ * bytes (AUDIT_MAX_DETAIL) and three long texts used to turn the whole detail into {truncated:true}, ids and all.
+ */
+function reportTextAudit(string $text, int $len = 120): ?array
+{
+    $text = trim($text);
+    if ($text === '') return null;
+    $one = (string)preg_replace('/\s+/u', ' ', $text);
+    return ['len' => mb_strlen($text, 'UTF-8'), 'excerpt' => mb_substr($one, 0, $len, 'UTF-8')];
 }
 
 /** The words kept with a report, bounded by the column. */
@@ -323,7 +409,9 @@ function reportPanelActor(PDO $db): array
 function reportAccountGuard(PDO $db, array $cfg, ?int $target): string
 {
     if ($target === null || $target <= 0 || userFindById($db, $target) === null) return 'no_author';
-    if (userIdHasPermission($db, $cfg, $target, 'panel.access')) return 'target_is_staff';
+    // By the memberships, not by userIdHasPermission(): an unverified moderator reads as a guest there, and "staff stay
+    // untouchable" must not depend on whether they have confirmed their address (1.75.0, moderationIsStaff()).
+    if (moderationIsStaff($db, $target)) return 'target_is_staff';
     if (!empty($_SESSION['admin_via_user']) && (int)$_SESSION['admin_via_user'] === $target) return 'target_is_you';
     return '';
 }
@@ -331,66 +419,18 @@ function reportAccountGuard(PDO $db, array $cfg, ?int $target): string
 /* ── warnings ─────────────────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Record a WARNING and tell its member — the loud half of every action (see the head of this file). ONE
- * notification of type 'warning', in the member's language: what happened (its title, by `$action` and the
- * kind), the moderator's reason and which warning this is on the account. Returns the warning's id.
- *
- * $src: ['kind' => comment|description|shout|message|'', 'id' => int, 'hash' => string, 'name' => the torrent's
- * name for the sentence]; $action: warn | remove | mute | ban; $until: for a silence or a ban, the unix moment it
- * ends (null: until somebody lifts it).
+ * (1.75.0) userWarn() is gone: a warning is ONE call of userModerate() (includes/moderation.php) like every other
+ * punishment, so the row lock, the count, the automatic rules and the notification are one path. The wording of the
+ * warning notification — what happened, the moderator's reason, which warning this is — is moderationNoticeWarning().
  */
-function userWarn(PDO $db, array $cfg, int $userId, string $reason, array $src, string $action, ?int $until = null): int
-{
-    $user = userFindById($db, $userId);
-    if ($user === null) return 0;
-    $kind = in_array($src['kind'] ?? '', ['comment', 'description', 'shout', 'message'], true) ? (string)$src['kind'] : '';
-    $hash = preg_match('/^[0-9a-f]{40}$/', (string)($src['hash'] ?? '')) ? (string)$src['hash'] : '';
-    $by = function_exists('auditActor') ? auditActor($db) : ['id' => null, 'name' => 'panel'];
-    $reason = contentReportClean($reason, CONTENT_REPORT_TEXT_MAX);
-    $db->prepare("INSERT INTO user_warnings (user_id, reason, source_kind, source_id, info_hash, action, by_id, by_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-       ->execute([$userId, $reason, $kind, max(0, (int)($src['id'] ?? 0)), $hash, in_array($action, ['warn', 'remove', 'mute', 'ban'], true) ? $action : 'warn',
-                  !empty($by['id']) ? (int)$by['id'] : null, mb_substr((string)($by['name'] ?? ''), 0, 64)]);
-    $wid = (int)$db->lastInsertId();
-    $st = $db->prepare("SELECT COUNT(*) FROM user_warnings WHERE user_id = ?");
-    $st->execute([$userId]);
-    $n = (int)$st->fetchColumn();
-
-    $lang = recipientLang($cfg, $user);
-    $name = (string)($src['name'] ?? '');
-    if ($action === 'mute' || $action === 'ban') {
-        if ($until === null) {
-            $title = langFor($lang, $action === 'mute' ? 'notify.warn_muted_forever' : 'notify.warn_banned_forever');
-        } else {
-            $date = function_exists('userDisplayTime') ? userDisplayTime($until, userDisplayTimezone($user, $cfg), 'Y-m-d H:i') : date('Y-m-d H:i', $until);
-            $title = langFor($lang, $action === 'mute' ? 'notify.warn_muted' : 'notify.warn_banned', ['date' => $date]);
-        }
-    } else {
-        $what = $kind !== '' ? $kind : 'message';
-        $title = langFor($lang, ($action === 'remove' ? 'notify.warn_removed_' : 'notify.warn_about_') . $what, ['name' => $name]);
-    }
-    $body = langFor($lang, 'notify.warn_reason', ['reason' => $reason])
-          . ($action === 'mute' ? "\n" . langFor($lang, 'notify.warn_muted_what') : '')
-          . "\n" . langFor($lang, 'notify.warn_count', ['n' => $n]);
-    // Where it happened, when that is a place on the site — the torrent's Info panel. A removed comment's link
-    // would find nothing, so it is the torrent's.
-    $link = null;
-    if ($hash !== '' && ($kind === 'comment' || $kind === 'description')) {
-        $link = ($kind === 'comment' && $action !== 'remove' && (int)($src['id'] ?? 0) > 0 && function_exists('commentLink'))
-            ? commentLink($hash, (int)$src['id']) : '?action=search&hash=' . $hash;
-    }
-    userNotify($db, $userId, 'warning', $title, $body, $link);
-    if (function_exists('auditLog')) {
-        auditLog($db, 'user.warn', ['target_type' => 'user', 'target_id' => $userId,
-            'summary' => (string)($by['name'] ?? 'panel') . ' → warned ' . (string)$user['username'] . ' (' . $action . ($kind !== '' ? ', ' . $kind : '') . '): ' . $reason,
-            'detail' => ['warning' => $wid, 'count' => $n, 'kind' => $kind, 'id' => (int)($src['id'] ?? 0), 'hash' => $hash, 'action' => $action, 'until' => $until]]);
-    }
-    return $wid;
-}
 
 /**
- * How many warnings each of these accounts has had, and the latest few: [uid => ['count' => n, 'latest' =>
- * [['at', 'reason', 'kind', 'action', 'by'], …]]] — for the report cards and Users. One query for the counts,
- * one small indexed one per account that has any.
+ * How many warnings each of these accounts has, and the latest rows of the log: [uid => ['count' => n, 'latest' =>
+ * [['at', 'reason', 'kind', 'action', 'by', 'reason_format', 'reason_html', 'loud', 'revoked', 'auto'], …]]] — for the
+ * report cards and Users. `count` is what COUNTS (MODERATION_COUNTED: loud, not revoked, not automatic — a revoked warning
+ * and a silent action are in the list, marked, and in no number); `latest` is the newest rows whatever they are, so a
+ * moderator sees a revoked warning struck through and a silent action for what it is. One query for the counts, one small
+ * indexed one per account that has any.
  */
 function userWarningsSummary(PDO $db, array $userIds, int $latest = CONTENT_REPORT_WARNINGS_SHOWN): array
 {
@@ -399,18 +439,29 @@ function userWarningsSummary(PDO $db, array $userIds, int $latest = CONTENT_REPO
     foreach ($ids as $id) $out[$id] = ['count' => 0, 'latest' => []];
     if (!$ids) return $out;
     try {
+        $counts = moderationCounts($db, $ids);
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $st = $db->prepare("SELECT user_id, COUNT(*) AS n FROM user_warnings WHERE user_id IN ($in) GROUP BY user_id");
-        $st->execute($ids);
+        $any = $db->prepare("SELECT DISTINCT user_id FROM user_warnings WHERE user_id IN ($in)");
+        $any->execute($ids);
         $lim = max(1, min(20, $latest));
-        $one = $db->prepare("SELECT created_at, reason, source_kind, action, by_name FROM user_warnings WHERE user_id = ? ORDER BY id DESC LIMIT $lim");
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $uid = (int)$r['user_id'];
-            $out[$uid]['count'] = (int)$r['n'];
+        // The reason's format is a column of schema 94: a BBCode / Markdown reason is also handed over RENDERED
+        // (`reason_html`, the site's renderer — the panel puts it in the page), a plain one is text for textContent.
+        $one = $db->prepare("SELECT created_at, reason, reason_format, source_kind, action, by_name, loud, revoked_at FROM user_warnings
+                              WHERE user_id = ? ORDER BY id DESC LIMIT $lim");
+        $cfgNow = $GLOBALS['cfg'] ?? [];
+        foreach ($any->fetchAll(PDO::FETCH_COLUMN) as $uidRaw) {
+            $uid = (int)$uidRaw;
+            $out[$uid]['count'] = (int)($counts[$uid] ?? 0);
             $one->execute([$uid]);
             foreach ($one->fetchAll(PDO::FETCH_ASSOC) as $w) {
-                $out[$uid]['latest'][] = ['at' => (string)$w['created_at'], 'reason' => (string)$w['reason'], 'kind' => (string)$w['source_kind'],
-                                          'action' => (string)$w['action'], 'by' => (string)$w['by_name']];
+                $f = (string)$w['reason_format'];
+                $auto = (string)$w['source_kind'] === 'auto';
+                $out[$uid]['latest'][] = ['at' => (string)$w['created_at'], 'reason' => $auto ? '' : (string)$w['reason'], 'kind' => (string)$w['source_kind'],
+                                          'action' => (string)$w['action'], 'by' => (string)$w['by_name'], 'reason_format' => $f,
+                                          'reason_html' => (!$auto && $f !== 'plain') ? reportTextHtml((string)$w['reason'], $f, $cfgNow) : '',
+                                          'loud' => (int)$w['loud'] === 1, 'revoked' => $w['revoked_at'] !== null, 'auto' => $auto,
+                                          // an automatic penalty's reason is "<warnings>|<days>" (moderationAutoEvaluate()): sent as numbers
+                                          'auto_info' => $auto ? array_combine(['count', 'window'], array_map('intval', array_pad(explode('|', (string)$w['reason'], 2), 2, '0'))) : null];
             }
         }
     } catch (\Throwable $e) { /* the table arrives with schema 84 */ }
@@ -449,7 +500,7 @@ function reportAuthorStates(PDO $db, array $cfg, array $userIds): array
             'banned'       => (string)$u['status'] === 'banned',
             'banned_until' => $u['banned_until'] ? (string)$u['banned_until'] : null,
             'muted_until'  => ($u['pm_muted_until'] !== null && strtotime((string)$u['pm_muted_until']) > time()) ? (string)$u['pm_muted_until'] : null,
-            'staff'        => userIdHasPermission($db, $cfg, $id, 'panel.access'),
+            'staff'        => moderationIsStaff($db, $id),
             'you'          => $me > 0 && $me === $id,
             'reports'      => (int)($counts[$id] ?? 0),
             'warnings'     => (int)($warn[$id]['count'] ?? 0),
@@ -705,7 +756,11 @@ function contentReportList(PDO $db, array $cfg, string $kind, array $f, int $pag
                 'id' => (int)$r['id'], 'status' => (string)$r['status'], 'reason' => (string)$r['reason'],
                 'reporter' => (string)($r['reporter_name'] ?? ''), 'reporter_avatar' => $face((string)($r['reporter_name'] ?? ''), $r['reporter_avatar_sha'] ?? null),
                 'created_at' => (string)$r['created_at'], 'outcome' => (string)$r['outcome'], 'handled_by' => (string)$r['handled_by'],
-                'handled_at' => $r['handled_at'] ? (string)$r['handled_at'] : null, 'note' => (string)$r['note'], 'reply' => (string)($r['reply'] ?? ''),
+                'handled_at' => $r['handled_at'] ? (string)$r['handled_at'] : null, 'note' => (string)($r['note'] ?? ''), 'reply' => (string)($r['reply'] ?? ''),
+                // the answer's format and — for BBCode / Markdown — the answer RENDERED (1.75.0); a plain one is text
+                'reply_format' => (string)($r['reply_format'] ?? 'plain'),
+                'reply_html' => (($r['reply_format'] ?? 'plain') !== 'plain' && (string)($r['reply'] ?? '') !== '')
+                    ? reportTextHtml((string)$r['reply'], (string)$r['reply_format'], $cfg) : '',
                 // the words this reporter saw, when they are not what the card shows as the latest report's
                 'snapshot_differs' => (string)$r['snapshot'] !== $snapText,
             ];
@@ -746,14 +801,23 @@ function contentReportList(PDO $db, array $cfg, string $kind, array $f, int $pag
 /**
  * Close these (open) reports with an outcome, a note and an answer. Returns how many were closed.
  */
-function contentReportCloseRows(PDO $db, array $ids, string $outcome, string $note, string $reply, string $by): int
+function contentReportCloseRows(PDO $db, array $ids, string $outcome, string $note, string $reply, string $by, string $replyFormat = 'plain'): int
 {
     $ids = array_values(array_filter(array_map('intval', $ids), fn($v) => $v > 0));
     if (!$ids) return 0;
     $in = implode(',', array_fill(0, count($ids), '?'));
-    $st = $db->prepare("UPDATE content_reports SET status = 'closed', open_slot = NULL, outcome = ?, note = ?, reply = ?, handled_by = ?, handled_at = NOW()
-                         WHERE status = 'open' AND id IN ($in)");
-    $st->execute(array_merge([$outcome, $note, $reply !== '' ? $reply : null, mb_substr($by, 0, 64)], $ids));
+    $replyFormat = in_array($replyFormat, ['bbcode', 'markdown'], true) && $reply !== '' ? $replyFormat : 'plain';
+    try {
+        $st = $db->prepare("UPDATE content_reports SET status = 'closed', open_slot = NULL, outcome = ?, note = ?, reply = ?, reply_format = ?, handled_by = ?, handled_at = NOW()
+                             WHERE status = 'open' AND id IN ($in)");
+        $st->execute(array_merge([$outcome, $note, $reply !== '' ? $reply : null, $replyFormat, mb_substr($by, 0, 64)], $ids));
+    } catch (\PDOException $e) {
+        // A database whose v94 migration has not run yet: the answer as it was kept before (plain, one line).
+        if ((string)$e->getCode() !== '42S22') throw $e;
+        $st = $db->prepare("UPDATE content_reports SET status = 'closed', open_slot = NULL, outcome = ?, note = ?, reply = ?, handled_by = ?, handled_at = NOW()
+                             WHERE status = 'open' AND id IN ($in)");
+        $st->execute(array_merge([$outcome, $note, $reply !== '' ? mb_substr($reply, 0, 500) : null, mb_substr($by, 0, 64)], $ids));
+    }
     return $st->rowCount();
 }
 
@@ -762,8 +826,9 @@ function contentReportCloseRows(PDO $db, array $ids, string $outcome, string $no
  * the moderator wrote one. $outcome: closed | removed | handled. Returns how many were told. Never the name of
  * anybody else who reported it, and the author never hears who did.
  */
-function contentReportTellReporters(PDO $db, array $cfg, array $rows, string $outcome, string $reply, string $kind, string $name, string $author): int
+function contentReportTellReporters(PDO $db, array $cfg, array $rows, string $outcome, string $reply, string $kind, string $name, string $author, string $replyFormat = 'plain'): int
 {
+    $rich = $reply !== '' && in_array($replyFormat, ['bbcode', 'markdown'], true);
     $told = [];
     foreach ($rows as $r) {
         $rid = (int)($r['reporter_id'] ?? 0);
@@ -778,7 +843,9 @@ function contentReportTellReporters(PDO $db, array $cfg, array $rows, string $ou
             $what = langFor($lang, 'notify.creport_what_' . $kind, $vars);
             $title = langFor($lang, $outcome === 'closed' ? 'notify.creport_closed' : 'notify.creport_handled', ['what' => $what]);
         }
-        userNotify($db, $rid, 'report', $title,
+        // A formatted answer (1.75.0) travels as `rich` and the body is only "The moderator wrote:" above it.
+        if ($rich) userNotify($db, $rid, 'report', $title, langFor($lang, 'notify.report_reply_lead'), null, null, $reply, $replyFormat);
+        else userNotify($db, $rid, 'report', $title,
             $reply !== '' ? langFor($lang, 'notify.report_reply', ['reply' => $reply]) : langFor($lang, 'notify.report_no_reply'));
         $told[$rid] = true;
     }
@@ -802,7 +869,7 @@ function contentReportPanelFail(int $status, string $code, array $extra = []): a
  *            sha of the words the moderator was shown, and a change since is refused (409 changed).
  *   warn     a warning, and nothing else (always loud).
  *   mute     users.pm_muted_until (messages, shouts, comments, a profile's and a list's words) for `days`
- *            (0: until somebody lifts it), measured by the database's clock; unmute lifts it.
+ *            (0: until somebody lifts it), from now (userModerate()); unmute lifts it.
  *   ban      the account suspended for `days` (0: until lifted), its remembered devices signed out; unban lifts
  *            a ban THIS card may lift — one with a date. A ban without one is the owner's, from Users.
  * mode: every action that reaches the author — remove, mute, ban, and the lifts — is silent (the author told
@@ -825,8 +892,15 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
     $hash = $kind === 'shout' ? '' : strtolower(trim((string)($input['hash'] ?? '')));
     if ($kind !== 'shout' && !preg_match('/^[0-9a-f]{40}$/', $hash)) return contentReportPanelFail(400, 'not_found');
     $note = contentReportClean($input['note'] ?? '', CONTENT_REPORT_TEXT_MAX);
-    $reply = contentReportClean($input['reply'] ?? '', CONTENT_REPORT_TEXT_MAX);
-    $reason = contentReportClean($input['reason'] ?? '', CONTENT_REPORT_TEXT_MAX);
+    // The answer to the reporters and the reason for the author are texts with LINES and a format (1.75.0): kept raw, judged
+    // by reportTextValidate() — one character past the limit is read in so that "too long" is said, not cut off silently.
+    $reply = reportTextClean($input['reply'] ?? '', REPORT_TEXT_MAX + 1);
+    $reason = reportTextClean($input['reason'] ?? '', REPORT_TEXT_MAX + 1);
+    $replyFormat = reportTextFormat($input['reply_format'] ?? 'plain', $cfg);
+    $reasonFormat = reportTextFormat($input['reason_format'] ?? 'plain', $cfg);
+    foreach ([[$reply, $replyFormat, 'reply'], [$reason, $reasonFormat, 'reason']] as [$txt, $fmt, $field]) {
+        if (($why = reportTextValidate($txt, $fmt, $cfg)) !== null) return contentReportPanelFail(400, 'invalid_text', ['message' => $why, 'field' => $field]);
+    }
     $days = max(0, min(3650, (int)($input['days'] ?? 0)));
 
     $st = $db->prepare("SELECT * FROM content_reports WHERE kind = ? AND target_id = ? AND info_hash = ? ORDER BY id DESC");
@@ -852,22 +926,20 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
     if ($mode === 'loud' && in_array($action, ['remove', 'warn', 'mute', 'ban'], true) && $reason === '') {
         return contentReportPanelFail(400, 'reason_required');
     }
-    if (in_array($action, ['ban', 'unban'], true) && $author !== null
-        && (string)$author['status'] === 'banned' && empty($author['banned_until'])) {
-        return contentReportPanelFail($action === 'ban' ? 409 : 403, 'ban_is_permanent');
-    }
-    $src = ['kind' => $kind, 'id' => $targetId, 'hash' => $hash, 'name' => $name];
+    $src =['kind' => $kind, 'id' => $targetId, 'hash' => $hash, 'name' => $name];
     $detail = ['kind' => $kind, 'target' => $targetId, 'hash' => $hash, 'mode' => $mode, 'author_id' => $authorId,
-               'reports' => array_map(fn($r) => (int)$r['id'], $openRows), 'note' => $note !== '' ? $note : null,
-               'reply' => $reply !== '' ? $reply : null, 'reason' => $reason !== '' ? $reason : null];
+               'reports' => array_map(fn($r) => (int)$r['id'], $openRows), 'note' => reportTextAudit($note),
+               // excerpts and lengths (reportTextAudit()), not three whole texts: the detail is cut at 4 000 bytes
+               'reply' => reportTextAudit($reply), 'reply_format' => $reply !== '' ? $replyFormat : null,
+               'reason' => reportTextAudit($reason), 'reason_format' => $reason !== '' ? $reasonFormat : null];
     $out = ['success' => true, 'action' => $action, 'mode' => $mode];
     $what = $kind . ($kind === 'shout' ? ' #' . $targetId : ' on ' . ($name !== '' ? $name : substr($hash, 0, 12)));
 
     if ($action === 'close' || $action === 'reopen') {
         if ($action === 'close') {
-            $n = contentReportCloseRows($db, array_map(fn($r) => (int)$r['id'], $openRows), 'closed', $note, $reply, $by);
+            $n = contentReportCloseRows($db, array_map(fn($r) => (int)$r['id'], $openRows), 'closed', $note, $reply, $by, $replyFormat);
             $out['closed'] = $n;
-            $out['told'] = $n > 0 ? contentReportTellReporters($db, $cfg, $openRows, 'closed', $reply, $kind, $name, $authorName) : 0;
+            $out['told'] = $n > 0 ? contentReportTellReporters($db, $cfg, $openRows, 'closed', $reply, $kind, $name, $authorName, $replyFormat) : 0;
         } else {
             // A second thought: the notes and the answers the first time left stay. UPDATE IGNORE: a report whose
             // reporter has opened a new one on the same target since stays closed — the new one stands for it.
@@ -889,7 +961,8 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
             $row = commentRow($db, $targetId);
             if ($row === null) return contentReportPanelFail(409, 'gone');
             // The row keeps why it went; a silent removal without a reason still says it was a report.
-            $why = $reason !== '' ? $reason : 'after a report (#' . (int)$rows[0]['id'] . ')';
+            // (the row keeps it as one line of plain words: a formatted reason is cut to its first 500 characters)
+            $why = $reason !== '' ? mb_substr((string)preg_replace('/\s+/u', ' ', $reason), 0, 500, 'UTF-8') : 'after a report (#' . (int)$rows[0]['id'] . ')';
             $r = commentDelete($db, $cfg, $me, $row, $why, ['notify' => false, 'authority' => 'panel']);
             if (empty($r['ok'])) return contentReportPanelFail((int)($r['status'] ?? 409), (string)($r['error'] ?? 'failed'));
         } elseif ($kind === 'description') {
@@ -900,62 +973,44 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
             $r = shoutDelete($db, $cfg, $me, $targetId, ['authority' => 'panel']);
             if (empty($r['ok'])) return contentReportPanelFail($r['error'] === 'not_found' ? 409 : 403, $r['error'] === 'not_found' ? 'gone' : (string)$r['error']);
         }
-        $n = contentReportCloseRows($db, array_map(fn($r) => (int)$r['id'], $openRows), 'removed', $note, $reply, $by);
+        $n = contentReportCloseRows($db, array_map(fn($r) => (int)$r['id'], $openRows), 'removed', $note, $reply, $by, $replyFormat);
         $out['closed'] = $n;
-        $out['told'] = $openRows ? contentReportTellReporters($db, $cfg, $openRows, 'removed', $reply, $kind, $name, $authorName) : 0;
-        if ($mode === 'loud' && $authorId !== null) $out['warning'] = userWarn($db, $cfg, (int)$authorId, $reason, $src, 'remove');
+        $out['told'] = $openRows ? contentReportTellReporters($db, $cfg, $openRows, 'removed', $reply, $kind, $name, $authorName, $replyFormat) : 0;
+        // The words are gone either way; the author's log gets the row either way (1.75.0: a silent removal is recorded,
+        // loud 0, and never counts), and a warning when loud — through the one path.
+        if ($authorId !== null) {
+            $m = userModerate($db, $cfg, ['user_id' => (int)$authorId, 'action' => 'remove', 'loud' => $mode === 'loud', 'reason' => $reason,
+                                          'reason_format' => $reasonFormat, 'src' => $src]);
+            if (!empty($m['ok'])) { if ($mode === 'loud') $out['warning'] = $m['warning']; }
+            elseif ($mode === 'loud') return contentReportPanelFail((int)$m['status'], (string)$m['error'], array_diff_key($m, ['ok' => 1, 'status' => 1, 'error' => 1]));
+        }
         $detail['warning'] = $out['warning'] ?? null;
         auditLog($db, 'creport.remove', ['target_type' => $kind, 'target_id' => $kind === 'description' ? $hash : (string)$targetId,
             'summary' => $by . ' → removed a ' . $what . ($authorName !== '' ? ' by ' . $authorName : '') . ' (' . $mode . ')', 'detail' => $detail]);
         return ['status' => 200, 'body' => $out];
     }
 
-    // The account actions. $authorId is an account the guards above let through.
+    // The account actions, every one through the ONE path (includes/moderation.php, 1.75.0): the row lock, the apply, the log
+    // row — silent ones too —, the count, the automatic rules, then the notification. $authorId is an account the guards above
+    // let through; userModerate() asks them again, and refuses a ban over a ban with no end date (409) and the lift of one (403:
+    // that decision is the Users page's, panel.users.edit — this card passes no `may_dateless`).
     $uid = (int)$authorId;
-    $until = null;
+    $m = userModerate($db, $cfg, ['user_id' => $uid, 'action' => $action, 'days' => $days, 'loud' => $mode === 'loud', 'reason' => $reason,
+                                  'reason_format' => $reasonFormat, 'src' => $src]);
+    if (empty($m['ok'])) return contentReportPanelFail((int)$m['status'], (string)$m['error'], array_diff_key($m, ['ok' => 1, 'status' => 1, 'error' => 1]));
     if ($action === 'warn') {
-        $out['warning'] = userWarn($db, $cfg, $uid, $reason, $src, 'warn');
+        $out['warning'] = $m['warning'];
     } elseif ($action === 'mute' || $action === 'ban') {
-        // By the DATABASE's clock, which is the one every reader of the column compares with; "until somebody
-        // lifts it" as a date far enough away to mean it (the message card's convention).
-        if ($action === 'mute') {
-            $db->prepare("UPDATE users SET pm_muted_until = " . ($days > 0 ? "NOW() + INTERVAL ? DAY" : "?") . " WHERE id = ?")
-               ->execute([$days > 0 ? $days : CONTENT_REPORT_FOREVER, $uid]);
-            $col = 'pm_muted_until';
-        } else {
-            $db->prepare("UPDATE users SET status = 'banned', banned_until = " . ($days > 0 ? "NOW() + INTERVAL ? DAY" : "?") . " WHERE id = ?")
-               ->execute([$days > 0 ? $days : CONTENT_REPORT_FOREVER, $uid]);
-            // A banned account's sessions end on their next request (currentUser() refuses it); its remembered devices go now.
-            if (function_exists('userSignOutOthers')) userSignOutOthers($db, $uid, false);
-            if (function_exists('userPermissionsForget')) userPermissionsForget($uid);
-            $col = 'banned_until';
-        }
-        $q = $db->prepare("SELECT `$col`, UNIX_TIMESTAMP(`$col`) FROM users WHERE id = ?");
-        $q->execute([$uid]);
-        $v = $q->fetch(PDO::FETCH_NUM) ?: [null, null];
-        $out['until'] = $v[0];
-        if ($days > 0 && $v[1] !== null) $until = (int)$v[1];
-        if ($mode === 'loud') $out['warning'] = userWarn($db, $cfg, $uid, $reason, $src, $action, $until);
-    } else {   // unmute | unban
-        if ($action === 'unmute') {
-            $db->prepare("UPDATE users SET pm_muted_until = NULL WHERE id = ?")->execute([$uid]);
-        } else {
-            $db->prepare("UPDATE users SET status = 'active', banned_until = NULL WHERE id = ?")->execute([$uid]);
-            if (function_exists('userPermissionsForget')) userPermissionsForget($uid);
-        }
-        // Lifting one is good news, not a warning: said plainly when loud, not at all when silent.
-        if ($mode === 'loud' && $author !== null) {
-            $lang = recipientLang($cfg, $author);
-            userNotify($db, $uid, 'account', langFor($lang, $action === 'unmute' ? 'notify.unmuted' : 'notify.unbanned'),
-                       langFor($lang, $action === 'unmute' ? 'notify.unmuted_body' : 'notify.unbanned_body'));
-        }
+        $out['until'] = $m['until'];
+        if ($mode === 'loud') $out['warning'] = $m['warning'];
     }
+    if (!empty($m['auto'])) $out['auto'] = ['rule' => $m['auto']['rule'], 'action' => $m['auto']['action']];
     if (in_array($action, ['warn', 'mute', 'ban'], true)) {
         $outcome = ['warn' => 'warned', 'mute' => 'muted', 'ban' => 'banned'][$action];
-        $n = contentReportCloseRows($db, array_map(fn($r) => (int)$r['id'], $openRows), $outcome, $note, $reply, $by);
+        $n = contentReportCloseRows($db, array_map(fn($r) => (int)$r['id'], $openRows), $outcome, $note, $reply, $by, $replyFormat);
         $out['closed'] = $n;
         // The reporters hear it was handled — not what was done to the other account, unless the moderator writes it.
-        $out['told'] = $openRows ? contentReportTellReporters($db, $cfg, $openRows, 'handled', $reply, $kind, $name, $authorName) : 0;
+        $out['told'] = $openRows ? contentReportTellReporters($db, $cfg, $openRows, 'handled', $reply, $kind, $name, $authorName, $replyFormat) : 0;
     }
     $detail += ['days' => $days, 'until' => $out['until'] ?? null, 'warning' => $out['warning'] ?? null];
     auditLog($db, 'creport.' . $action, ['target_type' => 'user', 'target_id' => $uid,

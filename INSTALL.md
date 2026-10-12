@@ -53,7 +53,7 @@ mail.
 | Needed | Version | Why |
 |---|---|---|
 | PHP | **8.0 or newer** (8.4 on Debian 13) | the code uses nothing newer than 8.0; `install.php` checks `>= 8.0` |
-| PHP extensions, required | `pdo_mysql`, `mbstring`, `curl`, `gd` **with WebP**, `xml` (SimpleXML), `json`, `zlib`, `ctype` | `curl`: the index's full scrape and the address lists; `gd`+WebP: pictures and profile covers (a request that meets a picture without it is an error, not a fallback); SimpleXML: the tracker statistics |
+| PHP extensions, required | `pdo_mysql`, `mbstring`, `curl`, `gd` **with WebP**, `xml` (SimpleXML **and `dom`**), `json`, `zlib`, `ctype` | `curl`: the index's full scrape and the address lists; `gd`+WebP: pictures and profile covers (a request that meets a picture without it is an error, not a fallback); SimpleXML: the tracker statistics; **`dom`: the HTML sanitizer of a bulk message written as HTML and of a rich notification (`includes/htmlsafe.php`) — without it that format cannot be cleaned and is refused** |
 | PHP extensions, optional | `zip` (Font Awesome package import), `exif` (turns uploaded photos upright), `intl`, `apcu` (a shared settings cache) | |
 | PHP functions | `exec`, `proc_open`, `shell_exec` must **not** be in `disable_functions` | every root helper, the backups and the probe are started with them |
 | Database | **MariaDB 10.6+** (tested on 11.4 and 11.8) | MySQL is not supported: a fresh install fails on it (`TEXT DEFAULT ''`), and the site sets MariaDB's `max_statement_time` |
@@ -67,7 +67,7 @@ sudo apt update
 sudo apt install -y apache2 mariadb-server mariadb-client sudo \
   php-cli php-fpm php-mysql php-mbstring php-curl php-gd php-xml php-zip php-intl php-apcu \
   postfix git curl unzip nftables python3-libtorrent python3-pymysql
-php -v && php -m | grep -Ei 'pdo_mysql|mbstring|curl|gd|simplexml|zip|intl|exif'
+php -v && php -m | grep -Ei 'pdo_mysql|mbstring|curl|gd|simplexml|dom|zip|intl|exif'
 php -r 'var_dump(gd_info()["WebP Support"] ?? false);'     # must print bool(true)
 ```
 

@@ -188,6 +188,13 @@ add('perm.panel', {
                          'PANEL — wysyłanie użytkownikowi powiadomienia w serwisie'),
     'users.groups':     ('PANEL — grant and revoke groups (never the admin group)',
                          'PANEL — nadawanie i odbieranie grup (nigdy grupy Admin)'),
+    # 1.75.0 (includes/moderation.php): the Moderation page — read it, act on it, and the automatic penalties' rules.
+    'moderation.view':   ('PANEL — see the Moderation page: restricted members, the warnings log, the automatic penalties',
+                          'PANEL — podgląd strony Moderacja: ograniczeni członkowie, log ostrzeżeń, kary automatyczne'),
+    'moderation.handle': ('PANEL — lift a silence or a ban, revoke a warning, warn, silence or ban a member by hand',
+                          'PANEL — zdejmowanie wyciszenia lub blokady, odwoływanie ostrzeżeń, ostrzeganie, wyciszanie i blokowanie członków ręcznie'),
+    'moderation.rules':  ('PANEL — edit the automatic penalties (the ladder of warnings → silence or ban) and switch them on',
+                          'PANEL — edycja kar automatycznych (drabiny ostrzeżenia → wyciszenie lub blokada) i ich włączanie'),
     'backups.view':     ('PANEL — see the Backups page and the backup list (running, restoring and deleting stay with the owner)',
                          'PANEL — podgląd strony Kopie zapasowe i listy kopii (uruchamianie, przywracanie i usuwanie zostają przy właścicielu)'),
     'traffic.view':     ('PANEL — see the Traffic page (read-only; the controls stay with the owner)',

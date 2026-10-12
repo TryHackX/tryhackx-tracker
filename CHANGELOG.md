@@ -4,6 +4,64 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.0] — 2026-10-12
+
+Search ranks by how many of your words a name has and by their order, and a clicked column sorts inside those groups; messages to members can be HTML campaigns and notifications show their formatting; what a moderator writes on a report takes BBCode and Markdown; a Moderation page lists every restriction and warning, lifts and revokes them; automatic penalties after a number of warnings (off until switched on). Schema 94.
+
+- **Search groups results by how many of your words they have, and "Best match" puts your words in your order.** Searching "rick and
+  morty" with Best match used to rank a name that only repeated "and" level with the real thing, and without Best match a name with one
+  of the three words could sit among the ones with all three. Now the results come in groups — three words, then two, then one (words
+  the search index cannot hold, like "the" or two-letter ones, are not counted) — and with Best match ticked the names that carry your
+  words side by side in the order you typed them come first inside each group, then the names that have them in that order, then the
+  usual relevance. A column you click (size, S / L) now sorts inside those groups instead of being a tie-break that never fired — and
+  with Best match ticked it now decides even for a one-word search, where the relevance score used to stand in front of it. A
+  one-word search with nothing clicked is exactly what it was. The fastest case got faster: when enough names have every word, only those are looked at
+  first (a popular three-word title: about 0.6 s down to 0.1 s on a 200 000-name test catalogue), and the page is the same one the full
+  search would give.
+- **200 results per page really is 200.** The selector offered it and the page accepted it, but the search cut the list at 100.
+- **A word made of the letters a to f only ("decade", "facade") is searched as a word, not taken for the start of a hash** when you may
+  see hashes; a hash prefix needs a digit among its characters or twelve of them. And the plain-text fallback of the search takes `%`
+  and `_` literally instead of as wildcards.
+- The Best match tooltip describes the groups, and says the plain search is grouped the same way.
+- **A message to members can be a real HTML campaign.** "Write to members" gains HTML beside plain text, BBCode and Markdown: tables, inline colours and fonts, links and https images
+  come through; scripts, styles blocks, forms, frames, event handlers and anything that could fetch or run something are removed by a whitelist cleaner that reads the HTML the way a browser does and
+  writes a new one from only what it keeps. A "Site frame" box chooses between the site's dark frame and the author's own design (the footer with the preferences and unsubscribe links and the
+  sender's address is always added), the preview shows the whole mail exactly as it will be sent inside a frame that can run nothing — and says so when a layout was nested too deeply (about thirty tables inside
+  one another are kept; below that the words stay and the layout does not) — a message may be up to 60 000 bytes and the finished mail up to 95 KB (Gmail hides everything past about 102 KB, the
+  unsubscribe link with it, so a longer one is refused with the reason), preformatted text keeps its lines, an address with a space in it (a mail subject, a folder name) keeps the space, and the text version
+  of every message is now made from its HTML (it used to be the raw markup) and ends with the unsubscribe line.
+- **Notifications show their formatting.** A notification written in BBCode, Markdown or HTML — a bulk message, a moderator's reason, an answer to a report — is drawn formatted on the account page
+  (an HTML one inside a frame that cannot run scripts) instead of as literal tags; plain notifications are unchanged.
+- **What a moderator writes when acting on a report takes BBCode and Markdown, and several lines.** The reason to the author and the answer to the reporters (comments, descriptions, shouts and
+  reported messages), the note to one member, the mail to a person who reported a torrent and the answer to an appeal share one box with the site's formats, a toolbar and a preview; they may be
+  2 000 characters long (they were one line of 500), are kept as typed and shown formatted in the warning lists, the cards and the notifications, and the audit log keeps an excerpt and the length
+  instead of the whole text. An appeal's answer is no longer escaped twice. The note to one member (5 000 characters) takes the same formats under the same rules: no pictures, at most five links.
+- **Bulk mail's footer reads, and mail has a sender identity and a daily cap.** The footer's colours were 1.6 : 1 on its dark ground; the quote, code and table colours of Markdown / BBCode mail
+  read on both the dark frame and a white message; every formatting the editor offers (centre, right, tables, marks, rules, callouts, ordered and task lists, footnotes, fonts) now survives in a mail,
+  and a hidden block shows its content in a mail to a member. Two new settings: the sender's name and postal address for the footer, and a ceiling on how many bulk messages go out in a day (0 = none).
+- **PHP's dom extension is required** (php-xml; the installer checks it): the HTML cleaner needs it, and without it the HTML format is not offered.
+- **There is a Moderation page.** It lists everybody silenced or banned right now — until when, who did it, why, whether the member was told — and lifts a
+  silence or a ban from there, with a note the member can be sent; before, a silence could be lifted only from the report card that had caused it, and
+  nobody could even find who was silenced. A second tab is the log of every warning ever given, with filters (member, moderator, what was done, active or
+  revoked, dates) and a link to the comment, description or shout it was about; a warning can be **revoked** — it stays, struck through, counts nowhere any
+  more, the member can be told, and the silence or ban it left running can be lifted in the same step. A warning, a silence or a ban can also be given by
+  hand from a member's window on the Users page, and that list gains "silenced now" and "with warnings" filters and shows until when a ban or silence runs.
+  The moderator group has the page; the rules of the automatic penalties are a permission of their own.
+- **Automatic penalties, off until you switch them on.** A ladder of rules — by default three warnings in 30 days silence for 3 days, five in 60 silence for
+  14, seven in 90 ban for 30 — silences or bans a member by itself right after a warning that counted. Only warnings the member was told of, not revoked and
+  not automatic count (a crowd of reports never does, and a silent action never does); the strongest matching rule wins and is applied only if it ends later
+  than what the member already has, so it never shortens, never turns a ban into a silence, never touches a ban with no end date and never touches staff.
+  The member is told in a notification of its own; every change of the rules and every penalty is in the Log.
+- **One path for every punishment.** Warnings, removals, silences, bans and their lifts from the report cards, the message card, the Users page and the new
+  page are one operation that locks the member first, so two moderators warning the same member at the same moment can no longer both be "warning number 2".
+  A silent action is now kept in the log as well (it never counts). Saving the Users window of a member under a ban with an end date no longer turns that ban
+  into one without an end; and staff stay untouchable even when a moderator has not confirmed their e-mail address.
+- **Members see their own standing.** The account page gains "Account standing": the silence or ban that runs now with its end, and the warnings that count
+  with their date and the reason as written — never a moderator's name, and nothing at all for a member in good standing. The Info page now says that
+  warnings, including revoked ones, are kept until the account is deleted.
+- **Setting only a password in the Users window no longer verifies an unconfirmed e-mail address.** The window sent the address with every save, and an address the panel is given counts as vouched for; now it is sent and applied only when the moderator changed it (the status already worked that way), and a save of a window where nothing changed says so instead of sending anything.
+- The Users page shows a ban or silence end date inside its cell on a Polish page too (the line used to run 8 px past a narrow cell), and the three icons of the Moderation page (the shield with an exclamation mark, the person with a lock, the robot) have Font Awesome twins, so they no longer draw an empty box when that icon library is chosen.
+
 ## [1.74.4] — 2026-10-07
 
 The Reports badge, placed. Schema 93, no migration.

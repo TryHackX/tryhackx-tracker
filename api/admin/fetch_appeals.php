@@ -1,13 +1,26 @@
 <?php
 $appealSource = ($_GET['source'] ?? 'appeals') === 'archives' ? 'appeal_archives' : 'appeals';
 
+/**
+ * The moderator's answer to an appeal comes with its format (1.75.0: plain | bbcode | markdown, stored RAW — it used to
+ * be stored escaped and the panel escaped it again). A BBCode / Markdown answer is handed over rendered as well
+ * (`admin_response_html`, the site's renderer); the panel draws a plain one with textContent.
+ */
+$withRenderedAnswer = static function (array $a) use ($cfg): array {
+    $fmt = (string)($a['admin_response_format'] ?? 'plain');
+    $a['admin_response_format'] = $fmt;
+    $a['admin_response_html'] = ($fmt !== 'plain' && (string)($a['admin_response'] ?? '') !== '')
+        ? reportTextHtml((string)$a['admin_response'], $fmt, $cfg) : '';
+    return $a;
+};
+
 // Single appeal by ID
 if (isset($_GET['id'])) {
     $id = (int)$_GET['id'];
     $stmt = $db->prepare("SELECT * FROM `$appealSource` WHERE id = ?");
     $stmt->execute([$id]);
     $appeal = $stmt->fetch();
-    jsonResponse(['appeal' => $appeal ?: null]);
+    jsonResponse(['appeal' => $appeal ? $withRenderedAnswer($appeal) : null]);
 }
 
 // List with pagination, sorting, search, and filters
@@ -80,7 +93,7 @@ foreach ($params as $p) {
 $stmt->bindValue($paramIdx++, $perPage, PDO::PARAM_INT);
 $stmt->bindValue($paramIdx, $offset, PDO::PARAM_INT);
 $stmt->execute();
-$appeals = $stmt->fetchAll();
+$appeals = array_map($withRenderedAnswer, $stmt->fetchAll());
 
 jsonResponse([
     'appeals' => $appeals,

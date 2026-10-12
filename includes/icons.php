@@ -285,6 +285,7 @@ function iconFaEntries(): array {
         'person'                     => ['user', 'r'],
         'person-badge'               => ['id-badge', 'r'],
         'person-gear'                => ['user-gear', 's'],
+        'person-lock'                => ['user-lock', 's'],   // the Moderation page's "restricted now" tab (1.75.0)
         'person-plus'                => ['user-plus', 's'],
         'person-square'              => ['circle-user', 'r', 'approx' => 1, 'pro' => 'square-user'],   // ~ a person in a square: in a circle
         'person-x'                   => ['user-xmark', 's'],
@@ -301,12 +302,14 @@ function iconFaEntries(): array {
         'plus-slash-minus'           => ['plus-minus', 's'],
         'quote'                      => ['quote-left', 's'],
         'reply'                      => ['reply', 's'],
+        'robot'                      => ['robot', 's'],   // the Moderation page's automatic penalties (1.75.0)
         'scissors'                   => ['scissors', 's'],
         'search'                     => ['magnifying-glass', 's'],
         'send'                       => ['paper-plane', 'r'],
         'send-check'                 => ['envelope-circle-check', 's', 'approx' => 1],   // ~ a sent letter with a tick (no paper plane with one in Pro)
         'share'                      => ['share-nodes', 's', 'prorole' => 'r'],   // the Info panel's Share (1.71.0)
         'shield-check'               => ['shield-halved', 's', 'approx' => 1, 'pro' => 'shield-check', 'prorole' => 'r'],   // ~ no shield with a tick in Free
+        'shield-exclamation'         => ['shield-halved', 's', 'approx' => 1, 'pro' => 'shield-exclamation', 'prorole' => 'r'],   // ~ no shield with an exclamation mark in Free: the Moderation page's menu entry and title (1.75.0)
         'shield-fill'                => ['shield', 'f'],
         'shield-lock'                => ['shield-halved', 's', 'approx' => 1, 'pro' => 'shield-keyhole', 'prorole' => 'r'],   // ~ no shield with a lock in Free
         'shield-lock-fill'           => ['user-shield', 'f', 'approx' => 1, 'pro' => 'shield-keyhole'],   // ~ it marks the protected owner: a person behind a shield

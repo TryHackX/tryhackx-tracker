@@ -2244,19 +2244,70 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .wl-status-grid .ot-load-tile .wl-kv-v { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0.1rem 1.2rem; }
 .wl-status-grid .ot-load-tile .wl-kv-v > .wl-small { grid-column: 1 / -1; }
 
-/* Bulk message composer: the label, the formatting buttons and the format select share one line, so
-   the toolbar reads as belonging to the box under it rather than floating above the page. */
-.bm-msg-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
-.bm-tools { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-.bm-tools .btn { padding: 0.1rem 0.45rem; line-height: 1.5; }
-.bm-fmt { width: auto; margin-left: auto; }
-.bm-preview-wrap { margin-top: 0.6rem; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
-.bm-preview-head { padding: 0.3rem 0.7rem; background: #1b1b1b; border-bottom: 1px solid #333; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa4b2; }
-/* Light, because the mail template is light. A preview on a dark panel that arrives white in the
-   inbox is a preview of the wrong thing. */
-.bm-preview { padding: 0.8rem 0.9rem; background: #fff; color: #1c1e21; font-size: 0.88rem; line-height: 1.55; max-height: 22rem; overflow: auto; }
-.bm-preview a { color: #1a56a8; }
-.bm-preview img { max-width: 100%; height: auto; }
+/* (The bulk composer's own toolbar, format select and preview rules — .bm-msg-head, .bm-tools, .bm-fmt, .bm-preview* — went with
+   the inline editor in 1.75.0: the box is adminRichField() now, styled by the .arf-* rules below.) */
+/* ── adminRichField() (1.75.0, assets/js/admin-common.js): the one box for words with a format ─────────────────
+   The bulk composer's old `.bm-*` rules, taken out with the component. The head (toolbar, then the format select
+   at the right) shares a line and wraps; the preview is a box under the text — the SERVER's rendering on a dark
+   ground (what a member's notification page shows), or, for the bulk composer, the whole mail in a frame. */
+.arf { margin-bottom: 0.4rem; }
+.arf-head { display: flex; align-items: center; gap: 0.6rem; row-gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.arf-tools { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.arf-tools.d-hidden { display: none; }   /* (its own display: flex beat `.d-hidden`, so the toolbar showed above a plain-text box where no button does anything — 1.75.0, seen in the Moderation block) */
+.arf-tools .btn { padding: 0.1rem 0.45rem; line-height: 1.5; }
+.arf-tool-group { display: inline-flex; gap: 0.2rem; margin-right: 0.5rem; }
+.arf-tool-group[hidden], .arf-tools button[hidden] { display: none; }
+.arf-fmt { width: auto; margin-left: auto; }
+.arf-text { resize: vertical; }
+.arf-foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.6rem; margin-top: 0.15rem; }
+.arf-foot .arf-hint { flex: 1 1 auto; margin: 0; }
+.arf-foot .arf-count { flex: 0 0 auto; white-space: nowrap; }
+.arf-problem { color: #ff8a8a; }
+.arf-problem:empty { display: none; }
+.arf-preview-wrap { margin-top: 0.5rem; border: 1px solid #333; border-radius: 6px; overflow: hidden; }
+.arf-preview-head { padding: 0.25rem 0.7rem; background: #1b1b1b; border-bottom: 1px solid #333; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa4b2; }
+.arf-preview { padding: 0.6rem 0.8rem; background: #0e0f13; max-height: 16rem; overflow: auto; }
+/* The frame is the mail itself; it is given a white ground only where the document does not paint one (a bare message). */
+.arf-frame { display: block; width: 100%; height: 26rem; border: 0; background: #fff; resize: vertical; }
+.arf-compact .arf-text { font-size: 0.82rem; }
+/* Inside the report cards (admin-contentreports.js, admin-messages.js): the box takes a row of its own, and a moderator's
+   rendered reason / answer in a list is a block under its line. */
+.crep-rich { flex: 1 1 100%; width: 100%; margin-top: 0.3rem; }
+.arf-answer { margin: 0.15rem 0 0.3rem; font-size: 0.85rem; }
+.arf-answer p:last-child { margin-bottom: 0; }
+
+/* THE MODERATION PAGE (1.75.0, templates/admin/moderation.php, assets/js/admin-moderation.js) and the moderation lines
+   in the Users window and on the report cards. A card per member (Restricted now) or per log row (Warnings): the same
+   .msgrep-card the Reports page draws, with a block per restriction inside it. A REVOKED row stays in the list, struck
+   through — its words and its chips — and its revoke line (who, when, the note) is plain text under it. */
+.mod-card .mod-meta { margin: 0 0 0.3rem; }
+.mod-card .mod-reason { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.88rem; margin: 0.15rem 0 0.3rem; }
+.mod-card .mod-source { margin-left: auto; }
+.mod-restriction { border-left: 3px solid #5a4a1a; padding: 0.15rem 0 0.15rem 0.7rem; margin: 0.45rem 0; }
+.mod-restriction.mod-ban { border-left-color: #8a3a3a; }
+.mod-restriction-head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; font-weight: 600; }
+.mod-revoked .mod-body, .mod-revoked .mod-meta { text-decoration: line-through; text-decoration-color: #777; color: #8b95a1; }
+.mod-revoked .mod-body .arf-answer { opacity: 0.75; }
+.mod-chip-revoked { text-decoration: none; }
+.mod-revoke-line { margin-top: 0.3rem; text-decoration: none; }
+.mod-revoke-line .arf-answer { margin-top: 0.2rem; }
+.mod-revoke-what { border: 1px solid #333; border-radius: 6px; padding: 0.4rem 0.6rem; margin-bottom: 0.4rem; }
+.mod-auto-rules-list { margin: 0.2rem 0 0.6rem; padding-left: 1.2rem; }
+.mod-auto-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 0.7rem; margin: 0.4rem 0; }
+.mod-rules .mod-r-num { width: 5.5rem; display: inline-block; }
+.mod-rules .mod-r-on { width: 4.5rem; }
+.mod-rule-bad td { background: rgba(200, 60, 60, 0.18); }
+.ue-warnings-list li.mod-revoked { text-decoration: line-through; color: #8b95a1; }
+.ue-mod-state { font-size: 0.85rem; margin-bottom: 0.4rem; }
+.ue-mod-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+.ue-mod-modes { display: flex; flex-wrap: wrap; gap: 0.9rem; align-items: center; margin: 0.4rem 0; }
+/* Wraps between its words like every badge cell's content (1.73.0): "blokada bez daty końca" was 120.3px in a 120px cell on a Polish page. */
+.us-until { display: block; font-size: 0.72rem; color: #e0b15a; }
+@media (max-width: 600px) {
+    .mod-card .mod-source { margin-left: 0; }
+    .mod-rules .mod-r-num { width: 4.4rem; }
+}
+
 /* The only tile with a sentence in it, and the one that balances the grid: five tiles in three
    columns otherwise leave a hole where the sixth would be. Collapses to one column on narrow
    screens, where the grid has only one anyway. */
@@ -2297,12 +2348,6 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 /* The two "Send as" boxes sit on one line with the label above them; without a little breathing room
    they read as one control with two ticks. */
 #bm-sendas { display: flex; gap: 1.1rem; flex-wrap: wrap; align-items: center; }
-.bm-tool-group { display: inline-flex; gap: 0.2rem; margin-right: 0.5rem; }
-.bm-tool-group[hidden] { display: none; }
-.bm-tools button[hidden] { display: none; }
-/* The action row wraps rather than clipping its labels — "Send one to me" is a long button and the
-   card is not always wide. */
-.bm-msg-head { row-gap: 0.35rem; }
 
 /* ── the audit log ─────────────────────────────────────────────────────────
    Colour by AREA, not by action: one colour per action would be a legend, and a legend nobody reads

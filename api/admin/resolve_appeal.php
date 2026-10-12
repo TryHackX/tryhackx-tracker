@@ -8,7 +8,14 @@ if (!$input) {
 
 $id = (int)($input['id'] ?? 0);
 $newStatus = $input['status'] ?? '';
-$adminResponse = trim($input['admin_response'] ?? '');
+// The answer to the appellant (1.75.0): lines and a format — plain, or BBCode / Markdown where the site has them on —,
+// up to REPORT_TEXT_MAX characters, stored RAW (it was stored through sanitize() and the panel escaped it a second
+// time). One character past the limit is read in so that "too long" is said instead of a silent cut.
+$adminResponse = reportTextClean($input['admin_response'] ?? '', REPORT_TEXT_MAX + 1);
+$responseFormat = reportTextFormat($input['admin_response_format'] ?? 'plain', $cfg);
+if (($why = reportTextValidate($adminResponse, $responseFormat, $cfg)) !== null) {
+    jsonResponse(['error' => $why], 400);
+}
 
 if ($id < 1) {
     jsonResponse(['error' => __('api.appeal.invalid_id')], 400);
@@ -29,8 +36,15 @@ if (!$appeal) {
 $appealType = $appeal['appeal_type'] ?? 'unblock';
 
 // Update appeal
-$stmt = $db->prepare("UPDATE appeals SET status = ?, admin_response = ? WHERE id = ?");
-$stmt->execute([$newStatus, $adminResponse ? sanitize($adminResponse) : null, $id]);
+try {
+    $stmt = $db->prepare("UPDATE appeals SET status = ?, admin_response = ?, admin_response_format = ? WHERE id = ?");
+    $stmt->execute([$newStatus, $adminResponse !== '' ? $adminResponse : null, $adminResponse !== '' ? $responseFormat : 'plain', $id]);
+} catch (\PDOException $e) {
+    // A database whose v94 migration has not run yet: the answer as it was kept before (plain).
+    if ((string)$e->getCode() !== '42S22') throw $e;
+    $stmt = $db->prepare("UPDATE appeals SET status = ?, admin_response = ? WHERE id = ?");
+    $stmt->execute([$newStatus, $adminResponse !== '' ? $adminResponse : null, $id]);
+}
 
 $unblocked = false;
 $blocked = false;
@@ -104,6 +118,7 @@ try {
         'listed' => $appealType === 'block' ? $blocked : $unblocked,
         'title' => (string)($objectTitle ?: ''),
         'response' => $adminResponse,
+        'response_format' => $responseFormat,
     ]);
 } catch (\Throwable $e) {
     error_log('[appeal] the decision mail of appeal #' . $id . ' failed: ' . $e->getMessage());

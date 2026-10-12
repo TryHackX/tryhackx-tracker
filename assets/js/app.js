@@ -2849,6 +2849,48 @@ window.siteToast = siteToast;
         const accBadge = $id('acc-unread-badge');
         if (accBadge) { accBadge.textContent = t.key('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
     }
+    /**
+     * The words of a notification that HAS a format (1.75.0, api/user_notifications.php): a moderator's reason or answer
+     * in BBCode / Markdown, a bulk message in BBCode / Markdown / HTML. The server renders them when they are read.
+     *   bbcode, markdown   `rich_html` is the site's own renderer's output on escaped input (includes/richtext.php) and goes
+     *                      into a contained box (.acc-notif-rich: scrolls, never wider than the card);
+     *   html               a campaign's HTML, cleaned by the sanitizer — and then NOT put into this page at all: `rich_doc` is
+     *                      a whole document for an <iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+     *                      with NO allow-scripts, so a miss of the sanitizer would still run nothing. allow-same-origin is only
+     *                      so this page can read the frame's height (the frame has no script to say it); allow-popups, so a
+     *                      link's target=_blank opens a tab. The frame is sized to its content, and again when an image arrives.
+     *                      No frame document, no box: HTML never has a way into this page's own DOM, not even as a fallback.
+     */
+    function richNotifBox(n) {
+        if (n.rich_format === 'html') {
+            if (!n.rich_doc) return null;
+            const fr = document.createElement('iframe');
+            fr.className = 'acc-notif-frame';
+            fr.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+            fr.setAttribute('referrerpolicy', 'no-referrer');
+            t.attr(fr, 'title', 'js.app.notif_rich_frame');
+            const fit = () => {
+                try {
+                    const d = fr.contentDocument;
+                    if (d && d.documentElement) fr.style.height = Math.min(640, Math.max(40, d.documentElement.scrollHeight + 2)) + 'px';
+                } catch (e) { /* the height stays what it was */ }
+            };
+            fr.addEventListener('load', () => {
+                fit();
+                try { fr.contentDocument.querySelectorAll('img').forEach((im) => im.addEventListener('load', fit)); } catch (e) { /* none */ }
+                setTimeout(fit, 400);
+                setTimeout(fit, 1500);
+            });
+            fr.srcdoc = n.rich_doc;
+            return fr;
+        }
+        // Only the two markups that our own renderer wrote (escaped first) are ever put into the page as HTML.
+        if (n.rich_format !== 'bbcode' && n.rich_format !== 'markdown') return null;
+        const box = document.createElement('div');
+        box.className = 'acc-notif-rich rt-body';
+        box.innerHTML = n.rich_html || '';
+        return box;
+    }
     let notifPage = 1;
     async function loadNotifications(page) {
         if (page) notifPage = page;
@@ -2889,6 +2931,11 @@ window.siteToast = siteToast;
                 b.className = 'acc-notif-body';
                 b.textContent = n.body;
                 item.appendChild(b);
+            }
+            // …and, when the notification has words with a FORMAT (1.75.0), those under it — see richNotifBox().
+            if (n.rich_format && (n.rich_html || n.rich_doc)) {
+                const rich = richNotifBox(n);
+                if (rich) item.appendChild(rich);
             }
             // Where this notification happened. A friend request that says somebody is waiting and
             // then leaves the reader to find the tab themselves is a notification that has told
@@ -4571,8 +4618,11 @@ window.siteToast = siteToast;
         // instead. [...q] counts characters the way mb_strlen does; "ąę".length would say 2 as well,
         // but an emoji would come out as 2 for one character.
         const hint = $id('search-hint');
+        // The hash-prefix rule is indexIsHashPrefix()'s too (1.75.0): hex, six to forty, and a digit among the characters or
+        // twelve of them — "decade" is a word. (It can never matter for the floor below, a prefix being longer than it.)
         const HASH_PREFIX_RE = /^[a-f0-9]{6,40}$/i;
-        const tooShort = (q) => q !== '' && [...q].length < 3 && !HASH_PREFIX_RE.test(q);
+        const isHashPrefix = (q) => HASH_PREFIX_RE.test(q) && (q.length >= 12 || /\d/.test(q));
+        const tooShort = (q) => q !== '' && [...q].length < 3 && !isHashPrefix(q);
         const showHint = (msg) => { if (!hint) return; hint.textContent = msg || ''; hint.hidden = !msg; };
         const magnetFor = (hash, name) => {
             let m = 'magnet:?xt=urn:btih:' + hash;

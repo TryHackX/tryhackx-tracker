@@ -166,6 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
             `to_email` VARCHAR(255) NOT NULL,
             `subject` VARCHAR(255) NOT NULL,
             `message` TEXT,
+            `message_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
             `info_hash` VARCHAR(40),
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -199,6 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
             `appeal_type` VARCHAR(20) DEFAULT 'unblock',
             `status` VARCHAR(20) DEFAULT 'pending',
             `admin_response` TEXT DEFAULT NULL,
+            `admin_response_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
             `ip` VARCHAR(45) NOT NULL,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_appeals_infohash` (`infoHash`),
@@ -216,6 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 2) {
             `appeal_type` VARCHAR(20) DEFAULT 'unblock',
             `status` VARCHAR(20) DEFAULT 'pending',
             `admin_response` TEXT DEFAULT NULL,
+            `admin_response_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
             `ip` VARCHAR(45) NOT NULL,
             `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
             `archived_at` DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -573,6 +576,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
                 'PHP ' . PHP_VERSION => version_compare(PHP_VERSION, '8.0.0', '>='),
                 'PDO MySQL' => extension_loaded('pdo_mysql'),
                 'JSON' => extension_loaded('json'),
+                // The HTML sanitizer of a bulk message and a rich notification (includes/htmlsafe.php) parses with it.
+                'DOM (php-xml)' => extension_loaded('dom'),
                 'OpenSSL' => extension_loaded('openssl'),
                 'Config writable' => is_writable(__DIR__ . '/config/'),
             ];

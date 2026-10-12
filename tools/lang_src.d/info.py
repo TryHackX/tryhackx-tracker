@@ -422,10 +422,16 @@ add('info', {
                   'most.',
                   '<strong>Shoutbox:</strong> każdy wpis z grupą adresów, z której przyszedł, najwyżej przez '
                   ':days.'),
-    'd_moderation': ('<strong>Reports of words and warnings:</strong> a report keeps a copy of what was reported, '
-                     'the reason and the outcome; a warning stays with the account.',
-                     '<strong>Zgłoszenia treści i ostrzeżenia:</strong> zgłoszenie zachowuje kopię tego, co '
-                     'zgłoszono, powód i wynik; ostrzeżenie zostaje przy koncie.'),
+    'd_moderation': ('<strong>Reports of words, warnings and penalties:</strong> a report keeps a copy of what was '
+                     'reported, the reason and the outcome. A warning, and every silence, ban and removal of words '
+                     'a moderator gave — silent ones, automatic penalties and revoked warnings included — stays in '
+                     'a log with the account until the account is deleted; a revoked warning is kept, marked as '
+                     'revoked, and no longer counts.',
+                     '<strong>Zgłoszenia treści, ostrzeżenia i kary:</strong> zgłoszenie zachowuje kopię tego, co '
+                     'zgłoszono, powód i wynik. Ostrzeżenie oraz każde wyciszenie, blokada i usunięcie treści '
+                     'nadane przez moderatora — także ciche, kary automatyczne i odwołane ostrzeżenia — zostają '
+                     'w logu przy koncie do czasu usunięcia konta; odwołane ostrzeżenie jest zachowane, oznaczone '
+                     'jako odwołane, i już się nie liczy.'),
     'd_antispam': ('<strong>Anti-spam:</strong> the times and fingerprints described above, for two days after the '
                    'last write.',
                    '<strong>Ochrona przed spamem:</strong> opisane wyżej czasy i odciski, przez dwa dni od '

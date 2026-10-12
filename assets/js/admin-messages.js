@@ -79,6 +79,13 @@
         return span;
     }
 
+    /** A block of the SERVER's rendering of a moderator's BBCode / Markdown (reportTextHtml(): the site's renderer on escaped input). */
+    function richBlock(html) {
+        var d = el('div', 'arf-answer rt-body richtext');
+        d.innerHTML = html;
+        return d;
+    }
+
     function card(rep) {
         var c = el('div', 'msgrep-card' + (rep.status === 'closed' ? ' msgrep-closed' : ''));
         var head = el('div', 'msgrep-head');
@@ -108,13 +115,38 @@
             var wl = el('ul', 'msgrep-warnings');
             wl.setAttribute('aria-label', t.key('js.creport.latest_warnings'));
             st0.latest_warnings.forEach(function (w) {
-                wl.appendChild(el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' })));
+                // 1.75.0: a REVOKED warning stays in the list, struck through; a silent action and an automatic penalty are marked
+                var marks = [];
+                if (w.auto) marks.push(t.key('js.moderation.mark_auto'));
+                else if (w.loud === false) marks.push(t.key('js.moderation.mark_silent'));
+                if (w.revoked) marks.push(t.key('js.moderation.mark_revoked'));
+                var tail = marks.length ? [' (', marks.flatMap(function (m, i) { return i ? [', ', m] : [m]; }), ')'].flat() : [];
+                var wi;
+                if (w.auto && w.auto_info) {
+                    wi = el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: t.key('js.moderation.auto_reason', { n: w.auto_info.count, days: w.auto_info.window }) }));
+                } else if (w.reason_html) {
+                    // A BBCode / Markdown reason (1.75.0): the server's rendering of it (the site's renderer on escaped input).
+                    wi = el('li', null, t.key('js.creport.warning_head', { at: String(w.at || '').slice(0, 16) }));
+                    tail.forEach(function (p) { wi.append(p); });
+                    tail = [];
+                    wi.appendChild(richBlock(w.reason_html));
+                } else {
+                    wi = el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' }));
+                }
+                tail.forEach(function (p) { wi.append(p); });
+                if (w.revoked) wi.className = 'mod-revoked';
+                wl.appendChild(wi);
             });
             c.appendChild(el('div', 'msgrep-warn-head text-muted', t.key('js.creport.latest_warnings')));
             c.appendChild(wl);
         }
         // What was already said about it: the answer the reporter was given, and the note for the log.
-        if (rep.reply) c.appendChild(el('div', 'msgrep-answer', t.key('js.msgrep.answered', { text: rep.reply })));
+        if (rep.reply_html) {
+            // a BBCode / Markdown answer (1.75.0), as the server rendered it
+            var ans = el('div', 'msgrep-answer', t.key('js.msgrep.answered_lead'));
+            ans.appendChild(richBlock(rep.reply_html));
+            c.appendChild(ans);
+        } else if (rep.reply) c.appendChild(el('div', 'msgrep-answer', t.key('js.msgrep.answered', { text: rep.reply })));
         if (rep.note) c.appendChild(el('div', 'msgrep-answer text-muted', t.key('js.msgrep.noted', { text: rep.note })));
 
         if (rep.reason) c.appendChild(el('div', 'msgrep-reason', rep.reason));
@@ -157,13 +189,12 @@
             acts.appendChild(note);
             // The answer to the reporter. A second box rather than a checkbox on the first: the two
             // texts have two readers, and "a note for the log" was being read as "an answer" by the
-            // person typing it while nobody ever received it.
-            var reply = document.createElement('input');
-            reply.type = 'text';
-            reply.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reply-in';
-            reply.placeholder = t.key('js.msgrep.reply_ph');
-            reply.maxLength = 500;
-            acts.appendChild(reply);
+            // person typing it while nobody ever received it. From 1.75.0 it takes lines and a format —
+            // adminRichField(), assets/js/admin-common.js, the box every window shares; the note stays plain.
+            var reply = window.AdminCommon.adminRichField({ compact: true, rows: 2, maxLength: 2000, countMax: 2000,
+                placeholder: t.key('js.msgrep.reply_ph'), ariaLabel: t.key('js.msgrep.reply_ph') });
+            var replyBox = el('div', 'crep-rich crep-reply-rich');
+            replyBox.appendChild(reply.el);
 
             var say = el('span', 'msgrep-said text-muted');
 
@@ -187,29 +218,31 @@
             };
             radio('silent', t.key('js.creport.mode_silent'), true);
             var loudRadio = radio('loud', t.key('js.creport.mode_loud'), false);
-            var reasonIn = document.createElement('input');
-            reasonIn.type = 'text';
-            reasonIn.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reason-in';
-            reasonIn.placeholder = t.key('js.creport.reason_ph');
-            reasonIn.setAttribute('aria-label', t.key('js.creport.reason_ph'));
-            reasonIn.maxLength = 500;
-            modeRow.appendChild(reasonIn);
+            // the reason the author is told (1.75.0): lines and a format, the same box
+            var reasonIn = window.AdminCommon.adminRichField({ compact: true, rows: 2, maxLength: 2000, countMax: 2000,
+                placeholder: t.key('js.creport.reason_ph'), ariaLabel: t.key('js.creport.reason_ph') });
+            var reasonBox = el('div', 'crep-rich crep-reason-rich');
+            reasonBox.appendChild(reasonIn.el);
+            modeRow.appendChild(reasonBox);
             modeRow.title = t.key('js.creport.mode_hint');
 
             /** One action, posted with whatever is in the note field. */
             var run = async function (action, days, btn) {
                 var loud = action === 'warn' || loudRadio.checked;
-                if (loud && action !== 'close' && action !== 'reopen' && !reasonIn.value.trim()) {
+                if (loud && action !== 'close' && action !== 'reopen' && reasonIn.isEmpty()) {
                     say.textContent = t.key('js.creport.err_reason');
                     reasonIn.focus();
                     return;
                 }
                 btn.disabled = true;
                 var r = await api('admin/message_report_action', 'POST',
-                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim(), reply: reply.value.trim(),
-                                    mode: loud ? 'loud' : 'silent', reason: reasonIn.value.trim() });
+                                  { id: rep.id, action: action, days: days || 0, note: note.value.trim(),
+                                    reply: reply.getValue().trim(), reply_format: reply.getFormat(),
+                                    mode: loud ? 'loud' : 'silent', reason: reasonIn.getValue().trim(), reason_format: reasonIn.getFormat() });
                 btn.disabled = false;
                 if (r && r.success) { load(page); return; }
+                // A text the server refused (too long, a picture, too many links): its own sentence.
+                if (r && r.error === 'invalid_text' && r.message) { say.textContent = r.message; return; }
                 // The refusals a moderator can actually hit, said in words rather than left as
                 // a button that did nothing.
                 say.textContent = t.key(r && r.error === 'target_is_staff' ? 'js.msgrep.err_staff'
@@ -255,6 +288,7 @@
                 acts.appendChild(confirmThen(acts, t.key('js.creport.warn_q', { user: rep.reported }), t.key('js.creport.warn'), 'btn-outline-warning',
                                              function (b) { run('warn', 0, b); }));
             }
+            c.appendChild(replyBox);     // the answer to the reporter, above the note and the buttons
             c.appendChild(acts);
             if (!st.staff) c.appendChild(modeRow);
 

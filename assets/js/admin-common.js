@@ -2,6 +2,7 @@
 // Exposes window.AdminCommon = { apiCall, esc, el, emptyState, showToast, confirmAction, promptModal, flashTip, makeSortStack,
 // renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, el, reportsWaiting, … }. Everything renders via textContent /
 // createElement — values shown here (torrent names, file paths, IPs, snapshots) come from untrusted sources.
+// 1.75.0: adminRichField() — the one box for words with a format (plain / BBCode / Markdown, a bulk message's HTML), see its comment.
 (function () {
     'use strict';
 
@@ -839,6 +840,244 @@
         b.classList.toggle('d-hidden', total <= 0);
     }
 
+    /* ── adminRichField(): the panel's ONE box for words that have a format (1.75.0) ───────────────────────────────────────
+     *
+     * A bulk message, a note to one member, a moderator's reason to an author and answer to the reporters, a reply to a
+     * person who reported a torrent, the answer to an appeal — each of them is a textarea with a FORMAT (plain, and
+     * BBCode / Markdown wherever the site has switched them on; a bulk message may also be HTML), a small toolbar for
+     * the syntax chosen, and a preview made by the SERVER. It used to be written out once, inline in admin-users.js, for the
+     * bulk composer; this is that, taken out, so the next window does not need a copy of it:
+     *
+     *   const f = AdminCommon.adminRichField({ textId: 'bm-body', formatId: 'bm-format', rows: 7, maxLength: 60000,
+     *       countMax: 60000, countBytes: true, formats: ['plain', 'markdown', 'bbcode', 'html'], preview: 'frame',
+     *       previewFetch: async (text, format) => ({ html: '<!doctype html>…', problem: null }), onFormat: (fmt) => … });
+     *   host.appendChild(f.el);                       f.getValue() / f.getFormat() / f.reset() / f.setFormats([…])
+     *
+     * Options (all optional):
+     *   textId, formatId   ids for the textarea and the select (a host's <label for> and its own code reach them by id);
+     *   rows, maxLength, placeholder, ariaLabel   the textarea's;
+     *   formats    the formats to offer. Without it they are asked of the server once per page (admin/rich_preview): 'plain'
+     *              and the ones the site accepts — so a window never offers a syntax the renderer has been told to refuse;
+     *   format     the one chosen to begin with ('plain');
+     *   preview    'inline' (default): the server's rendering of the text (admin/rich_preview, the site's own renderer on
+     *              escaped input) is put into the box under it, for BBCode / Markdown only;
+     *              'frame': previewFetch() gives a whole DOCUMENT and it goes into an <iframe sandbox="" srcdoc> — never
+     *              into this page's DOM. The bulk composer's, whose HTML is a campaign's;
+     *              'none';
+     *   previewFetch(text, format) → Promise<{html, problem}>   the host's own preview (the bulk composer's is its whole mail);
+     *   countMax / countBytes   a counter under the box ("120 / 2 000"; in bytes where the limit is);
+     *   compact    a small box for a card (fewer rows, the toolbar behind the format when it is not plain);
+     *   onFormat(fmt), onInput()   the host hears a change.
+     * The toolbar hides for plain and for html (HTML is typed as HTML) and each button hides whose syntax the chosen
+     * format cannot express — Ctrl+B / Ctrl+I / Ctrl+K do what the buttons do.
+     */
+    let richUid = 0;
+    let richFormatsPromise = null;
+    /** The formats the site accepts for the words a moderator writes, once per page: ['plain', …]. */
+    function richFormats() {
+        if (!richFormatsPromise) {
+            richFormatsPromise = apiCall('admin/rich_preview', 'POST', { text: '', format: 'plain' })
+                .then(r => (r && r.success && Array.isArray(r.formats) && r.formats.length) ? r.formats : ['plain'])
+                .catch(() => ['plain']);
+        }
+        return richFormatsPromise;
+    }
+    // Kept in step with SYNTAX in assets/js/app.js — the same renderer serves both. A third element means "a whole block".
+    const RICH_SYNTAX = {
+        markdown: {
+            bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'], code: ['`', '`'],
+            highlight: ['==', '=='],
+            link: ['[', '](https://example.org)'], image: ['![](', ')'],
+            quote: ['> ', ''], list: ['- ', ''], olist: ['1. ', ''],
+            table: ['| A | B |\n|---|---|\n| 1 | 2 |', '', true],
+            hr: ['\n---\n', '', true],
+        },
+        bbcode: {
+            bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], underline: ['[u]', '[/u]'],
+            strike: ['[s]', '[/s]'], code: ['[code]', '[/code]'],
+            color: ['[color=#e74c3c]', '[/color]'], size: ['[size=18]', '[/size]'],
+            highlight: ['[highlight=yellow]', '[/highlight]'],
+            link: ['[url=https://example.org]', '[/url]'], image: ['[img]', '[/img]'],
+            quote: ['[quote]', '[/quote]'],
+            list: ['[list]\n[*] ', '\n[/list]'], olist: ['[list=1]\n[*] ', '\n[/list]'],
+            center: ['[center]', '[/center]'],
+            table: ['[table]\n[tr][th]A[/th][th]B[/th][/tr]\n[tr][td]1[/td][td]2[/td][/tr]\n[/table]', '', true],
+            hr: ['\n[hr]\n', '', true],
+        },
+    };
+    const RICH_TOOLS = [
+        [['bold', 'type-bold'], ['italic', 'type-italic'], ['underline', 'type-underline'], ['strike', 'type-strikethrough']],
+        [['color', 'palette'], ['size', 'fonts'], ['highlight', 'highlighter']],
+        [['link', 'link-45deg'], ['image', 'image'], ['list', 'list-ul'], ['olist', 'list-ol']],
+        [['quote', 'quote'], ['code', 'code-slash'], ['table', 'table'], ['center', 'text-center'], ['hr', 'dash-lg']],
+    ];
+
+    function adminRichField(o) {
+        o = o || {};
+        richUid += 1;
+        const previewMode = o.preview || 'inline';
+        const compact = !!o.compact;
+
+        const root = el('div', { className: 'arf' + (compact ? ' arf-compact' : '') });
+        const tools = el('div', { className: 'arf-tools d-hidden', role: 'toolbar', 'aria-label': t.key('js.rich.toolbar') });
+        RICH_TOOLS.forEach(group => {
+            const g = el('span', { className: 'arf-tool-group' });
+            group.forEach(([name, icon]) => g.appendChild(el('button', {
+                type: 'button', className: 'btn btn-sm btn-outline-secondary', title: t.key('js.rich.' + name),
+                dataset: { md: name } }, el('i', { className: 'bi bi-' + icon, 'aria-hidden': 'true' }))));
+            tools.appendChild(g);
+        });
+        const sel = el('select', { id: o.formatId || null, className: 'form-select form-select-sm bg-dark text-light border-secondary arf-fmt',
+                                   title: t.key('js.rich.format_title'), 'aria-label': t.key('js.rich.format_title') });
+        const head = el('div', { className: 'arf-head' }, [tools, sel]);
+        const ta = el('textarea', { id: o.textId || null, className: 'form-control form-control-sm bg-dark text-light border-secondary arf-text',
+                                    rows: String(o.rows || (compact ? 3 : 5)), maxlength: o.maxLength ? String(o.maxLength) : null,
+                                    placeholder: o.placeholder || null, 'aria-label': o.ariaLabel || null });
+        const hint = el('small', { className: 'settings-hint arf-hint' });
+        const count = el('small', { className: 'text-muted arf-count' });
+        const foot = el('div', { className: 'arf-foot' }, [hint, count]);
+        const problem = el('div', { className: 'arf-problem wl-small', role: 'status' });
+        const wrap = el('div', { className: 'arf-preview-wrap d-hidden' });
+        wrap.appendChild(el('div', { className: 'arf-preview-head', text: t.key(previewMode === 'frame' ? 'js.rich.preview_mail' : 'js.rich.preview') }));
+        let box = null, frame = null;
+        if (previewMode === 'frame') {
+            // The REAL document, in a frame with no permission at all: no script, no form, no top navigation, no same-origin —
+            // a campaign's HTML never reaches this page's DOM or its cookies.
+            frame = el('iframe', { className: 'arf-frame', title: t.key('js.rich.preview_mail') });
+            frame.setAttribute('sandbox', '');
+            wrap.appendChild(frame);
+        } else if (previewMode === 'inline') {
+            box = el('div', { className: 'arf-preview rt-body richtext' });
+            wrap.appendChild(box);
+        }
+        [head, ta, foot, problem, wrap].forEach(n => root.appendChild(n));
+
+        const LABEL = { plain: () => t.key('js.users.fmt_plain'), markdown: () => 'Markdown', bbcode: () => 'BBCode', html: () => 'HTML' };
+        const getFormat = () => sel.value || 'plain';
+        const syntax = () => RICH_SYNTAX[getFormat()] || null;
+
+        function setFormats(list) {
+            const keep = sel.value || o.format || 'plain';
+            const formats = (Array.isArray(list) && list.length ? list : ['plain']).filter(f => LABEL[f]);
+            sel.textContent = '';
+            formats.forEach(f => sel.appendChild(el('option', { value: f, text: LABEL[f]() })));
+            sel.value = formats.indexOf(keep) >= 0 ? keep : formats[0];
+            // One format is no choice: a select with one entry says "plain text" and nothing else, so it goes.
+            sel.hidden = formats.length < 2;
+            syncUi();
+        }
+
+        function syncUi() {
+            const fmt = getFormat();
+            const syn = syntax();
+            tools.classList.toggle('d-hidden', !syn);
+            if (syn) {
+                tools.querySelectorAll('[data-md]').forEach(b => { b.hidden = !syn[b.dataset.md]; });
+                tools.querySelectorAll('.arf-tool-group').forEach(g => { g.hidden = ![...g.querySelectorAll('[data-md]')].some(b => !b.hidden); });
+            }
+            hint.textContent = '';
+            hint.append(t.key(fmt === 'markdown' ? 'js.users.fmt_hint_markdown' : fmt === 'bbcode' ? 'js.users.fmt_hint_bbcode'
+                              : fmt === 'html' ? 'js.rich.hint_html' : 'js.users.fmt_hint_plain'));
+            if (o.onFormat) o.onFormat(fmt);
+            previewSoon(true);
+        }
+
+        function updateCount() {
+            if (!o.countMax) return;
+            const n = o.countBytes ? new TextEncoder().encode(ta.value).length : [...ta.value].length;
+            count.textContent = '';
+            count.append(t.key(o.countBytes ? 'js.rich.count_bytes' : 'js.rich.count', { n: t.num(n), max: t.num(o.countMax) }));
+            count.classList.toggle('text-danger', n > o.countMax);
+            count.classList.toggle('text-muted', n <= o.countMax);
+        }
+
+        /** Wrap the selection (or drop a stub at the caret) and keep the caret somewhere useful. */
+        function wrapSelection(kind) {
+            const syn = syntax();
+            if (!syn || !syn[kind]) return;
+            const [open, close, block] = syn[kind];
+            const start = ta.selectionStart, end = ta.selectionEnd;
+            const picked = ta.value.slice(start, end);
+            if (block) {
+                // A whole construct. Wrapping a selection in a table skeleton would put the author's sentence in the header.
+                const pre = start > 0 && ta.value[start - 1] !== '\n' ? '\n' : '';
+                ta.setRangeText(pre + open + '\n', start, end, 'end');
+            } else if (close === '') {
+                // Line-prefix marks (a quote, a list in Markdown) belong at the start of every selected line.
+                ta.setRangeText((picked || 'text').split('\n').map(l => open + l).join('\n'), start, end, 'end');
+                if (!picked) ta.setSelectionRange(start + open.length, start + open.length + 4);
+            } else {
+                ta.setRangeText(open + (picked || 'text') + close, start, end, 'end');
+                if (!picked) ta.setSelectionRange(start + open.length, start + open.length + 4);
+            }
+            ta.focus();
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        let timer = 0, seq = 0;
+        async function renderPreview() {
+            if (previewMode === 'none') return;
+            const text = ta.value, fmt = getFormat();
+            const my = ++seq;
+            // Inline: nothing to show for plain text (it is what was typed). Frame: the mail, whatever the format.
+            if (text.trim() === '' || (previewMode === 'inline' && fmt === 'plain')) {
+                wrap.classList.add('d-hidden'); problem.textContent = ''; return;
+            }
+            let r;
+            try {
+                r = o.previewFetch ? await o.previewFetch(text, fmt)
+                                   : await apiCall('admin/rich_preview', 'POST', { text, format: fmt });
+            } catch (e) { r = null; }
+            if (my !== seq) return;                 // a newer keystroke is on its way
+            if (!r || (r.success === false && !r.html)) { wrap.classList.add('d-hidden'); return; }
+            problem.textContent = r.problem || '';
+            wrap.classList.remove('d-hidden');
+            // Inline: the server's rendering of ESCAPED input by the site's own renderer (includes/richtext.php), the markup
+            // every card and every member's notification page is handed. Frame: a whole document, in a sandbox with no powers.
+            if (frame) frame.srcdoc = r.html || '';
+            else if (box) box.innerHTML = r.html || '';
+        }
+        function previewSoon(now) {
+            clearTimeout(timer);
+            if (now) renderPreview(); else timer = setTimeout(renderPreview, 350);
+        }
+
+        tools.addEventListener('click', (e) => {
+            const b = e.target.closest('[data-md]');
+            if (b) wrapSelection(b.dataset.md);
+        });
+        ta.addEventListener('input', () => { updateCount(); previewSoon(false); if (o.onInput) o.onInput(); });
+        ta.addEventListener('keydown', (e) => {
+            if (!(e.ctrlKey || e.metaKey) || e.altKey || !syntax()) return;
+            const kind = { b: 'bold', i: 'italic', k: 'link' }[String(e.key).toLowerCase()];
+            if (!kind) return;
+            e.preventDefault();
+            wrapSelection(kind);
+        });
+        sel.addEventListener('change', syncUi);
+
+        // Formats: the host's, or the site's (once per page).
+        if (Array.isArray(o.formats)) setFormats(o.formats);
+        else { setFormats(['plain']); richFormats().then(setFormats); }
+        updateCount();
+
+        return {
+            el: root, textarea: ta, select: sel,
+            getValue: () => ta.value,
+            getFormat,
+            setValue(v) { ta.value = v || ''; updateCount(); previewSoon(true); },
+            setFormat(f) { if ([...sel.options].some(op => op.value === f)) { sel.value = f; syncUi(); } },
+            setFormats,
+            /** Empty the box, keep the format. */
+            reset() { ta.value = ''; problem.textContent = ''; wrap.classList.add('d-hidden'); updateCount(); },
+            focus() { ta.focus(); },
+            isEmpty: () => ta.value.trim() === '',
+            refresh: () => previewSoon(true),
+            /** Show a sentence under the box (a refusal from the server for this field). */
+            setProblem(msg) { problem.textContent = msg || ''; },
+        };
+    }
+
     // The close button on a toast built with insertAdjacentHTML (assets/js/admin.js and the inline
     // block in templates/admin/settings.php both do). It used to be
     // onclick="this.closest('.toast').remove()", which an enforcing script-src blocks — and
@@ -851,5 +1090,5 @@
         if (btn) btn.closest('.toast')?.remove();
     });
 
-    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting };
+    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting, adminRichField, richFormats };
 })();

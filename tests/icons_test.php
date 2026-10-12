@@ -119,7 +119,8 @@ $heads = ['templates/layout.php', 'install.php'];
 foreach (glob($root . '/templates/admin/*.php') as $f) {
     if (str_contains((string)file_get_contents($f), '</html>')) $heads[] = 'templates/admin/' . basename($f);
 }
-check('there are nine templates with a <head> plus the installer', count($heads) === 10, implode(', ', $heads));
+// ten since 1.75.0: the Moderation page is a document of its own, as the other panel pages are
+check('there are ten templates with a <head> plus the installer', count($heads) === 11, implode(', ', $heads));
 $noHelper = [];
 foreach ($heads as $h) {
     $src = (string)file_get_contents($root . '/' . $h);
@@ -186,9 +187,10 @@ foreach ($entries as $bi => $e) {
     if (str_ends_with((string)$bi, '-fill') && $e[1] !== 'f') $badE[] = "$bi: a -fill that is not role f";
 }
 check('every entry is a Free name and a role (s follows the style, r outline, f filled, b brand), twins and version names well formed', $badE === [], implode('; ', $badE));
-// 27 in 1.68.x; 1.69.0's picker took away the one entry only the old picker used (its balloon tab).
-check('the map has the same names as the entries, and 26 approximations are marked',
-      array_keys($map) === array_keys($entries) && count(array_filter($entries, fn($e) => !empty($e['approx']))) === 26);
+// 27 in 1.68.x; 1.69.0's picker took away the one entry only the old picker used (its balloon tab); 1.75.0's shield
+// with an exclamation mark (the Moderation page; Free has none, Pro has the very icon) makes it 27 again.
+check('the map has the same names as the entries, and 27 approximations are marked',
+      array_keys($map) === array_keys($entries) && count(array_filter($entries, fn($e) => !empty($e['approx']))) === 27);
 // With Pro (1.69.0): the eight that stay approximate even with Pro were searched for in the owner's Pro 6
 // and 7 indexes (labels and search terms) and drawn beside Bootstrap's glyph. Two have a closer Pro glyph
 // — the All settings chip's four boxes without the tick, the home layout's tiles mirrored — drawn and
@@ -215,7 +217,7 @@ foreach ($iconsLines as $i => $line) {
     for ($j = $i - 1; !$said && $j >= 0 && preg_match('#^\s*//#', $iconsLines[$j]); $j--) if (str_contains($iconsLines[$j], '// ~')) $said = true;
     if (!$said) $unexplained[] = $lm[1];
 }
-check('… each marked approximation says, in the source, why its glyph is the closest honest one', $approxSeen === 26 && $unexplained === [], implode(', ', $unexplained));
+check('… each marked approximation says, in the source, why its glyph is the closest honest one', $approxSeen === 27 && $unexplained === [], implode(', ', $unexplained));
 $setups = [
     'cdn7 solid'   => ['icon_library' => 'fontawesome', 'fa_source' => 'cdn7', 'fa_style' => 'solid'],
     'cdn7 regular' => ['icon_library' => 'fontawesome', 'fa_source' => 'cdn7', 'fa_style' => 'regular'],

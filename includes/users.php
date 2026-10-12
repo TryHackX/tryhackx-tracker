@@ -258,6 +258,14 @@ function userPermissionList(bool $english = false): array {
         'panel.users.edit'       => 'PANEL — change a user\'s status and email verification',
         'panel.users.notify'     => 'PANEL — send a user an in-app notification',
         'panel.users.groups'     => 'PANEL — grant and revoke groups (never the admin group)',
+        // v94 (1.75.0, includes/moderation.php): the Moderation page. `view` reads it — who is silenced or banned right now,
+        // every warning ever given, the automatic penalties' rules and what they did; `handle` acts — lift a silence or a
+        // ban, revoke a warning, warn / silence / ban a member by hand (lifting a ban that has NO end date, the owner's from
+        // the Users page, also needs panel.users.edit); `rules` writes the automatic penalties' rules and their switch.
+        // The moderator holds the first two (the v94 grant); the rules are the Admin group's blanket and a tick.
+        'panel.moderation.view'   => 'PANEL — see the Moderation page: restricted members, the warnings log, the automatic penalties',
+        'panel.moderation.handle' => 'PANEL — lift a silence or a ban, revoke a warning, warn, silence or ban a member by hand',
+        'panel.moderation.rules'  => 'PANEL — edit the automatic penalties (the ladder of warnings → silence or ban) and switch them on',
         // Look, but not touch. EVERY operation in api/admin/backup_action.php demands the admin
         // password, and adminReauth() checks it against the OWNER's hash — which a moderator does
         // not have and must not be given. So there is no "run a backup" permission: one would be a
@@ -310,7 +318,7 @@ function userGroupPresets(): array {
         'moderator' => [
             'label' => 'Moderator',
             'about' => 'Works the report queue and the whitelist. No settings, no backups, no log, no message queue.',
-            // EXACTLY the v25 seed plus what v63, v71, v72, v81, v83, v84 and v88 added to it — see
+            // EXACTLY the v25 seed plus what v63, v71, v72, v81, v83, v84, v88 and v94 added to it — see
             // trackerSchemaDataMigrations(); what every install's moderator holds (1.72.0: without the five
             // membership ids the fresh seed alone had — see above). Deleting whitelist rows is not here and
             // neither is panel.users.edit / .groups: those are boxes the operator ticks on purpose.
@@ -340,7 +348,10 @@ function userGroupPresets(): array {
                         // and act on each (never the message queue: panel.messages.* stays out, see above).
                         'panel.reports.comments.view', 'panel.reports.comments.handle',
                         'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
-                        'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
+                        'panel.reports.shouts.view', 'panel.reports.shouts.handle',
+                        // v94 (1.75.0): the Moderation page — read it and act on it (lift, revoke, warn by hand); the
+                        // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
+                        'panel.moderation.view', 'panel.moderation.handle'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -357,7 +368,7 @@ function userGroupPresets(): array {
             'label' => 'Read-only auditor',
             'about' => 'Sees every page and the audit log, and can change nothing.',
             'perms' => ['panel.access', 'panel.reports.view', 'panel.whitelist.view', 'panel.users.view',
-                        'panel.backups.view', 'panel.traffic.view', 'panel.audit.view'],
+                        'panel.moderation.view', 'panel.backups.view', 'panel.traffic.view', 'panel.audit.view'],
         ],
         // 1.72.0: the anonymous visitor's minimum — the recommended set of the seeded `guest` group, and a
         // starting point for any group that should see as little. Reading the public statistics, and nothing
@@ -1353,6 +1364,8 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $del("UPDATE content_reports SET author_id = NULL WHERE author_id = ?", [$userId], 'reports_unlinked');
     $del("DELETE FROM user_warnings WHERE user_id = ?", [$userId], 'warnings');
     $del("UPDATE user_warnings SET by_id = NULL WHERE by_id = ?", [$userId], 'warnings_given_unlinked');
+    // …and one it REVOKED (v94, 1.75.0): the same — the name stays, the account id goes.
+    $del("UPDATE user_warnings SET revoked_by_id = NULL WHERE revoked_by_id = ?", [$userId], 'warnings_revoked_unlinked');
     // The anti-spam layer's state for the account (v85, includes/antispam.php): its pace, its last words.
     $del("DELETE FROM antispam_state WHERE subject = ?", ['u:' . $userId], 'antispam');
     // The second factor (v53, includes/user2fa.php): the TOTP secret and the recovery codes' hashes — the most
@@ -1697,15 +1710,30 @@ function recipientLangOf(PDO $db, ?array $cfg, int $userId): string
  * goes with that account (userDeleteCascade()) instead of naming a deleted person for a year, and so a second request
  * is not announced while the first is unread (api/user_people.php). Written only when given, like the link.
  *
+ * `$rich` / `$richFormat` (v94, 1.75.0) are words that HAVE a format — a moderator's reason or answer written in BBCode
+ * or Markdown — kept as their SOURCE beside it, up to 60 000 bytes. `$body` stays the plain text with its localized
+ * lead-ins (the count of a warning, "the moderator wrote:"), so no sentence of ours ever has to be escaped into a
+ * markup; the account page draws the rich words under it (api/user_notifications.php renders them when they are
+ * read, with our own renderer — an HTML notification goes through the sanitizer and a frame). Written only when
+ * there is something and the format is one of the three, like the link.
+ *
  * Write the title and the body in the RECIPIENT's language (recipientLang()) — never a literal, never __(): a
  * notification is stored as words, and the request that writes it is usually somebody else's.
  */
-function userNotify(PDO $db, int $userId, string $type, string $title, string $body = '', ?string $link = null, ?int $senderId = null): void {
+function userNotify(PDO $db, int $userId, string $type, string $title, string $body = '', ?string $link = null, ?int $senderId = null,
+                    ?string $rich = null, ?string $richFormat = null): void {
     $link = ($link !== null && preg_match('/^\?action=[A-Za-z0-9_\-]+(?:&[A-Za-z0-9_\-]+=[A-Za-z0-9_.\-%]*)*(?:#[A-Za-z0-9_\-]+)?$/', $link)
              && strlen($link) <= 255) ? $link : null;
     $cols = ['user_id', 'type', 'title', 'body'];
     $vals = [$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null];
     if ($link !== null) { $cols[] = 'link'; $vals[] = $link; }
+    $plainCols = $cols; $plainVals = $vals;      // without the rich words: for a database whose v94 has not run yet
+    if ($rich !== null && trim($rich) !== '' && in_array($richFormat, ['bbcode', 'markdown', 'html'], true)) {
+        $rich = trim($rich);
+        if (strlen($rich) > 60000) $rich = rtrim(mb_strcut($rich, 0, 60000, 'UTF-8'));
+        $cols[] = 'rich'; $vals[] = $rich;
+        $cols[] = 'rich_format'; $vals[] = $richFormat;
+    }
     $insert = static function (array $cols, array $vals) use ($db): void {
         $db->prepare("INSERT INTO user_notifications (" . implode(', ', $cols) . ") VALUES ("
                      . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute($vals);
@@ -1720,7 +1748,13 @@ function userNotify(PDO $db, int $userId, string $type, string $title, string $b
             if ((string)$e->getCode() !== '42S22') throw $e;
         }
     }
-    $insert($cols, $vals);
+    try {
+        $insert($cols, $vals);
+    } catch (PDOException $e) {
+        // The same window for the rich words: the notification all the same, as its plain text (the body).
+        if ((string)$e->getCode() !== '42S22' || $cols === $plainCols) throw $e;
+        $insert($plainCols, $plainVals);
+    }
 }
 
 /**
@@ -1758,7 +1792,9 @@ function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, strin
         $html = buildEmailHtml([
             'title' => $opts['title'] ?? $subject,
             'greeting' => langFor($lang, 'mail.hello', ['name' => sanitize($user['username'] ?? '')]),
-            'body' => nl2br(sanitize($bodyText)),
+            // `body_html` (1.75.0): the words ALREADY as safe HTML — a notice written in BBCode or Markdown, rendered for a
+            // mail by the caller (mailRichParts()), whose `$bodyText` is then the text half made from it.
+            'body' => !empty($opts['body_html']) ? (string)$opts['body_html'] : nl2br(sanitize($bodyText)),
             'action_url' => $opts['action_url'] ?? '',
             'action_label' => $opts['action_label'] ?? '',
             'details' => [], 'unsubscribe_url' => $unsub, 'lang' => $lang,

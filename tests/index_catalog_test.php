@@ -13,7 +13,11 @@
  *      Python writers resolve (indexCatalogSyncRecent()), federation's purge;
  *   5. the capped count (PERF-2 (1)): a search counts to max(1000, offset + 10 pages) and says "more";
  *   6. a search the database stops for time (production 2026-10-06) is IndexSearchTimeout — the LIKE fallback is
- *      not run behind it — while any other failure of the fulltext pass still falls back to LIKE.
+ *      not run behind it — while any other failure of the fulltext pass still falls back to LIKE;
+ *   7. the ranking keys (1.75.0): words_hit and in_order in the three orders, the wide table and the catalogue giving the
+ *      same order, the SQL of a one-word query unchanged, the all-words fast path answering the page the full query gives,
+ *      a hash found by name and by file name coming back once, the whitelist merged by words_hit, the hex rule, the LIKE
+ *      escape.
  *
  * Its rows carry their own hash prefix and are removed at the end; config/index_state.json is put back as it was.
  * It TRUNCATEs nothing.
@@ -255,6 +259,9 @@ foreach ([false, true] as $cat) {
     $few = indexSearchCatalogue($db, $cfg, ['search' => 'echidna', 'sort' => 'seeders:desc', 'page' => 2, 'per_page' => 5, 'catalog' => $cat]);
     $exact = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE " . IDX_CATALOG_MEMBER . " AND MATCH(name) AGAINST('echidna*' IN BOOLEAN MODE)")->fetchColumn();
     check(($cat ? 'catalogue' : 'wide table') . ': under the cap the count is exact', $few['total'] === $exact && $few['total_capped'] === false && $exact > 5, "$exact " . json_encode(array_diff_key($few, ['rows' => 1])));
+    $p200 = indexSearchCatalogue($db, $cfg, ['search' => 'bilby', 'sort' => 'seeders:desc', 'page' => 2, 'per_page' => 200, 'catalog' => $cat]);
+    check(($cat ? 'catalogue' : 'wide table') . ': per_page 200 is honoured (the clamp said 100): 200 rows, 6 pages of the 1 100',
+          count($p200['rows']) === 200 && $p200['per_page'] === 200 && $p200['pages'] === 6 && $p200['total'] === 1100, json_encode(array_diff_key($p200, ['rows' => 1])));
     $short = indexSearchCatalogue($db, $cfg, ['search' => 'echidna', 'sort' => 'seeders:desc', 'page' => 1, 'per_page' => 100, 'catalog' => $cat]);
     check(($cat ? 'catalogue' : 'wide table') . ': a first page that is not full IS the total (nothing counted)', $short['total'] === count($short['rows']) && $short['total_capped'] === false);
 }
@@ -332,6 +339,275 @@ check('… the next one writes what the worker or federation resolved since (met
 $db->exec("UPDATE index_hashes SET meta_source = 'fed:c7catpeer' WHERE info_hash IN ('" . ch(13) . "', '" . ch(14) . "')");
 $purged = fedPurgeBatch($db, 'c7catpeer');
 check('federation\'s purge takes the names it removes out of the catalogue', $purged === 2 && !$catHas($db, ch(13)) && !$catHas($db, ch(14)), (string)$purged);
+
+/* ── 7. the ranking keys and the all-words fast path (1.75.0) ───────────────── */
+// The words of a search, and the SQL written from them.
+$rwOf = static fn(string $s): array => indexRankWords($s);
+$rw = $rwOf('Rick and Morty');
+check('rank words: the query split on anything that is not a letter or a digit, lower-cased, in order',
+      $rw['w'] === ['rick', 'and', 'morty'] && $rw['c'] === ['rick', 'and', 'morty'], json_encode($rw));
+$rw = $rwOf('The Office');
+check('… the countable ones leave out the stop words and the short ones ("the"), the order test keeps every word',
+      $rw['w'] === ['the', 'office'] && $rw['c'] === ['office'], json_encode($rw));
+check('… "of tv uk" has nothing countable, "the and of" only "and"', $rwOf('of tv uk')['c'] === [] && $rwOf('the and of')['c'] === ['and'] && count($rwOf('of tv uk')['w']) === 3);
+check('… a word typed twice counts once; at most eight distinct words take part',
+      $rwOf('rick rick morty')['w'] === ['rick', 'morty'] && count($rwOf('aa1 bb2 cc3 dd4 ee5 ff6 gg7 hh8 ii9 jj0')['w']) === 8
+      && count($rwOf('aa1 bb2 cc3 dd4 ee5 ff6 gg7 hh8 ii9 jj0')['c']) === 8);
+check('… punctuation at a word\'s edge is no matter (the star stays on the word), Polish letters are letters',
+      $rwOf('Rick, and Morty!')['c'] === ['rick', 'and', 'morty'] && $rwOf('Zażółć gęślą: jaźń')['c'] === ['zażółć', 'gęślą', 'jaźń'], json_encode($rwOf('Zażółć gęślą: jaźń')));
+check('… but a delimiter INSIDE a word makes the fulltext WHERE and the counts disagree, so nothing is counted (the order test still has the words)',
+      $rwOf('rick_and_morty')['c'] === [] && $rwOf('rick.and.morty')['c'] === [] && $rwOf("don't stop")['c'] === [] && $rwOf('rick_and_morty')['w'] === ['rick', 'and', 'morty']
+      && $rwOf('rick & morty')['c'] === ['rick', 'morty'] && $rwOf('spider-man 2002')['c'] === ['spider', 'man', '2002']);
+check('… invalid UTF-8 and the empty string do not break it', $rwOf("\xff\xfe") === ['w' => [], 'c' => []] && $rwOf('  ') === ['w' => [], 'c' => []]);
+$rs = indexRankSql(['w' => ['rick', 'and', 'morty'], 'c' => ['rick', 'and', 'morty']], true, true);
+check('words_hit: one MATCH per countable word, the prefix the WHERE searches with',
+      $rs['hit'][0] === '(MATCH(name) AGAINST(? IN BOOLEAN MODE) > 0) + (MATCH(name) AGAINST(? IN BOOLEAN MODE) > 0) + (MATCH(name) AGAINST(? IN BOOLEAN MODE) > 0)'
+      && $rs['hit'][1] === ['rick*', 'and*', 'morty*'], json_encode($rs['hit']));
+check('in_order: the LIKE gate, then the adjacent REGEXP (2), then the in-order one (1) — word starts by lookbehind, not \\b',
+      $rs['ord'][0] === 'CASE WHEN name NOT LIKE ? THEN 0 WHEN name REGEXP ? THEN 2 WHEN name REGEXP ? THEN 1 ELSE 0 END'
+      && $rs['ord'][1] === ['%rick%and%morty%',
+          '(?i)(?<![\p{L}\p{N}])rick[\p{L}\p{N}]*[^\p{L}\p{N}]+and[\p{L}\p{N}]*[^\p{L}\p{N}]+morty',
+          '(?i)(?<![\p{L}\p{N}])rick.*(?<![\p{L}\p{N}])and.*(?<![\p{L}\p{N}])morty'], json_encode($rs['ord']));
+$rs1 = indexRankSql(['w' => ['the', 'office'], 'c' => ['office']], true, true);
+check('… with one countable word there is no words_hit; with no second word, no in_order',
+      $rs1['hit'] === ['', []] && $rs1['ord'][0] !== '' && indexRankSql(['w' => ['rick'], 'c' => ['rick']], true, true) === ['hit' => ['', []], 'ord' => ['', []]]);
+check('the LIKE gate escapes the LIKE wildcards', indexLikeEscape('50%_off\\') === '50\\%\\_off\\\\');
+
+// The fixtures: the names of the brief (and a few more), each with a seeder count and a size of its own.
+$rkRows = [
+    'r1' => ['Rick and Morty S01', 5, 5000], 'r2' => ['Rick.and.Morty.S02', 9, 3000], 'r3' => ['rick_and_morty_s03', 50, 100],
+    'r4' => ['Rick Sanchez and and and', 40, 200], 'r5' => ['Morty Rick and', 7, 9000], 'r6' => ['Rick', 60, 50],
+    'o1' => ['The Office UK', 3, 700], 'o2' => ['Home Office Tour', 30, 600], 'p1' => ['Pokémon Movie', 2, 10],
+    'l1' => ['ab_cd lik', 11, 1], 'l2' => ['abxcd lik', 12, 2], 'l3' => ['sale 5% off lik', 13, 3], 'l4' => ['sale 50 off lik', 14, 4],
+    'd1' => ['decade facade release', 15, 5],
+];
+$labels = [];
+$rkIds = [];
+$i = 6000;
+foreach ($rkRows as $label => [$nm, $seed, $size]) {
+    $ins->execute([ch($i), $nm, 5, $seed, 0, null, 'done', date('Y-m-d H:i:s', time() - 7200), $size, 1, null, null, null]);
+    $labels[ch($i)] = $label; $rkIds[$label] = ch($i); $i++;
+}
+$db->prepare("INSERT INTO whitelist (info_hash, name, total_size, files_count, source, created_at, banned, content_status, meta_status, scrape_seeders)
+              VALUES (?, 'Rick and Morty S04 whitelist', 4000, 1, 'admin', NOW(), 0, 'none', 'done', 20)")->execute([ch(6100)]);
+$labels[ch(6100)] = 'w1'; $rkIds['w1'] = ch(6100);
+indexCatalogSync($db, array_values(array_filter($rkIds, fn($h) => $h !== ch(6100))));
+$orderOf = static function (array $q) use ($db, $cfg, $dropCatCaches, $labels): array {
+    $out = [];
+    foreach ([false, true] as $cat) {
+        $dropCatCaches();
+        $res = indexSearchCatalogue($db, $cfg, $q + ['catalog' => $cat, 'per_page' => 200, 'page' => 1]);
+        $out[$cat ? 'cat' : 'wide'] = array_values(array_filter(array_map(fn($r) => $labels[$r['info_hash']] ?? null, $res['rows'])));
+    }
+    return $out;
+};
+$same = static function (string $name, array $got, array $want): void {
+    check($name, $got['wide'] === $want && $got['cat'] === $want, 'want ' . implode(' ', $want) . ' | wide ' . implode(' ', $got['wide']) . ' | catalogue ' . implode(' ', $got['cat']));
+};
+
+// "rick and morty": r1/r2 have all three words side by side, r5 all three out of order, r4 two (and "and" three times —
+// it used to tie with the real thing), r3 is one fulltext token (rick_and_morty_s03: only "rick*" matches) but reads in order, r6 one.
+$same('Best match: more words first, then the words in order, then the score and the seeders (r2 beats r1 on seeders; both score alike)',
+      $orderOf(['search' => 'rick and morty', 'sort' => 'relevance:desc']), ['r2', 'r1', 'r5', 'r4', 'r3', 'r6']);
+$same('Best match + Size, largest first: the column decides INSIDE the groups — r1 (5000) before r2 (3000), the groups as before',
+      $orderOf(['search' => 'rick and morty', 'sort' => 'relevance:desc,size:desc']), ['r1', 'r2', 'r5', 'r4', 'r3', 'r6']);
+$same('Best match + Size, smallest first: r2 (3000) before r1 (5000); r3 (reads in order) still before r6 whatever their sizes',
+      $orderOf(['search' => 'rick and morty', 'sort' => 'relevance:desc,size:asc']), ['r2', 'r1', 'r5', 'r4', 'r3', 'r6']);
+$same('Best match + S/L: the seeders decide inside a group — r6 (60 seeders) does not climb over r3, the order test comes first',
+      $orderOf(['search' => 'rick and morty', 'sort' => 'relevance:desc,seeders:desc']), ['r2', 'r1', 'r5', 'r4', 'r3', 'r6']);
+$same('plain search, S/L: grouped by how many words matched (3, then 2, then 1), the seeders inside each group',
+      $orderOf(['search' => 'rick and morty', 'sort' => 'seeders:desc']), ['r2', 'r5', 'r1', 'r4', 'r6', 'r3']);
+$same('plain search, Size: the same groups, the size inside them', $orderOf(['search' => 'rick and morty', 'sort' => 'size:desc']), ['r5', 'r1', 'r2', 'r4', 'r3', 'r6']);
+$same('with the whitelist beside it: words_hit is one number in both arms, so the whitelist row (3 words, in order, 4000) takes its place among the index rows',
+      $orderOf(['search' => 'rick and morty', 'sort' => 'relevance:desc,size:desc', 'include_whitelist' => true]), ['r1', 'w1', 'r2', 'r5', 'r4', 'r3', 'r6']);
+$same('… and the plain search with it (the whitelist row has 20 seeders)', $orderOf(['search' => 'rick and morty', 'sort' => 'seeders:desc', 'include_whitelist' => true]), ['w1', 'r2', 'r5', 'r1', 'r4', 'r6', 'r3']);
+// one word: no ranking key, but Best match + a column no longer has the score in front of the column — the column decides
+$same('one word, Best match + Size: the column decides (the score used to stand in front of it and nothing ever got past it)',
+      $orderOf(['search' => 'rick', 'sort' => 'relevance:desc,size:desc']), ['r5', 'r1', 'r2', 'r4', 'r3', 'r6']);
+$same('… ascending', $orderOf(['search' => 'rick', 'sort' => 'relevance:desc,size:asc']), ['r6', 'r3', 'r4', 'r2', 'r1', 'r5']);
+$same('… S/L: the seeders decide, descending', $orderOf(['search' => 'rick', 'sort' => 'relevance:desc,seeders:desc']), ['r6', 'r3', 'r4', 'r2', 'r5', 'r1']);
+// "the office": "the" is a stop word, so one countable word — no words_hit, only the order test (Best match)
+$same('"the office", Best match: no words_hit (one countable word) but the words in order still come first — The Office UK before Home Office Tour',
+      $orderOf(['search' => 'the office', 'sort' => 'relevance:desc']), ['o1', 'o2']);
+$same('… with a column: the order test first, then the seeders (Home Office Tour 30 would lead without it)',
+      $orderOf(['search' => 'the office', 'sort' => 'relevance:desc,seeders:desc']), ['o1', 'o2']);
+$same('… plain: no ranking keys at all, the column alone (1.74.4\'s order)', $orderOf(['search' => 'the office', 'sort' => 'seeders:desc']), ['o2', 'o1']);
+// accents: the fulltext index ignores them, the order test (REGEXP) does not
+$same('"pokemon movie" finds Pokémon Movie (both words match, the order test cannot read the accent: in_order 0, never a lost row)',
+      $orderOf(['search' => 'pokemon movie', 'sort' => 'relevance:desc']), ['p1']);
+$same('… and "pokémon movie" with the accent too', $orderOf(['search' => 'pokémon movie', 'sort' => 'relevance:desc']), ['p1']);
+// underscores: one fulltext token, so the query is not counted at all, and its WHERE is what it always was
+$same('"rick_and_morty" is not counted by words (InnoDB reads it as one token) and finds the underscore name; order test only',
+      $orderOf(['search' => 'rick_and_morty', 'sort' => 'relevance:desc']), ['r3']);
+// the fault of the hash-prefix rule: a six-letter word of a–f is a word
+foreach ([true, false] as $hs) {
+    $res = indexSearchCatalogue($db, $cfg, ['search' => 'decade', 'sort' => 'seeders:desc', 'hash_search' => $hs, 'catalog' => true]);
+    check('"decade" is a word, not a hash prefix (hash_search ' . ($hs ? 'on' : 'off') . ')', in_array($rkIds['d1'], array_column($res['rows'], 'info_hash'), true), (string)count($res['rows']));
+}
+check('the shared rule: a digit among the characters, or twelve of them, makes a hex term a hash prefix',
+      !indexIsHashPrefix('abcdef') && !indexIsHashPrefix('decade') && !indexIsHashPrefix('FACADE') && indexIsHashPrefix('abc123') && indexIsHashPrefix('abcdef012345')
+      && indexIsHashPrefix('abcdefabcdef') && !indexIsHashPrefix('abcde') && !indexIsHashPrefix('abcdeg') && indexIsHashPrefix(str_repeat('a', 12)) && !indexIsHashPrefix(str_repeat('a', 41)));
+// the LIKE fallback takes % and _ literally
+$likeHits = static function (string $term) use ($db, $cfg, $dropCatCaches, $labels): array {
+    $out = [];
+    foreach ([false, true] as $cat) {
+        $dropCatCaches();
+        $res = indexSearchCatalogue($db, $cfg, ['search' => $term, 'sort' => 'seeders:desc', 'catalog' => $cat, 'per_page' => 200]);
+        $got = array_values(array_filter(array_map(fn($r) => $labels[$r['info_hash']] ?? null, $res['rows'])));
+        sort($got); $out[] = $got;
+    }
+    return $out[0] === $out[1] ? $out[0] : ['differ'];
+};
+check('the LIKE fallback: "b_" is a letter b and an underscore, not "b and any character"', $likeHits('b_') === ['l1'], json_encode($likeHits('b_')));
+check('… "5%" is a five and a percent sign', $likeHits('5%') === ['l3'], json_encode($likeHits('5%')));
+// the file-name clause (the LIKE of a term fulltext cannot take) is escaped by the same rule
+check('… and so is the file-name clause', indexFilePathClause('a_') === ['path LIKE ?', ['%a\\_%']], json_encode(indexFilePathClause('a_')));
+
+// The SQL. A recording connection: every statement the search prepares is written down, then really run.
+final class IdxRecordPdo extends PDO {
+    public array $asked = [];
+    public PDO $real;
+    public function prepare(string $query, array $options = []): PDOStatement|false { $this->asked[] = $query; return $this->real->prepare($query, $options); }
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false { return $this->real->query($query); }
+    public function exec(string $statement): int|false { return $this->real->exec($statement); }
+}
+$rec = (new ReflectionClass(IdxRecordPdo::class))->newInstanceWithoutConstructor();
+$rec->real = $db;
+$sqlOf = static function (array $q) use ($rec, $cfg, $dropCatCaches): array {
+    $rec->asked = [];
+    $dropCatCaches();
+    indexSearchCatalogue($rec, $cfg, $q);
+    return array_map(static fn(string $s): string => preg_replace('/\s+/', ' ', $s), $rec->asked);
+};
+// one word: Best match alone and the plain search are 1.74.4's statements, nothing added; Best match + a column loses the score in front of the column (1.75.0)
+foreach ([false, true] as $cat) {
+    $cs = $cat ? 'catalogue' : 'wide table';
+    $best = $sqlOf(['search' => 'quokka', 'sort' => 'relevance:desc', 'catalog' => $cat])[0];
+    $col  = $sqlOf(['search' => 'quokka', 'sort' => 'relevance:desc,size:desc', 'catalog' => $cat])[0];
+    $plain = $sqlOf(['search' => 'quokka', 'sort' => 'size:asc', 'catalog' => $cat])[0];
+    $one = fn(string $s) => !str_contains($s, 'words_hit') && !str_contains($s, 'in_order') && !str_contains($s, 'CASE') && !str_contains($s, 'REGEXP') && substr_count($s, 'MATCH(') === 2;
+    $e1 = $cat ? 'ORDER BY score DESC, eff_seeders DESC, info_hash DESC LIMIT ? OFFSET ?) k JOIN index_hashes h ON h.info_hash = k.info_hash AND (h.meta_status = \'done\' OR (h.name IS NOT NULL AND h.name <> \'\')) ORDER BY k.score DESC, k.eff_seeders DESC, k.info_hash DESC'
+                : 'ORDER BY score DESC, eff_seeders DESC, info_hash DESC LIMIT ? OFFSET ?';
+    $e2 = $cat ? 'ORDER BY total_size DESC, info_hash DESC LIMIT ? OFFSET ?) k JOIN index_hashes h ON h.info_hash = k.info_hash AND (h.meta_status = \'done\' OR (h.name IS NOT NULL AND h.name <> \'\')) ORDER BY k.total_size DESC, k.info_hash DESC'
+                : 'ORDER BY total_size DESC, info_hash DESC LIMIT ? OFFSET ?';
+    $e3 = $cat ? 'ORDER BY total_size ASC, info_hash ASC LIMIT ? OFFSET ?) k JOIN index_hashes h ON h.info_hash = k.info_hash AND (h.meta_status = \'done\' OR (h.name IS NOT NULL AND h.name <> \'\')) ORDER BY k.total_size ASC, k.info_hash ASC'
+                : 'ORDER BY total_size ASC, info_hash ASC LIMIT ? OFFSET ?';
+    check("$cs, one word: Best match is 'score DESC, eff_seeders DESC, info_hash DESC' as in 1.74.4 — no ranking key, no extra MATCH", $one($best) && str_ends_with($best, $e1), $best);
+    check("$cs, one word: Best match + Size is 'total_size DESC, info_hash DESC' — no score in front of the column (1.75.0), no ranking key", $one($col) && str_ends_with($col, $e2), $col);
+    check("$cs, one word: the plain search is the column and the hash as before", $one($plain) && str_ends_with($plain, $e3), $plain);
+}
+// three words, the full query (the fast path off): the keys in the three orders, in every statement shape
+foreach ([false, true] as $cat) {
+    $cs = $cat ? 'catalogue' : 'wide table';
+    $q3 = ['search' => 'rick and morty', 'catalog' => $cat, 'fast_path' => false];
+    $a = $sqlOf($q3 + ['sort' => 'relevance:desc'])[0];
+    $b = $sqlOf($q3 + ['sort' => 'relevance:desc,size:desc'])[0];
+    $c = $sqlOf($q3 + ['sort' => 'seeders:desc'])[0];
+    if ($cat) {
+        check("$cs, three words, Best match: words_hit, in_order, score, seeders, hash — in the inner query and the outer one",
+              str_contains($a, 'ORDER BY words_hit DESC, in_order DESC, score DESC, eff_seeders DESC, info_hash DESC LIMIT ? OFFSET ?) k')
+              && str_ends_with($a, 'ORDER BY k.words_hit DESC, k.in_order DESC, k.score DESC, k.eff_seeders DESC, k.info_hash DESC')
+              && str_contains($a, 'k.score AS score, k.words_hit AS words_hit, k.in_order AS in_order'), $a);
+        check("$cs, Best match + Size: words_hit, in_order, size, hash (the score is out of the way of the column)",
+              str_contains($b, 'ORDER BY words_hit DESC, in_order DESC, total_size DESC, info_hash DESC LIMIT ? OFFSET ?) k')
+              && str_ends_with($b, 'ORDER BY k.words_hit DESC, k.in_order DESC, k.total_size DESC, k.info_hash DESC'), $b);
+        check("$cs, plain: words_hit, then the column and the hash — no in_order",
+              str_contains($c, 'ORDER BY words_hit DESC, eff_seeders DESC, info_hash DESC LIMIT ? OFFSET ?) k') && !str_contains($c, 'in_order')
+              && str_ends_with($c, 'ORDER BY k.words_hit DESC, k.eff_seeders DESC, k.info_hash DESC'), $c);
+    } else {
+        check("$cs, three words, Best match: words_hit, in_order, score, seeders, hash",
+              str_ends_with($a, 'ORDER BY words_hit DESC, in_order DESC, score DESC, eff_seeders DESC, info_hash DESC LIMIT ? OFFSET ?'), $a);
+        check("$cs, Best match + Size: words_hit, in_order, size, hash", str_ends_with($b, 'ORDER BY words_hit DESC, in_order DESC, total_size DESC, info_hash DESC LIMIT ? OFFSET ?'), $b);
+        check("$cs, plain: words_hit, then the column and the hash — no in_order", str_ends_with($c, 'ORDER BY words_hit DESC, eff_seeders DESC, info_hash DESC LIMIT ? OFFSET ?') && !str_contains($c, 'in_order'), $c);
+    }
+}
+// two arms: the same columns in the same positions in both halves, and the merge sorts by the same keys
+foreach ([false, true] as $cat) {
+    $cs = $cat ? 'catalogue' : 'wide table';
+    $s2 = $sqlOf(['search' => 'rick and morty', 'catalog' => $cat, 'fast_path' => false, 'include_whitelist' => true, 'sort' => 'relevance:desc,size:desc'])[0];
+    $halves = $cat ? (str_contains($s2, 'a.score, a.words_hit, a.in_order') && str_contains($s2, 'b.score, b.words_hit, b.in_order'))
+                   : (substr_count($s2, 'AS score, (MATCH(name)') === 2 && substr_count($s2, 'AS words_hit, CASE WHEN name NOT LIKE ?') === 2);
+    check("$cs, two arms: both halves carry words_hit and in_order after the score, the merge sorts by them first",
+          $halves && str_ends_with($s2, ') cat ORDER BY words_hit DESC, in_order DESC, total_size DESC, info_hash DESC LIMIT ? OFFSET ?'), $s2);
+}
+
+// The all-words fast path: the page it answers with is the page the full query would give.
+$z = ['zymase', 'xylitol', 'quartzite'];
+$zIns = $db->prepare("INSERT INTO index_hashes (info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers, last_completed, grace_until, meta_status, meta_fetched_at, total_size, files_count)
+                      VALUES (?, ?, NOW(), NOW(), 1, ?, 0, 0, NOW() + INTERVAL 3 DAY, 'done', NOW() - INTERVAL 2 HOUR, ?, 1)");
+$zHashes = []; $zi = 6200;
+for ($k = 1; $k <= 60; $k++) { $zIns->execute([ch($zi), "zymase xylitol quartzite A$k", ($k * 7) % 31, $k * 100]); $zHashes[] = ch($zi); $zi++; }
+for ($k = 1; $k <= 40; $k++) { $zIns->execute([ch($zi), $z[$k % 3] . ' ' . $z[($k + 1) % 3] . " B$k", ($k * 5) % 29, $k * 90]); $zHashes[] = ch($zi); $zi++; }
+for ($k = 1; $k <= 30; $k++) { $zIns->execute([ch($zi), $z[$k % 3] . " C$k", ($k * 3) % 23, $k * 80]); $zHashes[] = ch($zi); $zi++; }
+$zIns->execute([ch(6500), 'Unrelated title', 1, 1]); $zHashes[] = ch(6500);
+indexCatalogSync($db, $zHashes);
+$wlz = $db->prepare("INSERT INTO whitelist (info_hash, name, total_size, files_count, source, created_at, banned, content_status, meta_status, scrape_seeders)
+                     VALUES (?, ?, ?, 1, 'admin', NOW(), 0, 'none', 'done', ?)");
+for ($k = 1; $k <= 4; $k++) $wlz->execute([ch(6600 + $k), "zymase xylitol quartzite WL$k", $k * 150, ($k * 11) % 17]);
+for ($k = 5; $k <= 7; $k++) $wlz->execute([ch(6600 + $k), "xylitol zymase WL$k", $k * 150, ($k * 11) % 17]);
+// files: three three-word names, two one-word names (found by name AND by file), and one torrent only a file name finds
+$db->prepare("INSERT INTO index_files (info_hash, path, size) VALUES (?, 'zymase/xylitol quartzite.mkv', 5), (?, 'zymase xylitol quartzite.mkv', 6), (?, 'zymase/xylitol/quartzite.mkv', 7),
+              (?, 'xylitol quartzite zymase.mkv', 8), (?, 'quartzite zymase xylitol.mkv', 9), (?, 'zymase xylitol quartzite.mkv', 10)")
+   ->execute([ch(6201), ch(6202), ch(6203), ch(6301), ch(6302), ch(6500)]);
+$hashesOf = static fn(array $r): array => array_column($r['rows'], 'info_hash');
+$bad = []; $cases = 0; $fastRan = 0; $fullRan = 0;
+foreach ([false, true] as $cat) {
+    foreach ([false, true] as $wl) {
+        foreach (['relevance:desc', 'relevance:desc,size:desc', 'relevance:desc,seeders:asc', 'seeders:desc', 'size:asc,leechers:desc'] as $sort) {
+            foreach ([1, 2, 3, 4] as $page) {
+                $q = ['search' => 'zymase xylitol quartzite', 'sort' => $sort, 'include_whitelist' => $wl, 'page' => $page, 'per_page' => 25, 'catalog' => $cat];
+                $dropCatCaches(); $fast = indexSearchCatalogue($db, $cfg, $q);
+                $dropCatCaches(); $full = indexSearchCatalogue($db, $cfg, $q + ['fast_path' => false]);
+                $cases++;
+                if ($hashesOf($fast) !== $hashesOf($full) || $fast['total'] !== $full['total'] || $fast['total_capped'] !== $full['total_capped']) {
+                    $bad[] = ($cat ? 'cat' : 'wide') . "/wl$wl/$sort/p$page: " . count($hashesOf($fast)) . ' vs ' . count($hashesOf($full));
+                }
+            }
+        }
+    }
+}
+check("the all-words fast path answers the page the full query gives — $cases cases (both tables, with and without the whitelist, five orders, pages 1-4: full pages from the fast tier and the ones that fall back)",
+      $bad === [], implode(' | ', array_slice($bad, 0, 6)));
+// … and it IS the shortcut: a full page of the tier is one statement (+ the count), no words_hit anywhere; a short tier runs the full query after it
+foreach ([false, true] as $cat) {
+    $cs = $cat ? 'catalogue' : 'wide table';
+    $s = $sqlOf(['search' => 'zymase xylitol quartzite', 'sort' => 'relevance:desc', 'page' => 1, 'per_page' => 25, 'catalog' => $cat]);
+    check("$cs: page 1 of a tier of 60 is answered by the all-words query alone (and the count)",
+          count($s) === 2 && !str_contains($s[0], 'words_hit') && str_contains($s[0], 'in_order') && !str_contains($s[0], 'UNION'), implode(' || ', $s));
+    $s = $sqlOf(['search' => 'zymase xylitol quartzite', 'sort' => 'relevance:desc', 'page' => 3, 'per_page' => 25, 'catalog' => $cat]);
+    check("$cs: page 3 reaches past the tier (60 rows): the all-words query comes back short and the full query follows",
+          count($s) >= 2 && !str_contains($s[0], 'words_hit') && str_contains($s[1], 'words_hit'), implode(' || ', array_map(fn($x) => substr($x, 0, 80), $s)));
+    $s = $sqlOf(['search' => 'zymase xylitol quartzite', 'sort' => 'seeders:desc', 'page' => 1, 'per_page' => 25, 'catalog' => $cat]);
+    check("$cs: the plain search has the shortcut too — its all-words query carries no ranking key at all",
+          count($s) === 2 && !str_contains($s[0], 'words_hit') && !str_contains($s[0], 'in_order'), $s[0]);
+    $s = $sqlOf(['search' => 'rick_and_morty', 'sort' => 'relevance:desc', 'page' => 1, 'per_page' => 25, 'catalog' => $cat]);
+    check("$cs: a query the counts cannot agree with (rick_and_morty) has no shortcut and no words_hit — today's WHERE",
+          !str_contains($s[0], 'words_hit') && substr_count($s[0], 'MATCH(') === 2 && str_contains($s[0], 'in_order'), $s[0]);
+}
+// file-name hits: the same expressions in both halves of the arm, so a torrent found by name AND by file is ONE row
+foreach ([false, true] as $cat) {
+    foreach ([false, true] as $wl) {
+        foreach (['relevance:desc', 'relevance:desc,size:desc', 'seeders:desc'] as $sort) {
+            $dropCatCaches();
+            $r = indexSearchCatalogue($db, $cfg, ['search' => 'zymase xylitol quartzite', 'sort' => $sort, 'search_files' => 1, 'include_whitelist' => $wl, 'per_page' => 200, 'catalog' => $cat]);
+            $hs = $hashesOf($r);
+            $dup = array_keys(array_filter(array_count_values($hs), fn($c) => $c > 1));
+            $pos = array_search(ch(6500), $hs, true);
+            $both = array_intersect([ch(6201), ch(6202), ch(6301), ch(6302)], $hs);
+            check(($cat ? 'catalogue' : 'wide table') . ', ' . ($wl ? 'with' : 'without') . ' the whitelist, ' . $sort . ': search in file names — no hash twice, a name-and-file hit once, the file-only torrent last',
+                  $dup === [] && count($both) === 4 && $pos === count($hs) - 1, 'dup ' . json_encode($dup) . ' pos ' . json_encode($pos) . ' of ' . count($hs));
+        }
+    }
+}
+// the whitelist merge: a whitelist row with all three words stands among the index rows by words_hit, not by a score of another index
+$dropCatCaches();
+$wm = indexSearchCatalogue($db, $cfg, ['search' => 'zymase xylitol quartzite', 'sort' => 'size:asc', 'include_whitelist' => true, 'per_page' => 200, 'catalog' => true]);
+$wmSrc = array_column($wm['rows'], 'src', 'info_hash');
+$firstWl = array_search(ch(6601), array_column($wm['rows'], 'info_hash'), true);
+$lastAll = max(array_keys(array_filter(array_column($wm['rows'], 'name'), fn($nm) => str_starts_with($nm, 'zymase xylitol quartzite'))));
+$firstTwo = min(array_keys(array_filter(array_column($wm['rows'], 'name'), fn($nm) => !str_starts_with($nm, 'zymase xylitol quartzite'))));
+check('the whitelist merge: whitelist rows with all three words are inside the three-word group, before the first two-word row',
+      ($wmSrc[ch(6601)] ?? '') === 'whitelist' && $firstWl !== false && $firstWl <= $lastAll && $lastAll < $firstTwo, "wl at $firstWl, last three-word row $lastAll, first fewer-word row $firstTwo");
 } finally {
     $cleanup();
 }

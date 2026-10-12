@@ -1,5 +1,8 @@
 <?php
 
+// htmlToText() — the text half of a mail is made from its HTML (1.75.0). This file is loaded on its own by many callers.
+require_once __DIR__ . '/htmlsafe.php';
+
 /**
  * RFC 2047 encoded-word for header TEXT (Subject, From display name) containing non-ASCII.
  * Raw UTF-8 in a header makes postfix flag the message as needing SMTPUTF8 — and a dovecot
@@ -155,9 +158,13 @@ function mailRequestLang(array $cfg): string {
     return mailSiteLang($cfg);
 }
 
-/** Plain text out of one of the dictionary's HTML sentences (`<br>` as a new line, every other tag dropped). */
+/**
+ * Plain text out of one of the dictionary's HTML sentences (`<br>` as a new line, every other tag dropped).
+ * Since 1.75.0 the one conversion every mail's text half uses — htmlToText(), includes/htmlsafe.php — so a
+ * link in a sentence reads "words (address)" and a list or a paragraph keeps its lines.
+ */
 function mailPlain(string $html): string {
-    return html_entity_decode(strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $html)), ENT_QUOTES, 'UTF-8');
+    return htmlToText($html);
 }
 
 /**
@@ -369,13 +376,41 @@ function sendStatusNotification(PDO $db, int $reportId, string $newStatus, array
     return $sent;
 }
 
-/** The team's own words to the person who sent a report. $lang (of the mail's frame): the site's (default). */
-function sendCustomEmail(PDO $db, int $reportId, string $customMessage, array $cfg, ?string $lang = null): bool {
+/** The longest message the panel sends in a mail to a reporter or an appellant (and a moderator's reason / answer), in characters. */
+const MAIL_TEAM_TEXT_MAX = 2000;
+
+/**
+ * A moderator's words as a mail carries them: [HTML (safe), plain text]. 'plain' is escaped text with its line breaks and
+ * is its own text half; BBCode and Markdown are rendered for a mail (richtextRenderForEmail(), the site's own renderer —
+ * the HTML half is what the site would show, with the classes turned into inline styles) and the text half is made from
+ * that HTML (htmlToText()), so a mail client that shows text gets sentences, not tags. ['', ''] for nothing.
+ */
+function mailRichParts(string $text, string $format, array $cfg): array {
+    $text = trim($text);
+    if ($text === '') return ['', ''];
+    if (($format === 'bbcode' || $format === 'markdown') && function_exists('richtextRenderForEmail')) {
+        $html = richtextRenderForEmail($text, $format, $cfg);
+        if ($html !== '') return [$html, htmlToText($html)];
+    }
+    return [nl2br(sanitize($text)), $text];
+}
+
+/**
+ * The team's own words to the person who sent a report. $lang (of the mail's frame): the site's (default).
+ * $format (1.75.0): plain | bbcode | markdown, as the moderator wrote it (api/admin/send_email.php checks it against
+ * the site's switches and the 2 000-character limit; the cut here is the last line of defence). The log row keeps the
+ * RAW words and their format — it used to keep them escaped, and the panel escaped them again.
+ */
+function sendCustomEmail(PDO $db, int $reportId, string $customMessage, array $cfg, ?string $lang = null, string $format = 'plain'): bool {
     $stmt = $db->prepare("SELECT * FROM reports WHERE id = ?");
     $stmt->execute([$reportId]);
     $report = $stmt->fetch();
     if (!$report || empty($report['email'])) return false;
     if (isUnsubscribed($db, $report['email'], 'custom')) return false;
+
+    $customMessage = mb_substr(trim($customMessage), 0, MAIL_TEAM_TEXT_MAX, 'UTF-8');
+    if (!in_array($format, ['plain', 'bbcode', 'markdown'], true)) $format = 'plain';
+    [$messageHtml, $messageText] = mailRichParts($customMessage, $format, $cfg);
 
     $lang = $lang ?? mailSiteLang($cfg);
     $unsubUrl = getUnsubscribeUrl($report['email'], $cfg);
@@ -386,7 +421,7 @@ function sendCustomEmail(PDO $db, int $reportId, string $customMessage, array $c
     $plain = mailT($lang, 'mail.dear', ['name' => (string)$report['name']]) . "\n\n";
     $plain .= mailT($lang, 'mail.cus_intro', ['id' => $reportId]) . "\n\n";
     $plain .= '--- ' . mailT($lang, 'mail.team_message') . " ---\n\n";
-    $plain .= "$customMessage\n\n";
+    $plain .= "$messageText\n\n";
     $plain .= '--- ' . mailT($lang, 'mail.cus_details') . " ---\n";
     $plain .= mailDetailsPlain($details);
     $plain .= "\n" . $footer . "\n\n";
@@ -396,7 +431,7 @@ function sendCustomEmail(PDO $db, int $reportId, string $customMessage, array $c
         'title' => mailT($lang, 'mail.cus_title', ['id' => $reportId]),
         'greeting' => sanitize(mailT($lang, 'mail.dear', ['name' => (string)$report['name']])),
         'body' => sanitize(mailT($lang, 'mail.cus_body')),
-        'custom_message' => $customMessage,
+        'custom_message_html' => $messageHtml,
         'details' => $details,
         'footer_note' => $footer,
         'unsubscribe_url' => $unsubUrl,
@@ -405,8 +440,15 @@ function sendCustomEmail(PDO $db, int $reportId, string $customMessage, array $c
 
     $sent = sendEmail($report['email'], $subject, $plain, $html, $cfg, $unsubUrl);
     if ($sent) {
-        $stmt = $db->prepare("INSERT INTO sent_emails (report_id, to_email, subject, message, info_hash) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$reportId, $report['email'], $subject, sanitize($customMessage), $report['infoHash']]);
+        try {
+            $stmt = $db->prepare("INSERT INTO sent_emails (report_id, to_email, subject, message, message_format, info_hash) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$reportId, $report['email'], $subject, $customMessage, $format, $report['infoHash']]);
+        } catch (\PDOException $e) {
+            // A database whose v94 migration has not run yet (a request served while another one migrates).
+            if ((string)$e->getCode() !== '42S22') throw $e;
+            $stmt = $db->prepare("INSERT INTO sent_emails (report_id, to_email, subject, message, info_hash) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([$reportId, $report['email'], $subject, $customMessage, $report['infoHash']]);
+        }
     }
     return $sent;
 }
@@ -474,7 +516,8 @@ function sendAppealConfirmation(PDO $db, int $appealId, array $cfg, ?string $lan
  * One of them, built and not sent: ['subject', 'plain', 'html', 'unsubscribe']. $kind: accepted | rejected |
  * reopened | auto_closed. $appeal: the `appeals` (or `appeal_archives`) row — its infoHash, appeal_type, name
  * and email are read. $opts: 'listed' (bool: the decision changed the tracker's list — blocked or unblocked),
- * 'title' (the reported object's title, text), 'response' (the moderator's words to the appellant, text).
+ * 'title' (the reported object's title, text), 'response' (the moderator's words to the appellant, text) with its
+ * 'response_format' (plain | bbcode | markdown, 1.75.0: mailRichParts()).
  */
 function mailAppealDecisionParts(array $appeal, string $kind, array $cfg, string $lang, array $opts = []): array {
     $isBlock = ($appeal['appeal_type'] ?? 'unblock') === 'block';
@@ -511,11 +554,13 @@ function mailAppealDecisionParts(array $appeal, string $kind, array $cfg, string
     $details[mailT($lang, 'mail.r_info_hash')] = '<code>' . sanitize((string)($appeal['infoHash'] ?? '')) . '</code>';
     $details[mailT($lang, 'mail.r_request_type')] = sanitize($type);
     $details[$statusLabel] = '<strong>' . $decisionHtml . '</strong>';
-    $response = trim((string)($opts['response'] ?? ''));
+    $response = mb_substr(trim((string)($opts['response'] ?? '')), 0, MAIL_TEAM_TEXT_MAX, 'UTF-8');
+    // The moderator's words may be BBCode or Markdown (1.75.0, `response_format`): rendered for a mail, their text half made from that.
+    [$responseHtml, $responseText] = mailRichParts($response, (string)($opts['response_format'] ?? 'plain'), $cfg);
     $greeting = mailT($lang, 'mail.hello', ['name' => (string)($appeal['name'] ?? '')]);
 
     $plain = $greeting . "\n\n" . mailPlain($bodyHtml) . "\n\n"
-           . ($response !== '' ? '--- ' . mailT($lang, 'mail.team_message') . " ---\n" . $response . "\n\n" : '')
+           . ($response !== '' ? '--- ' . mailT($lang, 'mail.team_message') . " ---\n" . $responseText . "\n\n" : '')
            . mailDetailsPlain($details)
            . ($unsubUrl !== '' ? "\n" . mailT($lang, 'mail.unsubscribe_plain', ['url' => $unsubUrl]) . "\n" : '');
     $html = buildEmailHtml([
@@ -523,7 +568,7 @@ function mailAppealDecisionParts(array $appeal, string $kind, array $cfg, string
         'greeting' => sanitize($greeting),
         'body' => $bodyHtml,
         'details' => $details,
-        'custom_message' => $response,
+        'custom_message_html' => $responseHtml,
         'unsubscribe_url' => $unsubUrl,
         'lang' => $lang,
     ], $cfg);
@@ -569,13 +614,16 @@ function buildEmailHtml(array $data, array $cfg): string {
     }
 
     $customBlock = '';
-    if ($customMessage) {
-        $escapedMsg = nl2br(sanitize($customMessage));
+    // `custom_message_html` (1.75.0): the team's words ALREADY as safe HTML — a BBCode or Markdown message rendered for
+    // a mail (richtextRenderForEmail()) — in place of the text, which is escaped here.
+    $customHtml = (string)($data['custom_message_html'] ?? '');
+    if ($customMessage || $customHtml !== '') {
+        $escapedMsg = $customHtml !== '' ? $customHtml : nl2br(sanitize($customMessage));
         $teamWord = sanitize(mailT($lang, 'mail.team_message'));
         $customBlock = <<<HTML
         <div style="margin:16px 0;padding:14px 18px;background:#0d1117;border-left:3px solid #4a9eff;border-radius:4px;">
             <p style="color:#8899aa;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;">{$teamWord}</p>
-            <p style="color:#e0e0e0;margin:0;line-height:1.6;">{$escapedMsg}</p>
+            <div style="color:#e0e0e0;margin:0;line-height:1.6;">{$escapedMsg}</div>
         </div>
 HTML;
     }
@@ -602,11 +650,10 @@ HTML;
 HTML;
     }
 
-    // The preferences link only renders when a real URL was provided — an empty href looked like
-    // a dead link in the reset mails.
-    $unsubBlock = $unsubUrl !== ''
-        ? '<a href="' . sanitize($unsubUrl) . '" style="color:#5a6a7a;font-size:11px;text-decoration:underline;">' . sanitize(mailT($lang, 'mail.manage_prefs')) . '</a>'
-        : '';
+    // The footer: the preferences link (only when a real URL was provided — an empty href looked like a dead
+    // link in the reset mails), the site and its address, the sender's identity when the operator wrote one.
+    // One function, shared with the bare frame of a campaign (mailFooterHtml()).
+    $footerHtml = mailFooterHtml($cfg, $lang, (string)$unsubUrl, 'dark');
     $htmlLang = sanitize($lang ?? (function_exists('langCurrent') ? langCurrent() : 'en'));
 
     return <<<HTML
@@ -619,18 +666,82 @@ HTML;
 </div>
 <div style="padding:24px;color:#e0e0e0;">
 <p style="color:#ccc;margin:0 0 16px;">{$greeting}</p>
-<p style="line-height:1.7;margin:0 0 16px;">{$bodyHtml}</p>
+<div style="line-height:1.7;margin:0 0 16px;">{$bodyHtml}</div>
 {$actionBlock}
 {$customBlock}
 <table style="width:100%;border-collapse:collapse;margin:20px 0;background:#0a0a1a;border-radius:6px;overflow:hidden;">{$rows}</table>
 {$footerNoteHtml}
 </div>
-<div style="padding:16px 24px;background:#0a0a14;text-align:center;border-top:1px solid #2a2a3e;">
-{$unsubBlock}
-<p style="color:#3a3a4a;font-size:11px;margin:8px 0 0;">{$siteName} &bull; {$siteEmail}</p>
-</div>
+{$footerHtml}
 </div></body></html>
 HTML;
+}
+
+/**
+ * The sender's identity for a mail's footer — a postal address, a company — as ONE line of text, or ''. It is the
+ * setting `mail_sender_address` (1.75.0): a bulk message is commercial mail in most places and is expected to say
+ * who sent it and where. (mailSenderAddress() above is something else: the e-mail address mails are sent FROM.)
+ */
+function mailSenderIdentity(array $cfg): string {
+    $s = (string)preg_replace('/\s*[\r\n]+\s*/u', ', ', trim((string)($cfg['mail_sender_address'] ?? '')));
+    $s = (string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $s);
+    return mb_substr($s, 0, 300, 'UTF-8');
+}
+
+/**
+ * The footer every mail ends with, as an HTML block with a ground and colours of its own (so it reads wherever it
+ * is put): the preferences link when there is an address for it ($unsubUrl — none on a transactional mail), the
+ * site's name and address, the sender's identity when the operator wrote one. 1.75.0: out of buildEmailHtml(),
+ * because a campaign sent without the site's frame ('none') must still carry it — the preferences and
+ * unsubscribe link is the one thing no design may leave out — and the colours are lifted: #3a3a4a on #0a0a14
+ * was 1.6 : 1 and the preferences link 3.4 : 1. $theme: 'dark' (inside the site's frame) or 'light' (a bare message).
+ */
+function mailFooterHtml(array $cfg, ?string $lang, string $unsubUrl, string $theme = 'dark'): string {
+    $dark = $theme !== 'light';
+    $siteName  = htmlspecialchars((string)($cfg['site_name'] ?? 'Tracker'), ENT_QUOTES, 'UTF-8');
+    $siteEmail = htmlspecialchars((string)($cfg['site_email'] ?? ''), ENT_QUOTES, 'UTF-8');
+    $ident     = htmlspecialchars(mailSenderIdentity($cfg), ENT_QUOTES, 'UTF-8');
+    $box   = $dark ? 'padding:16px 24px;background:#0a0a14;text-align:center;border-top:1px solid #2a2a3e;'
+                   : 'margin:24px 0 0;padding:16px 24px;background:#f4f5f7;text-align:center;border-top:1px solid #d9dce1;';
+    $link  = $dark ? 'color:#8ab4f8;font-size:12px;text-decoration:underline;' : 'color:#1a5fb4;font-size:12px;text-decoration:underline;';
+    $small = $dark ? 'color:#8899aa;font-size:11px;margin:8px 0 0;line-height:1.5;' : 'color:#555b66;font-size:11px;margin:8px 0 0;line-height:1.5;';
+    $font  = $dark ? '' : 'font-family:Arial,Helvetica,sans-serif;';
+    $out  = '<div style="' . $font . $box . '">';
+    if ($unsubUrl !== '') {
+        $out .= '<a href="' . sanitize($unsubUrl) . '" style="' . $link . '">' . sanitize(mailT($lang, 'mail.manage_prefs')) . '</a>';
+    }
+    $out .= '<p style="' . $small . '">' . $siteName . ($siteEmail !== '' ? ' &bull; ' . $siteEmail : '') . '</p>';
+    if ($ident !== '') $out .= '<p style="' . $small . '">' . $ident . '</p>';
+    return $out . '</div>';
+}
+
+/**
+ * The footer as text, for the text/plain half: the unsubscribe line (the address, when there is one), the site and
+ * its address, the sender's identity. Lines, no trailing newline; '' for nothing at all.
+ */
+function mailFooterText(array $cfg, ?string $lang, string $unsubUrl): string {
+    $lines = [];
+    if ($unsubUrl !== '') $lines[] = mailT($lang, 'mail.unsubscribe_plain', ['url' => $unsubUrl]);
+    $site = trim((string)($cfg['site_name'] ?? ''));
+    $mail = trim((string)($cfg['site_email'] ?? ''));
+    if ($site !== '' || $mail !== '') $lines[] = $site . (($site !== '' && $mail !== '') ? ' - ' : '') . $mail;
+    $ident = mailSenderIdentity($cfg);
+    if ($ident !== '') $lines[] = $ident;
+    return implode("\n", $lines);
+}
+
+/**
+ * A message sent WITHOUT the site's frame (a campaign's `frame` = 'none', 1.75.0): a minimal white document — the
+ * author's own HTML as it is, and the footer (mailFooterHtml(), light) because it is mandatory. $bodyHtml is HTML
+ * the caller has made safe; $title is text (the subject, for the document's <title>).
+ */
+function buildEmailHtmlBare(string $title, string $bodyHtml, array $cfg, string $unsubUrl, ?string $lang = null): string {
+    $htmlLang = sanitize($lang ?? (function_exists('langCurrent') ? langCurrent() : 'en'));
+    return '<!DOCTYPE html><html lang="' . $htmlLang . '"><head><meta charset="UTF-8">'
+         . '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+         . '<title>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title></head>'
+         . '<body style="margin:0;padding:0;background:#ffffff;">' . $bodyHtml
+         . mailFooterHtml($cfg, $lang, $unsubUrl, 'light') . '</body></html>';
 }
 
 /**

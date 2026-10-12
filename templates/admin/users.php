@@ -51,6 +51,9 @@
                             <option value=""><?= _h('a.users.all') ?></option>
                             <option value="active"><?= _h('a.users.active') ?></option>
                             <option value="banned"><?= _h('a.users.banned') ?></option>
+                            <?php /* 1.75.0: silenced right now, and with a warning that counts (loud, not revoked, not automatic) */ ?>
+                            <option value="muted"><?= _h('a.users.muted') ?></option>
+                            <option value="warned"><?= _h('a.users.warned') ?></option>
                         </select>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="us-filter-group" title="<?= _h('a.users.group') ?>">
                             <option value=""><?= _h('a.users.all_groups') ?></option>
@@ -120,50 +123,16 @@
                         <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-subject" maxlength="200" placeholder="<?= _h('a.users.subject_ph') ?>">
                     </div>
                     <div class="col-12">
-                        <div class="bm-msg-head">
-                            <label class="form-label mb-0" for="bm-body"><?= _h('a.users.message') ?></label>
-                            <!-- Same set as the public description editor, and the same rule: a button
-                                 whose syntax the chosen format cannot express hides itself, so the bar
-                                 never offers markup the renderer will ignore. -->
-                            <div class="bm-tools d-hidden" id="bm-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
-                                <span class="bm-tool-group">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="underline" title="<?= _h('rt.underline') ?>"><i class="bi bi-type-underline"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="strike" title="<?= _h('rt.strike') ?>"><i class="bi bi-type-strikethrough"></i></button>
-                                </span>
-                                <span class="bm-tool-group">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="color" title="<?= _h('rt.color') ?>"><i class="bi bi-palette"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="size" title="<?= _h('rt.size') ?>"><i class="bi bi-fonts"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="highlight" title="<?= _h('rt.highlight') ?>"><i class="bi bi-highlighter"></i></button>
-                                </span>
-                                <span class="bm-tool-group">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="link" title="<?= _h('rt.link') ?>"><i class="bi bi-link-45deg"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="image" title="<?= _h('rt.image') ?>"><i class="bi bi-image"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="list" title="<?= _h('rt.list') ?>"><i class="bi bi-list-ul"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="olist" title="<?= _h('rt.olist') ?>"><i class="bi bi-list-ol"></i></button>
-                                </span>
-                                <span class="bm-tool-group">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="quote" title="<?= _h('rt.quote') ?>"><i class="bi bi-quote"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="code" title="<?= _h('rt.code') ?>"><i class="bi bi-code-slash"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="table" title="<?= _h('rt.table') ?>"><i class="bi bi-table"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="center" title="<?= _h('rt.center') ?>"><i class="bi bi-text-center"></i></button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-md="hr" title="<?= _h('rt.hr') ?>"><i class="bi bi-dash-lg"></i></button>
-                                </span>
-                            </div>
-                            <select class="form-select form-select-sm bg-dark text-light border-secondary bm-fmt" id="bm-format" title="<?= _h('a.users.fmt_title') ?>">
-                                <option value="plain"><?= _h('a.users.fmt_plain') ?></option>
-                            </select>
+                        <label class="form-label" for="bm-body"><?= _h('a.users.message') ?></label>
+                        <?php /* The format select, the formatting buttons, the textarea and its preview are ONE component now
+                                 (assets/js/admin-common.js adminRichField(), 1.75.0), mounted here by admin-users.js. Its
+                                 preview is the WHOLE mail — frame (or none), body, footer — made by api/admin/bulk_send.php
+                                 (op: render → bulkMailParts(), the function the janitor calls) and shown in a frame with no
+                                 permissions: a campaign's HTML never reaches this page. */ ?>
+                        <div id="bm-rich"></div>
+                        <div class="d-flex flex-wrap align-items-center gap-3 mt-1">
+                            <label class="search-check" id="bm-frame-wrap" title="<?= _h('a.users.frame_title') ?>"><input type="checkbox" id="bm-frame" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.users.frame_label') ?></label>
                         </div>
-                        <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-body" rows="7" maxlength="5000" placeholder="<?= _h('a.users.body_ph') ?>"></textarea>
-                        <div class="bm-preview-wrap d-hidden" id="bm-preview-wrap">
-                            <div class="bm-preview-head"><?= _h('a.users.preview_head') ?></div>
-                            <!-- Rendered by api/admin/bulk_send.php (op: render), which calls the same
-                                 bulkBodyHtml() the janitor calls. A preview drawn in the browser would
-                                 be a second renderer to keep in step, and the first one to drift. -->
-                            <div class="bm-preview" id="bm-preview-html"></div>
-                        </div>
-                        <small class="settings-hint" id="bm-fmt-hint"><?= _h('a.users.fmt_hint_plain') ?></small>
                     </div>
                 </div>
 
@@ -355,6 +324,42 @@
                         <div class="ue-warnings-text small" id="ue-warnings-text"></div>
                         <small class="text-muted"><?= _h('a.users.warnings_hint') ?></small>
                     </div>
+                    <?php /* Warn, silence or ban by hand, and lift (1.75.0, includes/moderation.php — the one path the report cards use):
+                             drawn for a session that holds panel.moderation.handle, and never for the owner's own account. The reason is
+                             adminRichField() (#ue-mod-rich); the buttons act at once through admin/moderation_action — they are not part
+                             of Save, which is for the address, the password and the status box above. */ ?>
+                    <div class="mb-2" id="ue-moderation" hidden>
+                        <label class="form-label wl-label" for="ue-mod-action"><?= _h('a.users.mod_head') ?></label>
+                        <div class="ue-mod-state" id="ue-mod-state"></div>
+                        <div class="ue-mod-row">
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="ue-mod-action">
+                                <option value="warn:0"><?= _h('a.users.mod_warn') ?></option>
+                                <optgroup label="<?= _h('a.users.mod_mute_group') ?>">
+                                    <option value="mute:1"><?= _h('js.creport.mute_1') ?></option>
+                                    <option value="mute:7"><?= _h('js.creport.mute_7') ?></option>
+                                    <option value="mute:30"><?= _h('js.creport.mute_30') ?></option>
+                                    <option value="mute:0"><?= _h('js.creport.mute_forever') ?></option>
+                                </optgroup>
+                                <optgroup label="<?= _h('a.users.mod_ban_group') ?>">
+                                    <option value="ban:7"><?= _h('js.creport.ban_7') ?></option>
+                                    <option value="ban:30"><?= _h('js.creport.ban_30') ?></option>
+                                    <option value="ban:0"><?= _h('js.creport.ban_forever') ?></option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div id="ue-mod-rich"></div>
+                        <div class="ue-mod-modes" role="radiogroup" aria-label="<?= _h('js.creport.mode_label') ?>">
+                            <label class="msgrep-mode-opt"><input type="radio" name="ue-mod-mode" id="ue-mod-silent" value="silent" checked> <?= _h('js.creport.mode_silent') ?></label>
+                            <label class="msgrep-mode-opt"><input type="radio" name="ue-mod-mode" id="ue-mod-loud" value="loud"> <?= _h('js.creport.mode_loud') ?></label>
+                        </div>
+                        <div class="ue-mod-row">
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="ue-mod-apply"><i class="bi bi-exclamation-triangle"></i> <?= _h('a.users.mod_apply') ?></button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="ue-mod-lift-mute" hidden><i class="bi bi-unlock"></i> <?= _h('js.moderation.lift_mute') ?></button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="ue-mod-lift-ban" hidden><i class="bi bi-unlock"></i> <?= _h('js.moderation.lift_ban') ?></button>
+                        </div>
+                        <div class="small" id="ue-mod-msg" aria-live="polite"></div>
+                        <small class="text-muted"><?= _h('a.users.mod_hint') ?></small>
+                    </div>
                     <div id="ue-alert"></div>
                     <div class="d-flex justify-content-end gap-2 mt-3">
                         <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
@@ -431,7 +436,9 @@
                     </div>
                     <div class="mb-2">
                         <label for="un-body" class="form-label wl-label"><?= _h('a.users.message') ?> <small class="text-muted"><?= _h('a.users.optional') ?></small></label>
-                        <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="un-body" rows="4" maxlength="5000"></textarea>
+                        <?php /* adminRichField() (assets/js/admin-common.js, 1.75.0): the format select, the buttons and the preview;
+                                 the textarea is #un-body, made by the component. */ ?>
+                        <div id="un-rich"></div>
                     </div>
                     <div class="form-check">
                         <input class="form-check-input" type="checkbox" id="un-email">

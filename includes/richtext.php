@@ -277,26 +277,89 @@ function richtextRenderForEmail(?string $text, string $format, array $cfg): stri
     // the ordinary emoji it stands for, as it is wherever Font Awesome is switched off (1.69.0).
     // The site's emotes are not drawn in a mail at all (1.70.0): `:code:` stays the text it was typed as —
     // the renderer alone never draws them (richtextRenderIn() does, for the pages).
-    $html = richtextRender($text, $format, array_merge($cfg, ['shout_emoji_fa' => 'off']));
+    //
+    // $signedIn is TRUE (1.75.0): a mail is addressed to somebody on purpose — a member, a reporter — by the person
+    // who wrote it, so a [hide] block is their own words to that reader and shows its content; rendered for "a
+    // guest" it said "sign in to read this" inside an inbox.
+    $html = richtextRender($text, $format, array_merge($cfg, ['shout_emoji_fa' => 'off']), true);
     if ($html === '') return '';
-    $style = [
-        'rt-code'   => 'margin:0.6rem 0;padding:10px 12px;border-radius:4px;background:#f4f5f7;border:1px solid #dcdfe4;overflow-x:auto;font-family:Consolas,Menlo,monospace;font-size:13px;white-space:pre-wrap',
-        'rt-inline' => 'padding:1px 5px;border-radius:3px;background:#f4f5f7;font-family:Consolas,Menlo,monospace;font-size:13px',
-        'rt-quote'  => 'margin:10px 0;padding:6px 14px;border-left:3px solid #c9ced6;color:#555',
-        'rt-list'   => 'margin:8px 0 10px 20px;padding:0',
-        'rt-h'      => 'margin:14px 0 6px;font-weight:600',
-        'rt-img'    => 'max-width:100%;height:auto;border-radius:4px;margin:8px 0',
-    ];
-    foreach ($style as $cls => $css) {
-        $html = str_replace(' class="' . $cls . '"', ' style="' . $css . '"', $html);
-    }
     // Icons draw from a web font no mail client loads, so they leave (1.68.0): a task box becomes
     // the brackets its author typed, and every other icon — a spoiler's chevron, the YouTube mark —
     // is decoration beside words that already say the same thing.
     $html = (string)preg_replace_callback('#<i class="bi bi-([a-z0-9-]+)[^"]*"[^>]*></i> ?#', static function (array $m): string {
         return $m[1] === 'check-square' ? '[x]' : ($m[1] === 'square' ? '[ ]' : '');
     }, $html);
-    return str_replace(' data-external="1"', '', $html);
+    return str_replace(' data-external="1"', '', richtextMailStyles($html));
+}
+
+/**
+ * The classes the renderer writes, as the inline styles they stand for (1.75.0: all of them — until then six).
+ * The renderer's HTML is what the site shows; a mail client drops <style> and most drop class, so every class is
+ * swapped for the declarations the site's stylesheet (assets/css/detail-panel.css .rt-body …) gives it, and a class
+ * with nothing to say is dropped. The colours are chosen to READ on both grounds a mail can have — the site's dark
+ * frame (#111, text #e0e0e0) and a bare white message: borders and grounds are mid-grey or translucent, and the TEXT
+ * colour is never set, so it is the container's. (The quote was #555 on #111 and the code #f4f5f7 under #e0e0e0.)
+ * A style an element already carried — [color=…], [size=…], [mark=…], a Markdown cell's alignment — comes LAST and wins.
+ * A link gets a colour that reads on both (the default blue is unreadable on the dark frame).
+ */
+function richtextMailStyles(string $html): string
+{
+    $mono = 'font-family:Consolas,Menlo,monospace';
+    $map = [
+        'rt-code'   => 'margin:10px 0;padding:10px 12px;border-radius:4px;background:rgba(127,127,127,0.18);border:1px solid rgba(127,127,127,0.4);overflow-x:auto;' . $mono . ';font-size:13px;white-space:pre-wrap',
+        'rt-inline' => 'padding:1px 5px;border-radius:3px;background:rgba(127,127,127,0.22);' . $mono . ';font-size:13px',
+        'rt-quote'  => 'margin:10px 0;padding:6px 14px;border-left:3px solid #8a94a6',
+        'rt-cite'   => 'display:block;font-weight:600;font-size:12px;margin-bottom:3px',
+        'rt-list'   => 'margin:8px 0 10px 20px;padding:0',
+        'rt-list-num' => 'list-style-type:decimal', 'rt-list-alpha' => 'list-style-type:lower-alpha', 'rt-list-roman' => 'list-style-type:lower-roman',
+        'rt-list-task' => 'list-style:none;margin-left:0',
+        'rt-footnotes' => 'font-size:12px;margin-top:12px;padding-top:6px;border-top:1px solid #8a94a6',
+        'rt-task-done' => 'text-decoration:line-through',
+        'rt-h'      => 'margin:14px 0 6px;font-weight:600',
+        'rt-img'    => 'max-width:100%;height:auto;border-radius:4px;margin:8px 0',
+        'rt-center' => 'text-align:center', 'rt-right' => 'text-align:right', 'rt-left' => 'text-align:left',
+        'rt-hr'     => 'border:0;border-top:1px solid #8a94a6;margin:14px 0',
+        'rt-mark'   => 'background:#f0b429;color:#111111;padding:0 3px;border-radius:2px',
+        'rt-font-mono' => $mono, 'rt-font-serif' => 'font-family:Georgia,\'Times New Roman\',serif', 'rt-font-sans' => 'font-family:Arial,Helvetica,sans-serif',
+        'rt-table-wrap' => 'overflow-x:auto;margin:10px 0',
+        'rt-table'  => 'border-collapse:collapse;font-size:13px',
+        'rt-t-center' => 'text-align:center', 'rt-t-right' => 'text-align:right',
+        'rt-spoiler' => 'border:1px solid #8a94a6;border-radius:5px;margin:10px 0',
+        'rt-spoiler-body' => 'padding:0 10px 8px',
+        'rt-hide'   => 'border-left:3px solid #4a9eff;padding:4px 10px;margin:10px 0',
+        'rt-video'  => 'display:inline-block;padding:2px 8px;border:1px solid #8a94a6;border-radius:4px',
+        'rt-callout' => 'border-left:3px solid #8a94a6;border-radius:0 4px 4px 0;padding:8px 12px;margin:10px 0;background:rgba(127,127,127,0.12)',
+        'rt-callout-note' => 'border-left-color:#4a9eff', 'rt-callout-tip' => 'border-left-color:#2e9e55',
+        'rt-callout-important' => 'border-left-color:#a06fd8', 'rt-callout-warning' => 'border-left-color:#c9a227',
+        'rt-callout-caution' => 'border-left-color:#d4524a',
+    ];
+    $kind = ['note' => '#4a9eff', 'tip' => '#2e9e55', 'important' => '#a06fd8', 'warning' => '#c9a227', 'caution' => '#d4524a'];
+    // The callout's label takes its callout's colour: asked as a PAIR, while the parent is still next to it.
+    $html = (string)preg_replace_callback('#<div class="rt-callout rt-callout-(note|tip|important|warning|caution)"><div class="rt-callout-k">#',
+        static function (array $m) use ($map, $kind): string {
+            return '<div style="' . $map['rt-callout'] . ';' . $map['rt-callout-' . $m[1]] . '"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.07em;font-weight:700;margin-bottom:3px;color:' . $kind[$m[1]] . '">';
+        }, $html);
+    return (string)preg_replace_callback('#<([a-z][a-z0-9]*)((?:\s[^>]*)?)>#i', static function (array $m) use ($map): string {
+        $tag = strtolower($m[1]);
+        $attrs = $m[2];
+        $cls = '';
+        $style = '';
+        $attrs = (string)preg_replace_callback('/\sclass="([^"]*)"/', static function (array $c) use (&$cls): string { $cls = $c[1]; return ''; }, $attrs, 1);
+        $attrs = (string)preg_replace_callback('/\sstyle="([^"]*)"/', static function (array $c) use (&$style): string { $style = $c[1]; return ''; }, $attrs, 1);
+        $css = [];
+        if ($tag === 'td' || $tag === 'th') {
+            $css[] = 'border:1px solid #8a94a6;padding:5px 9px;text-align:left' . ($tag === 'th' ? ';font-weight:600;background:rgba(127,127,127,0.16)' : '');
+        } elseif ($tag === 'summary') {
+            $css[] = 'font-weight:600;padding:4px 10px';
+        } elseif ($tag === 'a') {
+            $css[] = 'color:#3b82f6;text-decoration:underline';
+        }
+        foreach (preg_split('/\s+/', trim($cls)) ?: [] as $c) {
+            if ($c !== '' && ($map[$c] ?? '') !== '') $css[] = $map[$c];
+        }
+        if ($style !== '') $css[] = $style;
+        return '<' . $tag . $attrs . ($css ? ' style="' . implode(';', $css) . '"' : '') . '>';
+    }, $html);
 }
 
 /* ── sanitisers for the tags that carry a VALUE ──────────────────────────────

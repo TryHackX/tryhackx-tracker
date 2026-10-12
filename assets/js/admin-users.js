@@ -101,6 +101,7 @@
         $('us-table').classList.remove('tbl-loading');
         if (r.error) { showToast(t.key('js.users.users_error', { error: r.error }), 'danger'); return; }
         state.us.rows = r.rows || [];
+        state.canModerate = !!r.can_moderate;
         renderStatus(r.counts || { total: 0, active: 0, banned: 0 }, !!r.enabled);
         $('us-total').textContent = t.key('js.users.count_users', { n: t.num(r.total || 0) });
         const tb = $('us-body');
@@ -150,9 +151,20 @@
             // edit window.
             const warned = Number(u.warnings) || 0;
             // The status is a word of the dictionary, not the stored value (it said "ACTIVE" / "BANNED" on a Polish page).
+            // …and, since 1.75.0, until WHEN it holds: a ban's end ("until lifted" is the 2099 date; a ban with no date at all is
+            // the owner's, from the status box in the edit window) and the end of a silence, each under the badge.
+            const untilBits = [];
+            if (u.status === 'banned') {
+                untilBits.push(el('span', { className: 'us-until', text: !u.banned_until ? t.key('js.users.ban_no_end')
+                    : String(u.banned_until).slice(0, 4) >= '2099' ? t.key('js.users.until_lifted') : t.key('js.users.ban_until', { date: fmtDate(u.banned_until) }) }));
+            }
+            if (u.muted_until) {
+                untilBits.push(el('span', { className: 'us-until', text: String(u.muted_until).slice(0, 4) >= '2099' ? t.key('js.users.mute_lifted')
+                    : t.key('js.users.mute_until', { date: fmtDate(u.muted_until) }) }));
+            }
             tr.appendChild(el('td', { className: 'col-badge' }, [badge(STATUS_WORD[u.status] ? t.key(STATUS_WORD[u.status]) : u.status, u.status === 'active' ? 'wl-b-ok' : 'wl-b-bad'),
                 warned ? el('span', { className: 'us-warned', title: t.key('js.users.warned_badge', { n: warned }), 'aria-label': t.key('js.users.warned_badge', { n: warned }) },
-                            [el('i', { className: 'bi bi-exclamation-triangle', 'aria-hidden': 'true' }), ' ' + warned]) : null]));
+                            [el('i', { className: 'bi bi-exclamation-triangle', 'aria-hidden': 'true' }), ' ' + warned]) : null, ...untilBits]));
             // A cell of badges (admin.css, `.col-badge`): the groups wrap onto as many lines as they need.
             const gTd = el('td', { className: 'col-badge col-start' });
             (u.groups || []).forEach(g => {
@@ -252,6 +264,7 @@
         ueMedia(u);
         ueBio(u);
         ueWarnings(u);
+        ueModeration(u);
         bootstrap.Modal.getOrCreateInstance($('usEditModal')).show();
     }
     /**
@@ -268,11 +281,114 @@
         box.appendChild(el('div', { className: 'text-warning', text: t.key('js.users.warnings_count', { n }) }));
         const ul = el('ul', { className: 'ue-warnings-list' });
         (u.latest_warnings || []).forEach(w => {
-            ul.appendChild(el('li', { text: t.key('js.users.warning_line', {
-                at: String(w.at || '').slice(0, 16), action: t.key('js.users.warn_action_' + (w.action || 'warn')),
-                reason: w.reason || '', by: w.by || '—' }) }));
+            // 1.75.0: a REVOKED row stays in the list, struck through; a silent one and an automatic penalty are marked.
+            const marks = [];
+            if (w.auto) marks.push(t.key('js.moderation.mark_auto'));
+            else if (w.loud === false) marks.push(t.key('js.moderation.mark_silent'));
+            if (w.revoked) marks.push(t.key('js.moderation.mark_revoked'));
+            const tail = marks.length ? [' (', ...marks.flatMap((m, i) => (i ? [', ', m] : [m])), ')'] : [];
+            const li = el('li', { className: w.revoked ? 'mod-revoked' : null });
+            if (w.auto && w.auto_info) {
+                li.append(t.key('js.users.warning_head', { at: String(w.at || '').slice(0, 16), action: t.key('js.users.warn_action_' + (w.action || 'warn')), by: t.key('js.moderation.by_auto') }),
+                          ' ', t.key('js.moderation.auto_reason', { n: w.auto_info.count, days: w.auto_info.window }), ...tail);
+            } else if (w.reason_html) {
+                // A BBCode / Markdown reason (1.75.0): the server's rendering of it (the site's renderer on escaped input).
+                const body = el('div', { className: 'arf-answer rt-body richtext' });
+                body.innerHTML = w.reason_html;
+                li.append(t.key('js.users.warning_head', { at: String(w.at || '').slice(0, 16), action: t.key('js.users.warn_action_' + (w.action || 'warn')), by: w.by || '—' }), ...tail, body);
+            } else {
+                li.append(t.key('js.users.warning_line', { at: String(w.at || '').slice(0, 16), action: t.key('js.users.warn_action_' + (w.action || 'warn')),
+                                                           reason: w.reason || '', by: w.by || '—' }), ...tail);
+            }
+            ul.appendChild(li);
         });
         box.appendChild(ul);
+    }
+
+    // ── warn, silence and ban by hand; lift (1.75.0) ────────────────────────────────────────────────
+    // The Moderation block of the edit window: the SAME path the report cards use (includes/moderation.php, through
+    // admin/moderation_action), with a reason in adminRichField(). Acts at once — it is not part of Save. A ban with NO end date
+    // (the owner's, from the status box above) is lifted by that box, not here.
+    let modField = null;
+    function modBox() {
+        if (!modField) {
+            modField = A.adminRichField({ compact: true, rows: 2, maxLength: 2000, countMax: 2000,
+                placeholder: t.key('js.moderation.reason_ph'), ariaLabel: t.key('js.moderation.reason_ph') });
+            $('ue-mod-rich').appendChild(modField.el);
+        }
+        return modField;
+    }
+    function modSay(text, bad) {
+        const m = $('ue-mod-msg');
+        if (!m) return;
+        m.textContent = '';
+        if (text) m.append(text);
+        m.className = 'small ' + (bad ? 'text-danger' : 'text-success');
+    }
+    const modErr = (r) => (r && r.error === 'invalid_text' && r.message) ? r.message
+        : (t.has('js.moderation.err_' + (r && r.error)) ? t.key('js.moderation.err_' + r.error) : t.key('js.moderation.err_failed'));
+    function ueModeration(u) {
+        const box = $('ue-moderation');
+        if (!box) return;
+        // Not for the owner's own account (it cannot be punished) and not for a session without panel.moderation.handle.
+        box.hidden = !state.canModerate || !!u.root_admin;
+        if (box.hidden) return;
+        modBox().reset();
+        modSay('');
+        const st = $('ue-mod-state');
+        st.textContent = '';
+        const bits = [];
+        if (u.status === 'banned') {
+            bits.push(!u.banned_until ? t.key('js.users.ban_no_end_long') : String(u.banned_until).slice(0, 4) >= '2099' ? t.key('js.users.until_lifted_long')
+                : t.key('js.users.ban_until_long', { date: fmtDate(u.banned_until) }));
+        }
+        if (u.muted_until) {
+            bits.push(String(u.muted_until).slice(0, 4) >= '2099' ? t.key('js.users.mute_lifted_long') : t.key('js.users.mute_until_long', { date: fmtDate(u.muted_until) }));
+        }
+        if (!bits.length) bits.push(t.key('js.users.mod_clean'));
+        bits.forEach((b, i) => { if (i) st.append(' · '); st.append(b); });
+        // lifting a silence, and a ban that has an end date (a dateless one: the status box)
+        $('ue-mod-lift-mute').hidden = !u.muted_until;
+        $('ue-mod-lift-ban').hidden = !(u.status === 'banned' && u.banned_until);
+        syncModMode();
+    }
+    /** A warning is always loud: its silent choice goes. */
+    function syncModMode() {
+        const warn = $('ue-mod-action').value.startsWith('warn:');
+        $('ue-mod-silent').disabled = warn;
+        if (warn) $('ue-mod-loud').checked = true;
+    }
+    async function ueModRefresh() {
+        const id = editUser ? editUser.id : 0;
+        await loadUsers();
+        const fresh = (state.us.rows || []).find(x => x.id === id);
+        if (fresh) { editUser = fresh; ueModeration(fresh); ueWarnings(fresh); }
+    }
+    async function ueModApply() {
+        if (!editUser) return;
+        const [action, days] = $('ue-mod-action').value.split(':');
+        const f = modBox();
+        const loud = action === 'warn' || $('ue-mod-loud').checked;
+        if (loud && f.isEmpty()) { modSay(t.key('js.moderation.err_reason_required'), true); f.focus(); return; }
+        if (!(await confirmAction(t.key('js.moderation.confirm_title'), t.key('js.moderation.sure_' + action, { user: editUser.username }), { okLabel: t.key('js.moderation.confirm_ok') }))) return;
+        const btn = $('ue-mod-apply');
+        btn.disabled = true;
+        const r = await apiCall('admin/moderation_action', 'POST', { op: 'apply', user_id: editUser.id, action, days: Number(days), loud,
+            reason: f.getValue().trim(), reason_format: f.getFormat() });
+        btn.disabled = false;
+        if (!r.success) { modSay(modErr(r), true); return; }
+        showToast(t.key('js.moderation.done_' + action, { user: editUser.username }));
+        if (r.auto) showToast(t.key('js.moderation.done_auto'), 'warning');
+        await ueModRefresh();
+    }
+    async function ueModLift(what) {
+        if (!editUser) return;
+        const f = modBox();
+        const r = await apiCall('admin/moderation_action', 'POST', { op: 'lift', user_id: editUser.id, what,
+            loud: $('ue-mod-loud').checked, note: f.getValue().trim(), note_format: f.getFormat() });
+        if (!r.success) { modSay(modErr(r), true); return; }
+        showToast(t.key(what === 'ban' ? 'js.moderation.lifted_ban' : 'js.moderation.lifted_mute', { user: editUser.username }));
+        await ueModRefresh();
     }
     /**
      * The description on their profile (1.69.0): the rendering admin/fetch_users sent — made by the
@@ -328,8 +444,22 @@
     }
     async function saveEdit() {
         if (!ueValidate()) return;
-        const body = { id: editUser.id, status: $('ue-status').value, email: $('ue-email').value.trim() };
+        // The status only when the moderator CHANGED it (1.75.0): it used to be sent with every save, and "banned" written over a
+        // ban that had an end date made it dateless — editing an address ended a timed ban's date. (The server ignores a
+        // status the account already has, too.)
+        // The address the same way (1.75.0): the server marks an address it is given as verified, so sending the unchanged one
+        // with every save verified an address nobody had confirmed whenever only a password or a group was being set.
+        const body = { id: editUser.id };
+        const mail = $('ue-email').value.trim();
+        if (mail !== (editUser.email || '')) body.email = mail;
+        if ($('ue-status').value !== editUser.status) body.status = $('ue-status').value;
         if ($('ue-password').value !== '') body.password = $('ue-password').value;
+        // Nothing was changed: nothing to send (the server would answer "nothing to change" inside the window).
+        if (Object.keys(body).length === 1) {
+            showToast(t.key('js.users.nothing_changed'));
+            bootstrap.Modal.getOrCreateInstance($('usEditModal')).hide();
+            return;
+        }
         const r = await apiCall('admin/user_update', 'POST', body);
         if (r.success) {
             showToast(t.key('js.users.saved'));
@@ -532,16 +662,26 @@
     }
 
     // ── notify modal ────────────────────────────────────────────────────────
+    // The note to one member takes the site's formats (1.75.0): the shared box, adminRichField() — plain, and BBCode /
+    // Markdown where the site has them on — and its server preview. Made once, when the window is first opened.
+    let notifyField = null;
+    function notifyBox() {
+        if (!notifyField) {
+            notifyField = A.adminRichField({ textId: 'un-body', formatId: 'un-format', rows: 4, maxLength: 5000, countMax: 5000, compact: true });
+            $('un-rich').appendChild(notifyField.el);
+        }
+        return notifyField;
+    }
     function openNotify(u) {
         notifyUser = u;
         titleName('un-name', u);
-        $('un-title').value = ''; $('un-body').value = '';
+        $('un-title').value = ''; notifyBox().reset();
         $('un-email').checked = false;
         $('un-alert').textContent = '';
         bootstrap.Modal.getOrCreateInstance($('usNotifyModal')).show();
     }
     async function sendNotify() {
-        const r = await apiCall('admin/user_notify', 'POST', { id: notifyUser.id, title: $('un-title').value.trim(), body: $('un-body').value.trim(), email: $('un-email').checked ? 1 : 0 });
+        const r = await apiCall('admin/user_notify', 'POST', { id: notifyUser.id, title: $('un-title').value.trim(), body: notifyBox().getValue().trim(), format: notifyBox().getFormat(), email: $('un-email').checked ? 1 : 0 });
         if (r.success) {
             showToast(r.mailed ? t.key('js.users.sent_email') : t.key('js.users.sent'));
             bootstrap.Modal.getOrCreateInstance($('usNotifyModal')).hide();
@@ -966,134 +1106,50 @@
 
     // ── the message editor ──────────────────────────────────────────────────
     //
-    // Ctrl+B in a <textarea> does nothing on its own; the browser only wires those shortcuts to
-    // contenteditable regions. So the shortcuts and the buttons run the same function, which wraps
-    // the selection in whichever syntax the chosen format uses. A contenteditable box would have
-    // given Ctrl+B for free and cost a second renderer, a paste sanitiser and an HTML whitelist to
-    // police — the markup the site already renders is the cheaper honest answer.
-    // Kept in step with SYNTAX in assets/js/app.js — the same renderer serves both, so a button here
-    // that writes something the public editor cannot would be a lie about what the site supports.
-    // A third element means "a whole block": inserted on its own lines instead of wrapped.
-    const MD_SYNTAX = {
-        markdown: {
-            bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'], code: ['`', '`'],
-            highlight: ['==', '=='],
-            link: ['[', '](https://example.org)'], image: ['![](', ')'],
-            quote: ['> ', ''], list: ['- ', ''], olist: ['1. ', ''],
-            table: ['| A | B |\n|---|---|\n| 1 | 2 |', '', true],
-            hr: ['\n---\n', '', true],
-        },
-        bbcode: {
-            bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], underline: ['[u]', '[/u]'],
-            strike: ['[s]', '[/s]'], code: ['[code]', '[/code]'],
-            color: ['[color=#e74c3c]', '[/color]'], size: ['[size=18]', '[/size]'],
-            highlight: ['[highlight=yellow]', '[/highlight]'],
-            link: ['[url=https://example.org]', '[/url]'], image: ['[img]', '[/img]'],
-            quote: ['[quote]', '[/quote]'],
-            list: ['[list]\n[*] ', '\n[/list]'], olist: ['[list=1]\n[*] ', '\n[/list]'],
-            center: ['[center]', '[/center]'],
-            table: ['[table]\n[tr][th]A[/th][th]B[/th][/tr]\n[tr][td]1[/td][td]2[/td][/tr]\n[/table]', '', true],
-            hr: ['\n[hr]\n', '', true],
-        },
-    };
-
-    function bmFormat() { const f = $('bm-format'); return f ? f.value : 'plain'; }
-
-    /** Wrap the selection (or drop a stub at the caret) and keep the caret somewhere useful. */
-    function bmWrap(kind) {
-        const ta = $('bm-body');
-        const syn = MD_SYNTAX[bmFormat()];
-        if (!ta || !syn || !syn[kind]) return;
-        const [open, close, block] = syn[kind];
-        const start = ta.selectionStart, end = ta.selectionEnd;
-        const sel = ta.value.slice(start, end);
-        if (block) {
-            // A whole construct. Wrapping a selection in a table skeleton would put the author's
-            // sentence in the header, which is never what they meant.
-            const pre = start > 0 && ta.value[start - 1] !== '\n' ? '\n' : '';
-            ta.setRangeText(pre + open + '\n', start, end, 'end');
-            ta.focus();
-            ta.dispatchEvent(new Event('input', { bubbles: true }));
-            return;
-        }
-        // Line-prefix marks (quote, list in Markdown) belong at the start of every selected line,
-        // not wrapped around the block — otherwise a three-line quote quotes only its first line.
-        const linewise = close === '' ;
-        let inserted;
-        if (linewise) {
-            const lines = (sel || 'text').split('\n');
-            inserted = lines.map(l => open + l).join('\n');
-        } else {
-            inserted = open + (sel || 'text') + close;
-        }
-        ta.setRangeText(inserted, start, end, 'end');
-        if (!sel) {
-            // No selection: select the placeholder so the next keystroke replaces it.
-            const at = start + (linewise ? open.length : open.length);
-            ta.setSelectionRange(at, at + 4);
-        }
-        ta.focus();
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-
-    let bmPrevTimer = null;
-    async function bmRenderPreview() {
-        const wrap = $('bm-preview-wrap'), out = $('bm-preview-html');
-        if (!wrap || !out) return;
-        const fmt = bmFormat();
-        const body = $('bm-body').value;
-        if (fmt === 'plain' || body.trim() === '') { wrap.classList.add('d-hidden'); return; }
-        const r = await apiCall('admin/bulk_send', 'POST', { op: 'render', body, format: fmt });
-        if (!r || !r.success) { wrap.classList.add('d-hidden'); return; }
-        wrap.classList.remove('d-hidden');
-        // Server-rendered from fully escaped input by includes/richtext.php, the same call the
-        // janitor makes when it builds the mail.
-        out.innerHTML = r.html;
-    }
-    function bmPreviewSoon() { clearTimeout(bmPrevTimer); bmPrevTimer = setTimeout(bmRenderPreview, 350); }
-
-    function bmSyncFormatUi() {
-        const fmt = bmFormat();
-        const tools = $('bm-tools');
-        if (tools) {
-            tools.classList.toggle('d-hidden', fmt === 'plain');
-            const syn = MD_SYNTAX[fmt] || {};
-            tools.querySelectorAll('[data-md]').forEach(b => { b.hidden = !syn[b.dataset.md]; });
-            tools.querySelectorAll('.bm-tool-group').forEach(g => {
-                g.hidden = ![...g.querySelectorAll('[data-md]')].some(b => !b.hidden);
+    // The box — format select, toolbar, textarea, counter, preview — is adminRichField() (assets/js/admin-common.js, 1.75.0),
+    // the component every window that takes words with a format uses; this file says only what is particular to a BULK
+    // message: the formats are the audience preview's (plain, the site's BBCode / Markdown, and HTML where the server can
+    // parse it), the limit is 60 000 BYTES (a copy is written for every recipient), and the preview is the WHOLE MAIL —
+    // the frame (or none), the body, the footer — made by admin/bulk_send (op: render → bulkMailParts(), the function the
+    // janitor sends with) and shown in a frame with no permissions. The old inline editor (a toolbar, a textarea, an
+    // innerHTML preview) is gone: an innerHTML preview of an administrator's HTML would have put it into the panel.
+    const BULK_MAX_BYTES = 60000;
+    let bmField = null, bmFormatsSet = false;
+    function bmFormat() { return bmField ? bmField.getFormat() : 'plain'; }
+    /** 'none' when "Site frame" is unticked: the author's own design, with only the footer the law asks for. */
+    function bmFrame() { const c = $('bm-frame'); return c && !c.checked ? 'none' : 'site'; }
+    function bmBox() {
+        if (!bmField) {
+            bmField = A.adminRichField({
+                textId: 'bm-body', formatId: 'bm-format', rows: 9,
+                countMax: BULK_MAX_BYTES, countBytes: true,
+                placeholder: t.key('js.rich.bulk_ph'),
+                formats: ['plain'],                 // the audience preview says which (bmFillFormats())
+                preview: 'frame',
+                previewFetch: async (text, format) => {
+                    const r = await apiCall('admin/bulk_send', 'POST', { op: 'render', subject: $('bm-subject').value.trim(), body: text, format, frame: bmFrame() });
+                    return r && r.success ? { html: r.html, problem: r.problem } : null;
+                },
             });
+            $('bm-rich').appendChild(bmField.el);
         }
-        const hint = $('bm-fmt-hint');
-        if (hint) {
-            hint.textContent = fmt === 'plain'
-                ? t.key('js.users.fmt_hint_plain')
-                : (fmt === 'markdown'
-                    ? t.key('js.users.fmt_hint_markdown')
-                    : t.key('js.users.fmt_hint_bbcode'));
-        }
-        bmRenderPreview();
+        return bmField;
     }
-
-    /** Offer only the formats the site has switched on, plus plain text. */
+    /** Offer only the formats the server says (plain, the site's, and HTML where it can be cleaned) — once. */
     function bmFillFormats(formats) {
-        const sel = $('bm-format');
-        if (!sel || !Array.isArray(formats) || sel.dataset.filled === '1') return;
-        const label = { plain: t.key('js.users.fmt_plain'), markdown: 'Markdown', bbcode: 'BBCode' };
-        sel.textContent = '';
-        formats.forEach(f => sel.appendChild(el('option', { value: f, text: label[f] || f })));
-        sel.dataset.filled = '1';
-        bmSyncFormatUi();
+        if (!Array.isArray(formats) || bmFormatsSet) return;
+        bmFormatsSet = true;
+        bmBox().setFormats(formats);
     }
-
     async function sendTest() {
         const r = await apiCall('admin/bulk_send', 'POST',
-            { op: 'test', subject: $('bm-subject').value, body: $('bm-body').value, format: bmFormat() });
+            { op: 'test', subject: $('bm-subject').value, body: bmBox().getValue(), format: bmFormat(), frame: bmFrame() });
         showToast((r && (r.message || r.error)) || t.key('js.users.failed'), r && r.success ? 'success' : 'error');
     }
 
     async function sendWrite() {
         const subject = $('bm-subject').value.trim();
-        const body = $('bm-body').value.trim();
+        const body = bmBox().getValue().trim();
         if (!subject || !body) { showToast(t.key('js.users.write_need_subject_body'), 'error'); return; }
         const wantMail = $('bm-email').checked;
         const wantNotify = $('bm-notify').checked;
@@ -1112,9 +1168,9 @@
         if (!pw) return;
         const r = await apiCall('admin/bulk_send', 'POST', {
             op: 'queue', password: pw, audience: writeAudience(),
-            subject, body, format: bmFormat(), notify: wantNotify, email: wantMail });
+            subject, body, format: bmFormat(), frame: bmFrame(), notify: wantNotify, email: wantMail });
         showToast((r && (r.message || r.error)) || t.key('js.users.failed'), r && r.success ? 'success' : 'error');
-        if (r && r.success) { $('bm-subject').value = ''; $('bm-body').value = ''; bmRenderPreview(); loadBatches(); }
+        if (r && r.success) { $('bm-subject').value = ''; bmBox().reset(); loadBatches(); }
     }
 
     // ── wiring ──────────────────────────────────────────────────────────────
@@ -1147,6 +1203,13 @@
         if ($('ue-remove-avatar')) $('ue-remove-avatar').addEventListener('click', () => ueRemoveMedia('avatar'));
         if ($('ue-remove-cover')) $('ue-remove-cover').addEventListener('click', () => ueRemoveMedia('cover'));
         if ($('ue-bio-clear')) $('ue-bio-clear').addEventListener('click', ueClearBio);
+        // the Moderation block of the edit window (1.75.0)
+        if ($('ue-mod-apply')) {
+            $('ue-mod-apply').addEventListener('click', ueModApply);
+            $('ue-mod-lift-mute').addEventListener('click', () => ueModLift('mute'));
+            $('ue-mod-lift-ban').addEventListener('click', () => ueModLift('ban'));
+            $('ue-mod-action').addEventListener('change', syncModMode);
+        }
         $('ue-email').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });
         $('ue-email2').addEventListener('input', ueValidate);
         $('ue-password').addEventListener('input', () => { ueSyncRepeats(); ueValidate(); });
@@ -1164,24 +1227,16 @@
         $('bm-mode').addEventListener('change', refreshPreview);
         $('bm-group').addEventListener('change', refreshPreview);
         $('bm-refresh').addEventListener('click', refreshPreview);
-        $('bm-format').addEventListener('change', bmSyncFormatUi);
+        // The composer's box (adminRichField()) is made now, so its format select and textarea exist for the first look.
+        bmBox();
+        // "Site frame" and the subject are part of the mail the preview shows (the frame, the document's title).
+        $('bm-frame').addEventListener('change', () => bmBox().refresh());
+        $('bm-subject').addEventListener('input', A.debounce(() => bmBox().refresh(), 600));
         // The label carries a count that depends on which channel is ticked, so it is refreshed when
         // that changes rather than only when the audience does.
         ['bm-email', 'bm-notify'].forEach(id => {
             const el2 = $(id);
             if (el2) el2.addEventListener('change', refreshPreview);
-        });
-        $('bm-tools').addEventListener('click', (e) => {
-            const b = e.target.closest('[data-md]');
-            if (b) bmWrap(b.dataset.md);
-        });
-        $('bm-body').addEventListener('input', bmPreviewSoon);
-        $('bm-body').addEventListener('keydown', (e) => {
-            if (!(e.ctrlKey || e.metaKey) || e.altKey || bmFormat() === 'plain') return;
-            const kind = { b: 'bold', i: 'italic', k: 'link' }[e.key.toLowerCase()];
-            if (!kind) return;
-            e.preventDefault();
-            bmWrap(kind);
         });
         $('bm-test').addEventListener('click', sendTest);
         $('bm-send').addEventListener('click', sendWrite);
@@ -1202,6 +1257,16 @@
             const f = $(id);
             if (f) { f.addEventListener('input', uaValidate); f.addEventListener('blur', uaValidate); }
         });
-        loadGroups().then(loadUsers);
+        // "Open user" on the Moderation page (1.75.0) arrives as #find=<name>: the list is searched for that name and, when it is
+        // there, its edit window opens.
+        let findName = '';
+        const fm = /^#find=(.+)$/.exec(location.hash || '');
+        if (fm) { try { findName = decodeURIComponent(fm[1]); } catch (e) { findName = ''; } }
+        if (findName) { $('us-search').value = findName; state.us.search = findName; }
+        loadGroups().then(loadUsers).then(() => {
+            if (!findName) return;
+            const hit = (state.us.rows || []).find(x => String(x.username).toLowerCase() === findName.toLowerCase());
+            if (hit) openEdit(hit);
+        });
     });
 })();

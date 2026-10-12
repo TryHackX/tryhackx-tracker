@@ -28,6 +28,10 @@ $accDescs = function_exists('profileDescsContext') ? profileDescsContext($db, $c
     : ['credit_ok' => false, 'enabled' => false, 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false, 'name_hidden' => false];
 $accLists = listsContext($db, $cfg, $meUser);
 $accPeople = peopleContext($db, $cfg, $meUser);
+// "Account standing" (1.75.0, includes/moderation.php): the silence or ban that runs now with its end, and the warnings that
+// count, as the member was told them. The SESSION'S OWN id and nothing else is ever passed — nobody else's standing is read
+// by a page — and an account in good standing gets [] and no card.
+$accStanding = function_exists('accountStandingContext') ? accountStandingContext($db, $cfg, (int)$meUser['id']) : [];
 // Whether this reader may search inside file names — the same permission the search page asks, and
 // the endpoints ask it again themselves.
 $mayFileSearch = userCan($db, $cfg, 'index.files');
@@ -139,6 +143,36 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
          columns. Every id, and every class a script or a check reads, is where it was: on the card that
          is now the block. */ ?>
 <div class="acc-flow">
+    <?php if ($accStanding): ?>
+    <?php /* ACCOUNT STANDING (1.75.0): only for an account that has something to show — a silence or a ban running now, a warning
+             that counts. Active warnings only (loud, not revoked): a silent action was never told to the member, a withdrawn
+             warning is withdrawn. No moderator's name. The reasons are the site's own rendering (reportTextHtml()). */ ?>
+    <section class="account-card acc-card acc-standing" id="acc-card-standing">
+        <h2><?= _h('account.standing') ?></h2>
+        <p class="acc-card-desc"><?= _h('account.standing_desc') ?></p>
+        <?php foreach (['ban' => 'account.standing_banned', 'mute' => 'account.standing_muted'] as $accK => $accKey): if (!$accStanding[$accK]) continue; $accR = $accStanding[$accK]; ?>
+        <p class="acc-standing-restr acc-standing-<?= $accK ?>"><i class="bi bi-<?= $accK === 'ban' ? 'slash-circle' : 'volume-mute' ?>" aria-hidden="true"></i>
+            <?= $accR['until'] === null ? _h($accKey . '_nodate') : ($accR['forever'] ? _h($accKey . '_forever') : _h($accKey, ['date' => $accR['until']])) ?></p>
+        <?php endforeach; ?>
+        <?php if ($accStanding['warnings']): ?>
+        <p class="acc-standing-count"><?= _h('account.standing_count', ['n' => (int)$accStanding['count']]) ?></p>
+        <ul class="acc-standing-list">
+            <?php foreach ($accStanding['warnings'] as $accW): ?>
+            <li>
+                <span class="acc-standing-when"><?= sanitize($accW['at']) ?></span>
+                <strong><?= _h('account.standing_act_' . ($accW['auto'] ? 'auto_' : '') . $accW['action']) ?></strong>
+                <?php if ($accW['auto']): ?>
+                <div class="acc-standing-reason"><?= _h('account.standing_auto', [
+                    'warnings' => plural((int)$accW['auto']['count'], 'notify.auto_warnings'), 'window' => plural((int)$accW['auto']['window'], 'notify.auto_window')]) ?></div>
+                <?php elseif ($accW['html'] !== ''): ?>
+                <div class="acc-standing-reason rt-body richtext" data-lang-keep><?= $accW['html'] ?></div>
+                <?php endif; ?>
+            </li>
+            <?php endforeach; ?>
+        </ul>
+        <?php endif; ?>
+    </section>
+    <?php endif; ?>
     <section class="account-card acc-card" id="acc-card-profile">
         <h2><?= _h('account.profile') ?></h2>
         <p class="acc-card-desc"><?= _h('account.card_profile_desc') ?></p>

@@ -35,6 +35,10 @@
  *    second reason: assets/js/admin-pagecontent.js fills an iframe through srcdoc, and an
  *    about:srcdoc document INHERITS this policy while carrying its own <style> block. Anybody
  *    reading the shipped header should not come away believing style injection is blocked here.
+ *    1.75.0 adds two more srcdoc frames, both with a `sandbox` that gives them no script: the account page's frame for
+ *    an HTML notification (assets/js/app.js richNotifBox(); its inline styles are an administrator's, cleaned by
+ *    includes/htmlsafe.php) and the bulk composer's preview of the whole mail (assets/js/admin-common.js, sandbox=""). A
+ *    stricter style-src would need those documents' styles nonce'd as well — frame-src is not consulted for srcdoc.
  *  * img-src keeps `https:` for the reason .htaccess spells out: images in descriptions. Tightening
  *    it belongs with desc_max_images, not with this change.
  *

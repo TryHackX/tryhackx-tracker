@@ -200,7 +200,9 @@
                         <h6><i class="bi bi-envelope"></i> <?= _h('a.reports.m_email_head') ?></h6>
                         <p class="email-hint"><?= _h('a.reports.m_email_hint') ?></p>
                     </div>
-                    <textarea class="form-control bg-dark text-light border-secondary" id="modal-email-msg" rows="3" placeholder="<?= _h('a.reports.m_email_ph') ?>"></textarea>
+                    <?php /* The team's words to the reporter take a format (1.75.0): adminRichField(), assets/js/admin-common.js — the
+                             select, the buttons, the preview; the textarea is #modal-email-msg, made by the component (admin.js emailBox()). */ ?>
+                    <div id="modal-email-rich"></div>
                     <div class="text-center mt-2">
                         <button class="btn btn-primary btn-sm" id="modal-send-email"><i class="bi bi-send"></i> <?= _h('a.reports.m_send') ?></button>
                     </div>
@@ -229,7 +231,8 @@
                     <div class="text-center" id="appeal-response-header">
                         <h6><i class="bi bi-reply"></i> <?= _h('a.reports.ap_resp_head') ?></h6>
                     </div>
-                    <textarea class="form-control bg-dark text-light border-secondary" id="appeal-response-msg" rows="3" placeholder="<?= _h('a.reports.ap_resp_ph') ?>"></textarea>
+                    <?php /* …and so does the answer to an appeal (admin.js appealBox()); the textarea is #appeal-response-msg. */ ?>
+                    <div id="appeal-response-rich"></div>
                     <div id="appeal-modal-alert" class="mt-2"></div>
                 </div>
             </div>

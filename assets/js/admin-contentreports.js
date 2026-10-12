@@ -81,6 +81,13 @@
         return span;
     }
 
+    /** A block of the SERVER's rendering of a moderator's BBCode / Markdown (reportTextHtml(): the site's renderer on escaped input). */
+    function richBlock(html) {
+        var d = el('div', 'arf-answer rt-body richtext');
+        d.innerHTML = html;
+        return d;
+    }
+
     /** What the author's account already is: the facts line and the latest warnings. */
     function authorState(c, st) {
         if (!st) return;
@@ -97,7 +104,27 @@
             c.appendChild(el('div', 'msgrep-warn-head text-muted', t.key('js.creport.latest_warnings')));
             var ul = el('ul', 'msgrep-warnings');
             st.latest_warnings.forEach(function (w) {
-                ul.appendChild(el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' })));
+                // 1.75.0: a REVOKED warning stays in the list, struck through; a silent action and an automatic penalty are marked
+                var marks = [];
+                if (w.auto) marks.push(t.key('js.moderation.mark_auto'));
+                else if (w.loud === false) marks.push(t.key('js.moderation.mark_silent'));
+                if (w.revoked) marks.push(t.key('js.moderation.mark_revoked'));
+                var tail = marks.length ? [' (', marks.flatMap(function (m, i) { return i ? [', ', m] : [m]; }), ')'].flat() : [];
+                var li;
+                if (w.auto && w.auto_info) {
+                    li = el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: t.key('js.moderation.auto_reason', { n: w.auto_info.count, days: w.auto_info.window }) }));
+                } else if (w.reason_html) {
+                    // A BBCode / Markdown reason (1.75.0): the server's rendering of it (the site's renderer on escaped input).
+                    li = el('li', null, t.key('js.creport.warning_head', { at: String(w.at || '').slice(0, 16) }));
+                    tail.forEach(function (p) { li.append(p); });
+                    tail = [];
+                    li.appendChild(richBlock(w.reason_html));
+                } else {
+                    li = el('li', null, t.key('js.creport.warning_line', { at: String(w.at || '').slice(0, 16), reason: w.reason || '' }));
+                }
+                tail.forEach(function (p) { li.append(p); });
+                if (w.revoked) li.className = 'mod-revoked';
+                ul.appendChild(li);
             });
             c.appendChild(ul);
         }
@@ -174,7 +201,11 @@
             if (r.snapshot_differs) line.appendChild(el('span', 'crep-other-words text-muted', t.key('js.creport.report_other_words')));
             li.appendChild(line);
             li.appendChild(el('div', 'msgrep-reason', r.reason));
-            if (r.reply) li.appendChild(el('div', 'msgrep-answer', t.key('js.msgrep.answered', { text: r.reply })));
+            if (r.reply_html) {
+                var ans = el('div', 'msgrep-answer', t.key('js.msgrep.answered_lead'));
+                ans.appendChild(richBlock(r.reply_html));
+                li.appendChild(ans);
+            } else if (r.reply) li.appendChild(el('div', 'msgrep-answer', t.key('js.msgrep.answered', { text: r.reply })));
             if (r.note) li.appendChild(el('div', 'msgrep-answer text-muted', t.key('js.msgrep.noted', { text: r.note })));
             ul.appendChild(li);
         });
@@ -197,13 +228,13 @@
         note.setAttribute('aria-label', t.key('js.msgrep.note_ph'));
         note.maxLength = 500;
         acts.appendChild(note);
-        var reply = document.createElement('input');
-        reply.type = 'text';
-        reply.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reply-in';
-        reply.placeholder = t.key('js.creport.reply_ph');
-        reply.setAttribute('aria-label', t.key('js.creport.reply_ph'));
-        reply.maxLength = 500;
-        acts.appendChild(reply);
+        // The answer to the reporters (1.75.0): lines and a format — adminRichField(), assets/js/admin-common.js — the
+        // site's own box with its toolbar and the server's preview. The note above stays what it was: the panel's own, plain.
+        var reply = window.AdminCommon.adminRichField({ compact: true, rows: 2, maxLength: 2000, countMax: 2000,
+            placeholder: t.key('js.creport.reply_ph'), ariaLabel: t.key('js.creport.reply_ph') });
+        var replyBox = el('div', 'crep-rich crep-reply-rich');
+        replyBox.appendChild(reply.el);
+        c.appendChild(replyBox);     // above the note and the buttons
         c.appendChild(acts);
 
         // Silently, or as a warning — for everything that reaches the author.
@@ -225,13 +256,12 @@
             };
             radio('silent', t.key('js.creport.mode_silent'), true);
             loudRadio = radio('loud', t.key('js.creport.mode_loud'), false);
-            reasonIn = document.createElement('input');
-            reasonIn.type = 'text';
-            reasonIn.className = 'form-control form-control-sm bg-dark text-light border-secondary msgrep-reason-in';
-            reasonIn.placeholder = t.key('js.creport.reason_ph');
-            reasonIn.setAttribute('aria-label', t.key('js.creport.reason_ph'));
-            reasonIn.maxLength = 500;
-            modeRow.appendChild(reasonIn);
+            // …and the reason the author is told (1.75.0), the same box: it comes to them as a warning in their notifications.
+            reasonIn = window.AdminCommon.adminRichField({ compact: true, rows: 2, maxLength: 2000, countMax: 2000,
+                placeholder: t.key('js.creport.reason_ph'), ariaLabel: t.key('js.creport.reason_ph') });
+            var reasonBox = el('div', 'crep-rich crep-reason-rich');
+            reasonBox.appendChild(reasonIn.el);
+            modeRow.appendChild(reasonBox);
             modeRow.appendChild(el('div', 'crep-mode-hint text-muted', t.key('js.creport.mode_hint')));
             c.appendChild(modeRow);
         }
@@ -241,7 +271,7 @@
         var run = async function (action, days, btn) {
             var loud = action === 'warn' || (!!loudRadio && loudRadio.checked);
             var reaches = ['remove', 'warn', 'mute', 'ban'].indexOf(action) >= 0;
-            if (loud && reaches && account && !reasonIn.value.trim()) {
+            if (loud && reaches && account && reasonIn.isEmpty()) {
                 say.textContent = t.key('js.creport.err_reason');
                 reasonIn.focus();
                 return;
@@ -249,8 +279,11 @@
             btn.disabled = true;
             var r = await api('admin/content_report_action', 'POST', {
                 kind: g.kind, target_id: g.target_id, hash: g.hash || '', action: action, days: days || 0,
-                mode: loud && account ? 'loud' : 'silent', reason: reasonIn ? reasonIn.value.trim() : '',
-                note: note.value.trim(), reply: reply.value.trim(), seen: action === 'remove' ? (g.sha || '') : '',
+                mode: loud && account ? 'loud' : 'silent',
+                reason: reasonIn ? reasonIn.getValue().trim() : '', reason_format: reasonIn ? reasonIn.getFormat() : 'plain',
+                note: note.value.trim(),
+                reply: reply.getValue().trim(), reply_format: reply.getFormat(),
+                seen: action === 'remove' ? (g.sha || '') : '',
             });
             btn.disabled = false;
             if (r && r.success) {
@@ -261,6 +294,8 @@
                 return;
             }
             var e = r && r.error;
+            // A text the server refused (too long, a picture, too many links, a format the site does not take): its own sentence.
+            if (e === 'invalid_text' && r.message) { say.textContent = r.message; return; }
             say.textContent = t.key(e === 'target_is_staff' ? 'js.msgrep.err_staff'
                               : e === 'target_is_you' ? 'js.msgrep.err_you'
                               : e === 'reason_required' ? 'js.creport.err_reason'

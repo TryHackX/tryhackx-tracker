@@ -52,7 +52,16 @@ check('markup formats still escape HTML the author typed',
 /* ── 3. an unknown format is plain, never "whatever was asked for" ────────── */
 
 check('an unknown format falls back to plain rather than rendering',
-      strpos(bulkBodyHtml('**bold**', 'html', $cfg), '<strong>') === false);
+      strpos(bulkBodyHtml('**bold**', 'nonsense', $cfg), '<strong>') === false
+      && strpos(bulkBodyHtml('<b>x</b>', 'nonsense', $cfg), '<b>') === false);
+check('html is a format of its own: markdown is not rendered, the markup is cleaned and wrapped in a <div> (never a <p>)',
+      strpos(bulkBodyHtml('**bold**', 'html', $cfg), '<strong>') === false
+      && str_starts_with(bulkBodyHtml('<p>x</p>', 'html', $cfg), '<div>') && str_ends_with(bulkBodyHtml('<p>x</p>', 'html', $cfg), '</div>')
+      && strpos(bulkBodyHtml('<p onclick="x()">hi</p><script>alert(1)</script>', 'html', $cfg), 'script') === false
+      && strpos(bulkBodyHtml('<p onclick="x()">hi</p>', 'html', $cfg), 'onclick') === false);
+check('every format is wrapped in a <div>: block HTML in a <p> is closed by the browser at its first <div>',
+      str_starts_with(bulkBodyHtml('a', 'plain', $cfg), '<div>') && str_starts_with(bulkBodyHtml('[b]a[/b]', 'bbcode', $cfg), '<div>')
+      && str_starts_with(bulkBodyHtml('*a*', 'markdown', $cfg), '<div>'));
 check('an empty body does not become stray markup',
       trim(strip_tags(bulkBodyHtml('', 'markdown', $cfg))) === '');
 
@@ -86,17 +95,20 @@ check('email render: rel and target are kept on the link',
 // api/admin/bulk_send.php. This checks the two callers actually call it, because a preview drawn by
 // a second renderer is a preview of something nobody will receive.
 
+// (1.75.0: both halves of the mail — the document and the text — come out of bulkMailParts(), which calls bulkBodyHtml();
+// the janitor, the test copy AND the composer's preview all call it, so the preview is the document that is sent.)
 $callers = [
-    'includes/bulkmail.php'    => 'bulkBodyHtml((string)$r[\'body\'], (string)($r[\'format\'] ?? \'plain\'), $cfg)',
-    'api/admin/bulk_send.php'  => 'bulkBodyHtml($body, $format, $cfg)',
+    'includes/bulkmail.php'    => 'bulkMailParts((string)$r[\'subject\'], (string)$r[\'body\'], (string)($r[\'format\'] ?? \'plain\'),',
+    'api/admin/bulk_send.php'  => 'bulkMailParts($subject, trim($body), $format, $frame, $cfg, $unsub)',
 ];
 foreach ($callers as $file => $needle) {
     $src = (string)file_get_contents($root . '/' . $file);
-    check("$file builds its HTML with bulkBodyHtml()", strpos($src, $needle) !== false);
+    check("$file builds its mail with bulkMailParts()", strpos($src, $needle) !== false);
 }
 $send = (string)file_get_contents($root . '/api/admin/bulk_send.php');
-check('the test send uses the chosen format, not a hardcoded plain one',
-      strpos($send, "'body' => bulkBodyHtml(\$body, \$format, \$cfg)") !== false);
+check('the preview is the same function with the same arguments: format and frame as chosen, not a hardcoded plain one',
+      strpos($send, 'bulkMailParts($subject !== \'\' ? $subject : \'…\', $body, $format, $frame, $cfg,') !== false);
+check('bulkMailParts() calls bulkBodyHtml(), and nothing else builds the body', substr_count((string)file_get_contents($root . '/includes/bulkmail.php'), 'bulkBodyHtml(') >= 2);
 
 /* ── 6. the format is stored per row, not read from settings at send time ─── */
 //
@@ -104,13 +116,14 @@ check('the test send uses the chosen format, not a hardcoded plain one',
 // arrive as its author saw it, rather than as a page of raw asterisks.
 
 $bulk = (string)file_get_contents($root . '/includes/bulkmail.php');
-check('mail_queue rows carry their own format',
-      strpos($bulk, 'INSERT INTO mail_queue (batch_id, user_id, email, subject, body, format)') !== false);
-check('the sender reads the format off the row',
-      preg_match('/SELECT id, user_id, email, subject, body, format, attempts FROM mail_queue/', $bulk) === 1);
+check('mail_queue rows carry their own format and frame',
+      strpos($bulk, 'INSERT INTO mail_queue (batch_id, user_id, email, subject, body, format, frame)') !== false);
+check('the sender reads the format and the frame off the row',
+      preg_match('/SELECT id, user_id, email, subject, body, format, frame, attempts FROM mail_queue/', $bulk) === 1);
 $schema = (string)file_get_contents($root . '/includes/schema.php');
-check('the column exists in the schema and in a migration',
-      substr_count($schema, "ENUM('plain','bbcode','markdown')") >= 2);
+check('the columns exist in the schema (fresh) and in a migration (widened only when it differs)',
+      substr_count($schema, "ENUM('plain','bbcode','markdown','html')") >= 2 && strpos($schema, "ENUM('site','none') NOT NULL DEFAULT 'site'") !== false
+      && strpos($schema, 'schemaColumnType($db, \'mail_queue\', \'format\')') !== false);
 
 echo "\n" . $n . ' checks, ' . $fails . " failed\n";
 exit($fails ? 1 : 0);

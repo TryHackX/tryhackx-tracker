@@ -181,6 +181,8 @@ $allowed = [
     'tuner_enabled', 'tuner_python',
     'rep_enabled', 'rep_mode', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
     'bulk_mail_enabled', 'bulk_mail_per_minute', 'bulk_mail_max_attempts',
+    // 1.75.0 (schema 94): the day's ceiling on bulk mail (0 = none) and the sender's identity for its footer
+    'bulk_mail_daily_cap', 'mail_sender_address', 'auto_penalties_enabled',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
     // whitelist registration audience + metadata worker concurrency (schema v8)
@@ -420,7 +422,7 @@ $intClamp = [
     // endpoint then refuses every write rather than merely letting the janitor undo it a minute later.
     'csp_report_keep_rows' => [0, CSP_ROWS_MAX, CSP_ROWS_DEFAULT],
     'users_notify_expiry_days' => [0, 30, 3], 'users_email_change_cooldown_days' => [0, 365, 30],
-    'bulk_mail_per_minute' => [1, 500, 20], 'bulk_mail_max_attempts' => [1, 10, 3],
+    'bulk_mail_per_minute' => [1, 500, 20], 'bulk_mail_max_attempts' => [1, 10, 3], 'bulk_mail_daily_cap' => [0, 1000000, 0],
     'desc_max_chars' => [200, 20000, 4000], 'desc_max_images' => [0, 50, 3],
     'livesync_port' => [1024, 65535, 9696],
     'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120],
@@ -562,7 +564,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
-          'pm_archive_returns',
+          'pm_archive_returns', 'auto_penalties_enabled',
           'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
           'who_votes_enabled', 'who_lists_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
@@ -647,6 +649,11 @@ if (isset($data['account_picture_side']) && !in_array($data['account_picture_sid
 }
 if (isset($data['account_cover_side']) && !in_array($data['account_cover_side'], ['left', 'right'], true)) {
     $data['account_cover_side'] = 'right';
+}
+// The sender's identity in the footer of a bulk message (1.75.0): text, written into HTML escaped by the footer — only
+// bounded here and stripped of control characters (a line break becomes a space: the footer shows one line).
+if (isset($data['mail_sender_address'])) {
+    $data['mail_sender_address'] = mb_substr(trim((string)preg_replace('/[\x00-\x1f\x7f]+/u', ' ', (string)$data['mail_sender_address'])), 0, 300);
 }
 // House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
 // bounded and stripped of control characters.

@@ -1577,11 +1577,11 @@ const INDEX_FILE_LIST_MATCHES = 50;
  */
 function indexFilePathClause(string $search): ?array {
     $search = trim($search);
-    if ($search === '' || preg_match(INDEX_HASH_PREFIX_RE, $search)) return null;
+    if ($search === '' || indexIsHashPrefix($search)) return null;
     $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
     return $ft !== ''
         ? ['MATCH(path) AGAINST(? IN BOOLEAN MODE)', [$ft]]
-        : ['path LIKE ?', ['%' . $search . '%']];
+        : ['path LIKE ?', ['%' . indexLikeEscape($search) . '%']];
 }
 
 /**
@@ -1893,6 +1893,117 @@ function indexFulltextTerm(string $term): string {
 }
 
 /**
+ * InnoDB's built-in stop-word list (INFORMATION_SCHEMA.INNODB_FT_DEFAULT_STOPWORD: 36 entries, "the" is on it twice).
+ * Production runs the default list and innodb_ft_min_token_size 3, so a word on it — or shorter than three characters —
+ * is never an index entry: `the*` matches "Theory" and never "the", `of*` matches "Office" and `tv*` nothing at all.
+ * indexRankWords() uses it to count only the words a name can be matched on. A server set up otherwise only changes
+ * which words count: a counted word the index does not hold leaves the fast path with no full page, and the full query
+ * answers — slower, never different.
+ */
+const INDEX_FT_STOPWORDS = ['a', 'about', 'an', 'are', 'as', 'at', 'be', 'by', 'com', 'de', 'en', 'for', 'from', 'how', 'i', 'in',
+    'is', 'it', 'la', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'who', 'will', 'with', 'und', 'www'];
+const INDEX_FT_MIN_TOKEN = 3;
+/** How many distinct words of a query take part in the ranking (the WHERE keeps all of them). */
+const INDEX_RANK_MAX_WORDS = 8;
+
+/**
+ * The words a search is RANKED by (1.75.0): ['w' => …, 'c' => …].
+ *
+ * `w` — the query's words, split on anything that is not a letter or a digit, lower-cased, in the order typed, the
+ * first eight distinct ones. They feed the "in the query's order" test, which reads the name's text and so wants every
+ * word, "the" and "tv" included. `c` — the COUNTABLE ones among them (indexRankFtAgrees() permitting): at least three
+ * characters and not on the stop-word list, i.e. the words the fulltext index can hold. They feed words_hit, one MATCH
+ * each, and the all-words fast path.
+ */
+function indexRankWords(string $search): array {
+    $words = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $w = array_slice(array_values(array_unique($words)), 0, INDEX_RANK_MAX_WORDS);
+    $c = [];
+    if (indexRankFtAgrees($search)) {
+        foreach ($w as $x) {
+            if (mb_strlen($x) >= INDEX_FT_MIN_TOKEN && !in_array($x, INDEX_FT_STOPWORDS, true)) $c[] = $x;
+        }
+    }
+    return ['w' => $w, 'c' => $c];
+}
+
+/**
+ * Do the fulltext WHERE and the per-word counts read this search as the same words?
+ *
+ * They do when each space-separated word of the query, less the punctuation at its edges, is ONE run of letters and
+ * digits: `rick,` and `wars:` are `rick*` and `wars*` to InnoDB too (checked on MariaDB 11.4). A delimiter INSIDE a word
+ * is another matter: `rick.and.morty*` stars the last token only, and `rick_and_morty*` is a single token, because
+ * InnoDB counts `_` as a letter and indexRankWords() does not. Counting `rick*`, `and*`, `morty*` against a WHERE that
+ * asked for something else would rank by words the search never looked for, and the all-words fast path would return
+ * rows the full query does not — so such a query is simply not counted (today's WHERE and order, plus the order test).
+ * Words indexFulltextTerm() drops (one character) are not part of the WHERE and are not looked at.
+ */
+function indexRankFtAgrees(string $search): bool {
+    $clean = preg_replace('/[+\-><()~"@*]/u', ' ', $search) ?? '';
+    foreach (preg_split('/\s+/u', trim($clean), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $w) {
+        if (mb_strlen($w) < 2) continue;
+        if (!preg_match('/^[^\p{L}\p{N}_\']*[\p{L}\p{N}]+[^\p{L}\p{N}_\']*$/u', $w)) return false;
+    }
+    return true;
+}
+
+/**
+ * The two ranking expressions of 1.75.0 as [sql, params] each, '' / [] where one is not asked for.
+ *
+ * words_hit — how many of the countable words the name has: one MATCH per word, the same prefix the WHERE searches with
+ * (`w*`). Per word and not a REGEXP, because the all-words fast path (a WHERE of `+w1* +w2* …`) has to select exactly
+ * the rows whose count is the number of words.
+ *
+ * in_order — 2: the words stand next to each other in the order typed with only separators between them (`Rick and
+ * Morty`, `Rick.and.Morty`, `rick_and_morty`), 1: they all appear in that order with anything between, 0: otherwise.
+ * `name NOT LIKE '%w1%w2%'` goes first and sends most rows to 0 without PCRE (and the LIKE passes everything the REGEXPs
+ * pass: it ignores case and accents, they do not). Both REGEXPs use `(?<![\p{L}\p{N}])` for the start of a word, not \b —
+ * PCRE counts `_` as a word character, so \bmorty misses rick_and_morty. REGEXP under utf8mb4_unicode_ci is
+ * case-insensitive only through the explicit (?i) and is accent-SENSITIVE: "pokemon" is not in "Pokémon" for in_order,
+ * while the fulltext index and the LIKE do match it (a ranking nicety lost, never a row).
+ */
+function indexRankSql(array $rw, bool $hit, bool $ord): array {
+    $out = ['hit' => ['', []], 'ord' => ['', []]];
+    if ($hit && count($rw['c']) >= 2) {
+        $parts = []; $params = [];
+        foreach ($rw['c'] as $c) { $parts[] = '(MATCH(name) AGAINST(? IN BOOLEAN MODE) > 0)'; $params[] = $c . '*'; }
+        $out['hit'] = [implode(' + ', $parts), $params];
+    }
+    if ($ord && count($rw['w']) >= 2) {
+        $like = '%' . implode('%', array_map(static fn(string $x): string => addcslashes($x, '%_\\'), $rw['w'])) . '%';
+        $q = array_map(static fn(string $x): string => preg_quote($x, '/'), $rw['w']);
+        $start = '(?<![\p{L}\p{N}])';
+        $adjacent = '(?i)' . $start . implode('[\p{L}\p{N}]*[^\p{L}\p{N}]+', $q);
+        $inOrder = '(?i)' . $start . implode('.*' . $start, $q);
+        $out['ord'] = ['CASE WHEN name NOT LIKE ? THEN 0 WHEN name REGEXP ? THEN 2 WHEN name REGEXP ? THEN 1 ELSE 0 END',
+                       [$like, $adjacent, $inOrder]];
+    }
+    return $out;
+}
+
+/**
+ * Is $s the start of an info hash? Hex, six to forty characters — and either a digit among them or twelve characters at
+ * least (1.75.0). A six-letter word made only of a–f ("decade", "facade", "deface", "efface") is hex too, and with
+ * `index.magnet` the reader's search took it for a hash prefix and found nothing. Six characters of a real hash have a digit
+ * among them 99.7 % of the time (1 − (6/16)^6), and the few that do not still work as soon as they are twelve long — no
+ * English word is that long and made of a–f only.
+ * ONE rule for the admin list, the public catalogue, the file clause and the too-short guard; app.js mirrors it.
+ */
+function indexIsHashPrefix(string $s): bool {
+    return preg_match(INDEX_HASH_PREFIX_RE, $s) === 1 && (strlen($s) >= 12 || preg_match('/\d/', $s) === 1);
+}
+
+/**
+ * A search term as the inside of a LIKE '%…%': `%`, `_` and the escape character itself taken literally (1.75.0). The
+ * fallback typed "50%" or "a_b" and got every name with a 50 or an "a" and any letter and a "b" — the wildcards of the
+ * LIKE the reader never wrote. MariaDB's default escape character is the backslash; no ESCAPE clause is added, so the
+ * statement's text is what it always was.
+ */
+function indexLikeEscape(string $s): string {
+    return addcslashes($s, '%_\\');
+}
+
+/**
  * Filtered/sorted/paginated SELECT over index_hashes. $q keys (all optional): page, per_page,
  * sort ('col:dir,col:dir' — keys of the map below), search, search_files (bool-ish), meta, life,
  * min_seeders (int — public search may hide the dead tail). Fulltext is tried first for name
@@ -1938,11 +2049,11 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     $searchFiles = !empty($q['search_files']) && $q['search_files'] !== '0';
     $fulltextClause = null; $likeClause = null;
     if ($search !== '') {
-        if (preg_match(INDEX_HASH_PREFIX_RE, $search)) {
+        if (indexIsHashPrefix($search)) {
             $where[] = "info_hash LIKE ?";
             $params[] = strtolower($search) . '%';
         } else {
-            $likeClause = ['sql' => "name LIKE ?", 'params' => ['%' . $search . '%']];
+            $likeClause = ['sql' => "name LIKE ?", 'params' => ['%' . indexLikeEscape($search) . '%']];
             $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
             // Resolve the file half into a bounded list of hashes first, exactly as the public
             // catalogue search does, and for the same reason: `name … OR info_hash IN (SELECT …)`
@@ -1956,7 +2067,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
                         $fs->execute([$ft]);
                     } else {
                         $fs = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE path LIKE ? LIMIT " . INDEX_FILE_MATCH_CAP);
-                        $fs->execute(['%' . $search . '%']);
+                        $fs->execute(['%' . indexLikeEscape($search) . '%']);
                     }
                     $fileHashes = $fs->fetchAll(PDO::FETCH_COLUMN);
                     $fs->closeCursor();
@@ -1969,8 +2080,8 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
             // measured (32.6 s -> 4.3 s on the live catalogue).
             $inFiles = $fileHashes ? ('info_hash IN (' . implode(',', array_fill(0, count($fileHashes), '?')) . ')') : '';
             if ($inFiles) {
-                $likeClause = ['sql' => "(name LIKE ? OR $inFiles)", 'params' => array_merge(['%' . $search . '%'], $fileHashes),
-                               'split' => [['sql' => 'name LIKE ?', 'params' => ['%' . $search . '%']],
+                $likeClause = ['sql' => "(name LIKE ? OR $inFiles)", 'params' => array_merge(['%' . indexLikeEscape($search) . '%'], $fileHashes),
+                               'split' => [['sql' => 'name LIKE ?', 'params' => ['%' . indexLikeEscape($search) . '%']],
                                            ['sql' => $inFiles, 'params' => $fileHashes]]];
             }
             if ($ft !== '') {
@@ -2096,8 +2207,9 @@ const INDEX_FILE_MATCH_CAP = 5000;
 /**
  * What a search term has to look like to be treated as the START of an info hash. Six hex digits at
  * least: fewer would match too much of the table to be a lookup, and a two-letter English word
- * like "ad" or "be" is hex too. Named once so the admin listing, the catalogue and the too-short
- * guard below cannot drift apart on what counts as a hash.
+ * like "ad" or "be" is hex too. This is the SHAPE; indexIsHashPrefix() is the rule (1.75.0: a digit among
+ * the characters, or twelve of them) that the admin listing, the catalogue, the file clause and the
+ * too-short guard below all ask, so they cannot drift apart on what counts as a hash.
  */
 const INDEX_HASH_PREFIX_RE = '/^[a-f0-9]{6,40}$/i';
 
@@ -2115,7 +2227,7 @@ const INDEX_HASH_PREFIX_RE = '/^[a-f0-9]{6,40}$/i';
  */
 function indexSearchTooShort(string $search): bool {
     $search = trim($search);
-    return $search !== '' && mb_strlen($search) < 3 && !preg_match(INDEX_HASH_PREFIX_RE, $search);
+    return $search !== '' && mb_strlen($search) < 3 && !indexIsHashPrefix($search);
 }
 
 /** A search that ran out of the database's time (max_statement_time) — the endpoint answers it as such, not as a 500. */
@@ -2141,7 +2253,9 @@ function indexIsStatementTimeout(\Throwable $e): bool {
  */
 function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $page = max(1, (int)($q['page'] ?? 1));
-    $perPage = max(1, min(100, (int)($q['per_page'] ?? 25)));
+    // 200 is what the page offers and the endpoint accepts (1.75.0: this clamp said 100, so the reader who picked "200 / page"
+    // got a hundred rows and a pager that disagreed with the choice). The arms cut at offset + perPage, which stays bounded.
+    $perPage = max(1, min(200, (int)($q['per_page'] ?? 25)));
     $offset = ($page - 1) * $perPage;
     $withWl = !empty($q['include_whitelist']);
     $searchFiles = !empty($q['search_files']);
@@ -2149,6 +2263,9 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // 1.74.0 (PERF-2/PERF-3): the narrow catalogue, once it has been made in full — see indexCatalogReady(). `catalog`
     // is the tests' and the measurements' switch (true / false); the endpoint never sends it.
     $useCat = indexCatalogReady($db, array_key_exists('catalog', $q) ? (bool)$q['catalog'] : null);
+    // `fast_path` false (1.75.0): the tests' and the measurements' switch for the all-words query in $run() — the full
+    // query only, to compare the two pages. The endpoint never sends it.
+    $useFast = !array_key_exists('fast_path', $q) || !empty($q['fast_path']);
 
     /**
      * Which reviewed states to show. Only the whitelist arm has a state at all — an index row is a
@@ -2175,16 +2292,50 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         if ($col === 'score') { $orderParts['score'] = 'score DESC'; continue; }
         $orderParts[$col] = $col . ((strtolower($pieces[1] ?? 'desc') === 'asc') ? ' ASC' : ' DESC');
     }
-    if (!$orderParts) $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC'];
-    elseif (count($orderParts) === 1 && isset($orderParts['score'])) $orderParts['seeders'] = 'seeders DESC';
+    // "Best match alone" — relevance with no column chosen — is told from "Best match + a column" HERE, before the
+    // seeders tie-break is written into the first (1.75.0): behind the ranking keys the score closes only the former.
+    $bestAlone = false;
+    if (!$orderParts) { $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC']; $bestAlone = true; }
+    elseif (count($orderParts) === 1 && isset($orderParts['score'])) { $orderParts['seeders'] = 'seeders DESC'; $bestAlone = true; }
 
     // `hash_search` false (1.69.0): the caller's reader is not shown hashes (no `index.magnet`), so a
     // hex term is searched as a NAME like any other word. Matching a prefix and then leaving the hash out
     // of the rows let such a reader read a hash back from the counts, sixteen answers per digit — the
     // same rule the profile's lists follow. Absent means yes: every other caller searches as before.
     $isHash = $search !== '' && (!array_key_exists('hash_search', $q) || !empty($q['hash_search']))
-              && preg_match(INDEX_HASH_PREFIX_RE, $search);
+              && indexIsHashPrefix($search);
     $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
+
+    /**
+     * THE RANKING KEYS (1.75.0) — what the search sorts by BEFORE the reader's columns, from the words of the query.
+     *
+     * Until 1.74 the FT score led "Best match" and nothing led the plain search. The score is a float no two rows share,
+     * so a column clicked beside it never fired, and the plain search put a row with one of the three words among
+     * the rows with all three. Two small whole numbers now come first, and only for a query of two words or more:
+     *
+     *   words_hit — how many of the countable words (indexRankWords()) the name has: three words, then two, then one.
+     *               A number that means the same in the catalogue and in the whitelist, which the float score never did.
+     *   in_order  — Best match only: 2 the words side by side in the order typed, 1 all of them in that order, 0 else.
+     *               Built from every word, "and" and "the" too, since it reads the text and not the index.
+     *
+     *   Best match alone      words_hit, in_order, score, seeders, hash   (the score only separates rows inside a tier)
+     *   Best match + columns  words_hit, in_order, <columns>, hash        (a column now decides inside the groups)
+     *   plain                 words_hit, <columns>, hash
+     *
+     * A key a query cannot have is left out, and a query of one word has neither. Its Best match alone and its plain
+     * search are what 1.74 wrote, byte for byte; Best match + a column no longer puts the score before the column (so the
+     * column, then the next one, decides, as it does for more words). File-name hits carry the SAME expressions (the other half of the arm's UNION must produce the same row for a
+     * hash found both ways, or it comes back twice), so a torrent only a file name found falls to the bottom by itself.
+     */
+    $rw = $ft !== '' ? indexRankWords($search) : ['w' => [], 'c' => []];
+    $bestOn = isset($orderParts['score']);
+    // The flags one execution of the search uses: 'hit'/'ord' = the key is selected and sorted by; 'alone' = Best match with
+    // no column. $fast: the all-words query, where words_hit is the same number on every row it can return and is left out.
+    $rankFor = static function (bool $scored, bool $fast = false) use ($rw, $bestOn, $bestAlone): array {
+        $hit = $scored && count($rw['c']) >= 2;
+        $ord = $scored && $bestOn && count($rw['w']) >= 2;
+        return ['hit' => $hit && !$fast, 'ord' => $ord, 'alone' => $bestAlone];
+    };
 
     /**
      * The ORDER BY, written so a query plan can actually serve it.
@@ -2207,10 +2358,23 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
      * documents: InnoDB carries the primary key inside every secondary index, so a tie-break the
      * other way round turns an index walk back into a filesort over the whole catalogue.
      */
-    $orderFor = static function (bool $wl, bool $scored, bool $union = false) use ($orderParts): string {
-        $parts = [];
+    //
+    // The keys of that order, ONE list for the three writers below (1.75.0): the ranking keys first, then the reader's.
+    // The score closes "Best match alone" and is left out behind a chosen column, for a query of one word as for more: a
+    // float nothing shares in front of the column would make the click a tie-break that never fires.
+    $orderKeys = static function (bool $scored, array $rank) use ($orderParts): array {
+        $keys = [];
+        if ($rank['hit']) $keys['words_hit'] = 'words_hit DESC';
+        if ($rank['ord']) $keys['in_order'] = 'in_order DESC';
         foreach ($orderParts as $key => $frag) {
-            if ($key === 'score') { if ($scored) $parts[] = $frag; continue; }
+            if ($key === 'score') { if ($scored && $rank['alone']) $keys['score'] = $frag; continue; }
+            $keys[$key] = $frag;
+        }
+        return $keys;
+    };
+    $orderFor = static function (bool $wl, bool $scored, bool $union, array $rank) use ($orderKeys): string {
+        $parts = [];
+        foreach ($orderKeys($scored, $rank) as $key => $frag) {
             // eff_seeders is the indexed generated column, and it is what makes an ordered index walk
             // possible — but only on the base table. A union arm is a derived table whose output has
             // no such column, and the sort there is a filesort over a handful of rows either way;
@@ -2223,12 +2387,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
              . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
     };
     // What the outer merge orders by when there are two arms: the aliases, which both arms expose.
-    $orderMerged = static function (bool $scored) use ($orderParts): string {
-        $parts = [];
-        foreach ($orderParts as $key => $frag) {
-            if ($key === 'score' && !$scored) continue;
-            $parts[] = $frag;
-        }
+    $orderMerged = static function (bool $scored, array $rank) use ($orderKeys): string {
+        $parts = array_values($orderKeys($scored, $rank));
         if (!$parts) $parts[] = 'seeders DESC';
         return implode(', ', $parts) . ', info_hash '
              . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
@@ -2245,10 +2405,10 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // The same order over index_catalog's own columns (1.74.0) — each a column with an index ending in the key, so the
     // inner query of the deferred join walks one index and stops after a page. $p = 'k.' for the outer query, which
     // keeps the order the inner one chose.
-    $orderCat = static function (bool $scored, string $p = '') use ($orderParts): string {
+    $orderCat = static function (bool $scored, array $rank, string $p = '') use ($orderKeys): string {
         $parts = [];
-        foreach ($orderParts as $key => $frag) {
-            if ($key === 'score') { if ($scored) $parts[] = $p . 'score DESC'; continue; }
+        foreach ($orderKeys($scored, $rank) as $key => $frag) {
+            if (in_array($key, ['score', 'words_hit', 'in_order'], true)) { $parts[] = $p . $frag; continue; }
             $col = ['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers'][$key] ?? $key;
             $parts[] = $p . $col . (str_ends_with($frag, ' ASC') ? ' ASC' : ' DESC');
         }
@@ -2315,7 +2475,12 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                content_status, 'whitelist' AS src";
     $colsIndex = "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, last_seeders) AS seeders, COALESCE(scrape_leechers, last_leechers) AS leechers,
                last_seen, votes_up, votes_down, votes_count, score_x100, 'none' AS content_status, 'index' AS src";
-    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false) use ($search, $isHash, $ft, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex): array {
+    // `$rank` (1.75.0) = $rankFor()'s flags for the run: the arm selects words_hit / in_order beside the score when they are
+    // on. `$fast` builds the ALL-WORDS arm instead: the same select, WHERE MATCH('+w1* +w2* …') in place of the OR and no
+    // file-name half — see $run().
+    $noRank = ['hit' => false, 'ord' => false, 'alone' => false];
+    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank): array {
+        $rank = $rank ?: $noRank;
         $cat = $cat && !$wl;
         $tbl = $wl ? 'whitelist' : ($cat ? 'index_catalog' : 'index_hashes');
         $cols = $wl ? $colsWl : ($cat ? 'info_hash, ' . implode(', ', $catCols) : $colsIndex);
@@ -2348,6 +2513,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $params = [];
         $scoreSql = '0';
         $scoreParams = [];
+        $rankSel = '';          // ", <expr> AS words_hit, <expr> AS in_order" — empty for a query of one word
+        $rankParams = [];
         // The "name matches OR one of its files matches" half, kept apart from the rest of the WHERE
         // because it is the one clause that cannot be ANDed into an indexed plan.
         //
@@ -2376,12 +2543,19 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                     $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
                     $scoreParams = [$ft];
                     $nameSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
-                    $nameParams = [$ft];
+                    // The all-words query: every countable word, as a prefix, required (the score above stays the OR's).
+                    $nameParams = [$fast ? '+' . implode('* +', $rw['c']) . '*' : $ft];
+                    $rs = indexRankSql($rw, $rank['hit'], $rank['ord']);
+                    foreach (['hit' => 'words_hit', 'ord' => 'in_order'] as $k => $as) {
+                        if ($rs[$k][0] === '') continue;
+                        $rankSel .= ', ' . $rs[$k][0] . ' AS ' . $as;
+                        $rankParams = array_merge($rankParams, $rs[$k][1]);
+                    }
                 } else {
                     $nameSql = "name LIKE ?";
-                    $nameParams = ['%' . $search . '%'];
+                    $nameParams = ['%' . indexLikeEscape($search) . '%'];
                 }
-                if ($searchFiles && $keys) {
+                if (!$fast && $searchFiles && $keys) {
                     $split = [$nameSql, $nameParams,
                               $col . ' IN (' . implode(',', array_fill(0, count($keys), '?')) . ')', array_values($keys)];
                 } else {
@@ -2400,7 +2574,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         if ($split === null) {
             $w = 'WHERE ' . implode(' AND ', $where);
             return [
-                "SELECT $cols, $scoreSql AS score FROM `$tbl` $w", array_merge($scoreParams, $params),
+                "SELECT $cols, $scoreSql AS score$rankSel FROM `$tbl` $w", array_merge($scoreParams, $rankParams, $params),
                 "SELECT COUNT(*) FROM `$tbl` $w", $params,
                 false,
                 "SELECT $key FROM `$tbl` $w", $params,
@@ -2411,10 +2585,12 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $wB = 'WHERE ' . implode(' AND ', array_merge($where, [$filesSql]));
         // UNION, not UNION ALL: a row whose name matches AND whose files match is one row, which is
         // what the OR said. The branches select identical expressions, so the de-duplication compares
-        // like with like.
-        $sel = "SELECT * FROM ((SELECT $cols, $scoreSql AS score FROM `$tbl` $wA)"
-             . " UNION (SELECT $cols, $scoreSql AS score FROM `$tbl` $wB)) arm";
-        $selParams = array_merge($scoreParams, $params, $nameParams, $scoreParams, $params, $filesParams);
+        // like with like — and that now includes words_hit and in_order (1.75.0): the files half computes the SAME
+        // expressions as the name half, never a literal 0, or a torrent found both ways would differ in a column and
+        // come back twice. A torrent only its files matched has words_hit 0 and in_order 0 by the values themselves.
+        $sel = "SELECT * FROM ((SELECT $cols, $scoreSql AS score$rankSel FROM `$tbl` $wA)"
+             . " UNION (SELECT $cols, $scoreSql AS score$rankSel FROM `$tbl` $wB)) arm";
+        $selParams = array_merge($scoreParams, $rankParams, $params, $nameParams, $scoreParams, $rankParams, $params, $filesParams);
         $cnt = "SELECT COUNT(*) FROM ((SELECT $key FROM `$tbl` $wA) UNION (SELECT $key FROM `$tbl` $wB)) c";
         $cntParams = array_merge($params, $nameParams, $params, $filesParams);
         $keysSql = "SELECT $key FROM ((SELECT $key FROM `$tbl` $wA) UNION (SELECT $key FROM `$tbl` $wB)) u";
@@ -2425,11 +2601,13 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // stops after it — an index walk, however deep the page — and index_hashes is read by key for those rows only;
     // the outer ORDER BY keeps the order the inner query chose. A row that stopped being a member a moment ago drops
     // out here rather than showing without a name. (With the whitelist beside it, $run() merges keys first instead.)
-    $deferred = static function (string $inner, string $innerOrder, string $limit, string $outerOrder): string {
+    $deferred = static function (string $inner, string $innerOrder, string $limit, string $outerOrder, array $rank): string {
+        // The ranking keys come out of the inner query like the score does, for the outer ORDER BY to sort by.
+        $rankOut = ($rank['hit'] ? ', k.words_hit AS words_hit' : '') . ($rank['ord'] ? ', k.in_order AS in_order' : '');
         return "SELECT h.info_hash, h.name, h.total_size, h.files_count,
                        COALESCE(h.scrape_seeders, h.last_seeders) AS seeders, COALESCE(h.scrape_leechers, h.last_leechers) AS leechers,
                        h.last_seen, h.votes_up, h.votes_down, h.votes_count, h.score_x100, 'none' AS content_status, 'index' AS src,
-                       k.score AS score
+                       k.score AS score$rankOut
                   FROM ($inner ORDER BY $innerOrder $limit) k
                   JOIN index_hashes h ON h.info_hash = k.info_hash
                    AND (h.meta_status = 'done' OR (h.name IS NOT NULL AND h.name <> ''))
@@ -2441,14 +2619,94 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // the second full pass a popular word cost (the count re-read every hit: 6.7 s of the 13.3 s measured).
     $cap = max(1000, $offset + 10 * $perPage);
 
-    $run = function (bool $useFt) use ($db, $buildArm, $withWl, $orderFor, $orderMerged, $orderCat, $deferred, $useCat, $catCols, $colsIndex, $colsWl, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter): array {
+    // The page of rows these arms give, in the order the reader asked for: [the catalogue's arm] or [that and the
+    // whitelist's], run as ONE statement (and, over the catalogue with the whitelist beside it, the wide rows read for the
+    // page alone afterwards). $rank is $rankFor()'s flags for the arms — the same ones they were built with.
+    $fetchPage = function (array $arms, array $rank, bool $scored) use ($db, $orderFor, $orderMerged, $orderCat, $deferred, $useCat, $catCols, $colsIndex, $colsWl, $perPage, $offset): array {
+        if (count($arms) === 1) {
+            if ($useCat) {
+                $sql = $deferred($arms[0][0], $orderCat($scored, $rank), 'LIMIT ? OFFSET ?', $orderCat($scored, $rank, 'k.'), $rank);
+            } else {
+                // ONE arm: no derived table. Wrapping a single SELECT in `SELECT * FROM (…) cat` forces
+                // the whole result into a temporary table before the ORDER BY can look at it, which on
+                // the empty search meant materialising 184 000 rows to return 25 of them.
+                $sql = $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4]), $rank) . ' LIMIT ? OFFSET ?';
+            }
+            $params = $arms[0][1];
+        } elseif (!$useCat) {
+            // TWO arms: the merge needs a derived table, but each arm can be ordered and cut short
+            // FIRST — no arm can contribute a row past position offset+perPage to the merged page,
+            // so nothing beyond that has to be materialised or sorted.
+            $cut = $offset + $perPage;
+            $sql = '(' . $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4]), $rank) . ' LIMIT ' . (int)$cut . ')'
+                 . ' UNION ALL '
+                 . '(' . $arms[1][0] . ' ORDER BY ' . $orderFor(true, $scored, !empty($arms[1][4]), $rank) . ' LIMIT ' . (int)$cut . ')';
+            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored, $rank) . ' LIMIT ? OFFSET ?';
+            $params = array_merge($arms[0][1], $arms[1][1]);
+        } else {
+            // TWO arms over the catalogue (1.74.0): the merge runs on keys and sort values only — the catalogue's
+            // straight from the index that serves the order, the whitelist's from its rows — and the wide rows are
+            // read for the page alone, below. Reading them for every row up to the cut, as the merge above does,
+            // was a random read of index_hashes per row passed over: 1.7 s for page 400 at a small pool. The
+            // aliases are the merge's own; one this order does not sort by is NULL in the catalogue's half. The
+            // ranking keys (1.75.0) follow the score in both halves, in the same positions.
+            $cut = $offset + $perPage;
+            $alias = [];
+            foreach (['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers', 'total_size' => 'total_size',
+                      'last_seen' => 'last_seen', 'name' => 'name', 'files_count' => 'files_count'] as $as => $col) {
+                $alias[] = (in_array($col, $catCols, true) ? 'a.' . $col : 'NULL') . ' AS ' . $as;
+            }
+            $rankA = ($rank['hit'] ? ', a.words_hit' : '') . ($rank['ord'] ? ', a.in_order' : '');
+            $rankB = ($rank['hit'] ? ', b.words_hit' : '') . ($rank['ord'] ? ', b.in_order' : '');
+            $sql = "(SELECT a.info_hash, 'index' AS src, " . implode(', ', $alias) . ", a.score$rankA FROM (" . $arms[0][0] . ") a"
+                 . " ORDER BY " . $orderCat($scored, $rank, 'a.') . " LIMIT " . (int)$cut . ")"
+                 . " UNION ALL "
+                 . "(SELECT b.info_hash, 'whitelist' AS src, b.seeders, b.leechers, b.total_size, b.last_seen, b.name, b.files_count, b.score$rankB"
+                 . " FROM (" . $arms[1][0] . ") b ORDER BY " . $orderFor(true, $scored, true, $rank) . " LIMIT " . (int)$cut . ")";
+            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored, $rank) . ' LIMIT ? OFFSET ?';
+            $params = array_merge($arms[0][1], $arms[1][1]);
+        }
+        $st = $db->prepare($sql);
+        $i = 1;
+        foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
+        $st->bindValue($i++, $perPage, PDO::PARAM_INT);
+        $st->bindValue($i, $offset, PDO::PARAM_INT);
+        $st->execute();
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if ($useCat && count($arms) > 1) {
+            // The page's wide rows, by key — the index's from index_hashes (a row that stopped being a member a moment
+            // ago drops out, as in $deferred), the whitelist's from whitelist (info_hash is unique there) — put back
+            // in the page's order, each with the score the merge ranked it by.
+            $wide = ['index' => [], 'whitelist' => []];
+            foreach (['index' => [$colsIndex, 'index_hashes', ' AND ' . IDX_CATALOG_MEMBER], 'whitelist' => [$colsWl, 'whitelist', ' AND banned = 0']] as $src => [$wideCols, $wideTable, $wideMember]) {
+                $keys = array_values(array_unique(array_column(array_filter($rows, fn($r) => $r['src'] === $src), 'info_hash')));
+                if (!$keys) continue;
+                $in = implode(',', array_fill(0, count($keys), '?'));
+                $w = $db->prepare("SELECT $wideCols FROM `$wideTable` WHERE info_hash IN ($in)$wideMember");
+                $w->execute($keys);
+                foreach ($w->fetchAll(PDO::FETCH_ASSOC) as $r) $wide[$src][$r['info_hash']] = $r;
+            }
+            $page = [];
+            foreach ($rows as $r) {
+                $full = $wide[$r['src']][$r['info_hash']] ?? null;
+                if ($full === null) continue;
+                $full['score'] = $r['score'];
+                $page[] = $full;
+            }
+            $rows = $page;
+        }
+        return $rows;
+    };
+
+    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter): array {
         // Whether the relevance column is a real score or the literal 0 — see $orderFor.
         $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
+        $rank = $rankFor($scored);
         // a hash can sit in BOTH tables between polls — prefer the whitelist row. The exclusion is
         // passed IN rather than appended to the finished SQL, which stopped being safe when an arm
         // became a UNION.
-        $arms = [$buildArm(false, $useFt, $withWl, $useCat)];
-        if ($withWl) $arms[] = $buildArm(true, $useFt);
+        $arms = [$buildArm(false, $useFt, $withWl, $useCat, $rank)];
+        if ($withWl) $arms[] = $buildArm(true, $useFt, false, false, $rank);
         // [total, capped]
         $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter, $useCat, $cap): array {
         $total = 0;
@@ -2494,75 +2752,26 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         return $capped ? [max($cap, $total), true] : [$total, false];
         };
 
-        if (count($arms) === 1) {
-            if ($useCat) {
-                $sql = $deferred($arms[0][0], $orderCat($scored), 'LIMIT ? OFFSET ?', $orderCat($scored, 'k.'));
-            } else {
-                // ONE arm: no derived table. Wrapping a single SELECT in `SELECT * FROM (…) cat` forces
-                // the whole result into a temporary table before the ORDER BY can look at it, which on
-                // the empty search meant materialising 184 000 rows to return 25 of them.
-                $sql = $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4])) . ' LIMIT ? OFFSET ?';
-            }
-            $params = $arms[0][1];
-        } elseif (!$useCat) {
-            // TWO arms: the merge needs a derived table, but each arm can be ordered and cut short
-            // FIRST — no arm can contribute a row past position offset+perPage to the merged page,
-            // so nothing beyond that has to be materialised or sorted.
-            $cut = $offset + $perPage;
-            $sql = '(' . $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4])) . ' LIMIT ' . (int)$cut . ')'
-                 . ' UNION ALL '
-                 . '(' . $arms[1][0] . ' ORDER BY ' . $orderFor(true, $scored, !empty($arms[1][4])) . ' LIMIT ' . (int)$cut . ')';
-            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored) . ' LIMIT ? OFFSET ?';
-            $params = array_merge($arms[0][1], $arms[1][1]);
-        } else {
-            // TWO arms over the catalogue (1.74.0): the merge runs on keys and sort values only — the catalogue's
-            // straight from the index that serves the order, the whitelist's from its rows — and the wide rows are
-            // read for the page alone, below. Reading them for every row up to the cut, as the merge above does,
-            // was a random read of index_hashes per row passed over: 1.7 s for page 400 at a small pool. The
-            // aliases are the merge's own; one this order does not sort by is NULL in the catalogue's half.
-            $cut = $offset + $perPage;
-            $alias = [];
-            foreach (['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers', 'total_size' => 'total_size',
-                      'last_seen' => 'last_seen', 'name' => 'name', 'files_count' => 'files_count'] as $as => $col) {
-                $alias[] = (in_array($col, $catCols, true) ? 'a.' . $col : 'NULL') . ' AS ' . $as;
-            }
-            $sql = "(SELECT a.info_hash, 'index' AS src, " . implode(', ', $alias) . ", a.score FROM (" . $arms[0][0] . ") a"
-                 . " ORDER BY " . $orderCat($scored, 'a.') . " LIMIT " . (int)$cut . ")"
-                 . " UNION ALL "
-                 . "(SELECT b.info_hash, 'whitelist' AS src, b.seeders, b.leechers, b.total_size, b.last_seen, b.name, b.files_count, b.score"
-                 . " FROM (" . $arms[1][0] . ") b ORDER BY " . $orderFor(true, $scored, true) . " LIMIT " . (int)$cut . ")";
-            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored) . ' LIMIT ? OFFSET ?';
-            $params = array_merge($arms[0][1], $arms[1][1]);
+        // THE ALL-WORDS FAST PATH (1.75.0). With two countable words or more the order starts with words_hit, so the
+        // page is made of the rows that have EVERY word first, and only when those run out of the rows that have fewer.
+        // Computing words_hit for every row the OR matched is the cost of the new order (+10 … +45 % on production's
+        // medium queries, which does not fit the budget): the rows with every word are a small fraction of those
+        // (1 400 of 70 568 for "rick and morty"), and one MATCH('+rick* +and* +morty*') finds exactly them. So that is
+        // asked first, with the same arms, the same score, the same remaining order and no words_hit key (it is the same
+        // number on every row it can return) and no file-name half (a hash only its files found has words_hit 0). A FULL
+        // page of it IS the page the full query would give — the same rows in the same order — and costs 13–78 ms
+        // instead of ~1 s (650 000 names). A short one (fewer rows than that tier holds past this offset) is thrown
+        // away and the full query runs, which adds 19–242 ms to those searches. The count below is the OR's, as
+        // before; this changes which rows a page holds, never how many there are.
+        $rows = null;
+        if ($rank['hit'] && $useFast) {
+            $rankFast = $rankFor($scored, true);
+            $fast = [$buildArm(false, $useFt, $withWl, $useCat, $rankFast, true)];
+            if ($withWl) $fast[] = $buildArm(true, $useFt, false, false, $rankFast, true);
+            $rows = $fetchPage($fast, $rankFast, $scored);
+            if (count($rows) < $perPage) $rows = null;
         }
-        $st = $db->prepare($sql);
-        $i = 1;
-        foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
-        $st->bindValue($i++, $perPage, PDO::PARAM_INT);
-        $st->bindValue($i, $offset, PDO::PARAM_INT);
-        $st->execute();
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-        if ($useCat && count($arms) > 1) {
-            // The page's wide rows, by key — the index's from index_hashes (a row that stopped being a member a moment
-            // ago drops out, as in $deferred), the whitelist's from whitelist (info_hash is unique there) — put back
-            // in the page's order, each with the score the merge ranked it by.
-            $wide = ['index' => [], 'whitelist' => []];
-            foreach (['index' => [$colsIndex, 'index_hashes', ' AND ' . IDX_CATALOG_MEMBER], 'whitelist' => [$colsWl, 'whitelist', ' AND banned = 0']] as $src => [$wideCols, $wideTable, $wideMember]) {
-                $keys = array_values(array_unique(array_column(array_filter($rows, fn($r) => $r['src'] === $src), 'info_hash')));
-                if (!$keys) continue;
-                $in = implode(',', array_fill(0, count($keys), '?'));
-                $w = $db->prepare("SELECT $wideCols FROM `$wideTable` WHERE info_hash IN ($in)$wideMember");
-                $w->execute($keys);
-                foreach ($w->fetchAll(PDO::FETCH_ASSOC) as $r) $wide[$src][$r['info_hash']] = $r;
-            }
-            $page = [];
-            foreach ($rows as $r) {
-                $full = $wide[$r['src']][$r['info_hash']] ?? null;
-                if ($full === null) continue;
-                $full['score'] = $r['score'];
-                $page[] = $full;
-            }
-            $rows = $page;
-        }
+        if ($rows === null) $rows = $fetchPage($arms, $rank, $scored);
 
         // COUNT LAST, AND ONLY WHEN THE ANSWER IS NOT ALREADY IN FRONT OF US.
         //
@@ -2590,7 +2799,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
 
     foreach ($rows as &$r) {
         foreach (['total_size', 'files_count', 'seeders', 'leechers'] as $k) $r[$k] = $r[$k] !== null ? (int)$r[$k] : null;
-        unset($r['score']);
+        unset($r['score'], $r['words_hit'], $r['in_order']);   // sort keys, not part of a row
     }
     unset($r);
     return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page,

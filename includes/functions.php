@@ -34,7 +34,7 @@ require_once __DIR__ . '/icons.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.74.4';
+const TRACKER_VERSION = '1.75.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -2164,15 +2164,30 @@ function autoReloadTrackerBlacklist(array $cfg): ?array {
  */
 function archiveAppeal(PDO $db, array $appeal): bool {
     try {
-        $stmt = $db->prepare(
-            "INSERT INTO appeal_archives (id, infoHash, report_id, name, email, message, appeal_type, status, admin_response, ip, timestamp, archived_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
-        );
-        $stmt->execute([
-            $appeal['id'], $appeal['infoHash'], $appeal['report_id'], $appeal['name'],
-            $appeal['email'], $appeal['message'], $appeal['appeal_type'] ?? 'unblock',
-            $appeal['status'], $appeal['admin_response'], $appeal['ip'], $appeal['timestamp']
-        ]);
+        // The answer's format goes with it (v94, 1.75.0). A database whose migration has not run yet has no such
+        // column in either table: the archive then keeps the answer as it always did.
+        if (function_exists('schemaColumnExists') && schemaColumnExists($db, 'appeal_archives', 'admin_response_format')) {
+            $stmt = $db->prepare(
+                "INSERT INTO appeal_archives (id, infoHash, report_id, name, email, message, appeal_type, status, admin_response, admin_response_format, ip, timestamp, archived_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
+            );
+            $stmt->execute([
+                $appeal['id'], $appeal['infoHash'], $appeal['report_id'], $appeal['name'],
+                $appeal['email'], $appeal['message'], $appeal['appeal_type'] ?? 'unblock',
+                $appeal['status'], $appeal['admin_response'], (string)($appeal['admin_response_format'] ?? 'plain'),
+                $appeal['ip'], $appeal['timestamp']
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                "INSERT INTO appeal_archives (id, infoHash, report_id, name, email, message, appeal_type, status, admin_response, ip, timestamp, archived_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
+            );
+            $stmt->execute([
+                $appeal['id'], $appeal['infoHash'], $appeal['report_id'], $appeal['name'],
+                $appeal['email'], $appeal['message'], $appeal['appeal_type'] ?? 'unblock',
+                $appeal['status'], $appeal['admin_response'], $appeal['ip'], $appeal['timestamp']
+            ]);
+        }
         $db->prepare("DELETE FROM appeals WHERE id = ?")->execute([$appeal['id']]);
         return true;
     } catch (PDOException $e) {

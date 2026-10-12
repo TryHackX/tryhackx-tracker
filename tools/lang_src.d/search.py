@@ -36,10 +36,12 @@ add('search', {
     'placeholder_files': ('Name or file name…', 'Nazwa albo nazwa pliku…'),
     'clear':       ('Clear search', 'Wyczyść wyszukiwanie'),
     'best':        ('Best match first', 'Najlepiej pasujące najpierw'),
-    'best_title':  ('Order by how well the name matches your query (rarer and longer words weigh more); '
-                    'column sorts break ties',
-                    'Sortuj według dopasowania nazwy do zapytania (rzadsze i dłuższe słowa ważą więcej); '
-                    'sortowanie kolumn rozstrzyga remisy'),
+    'best_title':  ('Results with more of your words come first, then those with the words in the order you '
+                    'typed them; a column you click sorts inside each of those groups. Without this the '
+                    'results are still grouped by how many of your words matched.',
+                    'Najpierw wyniki z większą liczbą Twoich słów, potem te, w których słowa stoją w tej '
+                    'kolejności, w jakiej je wpisano; kliknięta kolumna sortuje wewnątrz każdej z tych grup. '
+                    'Bez tej opcji wyniki są nadal grupowane według liczby dopasowanych słów.'),
     'files':       ('Also search file names', 'Szukaj też w nazwach plików'),
     'files_title': ('Also match torrent file names', 'Dopasowuj także nazwy plików w torrencie'),
     'content_title': ('Which descriptions to include, by review state. The default hides rejected ones — '

@@ -159,6 +159,13 @@ $apiRoutes = [
     // Reported comments, descriptions and shouts (1.71.0, includes/reports.php).
     'admin/content_reports'       => 'api/admin/content_reports.php',
     'admin/content_report_action' => 'api/admin/content_report_action.php',
+    // The preview of the words a moderator writes (1.75.0) — one component, every window (adminRichField()).
+    'admin/rich_preview'          => 'api/admin/rich_preview.php',
+    // The Moderation page (1.75.0, includes/moderation.php): who is silenced or banned, the warnings log, the automatic
+    // penalties — read, act (lift, revoke, warn / silence / ban by hand), and their rules.
+    'admin/fetch_moderation'      => 'api/admin/fetch_moderation.php',
+    'admin/moderation_action'     => 'api/admin/moderation_action.php',
+    'admin/moderation_rules'      => 'api/admin/moderation_rules.php',
     'admin/change_status'   => 'api/admin/change_status.php',
     'admin/block_hash'      => 'api/admin/block_hash.php',
     'admin/unblock_hash'    => 'api/admin/unblock_hash.php',
@@ -453,6 +460,12 @@ function adminEndpointPermission(string $endpoint): ?string {
         // and each endpoint asks its kind's own (as admin/backup_action asks for its op).
         'admin/content_reports'       => 'panel.access',
         'admin/content_report_action' => 'panel.access',
+        // A pure rendering of the text a moderator is typing (1.75.0): reads and writes nothing.
+        'admin/rich_preview'          => 'panel.access',
+        // The Moderation page (1.75.0): reading it, acting on it, and the automatic penalties' rules are three permissions.
+        'admin/fetch_moderation'      => 'panel.moderation.view',
+        'admin/moderation_action'     => 'panel.moderation.handle',
+        'admin/moderation_rules'      => 'panel.moderation.rules',
         'admin/fetch_appeals'      => 'panel.reports.view',
         'admin/change_status'      => 'panel.reports.status',
         'admin/update_field'       => 'panel.reports.status',
@@ -571,7 +584,7 @@ if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endp
             'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status',
             'admin/ot_status', 'admin/sysctl_status', 'admin/dbmem_status', 'admin/ot_cluster_status',
             'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
-            'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users', 'admin/content_reports',
+            'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users', 'admin/content_reports', 'admin/fetch_moderation',
             'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',
             'admin/fetch_fed_peers', 'admin/user_media',
             // 1.74.0 (PERF-12): the two pollers that were missing — the whitelist modal's row (every 3 s, and

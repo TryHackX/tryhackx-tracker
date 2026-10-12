@@ -73,7 +73,7 @@ add('notify', {
                                     'wpisu :user w shoutboksie'),
     'creport_someone':             ('a member',
                                     'członka'),
-    # ── the author, when the moderator chose to be LOUD: one warning, in the author's language (userWarn()) ──
+    # ── the author, when the moderator chose to be LOUD: one warning, in the author's language (moderationNoticeWarning()) ──
     'warn_removed_comment':        ('Warning: your comment on “:name” was removed',
                                     'Ostrzeżenie: Twój komentarz pod „:name” został usunięty'),
     'warn_removed_description':    ('Warning: your description of “:name” was removed',

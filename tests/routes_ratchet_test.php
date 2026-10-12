@@ -57,7 +57,7 @@ const PRE_AUTH = ['admin/login', 'admin/login_2fa'];
 const KNOWN_UNTESTED = [
     // the reports' queue actions — reached by clicking in the panel, no test of their own yet
     'admin/change_status', 'admin/unblock_hash', 'admin/send_email', 'admin/delete_report', 'admin/check_blacklist',
-    'admin/notify_review', 'admin/fetch_appeals', 'admin/block_archived',
+    'admin/notify_review', 'admin/block_archived',
     // panel reads drawn by pages (the browser checks open the pages, not the routes by name)
     'admin/settings_catalog', 'admin/csp_reports', 'admin/audit_log',
     // the helpers that act as root, or test paths on the machine: need the helper (a stub) to be worth testing

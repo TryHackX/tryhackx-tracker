@@ -14,12 +14,23 @@ if (isset($input['status'])) {
     $status = (string)$input['status'];
     if (!in_array($status, ['active', 'banned'], true)) jsonResponse(['error' => __('api.users.invalid_status')], 400);
     if ($status === 'banned' && userIsRootAdmin($u, $cfg)) jsonResponse(['error' => __('api.users.owner_cannot_ban')], 400);
+    // The status box is a CHANGE of status, not a field that is always saved (1.75.0): it used to be sent with every save of
+    // this window, and "banned" written over an account already banned for a few days made that ban dateless — an edit of the
+    // address ended a timed ban's end. Whatever the account already is, it stays; a ban's date is the Moderation page's.
+    if ($status === (string)$u['status']) $status = null;
 }
 $email = null; $emailSet = false;
 if (array_key_exists('email', $input)) {
-    $emailSet = true;
     $email = trim((string)$input['email']);
-    if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => __('api.users.invalid_email_2')], 400);
+    // Like the status, the address is a CHANGE (1.75.0): the window used to send it with every save, and writing it back
+    // marks it verified ("the admin vouches for it") — so setting only a password verified an address its owner had never
+    // confirmed. The address the account already has is left alone, verified or not; the flag's own switch is `email_verified`.
+    if ($email !== trim((string)($u['email'] ?? ''))) {
+        $emailSet = true;
+        if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => __('api.users.invalid_email_2')], 400);
+    } else {
+        $email = null;
+    }
 }
 $password = (string)($input['password'] ?? '');
 if ($password !== '' && !userValidPassword($password)) {

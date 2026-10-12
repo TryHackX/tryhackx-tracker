@@ -80,14 +80,9 @@ add('a.users', {
     'subject_ph':     ('e.g. Scheduled maintenance on Sunday',
                        'np. Planowana przerwa techniczna w niedzielę'),
     'message':        ('Message', 'Wiadomość'),
-    'fmt_title':      ('How the message is written', 'W jakiej składni piszesz wiadomość'),
-    'fmt_plain':      ('Plain text', 'Zwykły tekst'),
-    'body_ph':        ('Line breaks are kept.', 'Podziały wierszy są zachowywane.'),
-    'preview_head':   ('Preview of the email', 'Podgląd e-maila'),
-    'fmt_hint_plain': ('Plain text: line breaks are kept and nothing else is interpreted.',
-                       'Zwykły tekst: podziały wierszy są zachowywane, nic więcej nie jest '
-                       'interpretowane.'),
-    'audience_hint':  ('Choose an audience to see who would receive this.',
+    # (the composer's format select, placeholder, preview heading and hint moved into adminRichField() in 1.75.0:
+    # js.rich.*, js.users.fmt_*)
+    'audience_hint': ('Choose an audience to see who would receive this.',
                        'Wybierz odbiorców, aby zobaczyć, kto to dostanie.'),
     'recount':        ('Recount', 'Przelicz'),
     'send_test':      ('Send one to me', 'Wyślij do mnie'),

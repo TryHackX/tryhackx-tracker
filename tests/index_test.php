@@ -416,8 +416,18 @@ check('too short: three characters allowed', !indexSearchTooShort('abc') && !ind
 check('too short: counts characters, not bytes (ąę = 2, ąęó = 3)', indexSearchTooShort('ąę') && !indexSearchTooShort('ąęó'));
 check('too short: two hex digits are still too short (not a hash prefix)', indexSearchTooShort('ab') && indexSearchTooShort('1f'));
 check('too short: a hash prefix is never refused', !indexSearchTooShort('abcdef') && !indexSearchTooShort(strtoupper(h(1))));
-check('hash prefix regex is the shared constant', preg_match(INDEX_HASH_PREFIX_RE, 'abcdef') === 1 && preg_match(INDEX_HASH_PREFIX_RE, 'abcde') === 0
+check('hash prefix regex is the shared constant (the shape: hex, six to forty characters)', preg_match(INDEX_HASH_PREFIX_RE, 'abcdef') === 1 && preg_match(INDEX_HASH_PREFIX_RE, 'abcde') === 0
     && preg_match(INDEX_HASH_PREFIX_RE, 'abcdeg') === 0 && preg_match(INDEX_HASH_PREFIX_RE, h(1) . '0') === 0);
+// 1.75.0: the RULE on top of the shape — "abcdef", "decade", "facade", "deface", "efface" are English words made of a-f, and with
+// index.magnet the search took each for the start of a hash and found nothing. A hex term is a hash prefix only with a digit
+// among its characters, or at twelve characters or more (no word is that long and all a-f); one predicate for every caller.
+check('hash prefix rule: all-letter words of six to eleven characters are words, not hashes',
+    !indexIsHashPrefix('abcdef') && !indexIsHashPrefix('decade') && !indexIsHashPrefix('FACADE') && !indexIsHashPrefix('deface') && !indexIsHashPrefix('efface')
+    && !indexIsHashPrefix('abcdefabcde'));
+check('hash prefix rule: a digit among the characters still makes it a prefix, so does twelve characters of any hex',
+    indexIsHashPrefix('abc123') && indexIsHashPrefix('ABC123') && indexIsHashPrefix('1bcdef') && indexIsHashPrefix('abcdefabcdef') && indexIsHashPrefix(h(1))
+    && indexIsHashPrefix(strtoupper(h(1))) && !indexIsHashPrefix('abc12') && !indexIsHashPrefix('abc12g') && !indexIsHashPrefix(h(1) . '0'));
+check('too short: the hash clause follows the same rule (a hash prefix is longer than the floor either way)', !indexSearchTooShort('abc123') && indexSearchTooShort('ab'));
 
 // the indexed path the guard exists to protect: a prefix of the hash finds the row. Not h(): its
 // hashes are a small number zero-padded to 40 digits, so they all share the same first 29 characters
@@ -433,6 +443,15 @@ $byFull = indexSearchCatalogue($db, $cfg, ['search' => $hB, 'include_whitelist' 
 check('catalogue: the full hash finds its row', $byFull['total'] === 1 && ($byFull['rows'][0]['info_hash'] ?? '') === $hB, json_encode($byFull));
 $browse = indexSearchCatalogue($db, $cfg, ['search' => '', 'include_whitelist' => false]);
 check('catalogue: the empty search still lists everything', $browse['total'] === 2, json_encode($browse));
+// 1.75.0: the same rule in the admin list and the file clause — "decade" is a word there too, "f00d0000" a hash
+$hC = 'f00d' . str_repeat('0', 36);
+$db->exec("INSERT INTO index_hashes (info_hash, name, last_seen, grace_until, meta_status, last_seeders, last_leechers) VALUES ('$hC', 'Decade Facade Edition', NOW(), NOW() + INTERVAL 3 DAY, 'done', 1, 0)");
+$lstWord = indexListSelect($db, $cfg, ['search' => 'decade']);
+check('admin list: "decade" is searched as a name, not taken for the start of a hash', $lstWord['total'] === 1 && ($lstWord['rows'][0]['info_hash'] ?? '') === $hC, json_encode($lstWord['total']));
+$lstHash = indexListSelect($db, $cfg, ['search' => 'F00D0000']);
+check('… and a hex term with a digit still finds its hash', $lstHash['total'] === 1 && ($lstHash['rows'][0]['info_hash'] ?? '') === $hC, json_encode($lstHash['total']));
+check('the file clause: a word of a-f is searched in file names, a hash prefix is not', indexFilePathClause('decade') !== null && indexFilePathClause('abc123') === null && indexFilePathClause('f00d0000') === null);
+$db->exec("DELETE FROM index_hashes WHERE info_hash = '$hC'");
 
 // ── 12. the file list says how much of it was ever stored ─────────────────────
 // The metadata worker writes only the first max_files paths of a torrent (worker.py:645) but

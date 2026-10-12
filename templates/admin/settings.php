@@ -1334,6 +1334,26 @@
                         <input id="set-bulk_mail_max_attempts" type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_max_attempts" value="<?= sanitize($cfg['bulk_mail_max_attempts'] ?? '3') ?>" min="1" max="10">
                         <small class="settings-hint"><?= _h('settings.bulk_mail_retries_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="bulk_mail_daily_cap">
+                        <label for="set-bulk_mail_daily_cap" class="form-label"><?= _h('settings.bulk_mail_daily_cap') ?></label>
+                        <input id="set-bulk_mail_daily_cap" type="number" class="form-control bg-dark text-light border-secondary" name="bulk_mail_daily_cap" value="<?= sanitize($cfg['bulk_mail_daily_cap'] ?? '0') ?>" min="0" max="1000000">
+                        <small class="settings-hint"><?= __('settings.bulk_mail_daily_cap_hint') ?></small>
+                    </div>
+                    <div class="col-md-6" data-setting="mail_sender_address">
+                        <label for="set-mail_sender_address" class="form-label"><?= _h('settings.mail_sender_address') ?></label>
+                        <input id="set-mail_sender_address" type="text" class="form-control bg-dark text-light border-secondary" name="mail_sender_address" value="<?= sanitize($cfg['mail_sender_address'] ?? '') ?>" maxlength="300" autocomplete="off">
+                        <small class="settings-hint"><?= _h('settings.mail_sender_address_hint') ?></small>
+                    </div>
+                    <?php /* 1.75.0: the ladder of automatic penalties (the Moderation page's third tab holds its rules; a holder of
+                             panel.moderation.rules switches it there too). Off until the owner has read them. */ ?>
+                    <div class="col-md-3" data-setting="auto_penalties_enabled">
+                        <label for="set-auto_penalties_enabled" class="form-label"><?= _h('settings.auto_penalties_enabled') ?></label>
+                        <select id="set-auto_penalties_enabled" class="form-select bg-dark text-light border-secondary" name="auto_penalties_enabled">
+                            <option value="0" <?= ($cfg['auto_penalties_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['auto_penalties_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= __('settings.auto_penalties_enabled_hint', ['url' => $baseUrl . '?action=admin-moderation']) ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label for="set-users_require_email_verify" class="form-label"><?= _h('settings.users_email_verify') ?></label>
                         <select id="set-users_require_email_verify" class="form-select bg-dark text-light border-secondary" name="users_require_email_verify">

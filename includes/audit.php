@@ -56,8 +56,11 @@ function auditActionGroups(): array {
         // the same action now, which is how it was noticed.
         // group.recommend (1.72.0): a seeded group given what it was missing of its recommended set, or reset to it —
         // from the Groups tab or from tools/groups.php, one line either way (userGroupRecommendedAudit()).
+        // 1.75.0 (includes/moderation.php): user.warn is every row of the log (a silent one too), user.lift a silence or a ban
+        // ended, warning.revoke a warning withdrawn, user.autopenalty what the ladder did by itself and autopenalty.rules
+        // the ladder edited or switched.
         'users'    => ['user.create', 'user.update', 'user.delete', 'user.grant', 'user.revoke', 'user.notify', 'group.save', 'group.delete', 'user.media', 'user.bio',
-                       'user.warn', 'group.recommend'],
+                       'user.warn', 'user.lift', 'warning.revoke', 'user.autopenalty', 'autopenalty.rules', 'group.recommend'],
         'machine'  => ['tracker.mode', 'tracker.restart', 'tracker.reload', 'netlimit.apply', 'iplist.change', 'sysctl.apply',
                        'ot.apply', 'ot.cluster', 'livesync.apply', 'backup.run', 'backup.restore',
                        'backup.delete', 'backup.download', 'tuner.run'],

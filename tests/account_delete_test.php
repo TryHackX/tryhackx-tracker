@@ -87,7 +87,7 @@ $KEEP = [
     'shout_emotes'      => 'uploaded_by: NULL means "the panel\'s", so a gone uploader stays a raw id',
 ];
 $ACCOUNT_COLS = ['user_id', 'sender_id', 'reporter_id', 'reported_user_id', 'author_id', 'submitter_id', 'content_user_id',
-                 'friend_id', 'blocked_id', 'by_id', 'edited_by', 'approved_by', 'deleted_by', 'pinned_by', 'uploaded_by',
+                 'friend_id', 'blocked_id', 'by_id', 'revoked_by_id', 'edited_by', 'approved_by', 'deleted_by', 'pinned_by', 'uploaded_by',
                  'actor_id', 'u_low', 'u_high', 'voter_key'];
 $in = implode(',', array_fill(0, count($ACCOUNT_COLS), '?'));
 $cols = $db->prepare("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS

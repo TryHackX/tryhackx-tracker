@@ -194,6 +194,12 @@ or trust starts off. The built-in Info and Terms pages describe exactly the feat
 - **Reports of words and warnings** — a flag on a comment, a description or a shout (`content.report`,
   member); the Reports page's queues per kind (`panel.reports.comments|descriptions|shouts.view|handle`,
   moderator); close, remove, warn, silence or suspend — each silently or as a warning the author receives.
+- **The Moderation page** (1.75.0, `panel.moderation.view` / `.handle` / `.rules`; the moderator holds the first two) —
+  who is silenced or banned right now (and lifting it, with a note the member may be told), the log of every warning
+  with filters, **revoking** a warning (it stays, struck through, and counts nowhere), warning / silencing / banning by
+  hand from the Users page's edit window, and **automatic penalties** (`auto_penalties_enabled` [0]): a ladder of "N
+  counted warnings in D days → silence or ban for X days", off until you switch it on. A member sees their own
+  **Account standing** on their account page.
 - **One anti-spam layer** for everything people write (`antispam_enabled` [1]) — a free burst, growing
   pauses, a duplicate rule, stricter pacing and plain-text links for new accounts, a CAPTCHA for whoever
   keeps pushing. *Needs:* a CAPTCHA provider for the CAPTCHA half.
@@ -215,7 +221,8 @@ or trust starts off. The built-in Info and Terms pages describe exactly the feat
   (`digest_enabled` [0]); the build line (`version_display` [panel]).
 - **Moderators** — a panel session opened from a member account reaches exactly what its groups grant
   (`panel.*` permissions), and on the public pages it is that account, no more (1.74.0); settings, backups,
-  groups and the machine stay with the owner. The members' e-mail and IP addresses on the Users page are shown
+  groups and the machine stay with the owner. The panel's pages are Reports, Whitelist, Index, Traffic, Users,
+  **Moderation** (1.75.0), Backups and the Log. The members' e-mail and IP addresses on the Users page are shown
   in full only to staff who may edit accounts (`panel.users.edit`), shortened to the rest (1.74.0).
 - **The panel's own security** — a movable sign-in address, a second factor, the owner's password asked
   again for everything that changes the machine.
@@ -1006,8 +1013,11 @@ default — with it off, everything behaves exactly like the classic single-admi
 - **Member search** (`?action=search`): search everything the tracker has *seen* (resolved index
   metadata; with `whitelist.view` the live whitelist is folded in and badged `WL` — the admin can
   exclude it globally via `index_search_include_whitelist`, or kill the whole search regardless of
-  grants via `index_search_enabled`) — ordered by **Best match** relevance (fulltext score,
-  rarer/longer words weigh more) with multi-column header sorts, live-as-you-type with a loading
+  grants via `index_search_enabled`) — grouped by how many of the typed words a name has (1.75.0:
+  three words, then two, then one — words the fulltext index cannot hold, "the" and two-letter ones,
+  do not count), **Best match** then puts the words in the order typed first and the fulltext score
+  (rarer/longer words weigh more) last, and a column clicked in the header sorts inside those groups;
+  multi-column header sorts, live-as-you-type with a loading
   state, match highlighting, a rows-per-page choice (15–200), and per-permission columns (file
   counts open a **folder-tree modal** with `index.files`; info hashes / magnet links with
   `index.magnet`). A reader who is not shown hashes does not search by one either (1.69.0): without
@@ -1509,14 +1519,41 @@ member's reports an hour are limited; `content.report` (members as shipped).
 - **Silent or loud**, for everything that reaches the author: silently, they are told nothing; as a warning,
   they get one notification in their own language with your reason (required), kept on their account in
   `user_warnings`. The count and the latest warnings are on every reported author's card and in **Users** (the
-  member's window); the member sees them among their notifications, nowhere public. The **message card** has the
-  same choice and a Warn of its own.
+  member's window); the member sees them among their notifications and — since 1.75.0 — under **Account standing** on
+  their own account page, nowhere public. The **message card** has the same choice and a Warn of its own.
+- **One path for every punishment** (1.75.0, `includes/moderation.php`): every warning, removal of words, silence,
+  ban and lift — from the report cards, the message card, the Users page and the Moderation page — is one function,
+  `userModerate()`. It locks the member's row first (so two moderators warning at the same moment get two numbers, not
+  one), applies the action, writes the log row — a **silent** action too, with `loud` 0 —, counts, evaluates the
+  automatic rules, and only after the commit tells the member and writes the audit lines (`user.warn`, `user.lift`,
+  `warning.revoke`, `user.autopenalty`, `autopenalty.rules` — all in the Log's *Users* group).
+- **What counts as a warning** — toward the number the member is told, the Users list's badge and the automatic
+  penalties — is a row that was **loud** (the member was told), **not revoked** and **not itself automatic**: a
+  warning, removed words, a silence or a ban given as a warning. A raw report never counts, a silent action never
+  counts, a revoked warning never counts; they stay in the log. `user_warnings` rows are kept until the account is
+  deleted (revoked ones too) — the Info page says so.
+- **Automatic penalties** (`auto_penalty_rules`; seeded once: 3 warnings in 30 days → silence 3 days, 5 in 60 → 14 days,
+  7 in 90 → ban 30 days): evaluated right after a loud row is written, in the same transaction. The strongest
+  matching rule wins (a ban over a silence, then the one that ends later) and is applied only if it ends *later* than
+  what the member already has — it never shortens, never turns a ban into a silence, never touches a ban with no end
+  date (the owner's, from Users), skips the silence rules while a ban runs, and spares staff (anyone who can open the
+  panel, an unverified moderator too). A rule that matches again with the next warning extends the penalty from
+  that moment. The penalty is a row of its own (`source_kind` `auto`), told in its own notification and not counted.
+  "Until lifted" is the `2099-12-31 23:59:59` date, never NULL. Rules: 1–100 warnings, 1–365 days, duration 0–365
+  (0 = until lifted), edited on the Moderation page's third tab (`panel.moderation.rules`, the Admin group's and a
+  tick) and switched there or in Settings → User accounts.
 - **Who** (Users → Groups): `panel.reports.comments.view` / `.handle`, `panel.reports.descriptions.view` /
   `.handle`, `panel.reports.shouts.view` / `.handle` — the moderator group's as shipped. The message queue
   (`panel.messages.*`) is still nobody's until you grant it. The reporters hear the outcome (closed, removed,
   handled) in their language; every action is in the audit log's Reports group.
-- **Data** (schema 84): `content_reports` (beside `message_reports`, which is unchanged), `user_warnings`.
-  Endpoints: `content_report`, `admin/content_reports`, `admin/content_report_action` (`includes/reports.php`).
+- **Data** (schema 84): `content_reports` (beside `message_reports`, which is unchanged), `user_warnings`
+  (schema 94 adds `loud`, the revocation columns, source kinds `manual` and `auto`) and `auto_penalty_rules`.
+  Endpoints: `content_report`, `admin/content_reports`, `admin/content_report_action` (`includes/reports.php`),
+  `admin/fetch_moderation`, `admin/moderation_action`, `admin/moderation_rules` (`includes/moderation.php`).
+  Since 1.75.0 a moderator's reason (to the author) and answer (to the reporters) are texts of up to 2 000 characters with
+  lines and a format — plain, or BBCode / Markdown where the site accepts them — stored raw beside it
+  (`user_warnings.reason_format`, `content_reports.reply_format`, `message_reports.reply_format`) and drawn as formatted
+  in the author's and the reporters' notifications; the torrent-report mail and the appeal answer take the same box.
   Every report passes one limit function, `contentReportFloodCheck()` — the anti-spam layer, then the hour's limit.
 
 ### One anti-spam layer for everything people write (1.71.0)
@@ -3280,12 +3317,13 @@ upgrade takes (`includes/schema.php`, schema **91** in 1.73.0):
 | `hash_votes` | Ratings: one vote per account (or, for guests, per address group) |
 | `hash_comments` | Comments and replies on a torrent (soft-deleted, with who, when and why) — schema v83 |
 | `content_reports` | Reports of comments, descriptions and shouts, each with a copy of the words as reported — schema v84 |
-| `user_warnings` | Warnings a moderator gave, with the reason — schema v84 |
+| `user_warnings` | Every punishment a moderator or the rules gave — warnings, removed words, silences, bans, the silent ones too (`loud` 0), automatic penalties (`source_kind` `auto`) — with the reason in its format; a revoked row stays, marked — schema v84, v94 |
+| `auto_penalty_rules` | The ladder of automatic penalties: counted warnings in a window → silence or ban for a length (0 = until lifted) — schema v94 |
 | `users` | User accounts (username, optional email, password hash, status, privacy switches, language, time zone, sound choices, silence / ban dates) — schema v7 onward |
 | `user_groups` | Groups with JSON permissions (seeded: `guest` = anonymous visitors, `member` = granted on registration, `premium` = the paid extras (`profile.cover`, `shout.upload_emote`) granted by hand or bought, `moderator`, `admin` = passes every check, and since v89 stores every capability too — never a consent id unless somebody gives it) — schema v8 semantics, matrix v71, recommended sets 1.72.0 |
 | `user_group_members` | Timed memberships (`granted_at`/`expires_at`, expiry warnings) |
 | `user_group_orders` | What a shop asked for: `UNIQUE(client_id, order_id)` is what makes a retried purchase webhook grant one month instead of two, and what a refund of one order is recomputed from — schema v71 |
-| `user_notifications` | In-app notifications (grants, expiry warnings, replies, warnings, admin messages) |
+| `user_notifications` | In-app notifications (grants, expiry warnings, replies, warnings, admin messages); `rich` + `rich_format` hold the SOURCE of one that has formatting (BBCode / Markdown / HTML), drawn when it is read |
 | `user_tokens` | Remember-me + password-reset tokens (sha256 only), with each device's address and browser |
 | `user_twofa` | A member's second factor: the TOTP secret and hashed recovery codes — schema v53 |
 | `user_media` | Pictures and covers, re-encoded, as rows — schema v69 |
@@ -3302,7 +3340,7 @@ upgrade takes (`includes/schema.php`, schema **91** in 1.73.0):
 | `page_content` | Your own Terms, Info and home-page texts, per page and language — schema v41 |
 | `audit_log` | The panel's log (who, what, the address) — `audit_keep_days` |
 | `csp_reports` | Collected Content-Security-Policy violations (the directive, the blocked origin, the page) |
-| `mail_queue` | Bulk mail to members, sent by the janitor |
+| `mail_queue` | Bulk mail to members, sent by the janitor; `format` (plain / BBCode / Markdown / **HTML** — cleaned by `includes/htmlsafe.php`) and `frame` (the site's dark frame, or none: only the mandatory footer) |
 | `ip_lists` / `ip_list_entries` | Address lists for the firewall (allow / block / soft) and their networks — schema v34 |
 | `user_identities` | Sign-in bridge: which partner key vouches for which account, and the name it knows them by — schema v49 |
 | `auth_handoffs` | Sign-in bridge: one-time tickets (sha256 only), in either direction — schema v49 |
@@ -3433,9 +3471,11 @@ Prefix: `admin/`. Each needs a panel session **and** that endpoint's own panel p
 | `admin/fetch_index` / `index_status` / `index_item` / `index_polls` / `index_poll_now` / `index_scrape` / `index_scrape_bulk` / `index_fetch_meta` / `index_promote` / `index_delete` | GET / POST | The Index page: the catalogue, its status and scrape coverage, one entry, polls, live scrapes, metadata, promote to the whitelist, delete |
 | `admin/whitelist_review` / `whitelist_meta_queue` / `whitelist_scrape_bulk` / `wl_content` / `notify_review` | GET / POST | The review queues — partner registrations, metadata, descriptions and rewrites — and review notifications |
 | `admin/fetch_message_reports` / `message_report_action` / `content_reports` / `content_report_action` | GET / POST | The reported messages and the reported words (comments, descriptions, shouts): close, remove, warn, silence, ban — silently or as a warning |
+| `admin/fetch_moderation` / `moderation_action` / `moderation_rules` | GET / POST / POST | The Moderation page (`panel.moderation.view` / `.handle` / `.rules`): who is restricted now, the warnings log (keyset-paged, filtered), the automatic penalties; lift, revoke, warn / silence / ban by hand; the ladder and its switch |
 | `admin/delete_report` / `delete_permanently` / `delete_all` / `restore_report` / `restore_appeal` / `block_archived` / `update_field` | POST | Report housekeeping: archive and restore, delete for good, block from the archive, inline edits |
 | `admin/audit_log` / `csp_reports` | GET | The panel's log; the collected Content-Security-Policy reports |
-| `admin/bulk_send` | POST | Mail to members: queue, cancel, test copy (owner, password) |
+| `admin/bulk_send` | POST | Mail to members: queue, cancel, test copy, the preview of the whole mail (owner, password); formats plain / BBCode / Markdown / HTML, with or without the site's frame |
+| `admin/rich_preview` | POST | The panel's one preview of the words a moderator writes (reason, answer, a mail to a reporter): the formats the site accepts and the site's own rendering (any panel session) |
 | `admin/change_password` / `login_2fa` / `twofa` | POST | The owner's password; the second factor at sign-in; setting it up |
 | `admin/user_create` / `user_media` / `user_bio` | POST | Create an account; remove a member's picture or cover; clear a profile description |
 | `admin/home_layout` / `page_content` / `languages` / `iconpacks` / `sounds` / `shout_emotes` / `shout_purge` | GET / POST | Home page layout, the page editor, languages, icon packages, sounds, the emote manager, emptying the shoutbox |

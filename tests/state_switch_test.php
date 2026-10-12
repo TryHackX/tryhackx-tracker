@@ -24,6 +24,7 @@ if (!is_file($root . '/config/database.php')) { fwrite(STDERR, "config/database.
 /** The mailer, as bulkTick() sees it: records, and answers what $GLOBALS['SST_SEND'] says (default: accepted). */
 function sendEmail(string $to, string $subject, string $plainText, string $htmlBody, array $cfg, string $unsubscribeUrl = ''): bool {
     $GLOBALS['SST_SENT'][] = $to;
+    $GLOBALS['SST_LAST'] = [$plainText, $htmlBody];      // both halves of the last mail (1.75.0)
     $f = $GLOBALS['SST_SEND'] ?? null;
     return is_callable($f) ? (bool)$f($to) : true;
 }
@@ -106,6 +107,31 @@ try {
     check('… and at the most attempts it is given up — failed, with its reason — not retried for ever',
           $r3['failed'] === 1 && ($c['status'] ?? '') === 'failed' && (int)($c['attempts'] ?? 0) === 2 && ($c['last_error'] ?? '') !== '', $J([$r3, $c]));
     unset($GLOBALS['SST_SEND']);
+
+    // ── 1.75.0: the day's ceiling (bulk_mail_daily_cap), and an HTML row ──────────────────────────────────────────
+    // What has gone out since the database's midnight is counted from the rows. Two more are due; one place left under the cap.
+    foreach ([['d@sst.example', 'queued', -30], ['e@sst.example', 'queued', -20]] as [$to, $status, $at]) $ins->execute([$batch, $to, $status, $at]);
+    $sentToday = (int)$db->query("SELECT COUNT(*) FROM mail_queue WHERE status = 'sent' AND sent_at >= CURDATE()")->fetchColumn();
+    $cfgCap = array_merge($cfgB, ['bulk_mail_per_minute' => '5', 'bulk_mail_daily_cap' => (string)($sentToday + 1)]);
+    $GLOBALS['SST_SENT'] = [];
+    $rc1 = bulkTick($db, $cfgCap);
+    check('a daily cap with one place left: the tick sends ONE, though five are allowed a minute and two are due', $rc1['sent'] === 1 && count($GLOBALS['SST_SENT']) === 1 && empty($rc1['capped']), $J([$rc1, $GLOBALS['SST_SENT']]));
+    $GLOBALS['SST_SENT'] = [];
+    $rc2 = bulkTick($db, $cfgCap);
+    check('… at the cap it sends nothing, says so, and what waits still counts as left', $rc2['sent'] === 0 && $GLOBALS['SST_SENT'] === [] && !empty($rc2['capped']) && $rc2['left'] >= 1, $J($rc2));
+    $GLOBALS['SST_SENT'] = [];
+    $rc3 = bulkTick($db, array_merge($cfgCap, ['bulk_mail_daily_cap' => '0']));
+    check('… 0 is no cap: the next tick sends what is due', $rc3['sent'] >= 1 && empty($rc3['capped']), $J($rc3));
+    // An HTML row: the text half is made from the CLEANED HTML (no tags, the link as "words (address)"), the HTML half has no script.
+    $db->exec("UPDATE mail_queue SET status = 'sent' WHERE batch_id = '$batch' AND status = 'queued'");
+    $db->prepare("INSERT INTO mail_queue (batch_id, user_id, email, subject, body, format, frame, status, next_attempt_at)
+                  VALUES (?, NULL, 'html@sst.example', 'SST html', ?, 'html', 'none', 'queued', NOW() - INTERVAL 5 SECOND)")
+       ->execute([$batch, '<p>Hello <a href="https://x.example/y">there</a></p><script>alert(1)</script>']);
+    $GLOBALS['SST_SENT'] = [];
+    $rh = bulkTick($db, $cfgB);
+    check('an HTML row is sent with a text half made from its cleaned HTML and an HTML half without the script', $rh['sent'] === 1 && $GLOBALS['SST_SENT'] === ['html@sst.example']
+          && str_contains((string)($GLOBALS['SST_LAST'][0] ?? ''), 'Hello there (https://x.example/y)') && !str_contains((string)($GLOBALS['SST_LAST'][0] ?? ''), '<')
+          && !str_contains((string)($GLOBALS['SST_LAST'][1] ?? ''), 'script') && str_contains((string)($GLOBALS['SST_LAST'][1] ?? ''), '<a href="https://x.example/y"'), $J([$rh, $GLOBALS['SST_LAST'] ?? null]));
 } finally {
     if ($db->inTransaction()) $db->rollBack();
 }

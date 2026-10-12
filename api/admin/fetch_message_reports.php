@@ -77,8 +77,12 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'id'         => (int)$r['id'],
         'status'     => (string)$r['status'],
         'reason'     => (string)$r['reason'],
-        'note'       => (string)$r['note'],
+        'note'       => (string)($r['note'] ?? ''),
         'reply'      => (string)($r['reply'] ?? ''),
+        // the answer's format and, for BBCode / Markdown, the answer rendered (1.75.0); a plain one is text
+        'reply_format' => (string)($r['reply_format'] ?? 'plain'),
+        'reply_html' => (($r['reply_format'] ?? 'plain') !== 'plain' && (string)($r['reply'] ?? '') !== '')
+            ? reportTextHtml((string)$r['reply'], (string)$r['reply_format'], $cfg) : '',
         'reporter'   => (string)$r['reporter_name'],
         'reported'   => (string)$r['reported_name'],
         'reporter_avatar' => $reporterAv,
@@ -130,7 +134,7 @@ if ($names) {
                               ? (string)$u['pm_muted_until'] : null,
             'reports'      => (int)$u['reports'],
             // A moderator may not be punished from this card, so the card must not offer it.
-            'staff'        => userIdHasPermission($db, $cfg, (int)$u['id'], 'panel.access'),
+            'staff'        => moderationIsStaff($db, (int)$u['id']),
         ];
     }
 }

@@ -42,6 +42,10 @@ if ($search !== '') {
 }
 $status = (string)($_GET['status'] ?? '');
 if (in_array($status, ['active', 'banned'], true)) { $where[] = "status = ?"; $params[] = $status; }
+// 1.75.0: "muted" — silenced at this moment (the column is a date; one in the past is not in force) — and "warned" — with at
+// least one warning that counts (loud, not revoked, not an automatic penalty's own: MODERATION_COUNTED).
+if ($status === 'muted') $where[] = "(pm_muted_until IS NOT NULL AND pm_muted_until > NOW())";
+if ($status === 'warned') $where[] = "EXISTS (SELECT 1 FROM user_warnings w WHERE w.user_id = users.id AND " . MODERATION_COUNTED . ")";
 $groupFilter = (int)($_GET['group_id'] ?? 0);
 if ($groupFilter > 0) { $where[] = "id IN (SELECT user_id FROM user_group_members WHERE group_id = ?)"; $params[] = $groupFilter; }
 $whereClause = $where ? 'WHERE ' . implode(' AND ', $where) : '';
@@ -51,7 +55,7 @@ $count->execute($params);
 $total = (int)$count->fetchColumn();
 
 $stmt = $db->prepare("SELECT id, username, email, status, email_verified, created_at, created_ip, last_login_at, last_login_ip,
-                             avatar_sha, cover_sha, bio
+                             avatar_sha, cover_sha, bio, pm_muted_until, banned_until
                       FROM users $whereClause ORDER BY " . implode(', ', $orderParts) . " LIMIT ? OFFSET ?");
 $i = 1;
 foreach ($params as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
@@ -107,6 +111,11 @@ foreach ($rows as &$r) {
     $r['identities'] = $bridgeBy[$r['id']] ?? [];
     $r['warnings'] = (int)($warned[$r['id']]['count'] ?? 0);
     $r['latest_warnings'] = $warned[$r['id']]['latest'] ?? [];
+    // What the account is held back by now (1.75.0): the end of a silence that has not passed, and a ban's end — NULL on a
+    // banned account is the owner's ban with no end date; "until lifted" is the 2099 date (moderationIsForever()).
+    $r['muted_until'] = ($r['pm_muted_until'] !== null && strtotime((string)$r['pm_muted_until']) > time()) ? (string)$r['pm_muted_until'] : null;
+    $r['banned_until'] = $r['banned_until'] !== null ? (string)$r['banned_until'] : null;
+    unset($r['pm_muted_until']);
     // the mirrored panel admin — the UI greys out delete/ban/revoke-admin for this row
     $r['root_admin'] = userIsRootAdmin($r, $cfg);
     // The picture and the cover (1.63.0): whether there is one to take down in the edit modal, and
@@ -151,4 +160,6 @@ try {
 }
 
 jsonResponse(['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)),
-              'counts' => $counts, 'enabled' => usersEnabled($cfg)]);
+              'counts' => $counts, 'enabled' => usersEnabled($cfg),
+              // the edit window's Moderation block (warn / silence / ban by hand, lift) is drawn for a session that may use it
+              'can_moderate' => panelCan($db, $cfg, 'panel.moderation.handle')]);

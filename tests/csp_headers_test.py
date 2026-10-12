@@ -103,7 +103,7 @@ ROUTES = [
     "?action=whitelist", "?action=report", "?action=transparency", "?action=login",
     "?action=register", "?action=admin", "?action=settings", "?action=admin-traffic",
     "?action=admin-index", "?action=admin-users", "?action=admin-whitelist", "?action=admin-backups",
-    "?action=admin-audit",
+    "?action=admin-audit", "?action=admin-moderation",
 ]
 
 CSP_HEADERS = ("content-security-policy", "content-security-policy-report-only")
