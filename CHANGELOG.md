@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.2] — 2026-10-12
+
+The navigation's badges come with the page. Schema 94, no migration.
+
+- **The menu no longer jumps on every page.** The number beside your name (notifications and messages waiting) and the
+  shoutbox's number came hidden and appeared a moment after the page, which pushed every link of the bar sideways on
+  each page you opened. They now come with the page, already counted; the live updates carry on as before.
+
 ## [1.75.1] — 2026-10-12
 
 Search: a title that repeats your words no longer wins Best match, and short and common words (the, uk, tv) count in the groups. Schema 94, no migration.

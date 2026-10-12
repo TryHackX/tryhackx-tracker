@@ -3,6 +3,15 @@
 // between the links is drawing, not words — aria-hidden, so a screen reader stops reading "vertical line" between
 // every two of them.
 $navHere = static fn(bool $on): string => $on ? ' aria-current="page"' : '';
+// The badges' numbers come WITH the page (1.75.2, navUnreadCounts()): they used to come hidden and be filled by the
+// page's first request a moment later, and the whole bar moved on every page the reader opened. `data-n` hands the
+// same numbers to NavUnread (app.js), which then changes them only when the pulse says something else.
+$navShowShout = function_exists('shoutNav') && shoutNav($cfg) && shoutMayView($db, $cfg);
+$navCounts = !empty($navUser) && function_exists('navUnreadCounts')
+    ? navUnreadCounts($db, $cfg, $navUser, $navShowShout && function_exists('shoutEnabled') && shoutEnabled($cfg) && userCan($db, $cfg, 'shout.view'))
+    : ['notif' => 0, 'pm' => 0, 'shout' => null];
+$navMain = $navCounts['notif'] + $navCounts['pm'];
+$navShout = (int)($navCounts['shout'] ?? 0);
 ?>
 <nav class="main-nav">
     <div class="nav-links">
@@ -36,9 +45,9 @@ $navHere = static fn(bool $on): string => $on ? ' aria-current="page"' : '';
                  account name: that one counts notifications and waiting messages, a reader who sees
                  5 on it has two tabs to go and look in, and a third meaning would leave it answering
                  nothing. assets/js/app.js fills this one from the same pulse. */ ?>
-        <?php if (function_exists('shoutNav') && shoutNav($cfg) && shoutMayView($db, $cfg)): ?>
+        <?php if ($navShowShout): ?>
         <span class="sep" aria-hidden="true">|</span>
-        <a href="<?= sanitize(shoutNavUrl($cfg, $baseUrl)) ?>" class="<?= $action === 'shoutbox' ? 'active' : '' ?>"<?= $navHere($action === 'shoutbox') ?>><?= _h('nav.shoutbox') ?><span class="nav-unread nav-shout-unread" id="nav-shout-unread" hidden data-uid="<?= (int)($navUser['id'] ?? 0) ?>" data-pulse="<?= (int)siteLiveSeconds($cfg) ?>" title="<?= _h('nav.shoutbox_unread_title') ?>"></span></a>
+        <a href="<?= sanitize(shoutNavUrl($cfg, $baseUrl)) ?>" class="<?= $action === 'shoutbox' ? 'active' : '' ?>"<?= $navHere($action === 'shoutbox') ?>><?= _h('nav.shoutbox') ?><span class="nav-unread nav-shout-unread" id="nav-shout-unread"<?= $navShout > 0 ? '' : ' hidden' ?> data-uid="<?= (int)($navUser['id'] ?? 0) ?>" data-pulse="<?= (int)siteLiveSeconds($cfg) ?>" data-n-shout="<?= $navShout ?>" title="<?= _h('nav.shoutbox_unread_title') ?>"><?= $navShout > 0 ? $navShout : '' ?></span></a>
         <?php endif; ?>
         <?php $navUser = $navUser ?? (usersEnabled($cfg) ? currentUser($db) : null); ?>
         <?php /* The member directory used to be a nav entry of its own. It is a tab of the account
@@ -51,7 +60,7 @@ $navHere = static fn(bool $on): string => $on ? ' aria-current="page"' : '';
         <?php /* The reader's own picture before their name (1.63.0) — `$navUser` is the whole account row,
                  so this is no query at all; nothing while pictures are switched off. `js-avatar-me`
                  is how assets/js/media-editor.js finds it to follow a new picture without a reload. */ ?>
-        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"<?= $navHere($action === 'account') ?>><?= function_exists('userAvatarHtml') ? userAvatarHtml($navUser, 20, $baseUrl, 'avatar nav-av js-avatar-me', $cfg) : '' ?><?= sanitize($navUser['username']) ?><?php $navSounds = soundClientConfig($db, $cfg, $navUser, $baseUrl); ?><span class="nav-unread" id="nav-unread" hidden data-uid="<?= (int)$navUser['id'] ?>" data-pulse="<?= (int)siteLiveSeconds($cfg) ?>"<?= $navSounds ? ' data-sounds="' . sanitize(json_encode($navSounds, JSON_UNESCAPED_SLASHES)) . '"' : '' ?>></span></a><?php /* Sounds (1.56.0): what this reader plays rides on the badge as data-sounds, and the note beside it is
+        <a href="<?= $baseUrl ?>?action=account" class="nav-user <?= $accountActive ? 'active' : '' ?>"<?= $navHere($action === 'account') ?>><?= function_exists('userAvatarHtml') ? userAvatarHtml($navUser, 20, $baseUrl, 'avatar nav-av js-avatar-me', $cfg) : '' ?><?= sanitize($navUser['username']) ?><?php $navSounds = soundClientConfig($db, $cfg, $navUser, $baseUrl); ?><span class="nav-unread" id="nav-unread"<?= $navMain > 0 ? '' : ' hidden' ?> data-uid="<?= (int)$navUser['id'] ?>" data-pulse="<?= (int)siteLiveSeconds($cfg) ?>" data-n-notif="<?= (int)$navCounts['notif'] ?>" data-n-pm="<?= (int)$navCounts['pm'] ?>"<?= $navSounds ? ' data-sounds="' . sanitize(json_encode($navSounds, JSON_UNESCAPED_SLASHES)) . '"' : '' ?>><?= $navMain > 0 ? $navMain : '' ?></span></a><?php /* Sounds (1.56.0): what this reader plays rides on the badge as data-sounds, and the note beside it is
          shown by assets/js/sounds.js only while the browser refuses to let the page make a sound. */ ?><?php if ($navSounds): ?><span class="sound-chip" id="sound-chip" hidden title="<?= _h('nav.sounds_locked_title') ?>"><i class="bi bi-volume-mute" aria-hidden="true"></i> <?= _h('nav.sounds_locked') ?></span><?php endif; ?>
         <?php elseif (usersLinksVisible($cfg)): ?>
         <span class="sep" aria-hidden="true">|</span>

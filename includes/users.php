@@ -1810,6 +1810,26 @@ function userUnreadCount(PDO $db, int $userId): int {
     return (int)$st->fetchColumn();
 }
 
+/**
+ * The navigation badges' numbers, drawn with the page (1.75.2): `badge` = notifications + messages waiting (the account
+ * link's badge), `shout` = the room's lines (null when this reader has no room badge). The badges used to come hidden and
+ * be filled by the page's first user_me a moment later, and the bar moved under the reader's pointer on every page they
+ * opened. The same counts user_pulse answers, so the first request agrees with the page; a failed read draws nothing and
+ * the script fills the badges as before.
+ */
+function navUnreadCounts(PDO $db, array $cfg, array $user, bool $shoutBadge): array {
+    $out = ['notif' => 0, 'pm' => 0, 'shout' => null];
+    try {
+        $uid = (int)$user['id'];
+        $out['notif'] = userUnreadCount($db, $uid);
+        $out['pm'] = function_exists('pmEnabled') && pmEnabled($cfg) ? pmUnreadCount($db, $uid) : 0;
+        if ($shoutBadge && function_exists('shoutUnreadCounts')) $out['shout'] = (int)(shoutUnreadCounts($db, $cfg, $user)['shout'] ?? 0);
+    } catch (\Throwable $e) {
+        return ['notif' => 0, 'pm' => 0, 'shout' => null];
+    }
+    return $out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Password reset
 // ─────────────────────────────────────────────────────────────────────────────

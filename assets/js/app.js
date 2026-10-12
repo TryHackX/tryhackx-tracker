@@ -15,6 +15,14 @@ window.NavUnread = {
     // and lines in a room people are talking in are neither. Its own element beside the account
     // badge, the way the sounds note already is.
     shout: 0,
+    // The numbers the page was drawn with (1.75.2, templates/nav.php data-n-*): the badges no longer come hidden and
+    // appear a moment later — which moved the whole bar on every page — so the halves start from what is on screen
+    // and a later set() of one half adds it to the other half's real number, not to 0.
+    seed: function () {
+        var b = document.getElementById('nav-unread'), s = document.getElementById('nav-shout-unread');
+        if (b) { this.notif = Math.max(0, Number(b.dataset.nNotif) || 0); this.pm = Math.max(0, Number(b.dataset.nPm) || 0); }
+        if (s) this.shout = Math.max(0, Number(s.dataset.nShout) || 0);
+    },
     set: function (kind, n) {
         this[kind] = Math.max(0, Number(n) || 0);
         this.render();
@@ -3111,6 +3119,7 @@ window.siteToast = siteToast;
     }
 
     function initAccount() {
+        window.NavUnread.seed();
         if (!$id('account-form')) {
             // not on the account page — still light up the nav badge for signed-in users
             // Either badge is reason enough to ask. A guest the operator granted `shout.view` has a
