@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.1] — 2026-10-12
+
+Search: a title that repeats your words no longer wins Best match, and short and common words (the, uk, tv) count in the groups. Schema 94, no migration.
+
+- **A title that repeats the words no longer wins "Best match".** "Rick and morty" put "Rick.and.Morty.S00E177.Rick.and.Morty.In.The.Eternal…" first because the
+  search index's relevance number grows with every repetition of a word. Among the names that have all of your words the relevance no longer decides: they go
+  by their seeders (your clicked column still sorts them, and the words-in-your-order test still comes first); the groups with fewer words keep the relevance,
+  where a rarer word weighing more is the point. A one-word Best-match search is the same story — one word's relevance is only repetition — so it is now ordered by
+  seeders, exactly as the plain search is. The all-words shortcut got cheaper too (it no longer computes the relevance it does not use).
+- **Short and common words count.** "The breaking bread" used to ignore "the", and "UK TV show" ignored "uk" and "tv", because the search index cannot hold words that
+  short or that common. They are now found by a text match on the name, as whole words ("the" in "Theory" or "of" in "Office"
+  does not count), and counted in the groups (three words, then two, then one), so the names with "The" or "UK TV"
+  come first. New Settings switch **Count short and common words** (User accounts, on by default): turn it off for a site where the extra text match costs too much —
+  the search then counts only the words the index holds, as in 1.75.0.
+
 ## [1.75.0] — 2026-10-12
 
 Search ranks by how many of your words a name has and by their order, and a clicked column sorts inside those groups; messages to members can be HTML campaigns and notifications show their formatting; what a moderator writes on a report takes BBCode and Markdown; a Moderation page lists every restriction and warning, lifts and revokes them; automatic penalties after a number of warnings (off until switched on). Schema 94.

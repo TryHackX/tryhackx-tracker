@@ -1014,9 +1014,12 @@ default — with it off, everything behaves exactly like the classic single-admi
   metadata; with `whitelist.view` the live whitelist is folded in and badged `WL` — the admin can
   exclude it globally via `index_search_include_whitelist`, or kill the whole search regardless of
   grants via `index_search_enabled`) — grouped by how many of the typed words a name has (1.75.0:
-  three words, then two, then one — words the fulltext index cannot hold, "the" and two-letter ones,
-  do not count), **Best match** then puts the words in the order typed first and the fulltext score
-  (rarer/longer words weigh more) last, and a column clicked in the header sorts inside those groups;
+  three words, then two, then one; 1.75.1: the words the fulltext index cannot hold — "the", "tv" —
+  count too, found by a text match on the name, unless `search_count_common_words` [1] is off),
+  **Best match** then puts the words in the order typed first, and the group that has every word is
+  ordered by seeders (the fulltext score grows with repetitions, so it only orders the groups that
+  lack words, where rarer/longer words weigh more); a column clicked in the header sorts inside
+  those groups;
   multi-column header sorts, live-as-you-type with a loading
   state, match highlighting, a rows-per-page choice (15–200), and per-permission columns (file
   counts open a **folder-tree modal** with `index.files`; info hashes / magnet links with

@@ -1907,24 +1907,65 @@ const INDEX_FT_MIN_TOKEN = 3;
 const INDEX_RANK_MAX_WORDS = 8;
 
 /**
- * The words a search is RANKED by (1.75.0): ['w' => …, 'c' => …].
+ * The words a search is RANKED by (1.75.0): ['w' => …, 'c' => …, 'x' => …].
  *
  * `w` — the query's words, split on anything that is not a letter or a digit, lower-cased, in the order typed, the
  * first eight distinct ones. They feed the "in the query's order" test, which reads the name's text and so wants every
  * word, "the" and "tv" included. `c` — the COUNTABLE ones among them (indexRankFtAgrees() permitting): at least three
  * characters and not on the stop-word list, i.e. the words the fulltext index can hold. They feed words_hit, one MATCH
  * each, and the all-words fast path.
+ *
+ * `x` (1.75.1) — the rest of them, the words the index cannot hold ("the", "tv", "uk"): empty when $common is false (the
+ * setting search_count_common_words) or the fulltext WHERE and the counts disagree about the query. They are counted too,
+ * by a REGEXP on the name with in_order's word-start anchor and prefix — a name with "The" in it has the word the reader
+ * typed whether or not the index can say so. The fulltext WHERE never gets them: it was never able to match them.
  */
-function indexRankWords(string $search): array {
+function indexRankWords(string $search, bool $common = true): array {
     $words = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
     $w = array_slice(array_values(array_unique($words)), 0, INDEX_RANK_MAX_WORDS);
-    $c = [];
+    $c = []; $x = [];
     if (indexRankFtAgrees($search)) {
-        foreach ($w as $x) {
-            if (mb_strlen($x) >= INDEX_FT_MIN_TOKEN && !in_array($x, INDEX_FT_STOPWORDS, true)) $c[] = $x;
+        foreach ($w as $word) {
+            if (mb_strlen($word) >= INDEX_FT_MIN_TOKEN && !in_array($word, INDEX_FT_STOPWORDS, true)) $c[] = $word;
+            elseif ($common) $x[] = $word;
         }
     }
-    return ['w' => $w, 'c' => $c];
+    return ['w' => $w, 'c' => $c, 'x' => $x];
+}
+
+/**
+ * Does this query get a words_hit? At least one countable word (without one the fulltext index has nothing to say about
+ * the query and it keeps the order it always had) and two words in all — the countable ones plus, with the setting on,
+ * the common and short ones. The top group is then the rows with all of `indexRankTop()` of them.
+ */
+function indexRankHitActive(array $rw): bool {
+    $c = count($rw['c']);
+    return $c >= 1 && $c + count($rw['x'] ?? []) >= 2;
+}
+
+/** How many words a row has to have to stand in the top group: every counted word. */
+function indexRankTop(array $rw): int {
+    return count($rw['c']) + count($rw['x'] ?? []);
+}
+
+/**
+ * The REGEXP of one short or common word for the ranking: the WHOLE word (lookarounds, not \b — see indexRankSql). Not a
+ * prefix like the fulltext words: "of" as a prefix is in "Office" and "the" in "Theory", which would count them in names
+ * that do not have them (the owner's question, 1.75.1).
+ */
+function indexRankWordRe(string $word): string {
+    return '(?i)(?<![\p{L}\p{N}])' . preg_quote($word, '/') . '(?![\p{L}\p{N}])';
+}
+
+/**
+ * The all-words query's WHERE (1.75.0, extended in 1.75.1) as [sql, params]: MATCH('+c1* +c2*') for the countable words, and
+ * `name REGEXP ?` for each of the others — exactly the rows words_hit gives the top value.
+ */
+function indexRankAllWords(array $rw): array {
+    $sql = 'MATCH(name) AGAINST(? IN BOOLEAN MODE)';
+    $params = ['+' . implode('* +', $rw['c']) . '*'];
+    foreach ($rw['x'] ?? [] as $word) { $sql .= ' AND name REGEXP ?'; $params[] = indexRankWordRe($word); }
+    return [$sql, $params];
 }
 
 /**
@@ -1950,9 +1991,10 @@ function indexRankFtAgrees(string $search): bool {
 /**
  * The two ranking expressions of 1.75.0 as [sql, params] each, '' / [] where one is not asked for.
  *
- * words_hit — how many of the countable words the name has: one MATCH per word, the same prefix the WHERE searches with
+ * words_hit — how many of the words the name has: one MATCH per countable word, the same prefix the WHERE searches with
  * (`w*`). Per word and not a REGEXP, because the all-words fast path (a WHERE of `+w1* +w2* …`) has to select exactly
- * the rows whose count is the number of words.
+ * the rows whose count is the number of words. The words the index cannot hold (1.75.1) are a REGEXP each, and the fast
+ * path's WHERE has the same REGEXPs — so it is still exactly the rows that have them all.
  *
  * in_order — 2: the words stand next to each other in the order typed with only separators between them (`Rick and
  * Morty`, `Rick.and.Morty`, `rick_and_morty`), 1: they all appear in that order with anything between, 0: otherwise.
@@ -1964,14 +2006,20 @@ function indexRankFtAgrees(string $search): bool {
  */
 function indexRankSql(array $rw, bool $hit, bool $ord): array {
     $out = ['hit' => ['', []], 'ord' => ['', []]];
-    if ($hit && count($rw['c']) >= 2) {
+    if ($hit && indexRankHitActive($rw)) {
         $parts = []; $params = [];
         foreach ($rw['c'] as $c) { $parts[] = '(MATCH(name) AGAINST(? IN BOOLEAN MODE) > 0)'; $params[] = $c . '*'; }
+        // The words the index cannot hold (1.75.1): a REGEXP each, IFNULL because a name that is NULL (a row only its files
+        // found) must count 0, not turn the whole sum into NULL.
+        foreach ($rw['x'] ?? [] as $word) { $parts[] = 'IFNULL(name REGEXP ?, 0)'; $params[] = indexRankWordRe($word); }
         $out['hit'] = [implode(' + ', $parts), $params];
     }
     if ($ord && count($rw['w']) >= 2) {
         $like = '%' . implode('%', array_map(static fn(string $x): string => addcslashes($x, '%_\\'), $rw['w'])) . '%';
-        $q = array_map(static fn(string $x): string => preg_quote($x, '/'), $rw['w']);
+        // A short or common word counted by words_hit (1.75.1) is a WHOLE word here too, as in indexRankWordRe(): "the" must
+        // not put "Theory of Breaking Bread" in order for "the breaking bread". The others stay prefixes, as the index reads them.
+        $whole = array_flip($rw['x'] ?? []);
+        $q = array_map(static fn(string $x): string => preg_quote($x, '/') . (isset($whole[$x]) ? '(?![\p{L}\p{N}])' : ''), $rw['w']);
         $start = '(?<![\p{L}\p{N}])';
         $adjacent = '(?i)' . $start . implode('[\p{L}\p{N}]*[^\p{L}\p{N}]+', $q);
         $inOrder = '(?i)' . $start . implode('.*' . $start, $q);
@@ -2313,28 +2361,35 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
      * so a column clicked beside it never fired, and the plain search put a row with one of the three words among
      * the rows with all three. Two small whole numbers now come first, and only for a query of two words or more:
      *
-     *   words_hit — how many of the countable words (indexRankWords()) the name has: three words, then two, then one.
-     *               A number that means the same in the catalogue and in the whitelist, which the float score never did.
+     *   words_hit — how many of the query's words (indexRankWords()) the name has: three words, then two, then one. The
+     *               words the fulltext index cannot hold — "the", "tv" — count too (1.75.1, search_count_common_words), by a
+     *               REGEXP. A number that means the same in the catalogue and in the whitelist, which the float score never did.
      *   in_order  — Best match only: 2 the words side by side in the order typed, 1 all of them in that order, 0 else.
      *               Built from every word, "and" and "the" too, since it reads the text and not the index.
      *
-     *   Best match alone      words_hit, in_order, score, seeders, hash   (the score only separates rows inside a tier)
+     *   Best match alone      words_hit, in_order, score, seeders, hash   (the score only orders the groups that lack words)
      *   Best match + columns  words_hit, in_order, <columns>, hash        (a column now decides inside the groups)
      *   plain                 words_hit, <columns>, hash
      *
-     * A key a query cannot have is left out, and a query of one word has neither. Its Best match alone and its plain
-     * search are what 1.74 wrote, byte for byte; Best match + a column no longer puts the score before the column (so the
-     * column, then the next one, decides, as it does for more words). File-name hits carry the SAME expressions (the other half of the arm's UNION must produce the same row for a
-     * hash found both ways, or it comes back twice), so a torrent only a file name found falls to the bottom by itself.
+     * THE SCORE (1.75.1) is a term-frequency number: a name that REPEATS the words ("Rick.and.Morty.S00E177.Rick.and.Morty.In
+     * …") outscores the real thing. So in the group that has every word it no longer orders — `CASE WHEN words_hit = <all>
+     * THEN 0 ELSE score END` — and the seeders do; the groups with fewer words keep it, where a rarer word weighing more is
+     * the point. A query of one word has no group but the one: its Best match alone is its plain search, the seeders.
+     *
+     * A key a query cannot have is left out, and a query of one word has neither. Best match + a column puts no score before
+     * the column (so the column, then the next one, decides, as it does for more words). File-name hits carry the SAME
+     * expressions (the other half of the arm's UNION must produce the same row for a hash found both ways, or it comes
+     * back twice), so a torrent only a file name found falls to the bottom by itself.
      */
-    $rw = $ft !== '' ? indexRankWords($search) : ['w' => [], 'c' => []];
+    $rw = $ft !== '' ? indexRankWords($search, ($cfg['search_count_common_words'] ?? '1') === '1') : ['w' => [], 'c' => [], 'x' => []];
     $bestOn = isset($orderParts['score']);
-    // The flags one execution of the search uses: 'hit'/'ord' = the key is selected and sorted by; 'alone' = Best match with
-    // no column. $fast: the all-words query, where words_hit is the same number on every row it can return and is left out.
+    // The flags one execution of the search uses: 'hit'/'ord' = the key is selected and sorted by; 'top' = the value of
+    // words_hit that has every word (0 without a words_hit); 'alone' = Best match with no column. $fast: the all-words query,
+    // where words_hit is the same number on every row it can return and is left out.
     $rankFor = static function (bool $scored, bool $fast = false) use ($rw, $bestOn, $bestAlone): array {
-        $hit = $scored && count($rw['c']) >= 2;
+        $hit = $scored && indexRankHitActive($rw);
         $ord = $scored && $bestOn && count($rw['w']) >= 2;
-        return ['hit' => $hit && !$fast, 'ord' => $ord, 'alone' => $bestAlone];
+        return ['hit' => $hit && !$fast, 'ord' => $ord, 'top' => $hit ? indexRankTop($rw) : 0, 'alone' => $bestAlone];
     };
 
     /**
@@ -2361,13 +2416,20 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     //
     // The keys of that order, ONE list for the three writers below (1.75.0): the ranking keys first, then the reader's.
     // The score closes "Best match alone" and is left out behind a chosen column, for a query of one word as for more: a
-    // float nothing shares in front of the column would make the click a tie-break that never fires.
-    $orderKeys = static function (bool $scored, array $rank) use ($orderParts): array {
+    // float nothing shares in front of the column would make the click a tie-break that never fires. It orders only the
+    // groups that lack words (1.75.1): a query with no words_hit, and the all-words query, have no score key at all.
+    // $p prefixes the three alias keys (the catalogue's outer query and the merge's halves say k. / a. / b.).
+    $orderKeys = static function (bool $scored, array $rank, string $p = '') use ($orderParts): array {
         $keys = [];
-        if ($rank['hit']) $keys['words_hit'] = 'words_hit DESC';
-        if ($rank['ord']) $keys['in_order'] = 'in_order DESC';
+        if ($rank['hit']) $keys['words_hit'] = $p . 'words_hit DESC';
+        if ($rank['ord']) $keys['in_order'] = $p . 'in_order DESC';
         foreach ($orderParts as $key => $frag) {
-            if ($key === 'score') { if ($scored && $rank['alone']) $keys['score'] = $frag; continue; }
+            if ($key === 'score') {
+                if ($scored && $rank['alone'] && $rank['hit']) {
+                    $keys['score'] = 'CASE WHEN ' . $p . 'words_hit = ' . (int)$rank['top'] . ' THEN 0 ELSE ' . $p . 'score END DESC';
+                }
+                continue;
+            }
             $keys[$key] = $frag;
         }
         return $keys;
@@ -2407,8 +2469,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // keeps the order the inner one chose.
     $orderCat = static function (bool $scored, array $rank, string $p = '') use ($orderKeys): string {
         $parts = [];
-        foreach ($orderKeys($scored, $rank) as $key => $frag) {
-            if (in_array($key, ['score', 'words_hit', 'in_order'], true)) { $parts[] = $p . $frag; continue; }
+        foreach ($orderKeys($scored, $rank, $p) as $key => $frag) {
+            if (in_array($key, ['score', 'words_hit', 'in_order'], true)) { $parts[] = $frag; continue; }
             $col = ['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers'][$key] ?? $key;
             $parts[] = $p . $col . (str_ends_with($frag, ' ASC') ? ' ASC' : ' DESC');
         }
@@ -2478,7 +2540,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // `$rank` (1.75.0) = $rankFor()'s flags for the run: the arm selects words_hit / in_order beside the score when they are
     // on. `$fast` builds the ALL-WORDS arm instead: the same select, WHERE MATCH('+w1* +w2* …') in place of the OR and no
     // file-name half — see $run().
-    $noRank = ['hit' => false, 'ord' => false, 'alone' => false];
+    $noRank = ['hit' => false, 'ord' => false, 'top' => 0, 'alone' => false];
     $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank): array {
         $rank = $rank ?: $noRank;
         $cat = $cat && !$wl;
@@ -2540,11 +2602,18 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 $keys = $wl ? $fileIds : $fileHashes;
                 $col  = $wl ? 'id' : 'info_hash';
                 if ($useFt && $ft !== '') {
-                    $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
-                    $scoreParams = [$ft];
-                    $nameSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
-                    // The all-words query: every countable word, as a prefix, required (the score above stays the OR's).
-                    $nameParams = [$fast ? '+' . implode('* +', $rw['c']) . '*' : $ft];
+                    if ($fast) {
+                        // The all-words query: every countable word, as a prefix, required, and each of the other words
+                        // found by its REGEXP (1.75.1). No order of it reads the score (the group that has every word is
+                        // ordered by the seeders), so it is the literal 0 and the OR's MATCH — a second fulltext pass over
+                        // every name that has ANY of the words — is not run at all.
+                        [$nameSql, $nameParams] = indexRankAllWords($rw);
+                    } else {
+                        $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                        $scoreParams = [$ft];
+                        $nameSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                        $nameParams = [$ft];
+                    }
                     $rs = indexRankSql($rw, $rank['hit'], $rank['ord']);
                     foreach (['hit' => 'words_hit', 'ord' => 'in_order'] as $k => $as) {
                         if ($rs[$k][0] === '') continue;
@@ -2752,13 +2821,15 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         return $capped ? [max($cap, $total), true] : [$total, false];
         };
 
-        // THE ALL-WORDS FAST PATH (1.75.0). With two countable words or more the order starts with words_hit, so the
+        // THE ALL-WORDS FAST PATH (1.75.0). With a words_hit the order starts with it, so the
         // page is made of the rows that have EVERY word first, and only when those run out of the rows that have fewer.
         // Computing words_hit for every row the OR matched is the cost of the new order (+10 … +45 % on production's
         // medium queries, which does not fit the budget): the rows with every word are a small fraction of those
-        // (1 400 of 70 568 for "rick and morty"), and one MATCH('+rick* +and* +morty*') finds exactly them. So that is
-        // asked first, with the same arms, the same score, the same remaining order and no words_hit key (it is the same
-        // number on every row it can return) and no file-name half (a hash only its files found has words_hit 0). A FULL
+        // (1 400 of 70 568 for "rick and morty"), and one MATCH('+rick* +and* +morty*') finds exactly them (1.75.1: plus a
+        // REGEXP for each word the index cannot hold). So that is asked first, with the same arms, the same remaining
+        // order and no words_hit key (it is the same number on every row it can return) and no file-name half (a hash
+        // only its files found has words_hit 0) — and, since 1.75.1, no score: the group that has every word is ordered by
+        // the seeders, so the OR's MATCH (a second fulltext pass over every name with ANY of the words) is not run. A FULL
         // page of it IS the page the full query would give — the same rows in the same order — and costs 13–78 ms
         // instead of ~1 s (650 000 names). A short one (fewer rows than that tier holds past this offset) is thrown
         // away and the full query runs, which adds 19–242 ms to those searches. The count below is the OR's, as

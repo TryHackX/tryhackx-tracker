@@ -292,6 +292,7 @@ function settingsCatalogKeywords(): array {
         'search_time_budget'        => 'search timeout time limit budget seconds slow query 500 execution',
         'search_share_enabled'      => 'share link copy url permalink address search results torrent bookmark',
         'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
+        'search_count_common_words' => 'search ranking words matched groups common short stop words the of tv uk regexp cost slow best match relevance',
         // #section-user2fa
         'user_2fa_enabled'          => 'two factor authentication 2fa members accounts totp authenticator app',
         'user_2fa_required'         => 'two factor required force 2fa panel access moderators admins',

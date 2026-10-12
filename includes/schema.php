@@ -3910,6 +3910,10 @@ function trackerSchemaDefaultSettings(): array {
         // in the address whether or not anybody is offered a button for it — so this switch is
         // about whether the site hands out links, not about what may be reached.
         'search_share_enabled'        => '1',
+        // Whether the search counts the words the fulltext index cannot hold — "the", "of", two-letter ones like "tv" and "uk" —
+        // when it groups results by how many of the typed words a name has (1.75.1, indexRankWords()). They are found by a REGEXP
+        // on the name, which costs a little on a very common query; '0' is 1.75.0's behaviour (only the words the index holds).
+        'search_count_common_words'   => '1',
         // The language switcher rewrites the page instead of reloading it (assets/js/lang-swap.js).
         // Shipped off in 1.40.0 and on from 1.41.0: it had a release to be wrong in, every failure
         // path still falls back to the plain navigation it replaces, and the reload it replaces is

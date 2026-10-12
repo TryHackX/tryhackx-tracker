@@ -6,9 +6,10 @@
  * `index.magnet` gates the info hash (and with it the magnet link the client builds),
  * `whitelist.view` additionally folds the live whitelist into the results (whitelisted hashes are
  * removed from the index, so this is the only way they can be found).
- * Default order is relevance: results with more of the typed words first, then the words in the order typed, then the
- * fulltext score (rarer/longer words weigh more), seeders break ties; a clicked column sorts inside those groups (1.75.0,
- * see indexSearchCatalogue()).
+ * Default order is relevance: results with more of the typed words first, then the words in the order typed, then — in
+ * the groups that lack words — the fulltext score (rarer/longer words weigh more); the group that has every word, and a
+ * one-word search, go by seeders (1.75.1: the score grows with repetitions). A clicked column sorts inside those groups
+ * (see indexSearchCatalogue()).
  * Rate limited per IP bucket; only resolved rows (meta done / named whitelist rows) are searchable.
  */
 if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);

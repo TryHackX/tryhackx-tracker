@@ -37,8 +37,8 @@ $allowed = [
     'csp_mode', 'csp_report_enabled', 'csp_report_keep_rows', 'csp_extra_hosts',
     // the in-place language switch (assets/js/lang-swap.js, read through langJsBundle())
     'lang_swap_enabled',
-    // the Share buttons on the search page (templates/pages/search.php)
-    'search_share_enabled',
+    // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
+    'search_share_enabled', 'search_count_common_words',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
@@ -559,7 +559,7 @@ if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'
 }
 foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
-          'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist',
+          'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist', 'search_count_common_words',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
           'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',

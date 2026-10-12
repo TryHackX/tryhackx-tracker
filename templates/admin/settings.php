@@ -1424,6 +1424,14 @@
                         <small class="settings-hint"><?= _h('settings.users_search_whitelist_hint') ?></small>
                         <small class="settings-hint"><?= __('settings.users_search_note') ?></small>
                     </div>
+                    <div class="col-md-3">
+                        <label for="set-search_count_common_words" class="form-label"><?= _h('settings.users_search_common') ?></label>
+                        <select id="set-search_count_common_words" class="form-select bg-dark text-light border-secondary" name="search_count_common_words">
+                            <option value="1" <?= ($cfg['search_count_common_words'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.users_search_common_yes') ?></option>
+                            <option value="0" <?= ($cfg['search_count_common_words'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.users_search_common_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.users_search_common_hint') ?></small>
+                    </div>
                 </div>
             </div>
 
