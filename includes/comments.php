@@ -94,8 +94,7 @@
  * and `$opts['authority'] = 'panel'` for the Reports page; every row the page is handed carries `can_report` /
  * `reported`, and the page's actions row takes the Report button through window.Comments.onActions()
  * (assets/js/reports.js); a held guest comment is shown to a moderator in its own thread with an Approve button
- * (commentApprove()) — there is no separate queue (1.74.0: commentPendingList(), written for one and never
- * called, was removed).
+ * (commentApprove()) — there is no separate queue.
  * F (one anti-spam layer, includes/antispam.php): commentFloodCheck() is the ONE call every write here makes,
  * and it is the layer's now — a guest's CAPTCHA every time, a member's ladder and its CAPTCHA at the top, the
  * same words again refused, a correction a few seconds from the last; a new account's links are drawn as text

@@ -352,7 +352,6 @@
     // source would mean waving through whatever an image tag turns out to point at.
 
     const rvState = { page: 1, status: 'pending', search: '', sub: 'queue' };
-    let rvSearchTimer = null;
 
     function rvShowSub(sub) {
         rvState.sub = sub;

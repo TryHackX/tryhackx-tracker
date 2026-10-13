@@ -187,7 +187,7 @@ function indexKeepSavedClause(array $cfg, string $expiryCol): string
 function indexMetaDailyBudget(array $cfg): int { return max(0, min(1000000, (int)($cfg['index_meta_daily_budget'] ?? 500))); }
 function indexMetaAutoQueue(array $cfg): bool { return (($cfg['index_meta_auto_queue'] ?? '0') === '1'); }
 // `index_keep_files` is read where file lists are written — worker/federation.py (the setting) and worker/worker.py
-// (its config's twin); indexKeepFiles(), the PHP reader nothing called, went in 1.74.0 (QUAL-9).
+// (its config's twin); nothing in PHP reads it.
 
 /**
  * The poll's time budget: how long one poll may walk the scrape before it is cut and the next poll

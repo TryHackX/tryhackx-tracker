@@ -154,9 +154,11 @@ $wl = file_get_contents($root . '/includes/whitelist.php');
 check('nothing was added to whitelistJanitor(), which runs on every API request',
       !str_contains($wl, 'otClusterTick') && !str_contains($wl, "otClusterRun"));
 $fn = file_get_contents($root . '/includes/functions.php');
-check('a manual reload reaches every instance', str_contains($fn, 'function runTrackerServiceCommandAll'));
-check('… but its ok follows the PRIMARY, so one dead extra cannot strand the bookkeeping',
-      str_contains($fn, "'ok' => \$primary['ok']"));
+// 1.75.4: this held the source of runTrackerServiceCommandAll(), which nothing ever called. The manual reload of the
+// extras is the cluster card's own op (api/admin/ot_cluster_apply.php).
+$applyReload = file_get_contents($root . '/api/admin/ot_cluster_apply.php');
+check('a manual reload reaches every instance',
+      str_contains($applyReload, "if (\$op === 'reload')") && str_contains($applyReload, "otClusterRun(\$cfg, ['reload', '--all'])"));
 check('a reload that returned 0 is re-checked, because a SIGHUP can kill an unpatched build',
       str_contains($fn, 'is not active after the reload'));
 

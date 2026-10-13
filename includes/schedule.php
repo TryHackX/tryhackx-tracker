@@ -30,8 +30,7 @@ const SCHEDULE_DEFAULT_CMD = 'sudo -n /usr/local/sbin/tracker-mode.sh';
 const SCHEDULE_MIN_ATTEMPT_INTERVAL = 60;   // seconds between switch attempts (flap guard)
 const SCHEDULE_WEEK_MINUTES = 7 * 1440;
 
-// The schedule's defaults are includes/schema.php's (trackerSchemaDefaultSettings()); scheduleSettingDefaults(), a
-// copy nothing read, went in 1.74.0 (QUAL-9).
+// The schedule's defaults are includes/schema.php's (trackerSchemaDefaultSettings()).
 
 function scheduleEnabled(array $cfg): bool {
     return (($cfg['tracker_schedule_enabled'] ?? '0') === '1');

@@ -934,13 +934,12 @@ function richtextParagraphs(string $html): string {
         foreach ($stack as $tag) { if ($tag !== 'a') $t .= '<' . $tag . '>'; }
         return $t;
     };
-    $closers = function () use (&$open, $closeList) { return $closeList($open); };
     $openers = function () use (&$open, $openList) { return $openList($open); };
 
     // A BLANK LINE inside an inline run is the same interruption as a block, and gets the same
     // treatment: close what the chunk leaves open, reopen it at the top of the next one.
     //
-    // The blanket `$closers()` this replaces described the tags open at the END of the buffer and
+    // The blanket closer this replaces described the tags open at the END of the buffer and
     // stuck them on EVERY paragraph in it, which for `[b]a\n\nb[/b]` (one <strong> spanning the
     // break, closed before the buffer is flushed, so $open is empty) emitted
     // `<p><strong>a</p><p>b</strong></p>` — a <strong> opened in one paragraph, a closer in another

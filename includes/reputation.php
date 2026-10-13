@@ -294,7 +294,7 @@ function repMyVote(PDO $db, array $cfg, string $hash): int {
 
 // How much CAPTCHA pressure a vote adds: `captcha_pts_vote`, spent by api/rate_hash.php through the site's one points
 // scheme, addCaptchaPoints($cfg, 'vote') — somebody voting steadily is never bothered, somebody voting fifty times
-// in a minute meets a CAPTCHA. (repCaptchaPoints(), a second reader nothing called, went in 1.74.0, QUAL-9.)
+// in a minute meets a CAPTCHA.
 
 /**
  * Wipe every vote on a hash — used when a hash is banned, so a ban does not leave a score behind.

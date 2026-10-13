@@ -2256,7 +2256,6 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .search-table.search-loading { opacity: 0.45; transition: opacity 0.15s; }
 .terms-body { white-space: normal; line-height: 1.7; font-size: 0.9rem; }
 .reg-terms { color: var(--text); }
-.acc-prefs-check { font-size: 0.85rem; }
 
 /* The note under the announce block when this tracker answers on more than one port. Only rendered
    when extra opentracker instances are actually running, so on nearly every install it never exists. */

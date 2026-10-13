@@ -139,11 +139,6 @@ function checkListFilePermissions(string $path, string $label = 'whitelist', boo
     return $result;
 }
 
-/** Keep the old name working for the blacklist code paths. */
-if (!function_exists('checkBlacklistPermissionsLegacy')) {
-    function checkBlacklistPermissionsLegacy(string $path): array { return checkListFilePermissions($path, 'blacklist', false); }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // State file (config/whitelist_state.json)
 // ─────────────────────────────────────────────────────────────────────────────

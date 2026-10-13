@@ -54,10 +54,6 @@ add('a.reports', {
                       'full report details.',
                       'Twoja wiadomość zostanie wysłana w profesjonalnym szablonie e-maila razem '
                       'z pełnymi szczegółami zgłoszenia.'),
-    'm_email_ph':    ('e.g. We have reviewed your report and would like to request additional '
-                      'documentation...',
-                      'np. Rozpatrzyliśmy Twoje zgłoszenie i prosimy o dodatkową '
-                      'dokumentację…'),
     'm_send':        ('Send Message', 'Wyślij wiadomość'),
 
     # appeal modal
@@ -69,8 +65,6 @@ add('a.reports', {
     'ap_restore':   ('Restore to Active', 'Przywróć do aktywnych'),
     'ap_resp_head': ('Admin Response (sent to appellant)',
                      'Odpowiedź administratora (wysyłana do odwołującego się)'),
-    'ap_resp_ph':   ('Optional response message to the appellant...',
-                     'Opcjonalna wiadomość zwrotna do odwołującego się…'),
 
     # permanent deletion  (the page's own "confirm" dialog went in 1.74.0: admin-common.js asks for it)
     'admin_pass':     ('Admin Password *', 'Hasło administratora *'),

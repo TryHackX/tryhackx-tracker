@@ -24,8 +24,7 @@
  *    attribute value written through htmlspecialchars(ENT_QUOTES). The DOM-decoded value is what is judged.
  *  * DEFAULT DENY. An element that is in no list is dropped WITH its content. A short list of harmless wrappers
  *    (section, font, code …) is UNWRAPPED — the tag goes, its children stay. The dangerous ones (script, style,
- *    iframe, svg, math, template, noscript, form, …) are named below as well, though the default would drop them
- *    anyway: the list is documentation and a test target, not the security.
+ *    iframe, svg, math, template, noscript, form, …) need no list of their own: the default drops them.
  *  * Attributes: an exact, lower-case allow-list per element. Everything else — every on*, id, class, name,
  *    srcset, formaction, xmlns, xlink:href, xml:*, data-* — is gone.
  *  * URLs: the DOM-decoded value read the way a browser reads an address — control characters and the tab / line
@@ -94,18 +93,6 @@ function htmlSafeUnwrap(): array
             'dl', 'dt', 'dd', 'caption', 'colgroup', 'col', 'address'], true);
     }
     return $u;
-}
-
-/**
- * Dropped WITH their content. Documentation and test target: an element that is in no list is dropped with its
- * content as well (default deny), so this list can only ever say what the default already does.
- */
-function htmlSafeDrop(): array
-{
-    return ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select',
-            'svg', 'math', 'link', 'meta', 'base', 'template', 'noscript', 'title', 'xmp', 'plaintext', 'noembed',
-            'noframes', 'frameset', 'frame', 'applet', 'param', 'head', 'video', 'audio', 'source', 'track',
-            'picture', 'canvas', 'portal', 'option', 'optgroup', 'datalist', 'marquee'];
 }
 
 /** Can this PHP parse HTML at all (ext-dom)? Without it nothing is let through: htmlSafeClean() answers ''. */
@@ -518,7 +505,6 @@ function htmlSafeCssValue(string $prop, string $val, string $for): ?string
     $site = $for === 'site';
     $v = strtolower(trim($val));
     $kw = static fn(array $set): ?string => in_array($v, $set, true) ? $v : null;
-    $sides = ['top', 'right', 'bottom', 'left'];
     $borderStyles = ['none', 'hidden', 'dotted', 'dashed', 'solid', 'double', 'groove', 'ridge', 'inset', 'outset'];
     $borderWidth = static function (string $p): ?string {
         $p = strtolower($p);

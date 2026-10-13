@@ -275,14 +275,12 @@ add('apidocs', {
 
 # ── the review queue in the panel ───────────────────────────────────────────
 add('a.wl', {
-    'review_head':     ('Waiting for review', 'Czeka na przegląd'),
     'review_filter':   ('Review', 'Przegląd'),
     'review_any':      ('Any', 'Dowolny'),
     'review_pending':  ('Waiting', 'Czeka'),
     'review_approved': ('Approved', 'Zatwierdzone'),
     'review_rejected': ('Turned down', 'Odrzucone'),
     'review_none':     ('Not reviewed (published directly)', 'Bez przeglądu (opublikowane wprost)'),
-    'review_by':       ('Submitted by', 'Zgłoszone przez'),
     'approve':         ('Approve', 'Zatwierdź'),
     'reject':          ('Turn down', 'Odrzuć'),
 })
@@ -334,18 +332,12 @@ add('js.wl', {
 
 # ── the key editor in the whitelist panel ───────────────────────────────────
 add('a.wl', {
-    'cl_opts_create':  ('New API key', 'Nowy klucz API'),
-    'cl_opts_edit':    ('API key settings', 'Ustawienia klucza API'),
     'cl_label':        ('Who this key is for', 'Dla kogo jest ten klucz'),
     'cl_label_ph':     ('Partner forum, mirror bot…', 'Forum partnera, bot mirrora…'),
     'cl_scope_hint':   ('What the key may call. A key handed to somebody else should be the narrowest '
                         'scope that still does their job.',
                         'Co klucz może wywoływać. Klucz przekazany komuś innemu powinien mieć najwęższy '
                         'zakres, który wciąż wystarcza do jego zadania.'),
-    'cl_scope_locked': ('The scope is fixed when the key is made — a key whose reach can change is a key '
-                        'nobody can reason about. Make a new one instead.',
-                        'Zakres ustala się przy tworzeniu klucza — klucz, którego zasięg może się zmienić, to '
-                        'klucz, o którym nikt nie potrafi nic pewnego powiedzieć. Zrób raczej nowy.'),
     'cl_approve':      ('What happens to what they send', 'Co się dzieje z tym, co przyślą'),
     'cl_approve_auto': ('Publish immediately', 'Publikuj od razu'),
     'cl_approve_rev':  ('Hold for review', 'Wstrzymaj do przeglądu'),
@@ -368,7 +360,6 @@ add('a.wl', {
                         'żadnego sekretu, więc może jechać w tym samym mailu co klucz.'),
     'cl_docs_copy':    ('Copy the guide link', 'Kopiuj link do instrukcji'),
     'cl_docs_open':    ('Open the guide', 'Otwórz instrukcję'),
-    'cl_settings':     ('Settings', 'Ustawienia'),
     'cl_save':         ('Save', 'Zapisz'),
 
     # ── the scope, named by what it lets a key DO ───────────────────────────
@@ -379,27 +370,9 @@ add('a.wl', {
     'cl_scope_fed':    ('federation — exchange lists with another tracker',
                         'federation — wymiana list z innym trackerem'),
     'cl_scope_all':    ('all — everything above (use sparingly)', 'all — wszystko powyższe (używaj oszczędnie)'),
-    'cl_can':          ('What this key may call', 'Co ten klucz może wywołać'),
-    'cl_can_none':     ('Nothing — pick a scope.', 'Nic — wybierz zakres.'),
 
     'cl_f_hash':       ('The torrent itself', 'Sam torrent'),
     'cl_f_always':     ('always required', 'zawsze wymagane'),
-
-    # ── what a scope means for the rest of the dialog ───────────────────────
-    'cl_only_wl':      ('Approval and required fields apply to <strong>registering torrents</strong>, so '
-                        'they are only asked for a key that can do it.',
-                        'Zatwierdzanie i wymagane pola dotyczą <strong>rejestrowania torrentów</strong>, '
-                        'więc pytamy o nie tylko przy kluczu, który to potrafi.'),
-    'cl_bridge_on':    ('This key can sign the partner\'s members in here through the bridge. It is on.',
-                        'Ten klucz może logować tutaj użytkowników partnera przez mostek. Mostek jest włączony.'),
-    'cl_bridge_off':   ('The sign-in bridge is <strong>off</strong>, so the five <code>v1/auth/*</code> '
-                        'endpoints answer 503 for this key. Turn it on in Settings → Sign-in bridge.',
-                        'Mostek logowania jest <strong>wyłączony</strong>, więc pięć endpointów '
-                        '<code>v1/auth/*</code> odpowie temu kluczowi 503. Włącz go w Ustawieniach → Mostek logowania.'),
-    'cl_fed_note':     ('What this key may take is set once for every peer, in Settings → Federation — '
-                        'not here.',
-                        'Co ten klucz może pobrać, ustawia się raz dla wszystkich peerów, w Ustawieniach → '
-                        'Federacja — nie tutaj.'),
 })
 
 add('js.wl', {

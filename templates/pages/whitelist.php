@@ -21,7 +21,6 @@ $wlHttp     = trim((string)($cfg['announce_url_https'] ?? ''));
 // cluster is on, which it is not on the overwhelming majority of installs.
 $wlExtra    = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
                                       array_filter([$wlUdp, $wlHttp])));
-$wlOpen     = $wlReg && $wlPublic && $wlCaptcha;
 // Official number of registered (active, non-banned) hashes. Cheap path: the state file
 // (config/whitelist_state.json) — `count` is the row count of the last regeneration plus every append since
 // (bans/removals regenerate). Falls back to a COUNT(*) (small table) when the file was never generated

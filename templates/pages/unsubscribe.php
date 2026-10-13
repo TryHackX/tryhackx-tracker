@@ -26,11 +26,9 @@ if ($email && $token) {
         }
 
         // Check legacy full-unsubscribe
-        $isLegacy = false;
         $stmt = $db->prepare("SELECT COUNT(*) FROM unsubscribed_emails WHERE email = ?");
         $stmt->execute([$email]);
         if ($stmt->fetchColumn() > 0) {
-            $isLegacy = true;
             foreach ($types as $t) $prefs[$t] = false;
         }
 

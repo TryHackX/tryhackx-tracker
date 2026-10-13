@@ -34,7 +34,7 @@ require_once __DIR__ . '/icons.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.75.3';
+const TRACKER_VERSION = '1.75.4';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -200,8 +200,7 @@ function verifyCsrfHeader(): bool {
 // ─────────────────────────────────────────────────────────────────────────────
 // Setting `captcha_provider` selects the widget/verifier; `recaptcha_enabled` remains the master
 // "CAPTCHA enabled" switch and `recaptcha_on_<ctx>` the per-context toggles (legacy names kept so
-// existing installations keep working unchanged). The old verifyRecaptcha()/isRecaptchaEnabled()
-// names are preserved as thin wrappers.
+// existing installations keep working unchanged).
 //
 // Providers and their setting keys (each pair is <provider>_site_key / <provider>_secret):
 //   recaptcha     Google reCAPTCHA v2 checkbox      recaptcha_site_key / recaptcha_secret
@@ -406,11 +405,6 @@ function isCaptchaEnabled(array $cfg, string $context = 'report'): bool {
     if (!captchaConfigured($cfg)) return false;
     $key = 'recaptcha_on_' . $context;
     return !empty($cfg[$key]) && $cfg[$key] === '1';
-}
-
-/** Legacy alias of isCaptchaEnabled(). */
-function isRecaptchaEnabled(array $cfg, string $context = 'report'): bool {
-    return isCaptchaEnabled($cfg, $context);
 }
 
 /**
@@ -2111,30 +2105,6 @@ function runTrackerServiceCommand(string $verb, array $cfg): array {
         }
     }
     return ['ok' => $ok, 'output' => trim(implode("\n", $output)), 'code' => (int)$ret, 'cmd' => $cmd];
-}
-
-/**
- * The same verb across the installer's unit AND every extra instance.
- *
- * `ok` follows the PRIMARY alone, and that is deliberate. The primary's result drives the panel's
- * pending-reload bookkeeping; letting a permanently broken extra pull it down would mean the
- * bookkeeping never clears, the whitelist is never marked as applied, and submitters are told
- * "active in N seconds" for ever -- while the primary, which reloaded correctly every single time, is
- * recorded as having failed. Extras get their own entry and their own warning instead.
- */
-function runTrackerServiceCommandAll(string $verb, array $cfg): array {
-    $primary = runTrackerServiceCommand($verb, $cfg);
-    $out = ['ok' => $primary['ok'], 'primary' => $primary, 'extras' => [], 'extras_failed' => 0];
-    if (!function_exists('otClusterEnabled') || !otClusterEnabled($cfg)) return $out;
-    if ($verb !== 'reload') return $out;      // restarting every instance at once is never implicit
-
-    $r = otClusterRun($cfg, ['reload', '--all']);
-    foreach ((array)($r['json']['reloaded'] ?? []) as $x) {
-        $out['extras'][] = $x;
-        if (empty($x['ok'])) $out['extras_failed']++;
-    }
-    if (!$r['ok'] && !$out['extras']) $out['extras_failed'] = 1;
-    return $out;
 }
 
 /**

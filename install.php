@@ -98,7 +98,6 @@ if (isset($_GET['cleanup']) && $_GET['cleanup'] === '1' && $_SERVER['REQUEST_MET
 
 $step = (int)($_GET['step'] ?? 1);
 $error = '';
-$success = '';
 
 // Check if already installed (the cleanup/self-delete handler above stays allowed on purpose)
 if ($installed) {

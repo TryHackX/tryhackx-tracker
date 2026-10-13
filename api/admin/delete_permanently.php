@@ -30,7 +30,7 @@ if ($lastAttemptTime > 0 && (time() - $lastAttemptTime) > 900) {
 // Check CAPTCHA trigger (after X failed attempts)
 $deleteAttempts = $_SESSION['delete_attempts'] ?? 0;
 $captchaAttempts = (int)($cfg['delete_captcha_attempts'] ?? 2);
-if ($deleteAttempts >= $captchaAttempts && isRecaptchaEnabled($cfg, 'login')) {
+if ($deleteAttempts >= $captchaAttempts && isCaptchaEnabled($cfg, 'login')) {
     $grace = (int)($cfg['captcha_grace_minutes'] ?? 5);
     $inGrace = isset($_SESSION['captcha_solved_at']) && (time() - $_SESSION['captcha_solved_at']) < $grace * 60;
     
@@ -88,7 +88,6 @@ if (!$report) {
 }
 
 // Remove hash from blacklist file if it was blocked and no other blocked reports exist for it
-$blacklistChanged = false;
 if ($report['blocked']) {
     $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE infoHash = ? AND blocked = 1 AND id != ?");
     $stmt->execute([$report['infoHash'], $id]);
@@ -100,7 +99,6 @@ if ($report['blocked']) {
 
     if ($otherBlockedReports === 0 && $otherBlockedArchives === 0) {
         $unblock = trackerUnblockHash($db, $cfg, $report['infoHash']);
-        $blacklistChanged = $unblock['file_ok'];
         $unblockReload = $unblock['reload'] ?? null;
     }
 }

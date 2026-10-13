@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.4] — 2026-10-13
+
+Dead code removed. No behaviour change. Schema 94, no migration.
+
+- **Functions nothing called.** `htmlSafeDrop()` (a list of dropped tags the sanitiser never read: anything it does not
+  know is dropped anyway), `runTrackerServiceCommandAll()` (the manual reload of the extra instances is the cluster
+  card's own `reload`), `checkBlacklistPermissionsLegacy()` and the `isRecaptchaEnabled()` alias (its one caller asks
+  `isCaptchaEnabled()` now); in the federation worker, `merge_rows()`, the row-by-row importer the batched one replaced.
+- **Variables written and never read**, in the permanent-delete endpoint, the HTML sanitiser, the BBCode renderer, the
+  unsubscribe and whitelist pages, the installer and the Whitelist panel's script.
+- **Styles nothing uses**: the rules for three classes the report cards and the account page no longer draw, and a
+  rule for the sounds table written twice.
+- **18 unused strings** in both languages: the panel's copies of the API-key dialog's texts (the dialog is drawn by its
+  script, from its own `js.` copies), two placeholders of the Reports page's old text boxes, three Users-table words
+  for a column that is not there, and two review-queue words.
+- **Comments.** Notes about functions removed in earlier releases are gone; the ones that named a function that no
+  longer exists now name the one that does.
+
 ## [1.75.3] — 2026-10-13
 
 The opentracker crash fix and full-scrape gate, rebuilt binaries; the tracker side of the server audit. Schema 94, no migration.

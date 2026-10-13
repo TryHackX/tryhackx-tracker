@@ -43,8 +43,7 @@ function fedExportMaxBytes(array $cfg): int { return max(0, min(1073741824, (int
 function fedExportMaxFiles(array $cfg): int { return max(0, min(50000000, (int)($cfg['fed_export_max_files'] ?? 200000))); }
 /** Rows read from the database at a time while streaming. Bounds memory; not user-visible. */
 const FED_STREAM_CHUNK = 500;
-// `fed_import_new` and `fed_pull_minutes` are read by worker/federation.py, the side that imports and pulls; their
-// PHP twins (fedImportNew(), fedPullMinutes()) were never called and went in 1.74.0 (QUAL-9).
+// `fed_import_new` and `fed_pull_minutes` are read by worker/federation.py alone, the side that imports and pulls.
 
 /**
  * One export page. Cursor = (since = UNIX ts of meta_fetched_at, after_hash = tie-break within the

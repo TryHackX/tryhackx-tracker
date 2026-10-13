@@ -97,13 +97,6 @@ add('bridge', {
 })
 
 # ── the panel ───────────────────────────────────────────────────────────
-add('a.users', {
-    'col_source': ('Signs in via', 'Loguje się przez'),
-    'source_local': ('here', 'tutaj'),
-    'source_title': ('Where this account can sign in from', 'Skąd to konto może się logować'),
-})
 add('js.users', {
     'bridge_via': ('via :name', 'przez :name'),
-    # See the note in apidocs.py: the JS bundle is `js.` only, so this is a deliberate duplicate of
-    # a.users.source_title rather than a widening of the bundle.
 })

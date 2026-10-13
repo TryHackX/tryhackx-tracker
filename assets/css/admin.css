@@ -860,7 +860,6 @@
 .msgrep-mode-label { color: #adbac7; }
 .msgrep-mode-opt { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; white-space: nowrap; }
 .msgrep-mode-opt input { accent-color: #e0b15a; }
-.msgrep-reason-in { flex: 1 1 18rem; max-width: 32rem; }
 .msgrep-warn-head { font-size: 0.75rem; margin: 0.1rem 0 0.15rem; }
 .msgrep-warnings { font-size: 0.8rem; color: #c9a45c; margin: 0 0 0.5rem; padding-left: 1.1rem; }
 .msgrep-warnings li { overflow-wrap: anywhere; }
@@ -895,7 +894,6 @@
 @media (max-width: 575px) {
     .crep-name-in, .crep-date input { width: 100%; flex: 1 1 100%; }
     .crep-date { flex: 1 1 100%; }
-    .msgrep-reason-in { flex-basis: 100%; }
 }
 
 /* Which partner filed a report, under the name they filed it under. Quiet on purpose: it is provenance, not a
@@ -3208,7 +3206,6 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
 
 /* ── reported messages: the answer given and the note kept (1.54.0) ─────────────────────────── */
 .msgrep-answer { font-size: 0.85rem; margin: 0.2rem 0 0; }
-.msgrep-reply-in { margin-top: 0.3rem; }
 
 /* Settings → Sounds (1.56.0) */
 .admin-sound-file { max-width: 22rem; }
@@ -3237,7 +3234,6 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
     color: #8a94a2;
     border-bottom-color: #2a3442;
 }
-.admin-sounds-table td { vertical-align: middle; }
 .admin-sound-cell-name { font-size: 0.88rem; word-break: break-word; }
 .admin-sound-cell-used { min-width: 8rem; }
 /* One chip per site default that currently points here — short labels, so several fit on a line. */

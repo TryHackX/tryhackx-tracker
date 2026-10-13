@@ -476,65 +476,6 @@ def merge_batch(db, rows, peer_name, cfg, counters, peer_id=None, cursor=None):
             pass
         raise
 
-# ── merge (buffered fallback, kept for --self-test) ────────────────────────────
-
-def merge_rows(db, rows, peer_name, cfg):
-    """Merge validated rows. Returns (filled, inserted, skipped)."""
-    import_new = str(cfg.get("fed_import_new", "0")) == "1"
-    keep_files = str(cfg.get("index_keep_files", "1")) == "1"
-    grace_days = setting_int(cfg, "index_grace_days", 3, 1, 90)
-    max_rows = setting_int(cfg, "index_max_rows", 200000, 10, 5000000)
-    source = ("fed:" + peer_name)[:24]
-    filled = inserted = skipped = 0
-    total = None
-    for r in rows:
-        h = r["h"]
-        # never touch hashes that live in the whitelist / ban tables
-        if db.query("SELECT 1 FROM whitelist WHERE info_hash=%s UNION SELECT 1 FROM banned_hashes WHERE info_hash=%s LIMIT 1", (h, h), fetch=True):
-            skipped += 1
-            continue
-        existing = db.query("SELECT meta_status FROM index_hashes WHERE info_hash=%s", (h,), fetch=True)
-        if existing:
-            st = existing[0]["meta_status"]
-            if st in ("done", "fetching"):
-                skipped += 1
-                continue
-            n = db.query(
-                "UPDATE index_hashes SET name=%s, total_size=%s, files_count=%s, piece_length=%s,"
-                " meta_status='done', meta_fetched_at=NOW(), meta_error=NULL, meta_claim=NULL, meta_source=%s"
-                " WHERE info_hash=%s AND meta_status NOT IN ('done','fetching')",
-                (r["name"], r["size"], r["fc"], r["pl"], source, h))
-            if not n:
-                skipped += 1        # raced with the local worker — its result wins
-                continue
-            filled += 1
-        else:
-            if not import_new:
-                skipped += 1
-                continue
-            if total is None:
-                total = db.query("SELECT COUNT(*) c FROM index_hashes", fetch=True)[0]["c"]
-            if total >= max_rows:
-                skipped += 1        # over the cap — the pruner would evict these right away
-                continue
-            db.query(
-                "INSERT IGNORE INTO index_hashes (info_hash, name, first_seen, last_seen, seen_count,"
-                " last_seeders, last_leechers, grace_until, meta_status, meta_fetched_at, meta_source,"
-                " total_size, files_count, piece_length)"
-                " VALUES (%s, %s, COALESCE(%s, NOW()), COALESCE(%s, NOW()), %s, %s, %s,"
-                "         NOW() + INTERVAL %s DAY, 'done', NOW(), %s, %s, %s, %s)",
-                (h, r["name"], r["first"], r["last"], r["count"], r["seeders"], r["leechers"],
-                 grace_days, source, r["size"], r["fc"], r["pl"]))
-            total += 1
-            inserted += 1
-        if keep_files and r["files"]:
-            db.query("DELETE FROM index_files WHERE info_hash=%s", (h,))
-            conn = db._connect()
-            with conn.cursor() as cur:
-                cur.executemany("INSERT INTO index_files (info_hash, path, size) VALUES (%s, %s, %s)",
-                                [(h, p, s) for p, s in r["files"]])
-    return filled, inserted, skipped
-
 
 def sync_peer(db, peer, cfg, deadline=None):
     """

@@ -313,9 +313,9 @@ function iconpackCssHeader(string $head): ?array {
  *
  * $opts: kind ('upload' | 'path' | 'cli'), name (what the operator called it: the uploaded file's
  * name or the path), by (who). Returns a report the panel prints and the CLI echoes:
- *   ok, error (a code, see iconpackErrorText()), detail, id, already (the same content was already
- *   installed), root, edition, version, styles, bytes, kept [{path,bytes}], skipped {group => count},
- *   skipped_notes [{path, why}], refused [{path, why}].
+ *   ok, error (a code, see iconpackMessage() in includes/icons.php), detail, id, already (the same
+ *   content was already installed), root, edition, version, styles, bytes, kept [{path,bytes}],
+ *   skipped {group => count}, skipped_notes [{path, why}], refused [{path, why}].
  */
 function iconpackImport(string $source, array $opts = []): array {
     $report = ['ok' => false, 'error' => null, 'detail' => '', 'id' => null, 'already' => false, 'root' => null,
