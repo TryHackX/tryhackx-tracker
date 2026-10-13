@@ -1,0 +1,46 @@
+From: TryHackX <tryhackx@users.noreply.github.com>
+Subject: [PATCH] http_sendiovecdata: rebase `current` after realloc and initialise the NEW io_batch
+
+Production crashes 2026-10-08..12 (malloc_consolidate(): unaligned fastbin chunk detected /
+malloc(): unaligned tcache chunk detected / SIGSEGV), each 3-5 s after a full /scrape from a remote
+client. When more than OT_BATCH_LIMIT (16 MiB) of a chunked full scrape is queued unsent, the batch
+array is grown with realloc(). The old code then
+
+  1. called OT_IOB_INIT(current) with `current` still pointing into the OLD array: if realloc moved
+     the array, that is a 72-byte memset into a freed 0x50 chunk, zeroing glibc's tcache/fastbin
+     link; safe-linking turns the zeroed link into (addr >> 12), and the next malloc/consolidate of
+     that size class aborts ("unaligned ... chunk detected"). If realloc grew in place it wiped the
+     live batch instead: its queued buffers (up to 16 MiB) leaked and their bytes vanished from the
+     client's stream;
+  2. moved `current` to the new slot WITHOUT initialising it and queued buffers into it: an
+     uninitialised io_batch whose `array` holds whatever realloc left there (a wild pointer -> SEGV
+     or more heap corruption).
+
+A reader on loopback drains the scrape faster than it is produced, so the panel never queued
+16 MiB and the branch never ran; remote full-scrape clients (first seen 2026-10-08) do. The defect
+was noted in README.md on 2026-09-04 but did not make it into opentracker-review-fixes.patch.
+
+Against opentracker 1c7fac4 with sighup-udp-workers.patch, udp-reject-interval.patch and
+opentracker-review-fixes.patch applied. Apply from inside the opentracker directory:
+    patch -p1 --forward < opentracker-batch-realloc.patch
+
+--- a/ot_http.c
++++ b/ot_http.c
+@@ -207,9 +207,15 @@ ssize_t http_sendiovecdata(const int64 s
+       if (current->bytesleft > OT_BATCH_LIMIT) {
+         io_batch *new_batch = realloc(cookie->batch, (cookie->batches + 1) * sizeof(io_batch));
+         if (new_batch) {
++          /* realloc may have MOVED the array and `current` points into the old one, which is
++             freed memory now. Rebase first; then initialise the NEW slot (never the full batch,
++             whose queued buffers would leak and whose unsent bytes would drop out of the
++             stream) and only count it once it is initialised. `current` is recomputed in every
++             case, so nothing below touches the old array. */
+           cookie->batch = new_batch;
+-          if (OT_IOB_INIT(current) != -1)
+-            current = cookie->batch + cookie->batches++;
++          if (OT_IOB_INIT(cookie->batch + cookie->batches) != -1)
++            ++cookie->batches;
++          current = cookie->batch + cookie->batches - 1;
+         }
+       }
+       iob_addbuf_free(current, iovector[i].iov_base, iovector[i].iov_len);

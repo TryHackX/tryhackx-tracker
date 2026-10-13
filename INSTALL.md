@@ -3,7 +3,7 @@
 This is the whole path: a bare Debian box to a working tracker with the panel, the whitelist, the
 metadata worker, the firewall limits and the backups. It is written from a machine that is actually
 running it — Debian 13, PHP 8.4/8.5, MariaDB 11.8, Apache 2.4 with php-fpm, nftables 1.1, Python 3.13
-— and every command here is one that was run there. It is current for **version 1.73.0**.
+— and every command here is one that was run there. It is current for **version 1.75.x**.
 
 The README covers what each feature *is* and which setting switches it on. This covers the order to
 build it in, and the handful of things that will waste an afternoon if you meet them without warning.
@@ -60,13 +60,13 @@ mail.
 | Web server | Apache 2.4 with `mod_rewrite` (required), `mod_headers`, `mod_setenvif`, `mod_proxy_fcgi` + php-fpm — or nginx (README → *Reverse proxy / Nginx notes*) | |
 | Mail | a local MTA (`postfix`, `msmtp-mta`, `nullmailer`…) | mail leaves through PHP's `mail()` with `-f<From>`; without an MTA nothing is sent |
 | Python | 3.7+ with `python3-libtorrent` (2.x) and `python3-pymysql` | only for the metadata worker and the federation importer |
-| Tools the helpers call | `nft`, `systemd-run`, `systemctl`, `ss`, `ip`, `mariadb-dump`/`mariadb`, `gzip`, `tar`, `sha256sum`; optional `gpg`, `wg`, `tc` | and `php`/`python3` on root's PATH |
+| Tools the helpers call | `nft`, `systemd-run`, `systemctl`, `ss`, `ip`, `ping`, `mariadb-dump`/`mariadb`, `gzip`, `tar`, `sha256sum`; optional `gpg`, `wg`, `tc` | and `php`/`python3` on root's PATH; `ss`, `ip` and `tc` come from `iproute2`, `ping` from `iputils-ping` (the stability probe pings from 1.73.3 on) |
 
 ```bash
 sudo apt update
 sudo apt install -y apache2 mariadb-server mariadb-client sudo \
   php-cli php-fpm php-mysql php-mbstring php-curl php-gd php-xml php-zip php-intl php-apcu \
-  postfix git curl unzip nftables python3-libtorrent python3-pymysql
+  postfix git curl unzip nftables python3-libtorrent python3-pymysql iputils-ping iproute2
 php -v && php -m | grep -Ei 'pdo_mysql|mbstring|curl|gd|simplexml|dom|zip|intl|exif'
 php -r 'var_dump(gd_info()["WebP Support"] ?? false);'     # must print bool(true)
 ```
@@ -172,8 +172,8 @@ sudo a2enconf php8.4-fpm
         AllowOverride All
         Require all granted
     </Directory>
-    # .htaccess keeps dotfiles, *.sql|log|bak|old|ini|sh|env|lock, api/, config/, includes/ and
-    # templates/ away from the web — but not these, so the vhost does:
+    # .htaccess keeps dotfiles, *.sql|log|bak|old|ini|sh|env|lock, api/, config/, includes/,
+    # templates/ and tools/ away from the web — but not these, so the vhost does:
     RedirectMatch 404 ^/(\.git|tests|worker|scratchpad)(/|$)
     # TLS lines from certbot go here
 </VirtualHost>
@@ -232,19 +232,19 @@ the whitelist and appends banned hashes to the blacklist.
 ```bash
 cd /var/www/tracker.example.org/tools/opentracker/bin
 sha256sum -c <<'SUMS'
-d1a319cd999812a98c4fa2d6fedfee7a8a259b1d0ca0816d58bf2dc5f264fe8d  opentracker.white
-ef5e162e7cba1c3fd73b72c04f267c2699e5975d433c154699bc89cdc49da3cf  opentracker.black
+7d189b3af5314c8b0b6fe0a64d53b1fe657f4f6428bdabaf470bd751429c2924  opentracker.white
+0e97c18f0adf8335faa411dde52af3ab5d05b32b8f702d5cc0bda0e777cfb702  opentracker.black
 SUMS
 sudo install -o tracker -g tracker -m 0755 opentracker.white /home/tracker/opentracker.white
 sudo install -o tracker -g tracker -m 0755 opentracker.black /home/tracker/opentracker.black
 ```
 
 x86-64, dynamically linked against `libz` and `libc` only (glibc 2.34+: Debian 12/13, Ubuntu 22.04+),
-built with all four patches below.
+built with all six patches below.
 
 ### Or: build them yourself
 
-The full recipe — upstream commit, the four patch files, the feature flags and what each one is for —
+The full recipe — upstream commit, the six patch files, the feature flags and what each one is for —
 is in **[tools/opentracker/README.md](tools/opentracker/README.md)**. In short:
 
 ```bash
@@ -260,6 +260,8 @@ sudo git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
 sudo patch -p1 --forward < $P/sighup-udp-workers.patch     # else `systemctl reload` KILLS the tracker
 sudo patch -p1 --forward < $P/udp-reject-interval.patch    # else rejected clients retry for ever
 sudo patch -p1 --forward < $P/opentracker-review-fixes.patch  # seven review fixes (connid secret, accesslist reload, ...)
+sudo patch -p1 --forward < $P/opentracker-batch-realloc.patch  # else a slow full-scrape reader CRASHES the tracker (use-after-free)
+sudo patch -p1 --forward < $P/opentracker-fullscrape-gate.patch  # full /scrape only for loopback and access.stats addresses
 
 F="-DWANT_FULLSCRAPE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_MODEST_FULLSCRAPES"
 O=/usr/local/src/libowfat
@@ -276,6 +278,16 @@ without it the second build silently keeps the first one's mode.
 frees the buffers before the kernel has read them; the panel's full-scrape polls then arrive with
 heap pointers in the chunk headers and fail as "truncated". Details and the proof:
 `tools/opentracker/UPSTREAM-REPORT.md`.
+
+⚠ The two patches that follow the review fixes (1.75.3) are not optional either, and **apply in this order**
+(the gate is written against the file the first one leaves). `opentracker-batch-realloc.patch` fixes a
+use-after-free that aborts the tracker (`malloc(): unaligned tcache chunk detected`, a SIGSEGV) a few seconds
+after a client that reads a full `/scrape` slowly has made it queue more than 16 MiB. `opentracker-fullscrape-gate.patch`
+answers `/scrape` without an `info_hash` with **403 unless it comes from the machine itself or from an
+`access.stats` address**: TCP 6969 is public (the HTTP announce URL is advertised there), and an open full scrape hands the
+whole torrent list to anybody and makes the tracker buffer ~150 MB per request. Announces and per-hash scrapes are not
+affected. The panel's index and whitelist polls use `http://127.0.0.1:6969/scrape`, so they pass; a poll from another
+machine needs that machine's address in `access.stats`.
 
 ⚠ Do not drop `-DWANT_RESTRICT_STATS`. Without it `/stats` — the whole torrent list, with counts —
 is served to anyone who asks, on a path they can guess. With it, `access.stats` limits it to named
@@ -302,7 +314,8 @@ access.blacklist /home/tracker/accesslist/blacklist
 ```
 
 `access.stats 127.0.0.1`: the panel fetches `/stats` from this machine itself, so the loopback
-address is the one to allow (add your own only if you want to read it from outside).
+address is the one to allow (add your own only if you want to read it from outside; with the 1.75.3 gate patch
+the same addresses are the only ones besides loopback that may pull the full `/scrape`).
 `access.udp_reject_interval` comes from the second patch and is the single biggest traffic saving on
 a whitelist tracker: a UDP announce for a hash the accesslist rejects gets a well-formed "0 peers,
 come back in 86 400 s" reply instead of the 8-byte packet clients treat as a broken tracker and retry
@@ -335,10 +348,14 @@ WantedBy=multi-user.target
 ```
 
 ```ini
-# /etc/systemd/system/opentracker.service.d/limits.conf
+# /etc/systemd/system/opentracker.service.d/10-limits.conf
 [Service]
 LimitNOFILE=65536
 ```
+
+systemd applies a unit's drop-ins in name order and the **last** one wins. The panel's file is
+`90-tracker-panel.conf`, so yours must sort before it (`10-limits.conf`): a plain `limits.conf` or
+`override.conf` sorts after it and would overrule the panel's Nice and open-files values — the card warns when one does.
 
 ```bash
 sudo systemctl daemon-reload && sudo systemctl enable --now opentracker
@@ -659,8 +676,9 @@ profile for that run without touching the schedule.
 
 What a run is: `mariadb-dump --single-transaction --routines --triggers --quick | gzip` into
 `<dir>/tracker-db-<stamp>.sql.gz`, mode 0600, as a transient unit of its own. ⚠ **The default profile,
-`tracker-lekki`, leaves out `index_hashes` and `index_files`** — the catalogue rebuilds itself from the
-tracker; choose `tracker-pelny` or `tracker-baza` for a complete dump. Archives are unencrypted unless
+`tracker-lekki`, leaves out the rows of `index_hashes` and `index_files`** — the catalogue rebuilds itself
+from the tracker; choose `tracker-pelny` or `tracker-baza` for a complete dump. (Since 1.75.3 a light
+dump still carries the two tables' structure, empty, so restoring it recreates them; see *Restoring*.) Archives are unencrypted unless
 you set a GPG recipient, and they hold everything else: accounts, e-mail addresses, messages, the
 addresses the site keeps, two-factor secrets.
 
@@ -677,6 +695,13 @@ database name typed out. The helper first writes a `before-restore-<db>-<stamp>.
 sudo /usr/local/sbin/tracker-backup.sh restore-db /var/backups/tracker <id> --db tracker --confirm tracker --dry-run
 sudo /usr/local/sbin/tracker-backup.sh restore-db /var/backups/tracker <id> --db tracker --confirm tracker
 ```
+
+⚠ **Restoring a light dump.** Since 1.75.3 it carries `index_hashes` and `index_files` as empty tables, so
+restoring it *empties* those two in the target database; they refill from the tracker, and the safety dump
+written first still holds the old rows. A light dump made *before* 1.75.3 has no `CREATE TABLE` for them:
+restore it onto a database the installer has just built (`install.php`, section 6), where it only drops and
+recreates the tables it contains and the empty index tables survive. Into an empty database they would stay
+missing, because the restored `settings` table says the schema is current and the migration does not run again.
 
 A database backup contains no files: keep copies of `config/database.php`, `config/hash.txt`,
 `config/admin_2fa.json`, `config/iconpacks/` and any `lang/*.php` you installed yourself.
@@ -736,7 +761,7 @@ edit them on the server.
 ## 16. Before you call it done
 
 - [ ] `install.php` is deleted, `config/database.php` and `config/hash.txt` are 0600.
-- [ ] `.git`, `tests`, `worker` answer 404 from the web.
+- [ ] `.git`, `tests`, `worker` answer 404 from the web, and `tools/` answers 403 (its own `.htaccess`, so `AllowOverride All` must be on).
 - [ ] CAPTCHA is on (Settings → Security & CAPTCHA), and you have tested a sign-in.
 - [ ] The janitor timer is active: `systemctl list-timers | grep tracker`.
 - [ ] The service name is set and Reload works; the statistics show numbers.
@@ -761,8 +786,12 @@ sudo -u www-data php tools/janitor.php -v     # runs any pending migration once,
 for h in mode netlimit sysctl instance backup cluster dbmem livesync; do
   [ -f /usr/local/sbin/tracker-$h.sh ] && sudo install -o root -g root -m 0755 tools/opentracker/tracker-$h.sh /usr/local/sbin/
 done
-sudo install -o tracker -g tracker -m 0755 worker/worker.py worker/federation.py /home/tracker/metadata_worker/ \
-  && sudo systemctl restart tracker-metadata
+sudo install -o tracker -g tracker -m 0755 worker/worker.py worker/federation.py /home/tracker/metadata_worker/
+# so are the unit files (the federation pair only if you installed it):
+for u in tracker-metadata.service tracker-federation.service tracker-federation.timer; do
+  [ -f /etc/systemd/system/$u ] && sudo install -o root -g root -m 0644 worker/$u /etc/systemd/system/
+done
+sudo systemctl daemon-reload && sudo systemctl restart tracker-metadata
 ```
 
 The schema migrates itself on the first request after an upgrade, under a database lock

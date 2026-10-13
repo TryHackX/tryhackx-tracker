@@ -254,6 +254,14 @@ if [ "$MODE" = backup ]; then
                         echo "tracker|db/tracker.sql" > "$W/pozycje/tracker-db.baza" ;;
   esac
   case "$ITEMS" in *tracker-config*) echo "app config" > "$W/pozycje/tracker-config.files" ;; esac
+  # Backup-serwera.sh 2.0 streams the dump through gzip: db/<db>.sql.gz, never a raw .sql on disk.
+  # STUB_GZ_DUMP=1 makes this stub do the same; STUB_GZ_DUMP=corrupt leaves a member that is not gzip at all.
+  if [ -n "${STUB_GZ_DUMP:-}" ] && [ -f "$W/db/tracker.sql" ]; then
+    rm -f "$W/db/tracker.sql"
+    if [ "$STUB_GZ_DUMP" = corrupt ]; then echo "this is not gzip" > "$W/db/tracker.sql.gz"
+    else printf -- '-- gz dump of tracker\nCREATE TABLE g (id INT);\n' | gzip -c > "$W/db/tracker.sql.gz"; fi
+    echo "tracker|db/tracker.sql.gz" > "$W/pozycje/tracker-db.baza"
+  fi
   ( cd "$W" && find . -type f ! -name SUMY.sha256 -exec sha256sum {} + > SUMY.sha256 )
   S="$(date '+%Y%m%d-%H%M%S')"
   install -m 0600 /dev/null "$OUT/backup-tryhackx-$S.tar.gz"
@@ -272,8 +280,9 @@ fi
 echo "stub: nothing to do" >&2; exit 1
 STUB);
     // Stub MariaDB clients: the dump prints SQL, the client swallows it into a file we can inspect.
-    // records the arguments it was handed, so a test can prove the profile reached the dump client
-    file_put_contents($tmp . '/bin/mariadb-dump', "#!/bin/bash\nprintf '%s\\n' \"\$*\" > \"\$DUMPARGS_TO\"\nprintf -- '-- builtin dump of %s\\nCREATE TABLE x (id INT);\\n' \"\${!#}\"\nexit 0\n");
+    // records the arguments it was handed (one line per call: the light profile makes two), so a test can prove the
+    // profile reached the dump client; DUMP_FAIL_NODATA makes the structure-only call fail
+    file_put_contents($tmp . '/bin/mariadb-dump', "#!/bin/bash\nprintf '%s\\n' \"\$*\" >> \"\$DUMPARGS_TO\"\ncase \" \$* \" in *' --no-data '*) [ -n \"\${DUMP_FAIL_NODATA:-}\" ] && exit 2 ;; esac\nprintf -- '-- builtin dump of %s\\nCREATE TABLE x (id INT);\\n' \"\${!#}\"\nexit 0\n");
     file_put_contents($tmp . '/bin/mariadb', "#!/bin/bash\nfor a in \"\$@\"; do case \"\$a\" in -e) exit 0 ;; esac; done\ncat > \"\$IMPORTED_TO\"\nexit 0\n");
     // the helper refuses to touch anything unless it is root, which no test runner is
     file_put_contents($tmp . '/bin/id', "#!/bin/bash\n[ \"\$1\" = \"-u\" ] && { echo 0; exit 0; }\nexec /usr/bin/id \"\$@\"\n");
@@ -495,6 +504,57 @@ STUB);
     check('helper: the current database was dumped BEFORE the import', $safety !== '' && is_file($native($safety)), $safety);
     check('helper: the safety dump is not empty', $safety !== '' && is_file($native($safety)) && filesize($native($safety)) > 0);
 
+    // ── 1.75.3: Backup-serwera.sh 2.0 keeps the dump gzipped inside the archive (db/<db>.sql.gz) ──
+    // The restore used to match only db/<db>.sql, so an archive made by the new tool answered "does not contain a
+    // dump". It is checked with gzip -t first and streamed through gzip -dc into the client — no raw copy on disk.
+    putenv('STUB_GZ_DUMP=1');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-baza --db tracker');
+    $stGz = $waitDone($dir, $t0);
+    putenv('STUB_GZ_DUMP');
+    check('helper: a run whose archive carries db/<db>.sql.gz finishes', ($stGz['state'] ?? '') === 'done', json_encode($stGz));
+    $gzId = (string)($stGz['id'] ?? '');
+    // the member names, read straight out of the tar headers (512-byte blocks, the name in the first 100 bytes)
+    $gzTar = (string)@gzdecode((string)@file_get_contents($native((string)($stGz['archive'] ?? ''))));
+    $gzMembers = [];
+    for ($o = 0; $o + 512 <= strlen($gzTar); ) {
+        $nm = rtrim(substr($gzTar, $o, 100), "\0");
+        if ($nm === '') break;
+        $gzMembers[] = $nm;
+        $o += 512 + (int)(ceil(octdec(trim(substr($gzTar, $o + 124, 12), "\0 ")) / 512) * 512);
+    }
+    $gzJoined = implode("\n", $gzMembers);
+    check('helper: … and the archive really holds the dump gzipped, with no raw .sql beside it',
+          str_contains($gzJoined, 'db/tracker.sql.gz') && !preg_match('#db/tracker\.sql$#m', $gzJoined), $gzJoined);
+    @unlink($tmp . '/imported.sql');
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($gzId) . ' --db tracker --confirm tracker --dry-run');
+    check('helper: restore-db --dry-run finds the gzipped member and reports its size',
+          ($r['json']['dry_run'] ?? null) === true && (int)($r['json']['dump_bytes'] ?? 0) > 0 && ($r['json']['compressed'] ?? null) === true
+          && !is_file($tmp . '/imported.sql'), $r['out']);
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($gzId) . ' --db tracker --confirm tracker');
+    check('helper: restore-db imports the gzipped member', ($r['json']['ok'] ?? null) === true, $r['out']);
+    $imp = (string)@file_get_contents($tmp . '/imported.sql');
+    check('helper: … decompressed on the way into the client (the SQL arrives, not the gzip bytes)',
+          str_contains($imp, '-- gz dump of tracker') && str_contains($imp, 'CREATE TABLE g') && !str_starts_with($imp, "\x1f\x8b"), substr($imp, 0, 80));
+    check('helper: … after the safety dump, as always', ($r['json']['safety_dump'] ?? '') !== '' && is_file($native((string)$r['json']['safety_dump'])), $r['out']);
+    $run('delete ' . $q($dir) . ' ' . $q($gzId));
+
+    // a member that is not gzip at all is refused BEFORE anything is dumped or changed
+    putenv('STUB_GZ_DUMP=corrupt');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-baza --db tracker');
+    $stBad = $waitDone($dir, $t0);
+    putenv('STUB_GZ_DUMP');
+    $badId = (string)($stBad['id'] ?? '');
+    @unlink($tmp . '/imported.sql');
+    $before = glob($tmp . '/dir/before-restore-*') ?: [];
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($badId) . ' --db tracker --confirm tracker');
+    check('helper: a corrupt gzipped dump is refused', $r['rc'] !== 0 && ($r['json']['ok'] ?? null) === false
+          && str_contains((string)($r['json']['error'] ?? ''), 'gzip'), $r['out']);
+    check('helper: … nothing was imported and no new safety dump was written',
+          !is_file($tmp . '/imported.sql') && (glob($tmp . '/dir/before-restore-*') ?: []) === $before, $r['out']);
+    $run('delete ' . $q($dir) . ' ' . $q($badId));
+
     // ── the built-in fallback (no Backup-serwera.sh at all) ──
     putenv('BACKUP_SCRIPT=' . $posix($tmp . '/bin/does-not-exist.sh'));
     $r = $run('check ' . $q($dir));
@@ -511,6 +571,7 @@ STUB);
           && str_contains((string)($r['json']['message'] ?? ''), 'gzip'), $r['out']);
     $args = (string)@file_get_contents($tmp . '/dumpargs.txt');
     check('helper: the database-only profile dumps everything', !str_contains($args, '--ignore-table'), $args);
+    check('helper: … in one dump, with no structure-only second call', !str_contains($args, '--no-data'), $args);
 
     // The profile has to mean the same thing without the toolkit as with it: "light" leaves out the
     // two index tables, and saying so in the UI while dumping them anyway would be a lie.
@@ -524,7 +585,31 @@ STUB);
     check('helper: the light profile skips index_hashes', str_contains($args, '--ignore-table=tracker.index_hashes'), $args);
     check('helper: the light profile skips index_files', str_contains($args, '--ignore-table=tracker.index_files'), $args);
     check('helper: … and says so in the log', str_contains((string)($st5['log_tail'] ?? ''), 'light profile: skipping'), (string)($st5['log_tail'] ?? ''));
+    // 1.75.3: the ROWS stay out, the STRUCTURE goes in, empty. A restore into a database without the two tables
+    // would otherwise leave them missing for good: the restored `settings` says the schema is current, so
+    // ensureSchema() never runs the migration that creates them.
+    check('helper: the light profile also dumps the two index tables without their rows',
+          str_contains($args, '--no-data tracker index_hashes index_files'), $args);
+    $lightSql = (string)@gzdecode((string)@file_get_contents($native((string)($st5['archive'] ?? ''))));
+    $posMain = strpos($lightSql, '-- builtin dump of tracker'); $posIdx = strpos($lightSql, '-- builtin dump of index_files');
+    check('helper: … and that structure is in the archive, behind the main dump',
+          $posMain !== false && $posIdx !== false && $posMain < $posIdx, substr($lightSql, 0, 200));
     $run('delete ' . $q($dir) . ' ' . $q((string)$st5['id']));
+
+    // a structure dump that fails (a table an older schema does not have yet) must cost the dump its two empty
+    // tables, never the backup its archive — and nothing half-written may land in the dump
+    @unlink($tmp . '/dumpargs.txt');
+    putenv('DUMP_FAIL_NODATA=1');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki --db tracker');
+    $st6 = $waitDone($dir, $t0);
+    putenv('DUMP_FAIL_NODATA');
+    check('helper: a failing structure dump does not fail the light backup', ($st6['state'] ?? '') === 'done', json_encode($st6));
+    $lightSql2 = (string)@gzdecode((string)@file_get_contents($native((string)($st6['archive'] ?? ''))));
+    check('helper: … the archive holds the main dump alone', str_contains($lightSql2, '-- builtin dump of tracker')
+          && !str_contains($lightSql2, 'index_files'), substr($lightSql2, 0, 200));
+    check('helper: … and the log says what was left out', str_contains((string)($st6['log_tail'] ?? ''), 'could not dump the structure'), (string)($st6['log_tail'] ?? ''));
+    $run('delete ' . $q($dir) . ' ' . $q((string)$st6['id']));
     $r = $run('restore ' . $q($dir) . ' ' . $q((string)$st4['id']) . ' --items tracker-config');
     check('helper: restoring FILES from a plain dump is refused', $r['rc'] !== 0, $r['out']);
 

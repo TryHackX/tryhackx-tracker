@@ -76,6 +76,25 @@ $d = otAdvice(['cpus' => 6, 'workers' => 4, 'workers_consistent' => true, 'rmem_
                'socket_drops' => 0, 'other_dropins' => ['override.conf', 'limits.conf']]);
 check('advice: other drop-ins are named and declared untouched',
       str_contains(implode(' ', array_column($d, 'text')), 'never touched by the panel'));
+// 1.75.3: "the highest-numbered file wins" was wrong — systemd orders drop-ins by NAME and the last wins
+$dtxt = implode(' ', array_column($d, 'text'));
+check('advice: drop-in order is explained by name, not by "highest-numbered"',
+      str_contains($dtxt, 'order of their names') && str_contains($dtxt, '10-limits.conf') && !str_contains($dtxt, 'highest-numbered'), $dtxt);
+// a value the panel wrote that another drop-in overrules is a warning that names the keys and the files
+$ovr = otAdvice(['cpus' => 6, 'workers' => 6, 'workers_consistent' => true, 'rmem_max' => 8388608, 'socket_drops' => 0,
+                 'overridden' => [['key' => 'Nice', 'wanted' => '-5', 'effective' => '-2', 'by' => ['override.conf']],
+                                  ['key' => 'LimitNOFILE', 'wanted' => '200000', 'effective' => '65536', 'by' => ['limits.conf', 'override.conf']]]]);
+$ovTxt = implode(' ', array_column($ovr, 'text'));
+check('advice: a drop-in that wins over the panel\'s is a warning',
+      count($ovr) === 1 && $ovr[0]['level'] === 'warn', json_encode($ovr));
+check('advice: … naming the values and the files',
+      str_contains($ovTxt, 'Nice, LimitNOFILE') && str_contains($ovTxt, 'override.conf, limits.conf') && str_contains($ovTxt, '90-tracker-panel.conf'), $ovTxt);
+$ovr2 = otAdvice(['cpus' => 6, 'workers' => 6, 'workers_consistent' => true, 'rmem_max' => 8388608, 'socket_drops' => 0,
+                  'overridden' => [['key' => 'CPUWeight', 'wanted' => '300', 'effective' => '100', 'by' => []]]]);
+check('advice: … and says where to look when no file here is the cause',
+      count($ovr2) === 1 && str_contains($ovr2[0]['text'], 'CPUWeight') && str_contains($ovr2[0]['text'], '/usr/lib') && !str_contains($ovr2[0]['text'], ':files'), json_encode($ovr2));
+check('advice: nothing overruled means nothing said',
+      otAdvice(['cpus' => 6, 'workers' => 6, 'workers_consistent' => true, 'rmem_max' => 8388608, 'socket_drops' => 0, 'overridden' => []]) === []);
 // 1.73.0: the advice was English on every page (the DB memory and sysctl cards' beside it were not): the dictionary's
 // words now (api.ot.adv_*), in the reader's language, numbers written the reader's way.
 $GLOBALS['__lang']['current'] = null; langInvalidate(); langInit(['default_language' => 'pl']);
@@ -191,6 +210,7 @@ STUB);
     check('helper: reads the worker count out of the config', (int)($r['json']['workers'] ?? 0) === 4, $r['out']);
     check('helper: notices the two config files agree', ($r['json']['workers_consistent'] ?? null) === true);
     check('helper: no drop-in of ours yet', ($r['json']['dropin_present'] ?? null) === false);
+    check('helper: … so nothing can be overruled', ($r['json']['overridden'] ?? null) === [], json_encode($r['json']['overridden'] ?? null));
     check('helper: every numeric field really is a number',
           is_int($r['json']['rmem_max'] ?? null) && is_int($r['json']['socket_drops'] ?? null)
           && is_int($r['json']['udp_rcv_errors'] ?? null), json_encode($r['json']));
@@ -282,6 +302,44 @@ echo 'UNCONN 0 0 *:6969 *:*'
     check('helper: status lists the files it does not own',
           in_array('override.conf', (array)($r['json']['other_dropins'] ?? []), true)
           && in_array('limits.conf', (array)($r['json']['other_dropins'] ?? []), true), json_encode($r['json']['other_dropins'] ?? null));
+
+    // ── 1.75.3: a drop-in that sorts AFTER ours wins, and status must say so ──
+    // systemd orders drop-ins by name and the last one wins; 90-tracker-panel.conf loses to override.conf and limits.conf
+    // (a letter sorts after a digit). The stub's `show` answers with props (Nice=-2, CPUWeight=100, LimitNOFILE=65536),
+    // our file now says Nice=-1, CPUWeight=300, LimitNOFILE=200000: override.conf sets Nice, limits.conf sets
+    // LimitNOFILE, and nobody in this directory sets CPUWeight.
+    $ovByKey = static function (array $json): array {
+        $m = [];
+        foreach ((array)($json['overridden'] ?? []) as $o) $m[(string)($o['key'] ?? '')] = $o;
+        return $m;
+    };
+    $ov = $ovByKey((array)$r['json']);
+    check('helper: status lists the values the loaded unit does not have as written',
+          array_keys($ov) === ['Nice', 'CPUWeight', 'LimitNOFILE'], json_encode($r['json']['overridden'] ?? null));
+    check('helper: … each with what the panel wrote and what systemd runs',
+          ($ov['Nice']['wanted'] ?? '') === '-1' && ($ov['Nice']['effective'] ?? '') === '-2'
+          && ($ov['LimitNOFILE']['wanted'] ?? '') === '200000' && ($ov['LimitNOFILE']['effective'] ?? '') === '65536', json_encode($ov));
+    check('helper: … naming the file that wins', ($ov['Nice']['by'] ?? null) === ['override.conf']
+          && ($ov['LimitNOFILE']['by'] ?? null) === ['limits.conf'], json_encode($ov));
+    check('helper: … and naming nobody when the winner is not in this directory', ($ov['CPUWeight']['by'] ?? null) === [], json_encode($ov['CPUWeight'] ?? null));
+    // a file that sorts BEFORE ours loses to it, so it is not the culprit even though it sets the same key
+    file_put_contents($tmp . '/dropin/10-extra.conf', "[Service]\nNice=-3\nCPUWeight=50\n");
+    $r10 = $run('status');
+    $ov10 = $ovByKey((array)$r10['json']);
+    check('helper: a drop-in that sorts before ours is never blamed (10-extra.conf)',
+          ($ov10['Nice']['by'] ?? null) === ['override.conf'] && ($ov10['CPUWeight']['by'] ?? null) === [], json_encode($ov10));
+    check('helper: … but it is still listed as a drop-in the panel does not own',
+          in_array('10-extra.conf', (array)($r10['json']['other_dropins'] ?? []), true));
+    @unlink($tmp . '/dropin/10-extra.conf');
+    // an edit systemd has not been told about is stale, not overruled: no claim then
+    file_put_contents($tmp . '/state/props', "Nice=-2\nCPUWeight=100\nCPUAffinity=\nLimitNOFILE=65536\nNeedDaemonReload=yes\n");
+    check('helper: nothing is claimed while systemd still needs a daemon-reload',
+          ($run('status')['json']['overridden'] ?? null) === []);
+    // loaded exactly as written: nothing to report
+    file_put_contents($tmp . '/state/props', "Nice=-1\nCPUWeight=300\nCPUAffinity=\nLimitNOFILE=200000\n");
+    check('helper: nothing is reported when systemd runs what the panel wrote',
+          ($run('status')['json']['overridden'] ?? null) === []);
+    file_put_contents($tmp . '/state/props', "Nice=-2\nCPUWeight=100\nCPUAffinity=\nLimitNOFILE=65536\n");
 
     // workers: both files, always
     $r = $run('workers 6');

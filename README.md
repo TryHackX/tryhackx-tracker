@@ -282,7 +282,7 @@ Mail goes out through PHP's `mail()` — the machine needs an MTA (INSTALL §1).
 - **HMAC Tokens** — SHA-256 signed unsubscribe links with timing-safe comparison
 - **No Secrets in Source** — the database credentials are written by the installer into `config/database.php`, which is never committed (and never touched by an upgrade)
 - **Generic Error Responses** — raw database/exception messages are logged server-side, never returned to clients
-- **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, dotfiles and `*.sql|log|bak|old|ini|sh|env|lock`; `assets/` blocks server-side script execution and directory listing. `.git/`, `tests/`, `tools/`, `worker/` and `lang/` are **not** denied by the shipped files — the vhost does that (INSTALL §4; [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for nginx)
+- **Directory Protection** — `.htaccess` deny rules on `config/`, `includes/`, `templates/`, `api/`, `tools/` (1.75.3), dotfiles and `*.sql|log|bak|old|ini|sh|env|lock`; `assets/` blocks server-side script execution and directory listing. `.git/`, `tests/`, `worker/` and `lang/` are **not** denied by the shipped files — the vhost does that (INSTALL §4; [Reverse proxy / Nginx](#reverse-proxy--nginx-notes) for nginx)
 - **Security Headers** — `Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`
 - **Content-Security-Policy with a per-request nonce** — built in PHP (so it works on nginx, which never reads `.htaccess`, and so a nonce can exist at all), sent report-only until you switch it to enforce, `script-src` with no `'unsafe-inline'` and no `'unsafe-eval'` (the one exception: with reCAPTCHA configured, `'unsafe-eval'` where its widget can be drawn — 1.74.0), a narrower policy for the panel than for public pages, only the CAPTCHA provider you actually configured, and an optional bounded store of what browsers reported. On Apache the `.htaccess` fallback policy is enforced beside it — see [Content-Security-Policy](#content-security-policy)
 - **Subresource Integrity** — pinned CDN assets (Bootstrap, Bootstrap Icons or Font Awesome) loaded with `integrity` hashes
@@ -397,7 +397,7 @@ The full list, and the path from a bare server: [INSTALL.md](INSTALL.md).
 
 This is an admin panel for [opentracker](https://erdgeist.org/arts/software/opentracker/), and the
 package ships the two builds it is developed against — `tools/opentracker/bin/opentracker.white` and
-`opentracker.black` — together with the four patch files applied to them (three to opentracker,
+`opentracker.black` — together with the six patch files applied to them (five to opentracker,
 one to libowfat), the exact commit and feature flags they were built from, and the recipe to
 rebuild them yourself.
 
@@ -421,7 +421,11 @@ The write-up meant for upstream is `tools/opentracker/UPSTREAM-REPORT.md`. The f
 `opentracker-review-fixes.patch` (1.35.0), carries seven fixes from a source review — a forgeable
 UDP connection-id secret, a use-after-free on accesslist reload, a `/stats` result delivered to a
 reused socket, and four smaller ones — each adversarially reviewed and put through a lab before
-it was shipped.
+it was shipped. The last two came with 1.75.3, after the tracker crashed four times in five days
+(2026-10-08…12) a few seconds after a full `/scrape` pulled by a stranger: `opentracker-batch-realloc.patch`
+fixes the use-after-free in the response batching that the crashes came from, and
+`opentracker-fullscrape-gate.patch` answers a full `/scrape` with 403 unless it comes from the machine itself
+or from an `access.stats` address (per-hash scrapes and announces are untouched).
 
 Built and tested on **Debian 13 (trixie)**, x86-64, gcc 14.2.0. Details, checksums, feature flags,
 the build recipe and the install steps: **[tools/opentracker/README.md](tools/opentracker/README.md)**.
@@ -1142,8 +1146,9 @@ Four things the exchange needs once the partner is somebody else's machine (1.12
 **Admin → Traffic → OpenTracker — performance** (settings in Settings → *OpenTracker performance*)
 exposes what any systemd box already has: UDP worker threads (`listen.udp.workers`), `Nice`,
 `CPUWeight`, `CPUAffinity` and `LimitNOFILE`. Everything the panel writes goes into **one file it
-owns**, `90-tracker-panel.conf`; `override.conf` and `limits.conf` are never touched, and **Reset**
-deletes the panel's file and nothing else. Saving a setting changes nothing — a password-gated
+owns**, `90-tracker-panel.conf`; the other drop-ins (the installer's `10-limits.conf`, an `override.conf`) are
+never touched, and **Reset** deletes the panel's file and nothing else. systemd lets the drop-in that sorts last
+by name win, so one named `override.conf` or `limits.conf` outranks the panel's `90-…` file; the card says so (1.75.3). Saving a setting changes nothing — a password-gated
 **Apply** puts it in force, after showing the exact file. Where `/etc` is read-only for php-fpm
 (`ProtectSystem`), the Apply is queued and the janitor writes it within the minute.
 
@@ -2207,8 +2212,8 @@ outbound peer-list traffic disappears. (It does **not** reduce the inbound UDP s
 #### 1. Build OpenTracker with whitelist support
 
 Black- and whitelist are compile-time exclusive. The package ships both builds
-(`tools/opentracker/bin/opentracker.white` / `.black`, with all four patches); to build them yourself,
-the canonical recipe — the pinned upstream commit, libowfat with its patch, the three opentracker
+(`tools/opentracker/bin/opentracker.white` / `.black`, with all six patches); to build them yourself,
+the canonical recipe — the pinned upstream commit, libowfat with its patch, the five opentracker
 patches, the flags — is INSTALL.md §5 and **[tools/opentracker/README.md](tools/opentracker/README.md)**:
 
 ```bash
@@ -2216,7 +2221,7 @@ P=/path/to/tryhackx-tracker/tools/opentracker
 wget http://www.fefe.de/libowfat/libowfat-0.34.tar.xz && tar -xf libowfat-0.34.tar.xz && mv libowfat-0.34 libowfat
 (cd libowfat && patch -p1 --forward < $P/libowfat-no-zerocopy.patch) && make -C libowfat
 git clone git://erdgeist.org/opentracker && cd opentracker && git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
-for p in sighup-udp-workers udp-reject-interval opentracker-review-fixes; do patch -p1 --forward < $P/$p.patch; done
+for p in sighup-udp-workers udp-reject-interval opentracker-review-fixes opentracker-batch-realloc opentracker-fullscrape-gate; do patch -p1 --forward < $P/$p.patch; done
 F="-DWANT_FULLSCRAPE -DWANT_COMPRESSION_GZIP -DWANT_RESTRICT_STATS -DWANT_MODEST_FULLSCRAPES"
 make clean && make FEATURES="$F -DWANT_ACCESSLIST_WHITE" LIBOWFAT_HEADERS=../libowfat LIBOWFAT_LIBRARY=../libowfat && cp opentracker ../opentracker.white
 make clean && make FEATURES="$F -DWANT_ACCESSLIST_BLACK" LIBOWFAT_HEADERS=../libowfat LIBOWFAT_LIBRARY=../libowfat && cp opentracker ../opentracker.black
@@ -3273,7 +3278,7 @@ tracker/
 │   ├── api_client_example.py  # an example partner client
 │   ├── lang_src.py + lang_src.d/  # the dictionary's source, one module per area
 │   ├── emoji_data.php  # regenerates assets/emoji/
-│   └── opentracker/    # the shipped builds (bin/), the four patches, the root helpers (tracker-*.sh),
+│   └── opentracker/    # the shipped builds (bin/), the six patches, the root helpers (tracker-*.sh),
 │                       #   egress-budget/, and the build notes (README.md, UPSTREAM-REPORT.md)
 ├── worker/             # worker.py (metadata over DHT), federation.py (the peer importer), their systemd
 │                       #   units and the example conf — see worker/README.md

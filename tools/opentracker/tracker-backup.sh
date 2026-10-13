@@ -516,19 +516,32 @@ action_worker() {
         write_state "$d" running id="$id" mode="$mode" profile="$profile" items="$items" \
             started_at="$started" pid="$$" step="dumping database $dbname" bytes=0 archive="" error="" encrypted=false verified=null
         # The profile has to mean the same thing here as it does with the toolkit: "light" leaves out
-        # the two index tables (on a real install they are by far the biggest and they rebuild
-        # themselves from the swarm). Ignoring the profile would make the panel's own description of
-        # what it is doing false.
-        local dumpargs=()
+        # the ROWS of the two index tables (on a real install they are by far the biggest and they
+        # rebuild themselves from the swarm). Ignoring the profile would make the panel's own
+        # description of what it is doing false.
+        # Their STRUCTURE goes in, empty (1.75.3): a restore into a database that has no such tables
+        # would otherwise leave them missing for good, because the restored `settings` says the schema
+        # is current and ensureSchema() never runs the migration that creates them.
+        local dumpargs=() idxsql="" light=0
         case "$items" in
             *tracker-db-lekka*) dumpargs+=(--ignore-table="$dbname.index_hashes" --ignore-table="$dbname.index_files")
-                                note "light profile: skipping $dbname.index_hashes and $dbname.index_files" ;;
+                                light=1
+                                note "light profile: skipping the rows of $dbname.index_hashes and $dbname.index_files (their empty structure stays in the dump)" ;;
         esac
+        if [ "$light" = 1 ]; then
+            # Into a variable first: a failed structure dump (a table an old schema does not have yet) must
+            # cost the dump its two empty tables, not the backup its archive, and half a CREATE TABLE
+            # appended to a good dump would break the restore.
+            idxsql="$("$MARIADB_DUMP" --single-transaction --no-data "$dbname" index_hashes index_files 2>>"$(log_file "$d")")" || {
+                idxsql=""
+                note "WARNING: could not dump the structure of $dbname.index_hashes and index_files — restore this dump onto a database the installer has just built"; }
+        fi
         note "builtin dump of database $dbname -> $archive"
         install -m 0600 /dev/null "$archive"
         # --single-transaction keeps InnoDB consistent WITHOUT locking the tables the tracker is
         # writing to; the shared MariaDB serves several other sites on this box.
-        if ! ( set -o pipefail; "$MARIADB_DUMP" --single-transaction --routines --triggers --quick "${dumpargs[@]}" "$dbname" | gzip -c >"$archive" ) 2>>"$(log_file "$d")"; then
+        if ! ( set -o pipefail; { "$MARIADB_DUMP" --single-transaction --routines --triggers --quick "${dumpargs[@]}" "$dbname" \
+                                  && { [ -z "$idxsql" ] || printf '\n%s\n' "$idxsql"; }; } | gzip -c >"$archive" ) 2>>"$(log_file "$d")"; then
             rm -f -- "$archive"
             write_state "$d" failed id="$id" mode="$mode" profile="$profile" items="$items" \
                 started_at="$started" finished_at="$(date +%s)" pid=0 step="failed" bytes=0 archive="" \
@@ -852,7 +865,7 @@ action_restore_db() {
     case "$p" in *.gpg) fail "This archive is encrypted. Decrypt it on the server first: gpg -o <plain> -d '$p'" ;; esac
 
     WORK_DIR="$d"
-    local work sqlfile rc=0
+    local work sqlfile rc=0 gz=0
     work="$(mktemp -d "${TMPDIR:-/tmp}/tracker-restore.XXXXXX")" || fail "cannot create a work directory"
     trap 'rm -rf "${work:-}"' EXIT
     chmod 0700 "$work"
@@ -862,19 +875,29 @@ action_restore_db() {
         gzip -dc -- "$p" >"$sqlfile" 2>>"$(log_file "$d")" || fail "cannot decompress $p" 3
     else
         # Pull ONLY the dump of this database out of the archive — no other file is unpacked.
+        # Backup-serwera.sh 2.0 keeps the dump gzipped inside the archive (db/<db>.sql.gz, streamed through gzip and never
+        # a raw .sql); archives made before that hold a plain db/<db>.sql, and both restore.
         local member
-        member="$(tar -tzf "$p" 2>/dev/null | grep -E "(^|/)db/${db}(-bez-index)?\.sql$" | head -1)"
+        member="$(tar -tzf "$p" 2>/dev/null | grep -E "(^|/)db/${db}(-bez-index)?\.sql(\.gz)?$" | head -1)"
         [ -n "$member" ] || fail "The archive does not contain a dump of the database '$db'."
         tar -xzf "$p" -C "$work" -- "$member" 2>>"$(log_file "$d")" || fail "cannot extract $member from the archive" 3
         sqlfile="$work/$member"
         [ -f "$sqlfile" ] || fail "the extracted dump is missing"
+        case "$member" in
+            *.gz)
+                # Tested BEFORE anything is touched, the safety dump included: a dump that gzip cannot read must be
+                # a refusal here, not a half-finished import (or a full disk) later. It stays compressed — it is
+                # decompressed on the way into the client, so no copy of the whole SQL ever lands on disk.
+                gzip -t -- "$sqlfile" 2>>"$(log_file "$d")" || fail "The dump inside the archive is corrupt (gzip -t failed) — nothing was changed." 3
+                gz=1 ;;
+        esac
     fi
 
     local size; size="$(stat -c '%s' "$sqlfile" 2>/dev/null || echo 0)"
     if [ "$dry" = "1" ]; then
-        printf '{"ok":true,"dry_run":true,"id":%s,"db":%s,"dump_bytes":%s,"message":%s}\n' \
-            "$(jstr "$id")" "$(jstr "$db")" "$size" \
-            "$(jstr "Would import $size bytes into '$db' after dumping the current database. Nothing has been changed.")"
+        printf '{"ok":true,"dry_run":true,"id":%s,"db":%s,"dump_bytes":%s,"compressed":%s,"message":%s}\n' \
+            "$(jstr "$id")" "$(jstr "$db")" "$size" "$([ "$gz" = 1 ] && echo true || echo false)" \
+            "$(jstr "Would import $size bytes$([ "$gz" = 1 ] && echo ' (gzip-compressed, read as a stream)') into '$db' after dumping the current database. Nothing has been changed.")"
         return 0
     fi
 
@@ -894,7 +917,14 @@ action_restore_db() {
 
     note "restore-db $id -> $db ($size bytes)"
     "$MARIADB" -e "CREATE DATABASE IF NOT EXISTS \`$db\` CHARACTER SET utf8mb4" >>"$(log_file "$d")" 2>&1 || true
-    if ! "$MARIADB" "$db" <"$sqlfile" >>"$(log_file "$d")" 2>&1; then
+    local imported=0
+    if [ "$gz" = 1 ]; then
+        # pipefail: a gzip that dies half-way must fail the import, not be hidden behind the client's exit code
+        ( set -o pipefail; gzip -dc -- "$sqlfile" 2>>"$(log_file "$d")" | "$MARIADB" "$db" >>"$(log_file "$d")" 2>&1 ) && imported=1
+    else
+        "$MARIADB" "$db" <"$sqlfile" >>"$(log_file "$d")" 2>&1 && imported=1
+    fi
+    if [ "$imported" != 1 ]; then
         note "FAILED: import into $db"
         fail "The import into '$db' failed. The database as it was is saved at $safety" 5
     fi

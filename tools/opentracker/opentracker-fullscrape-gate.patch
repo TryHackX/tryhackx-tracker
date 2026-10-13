@@ -1,0 +1,50 @@
+From: TryHackX <tryhackx@users.noreply.github.com>
+Subject: [PATCH] full /scrape: only for loopback and blessed addresses (403 for everyone else)
+
+Upstream serves the whole torrent list to any client that asks for /scrape without an info_hash.
+OT_PERMISSION_MAY_FULLSCRAPE exists in ot_accesslist.h but is never checked. On a tracker whose
+HTTP port is public (HTTP announces), that means:
+
+  - anyone can download the complete list of hashes with their swarm sizes; six public addresses
+    started doing so every ~2 h on 2026-10-08;
+  - every such request makes a worker build the whole answer in memory (~45 MB gzip, ~150 MB
+    plain for ~2.3 M torrents) and hold it until the client has read it, at Internet speed;
+  - the slow remote reader is exactly what drove the batch-split use-after-free fixed by
+    opentracker-batch-realloc.patch.
+
+The panel reads the full scrape from 127.0.0.1, so the gate allows:
+  - loopback: 127.0.0.0/8 (as ::ffff:127.0.0.0/104) and ::1;
+  - addresses blessed with access.stats (OT_PERMISSION_MAY_STAT), the operator's own;
+  - addresses blessed with OT_PERMISSION_MAY_FULLSCRAPE (-A ip on the command line blesses all).
+Everyone else gets "403 Access Denied". The check runs before the modest-scrape limiter, so a
+refused client neither consumes a limiter slot nor starts a worker. HTTP announces, per-hash
+scrapes and /stats on the same port are unchanged.
+
+Apply after opentracker-batch-realloc.patch, from inside the opentracker directory:
+    patch -p1 --forward < opentracker-fullscrape-gate.patch
+
+--- a/ot_http.c
++++ b/ot_http.c
+@@ -372,6 +372,22 @@ static ssize_t http_handle_fullscrape(co
+   int               format = 0;
+   tai6464           t;
+
++  /* The full torrent list is for the operator's own tools, not for the world: allow loopback
++     (127.0.0.0/8 as ::ffff:127.0.0.0/104, and ::1) and addresses blessed with access.stats
++     (OT_PERMISSION_MAY_STAT) or OT_PERMISSION_MAY_FULLSCRAPE; refuse everyone else with 403
++     before the modest-scrape limiter records them and before a worker builds the whole
++     answer in memory (~150 MB plain per request). HTTP announces and per-hash scrapes on the
++     same port are unaffected. */
++  {
++    static const uint8_t v4mapped_prefix[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
++    static const uint8_t v6_loopback[16]     = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
++    const uint8_t       *ip                  = (const uint8_t *)cookie->ip;
++    int                  loopback            = (!memcmp(ip, v4mapped_prefix, 12) && ip[12] == 127) || !memcmp(ip, v6_loopback, 16);
++
++    if (!loopback && !accesslist_is_blessed(cookie->ip, (ot_permissions)(OT_PERMISSION_MAY_STAT | OT_PERMISSION_MAY_FULLSCRAPE)))
++      HTTPERROR_403_IP;
++  }
++
+ #ifdef WANT_MODEST_FULLSCRAPES
+   {
+     ot_scrape_log this_peer, *new_peer;

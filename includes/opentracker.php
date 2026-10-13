@@ -9,8 +9,11 @@
  * them until these have been tried and measured.
  *
  * Everything the panel writes goes into ONE file it owns — `90-tracker-panel.conf` in the unit's
- * drop-in directory. `override.conf` and `limits.conf` were put there by the installer or by hand
- * and are never touched. Undo is deleting that one file, which is exactly what Reset does.
+ * drop-in directory. The other drop-ins (the installer's `10-limits.conf`, an `override.conf`) were put there
+ * by the installer or by hand and are never touched. systemd applies drop-ins in the order of their names and
+ * the last one to set a value wins, so a name that sorts AFTER `90-…` (`override.conf`, a plain `limits.conf`)
+ * overrules the panel's file; the helper's status lists such values and otAdvice() says so (1.75.3).
+ * Undo is deleting that one file, which is exactly what Reset does.
  *
  * Nothing is applied by merely saving a setting: these values describe what the admin WANTS, and
  * the firewall-style Apply button (admin password) is what puts them in force. A fresh install
@@ -219,6 +222,22 @@ function otAdvice(array $st): array {
         $out[] = ['level' => $drops > 0 ? 'warn' : 'info', 'text' => $drops > 0
             ? __('api.ot.adv_rmem_drops', ['bytes' => $num($rmem), 'drops' => $num($drops)])
             : __('api.ot.adv_rmem', ['bytes' => $num($rmem)])];
+    }
+    // 1.75.3: a value the panel wrote that systemd did not load as written (the helper compares `systemctl show` with
+    // the panel's own file). With a file named, it is a drop-in that sorts after 90-tracker-panel.conf; without one the
+    // winner is in another drop-in directory. A warning, not a note: the card would otherwise say "written" beside a
+    // Nice or an open-files limit the admin never chose.
+    $lost = []; $by = [];
+    foreach ((array)($st['overridden'] ?? []) as $o) {
+        if (!is_array($o) || trim((string)($o['key'] ?? '')) === '') continue;
+        $lost[(string)$o['key']] = true;
+        foreach ((array)($o['by'] ?? []) as $f) $by[(string)$f] = true;
+    }
+    if ($lost) {
+        $keys = implode(', ', array_keys($lost));
+        $out[] = ['level' => 'warn', 'text' => $by
+            ? __('api.ot.adv_overridden', ['keys' => $keys, 'files' => implode(', ', array_keys($by))])
+            : __('api.ot.adv_overridden_other', ['keys' => $keys])];
     }
     if (!empty($st['other_dropins'])) {
         $out[] = ['level' => 'info', 'text' => __('api.ot.adv_dropins', ['files' => implode(', ', array_map('strval', (array)$st['other_dropins']))])];

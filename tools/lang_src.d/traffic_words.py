@@ -158,8 +158,23 @@ add('api.ot', {
                        'poza odpowiedzią — w przeciwieństwie do odrzuconego przez zaporę, który nic nie kosztuje. Podniesienie '
                        'limitu to ustawienie sysctl dla całego systemu, więc panel nie robi tego za Ciebie: '
                        'sudo sysctl -w net.core.rmem_max=8388608'),
-    'adv_dropins':    ('Other drop-ins are present and are never touched by the panel: :files. systemd merges them, and the '
-                       'highest-numbered file wins a conflict.',
-                       'Są też inne pliki drop-in, których panel nigdy nie rusza: :files. systemd je łączy, a przy konflikcie '
-                       'wygrywa plik o najwyższym numerze.'),
+    # 1.75.3: "the highest-numbered file wins" was wrong — systemd orders drop-ins by NAME and the last one wins, so a
+    # name that starts with a letter (override.conf) sorts after the panel's 90-… file and beats it.
+    'adv_dropins':    ('Other drop-ins are present and are never touched by the panel: :files. systemd applies drop-ins in the '
+                       'order of their names and the last one to set a value wins: the panel\'s 90-tracker-panel.conf outranks a '
+                       'name that sorts before it (10-limits.conf) and yields to one that sorts after it (override.conf).',
+                       'Są też inne pliki drop-in, których panel nigdy nie rusza: :files. systemd stosuje je w kolejności nazw, '
+                       'a przy konflikcie wygrywa ten, który jest ostatni: 90-tracker-panel.conf panelu przebija nazwę leżącą '
+                       'przed nim (10-limits.conf), a ustępuje tej leżącej po nim (override.conf).'),
+    'adv_overridden': ('systemd is not running what the panel wrote for :keys: another drop-in sets it too (:files), and its name '
+                       'sorts after 90-tracker-panel.conf, so it wins. Rename it to start with a number below 90 '
+                       '(10-limits.conf) or take that line out of it.',
+                       'systemd nie używa tego, co panel zapisał dla :keys: ustawia to także inny plik drop-in (:files), a jego '
+                       'nazwa leży po 90-tracker-panel.conf, więc to on wygrywa. Zmień mu nazwę tak, by zaczynała się od liczby '
+                       'mniejszej niż 90 (10-limits.conf) albo usuń z niego tę linię.'),
+    'adv_overridden_other': ('systemd is not running what the panel wrote for :keys, and no file in this drop-in directory explains '
+                             'it: a drop-in in another directory (/run, /usr/lib) wins. systemctl cat opentracker lists them all.',
+                             'systemd nie używa tego, co panel zapisał dla :keys, a żaden plik w tym katalogu drop-in tego nie '
+                             'tłumaczy: wygrywa drop-in z innego katalogu (/run, /usr/lib). systemctl cat opentracker wylicza je '
+                             'wszystkie.'),
 })

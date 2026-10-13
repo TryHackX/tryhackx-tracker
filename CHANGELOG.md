@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.3] — 2026-10-13
+
+The opentracker crash fix and full-scrape gate, rebuilt binaries; the tracker side of the server audit. Schema 94, no migration.
+
+- **A stranger downloading the full torrent list no longer crashes the tracker.** From 8 October the tracker aborted four times in five days, each a few seconds
+  after a visitor from the Internet fetched the full scrape: the answer was queued faster than they read it, and the code that grows the queue wrote into memory it
+  had just given back. That is fixed, and the full scrape is now answered only to the machine itself and to the addresses allowed to read the statistics — anybody
+  else gets "403 Access Denied" (announces and single-torrent scrapes are untouched, and the panel's own polls come from the machine itself). The guides now build the
+  tracker with both patches and say plainly that port 6969 is open to the world. Rebuilt tracker programs ship in the package; installing them needs a restart of the tracker.
+- **The panel says when another systemd file overrules its OpenTracker settings.** Nice and the open-files limit set under OpenTracker — performance were silently
+  beaten by a drop-in with a name like `override.conf`, because systemd applies such files in the order of their names and the last one wins (not "the highest number", as
+  the panel's text claimed). The card now compares what systemd really runs with what the panel wrote and names the file that wins; the installation guide gives the
+  installer's own file a name that sorts before the panel's.
+- **A light database backup keeps the two index tables, empty.** It used to leave them out completely, so restoring it into a fresh database left them missing for
+  good. Restoring such a backup now empties those two tables in the target (the safety dump taken first holds the rows). The database restore also reads dumps stored
+  gzipped inside a server backup's archive: it checks them first and never writes an unpacked copy to disk.
+- **The tools folder is closed to the web.** Its notes and patch files, among them an internal report, could be downloaded.
+- **Installing and updating.** The installation guide asks for `iputils-ping` and `iproute2`, and its upgrade steps reinstall the worker's and federation's unit files
+  as well; the web installer proposes `/home/tracker/accesslist/blacklist` and says MariaDB 10.6+ (MySQL is not supported); the deploy script keeps the root helpers
+  and the worker's unit files in step with the code (only those already installed).
+
 ## [1.75.2] — 2026-10-12
 
 The navigation's badges come with the page. Schema 94, no migration.

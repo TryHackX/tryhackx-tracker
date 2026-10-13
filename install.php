@@ -286,7 +286,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
         'turnstile'    => ['turnstile_site_key', 'turnstile_secret'],
         'hcaptcha'     => ['hcaptcha_site_key', 'hcaptcha_secret'],
     ][$captchaProvider];
-    $blacklistPath = trim($_POST['blacklist_path'] ?? '/home/tracker/blacklist');
+    $blacklistPath = trim($_POST['blacklist_path'] ?? '/home/tracker/accesslist/blacklist');
 
     if (strlen($adminUser) < 3) { $error = 'Username must be at least 3 characters.'; }
     elseif (strlen($adminPass) < 10) { $error = 'Password must be at least 10 characters long.'; }
@@ -567,7 +567,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
         <div class="info">
             <strong>Requirements:</strong><br>
             &bull; PHP 8.0+ with PDO MySQL<br>
-            &bull; MySQL 5.7+ or MariaDB 10.3+<br>
+            &bull; MariaDB 10.6+ (MySQL is not supported)<br>
             &bull; Apache with mod_rewrite (optional)
         </div>
         <p style="margin-bottom:1rem;">
@@ -707,7 +707,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 3) {
             <div class="form-group">
                 <label>Blacklist File Path</label>
                 <div style="display:flex;gap:0.5rem;">
-                    <input type="text" name="blacklist_path" id="blacklist_path" value="<?= htmlspecialchars($_POST['blacklist_path'] ?? '/home/tracker/blacklist') ?>" style="flex:1;">
+                    <input type="text" name="blacklist_path" id="blacklist_path" value="<?= htmlspecialchars($_POST['blacklist_path'] ?? '/home/tracker/accesslist/blacklist') ?>" style="flex:1;">
                     <button type="button" class="btn" style="background:#333;color:#4a9eff;padding:0.5rem 1rem;font-size:0.8rem;white-space:nowrap;" onclick="testBlacklist()">Test</button>
                 </div>
                 <div id="bl-result" style="margin-top:0.4rem;font-size:0.8rem;"></div>

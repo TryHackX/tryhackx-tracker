@@ -1,14 +1,14 @@
 # The tracker itself — the two opentracker builds
 
 The panel is an admin interface for [opentracker](https://erdgeist.org/arts/software/opentracker/).
-This directory holds the tracker binaries this project is developed and tested against, the four
-patches applied to them (three to opentracker, one to libowfat), the root helpers the panel calls,
+This directory holds the tracker binaries this project is developed and tested against, the six
+patches applied to them (five to opentracker, one to libowfat), the root helpers the panel calls,
 and everything needed to rebuild the binaries from source instead of trusting them.
 
 The sections from *A full scrape that loses its own framing* on — all but the short *After the first
-start* — are the project's **internal lab notes** of 2026-09-04 … 06 — the paths are the reference
-VPS's, the scripts lived in `/tmp` — kept because they are the evidence behind two of the patches.
-They are not instructions; the guide is [INSTALL.md](../../INSTALL.md) §5 and §9.
+start* — are the project's **internal lab notes** of 2026-09-04 … 06 and, last, the 2026-10 crash —
+the paths are the reference VPS's, the scripts lived in `/tmp` — kept because they are the evidence
+behind four of the patches. They are not instructions; the guide is [INSTALL.md](../../INSTALL.md) §5 and §9.
 
 **Tested on Debian 13 (trixie)**, x86-64, gcc 14.2.0, kernel 6.12. They are plain dynamically linked
 ELF executables needing only `libz` and `libc`, so any glibc distribution of that vintage will run
@@ -27,6 +27,8 @@ them; older glibc will not.
 | `opentracker-review-fixes.patch` | seven fixes from the 2026-09 source review (connid secret, accesslist reload UAF, /stats task on a dead fd, atomic torrent count, tpbs one-byte write, worker start order, mmap bound) |
 | `UPSTREAM-REPORT.md` | **internal**: the draft bug report for libowfat/opentracker (not yet sent) |
 | `udp-reject-interval.patch` | adds `access.udp_reject_interval` |
+| `opentracker-batch-realloc.patch` | (1.75.3) the crash fix: a use-after-free in `http_sendiovecdata()` when a full `/scrape` is queued faster than its client reads it — see *Round seven* |
+| `opentracker-fullscrape-gate.patch` | (1.75.3) a full `/scrape` is answered only to loopback and `access.stats` addresses, with 403 to everyone else; announces and per-hash scrapes are untouched |
 | `egress-budget/ottrack.nft` | the reply-rate budget: kernel sets of the clients answered in the last 3 h, replies to them first (see the Traffic page); installed by hand |
 | `egress-budget/tracker-egress-prio.sh` / `.service` | traffic control on the uplink for the same budget; installed by hand, if at all |
 | `tracker-mode.sh` | switches the `opentracker` / `opentracker.conf` symlinks white↔black and restarts (`[--all\|--instance N] white\|black\|status`); the schedule and the running-mode check |
@@ -39,13 +41,15 @@ them; older glibc will not.
 | `tracker-livesync.sh` | live peer sync with a second machine (needs a `-DWANT_SYNC_LIVE` build — not these — and WireGuard) |
 
 ```
-sha256  d1a319cd999812a98c4fa2d6fedfee7a8a259b1d0ca0816d58bf2dc5f264fe8d  opentracker.white
-sha256  ef5e162e7cba1c3fd73b72c04f267c2699e5975d433c154699bc89cdc49da3cf  opentracker.black
+sha256  7d189b3af5314c8b0b6fe0a64d53b1fe657f4f6428bdabaf470bd751429c2924  opentracker.white
+sha256  0e97c18f0adf8335faa411dde52af3ab5d05b32b8f702d5cc0bda0e777cfb702  opentracker.black
 ```
 
-Both are 113 840 bytes, stripped, position-independent — the 2026-09-06 builds with the libowfat
-zerocopy patch (round five) and the seven review fixes (round six); the unpatched 117 936-byte
-builds of 2026-08-18 are retired.
+Both are 113 840 bytes, stripped, position-independent — the 2026-10-13 builds (round seven): the libowfat
+zerocopy patch (round five), the seven review fixes (round six), the batch-realloc crash fix and the full-scrape
+gate. They are the binaries production has run since 2026-10-13 01:22, built from the exact sources of the
+2026-09-06 builds (which are retired, as are the unpatched 117 936-byte builds of 2026-08-18); a lab test showed
+the use-after-free on the old build under ASan and a clean run on this one.
 
 ### Why two binaries and not one switch
 
@@ -87,6 +91,7 @@ is what identifies it; a rebuild from the recipe below carries whatever its own 
 -DWANT_RESTRICT_STATS        access.stats / access.stats_path — /stats limited to named IPs and moved
                              off the default path
 -DWANT_MODEST_FULLSCRAPES    one full scrape per client per 5 minutes; the rest get HTTP 402
+                             (with opentracker-fullscrape-gate.patch, a client that may not scrape at all gets 403 first)
 -DWANT_ACCESSLIST_WHITE      ── white build only ──
 -DWANT_ACCESSLIST_BLACK      ── black build only ──
 ```
@@ -123,9 +128,13 @@ strings opentracker.white | grep -x 'access\.\(whitelist\|blacklist\|stats_path\
 
 ## The patches
 
-Four, all small, all here as unified diffs, and each fixes something that bites in production. The
-two below are opentracker's oldest; `libowfat-no-zerocopy.patch` is explained in *Round four* and
-`opentracker-review-fixes.patch` in *Round six*.
+Six, all small, all here as unified diffs, and each fixes something that bites in production. The
+two below are opentracker's oldest; `libowfat-no-zerocopy.patch` is explained in *Round four*,
+`opentracker-review-fixes.patch` in *Round six* and the last two (3 and 4 below) in *Round seven*.
+
+**Apply them in this order** — it is the order the recipe uses, and the later patches are written
+against the files the earlier ones leave: `sighup-udp-workers`, `udp-reject-interval`,
+`opentracker-review-fixes`, `opentracker-batch-realloc`, `opentracker-fullscrape-gate`.
 
 ### 1. `sighup-udp-workers.patch` — `systemctl reload` killed the tracker
 
@@ -161,6 +170,29 @@ access.udp_reject_interval 86400
 HTTP announces are unchanged: they still get the explicit "not authorized" failure reason, because an
 HTTP client is generally a person looking at an error message.
 
+### 3. `opentracker-batch-realloc.patch` — the crash (1.75.3)
+
+When a full `/scrape` has queued more than `OT_BATCH_LIMIT` (16 MiB) that the client has not read yet,
+`http_sendiovecdata()` grows its array of send batches with `realloc()`. The old code then initialised
+the batch through a pointer into the **old** array (freed memory, if `realloc` moved it) and queued the
+next buffers into a new slot it never initialised. The first is a 72-byte `memset` into a freed chunk,
+which zeroes glibc's free-list link and aborts the process a moment later (`malloc(): unaligned tcache
+chunk detected`, `malloc_consolidate(): unaligned fastbin chunk detected`) or crashes it with a SIGSEGV;
+when `realloc` grew the block in place it wiped the live batch instead and silently dropped up to 16 MiB
+from the client's stream. The patch rebases onto the new array, initialises **the new slot**, counts it
+only when that worked, and always recomputes `current`. *Round seven* has the evidence.
+
+### 4. `opentracker-fullscrape-gate.patch` — a full scrape is for the operator (1.75.3)
+
+Upstream serves the whole torrent list to anyone who asks for `/scrape` without an `info_hash`, and
+`OT_PERMISSION_MAY_FULLSCRAPE` exists but is never checked. The gate runs first in the full-scrape
+handler and allows loopback (`127.0.0.0/8`, `::1`), addresses blessed with `access.stats`
+(`OT_PERMISSION_MAY_STAT`) and addresses blessed with `OT_PERMISSION_MAY_FULLSCRAPE`; everyone else gets
+`403 Access Denied` before the five-minute limiter has recorded them and before a worker has built a
+~150 MB answer for them. Per-hash scrapes, announces (HTTP and UDP) and `/stats` are unchanged. The panel
+reads `http://127.0.0.1:6969/scrape`, so it passes; a poll from another machine needs that machine's
+address in `access.stats`.
+
 ---
 
 ## Building it yourself
@@ -179,13 +211,15 @@ wget http://www.fefe.de/libowfat/libowfat-0.34.tar.xz && tar -xf libowfat-0.34.t
 (cd libowfat && patch -p1 --forward < $P/libowfat-no-zerocopy.patch)
 make -C libowfat
 
-# opentracker at the tested commit, with its three patches
+# opentracker at the tested commit, with its five patches — in this order
 git clone git://erdgeist.org/opentracker
 cd opentracker
 git checkout 1c7fac4cc23801ac81a2abd7d3110683831c4811
 patch -p1 --forward < $P/sighup-udp-workers.patch
 patch -p1 --forward < $P/udp-reject-interval.patch
 patch -p1 --forward < $P/opentracker-review-fixes.patch
+patch -p1 --forward < $P/opentracker-batch-realloc.patch     # the 2026-10 crash fix
+patch -p1 --forward < $P/opentracker-fullscrape-gate.patch   # full /scrape: loopback and access.stats only
 ```
 
 `--forward`, and `patch` rather than `git apply`: the second patch applies with a little fuzz (its
@@ -194,8 +228,8 @@ hunk headers were written by hand), which `patch` accepts and `git apply` refuse
 **This recipe was verified, not assumed.** The first two patches were applied to a pristine checkout
 of the commit above and the result compared against the working tree that produced the binaries of
 that day: `opentracker.c`, `trackerlogic.c` and `trackerlogic.h` came out **byte-identical**, and the
-tree built cleanly. The libowfat patch (round four) and the review fixes (round six) came after and
-are in the recipe above; the shipped binaries carry all four.
+tree built cleanly. The libowfat patch (round four), the review fixes (round six) and the two 2026-10
+patches (round seven) came after and are in the recipe above; the shipped binaries carry all six.
 
 Then build each mode into its own binary — `make clean` between them is not optional, because the
 object files carry the accesslist flag:
@@ -302,7 +336,7 @@ Worth writing down, because each of these looked convincing enough to spend an h
 
 | Suspect | Verdict |
 | --- | --- |
-| The `io_batch` split in `http_sendiovecdata` (a stale pointer across `realloc`, and the wrong batch initialised) | **Not it.** Both defects are real and worth fixing, but instrumentation shows the split path never runs during a corrupted transfer. |
+| The `io_batch` split in `http_sendiovecdata` (a stale pointer across `realloc`, and the wrong batch initialised) | **Not it** — for the framing bug. Both defects are real, but instrumentation shows the split path never runs during a corrupted transfer. (They were a different failure, and it came in October: patch 3, *Round seven*.) |
 | libowfat freeing buffers as it sends them (`iob_addbuf_free` + autofree) | **Not it.** A build with `-DWANT_NO_AUTO_FREE`, where nothing is freed at all, corrupts identically. |
 | `MSG_ZEROCOPY` — the kernel still reading pages the application has freed | **Not it** — so this round concluded; **round four proved it was** (`strace`: 63 of 63 `sendmsg` calls flagged `MSG_ZEROCOPY`, clean once the option is refused), and `libowfat-no-zerocopy.patch` is the fix. A standalone program driving `iob_send` the same way got **zero** `SO_EE_ORIGIN_ZEROCOPY` completions on `MSG_ERRQUEUE`; the sends are ordinary copies. Patching libowfat to skip zerocopy for autofree batches changes nothing. |
 
@@ -353,6 +387,8 @@ Three things this project learned the hard way, in the order they bite:
    exact command.
 3. **Full scrapes are rate-limited to one per client per 5 minutes** (`WANT_MODEST_FULLSCRAPES`), and
    the answer to an early one is HTTP 402. That is not a payment and not a firewall; poll less often.
+   (With `opentracker-fullscrape-gate.patch` a client that is not loopback or an `access.stats` address
+   gets 403 instead, and is never counted.)
 
 ## The chunked-framing bug: what is now known (2026-09-04)
 
@@ -414,8 +450,9 @@ else
 ```
 
 **It does not fix the framing corruption** — tested, 3/3 still bad — but it is a genuine
-use-after-free that fires whenever one batch passes 16 MiB, and it should go in whenever the binaries
-are next rebuilt.
+use-after-free that fires whenever one batch passes 16 MiB, and it was noted here as one that should
+go in whenever the binaries are next rebuilt. It never made it into a patch, and on 2026-10-08 it
+started taking the tracker down: it is now `opentracker-batch-realloc.patch` (*Round seven*).
 
 ### Round two (2026-09-04): the lifetime is sound, and that makes it stranger
 
@@ -609,9 +646,10 @@ to apply the diff on a copy and find what was wrong with it. Seven patches survi
 `free_peerlist()` and the `iovec_increase` leak — both on `malloc`-failure paths) and are not
 shipped. Three findings are report-only by design because a fix would change behaviour or cost
 memory: the missing access gate on the full `/scrape` (high — an unauthenticated client can park
-~114 MB per connection for fifteen minutes; the panel is the only intended client and the port is
-loopback-only here), the kernel-default UDP receive buffer (the host sets `rmem_default`), and the
-per-packet `recvfrom`/`sendto` without batching.
+~114 MB per connection for fifteen minutes; the panel is the only intended client. The port is
+**not** loopback-only, as this note first claimed: TCP 6969 is public, the HTTP announce URL is advertised
+there. The gate shipped in 1.75.3 — patch 4 above), the kernel-default UDP receive buffer (the host sets
+`rmem_default`), and the per-packet `recvfrom`/`sendto` without batching.
 
 **What the patches change.** The UDP connection-id secret is read from `getrandom(2)` instead of
 `srandom(time(NULL))`, so a client can no longer forge connection ids for other addresses. An
@@ -636,3 +674,43 @@ Compiler warnings went from 13 to 11.
 Built as `/home/debian/build-fixed2/opentracker.{white,black}` (the sources with every patch in
 `/home/debian/build-p2/`); shipped in `bin/`. The swap on production is the operator's decision:
 it restarts the tracker and the swarm rebuilds from empty.
+
+## Round seven: the 2026-10 crash (2026-10-13)
+
+**Symptom.** Four aborts or crashes between 2026-10-08 and 10-12 — `malloc_consolidate(): unaligned
+fastbin chunk detected` twice, `malloc(): unaligned tcache chunk detected` once, one SIGSEGV — each
+three to five seconds after a client had pulled the full `/scrape`.
+
+**Cause (a use-after-free, confidence about 85 %).** The defect round one described and set aside as
+"not the framing bug": `http_sendiovecdata()` grows its array of send batches with `realloc()` when
+more than 16 MiB is queued and unsent. It then called `OT_IOB_INIT(current)` with `current` still
+pointing into the **old** array. If `realloc` moved the array, that is a 72-byte `memset` into a freed
+chunk; glibc keeps its free-list link in the chunk's first bytes, safe-linking turns the zeroed link
+into a misaligned pointer, and the next `malloc` or consolidation of that size class aborts. The new
+slot was also used without being initialised (a wild pointer: SIGSEGV or more corruption), and when the
+array grew in place the live batch was wiped instead, silently dropping its queued bytes. The batch
+array and the per-connection cookie are both 72 bytes, so every HTTP accept and close churns the very
+bin the freed chunk sits in.
+
+**Trigger.** Not a change in the panel. The panel reads the scrape over loopback faster than it is
+produced, so its backlog never reaches 16 MiB and the branch had never run in five weeks. From
+2026-10-08 six public addresses began pulling the full scrape every two hours or so, because TCP 6969 is
+public (the HTTP announce URL is advertised there) and the full scrape was open to everybody. An Internet
+client cannot keep up: ~45 MB of gzip arrives within seconds, the backlog passes 16 MiB, and the split
+branch runs. The first remote pull crashed the tracker five seconds later; four crashes in 67 remote
+pulls fits one dice roll per transfer (only the first split corrupts a free-list link). About three
+hundred loopback polls in the same window were never followed by a crash.
+
+**Fix.** `opentracker-batch-realloc.patch` (the use-after-free) and `opentracker-fullscrape-gate.patch`
+(a full scrape only for the operator; everybody else gets 403 and costs nothing). Neither depends on the
+other, but the gate is written against the file the first leaves, so apply them in that order.
+
+**Ruled out:** the SIGHUP accesslist reload (no reload in the window), `MSG_ZEROCOPY` (compiled out in
+this libowfat), the `/stats` task path (polled every minute for weeks with no correlation) and the
+fullscrape worker's early exits (it always pushes the terminator).
+
+**Not proven by a core.** The logs cannot show that the split branch ran in those four transfers; the
+mechanism was derived from the production source and its disassembly, not caught. If anything still
+crashes after the swap, enable cores for this unit only (`LimitCORE=infinity` in a drop-in; the file
+lands in `/home/tracker`, about 0.6 GB — delete it after use) and read it with `gdb` against an unstripped
+twin of the binary.

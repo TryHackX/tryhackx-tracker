@@ -236,13 +236,20 @@ check('the tool refuses to run anywhere but the command line (the first statemen
 check('… loads what the pages that read groups load (users.php, favourites.php) and writes through the shared function',
       str_contains($src, "require_once \$root . '/includes/users.php';") && str_contains($src, "require_once \$root . '/includes/favourites.php';")
       && str_contains($src, 'userGroupApplyRecommended(') && !preg_match('/UPDATE\s+user_groups/i', $src));
+// 1.75.3: tools/ is closed to the web as a whole (tools/.htaccess), so Apache answers 403 before the file's own guard
+// (404) is ever reached; a server that does not read .htaccess (php -S) still gets the file's 404.
+$toolsHt = (string)@file_get_contents($root . '/tools/.htaccess');
+check('tools/.htaccess denies the whole directory to the web (Apache 2.4 and 2.2 syntax)',
+      (bool)preg_match('/<IfModule mod_authz_core\.c>\s*Require all denied\s*<\/IfModule>/', $toolsHt)
+      && (bool)preg_match('/<IfModule !mod_authz_core\.c>\s*Order deny,allow\s*Deny from all\s*<\/IfModule>/', $toolsHt));
 $ctx = stream_context_create(['http' => ['timeout' => 5, 'ignore_errors' => true]]);
 $body = @file_get_contents('http://127.0.0.1:8089/tools/groups.php?cmd=list', false, $ctx);
 if ($body === false) {
     echo "NOTE the local site is not answering — the web half of the guard was not asked\n";
 } else {
     $status = (int)preg_replace('/^HTTP\/\S+\s+(\d+).*$/', '$1', (string)($http_response_header[0] ?? ''));
-    check('over the web the file answers 404 and says nothing', $status === 404 && !str_contains($body, 'registered permissions'),
+    check('over the web the file answers 403 (tools/.htaccess) or 404 (its own guard) and says nothing',
+          in_array($status, [403, 404], true) && !str_contains($body, 'registered permissions'),
           ($http_response_header[0] ?? '?') . ' ' . substr($body, 0, 120));
 }
 
