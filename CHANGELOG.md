@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.5] — 2026-10-23
+
+The metadata worker's accept queue really is 128. Schema 94, no migration.
+
+- **The worker's port takes the connections it is offered.** 1.74.0 said the accept queue of the worker's listening port
+  (6881) went from 5 to 128, and it did not: libtorrent reads `listen_queue_size` only when it opens its listening
+  sockets, and it opens them again only when `listen_interfaces` changes, so the value set after the session had started
+  was stored and never used. Every socket of the port kept a queue of 5 while about 540 new connections a second
+  arrived, and the kernel dropped the ones that did not fit. The setting now goes in with the settings the session is
+  created with, and `ss -ltn 'sport = :6881'` shows 128. Updating needs a restart of `tracker-metadata`.
+
 ## [1.75.4] — 2026-10-13
 
 Dead code removed. No behaviour change. Schema 94, no migration.

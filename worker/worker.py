@@ -473,6 +473,7 @@ class Worker:
         os.makedirs(os.path.dirname(cfg.heartbeat), exist_ok=True)
         settings = {
             "listen_interfaces": f"0.0.0.0:{cfg.listen_port},[::]:{cfg.listen_port}",
+            "listen_queue_size": 128,
             "enable_dht": True, "enable_lsd": False, "enable_upnp": False, "enable_natpmp": False,
             "download_rate_limit": cfg.download_rate, "connections_limit": cfg.connections,
             "user_agent": "tracker-metadata/1.0 libtorrent/" + lt.__version__,
@@ -482,12 +483,10 @@ class Worker:
             "dht_bootstrap_nodes": ",".join(cfg.dht_routers),
         }
         self.ses = lt.session(settings)
-        # Two settings applied one by one, because an older libtorrent that does not know one refuses the whole pack
-        # (1.74.0): `listen_queue_size` — the accept backlog of :6881 was libtorrent's default 5, and the kernel counted
-        # 1 300 refused connections a second on it (AUDIT 2.8); `ssrf_mitigation` — a tracker on a local address must
-        # end in /announce and carry no query of its own (the default where it exists; said here so it is not left to
-        # a build's default). See SRV-1 below for the rest.
-        for key, value in (("listen_queue_size", 128), ("ssrf_mitigation", True)):
+        # Applied on its own, because an older libtorrent that does not know it refuses the whole pack (1.74.0):
+        # `ssrf_mitigation` — a tracker on a local address must end in /announce and carry no query of its own (the
+        # default where it exists; said here so it is not left to a build's default). See SRV-1 below for the rest.
+        for key, value in (("ssrf_mitigation", True),):
             try:
                 self.ses.apply_settings({key: value})
             except Exception as e:

@@ -283,6 +283,32 @@ W.lt.options_t = types.SimpleNamespace(delete_files=1)
 W.Worker.finish(fw, 'tok', False, None, 'no peers within 60 s')
 check('a fetch given up counts against the yield', len(fw._outcomes) == 1 and fw._outcomes[0][1] is False, list(fw._outcomes))
 
+
+class FakeSession:
+    def __init__(self, settings):
+        self.constructed_with = dict(settings)
+        self.applied = []
+
+    def apply_settings(self, pack):
+        self.applied.append(dict(pack))
+
+
+W.lt.session = FakeSession
+W.lt.alert = types.SimpleNamespace(category_t=types.SimpleNamespace(status_notification=1, error_notification=2))
+with tempfile.TemporaryDirectory() as sd:
+    sw = W.Worker(types.SimpleNamespace(
+        db={}, tmp_dir=os.path.join(sd, 'tmp'), heartbeat=os.path.join(sd, 'heartbeat'), listen_port=6881,
+        download_rate=0, connections=200, dht_routers=['router.example:6881'], index_table='',
+        index_files_table='index_files', concurrency=3, timeout=90))
+check('listen_queue_size 128 is in the pack lt.session() is constructed with',
+      sw.ses.constructed_with.get('listen_queue_size') == 128, sw.ses.constructed_with)
+check('… the same pack that opens the listen sockets on the worker port',
+      sw.ses.constructed_with.get('listen_interfaces') == '0.0.0.0:6881,[::]:6881', sw.ses.constructed_with)
+check('… and not left to apply_settings() after the sockets are open, where libtorrent never reads it',
+      not any('listen_queue_size' in p for p in sw.ses.applied), sw.ses.applied)
+check('ssrf_mitigation is still applied on its own, as one setting',
+      sw.ses.applied == [{'ssrf_mitigation': True}], sw.ses.applied)
+
 print()
 print('%d checks, %d failed' % (n, fails))
 sys.exit(1 if fails else 0)
