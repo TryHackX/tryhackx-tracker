@@ -473,7 +473,7 @@ class Worker:
         os.makedirs(os.path.dirname(cfg.heartbeat), exist_ok=True)
         settings = {
             "listen_interfaces": f"0.0.0.0:{cfg.listen_port},[::]:{cfg.listen_port}",
-            "listen_queue_size": 128,
+            "listen_queue_size": 1024,
             "enable_dht": True, "enable_lsd": False, "enable_upnp": False, "enable_natpmp": False,
             "download_rate_limit": cfg.download_rate, "connections_limit": cfg.connections,
             "user_agent": "tracker-metadata/1.0 libtorrent/" + lt.__version__,

@@ -300,8 +300,8 @@ with tempfile.TemporaryDirectory() as sd:
         db={}, tmp_dir=os.path.join(sd, 'tmp'), heartbeat=os.path.join(sd, 'heartbeat'), listen_port=6881,
         download_rate=0, connections=200, dht_routers=['router.example:6881'], index_table='',
         index_files_table='index_files', concurrency=3, timeout=90))
-check('listen_queue_size 128 is in the pack lt.session() is constructed with',
-      sw.ses.constructed_with.get('listen_queue_size') == 128, sw.ses.constructed_with)
+check('listen_queue_size 1024 is in the pack lt.session() is constructed with',
+      sw.ses.constructed_with.get('listen_queue_size') == 1024, sw.ses.constructed_with)
 check('… the same pack that opens the listen sockets on the worker port',
       sw.ses.constructed_with.get('listen_interfaces') == '0.0.0.0:6881,[::]:6881', sw.ses.constructed_with)
 check('… and not left to apply_settings() after the sockets are open, where libtorrent never reads it',

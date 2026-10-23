@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.6] — 2026-10-24
+
+The metadata worker's accept queue is 1024. Schema 94, no migration.
+
+- **A busy moment no longer turns connections to the worker away.** With the queue at 128 (1.75.5) the kernel still
+  refused connections whenever the worker's network thread fell behind for a moment: about 540 new connections a second
+  arrive, so 128 places last a quarter of a second, and on production the queue of the worker's IPv4 socket reached
+  129/128 with up to about 200 refusals a second. The queue is now 1024, about two seconds of arrivals (the kernel caps
+  it at `net.core.somaxconn`, 4096 on production). Updating needs a restart of `tracker-metadata`.
+
 ## [1.75.5] — 2026-10-23
 
 The metadata worker's accept queue really is 128. Schema 94, no migration.
