@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.75.7] — 2026-10-24
+
+Changing one kernel buffer on the Traffic page no longer drops the others at the next reboot. Schema 94, no migration.
+
+- **A confirmed buffer setting survives the next change.** The Kernel network buffers card sends only the boxes that
+  changed, and confirming wrote the panel's sysctl file with only those keys, so raising the send buffers after the
+  receive buffers removed the receive buffers from the file: they stayed in force until the next reboot and then fell
+  back to 208 KiB (on production the tracker socket then dropped 1.26 million datagrams in nine minutes). Confirming now
+  keeps every key the file already holds and replaces only the ones being changed, and the preview shows that whole file.
+- **An unconfirmed change undoes only itself.** The watchdog that fires when a change is not confirmed in time, and the
+  janitor's backstop behind it, put every key back to its value from before the panel was first used and deleted the
+  file, taking earlier confirmed settings with it. Both now return only the keys of that change, to their confirmed value
+  (or the original one), and leave the file alone; with nothing armed they change nothing. Restore defaults still undoes
+  everything. Updating needs the root helper reinstalled (`/usr/local/sbin/tracker-sysctl.sh`); the deploy script does
+  that.
+
 ## [1.75.6] — 2026-10-24
 
 The metadata worker's accept queue is 1024. Schema 94, no migration.

@@ -248,6 +248,26 @@ render_conf() {
     done
 }
 
+conf_value() {
+    local name
+    name="$(key_sysctl_name "${1-}")" || return 1
+    [ -r "$CONF_FILE" ] || return 1
+    sed -n "s/^${name//./\\.} = //p" "$CONF_FILE" 2>/dev/null | head -1
+}
+
+merged_pairs() {
+    local k v kv seen=" " out=""
+    for kv in "$@"; do seen="$seen${kv%%=*} "; done
+    for k in $ALL_KEYS; do
+        case "$seen" in *" $k "*) continue ;; esac
+        v="$(conf_value "$k")" || continue
+        [ -n "$v" ] || continue
+        valid_value "$k" "$v" || continue
+        out="$out $k=$(printf '%s' "$v" | tr ' ' '_')"
+    done
+    printf '%s' "${out# }${out:+ }$*"
+}
+
 # ── baseline: what the machine looked like before the panel ever touched it ──
 #
 # Captured once, immediately before the first write, and then never overwritten. "Restore defaults"
@@ -424,7 +444,7 @@ action_preview() {
         key_path "$k" >/dev/null || fail "unknown key: $k" 2
         valid_value "$k" "$v" || fail "$VERR" 2
     done
-    printf '{"ok":true,"file":%s,"content":%s}\n' "$(jstr "$CONF_FILE")" "$(jstr "$(render_conf "$@")")"
+    printf '{"ok":true,"file":%s,"content":%s}\n' "$(jstr "$CONF_FILE")" "$(jstr "$(render_conf $(merged_pairs "$@"))")"
 }
 
 action_arm() {
@@ -500,7 +520,7 @@ action_confirm() {
             "$(jstr "$SYSCTL_D_DIR is read-only for this process; the janitor writes the file within a minute")"
         exit 0
     }
-    render_conf $wanted >"$CONF_FILE" 2>/dev/null || fail "confirm: could not write $CONF_FILE" 4
+    render_conf $(merged_pairs $wanted) >"$CONF_FILE" 2>/dev/null || fail "confirm: could not write $CONF_FILE" 4
     chmod 0644 "$CONF_FILE" 2>/dev/null
 
     # The scheduled revert must die here, or it fires later and quietly undoes a confirmed change.
@@ -518,6 +538,26 @@ action_revert() {
     # suicide that reads in the journal as a completed revert.
     [ "$from_watchdog" = 1 ] || cancel_reverts
     local k v restored=0 first=1 out="" removed=0 deferred=0
+    if [ "$from_watchdog" = 1 ]; then
+        local armed="" kv had=0
+        [ -r "$ARM_FILE" ] && armed="$(sed -n 's/.*"wanted":"\([^"]*\)".*/\1/p' "$ARM_FILE" | head -1)"
+        [ -n "$armed" ] && had=1
+        for kv in $armed; do
+            k="${kv%%=*}"
+            v="$(conf_value "$k")" || v=""
+            [ -n "$v" ] || v="$(baseline_value "$k")" || continue
+            [ -n "$v" ] || continue
+            valid_value "$k" "$v" || continue
+            write_key "$k" "$v" && restored=$(( restored + 1 ))
+            [ "$first" = 1 ] || out="$out,"
+            first=0
+            out="$out$(jstr "$k"):$(jstr "$v")"
+        done
+        rm -f "$ARM_FILE" 2>/dev/null
+        printf '{"ok":true,"reverted":%s,"watchdog":true,"restored":%s,"file_removed":false,"unpersist_deferred":false,"values":{%s}}\n' \
+            "$(jbool "$had")" "$restored" "$out"
+        return 0
+    fi
     if [ -r "$BASELINE_FILE" ]; then
         for k in $ALL_KEYS; do
             v="$(baseline_value "$k")" || continue

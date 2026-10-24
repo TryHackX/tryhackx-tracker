@@ -575,7 +575,7 @@ function sysctlTick(array $cfg): array {
     // could not be scheduled, and it is why the card shows the janitor's granularity in the countdown
     // rather than the nominal window.
     if ($armed && time() > (int)($armed['deadline'] ?? 0)) {
-        $r = sysctlRun($cfg, ['revert']);
+        $r = sysctlRun($cfg, ['revert', '--watchdog']);
         $s = sysctlState();
         unset($s['armed'], $s['request']);
         $s['last_revert_at'] = time();

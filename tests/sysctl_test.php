@@ -247,6 +247,9 @@ check('the card is gated on the feature being on, so an install that never enabl
       str_contains($traffic, 'sysctlEnabled($cfg)') && str_contains($traffic, 'id="sysctl-card"'));
 check('the janitor performs the writes', str_contains(file_get_contents($root . '/tools/janitor.php'), 'sysctlTick($cfg)'));
 
+check('janitor: its backstop for an unconfirmed change uses the same narrow undo as the watchdog',
+      str_contains((string)file_get_contents($root . '/includes/sysctl.php'), "sysctlRun(\$cfg, ['revert', '--watchdog'])"));
+
 /* ── 9. the real helper, end to end, against a fake kernel ────────────────── */
 
 $bash = null;
@@ -382,6 +385,39 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
     check('helper: the file is gone', !is_file($tmp . '/sysctl.d/99-tracker-panel.conf') && ($rev['json']['file_removed'] ?? null) === true);
     check('helper: revert is idempotent', ($run('revert')['json']['ok'] ?? false) === true);
 
+    $run('arm 120 a1a1 rmem_max=8388608 rmem_default=8388608');
+    $run('confirm a1a1');
+    $run('arm 120 b2b2 wmem_max=8388608 wmem_default=8388608');
+    $pvm = $run('preview wmem_max=8388608 wmem_default=8388608');
+    check('helper: preview shows the keys the file already holds next to the ones being changed',
+          str_contains((string)($pvm['json']['content'] ?? ''), 'net.core.rmem_default = 8388608')
+          && str_contains((string)($pvm['json']['content'] ?? ''), 'net.core.wmem_default = 8388608'), $pvm['out']);
+    $run('confirm b2b2');
+    $conf2 = (string)@file_get_contents($tmp . '/sysctl.d/99-tracker-panel.conf');
+    check('helper: confirming one change keeps the keys an earlier confirm wrote',
+          str_contains($conf2, 'net.core.rmem_max = 8388608') && str_contains($conf2, 'net.core.rmem_default = 8388608')
+          && str_contains($conf2, 'net.core.wmem_max = 8388608') && str_contains($conf2, 'net.core.wmem_default = 8388608'), $conf2);
+    check('helper: … each of them once',
+          substr_count($conf2, 'net.core.rmem_max') === 1 && substr_count($conf2, 'net.core.wmem_default') === 1, $conf2);
+    $run('arm 120 c3c3 wmem_default=4194304');
+    $wd2 = $run('revert --watchdog');
+    check('helper: a watchdog revert undoes only the unconfirmed change, back to the confirmed value',
+          trim((string)@file_get_contents($tmp . '/proc/net/core/wmem_default')) === '8388608', $wd2['out']);
+    check('helper: … leaves the confirmed keys running',
+          trim((string)@file_get_contents($tmp . '/proc/net/core/rmem_max')) === '8388608');
+    check('helper: … and keeps the file the next boot reads',
+          (string)@file_get_contents($tmp . '/sysctl.d/99-tracker-panel.conf') === $conf2
+          && ($wd2['json']['file_removed'] ?? null) === false, $wd2['out']);
+    $idle = $run('revert --watchdog');
+    check('helper: a watchdog with nothing armed changes nothing',
+          ($idle['json']['ok'] ?? false) === true && ($idle['json']['restored'] ?? null) === 0
+          && (string)@file_get_contents($tmp . '/sysctl.d/99-tracker-panel.conf') === $conf2
+          && trim((string)@file_get_contents($tmp . '/proc/net/core/rmem_max')) === '8388608', $idle['out']);
+    $run('revert');
+    check('helper: an explicit revert still restores the captured values and removes the file',
+          !is_file($tmp . '/sysctl.d/99-tracker-panel.conf')
+          && trim((string)@file_get_contents($tmp . '/proc/net/core/rmem_max')) === '212992');
+
     // A baseline holding a value the allow-list would reject must not be replayed back into the
     // kernel: revert re-validates every key rather than applying a file wholesale as root.
     file_put_contents($tmp . '/state/sysctl-baseline.json',
@@ -401,10 +437,9 @@ if ($bash === null || !trackerExecAvailable() || !is_file($helper)) {
           str_contains($sh, '"$SELF" revert --watchdog'));
     check('helper: … and that path skips cancelling units, because it is one of them',
           str_contains($sh, '[ "$from_watchdog" = 1 ] || cancel_reverts'));
-    file_put_contents($tmp . '/proc/net/ipv4/udp_rmem_min', "16384
-");
     file_put_contents($tmp . '/state/sysctl-baseline.json',
         '{"captured_at":1,"page_size":4096,"values":{"udp_rmem_min":"4096"}}');
+    $run('arm 120 d4d4 udp_rmem_min=16384');
     $wd = $run('revert --watchdog');
     check('helper: a watchdog revert still restores the captured value',
           ($wd['json']['ok'] ?? false) === true
