@@ -109,13 +109,13 @@ check('a key that sends nothing gets neither (users, shop, federation)',
 $createSrc = (string)@file_get_contents($root . '/api/admin/api_client_create.php');
 $fetchSrc = (string)@file_get_contents($root . '/api/admin/fetch_api_clients.php');
 check('the new key\'s guide link gets the key\'s own blocking answer',
-      str_contains($createSrc, 'apiClientDocsUrl((string)$c[\'scope\'], $autoApprove === 1, $fields, $autoBlock === 1)'));
+      str_contains($createSrc, 'apiClientDocsUrl((string)$c[\'scope\'], $autoApprove === 1, $fields, $autoBlock === 1, $describe)'));
 check('… and so does every row of the key list',
-      str_contains($fetchSrc, "apiClientDocsUrl((string)\$c['scope'], \$c['auto_approve'], \$c['required_fields'], \$c['abuse_auto_block'])"));
+      str_contains($fetchSrc, "apiClientDocsUrl((string)\$c['scope'], \$c['auto_approve'], \$c['required_fields'], \$c['abuse_auto_block'], \$c['describe_mode'])"));
 $wlJs = (string)@file_get_contents($root . '/assets/js/admin-whitelist.js');
 check('the panel\'s live preview builds the same two answers',
       str_contains($wlJs, "if (submits) u.searchParams.set('approve'") && str_contains($wlJs, "if (reports) u.searchParams.set('block'")
-      && str_contains($wlJs, 'docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1)'));
+      && str_contains($wlJs, 'docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1, v.describe_mode)'));
 // The whole reason it can travel in the same mail as the key.
 foreach (['key_id', 'secret', 'bearer', 'token'] as $word) {
     check("the address says nothing about the $word", !str_contains(strtolower($u), $word));

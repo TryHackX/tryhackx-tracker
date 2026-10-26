@@ -3866,7 +3866,7 @@ window.siteToast = siteToast;
             // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
             d.innerHTML = json.description_html;
             body.appendChild(d);
-        } else if (!json.source_url && !json.content_hidden) {
+        } else if (!json.source_url && !json.content_hidden && !(json.content_forum && json.content_forum.state === 'too_long')) {
             const none = document.createElement('p');
             none.className = 'text-muted info-section';
             none.textContent = t.key('js.app.no_description');
@@ -4320,7 +4320,7 @@ window.siteToast = siteToast;
      * to the first and the last three around a "+N" that opens the rest in place. The arrows are the icon
      * library's, not a character.
      */
-    function creditLine(credits) {
+    function creditLine(credits, tail) {
         const by = document.createElement('p');
         by.className = 'info-desc-by text-muted info-section';
         const many = credits.length > 1;
@@ -4329,14 +4329,17 @@ window.siteToast = siteToast;
         by.append(t.key(many ? 'js.app.desc_by_many' : 'js.app.desc_by'), headEnd);
         const entry = (c) => {
             const shown = c.state === 'shown' && c.name;
+            const forum = c.state === 'forum' && c.name;
             // `.av-who`: the picture and the name are one unit that a line never breaks inside.
             const who = document.createElement(shown && c.profile ? 'a' : 'span');
-            who.className = 'av-who info-credit-who' + (shown ? '' : ' info-credit-' + (c.state === 'hidden' ? 'hidden' : 'deleted'));
+            who.className = 'av-who info-credit-who' + (shown ? '' : forum ? ' info-credit-forum' : ' info-credit-' + (c.state === 'hidden' ? 'hidden' : 'deleted'));
             if (shown) {
                 if (c.profile) who.href = profileHref(c.name);
                 const pic = typeof window.userAvatarImg === 'function'
                     ? window.userAvatarImg({ username: c.name, avatar: String(c.avatar || '') }, 20, 'avatar info-av') : null;
                 if (pic) who.appendChild(pic);
+                who.appendChild(document.createTextNode(c.name));
+            } else if (forum) {
                 who.appendChild(document.createTextNode(c.name));
             } else {
                 who.append(c.state === 'hidden'
@@ -4378,9 +4381,47 @@ window.siteToast = siteToast;
                 more.addEventListener('click', () => draw(true));
                 by.appendChild(more);
             });
+            if (tail) by.append(' ', tail);
         };
         draw(false);
         return by;
+    }
+
+    function forumChip(forum) {
+        const a = document.createElement(forum.url ? 'a' : 'span');
+        a.className = 'info-chip info-chip-forum';
+        a.append(t.key('js.app.from_forum'));
+        a.title = forum.at ? t.key('js.app.from_forum_title_at', { at: forum.at }) : t.key('js.app.from_forum_title');
+        if (forum.url) {
+            a.href = forum.url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            if (!forum.trusted) a.setAttribute('data-external', '1');
+            const i = document.createElement('i');
+            i.className = 'bi bi-box-arrow-up-right';
+            i.setAttribute('aria-hidden', 'true');
+            a.append(' ', i);
+        }
+        return a;
+    }
+
+    function forumNote(forum, older) {
+        const keys = { too_long: older ? 'js.app.forum_too_long_newer' : 'js.app.forum_too_long', drift: 'js.app.forum_drift', proposed: 'js.app.forum_proposed',
+                       invalid: 'js.app.forum_invalid', removed: 'js.app.forum_removed', declined: 'js.app.forum_declined' };
+        const p = document.createElement('p');
+        p.className = 'info-desc-note info-section text-muted';
+        p.append(t.key(keys[forum.state] || 'js.app.forum_drift', { chars: t.num(Number(forum.chars || 0)),
+            max: t.num(Number(forum.max || 0)), at: forum.at || '', note: forum.note || '' }));
+        if (forum.url) {
+            const a = document.createElement('a');
+            a.href = forum.url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            if (!forum.trusted) a.setAttribute('data-external', '1');
+            a.textContent = t.key('js.app.forum_open');
+            p.append(' ', a);
+        }
+        return p;
     }
 
     /**
@@ -4390,13 +4431,21 @@ window.siteToast = siteToast;
      */
     function renderContentExtras(json, body, hash) {
         const credits = Array.isArray(json.content_credits) ? json.content_credits : [];
+        const forum = json.content_forum || null;
+        const chip = forum && forum.shown ? forumChip(forum) : null;
         if (credits.length) {
-            body.appendChild(creditLine(credits));
+            body.appendChild(creditLine(credits, chip));
         } else if (json.content_author) {
             // An answer without the chain (what the panel was sent before 1.70.0): the author alone.
             body.appendChild(creditLine([{ kind: 'first', state: 'shown', name: json.content_author,
-                                           avatar: json.content_author_avatar || '', profile: !!json.content_author_profile }]));
+                                           avatar: json.content_author_avatar || '', profile: !!json.content_author_profile }], chip));
+        } else if (chip) {
+            const p = document.createElement('p');
+            p.className = 'info-desc-by text-muted info-section';
+            p.appendChild(chip);
+            body.appendChild(p);
         }
+        if (forum && forum.state) body.appendChild(forumNote(forum, !!json.description_html));
         const note = (key, vars, cls) => {
             const p = document.createElement('p');
             p.className = 'info-desc-note info-section ' + (cls || 'text-muted');

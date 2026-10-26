@@ -75,6 +75,7 @@
                                 <option value="approved"><?= _h('a.wl.rv_st_approved') ?></option>
                                 <option value="rejected"><?= _h('a.wl.rv_st_rejected') ?></option>
                                 <option value="all"><?= _h('a.wl.rv_st_all') ?></option>
+                                <option value="forum"><?= _h('a.wl.rv_st_forum') ?></option>
                             </select>
                         </div>
                         <div class="toolbar-right"><span id="rv-total" class="text-muted wl-total"></span></div>
@@ -549,6 +550,20 @@
                             <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-url" value="url"><label class="form-check-label" for="cl-opts-f-url"><?= _h('a.wl.cl_f_url') ?> <code>ref.url</code></label></div>
                             <div class="form-check cl-check"><input class="form-check-input cl-opts-field" type="checkbox" id="cl-opts-f-source_id" value="source_id"><label class="form-check-label" for="cl-opts-f-source_id"><?= _h('a.wl.cl_f_source_id') ?> <code>ref.post_id</code></label></div>
                             <div class="cl-hint"><?= __('a.wl.cl_fields_hint') ?></div>
+                        </div>
+                        <div class="cl-field">
+                            <label class="cl-label" for="cl-opts-describe"><?= _h('a.wl.cl_describe') ?></label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-describe">
+                                <option value="off"><?= _h('a.wl.cl_describe_off') ?></option>
+                                <option value="queue"><?= _h('a.wl.cl_describe_queue') ?></option>
+                                <option value="publish"><?= _h('a.wl.cl_describe_publish') ?></option>
+                            </select>
+                            <div class="cl-hint"><?= __('a.wl.cl_describe_hint') ?></div>
+                        </div>
+                        <div class="cl-field" id="cl-opts-describe-accounts-field" hidden>
+                            <label class="cl-label" for="cl-opts-describe-accounts"><?= _h('a.wl.cl_describe_accounts') ?></label>
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary" id="cl-opts-describe-accounts"></select>
+                            <div class="cl-hint"><?= _h('a.wl.cl_describe_accounts_hint') ?></div>
                         </div>
                     </div>
 

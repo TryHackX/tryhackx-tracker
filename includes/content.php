@@ -8,9 +8,7 @@
  * a table added in 1.53.0 so that describing such a torrent does not have to register it: a whitelist
  * row is a registration, the index poll drops a whitelisted hash out of the index, and in whitelist
  * mode the accesslist is built from those rows. Words are not a registration. Every reader of a
- * description goes through richtextContentFor(), which looks in both places, and every writer goes
- * through contentAttach() — the whitelist form, the Info panel and the review queue included — so
- * the two homes cannot drift apart in what they allow.
+ * description goes through richtextContentFor(), which looks in both places.
  *
  * Who wrote it is recorded (`content_user_id`) and shown with the text, and the author is told what
  * happened to it: a description sent into a queue that never answers is the last description that
@@ -20,6 +18,7 @@ require_once __DIR__ . '/richtext.php';
 // How fast descriptions may be written, the same words twice, a guest's CAPTCHA (1.71.0): the site's one
 // anti-spam layer, which the description endpoints ask wherever they are loaded from.
 require_once __DIR__ . '/antispam.php';
+require_once __DIR__ . '/forumdescs.php';
 
 /** Descriptions or source links are switched on at all. */
 function contentEnabled(array $cfg): bool {
@@ -645,15 +644,7 @@ function contentEditApply(PDO $db, array $cfg, array $e): bool {
     $cur = contentRowById($db, $kind, (int)$e['target_id']);
     if (!$cur) return false;
     $pv = contentEditPreview($cur, $e);
-    if ($cur['description'] !== null || $cur['source_url'] !== null) {
-        $db->prepare("INSERT INTO wl_content_edits (whitelist_id, hash_content_id, info_hash, source_url, description,
-                             description_format, status, note, user_id, reviewed_at)
-                      VALUES (?, ?, ?, ?, ?, ?, 'rejected', ?, ?, NOW())")
-           ->execute([$kind === 'wl' ? (int)$e['target_id'] : null, $kind === 'idx' ? (int)$e['target_id'] : null,
-                      (string)$e['info_hash'], $cur['source_url'], $cur['description'],
-                      (string)$cur['description_format'], CONTENT_ARCHIVE_NOTE, $cur['content_user_id']]);
-        contentArchivePrune($db, $kind, (int)$e['target_id']);
-    }
+    contentArchive($db, $kind, (int)$e['target_id'], (string)$e['info_hash'], $cur);
     $proposer = $e['user_id'] !== null ? (int)$e['user_id'] : null;
     $previous = $cur['content_user_id'] !== null ? (int)$cur['content_user_id'] : null;
     $edit = $pv['kind'] === 'edit' && !$pv['as_rewrite'];
@@ -670,6 +661,7 @@ function contentEditApply(PDO $db, array $cfg, array $e): bool {
        ->execute([$e['source_url'], $e['description'], (string)$e['description_format'],
                   $author, contentCreditsEncode($chain), (int)$e['target_id']]);
     $db->prepare("UPDATE wl_content_edits SET status = 'applied', reviewed_at = NOW() WHERE id = ?")->execute([(int)$e['id']]);
+    forumDescProposalDone($db, $e, true);
     $name = contentNameFor($db, (string)$e['info_hash']);
     if ($edit) {
         contentNotify($db, $cfg, $proposer, 'notify.content_edit_applied', 'notify.content_edit_applied_body',
@@ -687,12 +679,22 @@ function contentEditApply(PDO $db, array $cfg, array $e): bool {
     return true;
 }
 
+function contentArchive(PDO $db, string $kind, int $id, string $hash, array $cur): void {
+    if ($cur['description'] === null && $cur['source_url'] === null) return;
+    $db->prepare("INSERT INTO wl_content_edits (whitelist_id, hash_content_id, info_hash, source_url, description,
+                         description_format, status, note, user_id, reviewed_at)
+                  VALUES (?, ?, ?, ?, ?, ?, 'rejected', ?, ?, NOW())")
+       ->execute([$kind === 'wl' ? $id : null, $kind === 'idx' ? $id : null, $hash, $cur['source_url'], $cur['description'],
+                  (string)$cur['description_format'], CONTENT_ARCHIVE_NOTE, $cur['content_user_id']]);
+    contentArchivePrune($db, $kind, $id);
+}
+
 /**
  * Keep the newest CONTENT_ARCHIVE_KEEP replaced versions of ONE description and delete the older ones
  * (1.70.0). "We do not keep every edit": every applied proposal used to add a full copy of the text it
  * replaced, for ever, and nothing ever read them back. Run at apply time, right after the new copy goes in,
  * for that home row only — so an install's history shrinks one description at a time, as each is edited
- * again, and never in a migration. Only the rows contentEditApply() writes are touched (status `rejected`
+ * again, and never in a migration. Only the archive's rows are touched (status `rejected`
  * with CONTENT_ARCHIVE_NOTE): a proposal still waiting, one applied, one a moderator turned down and one a
  * delete withdrew are never deleted here. Two statements, both through the home's pending-count key
  * (idx_edits_wl_status / idx_edits_hc_status, v82): the newest row past the ones kept, then everything of
@@ -713,6 +715,7 @@ function contentArchivePrune(PDO $db, string $kind, int $homeId): int {
 
 function contentEditReject(PDO $db, array $cfg, array $e): bool {
     $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW() WHERE id = ?")->execute([(int)$e['id']]);
+    forumDescProposalDone($db, $e, false);
     $name = contentNameFor($db, (string)$e['info_hash']);
     $isEdit = ($e['edit_kind'] ?? 'rewrite') === 'edit';
     contentNotify($db, $cfg, $e['user_id'] !== null ? (int)$e['user_id'] : null,

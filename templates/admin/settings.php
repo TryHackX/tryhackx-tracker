@@ -2936,6 +2936,18 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <small class="settings-hint"><?= _h('settings.content_sl_refresh_limit_hint') ?></small>
                     </div>
                 </div>
+                <h6 class="mt-4 mb-1" id="section-content-forum"><i class="bi bi-chat-left-text"></i> <?= _h('settings.forum_desc_heading') ?> <small class="settings-hint fw-normal"><?= _h('settings.forum_desc_sub') ?></small></h6>
+                <div class="row g-3">
+                    <div class="col-md-5" data-setting="forum_desc_conflict">
+                        <label for="set-forum_desc_conflict" class="form-label"><?= _h('settings.forum_desc_conflict') ?></label>
+                        <select id="set-forum_desc_conflict" class="form-select bg-dark text-light border-secondary" name="forum_desc_conflict">
+                            <option value="proposal" <?= ($cfg['forum_desc_conflict'] ?? 'proposal') === 'proposal' ? 'selected' : '' ?>><?= _h('settings.forum_desc_conflict_proposal') ?></option>
+                            <option value="keep" <?= ($cfg['forum_desc_conflict'] ?? 'proposal') === 'keep' ? 'selected' : '' ?>><?= _h('settings.forum_desc_conflict_keep') ?></option>
+                            <option value="replace" <?= ($cfg['forum_desc_conflict'] ?? 'proposal') === 'replace' ? 'selected' : '' ?>><?= _h('settings.forum_desc_conflict_replace') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.forum_desc_conflict_hint') ?></small>
+                    </div>
+                </div>
             </div>
 
             <?php /* Comments on a torrent (1.71.0, includes/comments.php) — between the descriptions and the

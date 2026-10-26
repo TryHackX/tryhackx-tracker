@@ -1128,8 +1128,9 @@ require $a["file"];
           !preg_grep('/can be undone|put it back by accepting|można to cofnąć|możesz ją przywrócić/u', [$enL['js.wl.apply_title'], $enL['js.wl.apply_rewrite_after'], $enL['a.wl.rv_edits_note'],
                                                                                               $plL['js.wl.apply_title'], $plL['js.wl.apply_rewrite_after'], $plL['a.wl.rv_edits_note']])
           && str_contains($enL['js.wl.apply_title'], 'newest ten') && str_contains($plL['js.wl.apply_title'], 'dziesięć najnowszych'));
-    check('… and contentEditApply() calls the prune right after the kept copy goes in',
-          preg_match('/CONTENT_ARCHIVE_NOTE, \$cur\[.content_user_id.\]\]\);\s*contentArchivePrune\(\$db, \$kind, \(int\)\$e\[.target_id.\]\);/', $src('includes/content.php')) === 1);
+    check('… and contentEditApply() keeps the copy through contentArchive(), which prunes right after it goes in',
+          preg_match('/CONTENT_ARCHIVE_NOTE, \$cur\[.content_user_id.\]\]\);\s*contentArchivePrune\(\$db, \$kind, \$id\);/', $src('includes/content.php')) === 1
+          && str_contains($src('includes/content.php'), "contentArchive(\$db, \$kind, (int)\$e['target_id'], (string)\$e['info_hash'], \$cur);"));
 } finally {
     $eClean();
     foreach (['member', 'moderator', 'admin'] as $slug) {

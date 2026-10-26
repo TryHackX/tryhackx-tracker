@@ -40,6 +40,15 @@ if (array_key_exists('image_domains', $input)) {
     $sets[] = 'image_domains = ?';
     $params[] = implode(' ', imagesDomainsClean($input['image_domains']));
 }
+if (array_key_exists('describe_mode', $input)) {
+    $mode = (string)$input['describe_mode'];
+    $sets[] = 'describe_mode = ?';
+    $params[] = in_array($mode, FORUM_DESC_MODES, true) ? $mode : 'off';
+}
+if (array_key_exists('describe_accounts', $input)) {
+    $sets[] = 'describe_accounts = ?';
+    $params[] = forumDescAccountsClean($db, $input['describe_accounts'], $id);
+}
 if (!$sets) {
     jsonResponse(['error' => __('api.federation.nothing_to_update')], 400);
 }

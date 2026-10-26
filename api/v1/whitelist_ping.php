@@ -26,4 +26,8 @@ jsonResponse([
     'whitelist_count' => $count,
     'api_version' => 1,
     'client' => (string)$client['label'],
+    'describe' => forumDescEnabled($cfg, $client) ? forumDescMode($client) : 'off',
+    'describe_max_chars' => FORUM_DESC_CHARS_CAP,
+    'describe_max_bytes' => FORUM_DESC_MAX_BODY,
+    'describe_max_topics' => FORUM_DESC_MAX_TOPICS,
 ]);

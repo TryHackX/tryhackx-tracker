@@ -410,6 +410,7 @@ $apiRoutes = [
     // ── Server-to-server API (bearer key; see includes/api_auth.php) ──
     'v1/whitelist/submit'        => 'api/v1/whitelist_submit.php',
     'v1/whitelist/ping'          => 'api/v1/whitelist_ping.php',
+    'v1/whitelist/describe'      => 'api/v1/whitelist_describe.php',
     // What happened to the rows a partner sent — including the note a moderator wrote when turning
     // one down. Without it a key that does not publish directly gets 'pending' and never hears again.
     'v1/whitelist/status'        => 'api/v1/whitelist_status.php',

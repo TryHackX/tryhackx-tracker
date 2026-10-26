@@ -504,7 +504,7 @@ function imagesRewriteTargets(): array
 {
     return [
         ["SELECT id AS k, description AS t FROM whitelist WHERE description LIKE ?",
-         "UPDATE whitelist SET description = ? WHERE id = ? AND description = ?"],
+         "UPDATE whitelist SET description = ? WHERE id = ? AND description = ?", 'whitelist'],
         ["SELECT id AS k, description AS t FROM hash_content WHERE description LIKE ?",
          "UPDATE hash_content SET description = ? WHERE id = ? AND description = ?"],
         ["SELECT id AS k, description AS t FROM wl_content_edits WHERE description LIKE ?",
@@ -520,7 +520,8 @@ function imagesRewrite(PDO $db, string $from, string $to): int
 {
     if ($from === '' || $from === $to) return 0;
     $n = 0;
-    foreach (imagesRewriteTargets() as [$sel, $sql]) {
+    foreach (imagesRewriteTargets() as $target) {
+        [$sel, $sql] = $target;
         try {
             $st = $db->prepare($sel);
             $st->execute(['%' . imagesLikeEscape($from) . '%']);
@@ -532,7 +533,11 @@ function imagesRewrite(PDO $db, string $from, string $to): int
                 $new = imagesReplaceUrl($old, $from, $to);
                 if ($new === $old) continue;
                 $up->execute([$new, $r['k'], $old]);
-                $n += $up->rowCount();
+                $hit = $up->rowCount();
+                $n += $hit;
+                if ($hit > 0 && ($target[2] ?? '') === 'whitelist' && function_exists('forumDescRewritten')) {
+                    forumDescRewritten($db, (int)$r['k'], $old, $new);
+                }
             }
         } catch (\Throwable $e) {
             continue;

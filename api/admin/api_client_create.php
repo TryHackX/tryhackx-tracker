@@ -22,8 +22,12 @@ $autoApprove = array_key_exists('auto_approve', $input) ? (!empty($input['auto_a
 $autoBlock = !empty($input['abuse_auto_block']) && $input['abuse_auto_block'] !== '0' && $input['abuse_auto_block'] !== 'false' ? 1 : 0;
 $fields = apiClientCleanFields($input['required_fields'] ?? [], $scope);
 $domains = imagesDomainsClean($input['image_domains'] ?? []);
-$db->prepare("UPDATE api_clients SET auto_approve = ?, abuse_auto_block = ?, required_fields = ?, image_domains = ? WHERE id = ?")
-   ->execute([$autoApprove, $autoBlock, implode(',', $fields), implode(' ', $domains), (int)$c['id']]);
+$describe = (string)($input['describe_mode'] ?? 'off');
+if (!in_array($describe, FORUM_DESC_MODES, true)) $describe = 'off';
+$describeAccounts = forumDescAccountsClean($db, $input['describe_accounts'] ?? null, (int)$c['id']);
+$db->prepare("UPDATE api_clients SET auto_approve = ?, abuse_auto_block = ?, required_fields = ?, image_domains = ?,
+                     describe_mode = ?, describe_accounts = ? WHERE id = ?")
+   ->execute([$autoApprove, $autoBlock, implode(',', $fields), implode(' ', $domains), $describe, $describeAccounts, (int)$c['id']]);
 jsonResponse([
     'success' => true,
     'id' => $c['id'],
@@ -36,10 +40,12 @@ jsonResponse([
     'abuse_auto_block' => $autoBlock === 1,
     'required_fields' => $fields,
     'image_domains' => $domains,
+    'describe_mode' => $describe,
+    'describe_accounts' => $describeAccounts,
     // The address of the instructions to send with the key. It carries no secret — only which
     // choices were made — so it is safe in the same mail as the key without being the key.
     // Each chapter's own answer (1.73.0): the registrations' approval and the reports' blocking — an abuse key's
     // guide used to describe its reports with this key's auto_approve (1 unless unticked) and promise a block on
     // arrival to a key that holds them for review.
-    'docs_url' => apiClientDocsUrl((string)$c['scope'], $autoApprove === 1, $fields, $autoBlock === 1),
+    'docs_url' => apiClientDocsUrl((string)$c['scope'], $autoApprove === 1, $fields, $autoBlock === 1, $describe),
 ]);

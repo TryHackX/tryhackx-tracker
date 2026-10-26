@@ -187,6 +187,7 @@ $allowed = [
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
     'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_quota_mb', 'images_unused_hours',
     'comment_images_upload', 'comment_images_links', 'comment_images_max', 'comment_image_max_mb', 'comment_thumb_h', 'comment_thumb_w',
+    'forum_desc_conflict',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
     // schema v43: stored file paths per torrent, the second live worker override
@@ -381,6 +382,9 @@ foreach (richtextPlaces() as $rtfPlace) {
 }
 if (isset($data['rt_youtube']) && !in_array($data['rt_youtube'], ['link', 'click', 'thumb'], true)) {
     $data['rt_youtube'] = 'link';
+}
+if (isset($data['forum_desc_conflict']) && !in_array($data['forum_desc_conflict'], FORUM_DESC_CONFLICTS, true)) {
+    $data['forum_desc_conflict'] = 'proposal';
 }
 if (isset($data['stats_timeline_default_range'])) {
     $known = array_keys(statsTimelineRangeButtons());

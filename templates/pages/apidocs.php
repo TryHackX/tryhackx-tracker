@@ -46,6 +46,9 @@ $docReview = ((string)($_GET['approve'] ?? 'auto')) === 'review';
 // who is not there.
 $docBlockAsked = (string)($_GET['block'] ?? '');
 $docBlockReview = $docBlockAsked !== '' ? $docBlockAsked !== 'auto' : ($docScope === 'abuse' ? $docReview : true);
+$docDescribe = in_array((string)($_GET['describe'] ?? ''), ['queue', 'publish'], true) ? (string)$_GET['describe'] : 'off';
+$docDescMax = defined('FORUM_DESC_CHARS_CAP') ? FORUM_DESC_CHARS_CAP : 1000000;
+$docDescLimits = defined('FORUM_DESC_MAX_TOPICS') ? [FORUM_DESC_MAX_TOPICS, FORUM_DESC_MAX_HASHES, FORUM_DESC_MAX_BODY] : [25, 20, 4194304];
 // The numbers the rules below quote, read the way includes/api_auth.php reads them (0 = that half is off).
 $docPerMin   = function_exists('apiRateLimitPerMin') ? apiRateLimitPerMin($cfg) : 60;
 $docBytesDay = function_exists('apiRateLimitBytesDay') ? apiRateLimitBytesDay($cfg) : 5368709120;
@@ -116,6 +119,22 @@ $exReply = json_encode([
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 $exPing = json_encode(['ok' => true, 'server_time' => 1790000000, 'mode' => 'whitelist', 'whitelist_count' => 1234,
                        'api_version' => 1, 'client' => 'Partner forum'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exDescText = '[b]Example release[/b] (2026) …';
+$exDescribe = json_encode(['topics' => [[
+    'discussion_id' => 160, 'post_id' => 162, 'url' => 'https://partner.example.org/d/160-example-release',
+    'author' => ['id' => '7', 'name' => 'kasia'], 'edited_at' => '2026-10-20T10:11:12+00:00',
+    'format' => 'flarum', 'content' => $exDescText, 'chars' => mb_strlen($exDescText),
+    'hashes' => ['0123456789abcdef0123456789abcdef01234567'],
+]], 'max_chars' => 500000], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+$exDescribeReply = json_encode([
+    'ok' => true, 'mode' => $docDescribe,
+    'results' => [['topic' => 0, 'discussion_id' => 160, 'hash' => '0123456789abcdef0123456789abcdef01234567',
+                   'status' => $docDescribe === 'queue' ? 'queued' : 'created', 'detail' => null]],
+    'summary' => ['created' => $docDescribe === 'queue' ? 0 : 1, 'queued' => $docDescribe === 'queue' ? 1 : 0, 'updated' => 0,
+                  'replaced' => 0, 'proposed' => 0, 'kept' => 0, 'unchanged' => 0, 'too_long' => 0, 'invalid' => 0, 'skipped' => 0],
+    'max_chars' => 500000, 'max_topics' => $docDescLimits[0], 'max_hashes' => $docDescLimits[1],
+    'max_bytes' => $docDescLimits[2], 'server_time' => 1790000000,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
 // "What happened to what I sent?" — the other half of a key that does not publish directly. The
 // example shows a row that was turned down, because that is the case the note exists for.
@@ -206,6 +225,8 @@ $exLoginReply = json_encode([
         <span class="apidocs-v"><?= _h($docReview ? 'apidocs.approve_review' : 'apidocs.approve_auto') ?></span></div>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_required') ?></span>
         <span class="apidocs-v"><?= $docFieldsWl ? sanitize(implode(', ', $docFieldsWl)) : _h('apidocs.required_none') ?></span></div>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_describe') ?></span>
+        <span class="apidocs-v"><?= _h($docDescribe === 'queue' ? 'apidocs.describe_queue_short' : ($docDescribe === 'publish' ? 'apidocs.describe_publish_short' : 'apidocs.describe_off_short')) ?></span></div>
     <?php endif; ?>
     <?php if ($showAbuse): ?>
     <div class="apidocs-fact"><span class="apidocs-k"><?= _h($showSubmit ? 'apidocs.k_required_report' : 'apidocs.k_required') ?></span>
@@ -230,6 +251,9 @@ Content-Type: application/json</code></pre>
         <tr><td><code>POST v1/whitelist/submit</code></td><td><?= __('apidocs.ep_wl_submit') ?></td></tr>
         <tr><td><code>GET|POST v1/whitelist/status</code></td><td><?= __('apidocs.ep_wl_status') ?></td></tr>
         <tr><td><code>GET v1/whitelist/ping</code></td><td><?= __('apidocs.ep_wl_ping') ?></td></tr>
+        <?php if ($docDescribe !== 'off'): ?>
+        <tr><td><code>POST v1/whitelist/describe</code></td><td><?= __('apidocs.ep_wl_describe') ?></td></tr>
+        <?php endif; ?>
     </tbody>
 </table>
 </div>
@@ -300,6 +324,39 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 <pre class="apidocs-pre"><code>GET <?= sanitize($docApi . 'v1/whitelist/ping') ?>
 
 <?= sanitize($exPing) ?></code></pre>
+
+<?php if ($docDescribe !== 'off'): ?>
+<h2><?= _h('apidocs.h_describe') ?></h2>
+<p><?= __($docDescribe === 'queue' ? 'apidocs.describe_body_queue' : 'apidocs.describe_body_publish') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/describe') ?>
+
+<?= sanitize($exDescribe) ?></code></pre>
+<p><?= __('apidocs.describe_limits', ['cap' => $docNum($docDescMax), 'topics' => $docDescLimits[0],
+                                      'hashes' => $docDescLimits[1], 'mb' => intdiv($docDescLimits[2], 1048576)]) ?></p>
+<pre class="apidocs-pre"><code><?= sanitize($exDescribeReply) ?></code></pre>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>created</code></td><td><?= _h('apidocs.ds_created') ?></td></tr>
+        <tr><td><code>queued</code></td><td><?= _h('apidocs.ds_queued') ?></td></tr>
+        <tr><td><code>updated</code></td><td><?= _h('apidocs.ds_updated') ?></td></tr>
+        <tr><td><code>replaced</code></td><td><?= _h('apidocs.ds_replaced') ?></td></tr>
+        <tr><td><code>proposed</code></td><td><?= _h('apidocs.ds_proposed') ?></td></tr>
+        <tr><td><code>kept</code></td><td><?= _h('apidocs.ds_kept') ?></td></tr>
+        <tr><td><code>unchanged</code></td><td><?= _h('apidocs.ds_unchanged') ?></td></tr>
+        <tr><td><code>too_long</code></td><td><?= _h('apidocs.ds_too_long') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= _h('apidocs.ds_invalid') ?></td></tr>
+        <tr><td><code>not_registered</code></td><td><?= _h('apidocs.ds_not_registered') ?></td></tr>
+        <tr><td><code>banned</code></td><td><?= _h('apidocs.ds_banned') ?></td></tr>
+        <tr><td><code>other_topic</code></td><td><?= _h('apidocs.ds_other_topic') ?></td></tr>
+        <tr><td><code>removed</code></td><td><?= _h('apidocs.ds_removed') ?></td></tr>
+        <tr><td><code>declined</code></td><td><?= _h('apidocs.ds_declined') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<p class="text-muted"><?= __('apidocs.describe_off_note') ?></p>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($showAbuse): ?>

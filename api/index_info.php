@@ -196,6 +196,14 @@ $deleteRight = contentDeleteRight($db, $cfg, $rec, $me);
 // may read them — and whether they already did (an open report of theirs), which the button shows.
 $reportFlags = ($canContent && $hasWords && function_exists('contentReportDescFlags'))
     ? contentReportDescFlags($db, $cfg, $me, $hash, $rec) : ['can' => false, 'reported' => false];
+$forumDesc = ($canContent && $rec !== null && $rec['kind'] === 'wl')
+    ? forumDescInfo($db, $cfg, $hash, $rec, userCan($db, $cfg, 'panel.whitelist.content')) : null;
+if ($forumDesc !== null) $forumDesc['at'] = infoReaderTime($forumDesc['at'], $me, $cfg);
+$credits = $canContent ? array_values((array)($content['credits'] ?? [])) : [];
+if ($forumDesc !== null && $forumDesc['author'] !== null && (!$credits || $credits[0]['kind'] !== 'first')) {
+    array_unshift($credits, ['kind' => 'first', 'pct' => null, 'state' => 'forum', 'name' => $forumDesc['author'],
+                             'avatar' => '', 'profile' => false, 'you' => false]);
+}
 
 jsonResponse([
     'success'   => true,
@@ -229,7 +237,8 @@ jsonResponse([
     // it — a name its owner hid is "a member" (no name, no picture, no link in the answer at all), a
     // deleted account is one. The panel draws it under the description; content_author above is the
     // first entry's name, kept for what read it before.
-    'content_credits'   => $canContent ? array_values((array)($content['credits'] ?? [])) : [],
+    'content_credits'   => $credits,
+    'content_forum'     => $forumDesc,
     'content_hidden'    => !$canContent && $hasWords,
     'content_mine'      => $mine,
     'content_mine_note' => $mineNote,

@@ -308,7 +308,7 @@ function apiChargeBytes(PDO $db, array $client, int $bytes): void {
  * Authenticate the request or exit with the appropriate JSON error. On success returns the client
  * row (id, label, key_id). All failures respond with the same generic 403 body.
  */
-function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody): array {
+function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody, int $maxBytes = API_MAX_BODY_BYTES): array {
     $ip = getClientIp($cfg);
     if (($cfg['api_enabled'] ?? '0') !== '1') jsonResponse(['error' => 'api_disabled'], 503);
     if (apiIsBanned($db, $cfg, $ip)) jsonResponse(['error' => 'forbidden'], 403);
@@ -333,7 +333,7 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     // them; a key told to require a title accepted items without one. The queue itself worked, the
     // panel showed the setting, and nothing on the way in ever read it.
     $st = $db->prepare("SELECT id, label, key_id, secret_hash, scope, enabled, auto_approve,
-                               abuse_auto_block, required_fields
+                               abuse_auto_block, required_fields, describe_mode, describe_accounts
                           FROM api_clients WHERE key_id = ? LIMIT 1");
     $st->execute([$keyId]);
     $client = $st->fetch();
@@ -341,7 +341,7 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     if (!hash_equals((string)$client['secret_hash'], hash('sha256', $secret))) $fail('bad_secret', 'secret does not match', $keyId);
     if ((int)$client['enabled'] !== 1) jsonResponse(['error' => 'forbidden'], 403); // admin action, no ban
     // authenticated client, oversized payload → 413, never a ban (a big forum scan batch is not an attack)
-    if ($rawBody === null) jsonResponse(['error' => 'payload_too_large', 'max_bytes' => API_MAX_BODY_BYTES], 413);
+    if ($rawBody === null) jsonResponse(['error' => 'payload_too_large', 'max_bytes' => $maxBytes], 413);
     try {
         $db->prepare("UPDATE api_clients SET last_used_at = NOW(), last_used_ip = ?, requests_count = requests_count + 1 WHERE id = ?")
            ->execute([$ip, (int)$client['id']]);
@@ -461,7 +461,7 @@ function apiAbsoluteBase(array $cfg): string {
  * without it BEING the key: somebody who finds the link learns how the public API is shaped, which
  * is the one thing about it that was never a secret.
  */
-function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields, bool $autoBlock = false): string {
+function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields, bool $autoBlock = false, string $describe = 'off'): string {
     // ONE ANSWER PER CHAPTER (1.73.0). `approve=` is what happens to a REGISTRATION (the key's auto_approve) and
     // `block=` what happens to a REPORT (abuse_auto_block — review unless somebody said otherwise), each written
     // only for a key that has that chapter: an `all` key gets both, an abuse key only block=, a key that submits
@@ -475,6 +475,7 @@ function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields, bool 
     return apiAbsoluteBase($GLOBALS['cfg'] ?? []) . '/?action=apidocs&scope=' . urlencode($scope)
          . ($submits ? '&approve=' . ($autoApprove ? 'auto' : 'review') : '')
          . ($reports ? '&block=' . ($autoBlock ? 'auto' : 'review') : '')
+         . ($submits && in_array($describe, ['queue', 'publish'], true) ? '&describe=' . $describe : '')
          . ($fields && ($submits || $reports) ? '&fields=' . urlencode(implode(',', $fields)) : '');
 }
 

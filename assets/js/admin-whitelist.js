@@ -423,14 +423,37 @@
         return span;
     }
 
+    const RV_FORUM = {
+        drift: 'js.wl.forum_state_drift',
+        too_long: 'js.wl.forum_state_too_long',
+        invalid: 'js.wl.forum_state_invalid',
+        removed: 'js.wl.forum_state_removed',
+        declined: 'js.wl.forum_state_declined',
+    };
+
+    function rvForum(row) {
+        const span = el('span', { className: 'wl-small rv-forum' }, [el('span', { className: 'wl-badge wl-b-muted', text: t.key('js.wl.from_forum') })]);
+        if (!row.author && row.forum_author) {
+            span.appendChild(document.createTextNode(' '));
+            span.appendChild(el('span', { className: 'text-muted', text: t.key('js.wl.forum_by', { user: row.forum_author }) }));
+        }
+        if (row.forum_url) {
+            span.appendChild(document.createTextNode(' '));
+            span.appendChild(el('a', { href: row.forum_url, target: '_blank', rel: 'noopener noreferrer', text: t.key('js.wl.forum_topic') }));
+        }
+        return span;
+    }
+
     const RV_STATE = {
         pending:  { icon: 'bi-hourglass-split', cls: 'rv-st-wait', text: t.key('js.wl.rv_waiting') },
         approved: { icon: 'bi-check-circle',    cls: 'rv-st-ok',   text: t.key('js.wl.rv_published') },
         rejected: { icon: 'bi-x-circle',        cls: 'rv-st-no',   text: t.key('js.wl.rv_rejected') },
     };
 
+    const RV_NONE = { icon: 'bi-dash-circle', cls: 'rv-st-none', text: t.key('js.wl.rv_no_text') };
+
     function reviewCard(row) {
-        const state = RV_STATE[row.content_status] || RV_STATE.pending;
+        const state = row.content_status === 'none' ? RV_NONE : (RV_STATE[row.content_status] || RV_STATE.pending);
         const card = el('div', { className: 'rv-card ' + state.cls });
 
         const head = el('div', { className: 'rv-head' });
@@ -447,6 +470,7 @@
         // Which home (a torrent the tracker has only seen has no whitelist row), and who wrote it.
         if (row.kind === 'idx') meta.appendChild(el('span', { className: 'wl-badge wl-b-warn', title: t.key('js.wl.rv_index_only_title'), text: t.key('js.wl.rv_index_only') }));
         if (row.author) meta.appendChild(rvBy(row));
+        if (row.forum_url || row.forum_author) meta.appendChild(rvForum(row));
         // Ratings decide the order of this queue, so the number that did the deciding is on the card.
         // A moderator who cannot see why something is at the top is being asked to trust a sort.
         if (row.votes_count) {
@@ -490,6 +514,15 @@
             card.appendChild(el('div', { className: 'rv-note' },
                 [el('strong', { text: t.key('js.wl.rejected_label') }), ' ', row.content_rejected_note]));
         }
+        if (RV_FORUM[row.forum_state]) {
+            card.appendChild(el('div', { className: 'rv-note' }, [
+                el('strong', { text: t.key('js.wl.forum_label') }), ' ',
+                t.key(RV_FORUM[row.forum_state], { note: row.forum_note || '',
+                    at: row.forum_at ? fmtDate(String(row.forum_at).replace(' ', 'T')) : '' }),
+            ]));
+        }
+
+        if (row.content_status === 'none') return card;
 
         const acts = el('div', { className: 'rv-acts' });
         if (row.content_status !== 'approved') {
@@ -564,6 +597,7 @@
                 el('span', { className: 'wl-small text-muted', text: fmtDate(String(row.created_at).replace(' ', 'T')) }),
                 el('span', { className: 'wl-small text-muted', text: row.ip ? t.key('js.wl.from_ip', {ip: row.ip}) : '' }),
                 row.author ? rvBy(row) : '',
+                row.forum_url || row.forum_author ? rvForum(row) : '',
                 row.kind === 'idx' ? el('span', { className: 'wl-badge wl-b-warn', text: t.key('js.wl.rv_index_only') }) : '',
             ]),
         ]));
@@ -1468,6 +1502,7 @@
         try { r = await apiCall('admin/fetch_api_clients'); } catch { r = { error: t.key('js.wl.network_error') }; }
         if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-danger py-4', text: r.error }))); return; }
         state.cl.rows = new Map(r.clients.map(c => [c.id, c]));
+        state.cl.accountKeys = r.account_keys || [];
         $('cl-total').replaceChildren(t.key(r.clients.length === 1 ? 'js.wl.clients_one' : 'js.wl.clients_many', { n: r.clients.length }),
             ...(r.api_enabled ? [] : [' · ', t.key('js.wl.api_disabled_in_settings')]));
         if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-muted py-4', text: t.key('js.wl.no_api_clients') })));
@@ -1494,6 +1529,10 @@
                 scopeTd.appendChild(document.createTextNode(' '));
                 scopeTd.appendChild(el('span', { className: 'text-muted wl-small', title: c.image_domains.join(', '),
                     text: t.key('js.wl.cl_imgdomains_badge', { list: c.image_domains.join(', ') }) }));
+            }
+            if ((c.scope === 'whitelist' || c.scope === 'all') && (c.describe_mode === 'queue' || c.describe_mode === 'publish')) {
+                scopeTd.appendChild(document.createTextNode(' '));
+                scopeTd.appendChild(badge(t.key(c.describe_mode === 'publish' ? 'js.wl.cl_describe_badge_publish' : 'js.wl.cl_describe_badge_queue'), ''));
             }
             tr.appendChild(scopeTd);
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
@@ -1522,6 +1561,8 @@
                 if (v.auto_approve !== undefined) body.auto_approve = v.auto_approve;
                 if (v.abuse_auto_block !== undefined) body.abuse_auto_block = v.abuse_auto_block;
                 if (v.required_fields !== undefined) body.required_fields = v.required_fields;
+                if (v.describe_mode !== undefined) body.describe_mode = v.describe_mode;
+                if (v.describe_accounts !== undefined) body.describe_accounts = v.describe_accounts;
                 const rr = await apiCall('admin/api_client_update', 'POST', body);
                 if (rr.success) { showToast(t.key('js.wl.cl_saved'), 'success'); loadClients(); } else showToast(rr.error || t.key('js.wl.rename_failed'), 'danger');
             }));
@@ -1549,6 +1590,8 @@
         const label = $('cl-opts-label'), scope = $('cl-opts-scope'), approve = $('cl-opts-approve');
         const abuse = $('cl-opts-abuse');
         const imgDomains = $('cl-opts-imgdomains');
+        const describe = $('cl-opts-describe'), describeAcc = $('cl-opts-describe-accounts');
+        const describeAccField = $('cl-opts-describe-accounts-field');
         const boxes = [...modalEl.querySelectorAll('.cl-opts-field')];
         const aboxes = [...modalEl.querySelectorAll('.cl-opts-afield')];
         const docs = $('cl-opts-docs'), openLink = $('cl-opts-docs-open');
@@ -1567,6 +1610,11 @@
         abuse.value = client && client.abuse_auto_block === true ? 'auto' : 'review';
         const have = new Set((client && client.required_fields) || []);
         imgDomains.value = client && Array.isArray(client.image_domains) ? client.image_domains.join('\n') : '';
+        describe.value = client && client.describe_mode ? client.describe_mode : 'off';
+        describeAcc.replaceChildren(el('option', { value: '', text: t.key('js.wl.cl_describe_acc_self') }),
+            ...(state.cl.accountKeys || []).filter(k => !client || k.id !== client.id).map(k => el('option', { value: String(k.id), text: k.label })));
+        describeAcc.value = client && client.describe_accounts ? String(client.describe_accounts) : '';
+        if (describeAcc.selectedIndex < 0) describeAcc.value = '';
         boxes.forEach(b => { b.checked = have.has(b.value); });
         aboxes.forEach(b => { b.checked = have.has(b.value); });
 
@@ -1589,6 +1637,8 @@
             const fields = [];
             if (canSubmit()) {
                 v.auto_approve = approve.value !== 'review' ? 1 : 0;
+                v.describe_mode = describe.value;
+                v.describe_accounts = describe.value !== 'off' && describeAcc.value ? Number(describeAcc.value) : null;
                 fields.push(...boxes.filter(b => b.checked).map(b => b.value));
             }
             if (canAbuse()) {
@@ -1602,7 +1652,8 @@
             const v = read();
             // Each chapter its own answer (1.73.0): approve= for what happens to a registration, block= for
             // a report — an `all` key has both — as apiClientDocsUrl() (includes/api_auth.php) writes them.
-            const url = docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1);
+            const url = docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1, v.describe_mode);
+            describeAccField.hidden = describe.value === 'off';
             docs.textContent = url;
             openLink.href = url;
         };
@@ -1610,7 +1661,7 @@
         // The endpoints, by scope. Named rather than described: an integrator copies these, and an
         // operator deciding how far to trust a partner is deciding about exactly this list.
         const ENDPOINTS = {
-            whitelist: ['v1/whitelist/submit', 'v1/whitelist/ping'],
+            whitelist: ['v1/whitelist/submit', 'v1/whitelist/describe', 'v1/whitelist/ping'],
             abuse: ['v1/blacklist/submit'],
             users: ['v1/users/lookup', 'v1/users/provision', 'v1/users/grant', 'v1/users/revoke',
                     'v1/auth/login', 'v1/auth/logout', 'v1/auth/verify', 'v1/auth/merge', 'v1/auth/status'],
@@ -1658,7 +1709,7 @@
         };
         applyScope();
         // The scope redraws the dialog; everything else only redraws the guide address.
-        const watched = [label, approve, abuse, ...boxes, ...aboxes];
+        const watched = [label, approve, abuse, describe, describeAcc, ...boxes, ...aboxes];
         watched.forEach(c => c.addEventListener('change', paint));
         scope.addEventListener('change', applyScope);
 
@@ -1682,7 +1733,7 @@
     // Mirrors apiClientDocsUrl() in includes/api_auth.php — this one is only for the live preview
     // while the operator is still deciding, before there is a row on the server to ask about. Every
     // address the panel actually HANDS OVER (the row button, the token modal) is the server's own.
-    function docsUrlFor(scope, autoApprove, fields, autoBlock) {
+    function docsUrlFor(scope, autoApprove, fields, autoBlock, describe) {
         const u = new URL((document.body.dataset.apiBase || '/').replace(/api\.php\?endpoint=$/, ''), location.href);
         u.searchParams.set('action', 'apidocs');
         u.searchParams.set('scope', scope || 'whitelist');
@@ -1693,6 +1744,7 @@
         const reports = scope === 'abuse' || scope === 'all';
         if (submits) u.searchParams.set('approve', autoApprove ? 'auto' : 'review');
         if (reports) u.searchParams.set('block', autoBlock ? 'auto' : 'review');
+        if (submits && (describe === 'queue' || describe === 'publish')) u.searchParams.set('describe', describe);
         if ((submits || reports) && fields && fields.length) u.searchParams.set('fields', fields.join(','));
         return u.toString();
     }

@@ -511,6 +511,7 @@ function settingsCatalogKeywords(): array {
         'desc_max_chars'            => 'description length limit characters maximum',
         'desc_max_images'           => 'description images limit how many img tags maximum',
         'desc_max_links'            => 'description links limit how many url maximum',
+        'forum_desc_conflict'       => 'forum topic description edited here conflict proposal keep replace history opisy z forum zmieniony tutaj propozycja zastap zostaw historia',
         'search_allow_sl_refresh'   => 'public search info modal refresh seeders leechers scrape on demand',
         'search_sl_refresh_seconds' => 'public search refresh seeders cooldown rate limit seconds',
         // #section-comments (1.71.0, includes/comments.php)

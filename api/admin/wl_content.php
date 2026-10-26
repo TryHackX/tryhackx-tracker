@@ -56,11 +56,17 @@ if ($op === 'list') {
     // is the only way to answer "why is this published" or "who rejected mine" without reading the
     // database by hand.
     $status = (string)($input['status'] ?? 'pending');
-    if (!in_array($status, ['pending', 'approved', 'rejected', 'all'], true)) $status = 'pending';
+    if (!in_array($status, ['pending', 'approved', 'rejected', 'all', 'forum'], true)) $status = 'pending';
     $whereW = $status === 'all' ? "w.content_status <> 'none'" : "w.content_status = ?";
     $whereC = $status === 'all' ? "c.content_status <> 'none'" : "c.content_status = ?";
     $argsW  = $status === 'all' ? [] : [$status];
     $argsC  = $status === 'all' ? [] : [$status];
+    if ($status === 'forum') {
+        $whereW = "f.state IN ('drift', 'too_long', 'invalid', 'removed', 'declined')";
+        $whereC = "1 = 0";
+        $argsW = [];
+        $argsC = [];
+    }
 
     // A hash prefix, a name, or a word from the text. The queue is small, so this is a LIKE and not
     // a full-text index; if it ever stops being small the index goes on `name`, not on `description`.
@@ -73,7 +79,7 @@ if ($op === 'list') {
         array_push($argsC, $like, $like, $like, $like);
     }
 
-    $cs = $db->prepare("SELECT (SELECT COUNT(*) FROM whitelist w WHERE $whereW)
+    $cs = $db->prepare("SELECT (SELECT COUNT(*) FROM whitelist w LEFT JOIN forum_descs f ON f.info_hash = w.info_hash WHERE $whereW)
                              + (SELECT COUNT(*) FROM hash_content c LEFT JOIN index_hashes i ON i.info_hash = c.info_hash WHERE $whereC)");
     $cs->execute(array_merge($argsW, $argsC));
     $total = (int)$cs->fetchColumn();
@@ -91,12 +97,15 @@ if ($op === 'list') {
             SELECT 'wl' AS kind, w.id, w.info_hash, w.name, w.source, w.source_url, w.description, w.description_format,
                    w.content_status, w.content_rejected_note, w.created_at, w.votes_up, w.votes_down,
                    w.votes_count, w.score_x100, w.content_user_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
-                   u.content_credit_public AS author_credit_public
-              FROM whitelist w LEFT JOIN users u ON u.id = w.content_user_id WHERE $whereW
+                   u.content_credit_public AS author_credit_public, f.url AS forum_url, f.author_name AS forum_author,
+                   f.state AS forum_state, f.note AS forum_note, f.forum_at
+              FROM whitelist w LEFT JOIN users u ON u.id = w.content_user_id
+                               LEFT JOIN forum_descs f ON f.info_hash = w.info_hash WHERE $whereW
             UNION ALL
             SELECT 'idx' AS kind, c.id, c.info_hash, i.name, 'index' AS source, c.source_url, c.description, c.description_format,
                    c.content_status, c.content_rejected_note, c.created_at, 0, 0, 0, 0, c.content_user_id, u.username AS author,
-                   u.avatar_sha AS author_avatar_sha, u.content_credit_public AS author_credit_public
+                   u.avatar_sha AS author_avatar_sha, u.content_credit_public AS author_credit_public,
+                   NULL, NULL, NULL, NULL, NULL
               FROM hash_content c LEFT JOIN index_hashes i ON i.info_hash = c.info_hash
                                   LEFT JOIN users u ON u.id = c.content_user_id WHERE $whereC
          ) q
@@ -139,7 +148,7 @@ if ($op === 'edits') {
                 COALESCE(w.description, c.description) AS cur_description,
                 COALESCE(w.description_format, c.description_format, 'bbcode') AS cur_format,
                 COALESCE(w.content_status, c.content_status, 'none') AS cur_status,
-                ua.username AS cur_author,
+                ua.username AS cur_author, f.url AS forum_url, f.author_name AS forum_author, f.forum_at,
                 CASE WHEN e.whitelist_id IS NOT NULL THEN 'wl' ELSE 'idx' END AS kind
            FROM wl_content_edits e
            LEFT JOIN whitelist w ON w.id = e.whitelist_id
@@ -147,6 +156,7 @@ if ($op === 'edits') {
            LEFT JOIN index_hashes i ON i.info_hash = e.info_hash
            LEFT JOIN users u ON u.id = e.user_id
            LEFT JOIN users ua ON ua.id = COALESCE(w.content_user_id, c.content_user_id)
+           LEFT JOIN forum_descs f ON f.edit_id = e.id
           WHERE e.status = 'pending' ORDER BY e.created_at ASC LIMIT 50");
     $rows = $st->fetchAll();
     // Both versions rendered, so the moderator compares what people will SEE rather than two blobs
