@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.79.1] — 2026-10-26
+
+The tracker no longer copies its own pictures. When a key's image domain also covered the tracker's own host (`tryhackx.org` covers `tracker.tryhackx.org`), every picture it had copied was found again in the descriptions and copied once more, every ten minutes, a little worse each time.
+
+- **Never from itself.** An address of this tracker is never queued for copying, whatever a key's image domains
+  cover, and one already in the queue is given up without a download.
+- **The damage undone.** The janitor's first pass after the update finds the copies made of the tracker's own
+  pictures, points every description, proposal, comment and page back at the first copy (the one made from the
+  partner's original) and deletes the others with their queue rows. An install that never had the loop has nothing to
+  undo.
+
 ## [1.79.0] — 2026-10-26
 
 Pictures from a partner's site are copied only with the partner's consent: the tracker says which domains it wants, the partner says whether it agrees, and copying runs only while both say yes. Schema 98.
