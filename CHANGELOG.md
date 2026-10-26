@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.79.0] — 2026-10-26
+
+Pictures from a partner's site are copied only with the partner's consent: the tracker says which domains it wants, the partner says whether it agrees, and copying runs only while both say yes. Schema 98.
+
+- **Both sides decide.** An API key's Image domains say which pictures this tracker wants to keep copies of; the
+  partner now says whether it agrees, with `"copy_images": true` (or `false`) in `v1/whitelist/submit` and
+  `v1/whitelist/describe`, or `copy_images=1` with `v1/whitelist/ping`. Pictures are copied from a key's domains only
+  while the key has image domains and its partner has said yes; until a partner says anything, nothing is copied.
+  flarum-homepage-blocks 2.11.0 sends it from its new setting "Let the tracker copy pictures from posts" (off as
+  shipped) and tells the tracker as soon as the setting is saved.
+- **What each side sees.** The replies of those three endpoints say `"images"`: `copy`, `off` (the key has no image
+  domains) or `no_consent`, with the domains in `"image_domains"`, and the forum's Test connection shows it. The key
+  list on the Whitelist page says whether the partner allows copying.
+- **Nothing lost while waiting.** A picture queued for copying from a domain whose partner has not agreed waits in the
+  queue instead of failing for good, and is copied as soon as the partner agrees. Pictures already copied stay when a
+  partner withdraws its consent.
+- **Schema 98** adds the partner's answer, and when it was given, to the API keys. It runs by itself at the first
+  request after the update.
+
 ## [1.78.0] — 2026-10-26
 
 Descriptions from the forum: the first post of a forum topic becomes the description of the torrents it registered, up to the forum's own length limit, published at once or held for a moderator as the forum's key says, and never over a description written or changed here. Schema 97.
