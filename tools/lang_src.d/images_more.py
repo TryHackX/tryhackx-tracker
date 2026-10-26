@@ -89,10 +89,13 @@ add('a.wl', {
     'cl_imgdomains_ph': ('e.g. tryhackx.org', 'np. tryhackx.org'),
     'cl_imgdomains_hint': ('Pictures from these domains (and their subdomains) in descriptions and comments are copied to this '
                            'site in the background. Pictures from other sites are never downloaded: a description keeps their '
-                           'address, a comment shows them as a link. Space or one per line; only while the key is enabled.',
+                           'address, a comment shows them as a link. Space or one per line; only while the key is enabled and '
+                           'the partner allows it: it sends copy_images (in flarum-homepage-blocks: “Let the tracker copy '
+                           'pictures from posts”).',
                            'Obrazy z tych domen (i ich poddomen) w opisach i komentarzach tracker kopiuje w tle do siebie. '
                            'Obrazów z innych stron nigdy nie pobiera: opis zachowuje ich adres, komentarz pokazuje je jako link. '
-                           'Spacja albo jedna na linię; działa tylko, gdy klucz jest włączony.'),
+                           'Spacja albo jedna na linię; działa tylko, gdy klucz jest włączony, a partner się na to zgadza: '
+                           'wysyła copy_images (w flarum-homepage-blocks: „Pozwól trackerowi kopiować obrazy z postów”).'),
 })
 
 add('a.img', {

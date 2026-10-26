@@ -131,7 +131,7 @@ check('what the composer is told: pictures from links, no upload as shipped, the
       && (commentComposerInfo($db, $cfgOn, $me)['images']['links'] ?? null) === true);
 
 $cl = apiClientCreate($db, 'cimgtest', 'whitelist');
-$db->prepare("UPDATE api_clients SET image_domains = 'assoc.test' WHERE id = ?")->execute([(int)$cl['id']]);
+$db->prepare("UPDATE api_clients SET image_domains = 'assoc.test', image_consent = 1 WHERE id = ?")->execute([(int)$cl['id']]);
 imagesRemoteHosts($db, true);
 $rules = commentImageRules($db, $cfgOn, $me);
 $rulesNoLinks = commentImageRules($db, array_merge($cfgOn, ['comment_images_links' => '0', 'comment_images_upload' => '1']), $me);

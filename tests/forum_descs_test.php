@@ -45,7 +45,7 @@ try {
           implode(',', $fcols));
     $schemaSrc = $src('includes/schema.php');
     check('describe_mode is in the schema twice (fresh install and upgrade)', substr_count($schemaSrc, 'describe_mode') >= 2);
-    check('the schema is 97', TRACKER_SCHEMA_VERSION === 97 && (int)($cfg['schema_version'] ?? 0) >= 97, (string)($cfg['schema_version'] ?? ''));
+    check('the schema is at least 97', TRACKER_SCHEMA_VERSION >= 97 && (int)($cfg['schema_version'] ?? 0) >= 97, (string)($cfg['schema_version'] ?? ''));
     check('the conflict policy is seeded as a proposal, and no length setting of the tracker\'s own is',
           str_contains($schemaSrc, "'forum_desc_conflict'         => 'proposal',") && !str_contains($schemaSrc, 'forum_desc_max_chars'));
     check('the route is v1/whitelist/describe and its file exists',

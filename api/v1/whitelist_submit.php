@@ -23,6 +23,7 @@ $payload = json_decode((string)$rawBody, true);
 if (!is_array($payload) || !isset($payload['items']) || !is_array($payload['items'])) {
     jsonResponse(['ok' => false, 'error' => 'invalid_json', 'message' => 'Body must be a JSON object with an "items" array.'], 422);
 }
+$client = imagesConsentNote($db, $client, $payload['copy_images'] ?? null);
 $items = array_values($payload['items']);
 if (count($items) === 0) {
     jsonResponse(['ok' => false, 'error' => 'no_items'], 422);
@@ -129,4 +130,4 @@ jsonResponse([
     'auto_approve' => $autoApprove,
     'required_fields' => $requiredFields,
     'server_time' => time(),
-]);
+] + imagesClientState($client));

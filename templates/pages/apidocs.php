@@ -268,6 +268,8 @@ Content-Type: application/json</code></pre>
 <div class="alert alert-warning show"><?= __('apidocs.required_note', ['fields' => sanitize(implode(', ', $docFieldsWl))]) ?></div>
 <?php endif; ?>
 
+<p><?= __('apidocs.images_consent') ?></p>
+
 <h2><?= _h('apidocs.h_reply') ?></h2>
 <p><?= __($docReview ? 'apidocs.reply_review' : 'apidocs.reply_auto') ?></p>
 <pre class="apidocs-pre"><code><?= sanitize($exReply) ?></code></pre>

@@ -5,10 +5,11 @@ $rawBody = apiReadRawBody(FORUM_DESC_MAX_BODY);
 $client  = apiAuthenticate($db, $cfg, 'v1/whitelist/describe', $rawBody, FORUM_DESC_MAX_BODY);
 apiRequireScope($client, 'whitelist');
 
-if (!forumDescEnabled($cfg, $client)) {
-    jsonResponse(['ok' => false, 'error' => 'describe_off', 'mode' => 'off']);
-}
 $payload = json_decode((string)$rawBody, true);
+if (is_array($payload)) $client = imagesConsentNote($db, $client, $payload['copy_images'] ?? null);
+if (!forumDescEnabled($cfg, $client)) {
+    jsonResponse(['ok' => false, 'error' => 'describe_off', 'mode' => 'off'] + imagesClientState($client));
+}
 if (!is_array($payload) || !isset($payload['topics']) || !is_array($payload['topics'])) {
     jsonResponse(['ok' => false, 'error' => 'invalid_json', 'message' => 'Body must be a JSON object with a "topics" array.'], 422);
 }
@@ -51,4 +52,4 @@ jsonResponse([
     'max_hashes' => FORUM_DESC_MAX_HASHES,
     'max_bytes' => FORUM_DESC_MAX_BODY,
     'server_time' => time(),
-]);
+] + imagesClientState($client));

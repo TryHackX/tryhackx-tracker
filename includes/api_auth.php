@@ -333,7 +333,7 @@ function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody
     // them; a key told to require a title accepted items without one. The queue itself worked, the
     // panel showed the setting, and nothing on the way in ever read it.
     $st = $db->prepare("SELECT id, label, key_id, secret_hash, scope, enabled, auto_approve,
-                               abuse_auto_block, required_fields, describe_mode, describe_accounts
+                               abuse_auto_block, required_fields, describe_mode, describe_accounts, image_domains, image_consent
                           FROM api_clients WHERE key_id = ? LIMIT 1");
     $st->execute([$keyId]);
     $client = $st->fetch();

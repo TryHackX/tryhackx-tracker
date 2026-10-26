@@ -1529,6 +1529,9 @@
                 scopeTd.appendChild(document.createTextNode(' '));
                 scopeTd.appendChild(el('span', { className: 'text-muted wl-small', title: c.image_domains.join(', '),
                     text: t.key('js.wl.cl_imgdomains_badge', { list: c.image_domains.join(', ') }) }));
+                scopeTd.appendChild(document.createTextNode(' '));
+                scopeTd.appendChild(badge(t.key(c.image_consent === true ? 'js.wl.cl_consent_yes'
+                    : (c.image_consent === false ? 'js.wl.cl_consent_no' : 'js.wl.cl_consent_none')), c.image_consent === true ? 'wl-b-ok' : 'wl-b-warn'));
             }
             if ((c.scope === 'whitelist' || c.scope === 'all') && (c.describe_mode === 'queue' || c.describe_mode === 'publish')) {
                 scopeTd.appendChild(document.createTextNode(' '));

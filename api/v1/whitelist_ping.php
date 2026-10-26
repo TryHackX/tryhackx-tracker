@@ -9,6 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET' && $_SERVER['REQUEST_METHOD'] !== 'POST
 $rawBody = $_SERVER['REQUEST_METHOD'] === 'POST' ? apiReadRawBody() : '';
 $client  = apiAuthenticate($db, $cfg, 'v1/whitelist/ping', $rawBody);
 apiRequireScope($client, 'whitelist');
+$pingBody = json_decode((string)$rawBody, true);
+$client = imagesConsentNote($db, $client, $_GET['copy_images'] ?? (is_array($pingBody) ? ($pingBody['copy_images'] ?? null) : null));
 
 // A database that cannot count is not a healthy node: 503, never "ok, 0 torrents" (1.74.0, QUAL-26 — the partner's
 // "Test connection" read a database error as an empty whitelist).
@@ -30,4 +32,4 @@ jsonResponse([
     'describe_max_chars' => FORUM_DESC_CHARS_CAP,
     'describe_max_bytes' => FORUM_DESC_MAX_BODY,
     'describe_max_topics' => FORUM_DESC_MAX_TOPICS,
-]);
+] + imagesClientState($client));

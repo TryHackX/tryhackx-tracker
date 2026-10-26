@@ -455,7 +455,7 @@ function imagesRemoteHosts(PDO $db, bool $fresh = false): array
     if ($hosts !== null && !$fresh) return $hosts;
     $all = [];
     try {
-        $st = $db->query("SELECT image_domains FROM api_clients WHERE enabled = 1 AND image_domains <> ''");
+        $st = $db->query("SELECT image_domains FROM api_clients WHERE enabled = 1 AND image_domains <> '' AND image_consent = 1");
         foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $raw) {
             foreach (imagesDomainsClean((string)$raw) as $d) $all[$d] = true;
         }
@@ -464,6 +464,30 @@ function imagesRemoteHosts(PDO $db, bool $fresh = false): array
     }
     $hosts = array_keys($all);
     return $hosts;
+}
+
+function imagesConsentFrom($raw): ?int
+{
+    if ($raw === true || $raw === 1 || $raw === '1' || $raw === 'true') return 1;
+    if ($raw === false || $raw === 0 || $raw === '0' || $raw === 'false') return 0;
+    return null;
+}
+
+function imagesConsentNote(PDO $db, array $client, $raw): array
+{
+    $v = imagesConsentFrom($raw);
+    $was = isset($client['image_consent']) ? (int)$client['image_consent'] : null;
+    if ($v === null || $v === $was) return $client;
+    $db->prepare("UPDATE api_clients SET image_consent = ?, image_consent_at = NOW() WHERE id = ?")->execute([$v, (int)$client['id']]);
+    $client['image_consent'] = $v;
+    return $client;
+}
+
+function imagesClientState(array $client): array
+{
+    $domains = imagesDomainsClean((string)($client['image_domains'] ?? ''));
+    $state = !$domains ? 'off' : (isset($client['image_consent']) && (int)$client['image_consent'] === 1 ? 'copy' : 'no_consent');
+    return ['images' => $state, 'image_domains' => $domains];
 }
 
 function imagesHostMatches(string $host, array $domains): bool
@@ -737,9 +761,16 @@ function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
         $out['queued'] = imagesRemoteScan($db, $cfg, $hosts, !empty($io['force_scan']));
         $start = microtime(true);
         $budget = (float)($io['budget'] ?? IMAGES_REMOTE_BUDGET);
-        $st = $db->prepare("SELECT url_sha, url, tries FROM image_remote WHERE status = 'pending' AND next_at <= NOW() ORDER BY next_at, created_at LIMIT ?");
-        $st->bindValue(1, IMAGES_REMOTE_PER_RUN, PDO::PARAM_INT);
-        $st->execute();
+        $where = [];
+        $args = [];
+        foreach ($hosts as $h) {
+            $where[] = 'host = ? OR host LIKE ?';
+            array_push($args, $h, '%.' . imagesLikeEscape($h));
+        }
+        $limit = IMAGES_REMOTE_PER_RUN;
+        $st = $db->prepare("SELECT url_sha, url, tries FROM image_remote WHERE status = 'pending' AND next_at <= NOW() AND ("
+                           . implode(' OR ', $where) . ") ORDER BY next_at, created_at LIMIT " . $limit);
+        $st->execute($args);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             if (microtime(true) - $start > $budget) break;
             $c = imagesRemoteCopy($db, $cfg, (string)$r['url_sha'], (string)$r['url'], (int)$r['tries'], $hosts, $io);

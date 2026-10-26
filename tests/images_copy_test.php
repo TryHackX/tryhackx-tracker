@@ -107,7 +107,7 @@ check('the transfer: pinned with CURLOPT_RESOLVE, no redirect followed, http(s) 
 
 $cl = apiClientCreate($db, 'imgcopytest', 'whitelist');
 $cid = (int)$cl['id'];
-$db->prepare("UPDATE api_clients SET image_domains = ? WHERE id = ?")->execute(['copy.test', $cid]);
+$db->prepare("UPDATE api_clients SET image_domains = ?, image_consent = 1 WHERE id = ?")->execute(['copy.test', $cid]);
 check('the domains copied from are the ENABLED keys\' ones', in_array('copy.test', imagesRemoteHosts($db, true), true));
 $db->prepare("UPDATE api_clients SET enabled = 0 WHERE id = ?")->execute([$cid]);
 $off = imagesRemoteHosts($db, true);
