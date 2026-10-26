@@ -112,9 +112,9 @@ function janitorHeavy(PDO $db, array $cfg, array $argv): void
 
     if (function_exists('imagesRemoteTick')) {
         $ir = imagesRemoteTick($db, $cfg);
-        if ($ir['copied'] || $ir['failed'] || $ir['error'] !== null || in_array('-v', $argv ?? [], true)) {
-            echo sprintf('[images] hosts=%d queued=%d copied=%d failed=%d rewritten=%d%s', $ir['hosts'], $ir['queued'], $ir['copied'],
-                $ir['failed'], $ir['rewritten'], $ir['error'] !== null ? ' error=' . $ir['error'] : ''), "\n";
+        if ($ir['copied'] || $ir['failed'] || $ir['repaired'] || $ir['error'] !== null || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[images] hosts=%d queued=%d copied=%d failed=%d rewritten=%d repaired=%d%s', $ir['hosts'], $ir['queued'], $ir['copied'],
+                $ir['failed'], $ir['rewritten'], $ir['repaired'], $ir['error'] !== null ? ' error=' . $ir['error'] : ''), "\n";
         }
     }
 

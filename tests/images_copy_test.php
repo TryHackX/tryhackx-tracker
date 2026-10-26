@@ -32,7 +32,7 @@ $pic = function (int $w, int $h): string {
 
 $H = str_repeat('c0', 20);
 $tidy = function () use ($db, $H): void {
-    $st = $db->query("SELECT id FROM images WHERE source_url LIKE 'https://forum.copy.test/%'");
+    $st = $db->query("SELECT id FROM images WHERE source_url LIKE 'https://forum.copy.test/%' OR source_url LIKE 'https://tracker.copy.test/%'");
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) imagesDelete($db, (int)$id);
     $db->exec("DELETE FROM image_remote WHERE host LIKE '%copy.test'");
     $db->exec("DELETE FROM api_clients WHERE label = 'imgcopytest'");
@@ -228,6 +228,46 @@ check('a key\'s image domains: asked in the key\'s dialog, saved on create and o
       && str_contains($src('api/admin/api_client_create.php'), "\$domains = imagesDomainsClean(\$input['image_domains'] ?? []);")
       && str_contains($src('api/admin/api_client_update.php'), "\$params[] = implode(' ', imagesDomainsClean(\$input['image_domains']));")
       && str_contains($src('api/admin/fetch_api_clients.php'), "\$c['image_domains'] = imagesDomainsClean((string)\$c['image_domains']);"));
+$cfgO = array_merge($cfgI, ['site_url' => 'https://tracker.copy.test/']);
+$ownText = "[img]https://tracker.copy.test/i/5-10x10.webp[/img] [img]https://forum.copy.test/assets/files/z.png[/img] https://TRACKER.copy.test/assets/logo.png";
+check('this site\'s own pictures are never queued, even when its host is under a key\'s domain',
+      imagesRemoteUrls($ownText, ['copy.test'], 'https://tracker.copy.test/') === ['https://forum.copy.test/assets/files/z.png']
+      && imagesOwnAt('https://copy.test/tracker/', 'http://COPY.test/tracker/i/1-1x1.webp') && !imagesOwnAt('https://copy.test/tracker/', 'https://copy.test/forum/a.png')
+      && !imagesOwnAt('https://tracker.copy.test/', 'https://forum.copy.test/a.png') && !imagesOwnAt('https://tracker.copy.test/', 'https://evil.example/https://tracker.copy.test/'),
+      json_encode(imagesRemoteUrls($ownText, ['copy.test'], 'https://tracker.copy.test/')));
+$calls = [];
+$ownCopy = imagesRemoteCopy($db, $cfgO, hash('sha256', 'own'), 'https://tracker.copy.test/i/5-10x10.webp', 0, ['copy.test'], ['resolve' => $resolveOk, 'get' => $getPng]);
+check('… and one already in the queue is given up at once, without a download',
+      empty($ownCopy['ok']) && ($ownCopy['error'] ?? '') === 'own_site' && !empty($ownCopy['final']) && $calls === [], json_encode($ownCopy));
+
+$UF = 'https://forum.copy.test/assets/files/chain.png';
+$ca = imagesStore($db, $cfgO, null, $pic(300, 200), 'chain.png', 'copy', $UF)['row'];
+$caUrl = imagesUrl($cfgO, (int)$ca['id'], (int)$ca['w'], (int)$ca['h'], 'webp');
+$cb = imagesStore($db, $cfgO, null, $pic(300, 200), 'b.webp', 'copy', $caUrl)['row'];
+$cbUrl = imagesUrl($cfgO, (int)$cb['id'], (int)$cb['w'], (int)$cb['h'], 'webp');
+$cc = imagesStore($db, $cfgO, null, $pic(300, 200), 'c.webp', 'copy', $cbUrl)['row'];
+$ccUrl = imagesUrl($cfgO, (int)$cc['id'], (int)$cc['w'], (int)$cc['h'], 'webp');
+$q = $db->prepare("INSERT INTO image_remote (url_sha, url, host, status, image_id) VALUES (?, ?, ?, ?, ?)");
+foreach ([[$UF, 'forum.copy.test', 'done', (int)$ca['id']], [$caUrl, 'tracker.copy.test', 'done', (int)$cb['id']],
+          [$cbUrl, 'tracker.copy.test', 'done', (int)$cc['id']], [$ccUrl, 'tracker.copy.test', 'pending', null]] as [$u, $h, $s, $i]) {
+    $q->execute([hash('sha256', $u), $u, $h, $s, $i]);
+}
+$db->prepare("INSERT INTO page_content (page, lang, format, body, enabled) VALUES ('imgcopytest', 'de', 'bbcode', ?, 1)")->execute(["chain [img]$ccUrl" . "[/img]."]);
+$db->prepare("INSERT INTO hash_comments (info_hash, user_id, body, status) VALUES (?, NULL, ?, 'visible')")->execute([$H, "older $cbUrl, here"]);
+$chainCm = (int)$db->lastInsertId();
+$rep = imagesOwnCopiesRepair($db, $cfgO);
+$pageDe = (string)$db->query("SELECT body FROM page_content WHERE page = 'imgcopytest' AND lang = 'de'")->fetchColumn();
+$cmDe = (string)$db->query("SELECT body FROM hash_comments WHERE id = " . $chainCm)->fetchColumn();
+check('copies of this site\'s own copies are undone: every text shows the first copy again, the later ones and their queue rows are gone',
+      $pageDe === "chain [img]$caUrl" . "[/img]." && $cmDe === "older $caUrl, here" && imagesRow($db, (int)$ca['id']) !== null
+      && imagesRow($db, (int)$cb['id']) === null && imagesRow($db, (int)$cc['id']) === null
+      && $rowOf($caUrl) === [] && $rowOf($cbUrl) === [] && $rowOf($ccUrl) === [] && ($rowOf($UF)['image_id'] ?? null) == $ca['id']
+      && $rep === ['queue' => 3, 'texts' => 2, 'images' => 2], json_encode([$rep, $pageDe, $cmDe]));
+check('… once: a second pass finds nothing to do, and the janitor\'s pass runs it first and says so',
+      imagesOwnCopiesRepair($db, $cfgO) === ['queue' => 0, 'texts' => 0, 'images' => 0]
+      && array_key_exists('repaired', imagesRemoteTick($db, $cfgO, ['resolve' => $resolveOk, 'get' => $getPng]))
+      && str_contains($src('tools/janitor.php'), "repaired=%d"));
+
 check('the copying runs in the janitor\'s slow half, never in a request',
       str_contains($src('tools/janitor.php'), '$ir = imagesRemoteTick($db, $cfg);')
       && strpos($src('tools/janitor.php'), '$ir = imagesRemoteTick($db, $cfg);') < strpos($src('tools/janitor.php'), 'function janitorHeavyDispatch('));

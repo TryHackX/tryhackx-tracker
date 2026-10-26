@@ -101,6 +101,22 @@ function imagesOwnUrl(array $cfg, string $url): ?array
     return imagesOwnUrlAt(imagesBase($cfg), $url);
 }
 
+function imagesOwnAt(string $base, string $url): bool
+{
+    $b = parse_url($base);
+    $u = parse_url($url);
+    if (!is_array($b) || !is_array($u) || empty($b['host']) || empty($u['host'])) return false;
+    if (strtolower(rtrim((string)$u['host'], '.')) !== strtolower(rtrim((string)$b['host'], '.'))) return false;
+    $path = (string)($b['path'] ?? '/');
+    return strncmp((string)($u['path'] ?? '/'), $path, strlen($path)) === 0;
+}
+
+function imagesOwnStoreUrl(string $base, string $url): ?array
+{
+    if (!imagesOwnAt($base, $url)) return null;
+    return imagesOwnUrlAt($base, (string)preg_replace('#^https?://#i', (string)parse_url($base, PHP_URL_SCHEME) . '://', $url));
+}
+
 function imagesEncode(\GdImage $im, int $quality): string
 {
     imagesavealpha($im, true);
@@ -500,7 +516,7 @@ function imagesHostMatches(string $host, array $domains): bool
     return false;
 }
 
-function imagesRemoteUrls(string $text, array $domains): array
+function imagesRemoteUrls(string $text, array $domains, string $base = ''): array
 {
     if ($text === '' || !$domains || !preg_match_all('~https?://[^\s\[\]"\'<>()]+~i', $text, $m, PREG_OFFSET_CAPTURE)) return [];
     $out = [];
@@ -509,7 +525,7 @@ function imagesRemoteUrls(string $text, array $domains): array
         if (strlen($url) > IMAGES_REMOTE_URL_MAX) continue;
         $p = parse_url($url);
         if (!is_array($p) || empty($p['host']) || isset($p['user']) || isset($p['pass'])) continue;
-        if (!imagesHostMatches((string)$p['host'], $domains)) continue;
+        if (!imagesHostMatches((string)$p['host'], $domains) || ($base !== '' && imagesOwnAt($base, $url))) continue;
         $tagged = $at >= 5 && strcasecmp(substr($text, $at - 5, 5), '[img]') === 0;
         if (!$tagged && !preg_match('/\.(?:jpe?g|png|gif|webp|avif|bmp)$/i', (string)($p['path'] ?? ''))) continue;
         $out[$url] = true;
@@ -603,7 +619,7 @@ function imagesRemoteSettle(PDO $db, array $cfg, string $text): string
     try {
         $hosts = imagesRemoteHosts($db);
         if (!$hosts) return $text;
-        $urls = imagesRemoteUrls($text, $hosts);
+        $urls = imagesRemoteUrls($text, $hosts, imagesBase($cfg));
         if (!$urls) return $text;
         imagesRemoteEnqueue($db, $urls);
         foreach (imagesRemoteDone($db, $cfg, $urls) as $from => $to) $text = imagesReplaceUrl($text, (string)$from, $to);
@@ -617,6 +633,7 @@ function imagesRemoteScan(PDO $db, array $cfg, array $hosts, bool $force = false
 {
     if (!$hosts || (!$force && time() - (int)($cfg['images_remote_scan_at'] ?? 0) < IMAGES_REMOTE_SCAN_SECONDS)) return 0;
     $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('images_remote_scan_at', ?)")->execute([(string)time()]);
+    $base = imagesBase($cfg);
     $found = [];
     foreach (imagesRewriteTargets() as [$sel]) {
         foreach ($hosts as $h) {
@@ -624,7 +641,7 @@ function imagesRemoteScan(PDO $db, array $cfg, array $hosts, bool $force = false
                 $st = $db->prepare($sel);
                 $st->execute(['%' . imagesLikeEscape($h) . '/%']);
                 while (($r = $st->fetch(PDO::FETCH_ASSOC)) !== false) {
-                    foreach (imagesRemoteUrls((string)$r['t'], $hosts) as $u) $found[$u] = true;
+                    foreach (imagesRemoteUrls((string)$r['t'], $hosts, $base) as $u) $found[$u] = true;
                 }
             } catch (\Throwable $e) {
                 continue;
@@ -717,7 +734,7 @@ function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $
 
 function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tries, array $hosts, array $io = []): array
 {
-    $f = imagesRemoteFetch($url, $hosts, imagesMaxBytes($cfg), $io);
+    $f = imagesOwnAt(imagesBase($cfg), $url) ? ['ok' => false, 'error' => 'own_site'] : imagesRemoteFetch($url, $hosts, imagesMaxBytes($cfg), $io);
     $stored = null;
     if (!empty($f['ok'])) {
         $name = basename((string)parse_url($url, PHP_URL_PATH));
@@ -728,7 +745,7 @@ function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tr
         $error = mb_substr((string)($f['error'] ?? 'network'), 0, 64);
         $tries++;
         $final = $tries >= IMAGES_REMOTE_TRIES
-              || in_array($error, ['not_allowed', 'bad_url', 'bad_port', 'bad_type', 'too_big', 'too_many_pixels'], true);
+              || in_array($error, ['not_allowed', 'own_site', 'bad_url', 'bad_port', 'bad_type', 'too_big', 'too_many_pixels'], true);
         $wait = [5, 30, 120, 720][$tries - 1] ?? 1440;
         $up = $db->prepare("UPDATE image_remote SET tries = ?, error = ?, status = ?, next_at = NOW() + INTERVAL ? MINUTE WHERE url_sha = ?");
         $up->bindValue(1, min(255, $tries), PDO::PARAM_INT);
@@ -749,7 +766,12 @@ function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tr
 
 function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
 {
-    $out = ['hosts' => 0, 'queued' => 0, 'copied' => 0, 'failed' => 0, 'rewritten' => 0, 'error' => null];
+    $out = ['hosts' => 0, 'queued' => 0, 'copied' => 0, 'failed' => 0, 'rewritten' => 0, 'repaired' => 0, 'error' => null];
+    try {
+        $out['repaired'] = imagesOwnCopiesRepair($db, $cfg)['images'];
+    } catch (\Throwable $e) {
+        $out['error'] = $e->getMessage();
+    }
     $hosts = imagesRemoteHosts($db, true);
     $out['hosts'] = count($hosts);
     if (!$hosts) return $out;
@@ -783,6 +805,81 @@ function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
         }
     } catch (\Throwable $e) {
         $out['error'] = $e->getMessage();
+    }
+    return $out;
+}
+
+function imagesOwnCopiesRepair(PDO $db, array $cfg): array
+{
+    $out = ['queue' => 0, 'texts' => 0, 'images' => 0];
+    $base = imagesBase($cfg);
+    $host = strtolower((string)(parse_url($base, PHP_URL_HOST) ?? ''));
+    if ($host === '') return $out;
+    $st = $db->prepare("SELECT url_sha, url FROM image_remote WHERE host = ?");
+    $st->execute([$host]);
+    $queued = [];
+    foreach ($st->fetchAll(PDO::FETCH_KEY_PAIR) as $sha => $url) {
+        if (imagesOwnAt($base, (string)$url)) $queued[] = (string)$sha;
+    }
+    if (!$queued) return $out;
+    $parent = [];
+    foreach ($db->query("SELECT id, source_url FROM images WHERE source = 'copy' AND source_url LIKE '%/i/%'")->fetchAll(PDO::FETCH_KEY_PAIR) as $id => $url) {
+        $o = imagesOwnStoreUrl($base, (string)$url);
+        if ($o !== null && $o['id'] < (int)$id) $parent[(int)$id] = $o['id'];
+    }
+    $rows = [];
+    foreach (array_chunk(array_values(array_unique(array_merge(array_keys($parent), array_values($parent)))), 500) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        $st = $db->prepare("SELECT i.id, b.mime, b.w, b.h, b.full_w, b.full_h FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha WHERE i.id IN ($in)");
+        $st->execute($chunk);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $rows[(int)$r['id']] = $r;
+    }
+    $target = [];
+    foreach (array_keys($parent) as $id) {
+        $root = null;
+        for ($cur = $id, $hops = 0; isset($parent[$cur]) && $hops < 10000; $hops++) {
+            $cur = $parent[$cur];
+            if (isset($rows[$cur])) $root = $cur;
+        }
+        if ($root !== null && isset($rows[$id])) $target[$id] = $root;
+    }
+    $fix = static function (string $text) use ($cfg, $base, $target, $rows): string {
+        return (string)(preg_replace_callback('~https?://[^\s\[\]"\'<>()]+~i', static function (array $m) use ($cfg, $base, $target, $rows): string {
+            $url = rtrim($m[0], '.,;:!?');
+            $o = imagesOwnStoreUrl($base, $url);
+            if ($o === null || !isset($target[$o['id']])) return $m[0];
+            $from = $rows[$o['id']];
+            $to = $rows[$target[$o['id']]];
+            $full = $o['w'] !== (int)$from['w'] || $o['h'] !== (int)$from['h'];
+            return imagesUrl($cfg, (int)$to['id'], (int)$to[$full ? 'full_w' : 'w'], (int)$to[$full ? 'full_h' : 'h'], imagesExt($to)) . substr($m[0], strlen($url));
+        }, $text) ?? $text);
+    };
+    if ($target) {
+        foreach (imagesRewriteTargets() as $t) {
+            [$sel, $sql] = $t;
+            $st = $db->prepare($sel);
+            $st->execute(['%/i/%']);
+            $up = $db->prepare($sql);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $old = (string)$r['t'];
+                $new = $fix($old);
+                if ($new === $old) continue;
+                $up->execute([$new, $r['k'], $old]);
+                if ($up->rowCount() < 1) continue;
+                $out['texts']++;
+                if (($t[2] ?? '') === 'whitelist' && function_exists('forumDescRewritten')) forumDescRewritten($db, (int)$r['k'], $old, $new);
+            }
+        }
+        $used = imagesReferencedIds($db);
+        foreach (array_keys($target) as $id) {
+            if (!isset($used[$id]) && imagesDelete($db, $id)) $out['images']++;
+        }
+    }
+    foreach (array_chunk($queued, 500) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        $st = $db->prepare("DELETE FROM image_remote WHERE url_sha IN ($in)");
+        $st->execute($chunk);
+        $out['queue'] += $st->rowCount();
     }
     return $out;
 }
