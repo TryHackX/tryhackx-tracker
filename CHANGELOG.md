@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.78.0] — 2026-10-26
+
+Descriptions from the forum: the first post of a forum topic becomes the description of the torrents it registered, up to the forum's own length limit, published at once or held for a moderator as the forum's key says, and never over a description written or changed here. Schema 97.
+
+- **The forum describes its own torrents.** An API key has a new setting, Descriptions from the forum: off (as
+  shipped), into the review queue, or published at once. With it on, `v1/whitelist/describe` takes the first post of a
+  topic — its source exactly as the author wrote it, in the `flarum` format — as the description of the torrents that
+  key registered from it. flarum-homepage-blocks 2.10.0 sends it after the topic's magnets: for a new topic, an edit of
+  its first post and a post the forum approved; its Scan whole forum sends and refreshes every topic.
+- **The forum's own limits.** With every call the forum sends its limit for the length of a post (homepage-blocks'
+  content length limit, or Flarum's own 63,000 characters), and descriptions are taken up to it, 1,000,000 characters
+  at most. A longer post is not cut: it is not brought over, and the Info panel says the description is on the forum
+  and links to the topic. The forum limits neither pictures nor links in a post, and neither does the import.
+- **A newer version of the post** replaces a description nobody changed here, the replaced one kept in its history (the
+  newest ten, as with an applied proposal); from a key whose descriptions wait for a moderator it becomes a rewrite
+  proposal. Pictures moved into the site's own store (1.77.0) do not count as a change.
+- **A description written or changed here is never overwritten by the forum on its own.** Settings → Descriptions &
+  source links → Descriptions from the forum: the forum's version becomes a rewrite proposal for the moderators (the
+  default), or the description stays as it is and is marked as different from the forum, or — only for a description
+  that came from the forum — it is replaced and the old version kept in its history. A description deleted here does
+  not come back with the same text, and an edited post brings it back into the review queue only; a version a
+  moderator turned down is not filed again.
+- **Who wrote it.** A forum author linked to an account through the sign-in bridge is credited with that account (the
+  key's Authors' accounts names the bridge's key); anybody else with their forum name. The Info panel shows the
+  description "from the forum", with a link to the topic; a moderator is also told when the forum has a newer version,
+  when one waits as a proposal or was turned down, and when one was too long, empty, in a format switched off here or
+  deleted here.
+- **The panel.** To review → Submissions has a filter, From the forum: needs attention; its cards and the Rewrites say
+  "from the forum", by whom, with the topic. A key that sends descriptions says so in the key list, its integration
+  guide has a chapter on `v1/whitelist/describe` (the address carries `describe=`), and `v1/whitelist/ping` answers the
+  key's description mode.
+- **Schema 97** adds the table of descriptions from the forum, the key's description mode and authors' key, and the
+  setting of what happens to a description changed here. It runs by itself at the first request after the update.
+
 ## [1.77.0] — 2026-10-26
 
 Pictures: uploaded in the description editor and kept by the site itself, in comments as thumbnails, copied from an API key's own domains, and all of them on a panel page of their own; a YouTube link can play in place. Schema 96.
