@@ -17,7 +17,7 @@
 requirePost();
 auditSuppress();
 $input = readJsonBody();
-$formats = array_merge(['plain'], richtextFormats($cfg));
+$formats = array_merge(['plain'], richtextFormats($cfg, 'report'));
 $format = is_string($input['format'] ?? null) ? (string)$input['format'] : 'plain';
 if (!in_array($format, $formats, true)) $format = 'plain';
 // One character past the limit is read in so that "too long" is said; the preview itself is bounded too.

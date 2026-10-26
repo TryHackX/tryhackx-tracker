@@ -1188,13 +1188,18 @@ check('the rows are made from the instant the DATABASE converted',
       str_contains((string)file_get_contents($root . '/includes/shout.php'), 'UNIX_TIMESTAMP(s.created_at) AS created_ts'));
 check('no colon after the name, in either renderer — it was a ::after, and it is gone',
       !str_contains($css, '.shout-who::after') && !preg_match("/shout-who[^\\n]*':'/", $boxJs));
+$lbJs = (string)file_get_contents($root . '/assets/js/lightbox.js');
 check('a picture opens the lightbox on a PLAIN click only; every modifier is left to the browser',
       str_contains($boxJs, "closest('a.shout-img-link')")
       && str_contains($boxJs, 'e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey')
-      && str_contains($boxJs, 'lightbox().open(a)') && str_contains($boxJs, "var href = link.getAttribute('href')"));
+      && str_contains($boxJs, 'lightbox().open(a)') && str_contains($boxJs, 'function lightbox() { return window.SiteLightbox; }')
+      && str_contains($lbJs, "var href = link.getAttribute('href')"));
 check('… and the lightbox has its way out, its link to the original and its focus handling',
-      str_contains($boxJs, "'shout-lb-close'") && str_contains($boxJs, "'shout-lb-orig'")
-      && str_contains($boxJs, "e.key === 'Escape'") && str_contains($boxJs, 'back.focus('));
+      str_contains($lbJs, "'shout-lb-close'") && str_contains($lbJs, "'shout-lb-orig'")
+      && str_contains($lbJs, "e.key === 'Escape'") && str_contains($lbJs, 'back.focus('));
+check('… and steps through the pictures of one description with the arrows, on screen and on the keyboard',
+      str_contains($lbJs, "'shout-lb-prev'") && str_contains($lbJs, "'shout-lb-next'")
+      && str_contains($lbJs, "e.key === 'ArrowLeft' || e.key === 'ArrowRight'") && str_contains($lbJs, 'prev.hidden = next.hidden = items.length < 2;'));
 // The picker is assets/js/emoji-picker.js from 1.70.0 (every editor has it; the room mounts it).
 $pickJs = (string)file_get_contents($root . '/assets/js/emoji-picker.js');
 check('the picker is placed against its button, above when it fits and clamped to the window',
@@ -1298,9 +1303,9 @@ check('… and there is ONE of it: the shoutbox, the emote cards and the inbox a
       && str_contains($peopleJs, 'window.askInPlace'));
 check('the lightbox\'s controls are inside the picture, revealed on hover, and always on without one',
       !str_contains($boxJs, 'shout-lb-bar') && !str_contains($css, '.shout-lb-bar')
-      && str_contains($boxJs, "el('div', { className: 'shout-lb-frame' }, [img, shut, orig])")
+      && str_contains($lbJs, "el('div', { className: 'shout-lb-frame' }, [img, shut, orig, prev, next])")
       && str_contains($css, '.shout-lb-frame:focus-within .shout-lb-orig, .shout-lb-frame:focus-within .shout-lb-close')
-      && str_contains($css, "@media (hover: none) {\n    .shout-lb-orig, .shout-lb-close { opacity: 1; pointer-events: auto; }"));
+      && str_contains($css, "@media (hover: none) {\n    .shout-lb-orig, .shout-lb-close, .shout-lb-prev, .shout-lb-next { opacity: 1; pointer-events: auto; }"));
 check('every overlay closes on the backdrop only when the press STARTED there',
       substr_count($appJs, 'closeOnBackdrop(') === 5
       && str_contains($appJs, "box.addEventListener('pointerdown', (e) => { fromBackdrop = e.target === box; });")
@@ -1308,7 +1313,7 @@ check('every overlay closes on the backdrop only when the press STARTED there',
       // list's Edit window (1.70.0), which closes through the same helper.
       && preg_match_all('/closeOnBackdrop\(\s*[A-Za-z_$][\w$.]*\s*,/', $favJs) === 4
       && substr_count($peopleJs, 'box.onpointerdown = function (e) { fromBackdrop = e.target === box; };') === 2
-      && str_contains($boxJs, 'root.addEventListener(\'pointerdown\', function (e) { lbFromBackdrop = onBackdrop(e.target); });')
+      && str_contains($lbJs, 'root.addEventListener(\'pointerdown\', function (e) { lbFromBackdrop = onBackdrop(e.target); });')
       && str_contains((string)file_get_contents($root . '/assets/js/admin-common.js'), 'fromBackdrop = e.target === box;'));
 check('the file tree carries the reader\'s open folders across a rebuild, and marks the ones holding a match',
       str_contains($appJs, 'function treeOpenState(holder)')
@@ -1439,7 +1444,7 @@ check('the editor finds ITS token through the site\'s one rule, csrfToken(ta) (1
 $prev = (string)file_get_contents($root . '/api/richtext_preview.php');
 check('a shout previews through the room\'s own renderer and rules, the ones posting uses',
       str_contains($prev, 'shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext(') && str_contains($prev, 'shoutBodyProblem($cfg, $text, $fmt)')
-      && str_contains($prev, "\$for === 'shout' ? shoutFormatChoices(\$cfg) : richtextFormats(\$cfg)")
+      && str_contains($prev, "\$for === 'shout' ? shoutFormatChoices(\$cfg) : richtextFormats(\$cfg, \$for)")
       && str_contains((string)file_get_contents($root . '/includes/shout.php'), "'html'        => shoutBodyHtml((string)\$r['body'], \$fmt, \$cfg, \$render)"));
 // …and by running it: the Preview's body and the list's body are one function's answer.
 $ctxT = shoutRenderContext($db, $cfgOn, [], ['hi [b]there[/b]']);

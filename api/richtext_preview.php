@@ -96,7 +96,7 @@ if ($for === 'comment') {
 // The syntaxes THIS writer may choose from. A shout's are the room's (shoutFormatChoices(): both, or
 // 'plain' when the room formats nothing) — not the description switches, which used to turn a
 // Markdown shout into BBCode here on a site that allows Markdown only in the room (1.67.0).
-$fmtChoices = $for === 'shout' ? shoutFormatChoices($cfg) : richtextFormats($cfg);
+$fmtChoices = $for === 'shout' ? shoutFormatChoices($cfg) : richtextFormats($cfg, $for);
 if (!in_array($fmt, $fmtChoices, true)) $fmt = $fmtChoices[0];
 
 // Cap before parsing, not after. A megabyte of nested tags is a CPU bill, and refusing it is

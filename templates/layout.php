@@ -138,6 +138,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
              like app.js, and BEFORE it: app.js mounts the whitelist form's editor as it loads, and that
              mount attaches the picker. It asks the server nothing until somebody opens it. */ ?>
     <script src="<?= $baseUrl ?>assets/js/emoji-picker.js<?= assetVer('assets/js/emoji-picker.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
     <?php /* The star, the profile lists and the "who has this" overlay. Loaded on every public page
              for the same reason app.js is: the star is delegated from `document` and has to be there

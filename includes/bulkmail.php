@@ -63,7 +63,7 @@ function bulkMailDailyCap(array $cfg): int {
  * server can parse HTML (ext-dom: htmlSafeAvailable()) — html.
  */
 function bulkFormats(array $cfg): array {
-    $f = array_merge(['plain'], function_exists('richtextFormats') ? richtextFormats($cfg) : []);
+    $f = array_merge(['plain'], function_exists('richtextFormats') ? richtextFormats($cfg, 'mail') : []);
     if (htmlSafeAvailable()) $f[] = 'html';
     return $f;
 }

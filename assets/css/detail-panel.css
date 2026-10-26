@@ -106,6 +106,21 @@
 .rt-body .rt-hide { border-left: 3px solid rgba(74,158,255,0.6); padding: 0.3rem 0.7rem; margin: 0.6rem 0; }
 .rt-body .rt-hide-locked { opacity: 0.7; font-style: italic; }
 
+.rt-body .rt-labels { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 0.75rem 0; }
+.rt-body .rt-labels-row { display: flex; flex-wrap: nowrap; justify-content: center; align-items: flex-start; gap: 8px; width: 100%; }
+.rt-body .rt-labels-row .rt-label { height: auto; max-height: none; margin: 0; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); object-fit: contain; }
+.rt-body .rt-labels-c1 .rt-label { flex: 0 1 auto; max-width: min(100%, 420px); }
+.rt-body .rt-labels-c2 .rt-label { flex: 0 1 calc((100% - 8px) / 2); max-width: calc((100% - 8px) / 2); }
+.rt-body .rt-labels-c3 .rt-label { flex: 0 1 calc((100% - 16px) / 3); max-width: calc((100% - 16px) / 3); }
+.rt-body .rt-labels-c4 .rt-label { flex: 0 1 calc((100% - 24px) / 4); max-width: calc((100% - 24px) / 4); }
+@media (max-width: 600px) {
+    .rt-body .rt-labels-c3 .rt-labels-row, .rt-body .rt-labels-c4 .rt-labels-row { flex-wrap: wrap; }
+    .rt-body .rt-labels-c3 .rt-label, .rt-body .rt-labels-c4 .rt-label { flex: 0 1 calc((100% - 8px) / 2); max-width: calc((100% - 8px) / 2); }
+}
+.rt-body .rt-ispoiler { background: rgba(255,255,255,0.18); color: transparent; border-radius: 3px; padding: 0 0.2em; cursor: pointer; transition: color 0.15s, background 0.15s; }
+.rt-body .rt-ispoiler:hover, .rt-body .rt-ispoiler:focus { color: inherit; background: rgba(255,255,255,0.07); outline: none; }
+.rt-body .rt-file { display: inline-flex; align-items: center; gap: 0.3em; padding: 0.05em 0.5em; border: 1px solid rgba(255,255,255,0.18); border-radius: 4px; font-size: 0.92em; }
+
 /* Callouts (> [!NOTE] and friends). */
 .rt-body .rt-callout { border-left: 3px solid; border-radius: 0 4px 4px 0; padding: 0.5rem 0.8rem; margin: 0.7rem 0; background: rgba(255,255,255,0.04); }
 .rt-body .rt-callout-k { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 700; margin-bottom: 0.2rem; }

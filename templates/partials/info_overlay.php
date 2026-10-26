@@ -174,12 +174,13 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
                 <span class="rt-counter" id="info-desc-count"></span>
                 <?php if (count($ioFormats) > 1): ?>
                 <select id="info-desc-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
-                    <option value="bbcode">BBCode</option>
-                    <option value="markdown">Markdown</option>
+                    <?php foreach ($ioFormats as $iof): ?>
+                    <option value="<?= sanitize($iof) ?>"><?= richtextFormatLabel($iof) ?></option>
+                    <?php endforeach; ?>
                 </select>
                 <?php else: ?>
                 <input type="hidden" id="info-desc-format" value="<?= sanitize($ioFormats[0]) ?>">
-                <span class="rt-format-fixed"><?= $ioFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></span>
+                <span class="rt-format-fixed"><?= richtextFormatLabel($ioFormats[0]) ?></span>
                 <?php endif; ?>
             </div>
             <div class="rt-tools" id="info-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
@@ -213,7 +214,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
                 <?php /* The picker (1.70.0) — a first description and a proposed rewrite alike. */ ?>
                 <?= function_exists('emojiPickerButton') ? emojiPickerButton($db, $cfg, $baseUrl, 'description', 'info-desc-emoji') : '' ?>
             </div>
-            <textarea id="info-desc" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
+            <textarea id="info-desc" rows="6" data-limit="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="info-desc-preview" hidden></div>
         </div>
         <details class="rt-syntax-fold">

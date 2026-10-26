@@ -126,7 +126,7 @@ function reportTextClean($s, int $max = REPORT_TEXT_MAX): string
 function reportTextFormat($f, array $cfg): string
 {
     $f = is_string($f) ? $f : 'plain';
-    return ($f === 'bbcode' || $f === 'markdown') && in_array($f, richtextFormats($cfg), true) ? $f : 'plain';
+    return ($f === 'bbcode' || $f === 'markdown') && in_array($f, richtextFormats($cfg, 'report'), true) ? $f : 'plain';
 }
 
 /**
@@ -146,7 +146,7 @@ function reportTextValidate(string $text, string $format, array $cfg, int $max =
     $len = mb_strlen($text, 'UTF-8');
     if ($len > $max) return __('api.report_text.too_long', ['n' => $len, 'max' => $max]);
     if ($format === 'plain') return null;
-    if (!in_array($format, richtextFormats($cfg), true)) return __('api.report_text.bad_format');
+    if (!in_array($format, richtextFormats($cfg, 'report'), true)) return __('api.report_text.bad_format');
     $c = richtextCount($text, $format, $cfg);
     if ($c['images'] > REPORT_TEXT_MAX_IMAGES) return __('api.report_text.no_images');
     if ($c['links'] > REPORT_TEXT_MAX_LINKS) return __('api.report_text.too_many_links', ['n' => $c['links'], 'max' => REPORT_TEXT_MAX_LINKS]);

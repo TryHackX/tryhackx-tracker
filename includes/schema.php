@@ -146,7 +146,7 @@ function trackerSchemaStatements(): array {
             `content_user_id` INT UNSIGNED DEFAULT NULL,
             `source_url` VARCHAR(500) DEFAULT NULL,
             `description` MEDIUMTEXT DEFAULT NULL,
-            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
             `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
             `content_reviewed_at` DATETIME DEFAULT NULL,
             `content_rejected_note` VARCHAR(255) DEFAULT NULL,
@@ -783,7 +783,7 @@ function trackerSchemaStatements(): array {
             `info_hash` CHAR(40) NOT NULL,
             `source_url` VARCHAR(500) DEFAULT NULL,
             `description` MEDIUMTEXT DEFAULT NULL,
-            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
             `status` ENUM('pending','applied','rejected') NOT NULL DEFAULT 'pending',
             -- v81: a REWRITE replaces the author (the proposer becomes it); an EDIT keeps the author and
             -- credits the proposer beside them with the share of the text it changed, measured when a
@@ -816,7 +816,7 @@ function trackerSchemaStatements(): array {
             `info_hash` CHAR(40) NOT NULL,
             `source_url` VARCHAR(500) DEFAULT NULL,
             `description` MEDIUMTEXT DEFAULT NULL,
-            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
             `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
             `content_user_id` INT UNSIGNED DEFAULT NULL,
             `content_reviewed_at` DATETIME DEFAULT NULL,
@@ -1917,7 +1917,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
             `info_hash` CHAR(40) NOT NULL,
             `source_url` VARCHAR(500) DEFAULT NULL,
             `description` MEDIUMTEXT DEFAULT NULL,
-            `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode',
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
             `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
             `content_user_id` INT UNSIGNED DEFAULT NULL,
             `content_reviewed_at` DATETIME DEFAULT NULL,
@@ -2330,7 +2330,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $wparts[] = "ADD COLUMN `description` MEDIUMTEXT DEFAULT NULL";
     }
     if (!schemaColumnExists($db, 'whitelist', 'description_format')) {
-        $wparts[] = "ADD COLUMN `description_format` ENUM('markdown','bbcode') NOT NULL DEFAULT 'bbcode'";
+        $wparts[] = "ADD COLUMN `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode'";
     }
     if (!schemaColumnExists($db, 'whitelist', 'content_status')) {
         $wparts[] = "ADD COLUMN `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none'";
@@ -2625,6 +2625,12 @@ function trackerSchemaGuardedStatements(PDO $db): array {
             $out[] = [$alter . ", ALGORITHM=INPLACE, LOCK=NONE", $alter . ", ALGORITHM=INPLACE", $alter];
         } else {
             schemaDeferHeavy('index_hashes: ' . implode(', ', $iparts));
+        }
+    }
+    foreach (['whitelist', 'hash_content', 'wl_content_edits'] as $tbl) {
+        $ty = schemaTableExists($db, $tbl) ? schemaColumnType($db, $tbl, 'description_format') : null;
+        if ($ty !== null && $ty !== "enum('markdown','bbcode','flarum')") {
+            $out[] = "ALTER TABLE `$tbl` MODIFY COLUMN `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode'";
         }
     }
     return $out;
@@ -3377,6 +3383,7 @@ function trackerSchemaDefaultSettings(): array {
         'wl_content_review'           => '1',
         'desc_allow_bbcode'           => '1',
         'desc_allow_markdown'         => '1',
+        'desc_allow_flarum'           => '1',
         'desc_max_chars'              => '4000',
         'desc_max_images'             => '3',
         'desc_max_links'              => '10',

@@ -183,12 +183,13 @@ if ($wlSched) {
                     <span class="rt-counter" id="wl-desc-count"></span>
                     <?php if (count($wlFormats) > 1): ?>
                     <select id="wl-desc-format" name="description_format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
-                        <option value="bbcode">BBCode</option>
-                        <option value="markdown">Markdown</option>
+                        <?php foreach ($wlFormats as $wlf): ?>
+                        <option value="<?= sanitize($wlf) ?>"><?= richtextFormatLabel($wlf) ?></option>
+                        <?php endforeach; ?>
                     </select>
                     <?php else: ?>
                     <input type="hidden" id="wl-desc-format" name="description_format" value="<?= sanitize($wlFormats[0]) ?>">
-                    <span class="rt-format-fixed"><?= $wlFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></span>
+                    <span class="rt-format-fixed"><?= richtextFormatLabel($wlFormats[0]) ?></span>
                     <?php endif; ?>
                 </div>
                 <!-- A button whose syntax the chosen format cannot express hides itself (see
@@ -227,7 +228,7 @@ if ($wlSched) {
                              at the end of the rail, with what this reader may use in a description. */ ?>
                     <?= function_exists('emojiPickerButton') ? emojiPickerButton($db, $cfg, $baseUrl, 'description', 'wl-desc-emoji') : '' ?>
                 </div>
-                <textarea id="wl-desc" name="description" rows="6" maxlength="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
+                <textarea id="wl-desc" name="description" rows="6" data-limit="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
                 <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>
             </div>
             <details class="rt-syntax-fold">

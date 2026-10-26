@@ -182,101 +182,7 @@
                            title: row.name || row.code, loading: 'lazy' });
     }
 
-    /* ─────────────────────────── a picture, full size ─────────────────────────── */
-
-    /**
-     * The lightbox a picture in a shout opens into (1.62.0).
-     *
-     * The picture fitted to the window on a dark backdrop, a close button, and a link to the
-     * original. Esc, the button and a click on the backdrop all close it; the focus goes into it
-     * when it opens and back to the picture that opened it when it closes, and Tab stays inside it
-     * while it is open — a dialog the keyboard can wander out of is a dialog still covering the page
-     * behind the person who wandered.
-     *
-     * It is opened only by the unmodified primary click on a picture's link (see mountShoutbox).
-     * The address is the link's own href, which the server built out of the URL its renderer had
-     * already validated (shoutLinkImages() in includes/shout.php); nothing here parses, decodes or
-     * rebuilds it — it is handed on as it came.
-     *
-     * One element for the whole page, built the first time it is needed and hidden afterwards
-     * rather than thrown away. It sits on <body>, outside the box: inside it, the list's scroll and
-     * the block's own edges would be the frame of a picture meant to fill the window.
-     */
-    var lb = null;
-    function lightboxBuild() {
-        var img = el('img', { className: 'shout-lb-img', alt: '', referrerpolicy: 'no-referrer' });
-        // Bootstrap Icons, the font every page that draws the room already carries (templates/
-        // layout.php), and the words beside or behind them for whoever cannot see a glyph.
-        var orig = el('a', { className: 'shout-lb-orig', target: '_blank', rel: 'noopener noreferrer' }, [
-            el('i', { className: 'bi bi-box-arrow-up-right', 'aria-hidden': 'true' }),
-            ' ', t.key('js.shout.lb_original'),
-        ]);
-        var shut = el('button', { type: 'button', className: 'shout-lb-close', title: t.key('js.shout.lb_close'),
-                                  'aria-label': t.key('js.shout.lb_close') },
-                      el('i', { className: 'bi bi-x-lg', 'aria-hidden': 'true' }));
-        // 1.64.0: the two controls are INSIDE the picture, not on a bar under it — the close as an
-        // icon in the top right corner, the link to the original centred along the bottom edge,
-        // both on a dark pill and both invisible until the picture is hovered or something inside
-        // it has the focus. A bar under the picture is a strip of furniture in the way of the one
-        // thing the window is for, and it took 3.5rem off the height the picture could use. Where
-        // there is no hover to have — a phone — the stylesheet leaves them on.
-        var root = el('div', { className: 'shout-lightbox', hidden: true, role: 'dialog', 'aria-modal': 'true',
-                               'aria-label': t.key('js.shout.lb_label') }, [
-            el('div', { className: 'shout-lb-frame' }, [img, shut, orig]),
-        ]);
-        var from = null;              // the link that opened it: the focus goes back there
-        function close() {
-            if (root.hidden) return;
-            root.hidden = true;
-            img.removeAttribute('src');
-            document.removeEventListener('keydown', onKey, true);
-            var back = from;
-            from = null;
-            if (back && back.isConnected) back.focus({ preventScroll: true });
-        }
-        function onKey(e) {
-            if (root.hidden) return;
-            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
-            if (e.key !== 'Tab') return;
-            // Two stops, and the keyboard goes round them rather than out of the dialog.
-            var stops = [orig, shut];
-            var i = stops.indexOf(document.activeElement);
-            e.preventDefault();
-            stops[(i + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length].focus();
-        }
-        // The backdrop is everything that is not the picture or the controls over it — and it
-        // closes only when the press STARTED there (1.64.0). A `click` goes to the common ancestor
-        // of the press and the release, so somebody who presses on the picture and lets go beside
-        // it was shutting the lightbox they were looking at. This file also runs on pages that do
-        // not carry app.js, so it keeps its own copy of the two lines rather than that one's.
-        var lbFromBackdrop = false;
-        var onBackdrop = function (n) { return n === root || (n.classList && n.classList.contains('shout-lb-frame')); };
-        root.addEventListener('pointerdown', function (e) { lbFromBackdrop = onBackdrop(e.target); });
-        root.addEventListener('click', function (e) {
-            if (onBackdrop(e.target) && lbFromBackdrop) close();
-        });
-        shut.addEventListener('click', close);
-        document.body.appendChild(root);
-        return {
-            root: root,
-            open: function (link) {
-                var href = link.getAttribute('href') || '';
-                if (!href) return false;
-                var small = link.querySelector('img');
-                from = link;
-                img.alt = small ? (small.getAttribute('alt') || '') : '';
-                img.src = href;
-                orig.href = href;
-                root.hidden = false;
-                document.addEventListener('keydown', onKey, true);
-                shut.focus({ preventScroll: true });
-                return true;
-            },
-            close: close,
-            isOpen: function () { return !root.hidden; },
-        };
-    }
-    function lightbox() { return lb || (lb = lightboxBuild()); }
+    function lightbox() { return window.SiteLightbox; }
 
     /* ─────────────────────────── the box itself ─────────────────────────── */
 
@@ -1569,8 +1475,8 @@
                          // the template drew for the same row — the two must be one description.
                          render: function (r) { return renderRow(r); },
                          // The lightbox, for the browser check: open or not, and a way to shut it.
-                         lightbox: { open: function () { return !!lb && lb.isOpen(); },
-                                     close: function () { if (lb) lb.close(); } },
+                         lightbox: { open: function () { return window.SiteLightbox.isOpen(); },
+                                     close: function () { window.SiteLightbox.close(); } },
                          picker: picker,
                          // The `@` list, for the browser check: whether it is open, what is in it,
                          // and the two steps that would otherwise need a real keyboard.

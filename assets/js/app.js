@@ -329,6 +329,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (mail) { e.preventDefault(); revealEmail(mail); return; }
         const page = e.target.closest('[data-trans-page]');
         if (page && !page.disabled) loadTransparency(parseInt(page.dataset.transPage, 10));
+        const pic = e.target.closest('.rt-body img.rt-img');
+        if (pic && !pic.closest('a') && window.SiteLightbox && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+            const all = [...pic.closest('.rt-body').querySelectorAll('img.rt-img')].filter((im) => !im.closest('a'));
+            e.preventDefault();
+            window.SiteLightbox.show(all.map((im) => ({ src: im.currentSrc || im.src, alt: im.alt })), all.indexOf(pic), pic);
+        }
     });
 });
 
@@ -4501,7 +4507,7 @@ window.siteToast = siteToast;
         const fmtEl = $id('info-desc-format');
         const editor = $id('info-desc-editor');
         if (editor) editor.dataset.mode = mode;
-        if (ta && json.content_max) ta.maxLength = json.content_max;
+        if (ta && json.content_max) ta.dataset.limit = json.content_max;
         const pre = mode === 'edit' ? json.content_edit : null;
         if (pre) {
             if (ta) ta.value = String(pre.description || '');
@@ -5540,11 +5546,16 @@ window.siteToast = siteToast;
             hr: ['\n[hr]\n', '', true],
         },
     };
+    SYNTAX.flarum = SYNTAX.bbcode;
     const HINT = {
         markdown: t.key('js.app.hint_markdown'),
         bbcode:   t.key('js.app.hint_bbcode'),
+        flarum:   t.key('js.app.hint_flarum'),
     };
-    const fmt = () => (fmtEl && fmtEl.value === 'markdown') ? 'markdown' : 'bbcode';
+    const fmt = () => (fmtEl && (fmtEl.value === 'markdown' || fmtEl.value === 'flarum')) ? fmtEl.value : 'bbcode';
+    const looksLikeFlarum = (s) => /\[(?:thxlabels|thxrow|magnet|upl-[a-z-]+)\b/i.test(s)
+        || (/\[(?:b|i|u|s|center|img|url|code|quote|spoiler|size|color|list)\b[^\]]*\]/i.test(s)
+            && /^(?:#{1,6} \S|_{3,}[ \t]*$|-{3,}[ \t]*$|> )/m.test(s));
 
     /** Wrap the selection, or drop a stub at the caret and select it so typing replaces it. */
     function wrap(kind) {
@@ -5614,6 +5625,7 @@ window.siteToast = siteToast;
             if (r.images.limit > 0 || r.images.used) bits.push(' · ', t.key('js.app.count_images', {used: r.images.used, limit: r.images.limit}));
             if (r.links.limit > 0 || r.links.used) bits.push(' · ', t.key('js.app.count_links', {used: r.links.used, limit: r.links.limit}));
             counter.replaceChildren(...bits);
+            counter.classList.toggle('rt-counter-over', r.limit > 0 && r.length > r.limit);
         }
         if (help) {
             help.textContent = r.problem || '';
@@ -5627,8 +5639,10 @@ window.siteToast = siteToast;
         if (measure) {
             const m = measure(ta.value, fmt()) || {};
             counter.textContent = t.key('js.app.count_characters', {used: Number(m.used) || 0, limit: Number(m.limit) || 0});
-        } else if (ta.maxLength > 0) {
-            counter.textContent = t.key('js.app.count_characters', {used: ta.value.length, limit: ta.maxLength});
+        } else if (ta.maxLength > 0 || Number(ta.dataset.limit) > 0) {
+            const limit = ta.maxLength > 0 ? ta.maxLength : Number(ta.dataset.limit);
+            counter.textContent = t.key('js.app.count_characters', {used: ta.value.length, limit: limit});
+            counter.classList.toggle('rt-counter-over', ta.value.length > limit);
         }
     }
 
@@ -5668,6 +5682,17 @@ window.siteToast = siteToast;
         // thing that tells somebody they are near the character limit before the form refuses them.
         countTyping();
         if (!box.hidden) timer = setTimeout(render, 400);
+    });
+    ta.addEventListener('paste', (e) => {
+        if (!fmtEl || fmtEl.tagName !== 'SELECT' || fmtEl.value === 'flarum') return;
+        if (![...fmtEl.options].some(o => o.value === 'flarum')) return;
+        if (!looksLikeFlarum(e.clipboardData ? e.clipboardData.getData('text/plain') : '')) return;
+        fmtEl.value = 'flarum';
+        fmtEl.dispatchEvent(new Event('change', { bubbles: true }));
+        if (help) {
+            help.textContent = t.key('js.app.switched_flarum');
+            help.classList.remove('form-hint-bad');
+        }
     });
     if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
     syncFormat();

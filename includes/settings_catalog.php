@@ -484,6 +484,7 @@ function settingsCatalogKeywords(): array {
         'link_trusted_domains'      => 'trusted domains skip leaving site warning modal external link',
         'desc_allow_bbcode'         => 'description format bbcode tags code quote allowed',
         'desc_allow_markdown'       => 'description format markdown allowed',
+        'desc_allow_flarum'         => 'description format flarum forum post pasted markdown bbcode mixed thxlabels labels allowed opis forum wklejony post',
         'desc_max_chars'            => 'description length limit characters maximum',
         'desc_max_images'           => 'description images limit how many img tags maximum',
         'desc_max_links'            => 'description links limit how many url maximum',

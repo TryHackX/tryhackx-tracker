@@ -83,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         'languages'  => pageContentLangs($db, $cfg, $page),
         'serving'    => $active ? $active['lang'] : null,
         'max'      => PAGECONTENT_MAX,
-        'formats'  => richtextFormats($cfg),
+        'formats'  => richtextFormats($cfg, 'page'),
         // Every condition a page may test, with its state right now — the editor lists them.
         'markers'  => array_map(fn($k, $v) => ['name' => $k, 'on' => (bool)$v[0], 'what' => $v[1]],
                                 array_keys(pageContentConditions($cfg, $db)), pageContentConditions($cfg, $db)),

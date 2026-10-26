@@ -271,6 +271,7 @@ function iconFaEntries(): array {
         'magnet'                     => ['magnet', 's', 'prorole' => 'r', 'prostyle' => ['duotone', 'duotone-regular', 'duotone-light', 'duotone-thin']],
         'megaphone'                  => ['bullhorn', 's', 'pro' => 'megaphone', 'prorole' => 'r'],   // the Appeals tab: Pro has Bootstrap's cone, in outline
         'palette'                    => ['palette', 's'],
+        'paperclip'                  => ['paperclip', 's'],
         // ~ Free has no badge with a tick (badge-check is Pro's): the tick in a circle, which reads as
         //   "verified" (1.69.0 — `certificate`, the badge WITHOUT the tick, read as a starburst). Outline
         //   and filled as Bootstrap's pair are; Pro draws the badge itself.

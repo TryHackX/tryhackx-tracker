@@ -2920,13 +2920,21 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         </select>
                         <small class="settings-hint"><?= _h('settings.content_allow_markdown_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="desc_allow_flarum">
+                        <label for="set-desc_allow_flarum" class="form-label"><?= _h('settings.content_allow_flarum') ?></label>
+                        <select id="set-desc_allow_flarum" class="form-select bg-dark text-light border-secondary" name="desc_allow_flarum">
+                            <option value="1" <?= ($cfg['desc_allow_flarum'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
+                            <option value="0" <?= ($cfg['desc_allow_flarum'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.content_allow_flarum_hint') ?></small>
+                    </div>
                     <div class="col-md-2" data-setting="desc_max_chars">
                         <label for="set-desc_max_chars" class="form-label"><?= _h('settings.content_max_chars') ?></label>
-                        <input id="set-desc_max_chars" type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_chars" value="<?= sanitize($cfg['desc_max_chars'] ?? '4000') ?>" min="200" max="20000">
+                        <input id="set-desc_max_chars" type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_chars" value="<?= sanitize($cfg['desc_max_chars'] ?? '4000') ?>" min="200" max="500000">
                     </div>
                     <div class="col-md-2" data-setting="desc_max_images">
                         <label for="set-desc_max_images" class="form-label"><?= _h('settings.content_max_images') ?></label>
-                        <input id="set-desc_max_images" type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_images" value="<?= sanitize($cfg['desc_max_images'] ?? '3') ?>" min="0" max="50">
+                        <input id="set-desc_max_images" type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_images" value="<?= sanitize($cfg['desc_max_images'] ?? '3') ?>" min="0" max="100">
                         <small class="settings-hint"><?= _h('settings.content_max_images_hint') ?></small>
                     </div>
                     <div class="col-md-2" data-setting="desc_max_links">

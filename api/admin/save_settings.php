@@ -184,7 +184,7 @@ $allowed = [
     // 1.75.0 (schema 94): the day's ceiling on bulk mail (0 = none) and the sender's identity for its footer
     'bulk_mail_daily_cap', 'mail_sender_address', 'auto_penalties_enabled',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
-    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
+    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
     // schema v43: stored file paths per torrent, the second live worker override
@@ -423,7 +423,7 @@ $intClamp = [
     'csp_report_keep_rows' => [0, CSP_ROWS_MAX, CSP_ROWS_DEFAULT],
     'users_notify_expiry_days' => [0, 30, 3], 'users_email_change_cooldown_days' => [0, 365, 30],
     'bulk_mail_per_minute' => [1, 500, 20], 'bulk_mail_max_attempts' => [1, 10, 3], 'bulk_mail_daily_cap' => [0, 1000000, 0],
-    'desc_max_chars' => [200, 20000, 4000], 'desc_max_images' => [0, 50, 3],
+    'desc_max_chars' => [200, 500000, 4000], 'desc_max_images' => [0, 100, 3],
     'livesync_port' => [1024, 65535, 9696],
     'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120],
     'rate_limit_user_login' => [0, 1000, 10],

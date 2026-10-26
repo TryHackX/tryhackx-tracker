@@ -30,18 +30,24 @@ require_once __DIR__ . '/content.php';
 // Font Awesome's faces, written as :fa-NAME: tokens (1.69.0): drawn on the finished text below.
 require_once __DIR__ . '/emoji.php';
 
-function richtextFormats(array $cfg): array {
+function richtextFormats(array $cfg, string $place = 'description'): array {
     $out = [];
     if (($cfg['desc_allow_bbcode'] ?? '1') === '1') $out[] = 'bbcode';
     if (($cfg['desc_allow_markdown'] ?? '1') === '1') $out[] = 'markdown';
-    return $out ?: ['bbcode'];
+    if (!$out) $out[] = 'bbcode';
+    if ($place === 'description' && ($cfg['desc_allow_flarum'] ?? '1') === '1') $out[] = 'flarum';
+    return $out;
+}
+
+function richtextFormatLabel(string $format): string {
+    return ['markdown' => 'Markdown', 'flarum' => 'Flarum'][$format] ?? 'BBCode';
 }
 
 function richtextMaxChars(array $cfg): int {
-    return max(0, min(20000, (int)($cfg['desc_max_chars'] ?? 4000) ?: 4000));
+    return max(0, min(500000, (int)($cfg['desc_max_chars'] ?? 4000) ?: 4000));
 }
 function richtextMaxImages(array $cfg): int {
-    return max(0, min(50, (int)($cfg['desc_max_images'] ?? 3)));
+    return max(0, min(100, (int)($cfg['desc_max_images'] ?? 3)));
 }
 function richtextMaxLinks(array $cfg): int {
     return max(0, min(100, (int)($cfg['desc_max_links'] ?? 10)));
@@ -328,6 +334,10 @@ function richtextMailStyles(string $html): string
         'rt-spoiler-body' => 'padding:0 10px 8px',
         'rt-hide'   => 'border-left:3px solid #4a9eff;padding:4px 10px;margin:10px 0',
         'rt-video'  => 'display:inline-block;padding:2px 8px;border:1px solid #8a94a6;border-radius:4px',
+        'rt-labels' => 'margin:12px 0;text-align:center', 'rt-labels-row' => 'margin:0 0 8px;text-align:center',
+        'rt-label'  => 'display:inline-block;max-width:31%;margin:4px;vertical-align:top;border-radius:6px',
+        'rt-ispoiler' => 'background:rgba(127,127,127,0.35);border-radius:3px;padding:0 3px',
+        'rt-file'   => 'display:inline-block;padding:1px 6px;border:1px solid #8a94a6;border-radius:4px',
         'rt-callout' => 'border-left:3px solid #8a94a6;border-radius:0 4px 4px 0;padding:8px 12px;margin:10px 0;background:rgba(127,127,127,0.12)',
         'rt-callout-note' => 'border-left-color:#4a9eff', 'rt-callout-tip' => 'border-left-color:#2e9e55',
         'rt-callout-important' => 'border-left-color:#a06fd8', 'rt-callout-warning' => 'border-left-color:#c9a227',
@@ -512,6 +522,8 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     if ($format === 'bbcode') {
         $s = preg_replace_callback('/\[code\](.*?)\[\/code\]/is',
             fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $s);
+    } elseif ($format === 'flarum') {
+        $s = richtextFlarumCode($s, $keep);
     } else {
         $s = preg_replace_callback('/```[a-z0-9+#-]*\n?(.*?)```/is',
             fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $s);
@@ -532,142 +544,9 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     }, $s);
 
     if ($format === 'bbcode') {
-        // ── inline emphasis ──
-        $s = preg_replace('/\[b\](.*?)\[\/b\]/is', '<strong>$1</strong>', $s);
-        $s = preg_replace('/\[i\](.*?)\[\/i\]/is', '<em>$1</em>', $s);
-        $s = preg_replace('/\[u\](.*?)\[\/u\]/is', '<u>$1</u>', $s);
-        $s = preg_replace('/\[s\](.*?)\[\/s\]/is', '<s>$1</s>', $s);
-        $s = preg_replace('/\[sub\](.*?)\[\/sub\]/is', '<sub>$1</sub>', $s);
-        $s = preg_replace('/\[sup\](.*?)\[\/sup\]/is', '<sup>$1</sup>', $s);
-
-        // ── the tags that carry a value: colour, size, font, highlight ──
-        // Each one drops to plain text when the value is not in its closed set, rather than emitting
-        // a tag with something unchecked in a style attribute.
-        $s = preg_replace_callback('/\[color=([^\]]{1,32})\](.*?)\[\/color\]/is', function ($m) {
-            $c = richtextSafeColor($m[1]);
-            return $c === null ? $m[2] : '<span class="rt-color" style="color:' . $c . '">' . $m[2] . '</span>';
-        }, $s);
-        $s = preg_replace_callback('/\[size=([^\]]{1,12})\](.*?)\[\/size\]/is', function ($m) {
-            $px = richtextSafeSize($m[1]);
-            return $px === null ? $m[2] : '<span class="rt-size" style="font-size:' . $px . 'px">' . $m[2] . '</span>';
-        }, $s);
-        $s = preg_replace_callback('/\[font=([^\]]{1,40})\](.*?)\[\/font\]/is', function ($m) {
-            $f = richtextSafeFont($m[1]);
-            return $f === null ? $m[2] : '<span class="rt-font-' . $f . '">' . $m[2] . '</span>';
-        }, $s);
-        $s = preg_replace_callback('/\[(?:highlight|mark)(?:=([^\]]{1,32}))?\](.*?)\[\/(?:highlight|mark)\]/is', function ($m) {
-            $c = ($m[1] ?? '') !== '' ? richtextSafeColor($m[1]) : null;
-            return '<mark class="rt-mark"' . ($c !== null ? ' style="background:' . $c . '"' : '') . '>' . $m[2] . '</mark>';
-        }, $s);
-
-        // ── alignment and rules ──
-        foreach (['center', 'right', 'left'] as $al) {
-            $s = preg_replace('/\[' . $al . '\](.*?)\[\/' . $al . '\]/is', '<div class="rt-' . $al . '">$1</div>', $s);
-        }
-        $s = preg_replace('/\[hr\]|\[hr\s*\/\]/i', '<hr class="rt-hr">', $s);
-
-        // ── quotes, with or without an author ──
-        // Longest form first: [quote=x] would otherwise be eaten by the bare [quote] pattern.
-        // The title group is `[^\]\n]{1,64}`, NOT `.{1,64}?`: a lazy dot-run could put the closing
-        // `]` at any of 64 positions and the engine retried the whole `(.*?)` scan for each of them,
-        // for every [quote= in the text — quadratic, and past ~15 600 characters PCRE gave up and
-        // returned NULL, which the next pattern turned into "" and the whole description vanished.
-        // Anchoring the title to "no ] inside" leaves one position per opener. The `?? $s` is the
-        // belt to that brace: if the engine ever gives up again, the text stays as it was.
-        $s = preg_replace_callback('/\[quote=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\](.*?)\[\/quote\]/is',
-            fn($m) => '<blockquote class="rt-quote"><cite class="rt-cite">' . trim($m[1]) . '</cite>' . $m[2] . '</blockquote>', $s) ?? $s;
-        $s = preg_replace('/\[quote\](.*?)\[\/quote\]/is', '<blockquote class="rt-quote">$1</blockquote>', $s) ?? $s;
-
-        // ── spoilers ──
-        $s = preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
-            fn($m) => '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s) ?? $s;
-        $s = preg_replace('/\[spoiler\](.*?)\[\/spoiler\]/is',
-            '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s) ?? $s;
-
-        // ── media and links ──
-        $s = preg_replace_callback('/\[img(?:=[^\]]*)?\](.*?)\[\/img\]/is', function ($m) {
-            $u = richtextSafeUrl(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
-            return $u === null ? '' : '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="" src="'
-                                    . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
-        }, $s);
-        // No iframe. An embedded player is a third-party frame that sees every visitor, and this
-        // site's own CSP forbids frame sources anyway — an <iframe> here would render as a blank box
-        // and quietly lie about working. A labelled link does what the author meant.
-        $s = preg_replace_callback('/\[(?:youtube|yt)\](.*?)\[\/(?:youtube|yt)\]/is', function ($m) use ($cfg) {
-            $id = richtextYoutubeId($m[1]);
-            if ($id === null) return $m[1];
-            $url = 'https://www.youtube.com/watch?v=' . $id;
-            $a = richtextLinkAttrs($url, $cfg);
-            // The platform's own mark before the words (1.68.0; it was a play-triangle character).
-            return $a === '' ? $url : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $id . '</a>';
-        }, $s);
-        // A new account's words (`rt_links_text`, see richtextLinkAttrs()): an address is words too.
-        $mailText = ($cfg['rt_links_text'] ?? '') === '1';
-        $s = preg_replace_callback('/\[email=([^\]]{1,190})\](.*?)\[\/email\]/is', function ($m) use ($mailText) {
-            $e = $mailText ? null : richtextSafeEmail($m[1]);
-            return $e === null ? $m[2] : '<a href="mailto:' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8')
-                                       . '" rel="nofollow noopener">' . $m[2] . '</a>';
-        }, $s);
-        $s = preg_replace_callback('/\[email\](.*?)\[\/email\]/is', function ($m) use ($mailText) {
-            $e = $mailText ? null : richtextSafeEmail($m[1]);
-            return $e === null ? $m[1] : '<a href="mailto:' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8')
-                                       . '" rel="nofollow noopener">' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8') . '</a>';
-        }, $s);
-        $s = preg_replace_callback('/\[url=([^\]]+)\](.*?)\[\/url\]/is', function ($m) use ($cfg) {
-            $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
-            return $a === '' ? $m[2] : '<a' . $a . '>' . $m[2] . '</a>';
-        }, $s);
-        $s = preg_replace_callback('/\[url\](.*?)\[\/url\]/is', function ($m) use ($cfg) {
-            $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
-            return $a === '' ? $m[1] : '<a' . $a . '>' . $m[1] . '</a>';
-        }, $s);
-
-        // ── lists, ordered and not ──
-        // [list=1] / [list=a] give an <ol>; the type is a class, because `type=` from author text is
-        // one more attribute nobody needs to be able to write.
-        $s = preg_replace_callback('/\[list=([^\]]{1,3})\](.*?)\[\/list\]/is', function ($m) {
-            $items = preg_split('/\[\*\]/', $m[2]);
-            array_shift($items);
-            if (!$items) return '';
-            $kind = preg_match('/^[aA]$/', trim($m[1])) ? 'alpha' : (preg_match('/^[iI]$/', trim($m[1])) ? 'roman' : 'num');
-            $li = '';
-            foreach ($items as $i) $li .= '<li>' . trim($i) . '</li>';
-            return '<ol class="rt-list rt-list-' . $kind . '">' . $li . '</ol>';
-        }, $s);
-        $s = preg_replace_callback('/\[list\](.*?)\[\/list\]/is', function ($m) {
-            $items = preg_split('/\[\*\]/', $m[1]);
-            array_shift($items);
-            if (!$items) return '';
-            $li = '';
-            foreach ($items as $i) $li .= '<li>' . trim($i) . '</li>';
-            return '<ul class="rt-list">' . $li . '</ul>';
-        }, $s);
-
-        // ── tables ──
-        // Built by walking the rows, not by rewriting each tag on its own. Turning [tr] into <tr>
-        // with a regex means an author who opens a row and never closes it emits a stray tag into
-        // the page; here anything that is not a well-formed row simply does not become one.
-        $s = preg_replace_callback('/\[table(?:=[^\]]*)?\](.*?)\[\/table\]/is', function ($m) {
-            $rows = '';
-            if (preg_match_all('/\[tr\](.*?)\[\/tr\]/is', $m[1], $rm)) {
-                foreach ($rm[1] as $rowSrc) {
-                    $cells = '';
-                    if (preg_match_all('/\[(th|td)\](.*?)\[\/\1\]/is', $rowSrc, $cm, PREG_SET_ORDER)) {
-                        foreach ($cm as $c) {
-                            $tag = strtolower($c[1]) === 'th' ? 'th' : 'td';
-                            $cells .= '<' . $tag . '>' . trim($c[2]) . '</' . $tag . '>';
-                        }
-                    }
-                    if ($cells !== '') $rows .= '<tr>' . $cells . '</tr>';
-                }
-            }
-            return $rows === '' ? '' : '<div class="rt-table-wrap"><table class="rt-table">' . $rows . '</table></div>';
-        }, $s);
-
-        // ── what we deliberately do not do ──
-        // [attach] needs an attachment store this project does not have. Left as plain text rather
-        // than silently deleted, so an author pasting a template from another forum can see why
-        // nothing appeared.
+        $s = richtextBbcodeRules($s, $cfg);
+    } elseif ($format === 'flarum') {
+        $s = richtextFlarumRules($s, $cfg);
     } else {
         // Markdown, the small useful half of it plus the GitHub-flavoured extensions people expect.
 
@@ -848,13 +727,15 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         $anchors[] = $m[0];
         return "\x00LINK" . (count($anchors) - 1) . "\x00";
     }, $s);
-    $s = preg_replace_callback('#(https?://[^\s<]+)#i', function ($m) use ($cfg) {
+    $s = preg_replace_callback('#(https?://[^\s<]+)#i', function ($m) use ($cfg, $format) {
+        if ($format === 'flarum' && ($media = richtextFlarumMedia($m[1], $cfg)) !== null) return $media;
         $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
         return $a === '' ? $m[1] : '<a' . $a . '>' . $m[1] . '</a>';
     }, $s);
     foreach ($anchors as $i => $html) {
         $s = str_replace("\x00LINK" . $i . "\x00", $html, $s);
     }
+    if ($format === 'flarum') $s = richtextFlarumGaps($s, $stash);
 
     // Paragraphs and breaks, last, so block tags above are not wrapped in <br>.
     //
@@ -883,6 +764,351 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     }
 
     return richtextParagraphs($s);
+}
+
+function richtextBbcodeRules(string $s, array $cfg): string {
+    // ── inline emphasis ──
+    $s = preg_replace('/\[b\](.*?)\[\/b\]/is', '<strong>$1</strong>', $s);
+    $s = preg_replace('/\[i\](.*?)\[\/i\]/is', '<em>$1</em>', $s);
+    $s = preg_replace('/\[u\](.*?)\[\/u\]/is', '<u>$1</u>', $s);
+    $s = preg_replace('/\[s\](.*?)\[\/s\]/is', '<s>$1</s>', $s);
+    $s = preg_replace('/\[sub\](.*?)\[\/sub\]/is', '<sub>$1</sub>', $s);
+    $s = preg_replace('/\[sup\](.*?)\[\/sup\]/is', '<sup>$1</sup>', $s);
+
+    // ── the tags that carry a value: colour, size, font, highlight ──
+    // Each one drops to plain text when the value is not in its closed set, rather than emitting
+    // a tag with something unchecked in a style attribute.
+    $s = preg_replace_callback('/\[color=([^\]]{1,32})\](.*?)\[\/color\]/is', function ($m) {
+        $c = richtextSafeColor($m[1]);
+        return $c === null ? $m[2] : '<span class="rt-color" style="color:' . $c . '">' . $m[2] . '</span>';
+    }, $s);
+    $s = preg_replace_callback('/\[size=([^\]]{1,12})\](.*?)\[\/size\]/is', function ($m) {
+        $px = richtextSafeSize($m[1]);
+        return $px === null ? $m[2] : '<span class="rt-size" style="font-size:' . $px . 'px">' . $m[2] . '</span>';
+    }, $s);
+    $s = preg_replace_callback('/\[font=([^\]]{1,40})\](.*?)\[\/font\]/is', function ($m) {
+        $f = richtextSafeFont($m[1]);
+        return $f === null ? $m[2] : '<span class="rt-font-' . $f . '">' . $m[2] . '</span>';
+    }, $s);
+    $s = preg_replace_callback('/\[(?:highlight|mark)(?:=([^\]]{1,32}))?\](.*?)\[\/(?:highlight|mark)\]/is', function ($m) {
+        $c = ($m[1] ?? '') !== '' ? richtextSafeColor($m[1]) : null;
+        return '<mark class="rt-mark"' . ($c !== null ? ' style="background:' . $c . '"' : '') . '>' . $m[2] . '</mark>';
+    }, $s);
+
+    // ── alignment and rules ──
+    foreach (['center', 'right', 'left'] as $al) {
+        $s = preg_replace('/\[' . $al . '\](.*?)\[\/' . $al . '\]/is', '<div class="rt-' . $al . '">$1</div>', $s);
+    }
+    $s = preg_replace('/\[hr\]|\[hr\s*\/\]/i', '<hr class="rt-hr">', $s);
+
+    // ── quotes, with or without an author ──
+    // Longest form first: [quote=x] would otherwise be eaten by the bare [quote] pattern.
+    // The title group is `[^\]\n]{1,64}`, NOT `.{1,64}?`: a lazy dot-run could put the closing
+    // `]` at any of 64 positions and the engine retried the whole `(.*?)` scan for each of them,
+    // for every [quote= in the text — quadratic, and past ~15 600 characters PCRE gave up and
+    // returned NULL, which the next pattern turned into "" and the whole description vanished.
+    // Anchoring the title to "no ] inside" leaves one position per opener. The `?? $s` is the
+    // belt to that brace: if the engine ever gives up again, the text stays as it was.
+    $s = preg_replace_callback('/\[quote=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\](.*?)\[\/quote\]/is',
+        fn($m) => '<blockquote class="rt-quote"><cite class="rt-cite">' . trim($m[1]) . '</cite>' . $m[2] . '</blockquote>', $s) ?? $s;
+    $s = preg_replace('/\[quote\](.*?)\[\/quote\]/is', '<blockquote class="rt-quote">$1</blockquote>', $s) ?? $s;
+
+    // ── spoilers ──
+    $s = preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
+        fn($m) => '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s) ?? $s;
+    $s = preg_replace('/\[spoiler\](.*?)\[\/spoiler\]/is',
+        '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s) ?? $s;
+
+    // ── media and links ──
+    $s = preg_replace_callback('/\[img(?:=[^\]]*)?\](.*?)\[\/img\]/is', function ($m) {
+        $u = richtextSafeUrl(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'));
+        return $u === null ? '' : '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="" src="'
+                                . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
+    }, $s);
+    // No iframe. An embedded player is a third-party frame that sees every visitor, and this
+    // site's own CSP forbids frame sources anyway — an <iframe> here would render as a blank box
+    // and quietly lie about working. A labelled link does what the author meant.
+    $s = preg_replace_callback('/\[(?:youtube|yt)\](.*?)\[\/(?:youtube|yt)\]/is', function ($m) use ($cfg) {
+        $id = richtextYoutubeId($m[1]);
+        if ($id === null) return $m[1];
+        $url = 'https://www.youtube.com/watch?v=' . $id;
+        $a = richtextLinkAttrs($url, $cfg);
+        // The platform's own mark before the words (1.68.0; it was a play-triangle character).
+        return $a === '' ? $url : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $id . '</a>';
+    }, $s);
+    // A new account's words (`rt_links_text`, see richtextLinkAttrs()): an address is words too.
+    $mailText = ($cfg['rt_links_text'] ?? '') === '1';
+    $s = preg_replace_callback('/\[email=([^\]]{1,190})\](.*?)\[\/email\]/is', function ($m) use ($mailText) {
+        $e = $mailText ? null : richtextSafeEmail($m[1]);
+        return $e === null ? $m[2] : '<a href="mailto:' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8')
+                                   . '" rel="nofollow noopener">' . $m[2] . '</a>';
+    }, $s);
+    $s = preg_replace_callback('/\[email\](.*?)\[\/email\]/is', function ($m) use ($mailText) {
+        $e = $mailText ? null : richtextSafeEmail($m[1]);
+        return $e === null ? $m[1] : '<a href="mailto:' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8')
+                                   . '" rel="nofollow noopener">' . htmlspecialchars($e, ENT_QUOTES, 'UTF-8') . '</a>';
+    }, $s);
+    $s = preg_replace_callback('/\[url=([^\]]+)\](.*?)\[\/url\]/is', function ($m) use ($cfg) {
+        $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
+        return $a === '' ? $m[2] : '<a' . $a . '>' . $m[2] . '</a>';
+    }, $s);
+    $s = preg_replace_callback('/\[url\](.*?)\[\/url\]/is', function ($m) use ($cfg) {
+        $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
+        return $a === '' ? $m[1] : '<a' . $a . '>' . $m[1] . '</a>';
+    }, $s);
+
+    $s = preg_replace_callback('/\[thxrow\](.*?)\[\/thxrow\]/is', function ($m) {
+        return richtextLabelRow($m[1]);
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/\[thxlabels(?:=(\d{1,2}))?\](.*?)\[\/thxlabels\]/is', function ($m) {
+        preg_match_all('/<div class="rt-labels-row">.*?<\/div>/s', $m[2], $rows);
+        $body = $rows[0] ? implode('', $rows[0]) : richtextLabelRow($m[2]);
+        if ($body === '') return '';
+        return '<div class="rt-labels rt-labels-c' . max(1, min(4, (int)($m[1] ?: 1))) . '">' . $body . '</div>';
+    }, $s) ?? $s;
+
+    // ── lists, ordered and not ──
+    // [list=1] / [list=a] give an <ol>; the type is a class, because `type=` from author text is
+    // one more attribute nobody needs to be able to write.
+    $s = preg_replace_callback('/\[list=([^\]]{1,3})\](.*?)\[\/list\]/is', function ($m) {
+        $items = preg_split('/\[\*\]/', $m[2]);
+        array_shift($items);
+        if (!$items) return '';
+        $kind = preg_match('/^[aA]$/', trim($m[1])) ? 'alpha' : (preg_match('/^[iI]$/', trim($m[1])) ? 'roman' : 'num');
+        $li = '';
+        foreach ($items as $i) $li .= '<li>' . trim($i) . '</li>';
+        return '<ol class="rt-list rt-list-' . $kind . '">' . $li . '</ol>';
+    }, $s);
+    $s = preg_replace_callback('/\[list\](.*?)\[\/list\]/is', function ($m) {
+        $items = preg_split('/\[\*\]/', $m[1]);
+        array_shift($items);
+        if (!$items) return '';
+        $li = '';
+        foreach ($items as $i) $li .= '<li>' . trim($i) . '</li>';
+        return '<ul class="rt-list">' . $li . '</ul>';
+    }, $s);
+
+    // ── tables ──
+    // Built by walking the rows, not by rewriting each tag on its own. Turning [tr] into <tr>
+    // with a regex means an author who opens a row and never closes it emits a stray tag into
+    // the page; here anything that is not a well-formed row simply does not become one.
+    $s = preg_replace_callback('/\[table(?:=[^\]]*)?\](.*?)\[\/table\]/is', function ($m) {
+        $rows = '';
+        if (preg_match_all('/\[tr\](.*?)\[\/tr\]/is', $m[1], $rm)) {
+            foreach ($rm[1] as $rowSrc) {
+                $cells = '';
+                if (preg_match_all('/\[(th|td)\](.*?)\[\/\1\]/is', $rowSrc, $cm, PREG_SET_ORDER)) {
+                    foreach ($cm as $c) {
+                        $tag = strtolower($c[1]) === 'th' ? 'th' : 'td';
+                        $cells .= '<' . $tag . '>' . trim($c[2]) . '</' . $tag . '>';
+                    }
+                }
+                if ($cells !== '') $rows .= '<tr>' . $cells . '</tr>';
+            }
+        }
+        return $rows === '' ? '' : '<div class="rt-table-wrap"><table class="rt-table">' . $rows . '</table></div>';
+    }, $s);
+
+    // ── what we deliberately do not do ──
+    // [attach] needs an attachment store this project does not have. Left as plain text rather
+    // than silently deleted, so an author pasting a template from another forum can see why
+    // nothing appeared.
+    return $s;
+}
+
+function richtextLabelRow(string $html): string {
+    if (!preg_match_all('/<img\b[^>]*>/', $html, $im)) return '';
+    $imgs = array_map(static fn(string $t): string => preg_replace('/^<img class="rt-img"/', '<img class="rt-img rt-label"', $t) ?? $t, $im[0]);
+    return '<div class="rt-labels-row">' . implode('', $imgs) . '</div>';
+}
+
+function richtextImgTag(string $url, string $alt = ''): string {
+    $u = richtextSafeUrl(html_entity_decode($url, ENT_QUOTES, 'UTF-8'));
+    if ($u === null) return '';
+    $alt = (string)preg_replace('/[\x03\x05\x06]\d+[\x03\x05\x06]/', '', $alt);
+    $alt = htmlspecialchars(html_entity_decode(strip_tags($alt), ENT_QUOTES, 'UTF-8'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    return '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="' . $alt . '" src="'
+         . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
+}
+
+function richtextFlarumAttrs(string $raw): array {
+    $out = [];
+    if (preg_match_all('/([a-z_]+)=(?:&quot;(.*?)&quot;|&#039;(.*?)&#039;|([^\s\]]*))/i', $raw, $mm, PREG_SET_ORDER)) {
+        foreach ($mm as $m) {
+            $out[strtolower($m[1])] = ($m[2] ?? '') !== '' ? $m[2] : ((($m[3] ?? '') !== '') ? $m[3] : ($m[4] ?? ''));
+        }
+    }
+    return $out;
+}
+
+function richtextFlarumCode(string $s, callable $keep): string {
+    $s = preg_replace_callback('/\[code(?:=[^\]\n]{0,32})?\](.*?)\[\/code\]/is',
+        fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $s) ?? $s;
+    $s = preg_replace_callback('/^[ \t]{0,3}(`{3,}|~{3,})[^\n`]*\n([\s\S]*?)\n[ \t]{0,3}\1[ \t]*$/m',
+        fn($m) => $keep('<pre class="rt-code"><code>' . $m[2] . '</code></pre>'), $s) ?? $s;
+    return preg_replace_callback('/(?<!`)(`+)(?!`)([^\n]+?)(?<!`)\1(?!`)/',
+        fn($m) => $keep('<code class="rt-inline">' . trim($m[2]) . '</code>'), $s) ?? $s;
+}
+
+function richtextFlarumRules(string $s, array $cfg): string {
+    $esc = [];
+    $s = preg_replace_callback('/\\\\(&(?:gt|lt|amp|quot|#039);|[\\\\`*_{}\[\]()#+\-.!~^|:@=])/', function ($m) use (&$esc) {
+        $esc[] = $m[1];
+        return "\x03" . (count($esc) - 1) . "\x03";
+    }, $s) ?? $s;
+    $s = preg_replace('/(?:^|\n)[ \t]*\[magnet\][\s\S]*?\[\/magnet\][ \t]*(?=\n|$)/i', '', $s) ?? $s;
+    $s = preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/i', '', $s) ?? $s;
+    $s = preg_replace('/@&quot;((?:(?!&quot;)[^\n]){1,64})&quot;#[pug]\d+/', '@$1', $s) ?? $s;
+    $s = preg_replace_callback('/\[upl-image-preview\b([^\]]*)\]/i', function ($m) {
+        $a = richtextFlarumAttrs($m[1]);
+        return richtextImgTag($a['url'] ?? '', $a['alt'] ?? '');
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/\[upl-image\b([^\]]*)\](.*?)\[\/upl-image\]/is', function ($m) {
+        return richtextImgTag(richtextFlarumAttrs($m[1])['url'] ?? '', $m[2]);
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/\[upl-text-preview\b([^\]]*)\](.*?)\[\/upl-text-preview\]/is', function ($m) use ($cfg) {
+        $a = richtextLinkAttrs(html_entity_decode(richtextFlarumAttrs($m[1])['url'] ?? '', ENT_QUOTES, 'UTF-8'), $cfg);
+        return $a === '' ? $m[2] : '<a' . $a . '>' . $m[2] . '</a>';
+    }, $s) ?? $s;
+    $s = preg_replace('/\[upl-file\b[^\]]*\](.*?)\[\/upl-file\]/is',
+        '<span class="rt-file"><i class="bi bi-paperclip" aria-hidden="true"></i> $1</span>', $s) ?? $s;
+    $s = preg_replace_callback('/\[img(=[^\]\s]*)?((?:\s+[a-z_]+=[^\]]*)?)\](.*?)\[\/img\]/is', function ($m) {
+        $a = richtextFlarumAttrs($m[2]);
+        $src = trim($m[3]) !== '' ? trim($m[3]) : substr($m[1], 1);
+        return richtextImgTag($src, $a['alt'] ?? ($a['title'] ?? ''));
+    }, $s) ?? $s;
+    $s = preg_replace('/\[quote\s+author=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\]/i', '[quote=$1]', $s) ?? $s;
+    $s = preg_replace('/\[spoiler\s+title=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\]/i', '[spoiler=$1]', $s) ?? $s;
+    $s = preg_replace('/\[del\](.*?)\[\/del\]/is', '<s>$1</s>', $s) ?? $s;
+    $s = richtextBbcodeRules($s, $cfg);
+    $s = richtextLitedownRules($s, $cfg);
+    return preg_replace_callback('/\x03(\d+)\x03/', fn($m) => $esc[(int)$m[1]] ?? '', $s) ?? $s;
+}
+
+function richtextLitedownRules(string $s, array $cfg): string {
+    $held = [];
+    $hold = function (string $html) use (&$held): string {
+        $held[] = $html;
+        return "\x05" . (count($held) - 1) . "\x05";
+    };
+    $s = preg_replace_callback('/<[^<>]*>/', fn($m) => $hold($m[0]), $s) ?? $s;
+    $s = preg_replace_callback('/&gt;!(?=\S)([^\n]*?\S)!&lt;|\|\|(?=\S)([^\n]*?\S)\|\|/', function ($m) use ($hold) {
+        return $hold('<span class="rt-ispoiler" tabindex="0">') . (($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '')) . $hold('</span>');
+    }, $s) ?? $s;
+
+    $refs = [];
+    $s = preg_replace_callback('/^[ \t]{0,3}\[([^\]\n]{1,100})\]:[ \t]*(https?:\/\/\S+)(?:[ \t]+(?:&quot;[^\n]*&quot;|&#039;[^\n]*&#039;|\([^\n]*\)))?[ \t]*$/mi',
+        function ($m) use (&$refs) {
+            $refs[mb_strtolower($m[1])] = $m[2];
+            return '';
+        }, $s) ?? $s;
+
+    $title = '(?:[ \t]+(?:&quot;[^\n]*?&quot;|&#039;[^\n]*?&#039;))?';
+    $s = preg_replace_callback('/!\[([^\]\n]*)\]\([ \t]*(\S+?)' . $title . '[ \t]*\)/', function ($m) use ($hold) {
+        $img = richtextImgTag($m[2], $m[1]);
+        return $img === '' ? $m[0] : $hold($img);
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/!\[([^\]\n]*)\]\[([^\]\n]*)\]/', function ($m) use ($hold, $refs) {
+        $url = $refs[mb_strtolower($m[2] !== '' ? $m[2] : $m[1])] ?? null;
+        $img = $url === null ? '' : richtextImgTag($url, $m[1]);
+        return $img === '' ? $m[0] : $hold($img);
+    }, $s) ?? $s;
+    $link = function (string $label, string $url, string $whole) use ($cfg, $hold): string {
+        $raw = html_entity_decode($url, ENT_QUOTES, 'UTF-8');
+        if (richtextSafeUrl($raw) === null) return $whole;
+        $a = richtextLinkAttrs($raw, $cfg);
+        return $a === '' ? $label : $hold('<a' . $a . '>') . $label . $hold('</a>');
+    };
+    $s = preg_replace_callback('/(?<!!)\[((?:[^\[\]\n]|\[[^\[\]\n]*\])*)\]\([ \t]*(\S+?)' . $title . '[ \t]*\)/',
+        fn($m) => $link($m[1], $m[2], $m[0]), $s) ?? $s;
+    if ($refs) {
+        $s = preg_replace_callback('/(?<!!)\[([^\[\]\n]+)\](?:\[([^\[\]\n]*)\])?/', function ($m) use ($link, $refs) {
+            $url = $refs[mb_strtolower(($m[2] ?? '') !== '' ? $m[2] : $m[1])] ?? null;
+            return $url === null ? $m[0] : $link($m[1], $url, $m[0]);
+        }, $s) ?? $s;
+    }
+    $s = preg_replace_callback('/&lt;(https?:\/\/(?:(?!&gt;)\S)+)&gt;/i', fn($m) => $link($m[1], $m[1], $m[0]), $s) ?? $s;
+
+    $urls = [];
+    $s = preg_replace_callback('#https?://[^\s\x05]+#i', function ($m) use (&$urls) {
+        $urls[] = $m[0];
+        return "\x06" . (count($urls) - 1) . "\x06";
+    }, $s) ?? $s;
+
+    $s = richtextLitedownBlocks($s, $hold, 0);
+
+    $s = preg_replace('/\*\*(?=\S)((?:(?!\n\n)[\s\S])+?)(?<=\S)\*\*/', '<strong>$1</strong>', $s) ?? $s;
+    $s = preg_replace('/(?<!\w)__(?=\S)((?:(?!\n\n)[\s\S])+?)(?<=\S)__(?!\w)/u', '<strong>$1</strong>', $s) ?? $s;
+    $s = preg_replace('/(?<![\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])/u', '<em>$1</em>', $s) ?? $s;
+    $s = preg_replace('/(?<![\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/u', '<em>$1</em>', $s) ?? $s;
+    $s = preg_replace('/~~(?=\S)([^\n]*?\S)~~/', '<s>$1</s>', $s) ?? $s;
+    $s = preg_replace('/\^\(([^()\n]+)\)/', '<sup>$1</sup>', $s) ?? $s;
+    $s = preg_replace('/\^([^\s^()<]+)/', '<sup>$1</sup>', $s) ?? $s;
+    $s = preg_replace('/(?<!~)~\(([^()\n]+)\)/', '<sub>$1</sub>', $s) ?? $s;
+    $s = preg_replace('/(?<!~)~([^\s~()<]+)/u', '<sub>$1</sub>', $s) ?? $s;
+
+    $s = preg_replace_callback('/\x06(\d+)\x06/', fn($m) => $urls[(int)$m[1]] ?? '', $s) ?? $s;
+    return preg_replace_callback('/\x05(\d+)\x05/', fn($m) => $held[(int)$m[1]] ?? '', $s) ?? $s;
+}
+
+function richtextLitedownBlocks(string $s, callable $hold, int $depth): string {
+    $s = preg_replace_callback('/(?:^[ \t]{0,3}&gt;[^\n]*(?:\n|$))+/m', function ($m) use ($hold, $depth) {
+        $lines = explode("\n", rtrim($m[0], "\n"));
+        $spoiler = true;
+        foreach ($lines as $l) {
+            if (!preg_match('/^[ \t]{0,3}&gt;!/', $l)) { $spoiler = false; break; }
+        }
+        $strip = $spoiler ? '/^[ \t]{0,3}&gt;![ \t]?/' : '/^[ \t]{0,3}&gt;[ \t]?/';
+        $inner = implode("\n", array_map(fn($l) => (string)preg_replace($strip, '', $l), $lines));
+        if ($depth < 4) $inner = richtextLitedownBlocks($inner, $hold, $depth + 1);
+        return ($spoiler
+            ? $hold('<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">')
+              . $inner . $hold('</div></details>')
+            : $hold('<blockquote class="rt-quote">') . $inner . $hold('</blockquote>')) . "\n";
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/^[ \t]{0,3}(#{1,6})[ \t]+([^\n]*?)(?:[ \t]+#+)?[ \t]*$/m', function ($m) use ($hold) {
+        $tag = strlen($m[1]) <= 2 ? 'h4' : (strlen($m[1]) <= 5 ? 'h5' : 'h6');
+        return $hold('<' . $tag . ' class="rt-h">') . $m[2] . $hold('</' . $tag . '>');
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/^([^\x00\x01\x05\n][^\n]*)\n[ \t]{0,3}(=+|-+)[ \t]*$/m', function ($m) use ($hold) {
+        if (trim($m[1]) === '') return $m[0];
+        $tag = $m[2][0] === '=' ? 'h4' : 'h5';
+        return $hold('<' . $tag . ' class="rt-h">') . trim($m[1]) . $hold('</' . $tag . '>');
+    }, $s) ?? $s;
+    $s = preg_replace_callback('/^[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/m',
+        fn() => $hold('<hr class="rt-hr">'), $s) ?? $s;
+    $list = function (array $m, string $marker, string $open, string $close) use ($hold): string {
+        $li = '';
+        foreach (explode("\n", rtrim($m[0], "\n")) as $line) {
+            $li .= $hold('<li>') . (string)preg_replace($marker, '', $line) . $hold('</li>');
+        }
+        return $hold($open) . $li . $hold($close) . "\n";
+    };
+    $s = preg_replace_callback('/(?:^[ \t]*[-*+][ \t]+[^\n]*(?:\n|$))+/m',
+        fn($m) => $list($m, '/^[ \t]*[-*+][ \t]+/', '<ul class="rt-list">', '</ul>'), $s) ?? $s;
+    return preg_replace_callback('/(?:^[ \t]*\d{1,9}[.)][ \t]+[^\n]*(?:\n|$))+/m',
+        fn($m) => $list($m, '/^[ \t]*\d{1,9}[.)][ \t]+/', '<ol class="rt-list rt-list-num">', '</ol>'), $s) ?? $s;
+}
+
+function richtextFlarumMedia(string $raw, array $cfg): ?string {
+    $url = html_entity_decode($raw, ENT_QUOTES, 'UTF-8');
+    if (preg_match('#^https?://[^?\#\s]+\.(?:jpe?g|png|gif|webp|avif)(?:[?\#]\S*)?$#i', $url)) {
+        $img = richtextImgTag($raw);
+        return $img === '' ? null : $img;
+    }
+    if (!preg_match('#^https?://(?:www\.|m\.)?(?:youtube\.com/(?:watch\?(?:\S*?&)?v=|shorts/|embed/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])#i', $url, $m)) {
+        return null;
+    }
+    $a = richtextLinkAttrs('https://www.youtube.com/watch?v=' . $m[1], $cfg);
+    return $a === '' ? null : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $m[1] . '</a>';
+}
+
+function richtextFlarumGaps(string $s, array $stash): string {
+    return preg_replace_callback('/\n*(<\/?(?:div|h[1-6]|ul|ol|li|pre|blockquote|table|details|summary)\b[^>]*>|<hr\b[^>]*>|\x00CODE(\d+)\x00|\x01HIDE\d+\x01)\n*/',
+        function ($m) use ($stash) {
+            if (($m[2] ?? '') !== '' && !str_starts_with($stash[(int)$m[2]] ?? '', '<pre')) return $m[0];
+            return $m[1];
+        }, $s) ?? $s;
 }
 
 /**
@@ -1079,8 +1305,11 @@ function richtextExcerpt(?string $text, int $len = 160): string {
     // at the token was not enough -- `[hide]a[/hide] SECRET[/hide]` leaves a stray CLOSER with the
     // secret sitting in FRONT of it, so the cut kept precisely the part meant to be private.
     if (preg_match('/\[\/?(?:hide|postshide)\b/i', $s)) return '';
+    $s = preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/i', ' ', $s) ?? $s;
+    $s = preg_replace('/@"([^"\n]{1,64})"#[pug]\d+/', '@$1', $s) ?? $s;
     $s = trim(preg_replace('/\s+/', ' ', strip_tags($s)) ?? '');
     $s = preg_replace('/\[\/?[a-z][^\]]*\]/i', '', $s) ?? $s;
+    $s = preg_replace('/\\\\(?=[\\\\`*_{}\[\]()#+\-.!~^|:@=<>])/', '', $s) ?? $s;
     $s = preg_replace('/[*_`#>~]+/', '', $s) ?? $s;
     $s = trim($s);
     return mb_strlen($s) > $len ? mb_substr($s, 0, $len - 1) . '…' : $s;

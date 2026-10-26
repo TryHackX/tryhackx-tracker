@@ -24,7 +24,7 @@
  * functions the save and every reader ask), so an answer they may not give is drawn disabled, with the line
  * that says why; a list that already has it keeps it until its owner chooses another.
  */
-$leFormats = function_exists('richtextFormats') ? richtextFormats($cfg) : ['bbcode'];
+$leFormats = function_exists('richtextFormats') ? richtextFormats($cfg, 'list') : ['bbcode'];
 $leCtx = listsContext($db, $cfg, currentUser($db));
 $leVis = [
     'private' => ['icon' => 'bi-lock', 'ok' => true],

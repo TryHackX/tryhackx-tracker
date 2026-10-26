@@ -143,8 +143,12 @@ add('js.app', {
         '— poprawny'),
     'hint_bbcode': ('BBCode: [b] [i] [u] [s] [color=#hex] [size=18] [font] [center] [right] [hr] [quote=Name] [list] [list=1] [table] [spoiler=Title] [sub] [sup] [highlight] [url] [img] [email] [youtube] [hide]. Ctrl+B / Ctrl+I / Ctrl+K.',
         'BBCode: [b] [i] [u] [s] [color=#hex] [size=18] [font] [center] [right] [hr] [quote=Nazwa] [list] [list=1] [table] [spoiler=Tytuł] [sub] [sup] [highlight] [url] [img] [email] [youtube] [hide]. Ctrl+B / Ctrl+I / Ctrl+K.'),
+    'hint_flarum': ('Flarum, as on the forum: Markdown and BBCode together — ## heading, **bold** or [b]bold[/b], [center], [img], [thxlabels=3][thxrow][img]…[/img][/thxrow][/thxlabels], >!spoiler!<, ___ line, \\~ for a plain tilde. [magnet] is left out. Ctrl+B / Ctrl+I / Ctrl+K.',
+        'Flarum, jak na forum: Markdown i BBCode razem — ## nagłówek, **pogrubienie** albo [b]pogrubienie[/b], [center], [img], [thxlabels=3][thxrow][img]…[/img][/thxrow][/thxlabels], >!spoiler!<, linia ___, \\~ dla zwykłej tyldy. [magnet] jest pomijany. Ctrl+B / Ctrl+I / Ctrl+K.'),
     'hint_markdown': ('Markdown: **bold**, *italic*, ~~strike~~, ==mark==, # heading, - list, 1. list, - [ ] task, > quote, > [!NOTE], `code`, tables, [^footnote], ||spoiler||, :rocket:, [text](url), ![](image). Ctrl+B / Ctrl+I / Ctrl+K.',
         'Markdown: **pogrubienie**, *kursywa*, ~~przekreślenie~~, ==zaznaczenie==, # nagłówek, - lista, 1. lista, - [ ] zadanie, > cytat, > [!NOTE], `kod`, tabele, [^przypis], ||spoiler||, :rocket:, [tekst](url), ![](obraz). Ctrl+B / Ctrl+I / Ctrl+K.'),
+    'switched_flarum': ('That looks like a post from the forum, so the format is now Flarum.',
+        'To wygląda na post z forum, więc format przełączono na Flarum.'),
     'info': ('Info',
         'Info'),
     'info_title': ('What this is, where it came from, and how the swarm looks',
@@ -4700,6 +4704,8 @@ add('js.shout', {
     'lb_label':    ('Picture', 'Obrazek'),
     'lb_close':    ('Close', 'Zamknij'),
     'lb_original': ('Open the original', 'Otwórz oryginał'),
+    'lb_prev':     ('Previous picture', 'Poprzedni obrazek'),
+    'lb_next':     ('Next picture', 'Następny obrazek'),
 })
 add('js.app', {
     'files_cut_title': ('There are more files here that this list did not load',

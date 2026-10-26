@@ -198,7 +198,7 @@ function listDescProblem(string $clean, string $format, array $cfg): ?array
     if (mb_strlen($clean, 'UTF-8') > $cap || strlen($clean) > LIST_DESC_SOURCE_BYTES) {
         return ['code' => 'too_long_source', 'vars' => ['max' => $cap]];
     }
-    if (!in_array($format, richtextFormats($cfg), true)) return ['code' => 'bad_format', 'vars' => []];
+    if (!in_array($format, richtextFormats($cfg, 'list'), true)) return ['code' => 'bad_format', 'vars' => []];
     $n = listDescVisible($clean, $format);
     $max = listsDescMax($cfg);
     if ($n > $max) return ['code' => 'too_long', 'vars' => ['n' => $n, 'max' => $max]];
@@ -316,7 +316,7 @@ function listEditRequest(PDO $db, array $cfg, array $me, array $own, array $inpu
     $fmt = $fmtIn === null || $fmtIn === '' ? $wasFmt : $fmtIn;
     if ($desc === '') {
         // Nothing written has no syntax to refuse: kept in the one asked for when it is one the site takes.
-        $allowed = richtextFormats($cfg);
+        $allowed = richtextFormats($cfg, 'list');
         $fmt = in_array($fmt, $allowed, true) ? $fmt : ($allowed[0] ?? 'bbcode');
     } elseif ($desc !== $wasText || $fmt !== $wasFmt) {
         // Silenced by a moderator (messages, the room and the profile's description obey it already): a

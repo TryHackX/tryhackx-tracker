@@ -2325,6 +2325,7 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .rt-tab:hover { color: var(--text); background: rgba(255,255,255,0.05); }
 .rt-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); }
 .rt-counter { margin-left: auto; font-size: 0.75rem; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rt-counter.rt-counter-over { color: #e57373; font-weight: 600; }
 /* width:auto beats the .form-group select rule this control would otherwise inherit */
 .rt-format, .rt-format-fixed { margin-left: 0.5rem; font-size: 0.78rem; }
 .form-group .rt-editor select.rt-format {
@@ -4481,9 +4482,27 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .shout-lb-close:focus { outline: none; }
 .shout-lb-close:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 /* No hover on this device, so "on hover" would mean "never". */
-@media (hover: none) {
-    .shout-lb-orig, .shout-lb-close { opacity: 1; pointer-events: auto; }
+.shout-lb-prev, .shout-lb-next {
+    position: absolute; top: 50%; transform: translateY(-50%); opacity: 0; pointer-events: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.75rem; height: 3.5rem; padding: 0; color: #fff; line-height: 1;
+    background: rgba(0, 0, 0, 0.45); border: 0; border-radius: 6px; font-size: 1.4rem; cursor: pointer;
+    transition: opacity 0.15s, color 0.15s;
 }
+.shout-lb-prev { left: 0.4rem; }
+.shout-lb-next { right: 0.4rem; }
+.shout-lb-prev[hidden], .shout-lb-next[hidden] { display: none; }
+.shout-lb-frame:hover .shout-lb-prev, .shout-lb-frame:hover .shout-lb-next,
+.shout-lb-frame:focus-within .shout-lb-prev, .shout-lb-frame:focus-within .shout-lb-next {
+    opacity: 1; pointer-events: auto;
+}
+.shout-lb-prev:hover, .shout-lb-next:hover { color: var(--accent); }
+.shout-lb-prev:focus-visible, .shout-lb-next:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+@media (hover: none) {
+    .shout-lb-orig, .shout-lb-close, .shout-lb-prev, .shout-lb-next { opacity: 1; pointer-events: auto; }
+}
+.rt-body .rt-img { cursor: zoom-in; }
+.rt-body a .rt-img { cursor: pointer; }
 
 /* ── ?action=emotes ──────────────────────────────────────────────────────────
    A GRID rather than a wrapped row of fixed-width boxes: with `flex-wrap` the last line of tiles sat

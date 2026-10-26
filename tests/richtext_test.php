@@ -201,7 +201,7 @@ check('too many images are refused, counting both syntaxes',
 check('a format the operator has switched off is refused',
       richtextValidate('x', 'markdown', ['desc_allow_markdown' => '0', 'desc_allow_bbcode' => '1']) !== null);
 check('with both formats off, bbcode is still offered rather than nothing',
-      richtextFormats(['desc_allow_bbcode' => '0', 'desc_allow_markdown' => '0']) === ['bbcode']);
+      richtextFormats(['desc_allow_bbcode' => '0', 'desc_allow_markdown' => '0', 'desc_allow_flarum' => '0']) === ['bbcode']);
 
 /* ── 9. the excerpt is plain text ─────────────────────────────────────────── */
 
@@ -567,6 +567,128 @@ foreach ($xp->query('//*') as $any) {
 }
 check('read through a DOM, hostile input yields pictures with only their own attributes and classes, and no element anywhere a script or a handler',
       $imgBad === [] && $xp->query('//img[@class="rt-emote"]')->length >= 3, implode(', ', $imgBad) . ' | ' . substr($hd, 0, 300));
+
+$cfgF = array_merge($cfg, ['desc_allow_flarum' => '1', 'desc_max_images' => '20', 'desc_max_links' => '20']);
+check('flarum: offered for descriptions only when switched on, and not yet for lists, reports, mail or pages',
+      !in_array('flarum', richtextFormats(array_merge($cfg, ['desc_allow_flarum' => '0'])), true) && in_array('flarum', richtextFormats($cfgF), true)
+      && in_array('flarum', richtextFormats($cfg), true)
+      && !in_array('flarum', richtextFormats($cfgF, 'list'), true) && !in_array('flarum', richtextFormats($cfgF, 'report'), true)
+      && !in_array('flarum', richtextFormats($cfgF, 'mail'), true) && !in_array('flarum', richtextFormats($cfgF, 'page'), true));
+check('flarum: with BBCode and Markdown both off, BBCode is still offered beside it',
+      richtextFormats(array_merge($cfgF, ['desc_allow_bbcode' => '0', 'desc_allow_markdown' => '0'])) === ['bbcode', 'flarum']);
+check('flarum: the format has its own name for the editor', richtextFormatLabel('flarum') === 'Flarum' && richtextFormatLabel('x') === 'BBCode');
+
+$post = "[center]\n## Big Buck Bunny (2008) [1.2 GiB] [AVC] [Full]\n[/center]\n\n### Quick look:\n"
+      . "[b]Title:[/b] Big Buck Bunny\n[b]Runtime:[/b] \\~10 min, [b]Type:[/b] WEB-DL\n"
+      . "[magnet]magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=bbb&tr=udp%3A%2F%2Fx[/magnet]\n___\n\n"
+      . "### Labels:\n[thxlabels=3][thxrow][img]https://example.org/a.jpg[/img][img]https://example.org/b.jpg[/img]"
+      . "[img]https://example.org/c.jpg[/img][/thxrow][thxrow][img]https://example.org/d.jpg[/img][img]https://example.org/e.jpg[/img]"
+      . "[/thxrow][/thxlabels]\n\n### Cast:\n[code]\nBunny as himself\n[/code]\n\n* [b]Files:[/b] 1\n* [b]Years:[/b] 2008\n\n---\n\n"
+      . "### Preview:\n[center]https://www.youtube.com/watch?v=aqz-KE-bpKQ[/center]\nhttps://example.org/poster.png\n\n"
+      . "### More labels:\n[thxlabels=1][thxrow][img]https://example.org/f.jpg[/img][/thxrow][/thxlabels]\n";
+$h = richtextRender($post, 'flarum', $cfgF, true);
+check('flarum: a heading inside [center] is a centred heading, its literal [brackets] kept as words',
+      str_contains($h, '<div class="rt-center"><h4 class="rt-h">Big Buck Bunny (2008) [1.2 GiB] [AVC] [Full]</h4></div>'), substr($h, 0, 300));
+check('flarum: ### is a heading and [b] is bold, side by side as on the forum',
+      str_contains($h, '<h5 class="rt-h">Quick look:</h5>') && str_contains($h, '<strong>Title:</strong> Big Buck Bunny'));
+check('flarum: \\~ is a plain tilde — no backslash and no subscript',
+      str_contains($h, '~10 min') && !str_contains($h, '\\~') && !str_contains($h, '<sub>10'));
+check('flarum: the magnet is left out entirely — no link, no text, no empty line where it stood',
+      !str_contains($h, 'magnet:') && !str_contains($h, 'btih') && !str_contains($h, 'WEB-DL<br><br>'));
+check('flarum: ___ and a --- after a blank line are rules', substr_count($h, '<hr class="rt-hr">') === 2, (string)substr_count($h, '<hr'));
+check('flarum: label grids in two places, each its own block — three and two, then one',
+      preg_match_all('/<div class="rt-labels rt-labels-c(\d)">/', $h, $lm) === 2 && $lm[1] === ['3', '1']
+      && substr_count($h, '<div class="rt-labels-row">') === 3 && substr_count($h, 'class="rt-img rt-label"') === 6);
+check('flarum: [code] keeps its lines, and lines of * [b]…[/b] are a list',
+      str_contains($h, '<pre class="rt-code"><code>Bunny as himself</code></pre>')
+      && str_contains($h, '<ul class="rt-list"><li><strong>Files:</strong> 1</li><li><strong>Years:</strong> 2008</li></ul>'));
+check('flarum: a bare YouTube address is the YouTube link, a bare picture address is the picture',
+      str_contains($h, 'class="rt-video"') && str_contains($h, 'watch?v=aqz-KE-bpKQ') && str_contains($h, 'src="https://example.org/poster.png"'));
+$cnt = richtextCount($post, 'flarum', $cfgF);
+check('flarum: the counters see seven pictures and one link (the magnet is none)', $cnt === ['images' => 7, 'links' => 1], json_encode($cnt));
+check('flarum: no line break is left hanging beside a block', !preg_match('#<div class="rt-center"><br>|</h[45]><br>|<br></div>#', $h), $h);
+check('flarum: sixty such posts in one description render in one go',
+      str_contains(richtextRender(str_repeat($post, 60), 'flarum', $cfgF, true), 'Quick look:'));
+
+$md = "**b1** __b2__ *i1* _i2_ ~~gone~~ x^2 H~2O snake_case_word\n"
+    . ">!secret!< and ||hush||\n\n>! block spoiler\n\n> quote\n> > nested\n\nSetext\n===\n\n"
+    . "[site](https://example.org \"t\") ![pic](https://example.org/p.png) <https://example.org/x> [ref][1] [Full]\n\n"
+    . "[1]: https://example.org/r\n\n@\"Some One\"#p12 said\n"
+    . "[upl-image-preview uuid=1 url=https://example.org/u.png alt=up] [upl-file uuid=2 size=10KB]notes.txt[/upl-file]\n"
+    . "[quote author=Ann]hi[/quote] [spoiler title=Plot]twist[/spoiler] [del]old[/del] [code=php]echo 1;[/code]\n"
+    . "```js\nlet a = 1;\n```\n";
+$m = richtextRender($md, 'flarum', $cfgF, true);
+check('flarum: ** and __ are bold, * and _ italic, ~~ struck — and an underscore inside a word is part of it',
+      str_contains($m, '<strong>b1</strong>') && str_contains($m, '<strong>b2</strong>') && str_contains($m, '<em>i1</em>')
+      && str_contains($m, '<em>i2</em>') && str_contains($m, '<s>gone</s>') && str_contains($m, 'snake_case_word'), $m);
+check('flarum: ^ and ~ raise and lower what follows, as the forum does', str_contains($m, 'x<sup>2</sup>') && str_contains($m, 'H<sub>2O</sub>'), $m);
+check('flarum: >!…!< and ||…|| hide words inside a line, >! hides a block',
+      substr_count($m, '<span class="rt-ispoiler" tabindex="0">') === 2 && str_contains($m, '<details class="rt-spoiler">'), $m);
+check('flarum: > quotes, one inside another',
+      str_contains($m, '<blockquote class="rt-quote">quote<blockquote class="rt-quote">nested</blockquote></blockquote>'), $m);
+check('flarum: === under a line makes it a heading', str_contains($m, '<h4 class="rt-h">Setext</h4>'), $m);
+check('flarum: links with a title, pictures, <address> and a reference resolve; a bracketed word with no reference stays words',
+      str_contains($m, '>site</a>') && str_contains($m, 'src="https://example.org/p.png"') && str_contains($m, 'href="https://example.org/x"')
+      && str_contains($m, 'href="https://example.org/r"') && str_contains($m, '[Full]') && !str_contains($m, '[1]: https'), $m);
+check('flarum: a mention reads as the name', str_contains($m, '@Some One said') && !str_contains($m, '#p12'), $m);
+check('flarum: an uploaded picture shows, an uploaded file is named',
+      str_contains($m, 'src="https://example.org/u.png"') && str_contains($m, '<span class="rt-file">') && str_contains($m, 'notes.txt'), $m);
+check('flarum: [quote author=], [spoiler title=], [del], [code=…] and a fenced block',
+      str_contains($m, '<cite class="rt-cite">Ann</cite>') && str_contains($m, 'Plot</summary>') && str_contains($m, '<s>old</s>')
+      && str_contains($m, '<code>echo 1;</code>') && str_contains($m, '<code>let a = 1;</code>'), $m);
+
+$fAttacks = [
+    '[img]javascript:alert(1)[/img]', '[img alt="x&quot; onerror=&quot;alert(1)"]https://e.org/a.png[/img]',
+    '![x" onerror="alert(1)](https://e.org/a.png)', '[x](javascript:alert(1))', '<script>alert(1)</script>',
+    '[upl-image-preview url=javascript:alert(1)]', '[upl-image-preview url="https://e.org/a.png" alt="\" onerror=\"alert(1)"]',
+    '[upl-text-preview url=javascript:alert(1)]x[/upl-text-preview]',
+    '[thxlabels=3"><script>alert(1)</script>][thxrow][img]https://e.org/a.png[/img][/thxrow][/thxlabels]',
+    '[thxlabels=9][thxrow]<img src=x onerror=alert(1)>[/thxrow][/thxlabels]', '@"<img src=x onerror=alert(1)>"#p1',
+    '[url=https://e.org/" onmouseover="alert(1)]x[/url]', '<https://e.org/"onmouseover="alert(1)>',
+    "[r]: javascript:alert(1)\n[x][r]", '||<script>alert(1)</script>||', '>!<b onclick=alert(1)>x</b>!<',
+    '\\<script\\>alert(1)\\</script\\>', 'https://e.org/x.png" onerror="alert(1)', '[img=javascript:alert(1)][/img]',
+    '[quote author="<script>"]x[/quote]', '[spoiler title="<img src=x onerror=alert(1)>"]x[/spoiler]',
+    "```\n<script>alert(1)</script>\n```", '`<img src=x onerror=alert(1)>`', '![a](https://e.org/a.png "<script>")',
+];
+$fAll = richtextRender(implode("\n\n", $fAttacks), 'flarum', $cfgF, true);
+$fDom = new DOMDocument();
+@$fDom->loadHTML('<?xml encoding="UTF-8"><div id="root">' . $fAll . '</div>', LIBXML_NOERROR | LIBXML_NOWARNING);
+$fBad = [];
+foreach ((new DOMXPath($fDom))->query('//*') as $node) {
+    if (in_array($node->nodeName, ['script', 'iframe', 'object', 'embed', 'svg', 'style', 'form'], true)) $fBad[] = $node->nodeName;
+    foreach ($node->attributes as $at) {
+        $an = strtolower($at->name);
+        if (str_starts_with($an, 'on') || $an === 'style') $fBad[] = $node->nodeName . '@' . $an;
+        if (in_array($an, ['href', 'src'], true) && !preg_match('#^(https?://|mailto:|\#)#i', $at->value)) $fBad[] = $node->nodeName . '@' . $an . '=' . $at->value;
+    }
+}
+check('flarum: read through a DOM, every attack is words — no script, no handler, no style, no address but http(s)', $fBad === [], implode(', ', $fBad));
+
+$fSlow = [];
+foreach ([['**', 4000], ['__', 4000], ['~', 4000], ['^', 4000], ['||', 4000], ['&gt;!', 2000], ['[thxlabels=3][thxrow]', 1000],
+          ['[magnet]', 2000], ['`', 4000], ["___\n", 2000], ["> ", 2000], ['[x](', 2000], ['![', 2000], ['\\', 4000]] as [$tok, $rep]) {
+    $t0 = microtime(true);
+    $out = richtextRender(str_repeat($tok, $rep), 'flarum', $cfgF, false);
+    $ms = (microtime(true) - $t0) * 1000;
+    if ($ms > 2000 || $out === '') $fSlow[] = $tok . ' x' . $rep . ' = ' . round($ms) . 'ms' . ($out === '' ? ' (empty)' : '');
+}
+check('flarum: pathological input neither hangs the renderer nor empties the description', $fSlow === [], implode(', ', $fSlow));
+
+$bb = richtextRender("[thxlabels=2][thxrow][img]https://example.org/a.jpg[/img][img]https://example.org/b.jpg[/img][/thxrow][/thxlabels]\n"
+                   . "[magnet]magnet:?xt=urn:btih:abc[/magnet]", 'bbcode', $cfg, true);
+check('bbcode: [thxlabels] is a label grid there too, and [magnet] stays the words it is (only the forum format leaves it out)',
+      str_contains($bb, '<div class="rt-labels rt-labels-c2"><div class="rt-labels-row">') && str_contains($bb, '[magnet]magnet:?xt=urn:btih:abc[/magnet]'), $bb);
+check('excerpt: a forum post loses its magnet and its backslashes',
+      !str_contains(richtextExcerpt($post, 400), 'magnet:') && !str_contains(richtextExcerpt($post, 400), '\\'), richtextExcerpt($post, 400));
+$fMail = richtextRenderForEmail($post, 'flarum', $cfgF);
+check('mail: the label grid keeps its shape as inline styles', str_contains($fMail, 'max-width:31%') && !str_contains($fMail, 'rt-labels'));
+
+require_once $root . '/includes/schema.php';
+$fStmts = implode("\n", array_map(fn($x) => is_array($x) ? implode("\n", $x) : (string)$x, trackerSchemaStatements()));
+check('schema: every home of a description can store the flarum format',
+      substr_count($fStmts, "`description_format` ENUM('markdown','bbcode','flarum')") >= 3
+      && !str_contains($fStmts, "`description_format` ENUM('markdown','bbcode') "));
+check('schema: the switch has a default, and it is on', (trackerSchemaDefaultSettings()['desc_allow_flarum'] ?? null) === '1');
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

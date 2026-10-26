@@ -23,7 +23,7 @@ $out = [
     // a ban with no end date is the owner's, from the Users page: lifting it here needs the Users page's right as well
     'may_dateless' => panelCan($db, $cfg, 'panel.users.edit'),
     'enabled' => ($cfg['auto_penalties_enabled'] ?? '0') === '1',
-    'formats' => function_exists('richtextFormats') ? richtextFormats($cfg) : [],
+    'formats' => function_exists('richtextFormats') ? richtextFormats($cfg, 'report') : [],
 ];
 
 try {
