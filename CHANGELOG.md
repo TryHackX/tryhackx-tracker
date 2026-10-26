@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.77.0] — 2026-10-26
+
+Pictures: uploaded in the description editor and kept by the site itself, in comments as thumbnails, copied from an API key's own domains, and all of them on a panel page of their own; a YouTube link can play in place. Schema 96.
+
+- **Pictures uploaded into a description.** The description editors (registering a torrent, and the Info panel's
+  description and its rewrite proposals) have a Pictures bar: paste a screenshot, drop files on the box or pick them, and
+  each one goes in where the cursor or the drop was. My pictures lists what you uploaded, with copy link, copy BBCode and
+  delete, and Insert as labels turns the ones you tick into a `[thxlabels]` grid with even rows. Uploading is the new
+  `content.images` permission, which members get on update.
+- **Kept by the site, not by somebody else's server.** A picture is checked by its bytes, turned the right way up,
+  stripped of its metadata (a phone's location among it), scaled to the longest edge allowed and stored as WebP in the
+  database, in a page size (up to 960 px) and a full size for the viewer; an animated GIF stays animated. The same file
+  is stored once. Its address, `/i/<id>-<width>x<height>.webp`, carries its size, so a description no longer jumps while
+  its pictures load. Until a published description, a page or a visible comment shows it, only its uploader and the
+  moderators can open it, so the site does not become anybody's free picture host.
+- **Limits** in Settings → Formatting & images → Pictures: the largest file (8 MB), the longest edge kept (2048 px), the
+  most megapixels (24), the WebP quality (82), uploads per account in 24 hours (60) and space per account (250 MB);
+  pictures nothing uses are removed after 48 hours. PHP's upload limits on the server cap the file size as well.
+- **Pictures in comments.** A member with the new `comment.images` permission (members get it on update, a guest never)
+  may put `[img]` into a comment. A picture from this site is a thumbnail of at most 360 × 240 px that loads after the
+  thread is drawn and opens full size in the viewer; one longer than eight to one is a link to it; a picture from any
+  other site is a link, so a reader never loads anything from a server nobody chose. A picture's address pasted into the
+  comment box shows under the box with an × to take it out. Settings → Formatting & images → Pictures in comments:
+  uploading (off as shipped; on, the box gets the Pictures bar and a pasted or dropped file is uploaded), pictures from
+  links (on), pictures per comment (18), the largest uploaded file (4 MB) and the thumbnail's size. Notifications quote
+  a picture as "[picture]".
+- **Pictures from an API key's domains are copied here.** A key has a new field, Image domains (for the forum's key, the
+  forum's domain). Pictures from those domains and their subdomains in descriptions and comments are copied into the
+  site's store in the background, once per address, and their addresses changed to the site's own. Nothing is
+  downloaded from any other site: a description keeps such a picture's address, a comment shows it as a link. A copy is
+  fetched only over http or https on ports 80 and 443, from an address checked to be public (every one the name resolves
+  to) and pinned for the download, with no redirects, a 15-second limit and the size limit; a failure is tried again
+  later, five times at most.
+- **The panel's Images page** lists every picture: whose it is or where it was copied from, its sizes, when it came and
+  whether it is public, found by member, file name, address or number. Where is it used opens the descriptions,
+  proposals, comments and pages that show it; Delete asks first, says how many places will show an empty space, and is
+  written to the log. Its Copying tab is the queue of copies, with the reason a copy failed, Try again and Remove from
+  the queue. The two permissions, `panel.images.view` and `panel.images.manage`, are the moderators' on update.
+- **A YouTube link can play in place.** Settings → Formatting & images → YouTube links: a link as before (the default), a
+  player that loads when clicked, or a thumbnail and that player. The player is YouTube's privacy-enhanced one
+  (youtube-nocookie.com), and nothing comes from YouTube before the click except the thumbnail of the last option. It
+  works in descriptions, pages and private messages; everywhere else, and in mail, the link stays a link.
+- **Schema 96** adds the picture tables (the stored files, the pictures, the day's uploads, the copying queue) and the
+  image domains of an API key, and grants the four new permissions. It runs by itself at the first request after the
+  update.
+
 ## [1.76.0] — 2026-10-26
 
 Address lists on the Traffic page can be edited; a post copied from the forum reads on the tracker as it does on the forum, label grids and all; every place that takes formatted text has its own formats in Settings; the seeds and peers refresh is shared and limited per address. Schema 95.
