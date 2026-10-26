@@ -999,15 +999,17 @@
      */
     function listDescStrip(text, fmt) {
         var s = String(text || '').replace(/\r\n?/g, '\n');
-        if (fmt === 'markdown') {
+        if (fmt === 'flarum') s = s.replace(/\[magnet\][\s\S]*?\[\/magnet\]/gi, '');
+        if (fmt !== 'markdown') {
+            s = s.replace(/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/gi, '');
+            s = s.replace(/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|thxlabels|thxrow|del|\*)(?:=[^\]\n]*)?\]/gi, '');
+        }
+        if (fmt !== 'bbcode') {
             s = s.replace(/!\[[^\]\n]*\]\([^) \t\n\x0B\f\r]*\)/g, '');
             s = s.replace(/\[([^\]\n]*)\]\([^) \t\n\x0B\f\r]*\)/g, '$1');
             s = s.replace(/(^|\n)[ \t]*(?:#{1,6}|>|[-*+]|\d{1,3}[.)])[ \t]+/g, '$1');
             s = s.replace(/==/g, '');
             s = s.replace(/[*~^`|]/g, '');
-        } else {
-            s = s.replace(/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/gi, '');
-            s = s.replace(/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|\*)(?:=[^\]\n]*)?\]/gi, '');
         }
         return s.replace(/⁠/g, '').replace(/[ \t\n\x0B\f]+/g, ' ').replace(/^ +| +$/g, '');
     }
@@ -1088,7 +1090,7 @@
         var cur = null;                 // {list, start, onSaved, returnTo} while the window is open
         var saving = false, armed = 0;
 
-        function fmtNow() { return fmtEl && fmtEl.value === 'markdown' ? 'markdown' : 'bbcode'; }
+        function fmtNow() { return fmtEl && ['markdown', 'flarum'].indexOf(fmtEl.value) !== -1 ? fmtEl.value : 'bbcode'; }
         function now() { return { name: nameIn.value.trim(), desc: ta.value.trim(), fmt: fmtNow(), vis: visNow() }; }
         function dirty() {
             if (!cur) return false;
@@ -1197,7 +1199,7 @@
             var l = cur.list, done = cur.onSaved;
             l.name = String(r.name || s.name);
             l.description = String(r.description || '');
-            l.description_format = r.description_format === 'markdown' ? 'markdown' : 'bbcode';
+            l.description_format = ['markdown', 'flarum'].indexOf(r.description_format) !== -1 ? r.description_format : 'bbcode';
             if (r.visibility) l.visibility = listVisOf(r.visibility);
             l.excerpt = String(r.excerpt || '');
             cur.start = now();          // nothing unsaved any more: leaving asks nothing
@@ -1217,7 +1219,7 @@
             visChosen = listVisOf(list.visibility);
             paintVis();
             if (fmtEl && fmtEl.tagName === 'SELECT') {
-                fmtEl.value = list.description_format === 'markdown' ? 'markdown' : 'bbcode';
+                fmtEl.value = ['markdown', 'flarum'].indexOf(list.description_format) !== -1 ? list.description_format : 'bbcode';
                 fmtEl.dispatchEvent(new Event('change'));   // the rail for this syntax
             }
             ta.dispatchEvent(new Event('input', { bubbles: true }));   // the counter, for this text

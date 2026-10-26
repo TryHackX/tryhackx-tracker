@@ -93,7 +93,7 @@ if ($for === 'comment') {
         'problem' => $bad !== null ? __('api.comment.' . $bad['code'], $bad['vars']) : null,
     ]);
 }
-// The syntaxes THIS writer may choose from. A shout's are the room's (shoutFormatChoices(): both, or
+// The syntaxes THIS writer may choose from. A shout's are the room's (shoutFormatChoices(): its own, or
 // 'plain' when the room formats nothing) — not the description switches, which used to turn a
 // Markdown shout into BBCode here on a site that allows Markdown only in the room (1.67.0).
 $fmtChoices = $for === 'shout' ? shoutFormatChoices($cfg) : richtextFormats($cfg, $for);
@@ -151,7 +151,7 @@ if ($for === 'shout') {
     // The site's emotes and stickers as the page that shows it will draw them (1.70.0) — and not
     // counted as pictures: the counts above are the renderer's own.
     $html = richtextRenderIn($for, $db, $text, $fmt, $cfg, richtextViewerSignedIn($db));
-    $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $cfg);
+    $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $cfg, $for);
 }
 jsonResponse([
     'success' => true,

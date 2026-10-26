@@ -209,15 +209,15 @@ $createOf = static function (array $list): string {
 $freshSql = $createOf(trackerSchemaStatements());
 $guardSql = $createOf(trackerSchemaGuardedStatements($db));
 $v80Shape = static fn(string $s): bool => str_contains($s, '`description` TEXT DEFAULT NULL')
-    && str_contains($s, "`description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode'") && !str_contains($s, 'VARCHAR(500)');
-check('fresh path: the CREATE makes the description TEXT (NULL = none) and its format an ENUM of the two syntaxes, BBCode by default',
+    && str_contains($s, "`description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'") && !str_contains($s, 'VARCHAR(500)');
+check('fresh path: the CREATE makes the description TEXT (NULL = none) and its format an ENUM of the three syntaxes, BBCode by default',
       $v80Shape($freshSql), substr($freshSql, 0, 240));
 check('… and the copy the upgrade list carries says exactly the same', $v80Shape($guardSql));
 $liveCols = [];
 foreach ($db->query("SHOW COLUMNS FROM user_lists")->fetchAll(PDO::FETCH_ASSOC) as $c) $liveCols[$c['Field']] = $c;
-check('the live table — an UPGRADED one — has both: description text NULL, description_format enum(bbcode, markdown) NOT NULL default bbcode',
+check('the live table — an UPGRADED one — has both: description text NULL, description_format enum(bbcode, markdown, flarum) NOT NULL default bbcode',
       strtolower((string)($liveCols['description']['Type'] ?? '')) === 'text' && ($liveCols['description']['Null'] ?? '') === 'YES'
-      && strtolower((string)($liveCols['description_format']['Type'] ?? '')) === "enum('bbcode','markdown')"
+      && strtolower((string)($liveCols['description_format']['Type'] ?? '')) === "enum('bbcode','markdown','flarum')"
       && ($liveCols['description_format']['Null'] ?? '') === 'NO' && ($liveCols['description_format']['Default'] ?? '') === 'bbcode',
       json_encode([$liveCols['description'] ?? null, $liveCols['description_format'] ?? null]));
 check('… and the migration asks for nothing more once it is there', schemaListDescMigration($db) === []);
@@ -256,7 +256,7 @@ try {
     $updates = array_values(array_filter($stmts, static fn($s) => str_starts_with($s, 'UPDATE')));
     check('upgrade path: the column made TEXT first, then one rewrite per text that needs one, the format column LAST',
           count($stmts) === $wantUpdates + 2 && str_starts_with($stmts[0], "ALTER TABLE `$oldT` MODIFY COLUMN `description` TEXT DEFAULT NULL")
-          && str_contains((string)end($stmts), "ADD COLUMN `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode'")
+          && str_contains((string)end($stmts), "ADD COLUMN `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'")
           && count($updates) === $wantUpdates && $wantUpdates === 2, json_encode($stmts));
     check('… each rewrite holds updated_at where it was, so no list moves on its owner\'s shelf',
           $updates !== [] && !array_filter($updates, static fn($s) => !str_contains($s, '`updated_at` = `updated_at`')));
@@ -451,7 +451,7 @@ try {
           && $err($edit(['name' => 'N', 'description' => 'x', 'format' => ['bbcode']])) === '400 bad_format'
           && ($edit(['name' => 'N', 'description' => '', 'format' => 'html'])['status'] ?? 0) === 200 && $rowOf($fxLists['pub'])['description_format'] === 'bbcode');
     check('Markdown switched off in Settings is not a syntax a new description may use',
-          $err($edit(['name' => 'N', 'description' => '**x**', 'format' => 'markdown'], true, array_merge($cfgE, ['desc_allow_markdown' => '0']))) === '400 bad_format');
+          $err($edit(['name' => 'N', 'description' => '**x**', 'format' => 'markdown'], true, array_merge($cfgE, ['rt_formats_list' => 'bbcode']))) === '400 bad_format');
 
     // What counts is what a reader sees (the limit is 50 here).
     $fifty = '[b][i][u]' . str_repeat('x', 50) . '[/u][/i][/b]';
@@ -465,6 +465,10 @@ try {
           && listDescVisible("# Title\n- **one**\n[two](https://e.example)", 'markdown') === 13,
           json_encode([listDescVisible(':flame: ' . "\u{1F600}", 'bbcode'), listDescVisible('[url=https://e.example]words[/url]', 'bbcode'),
                        listDescStrip("# Title\n- **one**\n[two](https://e.example)", 'markdown')]));
+    check('the card\'s excerpt hides a spoiler in every syntax its format has, Flarum\'s three included',
+          listDescExcerpt("a ||s1|| b >!s2!< c [spoiler]s3[/spoiler] d\n>! block\ne", 'flarum', $cfgE) === 'a b c d e'
+          && listDescExcerpt('a ||s|| b', 'markdown', $cfgE) === 'a b' && listDescExcerpt('a [spoiler]s[/spoiler] b', 'bbcode', $cfgE) === 'a b'
+          && listDescExcerpt('x >!y!< z', 'markdown', $cfgE) === 'x >!y!< z');
     check('the text as typed has its own ceiling (four times the limit): tags cannot store a novel',
           $err($edit(['name' => 'N', 'description' => str_repeat('[b][/b]', 29) . 'x'])) === '400 too_long_source');
 
@@ -472,6 +476,10 @@ try {
     check('a picture is refused, in either syntax (400 no_images)',
           $err($edit(['name' => 'N', 'description' => '[img]https://e.example/p.png[/img]'])) === '400 no_images'
           && $err($edit(['name' => 'N', 'description' => '![p](https://e.example/p.png)', 'format' => 'markdown'])) === '400 no_images');
+    $cfgFl = array_merge($cfgE, ['rt_formats_list' => 'bbcode,markdown,flarum']);
+    check('… and in Flarum\'s, where the bare address of a picture is a picture too',
+          $err($edit(['name' => 'N', 'description' => '![p](https://e.example/p.png)', 'format' => 'flarum'], true, $cfgFl)) === '400 no_images'
+          && $err($edit(['name' => 'N', 'description' => 'see https://e.example/p.png', 'format' => 'flarum'], true, $cfgFl)) === '400 no_images');
     check('an emote is not a picture: :flame: saves', ($edit(['name' => 'N', 'description' => 'Hot :flame:'])['status'] ?? 0) === 200);
     check('links: the description\'s limit (two here) — a third is 400 too_many_links',
           $err($edit(['name' => 'N', 'description' => 'https://a.io https://b.io https://c.io'])) === '400 too_many_links'
@@ -674,6 +682,7 @@ require "api/" . $a["endpoint"] . ".php";
         ['markdown', "# Title\n> quote\n- **one**\n1. *two*\n[three](https://e.example) ![four](https://e.example/4.png) ==hi== ||sp|| `c` ~s~ ^t^"],
         ['markdown', "Zażółć gęślą jaźń 🚀 [link](https://e.example/a_b) | table | cell |\n|---|---|"],
         ['bbcode', "[\u{2060}hide]plain text from 1.69.0[\u{2060}/hide] :\u{2060}fire: https\u{2060}://e.example"],
+        ['flarum', "## Title\n[b]Bold[/b] **two** [magnet]magnet:?xt=urn:btih:abc[/magnet] [list][*] a[/list]\n[thxlabels=2][thxrow][img]https://e.example/a.png[/img][/thxrow][/thxlabels] [del]x[/del] ___"],
     ];
     $tmpJs = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'lstd_twin_' . bin2hex(random_bytes(4)) . '.js';
     file_put_contents($tmpJs, $twin . "\nconst s = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));\n"
@@ -689,7 +698,7 @@ require "api/" . $a["endpoint"] . ".php";
         $php = [listDescStrip($s, $f), listDescVisible($s, $f)];
         if (!is_array($jsOut) || ($jsOut[$i] ?? null) !== $php) $twinBad[] = $i . ': php ' . json_encode($php) . ' js ' . json_encode($jsOut[$i] ?? $node);
     }
-    check('the counter\'s twin in favourites.js strips and counts exactly as listDescStrip()/listDescVisible() do (run by node on six texts)',
+    check('the counter\'s twin in favourites.js strips and counts exactly as listDescStrip()/listDescVisible() do (run by node on seven texts)',
           $twin !== '' && $twinBad === [], implode(' | ', $twinBad) ?: substr($twin, 0, 80));
 } catch (\Throwable $e) {
     check('the 1.70.0 D sections ran to the end', false, $e->getMessage() . ' @ ' . $e->getLine());
@@ -786,6 +795,7 @@ try {
         ksort($k);
         return ['cols' => $o, 'keys' => array_map(static fn($a) => implode(',', $a), $k)];
     };
+    $db->exec("ALTER TABLE `$v86T` MODIFY COLUMN `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'");
     $s86 = $shapeOf($db, $v86T); $s87 = $shapeOf($db, $v87T);
     check('the upgraded table and one made by today\'s CREATE are the same: every column (type, NULL, default) and every key',
           $s86 === $s87, json_encode(['upgraded' => $s86, 'fresh' => $s87]));

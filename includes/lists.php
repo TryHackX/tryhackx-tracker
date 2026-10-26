@@ -86,7 +86,7 @@ function listsMaxItems(array $cfg): int
 
 /* ── the description (v80, 1.70.0) ────────────────────────────────────────────────────────────────
  *
- * The site's rich text — BBCode or Markdown, whichever Settings allows (richtextFormats()) — kept as
+ * The site's rich text — whichever Settings allows (richtextFormats()) — kept as
  * typed with its format, and drawn by the description renderer with the room's emotes and stickers
  * (richtextRenderIn('list', …): an emote inline, a sticker bounded to 96 px — includes/shout.php says why).
  *
@@ -131,10 +131,10 @@ function listDescSourceCap(array $cfg): int
     return min(listsDescMax($cfg) * LIST_DESC_SOURCE_FACTOR, LIST_DESC_SOURCE_CHARS);
 }
 
-/** A stored format as the renderer takes it: one of the two syntaxes, BBCode for anything else. */
+/** A stored format as the renderer takes it: one of its syntaxes, BBCode for anything else. */
 function listDescFormatOf($format): string
 {
-    return $format === 'markdown' ? 'markdown' : 'bbcode';
+    return in_array($format, ['markdown', 'flarum'], true) ? $format : 'bbcode';
 }
 
 /**
@@ -165,15 +165,17 @@ function listDescClean(string $raw): string
 function listDescStrip(string $text, string $format, bool $keepJoiner = false): string
 {
     $s = str_replace(["\r\n", "\r"], "\n", $text);
-    if ($format === 'markdown') {
+    if ($format === 'flarum') $s = preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/iu', '', $s) ?? $s;
+    if ($format !== 'markdown') {
+        $s = preg_replace('/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/iu', '', $s) ?? $s;
+        $s = preg_replace('/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|thxlabels|thxrow|del|\*)(?:=[^\]\n]*)?\]/iu', '', $s) ?? $s;
+    }
+    if ($format !== 'bbcode') {
         $s = preg_replace('/!\[[^\]\n]*\]\([^) \t\n\x0B\f\r]*\)/u', '', $s) ?? $s;
         $s = preg_replace('/\[([^\]\n]*)\]\([^) \t\n\x0B\f\r]*\)/u', '$1', $s) ?? $s;
         $s = preg_replace('/(^|\n)[ \t]*(?:#{1,6}|>|[-*+]|\d{1,3}[.)])[ \t]+/u', '$1', $s) ?? $s;
         $s = preg_replace('/==/u', '', $s) ?? $s;
         $s = preg_replace('/[*~^`|]/u', '', $s) ?? $s;
-    } else {
-        $s = preg_replace('/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/iu', '', $s) ?? $s;
-        $s = preg_replace('/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|\*)(?:=[^\]\n]*)?\]/iu', '', $s) ?? $s;
     }
     if (!$keepJoiner) $s = str_replace("\u{2060}", '', $s);
     $s = preg_replace('/[ \t\n\x0B\f]+/u', ' ', $s) ?? $s;
@@ -246,9 +248,9 @@ function listDescExcerpt(?string $text, $format, array $cfg, int $len = LIST_DES
     $fmt = listDescFormatOf($format);
     $s = preg_replace('/\[(hide|postshide)(?:=[^\]]*)?\][\s\S]*?\[\/\1\]/i', ' ', $s) ?? $s;
     if (preg_match('/\[\/?(?:hide|postshide)\b/i', $s)) return '';
-    $s = $fmt === 'markdown'
-        ? (preg_replace('/\|\|[\s\S]*?\|\|/', ' ', $s) ?? $s)
-        : (preg_replace('/\[spoiler(?:=[^\]]*)?\][\s\S]*?\[\/spoiler\]/i', ' ', $s) ?? $s);
+    if ($fmt !== 'bbcode') $s = preg_replace('/\|\|[\s\S]*?\|\|/', ' ', $s) ?? $s;
+    if ($fmt === 'flarum') $s = preg_replace(['/>![^\n]*?!</', '/(^|\n)[ \t]*>![^\n]*/'], [' ', '$1'], $s) ?? $s;
+    if ($fmt !== 'markdown') $s = preg_replace('/\[spoiler(?:=[^\]]*)?\][\s\S]*?\[\/spoiler\]/i', ' ', $s) ?? $s;
     $plain = listDescStrip($s, $fmt, true);
     if (function_exists('richtextEmoji')) {
         $map = richtextEmoji();

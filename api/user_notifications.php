@@ -87,7 +87,7 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $n) {
     $n['rich_format'] = $src !== '' ? $fmt : null;
     $n['rich_html'] = '';
     $n['rich_doc'] = '';
-    if ($src !== '' && ($fmt === 'bbcode' || $fmt === 'markdown')) {
+    if ($src !== '' && in_array($fmt, richtextRichFormats(), true)) {
         $n['rich_html'] = richtextRender($src, $fmt, $cfg, true);
     } elseif ($src !== '' && $fmt === 'html') {
         $clean = htmlSafeClean($src, 'site');

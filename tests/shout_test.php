@@ -184,8 +184,14 @@ check('placement falls back to home', shoutPlacement([]) === 'home' && shoutPlac
       && shoutPlacement(['shout_placement' => 'nonsense']) === 'home');
 check('format falls back to bbcode', shoutFormat([]) === 'bbcode' && shoutFormat(['shout_format' => 'plain']) === 'plain'
       && shoutFormat(['shout_format' => 'rtf']) === 'bbcode');
-check('plain offers no choice of format; the others offer two',
-      shoutFormatChoices(['shout_format' => 'plain']) === ['plain'] && shoutFormatChoices([]) === ['bbcode', 'markdown']);
+check('the room\'s default is one the site has on for shouts: a switched-off one gives way to the first that is on, and plain stays plain',
+      shoutFormat(['shout_format' => 'flarum', 'rt_formats_shout' => 'bbcode,flarum']) === 'flarum'
+      && shoutFormat(['shout_format' => 'flarum', 'rt_formats_shout' => 'markdown']) === 'markdown'
+      && shoutFormat(['shout_format' => 'bbcode', 'rt_formats_shout' => 'markdown,flarum']) === 'markdown'
+      && shoutFormat(['shout_format' => 'plain', 'rt_formats_shout' => 'markdown']) === 'plain');
+check('plain offers no choice of format; the others offer what the site has on for shouts',
+      shoutFormatChoices(['shout_format' => 'plain']) === ['plain'] && shoutFormatChoices([]) === ['bbcode', 'markdown']
+      && shoutFormatChoices(['shout_format' => 'bbcode', 'rt_formats_shout' => 'markdown,flarum']) === ['markdown', 'flarum']);
 check('0 seconds means no polling, 1 and 2 are raised to 3, and 9999 is lowered to 120',
       shoutLiveSeconds(['shout_live_seconds' => '0']) === 0 && shoutLiveSeconds(['shout_live_seconds' => '1']) === 3
       && shoutLiveSeconds(['shout_live_seconds' => '9999']) === 120 && shoutLiveSeconds([]) === 10);
@@ -375,6 +381,9 @@ try {
     $r = shoutPost($db, $cfgOn, $me, 'still bbcode', 'rtf', '');
     check('an unknown format falls back to the site default',
           (string)$db->query("SELECT body_format FROM shouts WHERE id = " . (int)$r['id'])->fetchColumn() === 'bbcode');
+    $r = shoutPost($db, array_merge($cfgOn, ['shout_format' => 'flarum', 'rt_formats_shout' => 'markdown']), $me, 'only markdown here', 'flarum', '');
+    check('a format the site has switched off for shouts is never stored: the line takes the first one that is on',
+          !empty($r['ok']) && (string)$db->query("SELECT body_format FROM shouts WHERE id = " . (int)$r['id'])->fetchColumn() === 'markdown', json_encode($r['error'] ?? null));
     $cfgPlain = array_merge($cfgOn, ['shout_format' => 'plain']);
     $r = shoutPost($db, $cfgPlain, $me, "a < b\nand [b]not bold[/b]", 'markdown', '');
     check('with the site on plain, nothing is parsed whatever the writer asked for',

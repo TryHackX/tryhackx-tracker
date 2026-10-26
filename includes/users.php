@@ -1728,7 +1728,7 @@ function userNotify(PDO $db, int $userId, string $type, string $title, string $b
     $vals = [$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null];
     if ($link !== null) { $cols[] = 'link'; $vals[] = $link; }
     $plainCols = $cols; $plainVals = $vals;      // without the rich words: for a database whose v94 has not run yet
-    if ($rich !== null && trim($rich) !== '' && in_array($richFormat, ['bbcode', 'markdown', 'html'], true)) {
+    if ($rich !== null && trim($rich) !== '' && in_array($richFormat, array_merge(function_exists('richtextRichFormats') ? richtextRichFormats() : [], ['html']), true)) {
         $rich = trim($rich);
         if (strlen($rich) > 60000) $rich = rtrim(mb_strcut($rich, 0, 60000, 'UTF-8'));
         $cols[] = 'rich'; $vals[] = $rich;

@@ -103,10 +103,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stamp = sys_get_temp_dir() . '/idx_sl_' . $hash . '.stamp';
     $age = is_file($stamp) ? (time() - (int)@filemtime($stamp)) : PHP_INT_MAX;
     if ($age < $cool) {
+        $last = json_decode((string)@file_get_contents($stamp), true);
+        if (is_array($last) && isset($last['seeders'], $last['leechers'], $last['completed'])) {
+            jsonResponse(['success' => true, 'cached' => true, 'seeders' => (int)$last['seeders'],
+                          'leechers' => (int)$last['leechers'], 'completed' => (int)$last['completed'],
+                          'message' => __('api.index.refreshed_shared', ['s' => $age])]);
+        }
         jsonResponse(['error' => __('api.index.just_refreshed', ['s' => $cool - $age]),
                       'retry_after' => $cool - $age], 429);
     }
-    @touch($stamp);
+    if (!rateLimitAllow('sl_refresh', ipBucket(getClientIp($cfg)), max(0, (int)($cfg['rate_limit_sl_refresh'] ?? 30)))) {
+        jsonResponse(['error' => __('api.index.refresh_rate_limited')], 429);
+    }
+    @file_put_contents($stamp, '');
     // force = true: the caller has already paid the cooldown above, and a cached answer is exactly
     // what they pressed the button to avoid.
     $sl = scrapeOpenTracker($db, $cfg, ['info_hash' => $hash], true);
@@ -122,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                              scraped_at = NOW() WHERE info_hash = ?")
            ->execute([(int)$sl['seeders'], (int)$sl['leechers'], (int)$sl['completed'], $hash]);
     }
+    @file_put_contents($stamp, json_encode(['seeders' => (int)$sl['seeders'], 'leechers' => (int)$sl['leechers'], 'completed' => (int)$sl['completed']]));
     jsonResponse(['success' => true, 'seeders' => (int)$sl['seeders'],
                   'leechers' => (int)$sl['leechers'], 'completed' => (int)$sl['completed'],
                   'message' => __('api.index.refreshed')]);

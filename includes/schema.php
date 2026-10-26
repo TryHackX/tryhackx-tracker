@@ -680,7 +680,7 @@ function trackerSchemaStatements(): array {
             -- reaches the notifications already written. MEDIUMTEXT because a TEXT is 64 KB of BYTES and a campaign
             -- is allowed 60 000 of them.
             `rich` MEDIUMTEXT DEFAULT NULL,
-            `rich_format` ENUM('bbcode','markdown','html') DEFAULT NULL,
+            `rich_format` ENUM('bbcode','markdown','html','flarum') DEFAULT NULL,
             KEY `idx_un_user` (`user_id`, `read_at`),
             KEY `idx_un_created` (`created_at`),
             KEY `idx_un_sender` (`sender_id`),
@@ -879,7 +879,7 @@ function trackerSchemaStatements(): array {
             -- by the description renderer with the room's emotes (listDescRender(), includes/lists.php).
             -- TEXT, so NULL means none as well as '' — MySQL 5.7 cannot give a TEXT column a default.
             `description` TEXT DEFAULT NULL,
-            `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+            `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
             -- v87: who sees it besides its owner — nobody (private), the members the owner is friends
             -- with (friends), or everybody a profile is shown to (public); includes/lists.php decides
             -- what each one needs. Private by default, like every other privacy answer in this schema:
@@ -995,7 +995,7 @@ function trackerSchemaStatements(): array {
             `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
             `user_id` INT UNSIGNED DEFAULT NULL,
             `body` VARCHAR(2000) NOT NULL,
-            `body_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+            `body_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
             `is_system` TINYINT(1) NOT NULL DEFAULT 0,
             `ip_bucket` VARCHAR(45) DEFAULT NULL,
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1148,7 +1148,7 @@ function trackerSchemaStatements(): array {
             `thread_id` INT UNSIGNED NOT NULL,
             `sender_id` INT UNSIGNED NOT NULL,
             `body` TEXT NOT NULL,
-            `body_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+            `body_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `read_at` DATETIME DEFAULT NULL,
             `reported` TINYINT(1) NOT NULL DEFAULT 0,
@@ -1175,7 +1175,7 @@ function trackerSchemaStatements(): array {
             -- 2 000 characters, the answer with a format — TEXT, nullable (MySQL 5.7 cannot default a TEXT).
             `note` TEXT DEFAULT NULL,
             `reply` TEXT DEFAULT NULL,
-            `reply_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+            `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
             KEY `idx_mreport_status` (`status`, `created_at`),
@@ -1325,7 +1325,7 @@ function trackerSchemaStatements(): array {
             `handled_at` DATETIME DEFAULT NULL,
             `note` TEXT DEFAULT NULL,
             `reply` TEXT DEFAULT NULL,
-            `reply_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+            `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`),
             KEY `idx_crep_queue` (`kind`, `status`, `created_at`),
@@ -1349,7 +1349,7 @@ function trackerSchemaStatements(): array {
             -- v94 (1.75.0): the moderator's reason is a text of up to 2 000 characters in a format of its own
             -- (the member sees it rendered), TEXT and nullable like the reports' columns.
             `reason` TEXT DEFAULT NULL,
-            `reason_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+            `reason_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
             `source_kind` VARCHAR(16) NOT NULL DEFAULT '',
             `source_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
             `info_hash` CHAR(40) NOT NULL DEFAULT '',
@@ -1362,7 +1362,7 @@ function trackerSchemaStatements(): array {
             `revoked_by_id` INT UNSIGNED DEFAULT NULL,
             `revoked_by_name` VARCHAR(64) NOT NULL DEFAULT '',
             `revoke_note` TEXT DEFAULT NULL,
-            `revoke_note_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+            `revoke_note_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
             KEY `idx_warn_user` (`user_id`, `created_at`),
             KEY `idx_warn_by` (`by_id`),
             KEY `idx_warn_revoked_by` (`revoked_by_id`)
@@ -1450,7 +1450,7 @@ function trackerSchemaStatements(): array {
             -- batch written in Markdown and sent an hour after somebody switched Markdown off must
             -- still arrive as the sender saw it, not as a page of raw asterisks. 'html' (v94, 1.75.0) is a
             -- campaign: the body is the administrator's HTML, cleaned by htmlSafeClean() when the mail is built.
-            `format` ENUM('plain','bbcode','markdown','html') NOT NULL DEFAULT 'plain',
+            `format` ENUM('plain','bbcode','markdown','html','flarum') NOT NULL DEFAULT 'plain',
             -- v94: 'site' wraps the message in the site's dark frame, 'none' sends it as the author designed it
             -- with only the footer the law asks for (the preferences and unsubscribe links, the sender's address).
             `frame` ENUM('site','none') NOT NULL DEFAULT 'site',
@@ -1476,7 +1476,7 @@ function trackerSchemaStatements(): array {
             -- v41: one version per language. A single text served to everybody was fine while the
             -- site had one language; with two it means a Polish visitor reads English terms.
             `lang` VARCHAR(3) NOT NULL DEFAULT 'en',
-            `format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'markdown',
+            `format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'markdown',
             `body` MEDIUMTEXT NOT NULL,
             -- Stored but off is a DRAFT. The router checks this as well as emptiness, so a half
             -- written page cannot replace a live one merely by having been saved.
@@ -1861,7 +1861,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `thread_id` INT UNSIGNED NOT NULL,
         `sender_id` INT UNSIGNED NOT NULL,
         `body` TEXT NOT NULL,
-        `body_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        `body_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         `read_at` DATETIME DEFAULT NULL,
         `reported` TINYINT(1) NOT NULL DEFAULT 0,
@@ -1882,7 +1882,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `handled_at` DATETIME DEFAULT NULL,
         `note` TEXT DEFAULT NULL,
         `reply` TEXT DEFAULT NULL,
-        `reply_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+        `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
         KEY `idx_mreport_status` (`status`, `created_at`),
@@ -1969,7 +1969,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         `user_id` INT UNSIGNED DEFAULT NULL,
         `body` VARCHAR(2000) NOT NULL,
-        `body_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        `body_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
         `is_system` TINYINT(1) NOT NULL DEFAULT 0,
         `ip_bucket` VARCHAR(45) DEFAULT NULL,
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2050,7 +2050,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `handled_at` DATETIME DEFAULT NULL,
         `note` TEXT DEFAULT NULL,
         `reply` TEXT DEFAULT NULL,
-        `reply_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+        `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`),
         KEY `idx_crep_queue` (`kind`, `status`, `created_at`),
@@ -2061,7 +2061,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
         `user_id` INT UNSIGNED NOT NULL,
         `reason` TEXT DEFAULT NULL,
-        `reason_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+        `reason_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
         `source_kind` VARCHAR(16) NOT NULL DEFAULT '',
         `source_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
         `info_hash` CHAR(40) NOT NULL DEFAULT '',
@@ -2074,7 +2074,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `revoked_by_id` INT UNSIGNED DEFAULT NULL,
         `revoked_by_name` VARCHAR(64) NOT NULL DEFAULT '',
         `revoke_note` TEXT DEFAULT NULL,
-        `revoke_note_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain',
+        `revoke_note_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
         KEY `idx_warn_user` (`user_id`, `created_at`),
         KEY `idx_warn_by` (`by_id`),
         KEY `idx_warn_revoked_by` (`revoked_by_id`)
@@ -2220,7 +2220,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         `name` VARCHAR(80) NOT NULL,
         `slug` VARCHAR(90) NOT NULL,
         `description` TEXT DEFAULT NULL,
-        `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode',
+        `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
         `visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private',
         `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -2449,7 +2449,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
 
     // v23: the markup format of a queued bulk message. Small table, ordinary ALTER.
     if (!schemaColumnExists($db, 'mail_queue', 'format')) {
-        $out[] = "ALTER TABLE `mail_queue` ADD COLUMN `format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain'";
+        $out[] = "ALTER TABLE `mail_queue` ADD COLUMN `format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'";
     }
 
     // ── v94 (1.75.0): rich messages — see the version note and the CREATEs above ──────────────────────────────
@@ -2463,20 +2463,20 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     //   The format column of a queued message is widened AFTER v23's ADD above on a database that lacks it; the
     //   statement list runs in this order.
     $mq = [];
-    if (schemaColumnType($db, 'mail_queue', 'format') !== "enum('plain','bbcode','markdown','html')") {
-        $mq[] = "MODIFY COLUMN `format` ENUM('plain','bbcode','markdown','html') NOT NULL DEFAULT 'plain'";
+    if (schemaColumnType($db, 'mail_queue', 'format') !== "enum('plain','bbcode','markdown','html','flarum')") {
+        $mq[] = "MODIFY COLUMN `format` ENUM('plain','bbcode','markdown','html','flarum') NOT NULL DEFAULT 'plain'";
     }
     if (!schemaColumnExists($db, 'mail_queue', 'frame')) $mq[] = "ADD COLUMN `frame` ENUM('site','none') NOT NULL DEFAULT 'site'";
     if ($mq) $out[] = "ALTER TABLE `mail_queue` " . implode(', ', $mq);
 
     $rn = [];
     if (!schemaColumnExists($db, 'user_notifications', 'rich')) $rn[] = "ADD COLUMN `rich` MEDIUMTEXT DEFAULT NULL";
-    if (!schemaColumnExists($db, 'user_notifications', 'rich_format')) $rn[] = "ADD COLUMN `rich_format` ENUM('bbcode','markdown','html') DEFAULT NULL";
+    if (!schemaColumnExists($db, 'user_notifications', 'rich_format')) $rn[] = "ADD COLUMN `rich_format` ENUM('bbcode','markdown','html','flarum') DEFAULT NULL";
     if ($rn) $out[] = "ALTER TABLE `user_notifications` " . implode(', ', $rn);
 
     // The texts a moderator writes: VARCHAR(500) → TEXT (nullable: MySQL 5.7 cannot default a TEXT), and the
     // format beside the one a member reads. [table => [column to widen…, column to add + its definition]].
-    $fmtDef = "ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain'";
+    $fmtDef = "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'";
     foreach ([
         'content_reports' => [['note', 'reply'], 'reply_format'],
         'message_reports' => [['note', 'reply'], 'reply_format'],
@@ -2515,7 +2515,7 @@ function trackerSchemaGuardedStatements(PDO $db): array {
             'revoked_by_id'      => "ADD COLUMN `revoked_by_id` INT UNSIGNED DEFAULT NULL",
             'revoked_by_name'    => "ADD COLUMN `revoked_by_name` VARCHAR(64) NOT NULL DEFAULT ''",
             'revoke_note'        => "ADD COLUMN `revoke_note` TEXT DEFAULT NULL",
-            'revoke_note_format' => "ADD COLUMN `revoke_note_format` ENUM('plain','bbcode','markdown') NOT NULL DEFAULT 'plain'",
+            'revoke_note_format' => "ADD COLUMN `revoke_note_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'",
         ] as $col => $def) {
             if (!schemaColumnExists($db, 'user_warnings', $col)) $uw[] = $def;
         }
@@ -2631,6 +2631,26 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         $ty = schemaTableExists($db, $tbl) ? schemaColumnType($db, $tbl, 'description_format') : null;
         if ($ty !== null && $ty !== "enum('markdown','bbcode','flarum')") {
             $out[] = "ALTER TABLE `$tbl` MODIFY COLUMN `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode'";
+        }
+    }
+    foreach ([
+        ['user_messages', 'body_format', "ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'"],
+        ['user_lists', 'description_format', "ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'"],
+        ['shouts', 'body_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'"],
+        ['content_reports', 'reply_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['message_reports', 'reply_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['user_warnings', 'reason_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['user_warnings', 'revoke_note_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['appeals', 'admin_response_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['appeal_archives', 'admin_response_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['sent_emails', 'message_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['mail_queue', 'format', "ENUM('plain','bbcode','markdown','html','flarum') NOT NULL DEFAULT 'plain'"],
+        ['user_notifications', 'rich_format', "ENUM('bbcode','markdown','html','flarum') DEFAULT NULL"],
+        ['page_content', 'format', "ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'markdown'"],
+    ] as [$tbl, $col, $def]) {
+        $ty = schemaTableExists($db, $tbl) ? schemaColumnType($db, $tbl, $col) : null;
+        if ($ty !== null && $ty !== strtolower(substr($def, 0, strpos($def, ')') + 1))) {
+            $out[] = "ALTER TABLE `$tbl` MODIFY COLUMN `$col` $def";
         }
     }
     return $out;
@@ -3025,6 +3045,18 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
         error_log('[tracker schema] v94 auto penalty rules: ' . $e->getMessage());
     }
 
+    if (schemaOnce($db, 'v95_formats')) {
+        $base = [];
+        if (($cfg['desc_allow_bbcode'] ?? '1') === '1') $base[] = 'bbcode';
+        if (($cfg['desc_allow_markdown'] ?? '1') === '1') $base[] = 'markdown';
+        if (!$base) $base[] = 'bbcode';
+        $base[] = 'flarum';
+        $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+        foreach (['message', 'list', 'shout', 'report', 'page', 'mail'] as $place) {
+            $ins->execute(['rt_formats_' . $place, implode(',', $base)]);
+        }
+    }
+
     // v88: replying to a comment (includes/comments.php, 1.72.0) — to the two groups that write comments: a member
     // answers a comment where they may comment at all, and so does a moderator. GUEST GETS NOTHING: an operator who
     // grants it (with comment.view and comment.post) gets a guest's reply held to every guest rule — "Guest #tag",
@@ -3384,12 +3416,19 @@ function trackerSchemaDefaultSettings(): array {
         'desc_allow_bbcode'           => '1',
         'desc_allow_markdown'         => '1',
         'desc_allow_flarum'           => '1',
+        'rt_formats_message'          => 'bbcode,markdown,flarum',
+        'rt_formats_list'             => 'bbcode,markdown,flarum',
+        'rt_formats_shout'            => 'bbcode,markdown,flarum',
+        'rt_formats_report'           => 'bbcode,markdown,flarum',
+        'rt_formats_page'             => 'bbcode,markdown,flarum',
+        'rt_formats_mail'             => 'bbcode,markdown,flarum',
         'desc_max_chars'              => '4000',
         'desc_max_images'             => '3',
         'desc_max_links'              => '10',
         'link_trusted_domains'        => 'tryhackx.org',
         'search_allow_sl_refresh'     => '0',
         'search_sl_refresh_seconds'   => '120',
+        'rate_limit_sl_refresh'       => '30',
         'rate_limit_preview'          => '30',
         // Ratings. Off, and read-only for anonymous visitors by default: a public voting button is
         // the easiest thing on a site to automate, and the operator should choose to open it.
@@ -4178,7 +4217,7 @@ function schemaListDescMigration(PDO $db, string $table = 'user_lists'): array {
             $out[] = "UPDATE `$table` SET `description` = " . $db->quote($now) . ", `updated_at` = `updated_at` WHERE `id` = " . (int)$r['id'];
         }
     }
-    $out[] = "ALTER TABLE `$table` ADD COLUMN `description_format` ENUM('bbcode','markdown') NOT NULL DEFAULT 'bbcode'";
+    $out[] = "ALTER TABLE `$table` ADD COLUMN `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'";
     return $out;
 }
 

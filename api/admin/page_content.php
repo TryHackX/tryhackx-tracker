@@ -54,7 +54,8 @@ function pageContentLangs(PDO $db, array $cfg, string $page): array {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     $stored = pageContentGet($db, $page, $lang);
     $format = (string)($_GET['format'] ?? ($stored['format'] ?? 'markdown'));
-    if (!in_array($format, ['bbcode', 'markdown'], true)) $format = 'markdown';
+    $pageFormats = richtextFormats($cfg, 'page');
+    if (!in_array($format, $pageFormats, true)) $format = in_array('markdown', $pageFormats, true) ? 'markdown' : $pageFormats[0];
     $body = $stored ? (string)$stored['body'] : pageContentDefault($cfg, $page, $format, $baseUrl, $lang);
     // Which version a visitor in THIS language is served right now — the chain in
     // pageContentLangChain() means it may well be a version written for another language.
@@ -83,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         'languages'  => pageContentLangs($db, $cfg, $page),
         'serving'    => $active ? $active['lang'] : null,
         'max'      => PAGECONTENT_MAX,
-        'formats'  => richtextFormats($cfg, 'page'),
+        'formats'  => $pageFormats,
         // Every condition a page may test, with its state right now — the editor lists them.
         'markers'  => array_map(fn($k, $v) => ['name' => $k, 'on' => (bool)$v[0], 'what' => $v[1]],
                                 array_keys(pageContentConditions($cfg, $db)), pageContentConditions($cfg, $db)),
@@ -98,7 +99,7 @@ if (!in_array($op, ['save', 'reset', 'preview'], true)) {
 }
 
 $format = (string)($input['format'] ?? 'markdown');
-if (!in_array($format, ['bbcode', 'markdown'], true)) $format = 'markdown';
+if (!in_array($format, richtextRichFormats(), true)) $format = 'markdown';
 $body = (string)($input['body'] ?? '');
 
 if ($op === 'preview') {

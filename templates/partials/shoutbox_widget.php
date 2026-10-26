@@ -417,8 +417,9 @@ $shoutFaVer  = $shoutFaMode !== 'off' ? emojiFaVersion($cfg) : '';
                 <?php /* `shout_format` is the DEFAULT, not the law: one line is sometimes BBCode and
                          sometimes Markdown, and the server validates whichever was chosen. */ ?>
                 <select id="shout-body-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
-                    <option value="bbcode"<?= $shoutFmt === 'bbcode' ? ' selected' : '' ?>>BBCode</option>
-                    <option value="markdown"<?= $shoutFmt === 'markdown' ? ' selected' : '' ?>>Markdown</option>
+                    <?php foreach (shoutFormatChoices($cfg) as $sbf): ?>
+                    <option value="<?= sanitize($sbf) ?>"<?= $shoutFmt === $sbf ? ' selected' : '' ?>><?= richtextFormatLabel($sbf) ?></option>
+                    <?php endforeach; ?>
                 </select>
                 <?php /* The formatting rail the description and message editors have, on the SAME
                          line as the select rather than on a row of its own: a shout is two lines

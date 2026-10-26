@@ -156,6 +156,7 @@ $families = [
     '~^sound_default_([a-z_]+)$~' => fn($m) => str_contains($raw['includes/sounds.php'] ?? '', "'sound_default_' . \$k") && $literalIn('includes/sounds.php', $m[1]),
     '~^meta_order_mix_([a-z_]+)$~' => fn($m) => str_contains($raw['worker/worker.py'] ?? '', '"meta_order_mix_" + n') && $literalIn('worker/worker.py', $m[1]),
     '~^([a-z0-9_]+)_site_key$~' => fn($m) => str_contains($raw['includes/functions.php'] ?? '', "captchaProvider(\$cfg) . '_site_key'") && in_array($m[1], captchaProviders(), true),
+    '~^rt_formats_([a-z]+)$~' => fn($m) => str_contains($raw['includes/richtext.php'] ?? '', "'rt_formats_' . \$place") && $literalIn('includes/richtext.php', $m[1]),
 ];
 $unread = []; $byFamily = 0;
 foreach ($allowed as $key) {

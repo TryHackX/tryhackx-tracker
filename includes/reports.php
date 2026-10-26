@@ -126,7 +126,7 @@ function reportTextClean($s, int $max = REPORT_TEXT_MAX): string
 function reportTextFormat($f, array $cfg): string
 {
     $f = is_string($f) ? $f : 'plain';
-    return ($f === 'bbcode' || $f === 'markdown') && in_array($f, richtextFormats($cfg, 'report'), true) ? $f : 'plain';
+    return in_array($f, richtextFormats($cfg, 'report'), true) ? $f : 'plain';
 }
 
 /**
@@ -152,7 +152,7 @@ function reportTextValidate(string $text, string $format, array $cfg, int $max =
     if ($c['links'] > REPORT_TEXT_MAX_LINKS) return __('api.report_text.too_many_links', ['n' => $c['links'], 'max' => REPORT_TEXT_MAX_LINKS]);
     // …and the rule itself, last, so a limit added to it later cannot be missed here.
     $msg = richtextValidate($text, $format, array_merge($cfg, ['desc_max_chars' => (string)$max,
-        'desc_max_images' => (string)REPORT_TEXT_MAX_IMAGES, 'desc_max_links' => (string)REPORT_TEXT_MAX_LINKS]));
+        'desc_max_images' => (string)REPORT_TEXT_MAX_IMAGES, 'desc_max_links' => (string)REPORT_TEXT_MAX_LINKS]), 'report');
     return $msg !== null ? __('api.report_text.refused', ['why' => $msg]) : null;
 }
 
@@ -160,7 +160,7 @@ function reportTextValidate(string $text, string $format, array $cfg, int $max =
 function reportTextHtml(string $text, string $format, array $cfg): string
 {
     if (trim($text) === '') return '';
-    if (($format === 'bbcode' || $format === 'markdown') && function_exists('richtextRender')) {
+    if (function_exists('richtextRender') && in_array($format, richtextRichFormats(), true)) {
         $html = richtextRender($text, $format, $cfg, true);
         if ($html !== '') return $html;
     }
@@ -806,7 +806,7 @@ function contentReportCloseRows(PDO $db, array $ids, string $outcome, string $no
     $ids = array_values(array_filter(array_map('intval', $ids), fn($v) => $v > 0));
     if (!$ids) return 0;
     $in = implode(',', array_fill(0, count($ids), '?'));
-    $replyFormat = in_array($replyFormat, ['bbcode', 'markdown'], true) && $reply !== '' ? $replyFormat : 'plain';
+    $replyFormat = in_array($replyFormat, richtextRichFormats(), true) && $reply !== '' ? $replyFormat : 'plain';
     try {
         $st = $db->prepare("UPDATE content_reports SET status = 'closed', open_slot = NULL, outcome = ?, note = ?, reply = ?, reply_format = ?, handled_by = ?, handled_at = NOW()
                              WHERE status = 'open' AND id IN ($in)");
@@ -828,7 +828,7 @@ function contentReportCloseRows(PDO $db, array $ids, string $outcome, string $no
  */
 function contentReportTellReporters(PDO $db, array $cfg, array $rows, string $outcome, string $reply, string $kind, string $name, string $author, string $replyFormat = 'plain'): int
 {
-    $rich = $reply !== '' && in_array($replyFormat, ['bbcode', 'markdown'], true);
+    $rich = $reply !== '' && in_array($replyFormat, richtextRichFormats(), true);
     $told = [];
     foreach ($rows as $r) {
         $rid = (int)($r['reporter_id'] ?? 0);

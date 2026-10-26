@@ -120,13 +120,13 @@ $noteFloor = fn(): int => (int)$db->query("SELECT COALESCE(MAX(id), 0) FROM user
 check('the schema is at 94 or later, and its line says what 94 is', TRACKER_SCHEMA_VERSION >= 94
       && str_contains($src('includes/schema.php'), '94 = rich messages (1.75.0, includes/htmlsafe.php;'));
 $want = [
-    ['mail_queue', 'format', "enum('plain','bbcode','markdown','html')"], ['mail_queue', 'frame', "enum('site','none')"],
-    ['user_notifications', 'rich', 'mediumtext'], ['user_notifications', 'rich_format', "enum('bbcode','markdown','html')"],
-    ['content_reports', 'note', 'text'], ['content_reports', 'reply', 'text'], ['content_reports', 'reply_format', "enum('plain','bbcode','markdown')"],
-    ['message_reports', 'note', 'text'], ['message_reports', 'reply', 'text'], ['message_reports', 'reply_format', "enum('plain','bbcode','markdown')"],
-    ['user_warnings', 'reason', 'text'], ['user_warnings', 'reason_format', "enum('plain','bbcode','markdown')"],
-    ['appeals', 'admin_response_format', "enum('plain','bbcode','markdown')"], ['appeal_archives', 'admin_response_format', "enum('plain','bbcode','markdown')"],
-    ['sent_emails', 'message_format', "enum('plain','bbcode','markdown')"],
+    ['mail_queue', 'format', "enum('plain','bbcode','markdown','html','flarum')"], ['mail_queue', 'frame', "enum('site','none')"],
+    ['user_notifications', 'rich', 'mediumtext'], ['user_notifications', 'rich_format', "enum('bbcode','markdown','html','flarum')"],
+    ['content_reports', 'note', 'text'], ['content_reports', 'reply', 'text'], ['content_reports', 'reply_format', "enum('plain','bbcode','markdown','flarum')"],
+    ['message_reports', 'note', 'text'], ['message_reports', 'reply', 'text'], ['message_reports', 'reply_format', "enum('plain','bbcode','markdown','flarum')"],
+    ['user_warnings', 'reason', 'text'], ['user_warnings', 'reason_format', "enum('plain','bbcode','markdown','flarum')"],
+    ['appeals', 'admin_response_format', "enum('plain','bbcode','markdown','flarum')"], ['appeal_archives', 'admin_response_format', "enum('plain','bbcode','markdown','flarum')"],
+    ['sent_emails', 'message_format', "enum('plain','bbcode','markdown','flarum')"],
 ];
 $wrong = [];
 foreach ($want as [$t, $c, $ty]) { $got = schemaColumnType($db, $t, $c); if ($got !== $ty) $wrong[] = "$t.$c is " . var_export($got, true) . ", wanted $ty"; }
@@ -136,6 +136,25 @@ check('the two settings have their defaults (no cap, no sender identity)', (trac
       && (trackerSchemaDefaultSettings()['mail_sender_address'] ?? null) === ''
       && str_contains($src('api/admin/save_settings.php'), "'bulk_mail_daily_cap', 'mail_sender_address'")
       && str_contains($src('includes/settings_catalog.php'), "'mail_sender_address'") && str_contains($src('templates/admin/settings.php'), 'name="mail_sender_address"'));
+$rtfKeys = array_map(fn($p) => 'rt_formats_' . $p, richtextPlaces());
+$rtfIn = implode(',', array_fill(0, count($rtfKeys), '?'));
+$rtfRead = function () use ($db, $rtfKeys, $rtfIn): array {
+    $st = $db->prepare("SELECT `key`, `value` FROM settings WHERE `key` IN ($rtfIn)");
+    $st->execute($rtfKeys);
+    return $st->fetchAll(PDO::FETCH_KEY_PAIR);
+};
+$rtfWas = $rtfRead();
+$db->prepare("DELETE FROM settings WHERE `key` IN ($rtfIn) OR `key` = 'schema_once_v95_formats'")->execute($rtfKeys);
+trackerSchemaDataMigrations($db, array_merge($cfg, ['desc_allow_bbcode' => '1', 'desc_allow_markdown' => '0']));
+$rtfGot = $rtfRead();
+check('v95: an upgraded site\'s places start from the description switches it had, with Flarum beside them',
+      count($rtfGot) === count($rtfKeys) && array_unique(array_values($rtfGot)) === ['bbcode,flarum'], $J($rtfGot));
+$db->exec("UPDATE settings SET `value` = 'markdown' WHERE `key` = 'rt_formats_message'");
+trackerSchemaDataMigrations($db, $cfg);
+check('… once: a place the operator set afterwards keeps what they set', ($rtfRead()['rt_formats_message'] ?? '') === 'markdown', $J($rtfRead()));
+$db->prepare("DELETE FROM settings WHERE `key` IN ($rtfIn)")->execute($rtfKeys);
+$rtfPut = $db->prepare("INSERT INTO settings (`key`, `value`) VALUES (?, ?)");
+foreach ($rtfWas as $k => $v) $rtfPut->execute([$k, $v]);
 
 $scratchName = 'tracker_rm_' . bin2hex(random_bytes(3));
 $dsnPort = (string)($db->query('SELECT @@port')->fetchColumn() ?: '3306');
@@ -191,10 +210,12 @@ check('reportTextClean(): lines stay (CRLF → LF), tabs and control characters 
       reportTextClean("a\r\nb\t\x01c\n\n\n\nd \u{202E}e  ") === "a\nb  c\n\nd e", $J(reportTextClean("a\r\nb\t\x01c\n\n\n\nd \u{202E}e  ")));
 check('… cut at the limit in CHARACTERS, never in the middle of one; not a string is nothing',
       mb_strlen(reportTextClean(str_repeat('ą', 3000))) === REPORT_TEXT_MAX && reportTextClean(['x']) === '' && reportTextClean(null) === '');
-check('reportTextFormat(): plain, and BBCode / Markdown only where the site has them on',
+check('reportTextFormat(): plain, and BBCode / Markdown / Flarum only where the site has them on for moderators\' texts',
       reportTextFormat('bbcode', $cfgOn) === 'bbcode' && reportTextFormat('markdown', $cfgOn) === 'markdown' && reportTextFormat('html', $cfgOn) === 'plain'
-      && reportTextFormat('markdown', array_merge($cfgOn, ['desc_allow_markdown' => '0'])) === 'plain' && reportTextFormat(null, $cfgOn) === 'plain'
-      && reportTextFormat('bbcode', array_merge($cfgOn, ['desc_allow_bbcode' => '0'])) === 'plain');
+      && reportTextFormat('markdown', array_merge($cfgOn, ['rt_formats_report' => 'bbcode'])) === 'plain' && reportTextFormat(null, $cfgOn) === 'plain'
+      && reportTextFormat('bbcode', array_merge($cfgOn, ['rt_formats_report' => 'markdown'])) === 'plain'
+      && reportTextFormat('flarum', array_merge($cfgOn, ['rt_formats_report' => 'bbcode,flarum'])) === 'flarum'
+      && reportTextFormat('flarum', array_merge($cfgOn, ['rt_formats_report' => 'bbcode,markdown'])) === 'plain');
 check('reportTextValidate(): empty and short texts are fine, in every format',
       reportTextValidate('', 'bbcode', $cfgOn) === null && reportTextValidate('hello', 'plain', $cfgOn) === null && reportTextValidate('[b]hi[/b]', 'bbcode', $cfgOn) === null);
 check('… too long says how long, in the dictionary\'s words (plain too)', str_contains((string)reportTextValidate(str_repeat('a', 2001), 'plain', $cfgOn), '2001')
@@ -207,7 +228,7 @@ $links = implode(' ', array_map(fn($i) => "https://example.org/$i", range(1, 6))
 check('… more than five links are refused (rendered links are counted: a bare address is one)',
       str_contains((string)reportTextValidate($links, 'bbcode', $cfgOn), '6') && reportTextValidate(implode(' ', array_slice(explode(' ', $links), 0, 5)), 'bbcode', $cfgOn) === null
       && reportTextValidate($links, 'plain', $cfgOn) === null);
-check('… a format the site does not take is refused', reportTextValidate('x', 'markdown', array_merge($cfgOn, ['desc_allow_markdown' => '0', 'desc_allow_bbcode' => '1'])) === __('api.report_text.bad_format'));
+check('… a format the site does not take is refused', reportTextValidate('x', 'markdown', array_merge($cfgOn, ['rt_formats_report' => 'bbcode'])) === __('api.report_text.bad_format'));
 check('reportTextHtml(): BBCode and Markdown through the renderer, escaped; plain is escaped text with its lines',
       str_contains(reportTextHtml('[b]x[/b] <script>', 'bbcode', $cfgOn), '<strong>x</strong>') && !str_contains(reportTextHtml('<script>alert(1)</script>', 'markdown', $cfgOn), '<script')
       && reportTextHtml("a<b\nc", 'plain', $cfgOn) === "a&lt;b<br>\nc" && reportTextHtml('  ', 'bbcode', $cfgOn) === ''
@@ -378,8 +399,10 @@ foreach ($engines as [$eng, $engName]) {
           && bulkBodyWarning($p45) === __('api.bulk.html_flattened', ['n' => $p45['flattened'], 'max' => HTMLSAFE_MAX_DEPTH]) && bulkBodyProblem($t45, 'html', $cfgOn) === null, $J([$p45['flattened'], $p45['text']]));
 }
 $GLOBALS['__htmlsafe_engine'] = '';
-check('bulkFormats(): plain, the site\'s two, and html where the server can parse it', bulkFormats($cfgOn) === ['plain', 'bbcode', 'markdown', 'html']
-      && bulkFormats(array_merge($cfgOn, ['desc_allow_markdown' => '0'])) === ['plain', 'bbcode', 'html']);
+check('bulkFormats(): plain, the ones the site has on for mail, and html where the server can parse it',
+      bulkFormats(array_merge($cfgOn, ['rt_formats_mail' => 'bbcode,markdown'])) === ['plain', 'bbcode', 'markdown', 'html']
+      && bulkFormats(array_merge($cfgOn, ['rt_formats_mail' => 'bbcode'])) === ['plain', 'bbcode', 'html']
+      && bulkFormats(array_merge($cfgOn, ['rt_formats_mail' => 'bbcode,markdown,flarum'])) === ['plain', 'bbcode', 'markdown', 'flarum', 'html']);
 $q = bulkQueue($db, $cfgOn, ['mode' => 'selected', 'ids' => [$carol]], 'rmtest queue', '<p>hi</p>', 'html', 'none');
 $row = $db->query("SELECT format, frame, subject FROM mail_queue WHERE subject = 'rmtest queue'")->fetch(PDO::FETCH_ASSOC);
 check('bulkQueue(): an HTML message and its frame are kept on the row (or the mail is skipped — an account with no address)',
@@ -561,9 +584,9 @@ check('admin/bulk_send render: a flattened campaign carries the note in `problem
 $pv = $admin('rich_preview', ['text' => "[b]x[/b]\n<script>", 'format' => 'bbcode']);
 $pvp = $admin('rich_preview', ['text' => "a<b\nc", 'format' => 'html']);
 $pvl = $admin('rich_preview', ['text' => '[img]https://example.org/a.png[/img]', 'format' => 'bbcode']);
-$pvs = $admin('rich_preview', ['text' => '', 'format' => 'plain'], ['desc_allow_markdown' => '0']);
+$pvs = $admin('rich_preview', ['text' => '', 'format' => 'plain'], ['rt_formats_report' => 'bbcode']);
 check('admin/rich_preview: the formats the site accepts, the site\'s own rendering of escaped input, the problem the text would be refused with',
-      !empty($pv['success']) && $pv['formats'] === ['plain', 'bbcode', 'markdown'] && str_contains($pv['html'], '<strong>x</strong>') && !str_contains($pv['html'], '<script') && $pv['problem'] === null
+      !empty($pv['success']) && $pv['formats'] === array_merge(['plain'], richtextFormats($cfgOn, 'report')) && str_contains($pv['html'], '<strong>x</strong>') && !str_contains($pv['html'], '<script') && $pv['problem'] === null
       && $pvp['format'] === 'plain' && $pvp['html'] === "a&lt;b<br>\nc" && $pvl['problem'] === __('api.report_text.no_images') && $pvs['formats'] === ['plain', 'bbcode'], $J([$pv, $pvp, $pvl, $pvs]));
 check('… it is a route with a decision (any panel session) and writes no audit line',
       str_contains($src('api.php'), "'admin/rich_preview'          => 'panel.access'") && str_contains($src('api.php'), "'admin/rich_preview'          => 'api/admin/rich_preview.php'")

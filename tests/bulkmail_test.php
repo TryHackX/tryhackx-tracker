@@ -122,7 +122,7 @@ check('the sender reads the format and the frame off the row',
       preg_match('/SELECT id, user_id, email, subject, body, format, frame, attempts FROM mail_queue/', $bulk) === 1);
 $schema = (string)file_get_contents($root . '/includes/schema.php');
 check('the columns exist in the schema (fresh) and in a migration (widened only when it differs)',
-      substr_count($schema, "ENUM('plain','bbcode','markdown','html')") >= 2 && strpos($schema, "ENUM('site','none') NOT NULL DEFAULT 'site'") !== false
+      substr_count($schema, "ENUM('plain','bbcode','markdown','html','flarum')") >= 2 && strpos($schema, "ENUM('site','none') NOT NULL DEFAULT 'site'") !== false
       && strpos($schema, 'schemaColumnType($db, \'mail_queue\', \'format\')') !== false);
 
 echo "\n" . $n . ' checks, ' . $fails . " failed\n";

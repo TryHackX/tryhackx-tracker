@@ -435,16 +435,6 @@ add('', {
         'Potwierdź zmiany'),
     'settings.confirm_title': ('Confirm Settings Changes',
         'Potwierdź zmiany ustawień'),
-    'settings.content_allow_bbcode': ('Allow BBCode',
-        'Zezwól na BBCode'),
-    'settings.content_allow_markdown': ('Allow Markdown',
-        'Zezwól na Markdown'),
-    'settings.content_allow_flarum': ('Allow Flarum (forum posts)',
-        'Zezwól na Flarum (posty z forum)'),
-    'settings.content_allow_flarum_hint': ('A post copied from the forum as it is: Markdown and BBCode together, the label grids and the uploads. The magnet links in it are left out — this page is the magnet.',
-        'Post skopiowany z forum tak, jak jest: Markdown i BBCode razem, siatki etykiet i wgrane pliki. Linki magnet z posta są pomijane — ta strona sama jest magnetem.'),
-    'settings.content_allow_markdown_hint': ('With both on, whoever writes picks. With both off, BBCode is still offered — a description field with no syntax at all would be a trap.',
-        'Gdy oba włączone, wybiera piszący. Gdy oba wyłączone, BBCode nadal jest dostępny — pole opisu bez żadnej składni byłoby pułapką.'),
     'settings.content_autopublish': ('Always publish',
         'Zawsze publikuj'),
     'settings.content_autopublish_hint': ('Separate from <em>Review before publishing</em> on purpose: “I do not moderate” and “I moderate, but let this one through” are different decisions, and collapsing them into one switch means you cannot make the second.',
@@ -491,6 +481,9 @@ add('', {
         "Dodaje przycisk odświeżania w panelu Info publicznej wyszukiwarki, scrape'ujący ten jeden hash na żywo. Domyślnie wyłączone: to przycisk zamieniający kliknięcia obcych w żądania do trackera."),
     'settings.content_sl_refresh_seconds': ('Refresh cooldown (s)',
         'Odstęp odświeżania (s)'),
+    'settings.content_sl_refresh_limit': ('Refreshes per address per hour', 'Odświeżeń na adres na godzinę'),
+    'settings.content_sl_refresh_limit_hint': ('All torrents together, so nobody can click through hundreds of them. 0 = no limit.',
+        'Łącznie dla wszystkich torrentów, żeby nikt nie przeklikał ich setek. 0 = bez limitu.'),
     'settings.content_sl_refresh_seconds_hint': ('Per hash, across every visitor. Without this the button is a free load generator pointed at your own tracker.',
         'Na hash, wspólnie dla wszystkich odwiedzających. Bez tego przycisk to darmowy generator obciążenia wycelowany we własny tracker.'),
     'settings.content_source_url': ('Source link field',
@@ -507,8 +500,6 @@ add('', {
         'Każdy link poza serwis prosi odwiedzającego o potwierdzenie. Te domeny (i ich subdomeny) to pomijają. Puste = ostrzegaj przy wszystkim, także własnych.'),
     'settings.content_trusted_domains_ph': ('e.g. tryhackx.org, files.example.org',
         'np. tryhackx.org, files.example.org'),
-    'settings.content_yes': ('Yes',
-        'Tak'),
     'settings.donation_field_add': ('Add Field',
         'Dodaj pole'),
     'settings.donations_enabled': ('Show Donations',
@@ -2027,6 +2018,7 @@ add('', {
     # 1.69.0: "Descriptions & review" until the ratings had to be findable by the chip's name — and
     # 1.71.0 names the comments (tools/lang_src.d/comments.py), the section between the two.
     'settings.group_content': ('Descriptions, comments & ratings', 'Opisy, komentarze i oceny'),
+    'settings.group_formatting': ('Formatting & images', 'Formatowanie i obrazy'),
     # 1.60.0: two chips of their own. The shoutbox was filed under "Descriptions & review" and the
     # sounds under "User accounts", which is where they landed rather than where anybody looks.
     'settings.group_shoutbox': ('Shoutbox', 'Shoutbox'),
@@ -2433,8 +2425,9 @@ add('', {
     'settings.shout_format_plain': ('None (plain text)', 'Żadne (zwykły tekst)'),
     'settings.shout_format_bbcode': ('BBCode', 'BBCode'),
     'settings.shout_format_markdown': ('Markdown', 'Markdown'),
-    'settings.shout_format_hint': ('The format the box starts on. With BBCode or Markdown the writer can switch between the two per shout; "None" means no formatting at all and no switch.',
-        'Format, od którego zaczyna pole. Przy BBCode albo Markdownie piszący może przełączać między nimi przy każdej wypowiedzi; „Żadne” to brak formatowania i brak przełącznika.'),
+    'settings.shout_format_flarum': ('Flarum', 'Flarum'),
+    'settings.shout_format_hint': ('The format the box starts on. With BBCode or Markdown the writer can switch per shout; "None" means no formatting at all and no switch.',
+        'Format, od którego zaczyna pole. Przy BBCode albo Markdownie piszący może zmieniać format przy każdej wypowiedzi; „Żadne” to brak formatowania i brak przełącznika.'),
     'settings.shout_live_seconds': ('Ask for new lines every', 'Pytaj o nowe linie co'),
     'settings.shout_live_seconds_hint': ('Seconds. 0 = never (the box only fills on a page load). Below three is raised to three. A hidden tab and a box nobody can see never ask.',
         'Sekundy. 0 = wcale (pole zapełnia się tylko przy wczytaniu strony). Poniżej trzech podnosi się do trzech. Ukryta karta i niewidoczne pole nie pytają wcale.'),
@@ -2721,4 +2714,30 @@ add('', {
     'settings.federation_review_all_aria': ('Select every row in the list', 'Zaznacz wszystkie wiersze na liście'),
     # a row's checkbox in the federation review list (built by the page's script)
     'js.settings.fr_select_row': ('Select :name', 'Zaznacz: :name'),
+})
+
+
+# ── formatting & images: text formats per place ────────────────────────────
+add('settings', {
+    'formats_title': ('Text formats', 'Formaty tekstu'),
+    'formats_subtitle': ('Which syntaxes people may write in, place by place. Flarum is a post copied from the forum: Markdown and BBCode together, with the label grids.',
+        'Jakimi składniami można pisać, osobno w każdym miejscu. Flarum to post skopiowany z forum: Markdown i BBCode razem, z siatkami etykiet.'),
+    'formats_place': ('Where', 'Gdzie'),
+    'formats_description': ('Torrent descriptions', 'Opisy torrentów'),
+    'formats_description_hint': ('and the proposed rewrites of them', 'i propozycje ich zmian'),
+    'formats_message': ('Private messages', 'Wiadomości prywatne'),
+    'formats_message_hint': ('between members', 'między członkami'),
+    'formats_list': ('List descriptions', 'Opisy list'),
+    'formats_list_hint': ('pictures are never allowed there', 'obrazy nigdy nie są tam dozwolone'),
+    'formats_shout': ('Shoutbox', 'Shoutbox'),
+    'formats_shout_hint': ('unless the room is set to plain text', 'chyba że pokój ma ustawiony zwykły tekst'),
+    'formats_report': ("Moderators' texts", 'Teksty moderatorów'),
+    'formats_report_hint': ('answers to reports, warnings, appeal decisions, notifications, mail to a reporter',
+        'odpowiedzi na zgłoszenia, ostrzeżenia, decyzje w odwołaniach, powiadomienia, mail do zgłaszającego'),
+    'formats_page': ('Pages', 'Strony'),
+    'formats_page_hint': ('Terms, Info and the other pages edited in the panel', 'Regulamin, Info i inne strony edytowane w panelu'),
+    'formats_mail': ('Bulk mail', 'Maile masowe'),
+    'formats_mail_hint': ('beside plain text and HTML', 'obok zwykłego tekstu i HTML'),
+    'formats_note': ('With every box in a row cleared, BBCode stays. Comments and the profile description keep their own short BBCode.',
+        'Gdy w wierszu wszystko jest odznaczone, zostaje BBCode. Komentarze i opis profilu mają własny, krótki BBCode.'),
 })

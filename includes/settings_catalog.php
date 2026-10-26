@@ -69,6 +69,8 @@ function settingsCatalogGroups(): array {
         // hid them — and "Descriptions & ratings" until 1.71.0, for the same reason once there were comments.
         ['id' => 'content',      'title' => 'Descriptions, comments & ratings', 'icon' => 'bi-card-text',
          'keywords' => 'description source link bbcode markdown review moderation queue rewrite proposal images links preview submitter words text comments comment thread discussion guest komentarze ratings rating votes vote thumbs stars reputation likes score'],
+        ['id' => 'formatting',   'title' => 'Formatting & images', 'icon' => 'bi-fonts',
+         'keywords' => 'formatting formats format syntax bbcode markdown flarum forum post pasted messages lists shoutbox moderators reports warnings appeals pages mail images pictures formatowanie formaty skladnia wiadomosci listy zgloszenia ostrzezenia odwolania strony maile obrazy zdjecia'],
         // The shoutbox and the sounds were a section each inside "Descriptions & review" and "User
         // accounts", which is where they landed rather than where anybody would look for them: one
         // is a room people talk in and the other is what the whole site plays. Two chips of their
@@ -485,6 +487,13 @@ function settingsCatalogKeywords(): array {
         'desc_allow_bbcode'         => 'description format bbcode tags code quote allowed',
         'desc_allow_markdown'       => 'description format markdown allowed',
         'desc_allow_flarum'         => 'description format flarum forum post pasted markdown bbcode mixed thxlabels labels allowed opis forum wklejony post',
+        'rt_formats_message'        => 'private messages pm format bbcode markdown flarum syntax wiadomosci prywatne format',
+        'rt_formats_list'           => 'list description format bbcode markdown flarum syntax opis listy format',
+        'rt_formats_shout'          => 'shoutbox shout room format bbcode markdown flarum syntax shoutbox format',
+        'rt_formats_report'         => 'moderator text report answer warning appeal notification mail format bbcode markdown flarum moderator odpowiedz zgloszenie ostrzezenie odwolanie powiadomienie',
+        'rt_formats_page'           => 'pages terms info page editor format bbcode markdown flarum strony regulamin edytor stron format',
+        'rt_formats_mail'           => 'bulk mail newsletter format bbcode markdown flarum maile masowe format',
+        'rate_limit_sl_refresh'     => 'seeders leechers peers refresh button per address hour limit spam odswiezanie seedy pery limit adres godzina',
         'desc_max_chars'            => 'description length limit characters maximum',
         'desc_max_images'           => 'description images limit how many img tags maximum',
         'desc_max_links'            => 'description links limit how many url maximum',

@@ -436,7 +436,7 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
     $srcOn  = ($cfg['wl_allow_source_url'] ?? '0') === '1';
     $desc = $descOn ? trim((string)($in['description'] ?? '')) : '';
     $src  = $srcOn ? trim((string)($in['source_url'] ?? '')) : '';
-    // Normalised whatever else arrives: both homes store it in an ENUM('markdown','bbcode'), so a
+    // Normalised whatever else arrives: both homes store it in an ENUM, so a
     // format nobody asked for is a write that either fails or lands as ''. It used to be checked only
     // on the path that has a description, and a submission carrying just a source link wrote it raw.
     $fmt  = (string)($in['description_format'] ?? 'bbcode');

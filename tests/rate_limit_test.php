@@ -274,6 +274,23 @@ $rmTree($mailFile);
 check('a count that cannot be kept sends nothing (fail-CLOSED, the opposite of the limits)', confirmMailAllow($cap2, $day + 3 * 86400) === false);
 $rmTree($mailFile);
 
+require_once __DIR__ . '/../includes/schema.php';
+require_once __DIR__ . '/../includes/settings_catalog.php';
+$ii = (string)file_get_contents(__DIR__ . '/../api/index_info.php');
+$iiCool = strpos($ii, "jsonResponse(['error' => __('api.index.just_refreshed'");
+$iiLimit = strpos($ii, "if (!rateLimitAllow('sl_refresh', ipBucket(getClientIp(\$cfg)), max(0, (int)(\$cfg['rate_limit_sl_refresh'] ?? 30)))) {");
+$iiShared = strpos($ii, "jsonResponse(['success' => true, 'cached' => true,");
+$iiScrape = strpos($ii, "@file_put_contents(\$stamp, '');");
+check('the seeds refresh: inside the torrent\'s cooldown the last numbers for free, past it a hit spent per address group, before the scrape',
+      $iiShared !== false && $iiCool !== false && $iiLimit !== false && $iiScrape !== false && $iiShared < $iiCool && $iiCool < $iiLimit && $iiLimit < $iiScrape
+      && str_contains($ii, "jsonResponse(['error' => __('api.index.refresh_rate_limited')], 429);"));
+$slSave = (string)file_get_contents(__DIR__ . '/../api/admin/save_settings.php');
+check('… its limit ships at 30 an hour, is saved between 0 (off) and 100000, and has search words and a field on the page',
+      (trackerSchemaDefaultSettings()['rate_limit_sl_refresh'] ?? null) === '30'
+      && str_contains($slSave, "'rate_limit_sl_refresh' => [0, 100000, 30]") && str_contains($slSave, "'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars'")
+      && isset(settingsCatalogKeywords()['rate_limit_sl_refresh'])
+      && str_contains((string)file_get_contents(__DIR__ . '/../templates/admin/settings.php'), 'name="rate_limit_sl_refresh"'));
+
 $cleanup();
 $same = (is_file($idx) ? (string)file_get_contents($idx) : null) === $idxWas
      && (is_file($laFile) ? (string)file_get_contents($laFile) : null) === $laWas

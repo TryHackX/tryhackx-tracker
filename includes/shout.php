@@ -108,21 +108,23 @@ function shoutDeleteOwnMinutes(array $cfg): int
 }
 
 /**
- * The DEFAULT markup of a shout: plain | bbcode | markdown.
+ * The DEFAULT markup of a shout.
  *
- * 'plain' is not merely a third syntax — it switches formatting off entirely, composer included.
+ * 'plain' is not merely a syntax — it switches formatting off entirely, composer included.
  * With bbcode or markdown the writer picks per shout; this only says which one the box starts on.
  */
 function shoutFormat(array $cfg): string
 {
     $v = (string)($cfg['shout_format'] ?? 'bbcode');
-    return in_array($v, ['plain', 'bbcode', 'markdown'], true) ? $v : 'bbcode';
+    if ($v === 'plain') return 'plain';
+    $on = richtextFormats($cfg, 'shout');
+    return in_array($v, $on, true) ? $v : $on[0];
 }
 
 /** The formats a writer may choose from. One entry for 'plain' — there is nothing to choose. */
 function shoutFormatChoices(array $cfg): array
 {
-    return shoutFormat($cfg) === 'plain' ? ['plain'] : ['bbcode', 'markdown'];
+    return shoutFormat($cfg) === 'plain' ? ['plain'] : richtextFormats($cfg, 'shout');
 }
 
 /**
@@ -444,7 +446,7 @@ function shoutLinkImages(string $html, string $title = ''): string
 function shoutBodyProblem(array $cfg, string $body, string $format): ?string
 {
     if ($format === 'plain' || !function_exists('richtextValidate')) return null;
-    return richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)shoutMaxChars($cfg)]));
+    return richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)shoutMaxChars($cfg)]), 'shout');
 }
 
 /**

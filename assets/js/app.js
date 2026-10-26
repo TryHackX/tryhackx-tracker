@@ -3805,7 +3805,7 @@ window.siteToast = siteToast;
                 if (r && r.success) {
                     seedV.textContent = t.num(Number(r.seeders));
                     leechV.textContent = t.num(Number(r.leechers));
-                    btn.textContent = t.key('js.app.refreshed');
+                    btn.textContent = r.cached && r.message ? String(r.message) : t.key('js.app.refreshed');
                 } else {
                     btn.textContent = (r && r.error) || t.key('js.app.no_answer');
                 }

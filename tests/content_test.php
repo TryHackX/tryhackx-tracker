@@ -880,12 +880,12 @@ $GLOBALS["__audit_endpoint"] = $a["endpoint"];
 require $a["file"];
 ');
     // An address of its own: the browser checks share 127.0.0.1's hourly buckets and must not find them spent.
-    $runE = function (string $endpoint, string $method, array $get, array $post, array $session, string $ip = '127.0.0.77') use ($root, $runner, &$tmpE, $cfgE): array {
+    $runE = function (string $endpoint, string $method, array $get, array $post, array $session, string $ip = '127.0.0.77', array $cfgX = []) use ($root, $runner, &$tmpE, $cfgE): array {
         $argFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ct_args_' . bin2hex(random_bytes(4)) . '.json';
         $tmpE[] = $argFile;
         $file = str_starts_with($endpoint, 'admin/') ? 'api/admin/' . substr($endpoint, 6) . '.php' : 'api/' . $endpoint . '.php';
         file_put_contents($argFile, json_encode(['root' => $root, 'endpoint' => $endpoint, 'file' => $root . '/' . $file, 'method' => $method, 'ip' => $ip,
-            'get' => $get, 'post' => $post, 'session' => $session, 'cfg' => $cfgE, 'sid' => 'cttest' . bin2hex(random_bytes(8))]));
+            'get' => $get, 'post' => $post, 'session' => $session, 'cfg' => array_merge($cfgE, $cfgX), 'sid' => 'cttest' . bin2hex(random_bytes(8))]));
         $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' -d display_errors=0 -d xdebug.mode=off ' . escapeshellarg($runner) . ' ' . escapeshellarg($argFile) . ' 2>&1');
         $j = json_decode(trim($out), true);
         return is_array($j) ? $j : ['__raw' => substr($out, 0, 400)];
@@ -905,6 +905,22 @@ require $a["file"];
     $j = $runE('index_info', 'GET', ['hash' => $H1], [], ['csrf_token' => 'ct-child-token']);
     check('… nobody signed in: no Edit and no source text in the answer, whether the guest group may open the panel or not',
           empty($j['can_content_edit']) && (empty($j['success']) || ($j['content_edit'] ?? 'x') === null) && !str_contains(json_encode($j), 'members only'), json_encode($j));
+    $slStamp = sys_get_temp_dir() . '/idx_sl_' . $H1 . '.stamp';
+    $slWas = is_file($slStamp) ? [(string)file_get_contents($slStamp), (int)filemtime($slStamp)] : null;
+    $slCfg = ['search_allow_sl_refresh' => '1', 'search_sl_refresh_seconds' => '120', 'rate_limit_sl_refresh' => '1'];
+    $slAsk = fn() => $runE('index_info', 'POST', ['hash' => $H1], ['op' => 'refresh', 'csrf_token' => 'ct-child-token'], $sessE($bId), '127.0.0.78', $slCfg);
+    file_put_contents($slStamp, json_encode(['seeders' => 7, 'leechers' => 3, 'completed' => 11]));
+    $j = $slAsk();
+    $j2 = $slAsk();
+    check('the seeds refresh inside the torrent\'s cooldown: the numbers the last refresh fetched, to everybody, and nothing spent of the address\'s hourly limit',
+          !empty($j['success']) && !empty($j['cached']) && ($j['seeders'] ?? 0) === 7 && ($j['leechers'] ?? 0) === 3 && ($j['completed'] ?? 0) === 11
+          && !empty($j2['cached']) && rateLimitPeek('sl_refresh', ipBucket('127.0.0.78'), 1), json_encode([$j, $j2]));
+    file_put_contents($slStamp, '');
+    $j = $slAsk();
+    check('… and while a refresh is still asking the tracker, or got no answer from it, the answer is how long to wait, not old numbers',
+          empty($j['success']) && empty($j['cached']) && ($j['retry_after'] ?? 0) > 0, json_encode($j));
+    if ($slWas === null) @unlink($slStamp);
+    else { file_put_contents($slStamp, $slWas[0]); @touch($slStamp, $slWas[1]); }
     $db->prepare("UPDATE users SET content_credit_public = 0 WHERE id = ?")->execute([$bId]);
     $j = $runE('index_info', 'GET', ['hash' => $H1], [], $sessE($cId));
     check('… with the editor\'s name hidden, their name is nowhere in the answer another reader gets',

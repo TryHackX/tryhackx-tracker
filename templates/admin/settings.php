@@ -2904,30 +2904,6 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <input id="set-link_trusted_domains" type="text" class="form-control bg-dark text-light border-secondary" name="link_trusted_domains" value="<?= sanitize($cfg['link_trusted_domains'] ?? '') ?>" placeholder="<?= _h('settings.content_trusted_domains_ph') ?>">
                         <small class="settings-hint"><?= _h('settings.content_trusted_domains_hint') ?></small>
                     </div>
-                    <div class="col-md-3" data-setting="desc_allow_bbcode">
-                        <label for="set-desc_allow_bbcode" class="form-label"><?= _h('settings.content_allow_bbcode') ?></label>
-                        <select id="set-desc_allow_bbcode" class="form-select bg-dark text-light border-secondary" name="desc_allow_bbcode">
-                            <option value="1" <?= ($cfg['desc_allow_bbcode'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
-                            <option value="0" <?= ($cfg['desc_allow_bbcode'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><code>[b] [i] [u] [s] [code] [quote] [list] [url] [img]</code></small>
-                    </div>
-                    <div class="col-md-3" data-setting="desc_allow_markdown">
-                        <label for="set-desc_allow_markdown" class="form-label"><?= _h('settings.content_allow_markdown') ?></label>
-                        <select id="set-desc_allow_markdown" class="form-select bg-dark text-light border-secondary" name="desc_allow_markdown">
-                            <option value="1" <?= ($cfg['desc_allow_markdown'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
-                            <option value="0" <?= ($cfg['desc_allow_markdown'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.content_allow_markdown_hint') ?></small>
-                    </div>
-                    <div class="col-md-3" data-setting="desc_allow_flarum">
-                        <label for="set-desc_allow_flarum" class="form-label"><?= _h('settings.content_allow_flarum') ?></label>
-                        <select id="set-desc_allow_flarum" class="form-select bg-dark text-light border-secondary" name="desc_allow_flarum">
-                            <option value="1" <?= ($cfg['desc_allow_flarum'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_yes') ?></option>
-                            <option value="0" <?= ($cfg['desc_allow_flarum'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_no') ?></option>
-                        </select>
-                        <small class="settings-hint"><?= _h('settings.content_allow_flarum_hint') ?></small>
-                    </div>
                     <div class="col-md-2" data-setting="desc_max_chars">
                         <label for="set-desc_max_chars" class="form-label"><?= _h('settings.content_max_chars') ?></label>
                         <input id="set-desc_max_chars" type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_chars" value="<?= sanitize($cfg['desc_max_chars'] ?? '4000') ?>" min="200" max="500000">
@@ -2953,6 +2929,11 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <label for="set-search_sl_refresh_seconds" class="form-label"><?= _h('settings.content_sl_refresh_seconds') ?></label>
                         <input id="set-search_sl_refresh_seconds" type="number" class="form-control bg-dark text-light border-secondary" name="search_sl_refresh_seconds" value="<?= sanitize($cfg['search_sl_refresh_seconds'] ?? '120') ?>" min="10" max="3600">
                         <small class="settings-hint"><?= _h('settings.content_sl_refresh_seconds_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="rate_limit_sl_refresh">
+                        <label for="set-rate_limit_sl_refresh" class="form-label"><?= _h('settings.content_sl_refresh_limit') ?></label>
+                        <input id="set-rate_limit_sl_refresh" type="number" class="form-control bg-dark text-light border-secondary" name="rate_limit_sl_refresh" value="<?= sanitize($cfg['rate_limit_sl_refresh'] ?? '30') ?>" min="0" max="100000">
+                        <small class="settings-hint"><?= _h('settings.content_sl_refresh_limit_hint') ?></small>
                     </div>
                 </div>
             </div>
@@ -3122,6 +3103,50 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                 </div>
             </div>
 
+            <div class="settings-section" id="section-formats" data-group="formatting" data-title="<?= _h('settings.formats_title') ?>">
+                <h5><i class="bi bi-fonts"></i> <?= _h('settings.formats_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.formats_subtitle') ?></p>
+                <div class="table-responsive">
+                    <table class="table table-sm table-dark align-middle mb-1 rtf-table">
+                        <thead>
+                            <tr>
+                                <th><?= _h('settings.formats_place') ?></th>
+                                <?php foreach (richtextRichFormats() as $rtfF): ?>
+                                <th class="text-center"><?= richtextFormatLabel($rtfF) ?></th>
+                                <?php endforeach; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (array_merge(['description'], richtextPlaces()) as $rtfPlace):
+                                $rtfOn = $rtfPlace === 'description'
+                                    ? array_values(array_filter(richtextRichFormats(), fn($f) => ($cfg['desc_allow_' . $f] ?? '1') === '1'))
+                                    : richtextFormats($cfg, $rtfPlace); ?>
+                            <tr class="rtf-row" data-setting="<?= $rtfPlace === 'description' ? 'desc_allow_flarum' : 'rt_formats_' . $rtfPlace ?>">
+                                <td>
+                                    <?= _h('settings.formats_' . $rtfPlace) ?><br>
+                                    <small class="settings-hint"><?= _h('settings.formats_' . $rtfPlace . '_hint') ?></small>
+                                    <?php if ($rtfPlace === 'description'): ?>
+                                    <?php foreach (richtextRichFormats() as $rtfF): ?>
+                                    <input type="hidden" class="rtf-bool" data-format="<?= $rtfF ?>" name="desc_allow_<?= $rtfF ?>" value="<?= in_array($rtfF, $rtfOn, true) ? '1' : '0' ?>">
+                                    <?php endforeach; ?>
+                                    <?php else: ?>
+                                    <input type="hidden" class="rtf-csv" name="rt_formats_<?= $rtfPlace ?>" value="<?= sanitize(implode(',', $rtfOn)) ?>">
+                                    <?php endif; ?>
+                                </td>
+                                <?php foreach (richtextRichFormats() as $rtfF): ?>
+                                <td class="text-center">
+                                    <input type="checkbox" class="form-check-input rtf-check" value="<?= $rtfF ?>" <?= in_array($rtfF, $rtfOn, true) ? 'checked' : '' ?>
+                                           aria-label="<?= _h('settings.formats_' . $rtfPlace) ?>: <?= richtextFormatLabel($rtfF) ?>">
+                                </td>
+                                <?php endforeach; ?>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <small class="settings-hint d-block"><?= _h('settings.formats_note') ?></small>
+            </div>
+
             <?php /* ── The shoutbox (1.58.0, includes/shout.php) ────────────────────────────────
                      Everything the room needs, and one control that is not a setting: Purge, which
                      deletes rows and therefore asks for the owner's password (assets/js/admin-shout.js
@@ -3169,6 +3194,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                             <option value="plain" <?= $shFmt === 'plain' ? 'selected' : '' ?>><?= _h('settings.shout_format_plain') ?></option>
                             <option value="bbcode" <?= $shFmt === 'bbcode' ? 'selected' : '' ?>><?= _h('settings.shout_format_bbcode') ?></option>
                             <option value="markdown" <?= $shFmt === 'markdown' ? 'selected' : '' ?>><?= _h('settings.shout_format_markdown') ?></option>
+                            <option value="flarum" <?= $shFmt === 'flarum' ? 'selected' : '' ?>><?= _h('settings.shout_format_flarum') ?></option>
                         </select>
                         <small class="settings-hint"><?= __('settings.shout_format_hint') ?></small>
                     </div>
@@ -4784,6 +4810,7 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
                             <select class="form-select form-select-sm bg-dark text-light border-secondary" id="pc-format">
                                 <option value="markdown"><?= _h('settings.pages_format_markdown') ?></option>
                                 <option value="bbcode"><?= _h('settings.pages_format_bbcode') ?></option>
+                                <option value="flarum">Flarum</option>
                             </select>
                             <div class="form-check form-switch mb-0 ms-2">
                                 <input class="form-check-input" type="checkbox" id="pc-enabled">
@@ -5406,6 +5433,24 @@ sudo install -d -m 0700 <?= sanitize(backupDir($cfg)) ?></code></pre>
         document.getElementById('settings-form').addEventListener('submit', sync, true);
         sync(); dim();
     })();
+
+    document.querySelectorAll('.rtf-row').forEach((row) => {
+        const checks = [...row.querySelectorAll('.rtf-check')];
+        const csv = row.querySelector('.rtf-csv');
+        const sync = () => {
+            if (csv) {
+                csv.value = checks.filter(c => c.checked).map(c => c.value).join(',') || 'bbcode';
+                return;
+            }
+            checks.forEach((c) => {
+                const h = row.querySelector('.rtf-bool[data-format="' + c.value + '"]');
+                if (h) h.value = c.checked ? '1' : '0';
+            });
+        };
+        checks.forEach(c => c.addEventListener('change', sync));
+        document.getElementById('settings-form').addEventListener('submit', sync, true);
+        sync();
+    });
 
     document.getElementById('btn-test-backup-dir').addEventListener('click', async (e) => {
         const btn = e.currentTarget;

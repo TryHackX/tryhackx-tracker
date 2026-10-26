@@ -930,10 +930,17 @@ $accTrashDays = (int)$accPeople['trash_days'];
                 <button type="button" class="rt-tab active" data-rt="write"><?= _h('whitelist.write') ?></button>
                 <button type="button" class="rt-tab" data-rt="preview"><?= _h('whitelist.preview') ?></button>
                 <span class="rt-counter" id="pm-body-count"></span>
+                <?php $pmFormats = function_exists('richtextFormats') ? richtextFormats($cfg, 'message') : ['bbcode']; ?>
+                <?php if (count($pmFormats) > 1): ?>
                 <select id="pm-body-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
-                    <option value="bbcode">BBCode</option>
-                    <option value="markdown">Markdown</option>
+                    <?php foreach ($pmFormats as $pmf): ?>
+                    <option value="<?= sanitize($pmf) ?>"><?= richtextFormatLabel($pmf) ?></option>
+                    <?php endforeach; ?>
                 </select>
+                <?php else: ?>
+                <input type="hidden" id="pm-body-format" value="<?= sanitize($pmFormats[0]) ?>">
+                <span class="rt-format-fixed"><?= richtextFormatLabel($pmFormats[0]) ?></span>
+                <?php endif; ?>
             </div>
             <div class="rt-tools" id="pm-body-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
                 <span class="rt-tool-group">

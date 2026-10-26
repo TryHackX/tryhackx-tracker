@@ -388,7 +388,7 @@ const MAIL_TEAM_TEXT_MAX = 2000;
 function mailRichParts(string $text, string $format, array $cfg): array {
     $text = trim($text);
     if ($text === '') return ['', ''];
-    if (($format === 'bbcode' || $format === 'markdown') && function_exists('richtextRenderForEmail')) {
+    if (function_exists('richtextRenderForEmail') && in_array($format, richtextRichFormats(), true)) {
         $html = richtextRenderForEmail($text, $format, $cfg);
         if ($html !== '') return [$html, htmlToText($html)];
     }
@@ -409,7 +409,7 @@ function sendCustomEmail(PDO $db, int $reportId, string $customMessage, array $c
     if (isUnsubscribed($db, $report['email'], 'custom')) return false;
 
     $customMessage = mb_substr(trim($customMessage), 0, MAIL_TEAM_TEXT_MAX, 'UTF-8');
-    if (!in_array($format, ['plain', 'bbcode', 'markdown'], true)) $format = 'plain';
+    if (!in_array($format, array_merge(['plain'], function_exists('richtextRichFormats') ? richtextRichFormats() : []), true)) $format = 'plain';
     [$messageHtml, $messageText] = mailRichParts($customMessage, $format, $cfg);
 
     $lang = $lang ?? mailSiteLang($cfg);

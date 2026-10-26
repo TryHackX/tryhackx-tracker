@@ -140,7 +140,7 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string
     // Any INSTALLED language, not merely an enabled one: a translation is written before it is
     // switched on, and refusing to store the page for it would make that impossible.
     if (!langInstalled($lang)) return ['error' => __('api.pages.lang_not_installed')];
-    if (!in_array($format, ['bbcode', 'markdown'], true)) return ['error' => __('api.pages.unknown_format')];
+    if (!in_array($format, richtextFormats($cfg, 'page'), true)) return ['error' => __('api.pages.unknown_format')];
     if (strlen($body) > PAGECONTENT_MAX) {
         return ['error' => __('api.pages.body_too_long', ['max' => langNumber(PAGECONTENT_MAX)])];
     }
@@ -180,7 +180,7 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string
  * a page may link as often as the renderer lets anything link; images keep the operator's limit.
  */
 function pageContentValidate(string $body, string $format, array $cfg): ?string {
-    if (!in_array($format, ['bbcode', 'markdown'], true)) return __('api.pages.unknown_format');
+    if (!in_array($format, richtextFormats($cfg, 'page'), true)) return __('api.pages.unknown_format');
     $pageCfg = array_merge($cfg, ['desc_allow_bbcode' => '1', 'desc_allow_markdown' => '1']);
     $c = richtextCount($body, $format, $pageCfg);
     $maxImg = function_exists('richtextMaxImages') ? richtextMaxImages($cfg) : 3;

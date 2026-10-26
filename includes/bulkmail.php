@@ -59,7 +59,7 @@ function bulkMailDailyCap(array $cfg): int {
 }
 
 /**
- * The formats the composer offers and the endpoint accepts: plain, the two the site has switched on, and — where the
+ * The formats the composer offers and the endpoint accepts: plain, the ones the site has switched on, and — where the
  * server can parse HTML (ext-dom: htmlSafeAvailable()) — html.
  */
 function bulkFormats(array $cfg): array {
@@ -152,7 +152,7 @@ function bulkNotify(PDO $db, array $spec, string $title, string $body, string $f
     if (!$rows) return 0;
     $title = mb_substr(trim($title), 0, 190);
     if ($title === '') return 0;
-    $rich = in_array($format, ['bbcode', 'markdown', 'html'], true);
+    $rich = in_array($format, array_merge(function_exists('richtextRichFormats') ? richtextRichFormats() : [], ['html']), true);
     if ($rich) {
         $body = trim($body);
         if (strlen($body) > BULK_BODY_MAX_BYTES) $body = rtrim(mb_strcut($body, 0, BULK_BODY_MAX_BYTES, 'UTF-8'));
@@ -199,7 +199,7 @@ function bulkBodyHtml(string $body, string $format, array $cfg, ?array &$report 
     if ($format === 'html') {
         return '<div>' . htmlSafeClean($body, 'mail', $report) . '</div>';
     }
-    if ($format === 'bbcode' || $format === 'markdown') {
+    if (function_exists('richtextRichFormats') && in_array($format, richtextRichFormats(), true)) {
         if (function_exists('richtextRenderForEmail')) {
             $html = richtextRenderForEmail($body, $format, $cfg);
             if ($html !== '') return '<div>' . $html . '</div>';
@@ -232,7 +232,8 @@ function bulkMailParts(string $subject, string $body, string $format, string $fr
     } else {
         $html = $inner;
     }
-    $text = ($format === 'plain' || !in_array($format, ['bbcode', 'markdown', 'html'], true)) ? trim($body) : htmlToText($inner);
+    $text = ($format === 'plain' || !in_array($format, array_merge(function_exists('richtextRichFormats') ? richtextRichFormats() : [], ['html']), true))
+        ? trim($body) : htmlToText($inner);
     $foot = function_exists('mailFooterText') ? mailFooterText($cfg, $lang, $unsubUrl) : '';
     return ['html' => $html, 'text' => $text . ($foot !== '' ? "\n\n--\n" . $foot : '') . "\n",
             'inner' => $inner, 'flattened' => (int)($report['flattened'] ?? 0)];
@@ -285,7 +286,7 @@ function bulkBodyWarning(array $parts): ?string {
 function bulkQueue(PDO $db, array $cfg, array $spec, string $subject, string $body, string $format = 'plain', string $frame = 'site'): array {
     $subject = mb_substr(trim($subject), 0, 200);
     $body    = trim($body);
-    if (!in_array($format, ['plain', 'bbcode', 'markdown', 'html'], true)) $format = 'plain';
+    if (!in_array($format, array_merge(['plain', 'html'], function_exists('richtextRichFormats') ? richtextRichFormats() : []), true)) $format = 'plain';
     // 'none' is the campaign's own design; it only means something for HTML, but a Markdown message may want the
     // bare page too, so it is not refused for the others.
     if ($frame !== 'none') $frame = 'site';

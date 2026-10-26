@@ -569,7 +569,7 @@ check('read through a DOM, hostile input yields pictures with only their own att
       $imgBad === [] && $xp->query('//img[@class="rt-emote"]')->length >= 3, implode(', ', $imgBad) . ' | ' . substr($hd, 0, 300));
 
 $cfgF = array_merge($cfg, ['desc_allow_flarum' => '1', 'desc_max_images' => '20', 'desc_max_links' => '20']);
-check('flarum: offered for descriptions only when switched on, and not yet for lists, reports, mail or pages',
+check('flarum: offered for descriptions only when switched on, and not where a place has no setting of its own',
       !in_array('flarum', richtextFormats(array_merge($cfg, ['desc_allow_flarum' => '0'])), true) && in_array('flarum', richtextFormats($cfgF), true)
       && in_array('flarum', richtextFormats($cfg), true)
       && !in_array('flarum', richtextFormats($cfgF, 'list'), true) && !in_array('flarum', richtextFormats($cfgF, 'report'), true)
@@ -577,6 +577,20 @@ check('flarum: offered for descriptions only when switched on, and not yet for l
 check('flarum: with BBCode and Markdown both off, BBCode is still offered beside it',
       richtextFormats(array_merge($cfgF, ['desc_allow_bbcode' => '0', 'desc_allow_markdown' => '0'])) === ['bbcode', 'flarum']);
 check('flarum: the format has its own name for the editor', richtextFormatLabel('flarum') === 'Flarum' && richtextFormatLabel('x') === 'BBCode');
+check('formats per place: each place reads its own setting, in one fixed order, and a place left with nothing it knows offers BBCode',
+      richtextFormats(['rt_formats_message' => 'flarum'], 'message') === ['flarum']
+      && richtextFormats(['rt_formats_page' => 'flarum,bbcode'], 'page') === ['bbcode', 'flarum']
+      && richtextFormats(['rt_formats_list' => 'markdown', 'rt_formats_report' => 'flarum'], 'list') === ['markdown']
+      && richtextFormats(['rt_formats_shout' => ''], 'shout') === ['bbcode']
+      && richtextFormats(['rt_formats_mail' => 'html,plain,<b>'], 'mail') === ['bbcode']);
+check('formats per place: a description keeps its three switches and reads no place\'s setting',
+      richtextFormats(array_merge($cfgF, ['rt_formats_description' => 'markdown', 'rt_formats_message' => 'markdown'])) === ['bbcode', 'markdown', 'flarum']
+      && richtextFormats(array_merge($cfgF, ['desc_allow_flarum' => '0', 'rt_formats_message' => 'flarum'])) === ['bbcode', 'markdown']);
+check('formats per place: the validator asks the place it is given',
+      richtextValidate('x', 'flarum', array_merge($cfg, ['rt_formats_message' => 'bbcode']), 'message') !== null
+      && richtextValidate('x', 'flarum', array_merge($cfg, ['rt_formats_message' => 'bbcode,flarum']), 'message') === null
+      && richtextValidate('x', 'flarum', array_merge($cfg, ['desc_allow_flarum' => '0', 'rt_formats_message' => 'flarum']), 'message') === null
+      && richtextValidate('x', 'flarum', array_merge($cfg, ['desc_allow_flarum' => '0', 'rt_formats_message' => 'flarum'])) !== null);
 
 $post = "[center]\n## Big Buck Bunny (2008) [1.2 GiB] [AVC] [Full]\n[/center]\n\n### Quick look:\n"
       . "[b]Title:[/b] Big Buck Bunny\n[b]Runtime:[/b] \\~10 min, [b]Type:[/b] WEB-DL\n"
@@ -689,6 +703,26 @@ check('schema: every home of a description can store the flarum format',
       substr_count($fStmts, "`description_format` ENUM('markdown','bbcode','flarum')") >= 3
       && !str_contains($fStmts, "`description_format` ENUM('markdown','bbcode') "));
 check('schema: the switch has a default, and it is on', (trackerSchemaDefaultSettings()['desc_allow_flarum'] ?? null) === '1');
+require_once $root . '/includes/settings_catalog.php';
+$rtfSave = (string)file_get_contents($root . '/api/admin/save_settings.php');
+$rtfTpl = (string)file_get_contents($root . '/templates/admin/settings.php');
+$rtfMissing = [];
+foreach (richtextPlaces() as $rtfPlace) {
+    $k = 'rt_formats_' . $rtfPlace;
+    if ((trackerSchemaDefaultSettings()[$k] ?? null) !== 'bbcode,markdown,flarum') $rtfMissing[] = "$k default";
+    if (!str_contains($rtfSave, "'$k'")) $rtfMissing[] = "$k save";
+    if (!isset(settingsCatalogKeywords()[$k])) $rtfMissing[] = "$k catalogue";
+}
+check('formats per place: every place ships with all three on, is saved and is found by the search', $rtfMissing === [], implode(', ', $rtfMissing));
+check('formats per place: a saved place keeps only the formats the renderer knows, in its order, and never nothing',
+      str_contains($rtfSave, "\$keep = array_values(array_intersect(richtextRichFormats(), \$want));")
+      && str_contains($rtfSave, "\$data['rt_formats_' . \$rtfPlace] = implode(',', \$keep ?: ['bbcode']);"));
+check('formats per place: one table in a group of its own, a row per place, the description\'s three switches in it and nowhere else',
+      in_array('formatting', array_column(settingsCatalogGroups(), 'id'), true)
+      && str_contains($rtfTpl, 'id="section-formats" data-group="formatting"')
+      && str_contains($rtfTpl, "<?php foreach (array_merge(['description'], richtextPlaces()) as \$rtfPlace):")
+      && str_contains($rtfTpl, 'name="rt_formats_<?= $rtfPlace ?>"') && str_contains($rtfTpl, 'name="desc_allow_<?= $rtfF ?>"')
+      && !str_contains($rtfTpl, 'data-setting="desc_allow_bbcode"') && !str_contains($rtfTpl, 'name="desc_allow_markdown"'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

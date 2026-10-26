@@ -905,6 +905,7 @@
             hr: ['\n[hr]\n', '', true],
         },
     };
+    RICH_SYNTAX.flarum = RICH_SYNTAX.bbcode;
     const RICH_TOOLS = [
         [['bold', 'type-bold'], ['italic', 'type-italic'], ['underline', 'type-underline'], ['strike', 'type-strikethrough']],
         [['color', 'palette'], ['size', 'fonts'], ['highlight', 'highlighter']],
@@ -952,7 +953,7 @@
         }
         [head, ta, foot, problem, wrap].forEach(n => root.appendChild(n));
 
-        const LABEL = { plain: () => t.key('js.users.fmt_plain'), markdown: () => 'Markdown', bbcode: () => 'BBCode', html: () => 'HTML' };
+        const LABEL = { plain: () => t.key('js.users.fmt_plain'), markdown: () => 'Markdown', bbcode: () => 'BBCode', flarum: () => 'Flarum', html: () => 'HTML' };
         const getFormat = () => sel.value || 'plain';
         const syntax = () => RICH_SYNTAX[getFormat()] || null;
 
@@ -976,7 +977,7 @@
                 tools.querySelectorAll('.arf-tool-group').forEach(g => { g.hidden = ![...g.querySelectorAll('[data-md]')].some(b => !b.hidden); });
             }
             hint.textContent = '';
-            hint.append(t.key(fmt === 'markdown' ? 'js.users.fmt_hint_markdown' : fmt === 'bbcode' ? 'js.users.fmt_hint_bbcode'
+            hint.append(t.key(fmt === 'markdown' ? 'js.users.fmt_hint_markdown' : fmt === 'bbcode' ? 'js.users.fmt_hint_bbcode' : fmt === 'flarum' ? 'js.app.hint_flarum'
                               : fmt === 'html' ? 'js.rich.hint_html' : 'js.users.fmt_hint_plain'));
             if (o.onFormat) o.onFormat(fmt);
             previewSoon(true);

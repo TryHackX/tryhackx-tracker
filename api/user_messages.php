@@ -101,12 +101,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($body === '') jsonResponse(['error' => 'empty'], 400);
         $max = pmMaxChars($cfg);
         if (mb_strlen($body) > $max) jsonResponse(['error' => 'too_long', 'limit' => $max], 400);
-        // The same two formats the descriptions use, validated by the same validator: a message is
-        // a stranger's text and there is one place in this codebase that knows what may pass.
+        // The same validator the descriptions use: a message is a stranger's text and there is one
+        // place in this codebase that knows what may pass.
         $format = (string)($input['format'] ?? 'bbcode');
-        if (!in_array($format, ['bbcode', 'markdown'], true)) $format = 'bbcode';
+        if (!in_array($format, richtextRichFormats(), true)) $format = 'bbcode';
         if (function_exists('richtextValidate')) {
-            $bad = richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)$max]));
+            $bad = richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)$max]), 'message');
             if ($bad !== null) jsonResponse(['error' => 'invalid_body', 'detail' => $bad], 400);
         }
 

@@ -83,12 +83,13 @@ if (($leCtx['public_why'] ?? '') === 'sharing_off') {
                         <span class="rt-counter" id="le-desc-count"></span>
                         <?php if (count($leFormats) > 1): ?>
                         <select id="le-desc-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
-                            <option value="bbcode">BBCode</option>
-                            <option value="markdown">Markdown</option>
+                            <?php foreach ($leFormats as $lef): ?>
+                            <option value="<?= sanitize($lef) ?>"><?= richtextFormatLabel($lef) ?></option>
+                            <?php endforeach; ?>
                         </select>
                         <?php else: ?>
                         <input type="hidden" id="le-desc-format" value="<?= sanitize($leFormats[0]) ?>">
-                        <span class="rt-format-fixed" id="le-desc-format-fixed"><?= $leFormats[0] === 'markdown' ? 'Markdown' : 'BBCode' ?></span>
+                        <span class="rt-format-fixed" id="le-desc-format-fixed"><?= richtextFormatLabel($leFormats[0]) ?></span>
                         <?php endif; ?>
                     </div>
                     <div class="rt-tools" id="le-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">

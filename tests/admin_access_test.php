@@ -11,6 +11,7 @@ $root = dirname(__DIR__);
 require_once $root . '/includes/functions.php';
 require_once $root . '/includes/auth.php';
 require_once $root . '/includes/settings_catalog.php';
+require_once $root . '/includes/richtext.php';
 
 $fails = 0; $n = 0;
 function check(string $name, bool $ok, string $info = ''): void {
@@ -179,6 +180,8 @@ check('a link to any id inside a section (an old block\'s, a sub-heading) opens 
 // every keyword key must be reachable from the page: a name="" control or a data-setting="" block
 preg_match_all('/name="([a-z0-9_]+)"/', $tpl, $mn);
 preg_match_all('/data-setting="([a-z0-9_]+)"/', $tpl, $ms);
+if (str_contains($tpl, 'name="rt_formats_<?= $rtfPlace ?>"')) foreach (richtextPlaces() as $rtfP) $mn[1][] = 'rt_formats_' . $rtfP;
+if (str_contains($tpl, 'name="desc_allow_<?= $rtfF ?>"')) foreach (richtextRichFormats() as $rtfF) $mn[1][] = 'desc_allow_' . $rtfF;
 $onPage = array_unique(array_merge($mn[1], $ms[1]));
 $dead = array_diff(array_keys($kw), $onPage);
 check('catalogue: no keyword entry for a setting that is not on the page', empty($dead), implode(', ', $dead));

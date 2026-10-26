@@ -30,7 +30,19 @@ require_once __DIR__ . '/content.php';
 // Font Awesome's faces, written as :fa-NAME: tokens (1.69.0): drawn on the finished text below.
 require_once __DIR__ . '/emoji.php';
 
+function richtextRichFormats(): array {
+    return ['bbcode', 'markdown', 'flarum'];
+}
+
+function richtextPlaces(): array {
+    return ['message', 'list', 'shout', 'report', 'page', 'mail'];
+}
+
 function richtextFormats(array $cfg, string $place = 'description'): array {
+    if ($place !== 'description' && isset($cfg['rt_formats_' . $place])) {
+        $out = array_values(array_intersect(richtextRichFormats(), explode(',', (string)$cfg['rt_formats_' . $place])));
+        return $out ?: ['bbcode'];
+    }
     $out = [];
     if (($cfg['desc_allow_bbcode'] ?? '1') === '1') $out[] = 'bbcode';
     if (($cfg['desc_allow_markdown'] ?? '1') === '1') $out[] = 'markdown';
@@ -157,14 +169,14 @@ function richtextCount(string $text, string $format = 'bbcode', ?array $cfg = nu
 }
 
 /** Everything wrong with a description, or null. */
-function richtextValidate(string $text, string $format, array $cfg): ?string {
+function richtextValidate(string $text, string $format, array $cfg, string $place = 'description'): ?string {
     $text = trim($text);
     if ($text === '') return null;
     $max = richtextMaxChars($cfg);
     if ($max > 0 && mb_strlen($text) > $max) {
         return 'That description is ' . mb_strlen($text) . ' characters; the limit is ' . $max . '.';
     }
-    if (!in_array($format, richtextFormats($cfg), true)) {
+    if (!in_array($format, richtextFormats($cfg, $place), true)) {
         return 'That format is not accepted here.';
     }
     $c = richtextCount($text, $format, $cfg);
