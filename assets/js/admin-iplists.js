@@ -27,6 +27,7 @@
 
     let state = null;
     let busy = false;
+    let editing = null;
 
     const fmt = (n) => t.num(Number(n || 0));   // a count in the page's language (1.73.1)
     /** 342983424 -> "343 M". A column is not the place for nine digits. */
@@ -160,6 +161,7 @@
             tr.appendChild(src);
 
             const acts = el('td', { className: 'text-end text-nowrap' });
+            acts.appendChild(iconBtn('bi-pencil', t.key('js.iplists.edit_list'), 'btn-outline-secondary', () => openEdit(l)));
             if (l.source === 'url') {
                 acts.appendChild(iconBtn('bi-arrow-clockwise', t.key('js.iplists.refresh_now'), 'btn-outline-info',
                     () => act('refresh', { id: l.id })));
@@ -304,7 +306,7 @@
         return { entries: seen.size, addr4, nets6, bad, badSamples };
     }
 
-    function showPreview(text, file) {
+    function showPreview(text, file, current) {
         const box = $('ipl-preview');
         if (!box) return;
         box.textContent = '';
@@ -313,7 +315,8 @@
         box.classList.remove('d-none');
         const head = el('div', null, [
             el('strong', { text: t.key(d.entries === 1 ? 'js.iplists.entries_one' : 'js.iplists.entries_many', { n: fmt(d.entries) }) }),
-            el('span', { text: file ? t.key('js.iplists.read_from', { name: file.name, size: fmtSize(file.size) }) : t.key('js.iplists.pasted') }),
+            el('span', { text: file ? t.key('js.iplists.read_from', { name: file.name, size: fmtSize(file.size) })
+                                    : t.key(current ? 'js.iplists.in_list' : 'js.iplists.pasted') }),
         ]);
         box.appendChild(head);
         if (d.addr4 || d.nets6) {
@@ -360,7 +363,8 @@
         $('ipl-mode-wrap').classList.toggle('invisible', $('ipl-kind').value === 'allow');
     }
 
-    function openAdd() {
+    function resetDialog(edit) {
+        editing = edit;
         ['ipl-name', 'ipl-url', 'ipl-text'].forEach((id) => { $(id).value = ''; });
         $('ipl-file').value = '';
         const dz = $('ipl-drop');
@@ -371,16 +375,98 @@
         }
         const pv = $('ipl-preview');
         if (pv) { pv.textContent = ''; pv.classList.add('d-none'); }
+        $('ipl-error').classList.add('d-none');
+        $('ipl-source').disabled = !!edit;
+        $('ipl-text').disabled = false;
+        $('ipl-save').disabled = false;
+        $('ipl-modal-title').textContent = t.key(edit ? 'js.iplists.edit_title' : 'js.iplists.add_title');
+        $('ipl-save').textContent = t.key(edit ? 'js.iplists.edit_save' : 'js.iplists.add_save');
+    }
+
+    function openAdd() {
+        resetDialog(null);
         $('ipl-kind').value = 'block';
         $('ipl-mode').value = 'hard';
         $('ipl-source').value = 'url';
         $('ipl-ttl').value = card.dataset.ttl || '720';
-        $('ipl-error').classList.add('d-none');
         syncAddForm();
         bootstrap.Modal.getOrCreateInstance($('iplAddModal')).show();
     }
 
+    async function openEdit(l) {
+        const me = { id: l.id, source: l.source, text: null };
+        resetDialog(me);
+        $('ipl-name').value = l.name;
+        $('ipl-kind').value = l.kind;
+        $('ipl-mode').value = l.mode;
+        $('ipl-source').value = l.source;
+        $('ipl-url').value = l.source === 'url' ? l.url : '';
+        $('ipl-ttl').value = String(l.ttl_minutes || card.dataset.ttl || '720');
+        syncAddForm();
+        bootstrap.Modal.getOrCreateInstance($('iplAddModal')).show();
+        if (l.source !== 'manual') return;
+
+        const ta = $('ipl-text');
+        const pv = $('ipl-preview');
+        ta.disabled = true;
+        $('ipl-save').disabled = true;
+        if (pv) { pv.textContent = t.key('js.iplists.entries_loading'); pv.classList.remove('d-none'); }
+        const r = await apiCall('admin/ip_lists&id=' + encodeURIComponent(l.id));
+        if (editing !== me) return;
+        $('ipl-save').disabled = false;
+        if (r.error) {
+            if (pv) { pv.textContent = ''; pv.classList.add('d-none'); }
+            $('ipl-error').textContent = t.key('js.iplists.entries_load_failed', { error: r.error });
+            $('ipl-error').classList.remove('d-none');
+            return;
+        }
+        me.text = String(r.text || '');
+        ta.value = me.text;
+        ta.disabled = false;
+        showPreview(me.text, null, true);
+        if (!r.original && pv) {
+            pv.appendChild(el('div', { className: 'wl-small text-muted mt-1', text: t.key('js.iplists.no_original') }));
+        }
+    }
+
+    async function saveEdit() {
+        const err = $('ipl-error');
+        err.classList.add('d-none');
+        const body = {
+            op: 'update',
+            id: editing.id,
+            name: $('ipl-name').value.trim(),
+            kind: $('ipl-kind').value,
+            mode: $('ipl-mode').value,
+        };
+        if (editing.source === 'url') {
+            body.url = $('ipl-url').value.trim();
+            body.ttl_minutes = parseInt($('ipl-ttl').value, 10) || 720;
+        } else if ($('ipl-text').value !== (editing.text === null ? '' : editing.text)) {
+            body.text = $('ipl-text').value;
+        }
+        const bad = !body.name ? t.key('js.iplists.need_name')
+            : (editing.source === 'url' && !/^https?:\/\//i.test(body.url))
+                ? t.key('js.iplists.need_url')
+                : (body.text !== undefined && body.text.trim() === '')
+                    ? t.key('js.iplists.need_text') : '';
+        if (bad) { err.textContent = bad; err.classList.remove('d-none'); return; }
+
+        const save = $('ipl-save');
+        save.disabled = true;
+        try {
+            const r = await apiCall('admin/ip_list_action', 'POST', body);
+            if (r.error) { err.textContent = r.error; err.classList.remove('d-none'); return; }
+            bootstrap.Modal.getOrCreateInstance($('iplAddModal')).hide();
+            showToast(r.message || t.key('js.iplists.saved'), r.note ? 'warning' : 'success');
+            await load();
+        } finally {
+            save.disabled = false;
+        }
+    }
+
     async function saveAdd() {
+        if (editing) return saveEdit();
         const err = $('ipl-error');
         err.classList.add('d-none');
         const body = {

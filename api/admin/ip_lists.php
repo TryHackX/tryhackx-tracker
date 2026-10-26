@@ -7,6 +7,14 @@
  * and is not being repeated on a card that refreshes every few seconds.
  */
 
+$one = (int)($_GET['id'] ?? 0);
+if ($one > 0) {
+    if (!ipListFind($db, $one)) jsonResponse(['error' => __('api.iplist.no_such_list')], 404);
+    $src = ipListEntriesText($db, $one);
+    if ($src === null) jsonResponse(['error' => __('api.iplist.entries_read_failed')], 500);
+    jsonResponse(['success' => true, 'id' => $one, 'text' => $src['text'], 'original' => $src['original']]);
+}
+
 $lists = ipListAll($db);
 $counts = ['allow' => 0, 'hard' => 0, 'soft' => 0];
 $cover = ['allow' => 0, 'hard' => 0, 'soft' => 0];

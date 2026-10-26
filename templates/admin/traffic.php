@@ -220,7 +220,7 @@
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content bg-dark text-light">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-shield-plus text-info"></i> <?= _h('a.traffic.ipl_modal_title') ?></h5>
+                        <h5 class="modal-title"><i class="bi bi-shield-plus text-info"></i> <span id="ipl-modal-title"><?= _h('a.traffic.ipl_modal_title') ?></span></h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                     </div>
                     <div class="modal-body">

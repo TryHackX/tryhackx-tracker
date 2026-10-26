@@ -6,8 +6,7 @@
  * same class of control as the rate limit itself, and the Traffic page's read permission deliberately
  * does not carry the controls with it.
  *
- * Body: {"op": "create"|"entries"|"refresh"|"toggle"|"delete"|"push",
- *        "id": int, "name": "...", "kind": "allow"|"block", "mode": "hard"|"soft",
+ * Body: {"id": int, "name": "...", "kind": "allow"|"block", "mode": "hard"|"soft",
  *        "source": "manual"|"url", "url": "...", "ttl_minutes": int, "text": "...",
  *        "enabled": bool, "password": "..."}
  *
@@ -22,13 +21,13 @@ requirePost();
 
 $input = readJsonBody();
 $op = strtolower(trim((string)($input['op'] ?? '')));
-$known = ['create', 'entries', 'refresh', 'toggle', 'delete', 'push'];
+$known = ['create', 'entries', 'update', 'refresh', 'toggle', 'delete', 'push'];
 if (!in_array($op, $known, true)) {
     jsonResponse(['error' => __('api.iplist.unknown_op', ['ops' => implode(', ', $known)])], 400);
 }
 
 $id = (int)($input['id'] ?? 0);
-$needId = ['entries', 'refresh', 'toggle', 'delete'];
+$needId = ['entries', 'update', 'refresh', 'toggle', 'delete'];
 if (in_array($op, $needId, true)) {
     if ($id <= 0 || !ipListFind($db, $id)) jsonResponse(['error' => __('api.iplist.no_such_list')], 404);
 }
@@ -36,6 +35,14 @@ if (in_array($op, $needId, true)) {
 /** Re-write the file the firewall helper reads. Called after anything that changes what is enabled. */
 $sync = static function () use ($db, $cfg): array {
     return ipListWriteSetsFile($db, $cfg);
+};
+
+$storedMessage = static function (array $e): string {
+    return __('api.iplist.entries_stored', [
+        'stored'  => __($e['added'] === 1 ? 'api.iplist.stored_one' : 'api.iplist.stored_many', ['n' => langNumber($e['added'])]),
+        'skipped' => $e['skipped']
+            ? __($e['skipped'] === 1 ? 'api.iplist.ignored_one' : 'api.iplist.ignored_many', ['n' => langNumber($e['skipped'])])
+            : '']);
 };
 
 switch ($op) {
@@ -55,7 +62,7 @@ switch ($op) {
                 $added = (int)($f['added'] ?? 0);
             }
         } elseif (trim((string)($input['text'] ?? '')) !== '') {
-            $e = ipListSetEntries($db, $newId, (string)$input['text']);
+            $e = ipListSetEntries($db, $newId, (string)$input['text'], true);
             if (isset($e['error'])) $note = $e['error'];
             else $added = (int)$e['added'];
         }
@@ -72,15 +79,40 @@ switch ($op) {
         if (strlen($text) > IPLIST_FETCH_MAX_BYTES) {
             jsonResponse(['error' => __('api.iplist.file_too_large', ['mib' => (IPLIST_FETCH_MAX_BYTES >> 20)])], 400);
         }
-        $e = ipListSetEntries($db, $id, $text);
+        $e = ipListSetEntries($db, $id, $text, ipListFind($db, $id)['source'] === 'manual');
         if (isset($e['error'])) jsonResponse(['error' => $e['error']], 400);
         $s = $sync();
         jsonResponse(['success' => true, 'added' => $e['added'], 'skipped' => $e['skipped'], 'lines' => $s['lines'],
-                      'message' => __('api.iplist.entries_stored', [
-                          'stored'  => __($e['added'] === 1 ? 'api.iplist.stored_one' : 'api.iplist.stored_many', ['n' => langNumber($e['added'])]),
-                          'skipped' => $e['skipped']
-                              ? __($e['skipped'] === 1 ? 'api.iplist.ignored_one' : 'api.iplist.ignored_many', ['n' => langNumber($e['skipped'])])
-                              : ''])]);
+                      'message' => $storedMessage($e)]);
+    }
+
+    case 'update': {
+        $text = null;
+        if (ipListFind($db, $id)['source'] === 'manual' && array_key_exists('text', $input)) {
+            $text = (string)$input['text'];
+            if (strlen($text) > IPLIST_FETCH_MAX_BYTES) {
+                jsonResponse(['error' => __('api.iplist.file_too_large', ['mib' => (IPLIST_FETCH_MAX_BYTES >> 20)])], 400);
+            }
+            if (!ipListParse($text)['entries']) jsonResponse(['error' => __('api.iplist.no_entries')], 400);
+        }
+        $u = ipListUpdate($db, $id, $input);
+        if (isset($u['error'])) jsonResponse(['error' => $u['error']], 400);
+        $note = '';
+        $stored = null;
+        if ($text !== null) {
+            $e = ipListSetEntries($db, $id, $text, true);
+            if (isset($e['error'])) $note = $e['error'];
+            else $stored = $e;
+        } elseif ($u['refetch']) {
+            $f = ipListRefresh($db, $id, true);
+            if (isset($f['error'])) $note = __('api.iplist.saved_download_failed', ['error' => $f['error']]);
+        }
+        $s = $sync();
+        jsonResponse(['success' => true, 'note' => $note, 'lines' => $s['lines'],
+                      'message' => $note !== '' ? $note
+                          : ($stored !== null ? $storedMessage($stored)
+                          : ($u['enforce'] || $u['refetch'] ? __('api.iplist.saved_push')
+                          : __($u['changed'] ? 'api.iplist.saved' : 'api.iplist.unchanged')))]);
     }
 
     case 'refresh': {

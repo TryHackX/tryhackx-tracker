@@ -292,6 +292,8 @@ check('the schema version was bumped for the new tables', TRACKER_SCHEMA_VERSION
 $stmts = implode("\n", array_map(fn($s) => is_array($s) ? implode("\n", $s) : (string)$s, trackerSchemaStatements()));
 check('both tables are created', str_contains($stmts, 'CREATE TABLE IF NOT EXISTS `ip_lists`')
     && str_contains($stmts, 'CREATE TABLE IF NOT EXISTS `ip_list_entries`'));
+check('… and the text a manual list was pasted as has a table of its own, kept off the card\'s poll',
+      str_contains($stmts, 'CREATE TABLE IF NOT EXISTS `ip_list_sources`') && TRACKER_SCHEMA_VERSION >= 95);
 $helper = (string)file_get_contents($root . '/tools/opentracker/tracker-netlimit.sh');
 check('the helper accepts --blocked', str_contains($helper, '--blocked=*)'));
 check('… and forwards all four optional arguments',
@@ -330,6 +332,96 @@ check('… and its script is loaded', str_contains($card, 'admin-iplists.js'));
 $js = (string)file_get_contents($root . '/assets/js/admin-iplists.js');
 check('the push is the only action that asks for the password',
       substr_count($js, 'promptPassword(') === 1 && str_contains($js, "op: 'push'"));
+
+$action = (string)file_get_contents($root . '/api/admin/ip_list_action.php');
+check('a list can be edited: the write endpoint knows update and wants an existing list',
+      preg_match('~\$known = \[[^\]]*\'update\'~', $action) === 1 && preg_match('~\$needId = \[[^\]]*\'update\'~', $action) === 1
+      && str_contains($action, 'ipListUpdate('));
+check('… a manual list\'s entries are read back as text for the dialog',
+      str_contains((string)file_get_contents($root . '/api/admin/ip_lists.php'), 'ipListEntriesText('));
+check('… and every row opens the same dialog, which saves through update',
+      str_contains($js, 'function openEdit(') && str_contains($js, "op: 'update'") && str_contains($js, "apiCall('admin/ip_lists&id='")
+      && str_contains($card, 'id="ipl-modal-title"'));
+
+$sdb = null; $adm = null;
+$scratch = 'tracker_ipl_' . bin2hex(random_bytes(3));
+if (is_file($root . '/config/database.php')) {
+    require_once $root . '/config/database.php';
+    try {
+        $port = (string)(getDb()->query('SELECT @@port')->fetchColumn() ?: '3306');
+        $base = 'mysql:host=' . (defined('DB_HOST') ? DB_HOST : '127.0.0.1') . ';port=' . $port . ';charset=utf8mb4';
+        $adm = new PDO($base, defined('DB_USER') ? DB_USER : 'root', defined('DB_PASS') ? DB_PASS : '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $adm->exec("CREATE DATABASE `$scratch` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        $sdb = new PDO("$base;dbname=$scratch", defined('DB_USER') ? DB_USER : 'root', defined('DB_PASS') ? DB_PASS : '',
+                       [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        foreach (trackerSchemaStatements() as $s) {
+            foreach ((array)$s as $sql) {
+                if (preg_match('~CREATE TABLE IF NOT EXISTS `ip_list(s|_entries|_sources)`~', $sql)) $sdb->exec($sql);
+            }
+        }
+    } catch (\Throwable $e) {
+        $sdb = null;
+    }
+}
+if ($sdb instanceof PDO) {
+    $a = ipListCreate($sdb, ['name' => 'Alpha', 'kind' => 'block', 'mode' => 'hard', 'source' => 'manual', 'ttl_minutes' => 60]);
+    $b = ipListCreate($sdb, ['name' => 'Beta', 'kind' => 'block', 'mode' => 'soft', 'source' => 'url',
+                             'url' => 'https://example.org/b.zone', 'ttl_minutes' => 60]);
+    $aId = (int)($a['id'] ?? 0); $bId = (int)($b['id'] ?? 0);
+    ipListSetEntries($sdb, $aId, "10.0.0.0/8\n2001:db8::/32\n9.9.9.0/24\n1.2.3.4");
+    $txt = ipListEntriesText($sdb, $aId);
+    check('db: a list saved without its text reads back as its entries, one per line, IPv4 in address order, then IPv6',
+          $txt === ['text' => "1.2.3.4\n9.9.9.0/24\n10.0.0.0/8\n2001:db8::/32", 'original' => false], json_encode($txt));
+    check('db: a list with no entries reads back as nothing', ipListEntriesText($sdb, $bId) === ['text' => '', 'original' => false]);
+    $pasted = "# flood, October\r\n103.160.130.0/24\r\n113.103.0.0/16 # a note\r\n\r\n; done\r\n1.2.3.4";
+    $e = ipListSetEntries($sdb, $aId, $pasted, true);
+    $txt = ipListEntriesText($sdb, $aId);
+    check('db: a pasted list reads back exactly as it was written, comments and order kept, line ends made plain',
+          ($e['added'] ?? 0) === 3 && $txt === ['text' => str_replace("\r\n", "\n", $pasted), 'original' => true], json_encode([$e, $txt]));
+    check('db: … while the firewall still gets only the three ranges, as they were typed',
+          (int)$sdb->query("SELECT COUNT(*) FROM ip_list_entries WHERE list_id = $aId")->fetchColumn() === 3
+          && (int)$sdb->query("SELECT COUNT(*) FROM ip_list_entries WHERE list_id = $aId AND cidr = '113.103.0.0/16'")->fetchColumn() === 1);
+    $c = ipListCreate($sdb, ['name' => 'Gamma', 'kind' => 'block', 'mode' => 'hard', 'source' => 'manual']);
+    $cId = (int)($c['id'] ?? 0);
+    ipListSetEntries($sdb, $cId, "# x\n5.5.5.0/24", true);
+    check('db: deleting a list takes its pasted text with it',
+          ipListDelete($sdb, $cId) && (int)$sdb->query("SELECT COUNT(*) FROM ip_list_sources WHERE list_id = $cId")->fetchColumn() === 0);
+
+    $u = ipListUpdate($sdb, $aId, ['name' => 'Alpha', 'kind' => 'block', 'mode' => 'hard']);
+    check('db: saving the same values changes nothing', $u === ['changed' => false, 'enforce' => false, 'refetch' => false], json_encode($u));
+    $u = ipListUpdate($sdb, $aId, ['name' => 'Beta']);
+    check('db: a name another list already has is refused, and the list keeps its own',
+          isset($u['error']) && ipListFind($sdb, $aId)['name'] === 'Alpha', json_encode($u));
+    $u = ipListUpdate($sdb, $aId, ['name' => 'Alpha renamed', 'kind' => 'allow', 'mode' => 'soft']);
+    $row = ipListFind($sdb, $aId);
+    check('db: a new name and kind are stored, and an allow list has no "under pressure"',
+          !empty($u['changed']) && !empty($u['enforce']) && empty($u['refetch'])
+          && $row['name'] === 'Alpha renamed' && $row['kind'] === 'allow' && $row['mode'] === 'hard', json_encode([$u, $row]));
+    $u = ipListUpdate($sdb, $aId, ['url' => 'https://example.org/x.zone', 'ttl_minutes' => 30]);
+    $row = ipListFind($sdb, $aId);
+    check('db: a manual list takes no address and no refresh interval',
+          empty($u['changed']) && $row['url'] === '' && (int)$row['ttl_minutes'] === 60, json_encode([$u, $row]));
+    check('db: a kind or a mode that does not exist is refused',
+          isset(ipListUpdate($sdb, $aId, ['kind' => 'maybe'])['error']) && isset(ipListUpdate($sdb, $aId, ['mode' => 'loud'])['error']));
+    check('db: an empty or too long name is refused',
+          isset(ipListUpdate($sdb, $aId, ['name' => '  '])['error']) && isset(ipListUpdate($sdb, $aId, ['name' => str_repeat('x', 65)])['error']));
+    check('db: a URL list keeps needing an http(s) address',
+          isset(ipListUpdate($sdb, $bId, ['url' => 'ftp://example.org/b.zone'])['error'])
+          && ipListFind($sdb, $bId)['url'] === 'https://example.org/b.zone');
+    $u = ipListUpdate($sdb, $bId, ['ttl_minutes' => 5]);
+    check('db: the refresh interval is clamped, and a new interval alone downloads nothing',
+          !empty($u['changed']) && empty($u['refetch']) && empty($u['enforce'])
+          && (int)ipListFind($sdb, $bId)['ttl_minutes'] === IPLIST_TTL_MIN, json_encode($u));
+    $u = ipListUpdate($sdb, $bId, ['url' => 'https://example.org/c.zone']);
+    check('db: a new address asks for a fresh download',
+          !empty($u['refetch']) && ipListFind($sdb, $bId)['url'] === 'https://example.org/c.zone', json_encode($u));
+    check('db: a list that does not exist is refused', isset(ipListUpdate($sdb, 999999, ['name' => 'x'])['error']));
+} else {
+    skip('editing a list against a database', 'no local database to make a scratch copy in');
+}
+if ($adm instanceof PDO) {
+    try { $adm->exec("DROP DATABASE IF EXISTS `$scratch`"); } catch (\Throwable $e) { echo "could not drop $scratch\n"; }
+}
 
 echo "\n$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "\n";
 exit($fails ? 1 : 0);

@@ -144,6 +144,21 @@ function ipListFind(PDO $db, int $id): ?array {
     }
 }
 
+function ipListEntriesText(PDO $db, int $id): ?array {
+    try {
+        $st = $db->prepare("SELECT `text` FROM ip_list_sources WHERE list_id = ?");
+        $st->execute([$id]);
+        $src = $st->fetchColumn();
+        if (is_string($src) && trim($src) !== '') return ['text' => $src, 'original' => true];
+        $st = $db->prepare("SELECT cidr FROM ip_list_entries WHERE list_id = ?
+                             ORDER BY family, INET6_ATON(SUBSTRING_INDEX(cidr, '/', 1)), cidr");
+        $st->execute([$id]);
+        return ['text' => implode("\n", $st->fetchAll(PDO::FETCH_COLUMN)), 'original' => false];
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
 /**
  * The entries the firewall should be carrying, grouped the way the chain uses them.
  *
@@ -223,8 +238,43 @@ function ipListCreate(PDO $db, array $in): array {
     }
 }
 
+function ipListUpdate(PDO $db, int $id, array $in): array {
+    $l = ipListFind($db, $id);
+    if (!$l) return ['error' => __('api.iplist.no_such_list')];
+    $isUrl = $l['source'] === 'url';
+    $name = trim((string)($in['name'] ?? $l['name']));
+    $kind = (string)($in['kind'] ?? $l['kind']);
+    $mode = (string)($in['mode'] ?? $l['mode']);
+    $url  = $isUrl ? trim((string)($in['url'] ?? $l['url'])) : (string)$l['url'];
+    $ttl  = $isUrl ? (int)($in['ttl_minutes'] ?? $l['ttl_minutes']) : (int)$l['ttl_minutes'];
+
+    if ($name === '' || mb_strlen($name) > 64)      return ['error' => __('api.iplist.name_required')];
+    if (!in_array($kind, IPLIST_KINDS, true))       return ['error' => __('api.iplist.unknown_kind')];
+    if (!in_array($mode, IPLIST_MODES, true))       return ['error' => __('api.iplist.unknown_mode')];
+    if ($isUrl && (!preg_match('#^https?://#i', $url) || mb_strlen($url) > 500)) {
+        return ['error' => __('api.iplist.url_required')];
+    }
+    $ttl = max(IPLIST_TTL_MIN, min(IPLIST_TTL_MAX, $ttl ?: IPLIST_TTL_DEFAULT));
+    if ($kind === 'allow') $mode = 'hard';
+
+    $enforce = $kind !== $l['kind'] || $mode !== $l['mode'];
+    $refetch = $isUrl && $url !== (string)$l['url'];
+    if (!$enforce && !$refetch && $name === $l['name'] && $ttl === (int)$l['ttl_minutes']) {
+        return ['changed' => false, 'enforce' => false, 'refetch' => false];
+    }
+    try {
+        $db->prepare("UPDATE ip_lists SET name = ?, kind = ?, mode = ?, url = ?, ttl_minutes = ?, updated_at = NOW()
+                       WHERE id = ?")
+           ->execute([$name, $kind, $mode, $url, $ttl, $id]);
+    } catch (PDOException $e) {
+        if ((int)($e->errorInfo[1] ?? 0) === 1062) return ['error' => __('api.iplist.name_exists')];
+        return ['error' => __('api.iplist.toggle_failed')];
+    }
+    return ['changed' => true, 'enforce' => $enforce, 'refetch' => $refetch];
+}
+
 /** Replace a list's entries in one transaction. Returns ['added'=>int,'skipped'=>int] or ['error'=>…]. */
-function ipListSetEntries(PDO $db, int $id, string $text): array {
+function ipListSetEntries(PDO $db, int $id, string $text, bool $keepText = false): array {
     $p = ipListParse($text);
     if (!$p['entries']) return ['error' => __('api.iplist.no_entries')];
     try {
@@ -238,6 +288,10 @@ function ipListSetEntries(PDO $db, int $id, string $text): array {
         $db->prepare("UPDATE ip_lists SET last_fetch_at = NOW(), last_error = NULL, updated_at = NOW(),
                              addr4 = ?, nets6 = ? WHERE id = ?")
            ->execute([$cov['addr4'], $cov['nets6'], $id]);
+        if ($keepText) {
+            $db->prepare("REPLACE INTO ip_list_sources (list_id, `text`, updated_at) VALUES (?, ?, NOW())")
+               ->execute([$id, str_replace(["\r\n", "\r"], "\n", $text)]);
+        }
         $db->commit();
     } catch (\Throwable $e) {
         if ($db->inTransaction()) $db->rollBack();
@@ -257,6 +311,7 @@ function ipListDelete(PDO $db, int $id): bool {
     try {
         $db->beginTransaction();
         $db->prepare("DELETE FROM ip_list_entries WHERE list_id = ?")->execute([$id]);
+        $db->prepare("DELETE FROM ip_list_sources WHERE list_id = ?")->execute([$id]);
         $db->prepare("DELETE FROM ip_lists WHERE id = ?")->execute([$id]);
         $db->commit();
         return true;
