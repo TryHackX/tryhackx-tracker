@@ -31,6 +31,7 @@ require_once __DIR__ . '/includes/sounds.php';
 require_once __DIR__ . '/includes/shout.php';
 // Pictures and profile covers (v69): the pipeline, the stream and userAvatarUrl()/userAvatarHtml().
 require_once __DIR__ . '/includes/usermedia.php';
+require_once __DIR__ . '/includes/images.php';
 // The description on a profile (v74): its own small renderer and the rules it is saved by.
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile and the account page (v75): the one gate both ask.

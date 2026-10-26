@@ -110,6 +110,7 @@ function userPermissionList(bool $english = false): array {
         // v81 (includes/profiledescs.php). About what others may SEE, like rating.public: read with
         // userIdHasGrantedPermission(), and the member's own users.descriptions_public still says yes.
         'content.public'  => 'Let the descriptions they wrote be listed on their public profile',
+        'content.images'  => 'Upload pictures and put them into the descriptions they write',
         // ── favourites, profiles and uploads (v47) ──
         // Four ids for four separate decisions, because "may they keep a list" and "may that list be
         // read by a stranger" are not the same question and an operator will want to answer them
@@ -396,7 +397,7 @@ function userGroupPresets(): array {
                         // shout.edit_own is v72's, beside the delete it mirrors; profile.bio is v74's,
                         // rating.public v75's; content.delete_own and content.public v81's.
                         'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar', 'profile.bio',
-                        'rating.public', 'content.delete_own', 'content.public',
+                        'rating.public', 'content.delete_own', 'content.public', 'content.images',
                         // v83: comments on a torrent — read, write, and their own corrected or taken back
                         // for as long as the two windows say; v88: a reply to one.
                         'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
@@ -625,7 +626,7 @@ function userLegacyDefault(string $perm): bool {
     // would otherwise let every passer-by take any description down.
     // content.report (v84) for the same reason: a report is filed by an account and answered to it — with
     // accounts off there is nobody to file one or to be told what became of it.
-    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any', 'content.report'], true)) return false;
+    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any', 'content.report', 'content.images'], true)) return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     // The other way round from rating.* and content.*, and for the reason that decides both: those
     // two work without accounts, so answering false would switch them off for every install that
@@ -1335,6 +1336,8 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     // id, so a row left behind would go on answering at an address somebody may still have — the
     // image of a person who asked to be removed, served by a site that says they are gone.
     $del("DELETE FROM user_media WHERE user_id = ?", [$userId], 'pictures');
+    $del("UPDATE images SET user_id = NULL WHERE user_id = ?", [$userId], 'images_unlinked');
+    $del("DELETE FROM image_uploads WHERE user_id = ?", [$userId], 'image_uploads');
     // Submissions are NOT deleted — a whitelist row is a torrent the tracker serves, and deleting an
     // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a
     // profile that no longer exists.

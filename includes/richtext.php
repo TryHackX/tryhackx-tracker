@@ -285,12 +285,13 @@ function richtextViewerSignedIn(?PDO $db = null): bool {
  * database (a caller that has none, the CLI) it is richtextRender().
  */
 function richtextRenderIn(string $for, ?PDO $db, ?string $text, string $format, array $cfg, bool $signedIn = false): string {
-    $html = richtextRender($text, $format, $cfg, $signedIn);
+    $html = richtextRender($text, $format, in_array($for, ['description', 'message'], true) ? richtextVideoCfg($cfg) : $cfg, $signedIn);
     if ($html === '' || $db === null || !function_exists('emoteMapFor') || !str_contains($html, ':')) return $html;
     return emoteRenderHtml($html, emoteMapFor($db, $cfg, $for));
 }
 
 function richtextRenderForEmail(?string $text, string $format, array $cfg): string {
+    unset($cfg['rt_video_player']);
     // A Font Awesome face is a glyph of a web font no mail client loads: in a mail, a :fa-NAME: token is
     // the ordinary emoji it stands for, as it is wherever Font Awesome is switched off (1.69.0).
     // The site's emotes are not drawn in a mail at all (1.70.0): `:code:` stays the text it was typed as —
@@ -450,6 +451,25 @@ function richtextYoutubeId(string $v): ?string {
     $v = trim(html_entity_decode($v, ENT_QUOTES, 'UTF-8'));
     if (preg_match('~(?:youtu\.be/|v=|embed/|shorts/)([A-Za-z0-9_-]{11})~', $v, $m)) return $m[1];
     return preg_match('/^[A-Za-z0-9_-]{11}$/', $v) ? $v : null;
+}
+
+function richtextYoutubeStart(string $v): int {
+    $v = html_entity_decode($v, ENT_QUOTES, 'UTF-8');
+    if (!preg_match('/[?&#](?:t|start)=([0-9hms]{1,12})(?![0-9a-z])/i', $v, $m)) return 0;
+    $t = strtolower($m[1]);
+    if (ctype_digit($t)) return min(86400, (int)$t);
+    if (!preg_match('/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/', $t, $p)) return 0;
+    return min(86400, (int)($p[1] ?? 0) * 3600 + (int)($p[2] ?? 0) * 60 + (int)($p[3] ?? 0));
+}
+
+function richtextYoutubeData(string $id, int $start, array $cfg): string {
+    if (($cfg['rt_video_player'] ?? '') !== '1' || !preg_match('/^[A-Za-z0-9_-]{11}$/', $id)) return '';
+    return ' data-yt="' . $id . '"' . ($start > 0 ? ' data-yt-start="' . $start . '"' : '')
+         . (($cfg['rt_youtube'] ?? '') === 'thumb' ? ' data-yt-thumb="1"' : '');
+}
+
+function richtextVideoCfg(array $cfg): array {
+    return in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true) ? ['rt_video_player' => '1'] + $cfg : $cfg;
 }
 
 /** An email address, or null. Used for [email] — a mailto: is still a link somebody will click. */
@@ -775,7 +795,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         $s = str_replace("\x01HIDE" . $i . "\x01", $html, $s);
     }
 
-    return richtextParagraphs($s);
+    return richtextOwnImages(richtextParagraphs($s), $cfg);
 }
 
 function richtextBbcodeRules(string $s, array $cfg): string {
@@ -837,16 +857,16 @@ function richtextBbcodeRules(string $s, array $cfg): string {
         return $u === null ? '' : '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="" src="'
                                 . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
     }, $s);
-    // No iframe. An embedded player is a third-party frame that sees every visitor, and this
-    // site's own CSP forbids frame sources anyway — an <iframe> here would render as a blank box
-    // and quietly lie about working. A labelled link does what the author meant.
+    // No iframe. An embedded player is a third-party frame that sees every visitor. A labelled link
+    // does what the author meant.
     $s = preg_replace_callback('/\[(?:youtube|yt)\](.*?)\[\/(?:youtube|yt)\]/is', function ($m) use ($cfg) {
         $id = richtextYoutubeId($m[1]);
         if ($id === null) return $m[1];
         $url = 'https://www.youtube.com/watch?v=' . $id;
         $a = richtextLinkAttrs($url, $cfg);
         // The platform's own mark before the words (1.68.0; it was a play-triangle character).
-        return $a === '' ? $url : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $id . '</a>';
+        return $a === '' ? $url : '<a class="rt-video"' . $a . richtextYoutubeData($id, richtextYoutubeStart($m[1]), $cfg)
+                                . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $id . '</a>';
     }, $s);
     // A new account's words (`rt_links_text`, see richtextLinkAttrs()): an address is words too.
     $mailText = ($cfg['rt_links_text'] ?? '') === '1';
@@ -932,6 +952,26 @@ function richtextLabelRow(string $html): string {
     if (!preg_match_all('/<img\b[^>]*>/', $html, $im)) return '';
     $imgs = array_map(static fn(string $t): string => preg_replace('/^<img class="rt-img"/', '<img class="rt-img rt-label"', $t) ?? $t, $im[0]);
     return '<div class="rt-labels-row">' . implode('', $imgs) . '</div>';
+}
+
+const RICHTEXT_IMG_MAX_H = 520;
+
+function richtextOwnImages(string $html, array $cfg): string {
+    $base = rtrim(trim((string)($cfg['site_url'] ?? '')), '/');
+    if ($base === '' || !str_contains($html, '/i/')) return $html;
+    $q = preg_quote(htmlspecialchars($base . '/i/', ENT_QUOTES, 'UTF-8'), '#');
+    return preg_replace_callback('#<img class="(rt-img(?: [a-z-]+)*)"([^>]*?) src="(' . $q . '\d+-(\d+)x(\d+)\.(?:webp|gif))">#',
+        function ($m) {
+            if (str_contains($m[2], ' data-full=')) return $m[0];
+            $w = max(1, (int)$m[4]);
+            $h = max(1, (int)$m[5]);
+            if ($h > RICHTEXT_IMG_MAX_H) {
+                $w = max(1, (int)round($w * RICHTEXT_IMG_MAX_H / $h));
+                $h = RICHTEXT_IMG_MAX_H;
+            }
+            return '<img class="' . $m[1] . '"' . $m[2] . ' width="' . $w . '" height="' . $h . '" data-full="' . $m[3] . '?full=1" src="' . $m[3] . '">';
+        },
+        $html) ?? $html;
 }
 
 function richtextImgTag(string $url, string $alt = ''): string {
@@ -1112,7 +1152,8 @@ function richtextFlarumMedia(string $raw, array $cfg): ?string {
         return null;
     }
     $a = richtextLinkAttrs('https://www.youtube.com/watch?v=' . $m[1], $cfg);
-    return $a === '' ? null : '<a class="rt-video"' . $a . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $m[1] . '</a>';
+    return $a === '' ? null : '<a class="rt-video"' . $a . richtextYoutubeData($m[1], richtextYoutubeStart($url), $cfg)
+                            . '><i class="bi bi-youtube" aria-hidden="true"></i> YouTube: ' . $m[1] . '</a>';
 }
 
 function richtextFlarumGaps(string $s, array $stash): string {

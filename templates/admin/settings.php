@@ -3145,6 +3145,59 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     </table>
                 </div>
                 <small class="settings-hint d-block"><?= _h('settings.formats_note') ?></small>
+                <div class="row g-3 mt-1">
+                    <div class="col-md-6" data-setting="rt_youtube">
+                        <label for="set-rt_youtube" class="form-label"><?= _h('settings.rt_youtube') ?></label>
+                        <select id="set-rt_youtube" class="form-select bg-dark text-light border-secondary" name="rt_youtube">
+                            <?php foreach (['link', 'click', 'thumb'] as $rtY): ?>
+                            <option value="<?= $rtY ?>" <?= ($cfg['rt_youtube'] ?? 'link') === $rtY ? 'selected' : '' ?>><?= _h('settings.rt_youtube_' . $rtY) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.rt_youtube_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section" id="section-images" data-group="formatting" data-title="<?= _h('settings.images_title') ?>">
+                <h5><i class="bi bi-image"></i> <?= _h('settings.images_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.images_subtitle') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="images_max_mb">
+                        <label for="set-images_max_mb" class="form-label"><?= _h('settings.images_max_mb') ?></label>
+                        <input id="set-images_max_mb" type="number" class="form-control bg-dark text-light border-secondary" name="images_max_mb" value="<?= sanitize($cfg['images_max_mb'] ?? '8') ?>" min="1" max="20">
+                        <small class="settings-hint"><?= _h('settings.images_max_mb_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="images_max_edge">
+                        <label for="set-images_max_edge" class="form-label"><?= _h('settings.images_max_edge') ?></label>
+                        <input id="set-images_max_edge" type="number" class="form-control bg-dark text-light border-secondary" name="images_max_edge" value="<?= sanitize($cfg['images_max_edge'] ?? '2048') ?>" min="640" max="4096">
+                        <small class="settings-hint"><?= _h('settings.images_max_edge_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="images_max_mpx">
+                        <label for="set-images_max_mpx" class="form-label"><?= _h('settings.images_max_mpx') ?></label>
+                        <input id="set-images_max_mpx" type="number" class="form-control bg-dark text-light border-secondary" name="images_max_mpx" value="<?= sanitize($cfg['images_max_mpx'] ?? '24') ?>" min="4" max="40">
+                        <small class="settings-hint"><?= _h('settings.images_max_mpx_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="images_webp_quality">
+                        <label for="set-images_webp_quality" class="form-label"><?= _h('settings.images_webp_quality') ?></label>
+                        <input id="set-images_webp_quality" type="number" class="form-control bg-dark text-light border-secondary" name="images_webp_quality" value="<?= sanitize($cfg['images_webp_quality'] ?? '82') ?>" min="50" max="95">
+                        <small class="settings-hint"><?= _h('settings.images_webp_quality_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="images_per_day">
+                        <label for="set-images_per_day" class="form-label"><?= _h('settings.images_per_day') ?></label>
+                        <input id="set-images_per_day" type="number" class="form-control bg-dark text-light border-secondary" name="images_per_day" value="<?= sanitize($cfg['images_per_day'] ?? '60') ?>" min="0" max="1000">
+                        <small class="settings-hint"><?= _h('settings.images_per_day_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="images_quota_mb">
+                        <label for="set-images_quota_mb" class="form-label"><?= _h('settings.images_quota_mb') ?></label>
+                        <input id="set-images_quota_mb" type="number" class="form-control bg-dark text-light border-secondary" name="images_quota_mb" value="<?= sanitize($cfg['images_quota_mb'] ?? '250') ?>" min="0" max="100000">
+                        <small class="settings-hint"><?= _h('settings.images_quota_mb_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="images_unused_hours">
+                        <label for="set-images_unused_hours" class="form-label"><?= _h('settings.images_unused_hours') ?></label>
+                        <input id="set-images_unused_hours" type="number" class="form-control bg-dark text-light border-secondary" name="images_unused_hours" value="<?= sanitize($cfg['images_unused_hours'] ?? '48') ?>" min="1" max="720">
+                        <small class="settings-hint"><?= _h('settings.images_unused_hours_hint') ?></small>
+                    </div>
+                </div>
             </div>
 
             <?php /* ── The shoutbox (1.58.0, includes/shout.php) ────────────────────────────────

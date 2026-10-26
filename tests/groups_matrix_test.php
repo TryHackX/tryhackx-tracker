@@ -90,6 +90,7 @@ $MEMBER = array_merge($GUEST, [
     'content.report',
     // v88 (1.72.0): reply to a comment.
     'comment.reply',
+    'content.images',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
@@ -281,7 +282,7 @@ try {
     // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public) nor 1.70.0's v81 one
     // (content.delete_own, content.public) nor 1.71.0's v83 one (the comments) and v84 one (reporting), nor 1.72.0's
     // v88 one (replying), nor 1.75.0's v94 one (the Moderation page).
-    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports', 'schema_grant_v88_replies', 'schema_grant_v94_moderation')");
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports', 'schema_grant_v88_replies', 'schema_grant_v94_moderation', 'schema_grant_v96_images')");
     // 1.72.0: the owner's Admin group, imitated — what production's held before this release (read 2026-09-29): every id
     // but the fifteen registered since v81, v88's comment.reply and v94's three panel.moderation.* ids, four of the five consent ids among them (the owner had
     // ticked them himself; content.public came later and he never had it).

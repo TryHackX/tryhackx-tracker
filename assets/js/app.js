@@ -333,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pic && !pic.closest('a') && window.SiteLightbox && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
             const all = [...pic.closest('.rt-body').querySelectorAll('img.rt-img')].filter((im) => !im.closest('a'));
             e.preventDefault();
-            window.SiteLightbox.show(all.map((im) => ({ src: im.currentSrc || im.src, alt: im.alt })), all.indexOf(pic), pic);
+            window.SiteLightbox.show(all.map((im) => ({ src: im.dataset.full || im.currentSrc || im.src, alt: im.alt })), all.indexOf(pic), pic);
         }
     });
 });
@@ -1057,6 +1057,12 @@ async function handleWhitelistSubmit(e) {
     if (c.valid > max) {
         alert.className = 'alert alert-error show';
         alert.textContent = t.key('js.app.wl_too_many', {n: max});
+        return;
+    }
+    const descBusy = document.getElementById('wl-desc');
+    if (descBusy && window.ImagesEditor && window.ImagesEditor.busy(descBusy)) {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.images.wait_uploads');
         return;
     }
     btn.disabled = true;
@@ -4528,6 +4534,7 @@ window.siteToast = siteToast;
         cancel.addEventListener('click', () => { editor.remove(); opened.forEach((b) => { b.hidden = false; }); });
         send.addEventListener('click', async () => {
             if (send.disabled) return;
+            if (ta && window.ImagesEditor && window.ImagesEditor.busy(ta)) { msg.textContent = t.key('js.images.wait_uploads'); return; }
             const text = ta ? ta.value.trim() : '';
             const sUrl = src ? src.value.trim() : '';
             if (!text && !sUrl) { msg.textContent = t.key('js.app.desc_empty'); return; }
@@ -5697,6 +5704,7 @@ window.siteToast = siteToast;
     if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
     syncFormat();
     countTyping();
+    if (window.ImagesEditor && typeof window.ImagesEditor.attach === 'function') window.ImagesEditor.attach({ id, textarea: ta, format: fmt });
     }
 
     mountRichtext('wl-desc');

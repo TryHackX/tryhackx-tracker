@@ -33,7 +33,7 @@ foreach (homeLayoutOrder($cfg) as $homeKey) {
     if ($custom) {
         $homePh = $homePh ?? homePlaceholders($db, $cfg, $baseUrl, $homeBlocks);
         $text = pageContentResolveMarkers((string)$custom['body'], $cfg, $db);
-        $html = richtextRender($text, (string)$custom['format'], $cfg,
+        $html = richtextRender($text, (string)$custom['format'], richtextVideoCfg($cfg),
                                function_exists('richtextViewerSignedIn') ? richtextViewerSignedIn($db) : false);
         $body = '<div class="rt rt-home">' . homeApplyPlaceholders($html, $homePh) . '</div>';
     }

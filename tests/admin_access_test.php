@@ -796,6 +796,10 @@ check('… but still serves styles and fonts there',
       (bool)preg_match('/style-src[^;]*cdn\.jsdelivr\.net/', $pub)
       && (bool)preg_match('/font-src[^;]*cdn\.jsdelivr\.net/', $pub));
 check('a JSON response gets default-src none', str_starts_with($apiPol, "default-src 'none'"));
+check('a YouTube player may be framed on a public page only while the setting asks for one, and never in the panel',
+      !str_contains($pub, 'youtube') && str_contains(cspPolicy(['rt_youtube' => 'thumb'], 'public'), 'frame-src https://www.youtube-nocookie.com')
+      && str_contains(cspPolicy(['rt_youtube' => 'click'], 'public'), 'https://www.youtube-nocookie.com')
+      && !str_contains(cspPolicy(['rt_youtube' => 'thumb'], 'panel'), 'youtube') && !str_contains(cspPolicy(['rt_youtube' => 'link'], 'public'), 'youtube'));
 
 // The .htaccess list names all four CAPTCHA providers because a static file cannot read a setting.
 // This is the narrowing that moving into PHP bought — and, more importantly, the check that the

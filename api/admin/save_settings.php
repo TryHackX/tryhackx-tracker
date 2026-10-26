@@ -184,7 +184,8 @@ $allowed = [
     // 1.75.0 (schema 94): the day's ceiling on bulk mail (0 = none) and the sender's identity for its footer
     'bulk_mail_daily_cap', 'mail_sender_address', 'auto_penalties_enabled',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
-    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
+    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
+    'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_quota_mb', 'images_unused_hours',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
     // schema v43: stored file paths per torrent, the second live worker override
@@ -377,6 +378,9 @@ foreach (richtextPlaces() as $rtfPlace) {
     $keep = array_values(array_intersect(richtextRichFormats(), $want));
     $data['rt_formats_' . $rtfPlace] = implode(',', $keep ?: ['bbcode']);
 }
+if (isset($data['rt_youtube']) && !in_array($data['rt_youtube'], ['link', 'click', 'thumb'], true)) {
+    $data['rt_youtube'] = 'link';
+}
 if (isset($data['stats_timeline_default_range'])) {
     $known = array_keys(statsTimelineRangeButtons());
     $def = strtolower(trim($data['stats_timeline_default_range']));
@@ -432,6 +436,8 @@ $intClamp = [
     'desc_max_chars' => [200, 500000, 4000], 'desc_max_images' => [0, 100, 3],
     'livesync_port' => [1024, 65535, 9696],
     'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120], 'rate_limit_sl_refresh' => [0, 100000, 30],
+    'images_max_mb' => [1, 20, 8], 'images_max_edge' => [640, 4096, 2048], 'images_max_mpx' => [4, 40, 24], 'images_webp_quality' => [50, 95, 82],
+    'images_per_day' => [0, 1000, 60], 'images_quota_mb' => [0, 100000, 250], 'images_unused_hours' => [1, 720, 48],
     'rate_limit_user_login' => [0, 1000, 10],
     'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
     'rate_limit_hash_check' => [0, 100000, 120],

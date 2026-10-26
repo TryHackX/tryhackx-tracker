@@ -95,6 +95,7 @@ RewriteRule ^ - [L]
 
 # Route API requests
 RewriteRule ^api/(.*)$ api.php?endpoint=$1 [QSA,L]
+RewriteRule ^i/([0-9]+)-([0-9]+)x([0-9]+)\.(webp|gif)$ api.php?endpoint=image&id=$1&w=$2&h=$3&ext=$4 [QSA,L]
 
 # Route everything else to index.php
 RewriteRule ^(.*)$ index.php?action=$1 [QSA,L]

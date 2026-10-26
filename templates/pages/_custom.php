@@ -17,5 +17,5 @@ $__pcBody = pageContentResolveMarkers((string)($customPage['body'] ?? ''), $cfg,
 $__pcFormat = (string)($customPage['format'] ?? 'markdown');
 ?>
 <div class="rt rt-page">
-<?= richtextRender($__pcBody, $__pcFormat, $cfg, function_exists('richtextViewerSignedIn') ? richtextViewerSignedIn($db) : false) ?>
+<?= richtextRender($__pcBody, $__pcFormat, richtextVideoCfg($cfg), function_exists('richtextViewerSignedIn') ? richtextViewerSignedIn($db) : false) ?>
 </div>

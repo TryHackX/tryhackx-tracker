@@ -39,6 +39,7 @@ require_once __DIR__ . '/includes/sounds.php';
 require_once __DIR__ . '/includes/shout.php';
 // Pictures and profile covers (v69): the pipeline, the stream and userAvatarUrl()/userAvatarHtml().
 require_once __DIR__ . '/includes/usermedia.php';
+require_once __DIR__ . '/includes/images.php';
 // The description on a profile (v74): its renderer, its rules and the save the endpoint runs.
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile (v75): the gate, the parameters and the one query.
@@ -129,7 +130,7 @@ langInit($cfg, $langUser['language'] ?? null);
 // the stats poller and the admin tracker-service status poll are both hit repeatedly and have
 // nothing to do with the report/appeal janitors, so running them there is pure overhead. They
 // still run everywhere else. S2S calls never run them either.
-if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_emote', 'user_media', 'user_avatar_default', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_emote', 'user_media', 'image', 'user_avatar_default', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
     autoArchiveOldReports($db, $cfg);
     autoArchiveOldAppeals($db, $cfg);
     pruneOldSentEmails($db, $cfg);
@@ -337,6 +338,8 @@ $apiRoutes = [
     'user_media'                 => 'api/user_media.php',
     'user_avatar_default'        => 'api/user_avatar_default.php',
     'admin/user_media'           => 'api/admin/user_media.php',
+    'images'                     => 'api/images.php',
+    'image'                      => 'api/image.php',
     // The description on a profile (1.69.0, includes/profilebio.php): a member's own save, and the
     // panel's clear (panel.users.edit, like taking a picture down).
     'profile_bio'                => 'api/profile_bio.php',

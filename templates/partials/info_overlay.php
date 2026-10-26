@@ -217,6 +217,9 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
             <textarea id="info-desc" rows="6" data-limit="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
             <div class="rt-preview rt-body" id="info-desc-preview" hidden></div>
         </div>
+        <?php if (function_exists('imagesMayUpload') && imagesMayUpload($db, $cfg, $ioViewer)): ?>
+        <?php $imgFor = 'info-desc'; include __DIR__ . '/images_bar.php'; ?>
+        <?php endif; ?>
         <details class="rt-syntax-fold">
     <summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('rt.syntax_help') ?></summary>
     <div class="form-hint" id="info-desc-syntax"></div>

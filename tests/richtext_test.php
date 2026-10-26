@@ -724,5 +724,49 @@ check('formats per place: one table in a group of its own, a row per place, the 
       && str_contains($rtfTpl, 'name="rt_formats_<?= $rtfPlace ?>"') && str_contains($rtfTpl, 'name="desc_allow_<?= $rtfF ?>"')
       && !str_contains($rtfTpl, 'data-setting="desc_allow_bbcode"') && !str_contains($rtfTpl, 'name="desc_allow_markdown"'));
 
+$cfgYt = fn(string $mode) => array_merge($cfgF, ['rt_youtube' => $mode]);
+$ytBare = 'https://youtu.be/aqz-KE-bpKQ?t=1m30s';
+$ytThumb = richtextRenderIn('description', null, $ytBare, 'flarum', $cfgYt('thumb'));
+$ytClick = richtextRenderIn('message', null, '[youtube]https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=45[/youtube]', 'bbcode', $cfgYt('click'));
+check('youtube: in a description or a message the link carries the video for the player, its start, and the thumbnail only when asked for',
+      str_contains($ytThumb, 'class="rt-video"') && str_contains($ytThumb, 'data-yt="aqz-KE-bpKQ" data-yt-start="90" data-yt-thumb="1"')
+      && str_contains($ytClick, 'data-yt="aqz-KE-bpKQ" data-yt-start="45"') && !str_contains($ytClick, 'data-yt-thumb'), $ytThumb . ' | ' . $ytClick);
+check('youtube: "link", the other places, a render with no place, mail and a new account\'s words keep the plain link',
+      !str_contains(richtextRenderIn('description', null, $ytBare, 'flarum', $cfgYt('link')), 'data-yt')
+      && !str_contains(richtextRenderIn('description', null, $ytBare, 'flarum', $cfgF), 'data-yt')
+      && !str_contains(richtextRenderIn('shout', null, $ytBare, 'flarum', $cfgYt('thumb')), 'data-yt')
+      && !str_contains(richtextRenderIn('list', null, $ytBare, 'flarum', $cfgYt('thumb')), 'data-yt')
+      && !str_contains(richtextRender($ytBare, 'flarum', $cfgYt('thumb')), 'data-yt')
+      && !str_contains(richtextRenderForEmail($ytBare, 'flarum', richtextVideoCfg($cfgYt('thumb'))), 'data-yt')
+      && !str_contains(richtextRenderIn('description', null, $ytBare, 'flarum', $cfgYt('thumb') + ['rt_links_text' => '1']), 'data-yt'));
+check('youtube: the start time reads seconds, 1h2m3s and start=, and nothing else',
+      richtextYoutubeStart('https://youtu.be/x?t=90') === 90 && richtextYoutubeStart('https://youtu.be/x?t=90s') === 90
+      && richtextYoutubeStart('https://www.youtube.com/watch?v=x&t=1h2m3s') === 3723 && richtextYoutubeStart('https://www.youtube.com/embed/x?start=15') === 15
+      && richtextYoutubeStart('https://youtu.be/x?t=abc') === 0 && richtextYoutubeStart('https://youtu.be/x') === 0
+      && richtextYoutubeStart('https://youtu.be/x?t=999999') === 86400 && richtextYoutubeStart('https://youtu.be/x?tt=5') === 0);
+check('youtube: the pages a moderator writes (Terms, Info, the home sections) get the player too',
+      str_contains((string)file_get_contents($root . '/templates/pages/_custom.php'), 'richtextRender($__pcBody, $__pcFormat, richtextVideoCfg($cfg), ')
+      && str_contains((string)file_get_contents($root . '/templates/pages/home.php'), "richtextRender(\$text, (string)\$custom['format'], richtextVideoCfg(\$cfg),"));
+check('youtube: the setting ships as "link", is saved as one of its three answers, has search words and a control',
+      (trackerSchemaDefaultSettings()['rt_youtube'] ?? null) === 'link'
+      && str_contains($rtfSave, "'rt_youtube'") && str_contains($rtfSave, "!in_array(\$data['rt_youtube'], ['link', 'click', 'thumb'], true)")
+      && isset(settingsCatalogKeywords()['rt_youtube']) && str_contains($rtfTpl, 'name="rt_youtube"'));
+$ytJs = (string)file_get_contents($root . '/assets/js/ytplayer.js');
+$ytFrom = strpos($ytJs, '    function embedUrl(id, start) {');
+$ytTo = $ytFrom === false ? false : strpos($ytJs, "\n    }\n", $ytFrom);
+$ytFn = ($ytFrom !== false && $ytTo !== false) ? substr($ytJs, $ytFrom, $ytTo - $ytFrom + 6) : '';
+$ytTmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'yt_embed_' . bin2hex(random_bytes(4)) . '.js';
+file_put_contents($ytTmp, $ytFn . "\nprocess.stdout.write(JSON.stringify([embedUrl('aqz-KE-bpKQ', 90), embedUrl('aqz-KE-bpKQ', 0)]));\n");
+$ytOut = json_decode(trim((string)@shell_exec('node ' . escapeshellarg($ytTmp) . ' 2>&1')), true);
+@unlink($ytTmp);
+check('youtube: the player is the privacy-enhanced embed, playing once pressed, from the start time when there is one',
+      $ytOut === ['https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?autoplay=1&rel=0&start=90', 'https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?autoplay=1&rel=0'],
+      json_encode($ytOut));
+check('youtube: the frame sends the page\'s origin (the embed refuses to play without one), the thumbnail sends nothing, and every public page loads the script',
+      str_contains($ytJs, "referrerpolicy: 'strict-origin-when-cross-origin'") && str_contains($ytJs, "src: 'https://i.ytimg.com/vi/' + id + '/hqdefault.jpg'")
+      && str_contains($ytJs, "referrerpolicy: 'no-referrer'") && str_contains((string)file_get_contents($root . '/templates/layout.php'), 'assets/js/ytplayer.js'));
+check('youtube: the words of the player reach the public pages (their prefix is in the public bundle)',
+      (bool)preg_match("/const LANG_JS_PUBLIC = \\[[^\\]]*'js\\.video\\.'/s", (string)file_get_contents($root . '/includes/lang.php')));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

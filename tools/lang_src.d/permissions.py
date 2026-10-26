@@ -78,6 +78,8 @@ add('perm', {
                            'Usuwanie czyjegokolwiek opublikowanego opisu z panelu Info'),
     'content.public':   ('Let the descriptions they wrote be listed on their public profile',
                          'Pokazywanie napisanych opisów na publicznym profilu członka'),
+    'content.images':   ('Upload pictures and put them into the descriptions they write',
+                         'Wgrywanie obrazów i wstawianie ich do pisanych opisów'),
     'favourites.use':   ('Keep a list of favourite torrents',
                          'Prowadzenie listy ulubionych torrentów'),
     'favourites.public': ('Let their favourites list be shown on their public profile',

@@ -139,6 +139,10 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
              mount attaches the picker. It asks the server nothing until somebody opens it. */ ?>
     <script src="<?= $baseUrl ?>assets/js/emoji-picker.js<?= assetVer('assets/js/emoji-picker.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
+    <?php if (function_exists('imagesMayUpload') && imagesMayUpload($db, $cfg, $navUser)): ?>
+    <script src="<?= $baseUrl ?>assets/js/images-editor.js<?= assetVer('assets/js/images-editor.js') ?>"></script>
+    <?php endif; ?>
     <script src="<?= $baseUrl ?>assets/js/app.js<?= assetVer('assets/js/app.js') ?>"></script>
     <?php /* The star, the profile lists and the "who has this" overlay. Loaded on every public page
              for the same reason app.js is: the star is delegated from `document` and has to be there

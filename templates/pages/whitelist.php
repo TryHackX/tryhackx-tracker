@@ -231,6 +231,9 @@ if ($wlSched) {
                 <textarea id="wl-desc" name="description" rows="6" data-limit="<?= (int)richtextMaxChars($cfg) ?>" placeholder="<?= _h('whitelist.desc_ph') ?>"></textarea>
                 <div class="rt-preview rt-body" id="wl-desc-preview" hidden></div>
             </div>
+            <?php if (function_exists('imagesMayUpload') && imagesMayUpload($db, $cfg, $wlMe)): ?>
+            <?php $imgFor = 'wl-desc'; include __DIR__ . '/../partials/images_bar.php'; ?>
+            <?php endif; ?>
             <details class="rt-syntax-fold">
     <summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('rt.syntax_help') ?></summary>
     <div class="form-hint" id="wl-desc-syntax"></div>
