@@ -119,8 +119,7 @@ $heads = ['templates/layout.php', 'install.php'];
 foreach (glob($root . '/templates/admin/*.php') as $f) {
     if (str_contains((string)file_get_contents($f), '</html>')) $heads[] = 'templates/admin/' . basename($f);
 }
-// ten since 1.75.0: the Moderation page is a document of its own, as the other panel pages are
-check('there are ten templates with a <head> plus the installer', count($heads) === 11, implode(', ', $heads));
+check('there are eleven templates with a <head> plus the installer', count($heads) === 12, implode(', ', $heads));
 $noHelper = [];
 foreach ($heads as $h) {
     $src = (string)file_get_contents($root . '/' . $h);

@@ -26,8 +26,7 @@
  *                                            only while Settings allows links AND the writer may link
  *                                            (a member; a guest never). Otherwise the tag is text, and
  *                                            the save refuses it, so nobody is surprised by it later.
- * Nothing else: no picture, no table, no size, no colour, no alignment — a tag the list does not name
- * is shown as what was typed. A tag left open is closed at the end; a closer with nothing to close is
+ * No table, no size, no colour, no alignment. A tag left open is closed at the end; a closer with nothing to close is
  * text; a closer that crosses another tag closes it and opens it again (a link and a block are never
  * opened twice). Line breaks are kept, at most two in a row and COMMENT_MAX_LINES in all.
  *
@@ -102,6 +101,7 @@
  */
 require_once __DIR__ . '/richtext.php';
 require_once __DIR__ . '/antispam.php';
+require_once __DIR__ . '/images.php';
 
 const COMMENT_MAX_MIN      = 20;
 const COMMENT_MAX_MAX      = 5000;
@@ -131,6 +131,12 @@ const COMMENT_REPLY_DEPTH_DEFAULT = 3;
 const COMMENT_REPLIES_FIRST = 10;
 const COMMENT_REPLIES_MORE  = 25;
 const COMMENT_REPLIES_SEEK  = 200;
+const COMMENT_IMAGES_MAX_MAX = 50;
+const COMMENT_IMAGES_DEFAULT = 18;
+const COMMENT_IMAGE_MB_DEFAULT = 4;
+const COMMENT_IMAGE_RATIO_MAX = 8;
+const COMMENT_THUMB_H_DEFAULT = 240;
+const COMMENT_THUMB_W_DEFAULT = 360;
 
 // users.comment_notify — one bit per kind of news, all five on by default (the fifth since 1.72.0).
 const COMMENT_NOTIFY_MINE    = 1;   // a comment on a torrent I registered
@@ -212,6 +218,26 @@ function commentsReplyDepth(array $cfg): int
     return max(0, min(COMMENT_REPLY_DEPTH_MAX, (int)$v));
 }
 
+function commentImagesUploadOn(array $cfg): bool { return ($cfg['comment_images_upload'] ?? '0') === '1'; }
+
+function commentImagesLinksOn(array $cfg): bool { return ($cfg['comment_images_links'] ?? '1') === '1'; }
+
+function commentImagesMax(array $cfg): int
+{
+    $v = $cfg['comment_images_max'] ?? COMMENT_IMAGES_DEFAULT;
+    return is_numeric($v) ? max(0, min(COMMENT_IMAGES_MAX_MAX, (int)$v)) : COMMENT_IMAGES_DEFAULT;
+}
+
+function commentImageMaxBytes(array $cfg): int
+{
+    $mb = max(1, min(20, (int)($cfg['comment_image_max_mb'] ?? COMMENT_IMAGE_MB_DEFAULT) ?: COMMENT_IMAGE_MB_DEFAULT));
+    return min($mb * 1048576, imagesMaxBytes($cfg));
+}
+
+function commentThumbH(array $cfg): int { return max(80, min(600, (int)($cfg['comment_thumb_h'] ?? COMMENT_THUMB_H_DEFAULT) ?: COMMENT_THUMB_H_DEFAULT)); }
+
+function commentThumbW(array $cfg): int { return max(80, min(800, (int)($cfg['comment_thumb_w'] ?? COMMENT_THUMB_W_DEFAULT) ?: COMMENT_THUMB_W_DEFAULT)); }
+
 /* ── who may do what ───────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -290,6 +316,67 @@ function commentMayPost(PDO $db, array $cfg, ?array $me): array
 function commentWriterMayLink(array $cfg, ?array $me): bool
 {
     return commentLinksOn($cfg) && (int)($me['id'] ?? 0) > 0;
+}
+
+function commentImagesMayUse(PDO $db, array $cfg, ?array $me): bool
+{
+    if ((int)($me['id'] ?? 0) <= 0 || !commentsEnabled($cfg) || commentImagesMax($cfg) === 0) return false;
+    if (!commentImagesUploadOn($cfg) && !commentImagesLinksOn($cfg)) return false;
+    return commentCan($db, $cfg, $me, 'comment.images');
+}
+
+function commentImagesMayUpload(PDO $db, array $cfg, ?array $me): bool
+{
+    return commentImagesUploadOn($cfg) && commentImagesMayUse($db, $cfg, $me);
+}
+
+function commentImageCtx(PDO $db, array $cfg, bool $remote, int $max): array
+{
+    return ['remote' => $remote, 'max' => $max, 'base' => imagesBase($cfg), 'hosts' => imagesRemoteHosts($db),
+            'w' => commentThumbW($cfg), 'h' => commentThumbH($cfg)];
+}
+
+function commentImageRules(PDO $db, array $cfg, ?array $writer): ?array
+{
+    return commentImagesMayUse($db, $cfg, $writer) ? commentImageCtx($db, $cfg, commentImagesLinksOn($cfg), commentImagesMax($cfg)) : null;
+}
+
+function commentImageView(PDO $db, array $cfg): array
+{
+    return commentImageCtx($db, $cfg, true, COMMENT_IMAGES_MAX_MAX);
+}
+
+function commentImageInfo(PDO $db, array $cfg, ?array $me): ?array
+{
+    $r = commentImageRules($db, $cfg, $me);
+    if ($r === null) return null;
+    return ['upload' => commentImagesMayUpload($db, $cfg, $me), 'links' => (bool)$r['remote'], 'max' => (int)$r['max'],
+            'base' => (string)$r['base'], 'hosts' => array_values($r['hosts']), 'max_bytes' => commentImageMaxBytes($cfg)];
+}
+
+function commentImageTag(string $url, array $own, array $img): string
+{
+    $e = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $w = max(1, (int)$own['w']);
+    $h = max(1, (int)$own['h']);
+    if (max($w / $h, $h / $w) > COMMENT_IMAGE_RATIO_MAX) {
+        return '<a class="cm-img-odd" href="' . $e . '?full=1" target="_blank" rel="noopener"><i class="bi bi-image" aria-hidden="true"></i> '
+             . htmlspecialchars(__('comment.image_odd', ['w' => $w, 'h' => $h]), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</a>';
+    }
+    $scale = min(1, max(1, (int)$img['w']) / $w, max(1, (int)$img['h']) / $h);
+    $tw = max(1, (int)round($w * $scale));
+    $th = max(1, (int)round($h * $scale));
+    return '<img class="rt-img cm-img" alt="" loading="lazy" decoding="async" width="' . $tw . '" height="' . $th
+         . '" data-src="' . $e . '" data-full="' . $e . '?full=1">';
+}
+
+function commentImageLabel(string $url): string
+{
+    $p = parse_url($url);
+    $host = (string)($p['host'] ?? '');
+    $file = basename((string)($p['path'] ?? ''));
+    if (mb_strlen($file, 'UTF-8') > 40) $file = mb_substr($file, 0, 39, 'UTF-8') . '…';
+    return $file !== '' ? $host . ' · ' . $file : $host;
 }
 
 /**
@@ -415,7 +502,7 @@ function commentTitle(string $raw, int $max = 64): string
  *   · a closer that crosses tags closes them and reopens the inline ones only — a block, like a link,
  *     is never opened twice.
  */
-function commentParse(string $s, array $cfg, bool $links = true): array
+function commentParse(string $s, array $cfg, bool $links = true, ?array $img = null): array
 {
     static $inl = ['b' => 'strong', 'i' => 'em', 'u' => 'u', 's' => 's'];
     $out = '';
@@ -423,6 +510,11 @@ function commentParse(string $s, array $cfg, bool $links = true): array
     $nLinks = 0;
     $bad = 0;
     $urlTags = 0;
+    $nImg = 0;
+    $imgTags = 0;
+    $imgBad = 0;
+    $imgRemoteOff = 0;
+    $imgForeignText = 0;
     $stack = [];            // ['tag' => b|i|u|s|url|quote|spoiler, 'mark' => $chars when it opened, 'url' => …]
     $literal = ['quote' => 0, 'spoiler' => 0];   // openers of a kind already open, written as text
     $text = function (string $t, bool $pre = false) use (&$out, &$chars): void {
@@ -453,7 +545,7 @@ function commentParse(string $s, array $cfg, bool $links = true): array
         }
     };
 
-    $re = '~\[(?:(b|i|u|s)|/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?)\]~i';
+    $re = '~\[(?:(b|i|u|s)|/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?|(img))\]~i';
     $pos = 0;
     $nextUrlCloser = -1;
     while (preg_match($re, $s, $m, PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL, $pos)) {
@@ -528,6 +620,29 @@ function commentParse(string $s, array $cfg, bool $links = true): array
             continue;
         }
 
+        if ($m[8][0] !== null) {
+            if ($img === null) { $imgTags++; $text($tok); continue; }
+            if ($has('url') || !preg_match('~\[/img\]~i', $s, $im, PREG_OFFSET_CAPTURE, $pos)) { $text($tok); continue; }
+            $url = commentUrl(substr($s, $pos, (int)$im[0][1] - $pos));
+            if ($url === null) { $imgBad++; $text($tok); continue; }
+            $own = imagesOwnUrlAt((string)$img['base'], $url);
+            if ($own === null && empty($img['remote'])) { $imgRemoteOff++; $text($tok); continue; }
+            $pos = (int)$im[0][1] + strlen($im[0][0]);
+            $nImg++;
+            if ($own !== null) {
+                $out .= commentImageTag($url, $own, $img);
+                continue;
+            }
+            if (!$links) {
+                if (!imagesHostMatches((string)parse_url($url, PHP_URL_HOST), (array)($img['hosts'] ?? []))) $imgForeignText++;
+                $text($url);
+                continue;
+            }
+            $out .= '<a' . richtextLinkAttrs($url, $cfg) . ' class="cm-img-link" title="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                  . '"><i class="bi bi-image" aria-hidden="true"></i> ' . htmlspecialchars(commentImageLabel($url), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</a>';
+            continue;
+        }
+
         // [url=…] and [url]
         if (!$links) { $urlTags++; $text($tok); continue; }
         if ($has('url') || count($stack) >= COMMENT_MAX_DEPTH) { $text($tok); continue; }
@@ -555,14 +670,15 @@ function commentParse(string $s, array $cfg, bool $links = true): array
     $text(substr($s, $pos));
     while ($stack) $close(array_pop($stack));
     return ['html' => $out, 'chars' => $chars, 'links' => $nLinks, 'bad_links' => $bad, 'url_tags' => $urlTags,
-            'lines' => commentLines($s)];
+            'lines' => commentLines($s), 'images' => $nImg, 'img_tags' => $imgTags, 'img_bad' => $imgBad,
+            'img_remote_off' => $imgRemoteOff, 'img_foreign_text' => $imgForeignText];
 }
 
 /**
  * Everything wrong with a cleaned text, as ['code' => …, 'vars' => […]] for api.comment.<code>, or null.
  * The cheap, bounding questions first: the source's size before the text is walked at all.
  */
-function commentProblem(string $clean, array $cfg, bool $links): ?array
+function commentProblem(string $clean, array $cfg, bool $links, ?array $img = null): ?array
 {
     if ($clean === '') return ['code' => 'empty', 'vars' => []];
     $cap = commentSourceCap($cfg);
@@ -570,12 +686,17 @@ function commentProblem(string $clean, array $cfg, bool $links): ?array
         return ['code' => 'too_long_source', 'vars' => ['max' => $cap]];
     }
     if (commentLines($clean) > COMMENT_MAX_LINES) return ['code' => 'too_many_lines', 'vars' => ['max' => COMMENT_MAX_LINES]];
-    $p = commentParse($clean, $cfg, $links);
+    $p = commentParse($clean, $cfg, $links, $img);
     $max = commentMax($cfg);
     if ($p['chars'] > $max) return ['code' => 'too_long', 'vars' => ['n' => $p['chars'], 'max' => $max]];
     if ($p['url_tags'] > 0) return ['code' => 'no_links', 'vars' => []];
     if ($p['bad_links'] > 0) return ['code' => 'bad_link', 'vars' => []];
     if ($p['links'] > COMMENT_MAX_LINKS) return ['code' => 'too_many_links', 'vars' => ['max' => COMMENT_MAX_LINKS]];
+    if ($p['img_tags'] > 0) return ['code' => 'no_images', 'vars' => []];
+    if ($p['img_bad'] > 0) return ['code' => 'bad_image', 'vars' => []];
+    if ($p['img_remote_off'] > 0) return ['code' => 'no_image_links', 'vars' => []];
+    if ($p['img_foreign_text'] > 0) return ['code' => 'foreign_image', 'vars' => []];
+    if ($img !== null && $p['images'] > (int)$img['max']) return ['code' => 'too_many_images', 'vars' => ['max' => (int)$img['max']]];
     return null;
 }
 
@@ -601,7 +722,7 @@ function commentRenderHtml(string $body, string $format, array $cfg, array $ctx 
            . implode(' ', array_filter(array_slice($lines, COMMENT_MAX_LINES - 1), fn($l) => $l !== ''));
     }
     $html = $format === 'bbcode'
-        ? commentParse($c, $cfg, !empty($ctx['links']))['html']
+        ? commentParse($c, $cfg, !empty($ctx['links']), isset($ctx['images']) && is_array($ctx['images']) ? $ctx['images'] : null)['html']
         : str_replace("\n", '<br>', htmlspecialchars($c, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
     return commentTokens($html, $cfg, $ctx);
 }
@@ -644,9 +765,11 @@ function commentOutsideCode(string $html, callable $stage): string
 }
 
 /** A short plain-text version (a notification's quote): the tags taken out, spaces made one, cut. */
-function commentExcerpt(string $body, int $len = COMMENT_EXCERPT): string
+function commentExcerpt(string $body, int $len = COMMENT_EXCERPT, string $imageWord = ''): string
 {
     $t = commentClean($body);
+    $word = $imageWord !== '' ? $imageWord : __('comment.image_word');
+    $t = (string)preg_replace_callback('~\[img\][^\[\]]*\[/img\]~i', static fn() => ' ' . $word . ' ', $t);
     $t = (string)preg_replace('~\[/?(?:b|i|u|s|code|url(?:=[^\]\n]*)?|quote(?:=[^\]\n]*)?|spoiler(?:=[^\]\n]*)?)\]~i', '', $t);
     $t = trim((string)preg_replace('/\s+/u', ' ', $t));
     return mb_strlen($t, 'UTF-8') > $len ? rtrim(mb_substr($t, 0, $len - 1, 'UTF-8')) . '…' : $t;
@@ -1021,6 +1144,7 @@ function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
     // Which of them THIS reader may report, and has already reported (1.71.0 part E, includes/reports.php) —
     // one query for the batch.
     $reportFlags = function_exists('contentReportFlags') ? contentReportFlags($db, $cfg, $me, 'comment', $raw) : [];
+    $imgView = commentImageView($db, $cfg);
 
     $out = [];
     foreach ($raw as $r) {
@@ -1050,6 +1174,7 @@ function commentShape(PDO $db, array $cfg, ?array $me, array $raw): array
         // A guest's links are never links; a NEW account's are text too (1.71.0, includes/antispam.php) — decided
         // by when these words were written, so a link written on an account's first day stays text for good.
         $ctx['links'] = $linksOn && !$guest && !antispamWrittenNew($db, $cfg, $aid, $r['author_age_s'] ?? null);
+        $ctx['images'] = $guest ? null : $imgView;
         // What this reader may do — the same facts commentEditRight()/commentDeleteRight() read, asked once
         // for the batch; the endpoints ask again either way.
         $editLeft = 0;
@@ -1199,7 +1324,7 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
     }
     $who = $authorName !== '' ? $authorName : null;
     $torrent = commentTorrentName($db, $hash);
-    $excerpt = commentExcerpt((string)$row['body']);
+    $excerpts = [];
     $link = commentLink($hash, $id);
     // The strongest reason first: an answer to my comment (1.72.0), a mention, then "my torrent", "my description",
     // "my thread". A reply that also names its parent's author is ONE notification to them, the reply's.
@@ -1228,8 +1353,9 @@ function commentNotifyNew(PDO $db, array $cfg, array $row): array
         $lang = recipientLang($cfg, $u);
         $name = $who ?? langFor($lang, 'notify.comment_guest');
         $key = 'notify.comment_' . $reason;
+        $excerpts[$lang] ??= commentExcerpt((string)$row['body'], COMMENT_EXCERPT, langFor($lang, 'comment.image_word'));
         userNotify($db, $uid, $type, langFor($lang, $key, ['user' => $name, 'name' => $torrent]),
-                   langFor($lang, 'notify.comment_body', ['text' => $excerpt]), $link);
+                   langFor($lang, 'notify.comment_body', ['text' => $excerpts[$lang]]), $link);
         $told[$uid] = $type;
     }
     return $told;
@@ -1362,11 +1488,13 @@ function commentPostRequest(PDO $db, array $cfg, ?array $me, array $input, strin
     $ticket = null;
     $flood = commentFloodCheck($db, $cfg, $me, $ip, $input, 'post', $opts, $ticket);
     if ($flood !== null) return commentFloodAnswer($flood);
-    $bad = commentProblem($clean, $cfg, commentWriterMayLink($cfg, $me));
+    $imgRules = commentImageRules($db, $cfg, $me);
+    $bad = commentProblem($clean, $cfg, commentWriterMayLink($cfg, $me), $imgRules);
     if ($bad !== null) {
         antispamRelease($db, $ticket);   // the words were refused: the reserved comment goes back to the layer
         return commentFail(400, $bad['code'], $bad['vars']);
     }
+    if ($imgRules !== null) $clean = imagesRemoteSettle($db, $cfg, $clean);
 
     $uid = (int)($me['id'] ?? 0);
     $guest = $uid <= 0;
@@ -1381,6 +1509,7 @@ function commentPostRequest(PDO $db, array $cfg, ?array $me, array $input, strin
                   $guest ? mb_substr(function_exists('ipBucket') ? ipBucket($ip) : $ip, 0, 45) : null]);
     $id = (int)$db->lastInsertId();
     antispamRecord($db, $ticket);
+    if ($imgRules !== null && $status === 'visible') imagesPublishIn($db, $cfg, $clean);
     $row = commentRow($db, $id);
     if ($row === null) return commentFail(500, 'failed');
     if ($status === 'visible') commentNotifyNew($db, $cfg, $row);
@@ -1439,11 +1568,13 @@ function commentEditRequest(PDO $db, array $cfg, ?array $me, array $input, strin
     $flood = commentFloodCheck($db, $cfg, $me, $ip, $input, 'edit', $opts, $ticket);
     if ($flood !== null) return commentFloodAnswer($flood);
     $authorId = $row['user_id'] === null ? 0 : (int)$row['user_id'];
-    $bad = commentProblem($clean, $cfg, commentLinksOn($cfg) && $authorId > 0);
+    $imgRules = $authorId > 0 ? commentImageRules($db, $cfg, userFindById($db, $authorId)) : null;
+    $bad = commentProblem($clean, $cfg, commentLinksOn($cfg) && $authorId > 0, $imgRules);
     if ($bad !== null) {
         antispamRelease($db, $ticket);
         return commentFail(400, $bad['code'], $bad['vars']);
     }
+    if ($imgRules !== null) $clean = imagesRemoteSettle($db, $cfg, $clean);
     $reason = trim(mb_substr((string)($input['reason'] ?? ''), 0, COMMENT_REASON_MAX, 'UTF-8'));
     $uid = (int)$me['id'];
     $changed = $clean !== (string)$row['body'];
@@ -1456,6 +1587,7 @@ function commentEditRequest(PDO $db, array $cfg, ?array $me, array $input, strin
             return commentFail(404, 'not_found');
         }
         antispamRecord($db, $ticket);
+        if ($imgRules !== null && $row['status'] === 'visible') imagesPublishIn($db, $cfg, $clean);
         $hash = (string)$row['info_hash'];
         // What other people's notifications quote of it is the new words now (1.74.0, PRIV-1) — whoever edited it.
         commentNotifyFollow($db, $cfg, [$row], 'edited', $clean);
@@ -1508,7 +1640,7 @@ function commentNotifyMentions(PDO $db, array $cfg, array $row, array $ids): arr
         $st->execute([$author]);
         $name = (string)($st->fetchColumn() ?: langFor($lang, 'notify.comment_guest'));
         userNotify($db, $uid, 'comment_mention', langFor($lang, 'notify.comment_mention', ['user' => $name, 'name' => commentTorrentName($db, (string)$row['info_hash'])]),
-                   langFor($lang, 'notify.comment_body', ['text' => commentExcerpt((string)$row['body'])]), commentLink((string)$row['info_hash'], (int)$row['id']));
+                   langFor($lang, 'notify.comment_body', ['text' => commentExcerpt((string)$row['body'], COMMENT_EXCERPT, langFor($lang, 'comment.image_word'))]), commentLink((string)$row['info_hash'], (int)$row['id']));
         $told[$uid] = 'comment_mention';
     }
     return $told;
@@ -1544,7 +1676,6 @@ function commentNotifyFollow(PDO $db, array $cfg, array $comments, string $what,
         if ($id > 0 && preg_match('/^[0-9a-f]{40}$/', $hash)) $hashOf[commentLink($hash, $id)] = $hash;
     }
     if (!$hashOf) return 0;
-    $excerpt = $what === 'edited' ? commentExcerpt($newBody) : '';
     $names = [];
     $changed = 0;
     try {
@@ -1570,7 +1701,9 @@ function commentNotifyFollow(PDO $db, array $cfg, array $comments, string $what,
                     $up->execute(array_merge([mb_substr(langFor($lang, 'notify.comment_gone', ['name' => $names[$hash]]), 0, 190),
                                               langFor($lang, 'notify.comment_body_gone')], $nids));
                 } else {
-                    $body = $what === 'edited' ? langFor($lang, 'notify.comment_body', ['text' => $excerpt]) : langFor($lang, 'notify.comment_body_gone');
+                    $body = $what === 'edited'
+                        ? langFor($lang, 'notify.comment_body', ['text' => commentExcerpt($newBody, COMMENT_EXCERPT, langFor($lang, 'comment.image_word'))])
+                        : langFor($lang, 'notify.comment_body_gone');
                     $up = $db->prepare("UPDATE user_notifications SET body = ? WHERE id IN ($ph)");
                     $up->execute(array_merge([$body], $nids));
                 }
@@ -1726,6 +1859,7 @@ function commentComposerInfo(PDO $db, array $cfg, ?array $me): array
         'max'       => commentMax($cfg),
         'source_max' => commentSourceCap($cfg),
         'max_links' => COMMENT_MAX_LINKS,
+        'images'    => $gate['ok'] ? commentImageInfo($db, $cfg, $me) : null,
         'review'    => $uid <= 0 && commentGuestReview($cfg),
         // A guest's CAPTCHA every time (the anti-spam layer's guest rule, includes/antispam.php) — the page asks
         // for one before it sends; a new account's links will be text, and the composer says so (1.71.0).

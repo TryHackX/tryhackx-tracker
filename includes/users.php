@@ -203,6 +203,7 @@ function userPermissionList(bool $english = false): array {
         // Writing comments at all (comment.post, and everything that asks) comes first; a guest group holding this
         // replies under every guest rule. NO with accounts off, like every comment.* id (userLegacyDefault()).
         'comment.reply'      => 'Reply to a comment (as deep as the thread may go — comments_reply_depth)',
+        'comment.images'     => 'Put pictures into their comments, and upload them where Settings allows it',
         'comment.edit_own'   => 'Correct their own comments for a while (comment_edit_minutes)',
         'comment.delete_own' => 'Delete their own comments for a while (comment_delete_own_minutes)',
         'comment.moderate'   => 'Delete or edit anybody\'s comment with a reason, and release a guest\'s held comment',
@@ -267,6 +268,8 @@ function userPermissionList(bool $english = false): array {
         'panel.moderation.view'   => 'PANEL — see the Moderation page: restricted members, the warnings log, the automatic penalties',
         'panel.moderation.handle' => 'PANEL — lift a silence or a ban, revoke a warning, warn, silence or ban a member by hand',
         'panel.moderation.rules'  => 'PANEL — edit the automatic penalties (the ladder of warnings → silence or ban) and switch them on',
+        'panel.images.view'       => 'PANEL — see the Images page: every picture, who added it and where it is used',
+        'panel.images.manage'     => 'PANEL — delete any picture, and retry or drop the copies waiting in the queue',
         // Look, but not touch. EVERY operation in api/admin/backup_action.php demands the admin
         // password, and adminReauth() checks it against the OWNER's hash — which a moderator does
         // not have and must not be given. So there is no "run a backup" permission: one would be a
@@ -352,7 +355,8 @@ function userGroupPresets(): array {
                         'panel.reports.shouts.view', 'panel.reports.shouts.handle',
                         // v94 (1.75.0): the Moderation page — read it and act on it (lift, revoke, warn by hand); the
                         // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
-                        'panel.moderation.view', 'panel.moderation.handle'],
+                        'panel.moderation.view', 'panel.moderation.handle',
+                        'panel.images.view', 'panel.images.manage'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -401,6 +405,7 @@ function userGroupPresets(): array {
                         // v83: comments on a torrent — read, write, and their own corrected or taken back
                         // for as long as the two windows say; v88: a reply to one.
                         'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
+                        'comment.images',
                         // v84: report a comment, a description or a shout to the moderators.
                         'content.report'],
         ],

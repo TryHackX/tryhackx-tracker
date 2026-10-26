@@ -1,15 +1,18 @@
 <?php
 if (!usersEnabled($cfg)) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 404);
 $me = currentUser($db);
-if (!imagesMayUpload($db, $cfg, $me)) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 403);
+$forComment = (string)($_GET['place'] ?? '') === 'comment';
+$may = $forComment ? function_exists('commentImagesMayUpload') && commentImagesMayUpload($db, $cfg, $me) : imagesMayUpload($db, $cfg, $me);
+if (!$may) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 403);
 $uid = (int)$me['id'];
+$maxBytes = $forComment ? commentImageMaxBytes($cfg) : imagesMaxBytes($cfg);
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
-    jsonResponse(['success' => true] + imagesList($db, $cfg, $uid, (int)($_GET['page'] ?? 1)));
+    jsonResponse(['success' => true] + imagesList($db, $cfg, $uid, (int)($_GET['page'] ?? 1), $maxBytes));
 }
 
-$tooBig = fn() => jsonResponse(['error' => __('api.media.too_large', ['kb' => (int)floor(imagesMaxBytes($cfg) / 1024)]), 'code' => 'too_big'], 413);
+$tooBig = fn() => jsonResponse(['error' => __('api.media.too_large', ['kb' => (int)floor($maxBytes / 1024)]), 'code' => 'too_big'], 413);
 
 if (stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') === 0) {
     if (!$_FILES && !$_POST) $tooBig();
@@ -24,8 +27,9 @@ if (stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') ===
     if ($err !== UPLOAD_ERR_OK || !is_uploaded_file((string)$f['tmp_name'])) {
         jsonResponse(['error' => __('api.media.no_file'), 'code' => 'upload_failed'], 400);
     }
-    if ((int)$f['size'] > imagesMaxBytes($cfg)) $tooBig();
-    $r = imagesStore($db, $cfg, $uid, (string)file_get_contents((string)$f['tmp_name']), (string)($f['name'] ?? ''));
+    if ((int)$f['size'] > $maxBytes) $tooBig();
+    $r = imagesStore($db, $cfg, $uid, (string)file_get_contents((string)$f['tmp_name']), (string)($f['name'] ?? ''), 'upload', null,
+                     $forComment ? ['max_ratio' => COMMENT_IMAGE_RATIO_MAX] : []);
     if (empty($r['ok'])) jsonResponse(['error' => $r['message'], 'code' => $r['code']], (int)$r['status']);
     jsonResponse(['success' => true, 'image' => imagesRowOut($cfg, $r['row'])]);
 }

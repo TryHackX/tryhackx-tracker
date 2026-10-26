@@ -3666,6 +3666,19 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 .cm-text { margin-top: 0.3rem; overflow-wrap: anywhere; }
 .cm-text[hidden] { display: none; }
 .cm-text .rt-quote { margin: 0.35rem 0; }
+.rt-body .rt-img.cm-img { display: inline-block; vertical-align: top; max-height: none; margin: 0.3rem 0.35rem 0 0; object-fit: cover; background: rgba(255, 255, 255, 0.05); cursor: zoom-in; }
+.cm-img-link, .cm-img-odd { display: inline-flex; align-items: center; gap: 0.3rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.cm-imgs { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.45rem; }
+.cm-imgs[hidden] { display: none; }
+.cm-img-chip { position: relative; display: inline-flex; align-items: center; gap: 0.35rem; max-width: 15rem; height: 3.6rem; padding: 0.2rem 1.6rem 0.2rem 0.2rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-code); font-size: 0.78rem; }
+.cm-img-chip img { height: 100%; width: auto; max-width: 6.5rem; object-fit: cover; border-radius: 4px; }
+.cm-img-chip-note { display: grid; min-width: 0; line-height: 1.25; }
+.cm-img-chip-host { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-img-chip-kind { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-img-chip-x { position: absolute; top: 0.2rem; right: 0.2rem; width: 1.3rem; height: 1.3rem; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 0.7rem; line-height: 1; cursor: pointer; }
+.cm-img-chip-x:hover, .cm-img-chip-x:focus-visible { background: var(--error); }
+.cm-imgs-count { font-size: 0.75rem; color: var(--text-muted); }
+.cm-imgs-count.is-over { color: var(--error); }
 .cm-blocked { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; font-size: 0.85rem; }
 .cm-reason, .cm-edit-foot, .cm-compose-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin-top: 0.45rem; }
 .cm-reason-label { flex: 1 1 100%; font-size: 0.82rem; color: var(--text-muted); }

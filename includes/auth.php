@@ -17,7 +17,7 @@ function isLoggedIn(): bool {
 function adminReservedActions(): array {
     return ['home', 'info', 'tos', 'report', 'status', 'transparency', 'unsubscribe', 'stats',
             'whitelist', 'login', 'register', 'account', 'reset', 'verify', 'emailchange', 'search',
-            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-moderation', 'admin-backups',
+            'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-moderation', 'admin-images', 'admin-backups',
             'admin-traffic', 'admin-audit', 'notfound', 'u', 'apidocs',
             // Both are handled BEFORE the router (authBridgeHandleRoute), so an admin login
             // path set to one of them would be unreachable rather than merely odd.
@@ -26,7 +26,7 @@ function adminReservedActions(): array {
 
 /** The panel actions that exist regardless of where the sign-in form lives. */
 function adminPanelActions(): array {
-    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-moderation', 'admin-backups',
+    return ['admin', 'settings', 'admin-whitelist', 'admin-index', 'admin-users', 'admin-moderation', 'admin-images', 'admin-backups',
             'admin-traffic', 'admin-audit'];
 }
 
@@ -56,6 +56,7 @@ function adminNavItems(): array {
         // Who is silenced or banned, every warning, the automatic penalties (1.75.0, includes/moderation.php). Settings has
         // no section of its own for it: the one switch is on the page, and the owner's copy is in Settings → User accounts.
         ['action' => 'admin-moderation', 'label' => 'Moderation', 'icon' => 'bi-shield-exclamation', 'anchor' => '#section-users', 'perm' => 'panel.moderation.view'],
+        ['action' => 'admin-images',    'label' => 'Images',    'icon' => 'bi-image',       'anchor' => '#section-images',   'perm' => 'panel.images.view'],
         ['action' => 'admin-backups',   'label' => 'Backups',   'icon' => 'bi-archive',     'anchor' => '#section-backups',  'perm' => 'panel.backups.view'],
         ['action' => 'admin-audit',     'label' => 'Log',       'icon' => 'bi-journal-text','anchor' => '',                  'perm' => 'panel.audit.view'],
     ];

@@ -247,6 +247,8 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
             include __DIR__ . '/templates/admin/users.php';
         } elseif ($action === 'admin-moderation') {
             include __DIR__ . '/templates/admin/moderation.php';
+        } elseif ($action === 'admin-images') {
+            include __DIR__ . '/templates/admin/images.php';
         } elseif ($action === 'admin-audit') {
             include __DIR__ . '/templates/admin/audit.php';
         } elseif ($action === 'admin-backups') {

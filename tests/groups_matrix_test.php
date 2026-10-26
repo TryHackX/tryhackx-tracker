@@ -90,7 +90,7 @@ $MEMBER = array_merge($GUEST, [
     'content.report',
     // v88 (1.72.0): reply to a comment.
     'comment.reply',
-    'content.images',
+    'content.images', 'comment.images',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
@@ -123,7 +123,8 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               // v88 (1.72.0): reply to a comment.
               'comment.reply',
               // v94 (1.75.0): the Moderation page — read it and act on it (the rules are nobody's but the Admin group's).
-              'panel.moderation.view', 'panel.moderation.handle'];
+              'panel.moderation.view', 'panel.moderation.handle',
+              'panel.images.view', 'panel.images.manage'];
 
 /* ══ 1. the presets ════════════════════════════════════════════════════════ */
 // includes/users.php has claimed since 1.21.0 that "users_test.php checks every id here is real".
@@ -190,7 +191,8 @@ $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                          'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
                                          'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
                                         ['comment.reply'],
-                                        ['panel.moderation.view', 'panel.moderation.handle']));
+                                        ['panel.moderation.view', 'panel.moderation.handle'],
+                                        ['panel.images.view', 'panel.images.manage']));
 check('the moderator preset and the moderator seed agree',
       array_values(array_diff($modSeedPlus, $presets['moderator']['perms'])) === []
       && array_values(array_diff($presets['moderator']['perms'], $modSeedPlus)) === [],

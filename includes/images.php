@@ -8,6 +8,17 @@ const IMAGES_RATE_PER_MINUTE = 30;
 const IMAGES_SWEEP_SECONDS = 3600;
 const IMAGES_SWEEP_BATCH = 200;
 const IMAGES_GIF_MAX_BYTES = 8388608;
+const IMAGES_REMOTE_PER_RUN = 30;
+const IMAGES_REMOTE_BUDGET = 40;
+const IMAGES_REMOTE_TIMEOUT = 15;
+const IMAGES_REMOTE_CONNECT = 5;
+const IMAGES_REMOTE_TRIES = 5;
+const IMAGES_REMOTE_SCAN_SECONDS = 600;
+const IMAGES_REMOTE_URL_MAX = 500;
+const IMAGES_REMOTE_DOMAINS_MAX = 20;
+const IMAGES_REMOTE_PER_PAGE = 50;
+const IMAGES_PANEL_PER_PAGE = 48;
+const IMAGES_USED_MAX = 50;
 
 function imagesMaxMb(array $cfg): int
 {
@@ -77,6 +88,19 @@ function imagesUrl(array $cfg, int $id, int $w, int $h, string $ext): string
     return imagesBase($cfg) . 'i/' . $id . '-' . $w . 'x' . $h . '.' . ($ext === 'gif' ? 'gif' : 'webp');
 }
 
+function imagesOwnUrlAt(string $base, string $url): ?array
+{
+    if ($base === '' || strlen($url) <= strlen($base) || strncasecmp($url, $base, strlen($base)) !== 0) return null;
+    if (!preg_match('#^i/(\d{1,10})-(\d{1,5})x(\d{1,5})\.(webp|gif)$#', substr($url, strlen($base)), $m)) return null;
+    if ((int)$m[2] < 1 || (int)$m[3] < 1) return null;
+    return ['id' => (int)$m[1], 'w' => (int)$m[2], 'h' => (int)$m[3], 'ext' => $m[4]];
+}
+
+function imagesOwnUrl(array $cfg, string $url): ?array
+{
+    return imagesOwnUrlAt(imagesBase($cfg), $url);
+}
+
 function imagesEncode(\GdImage $im, int $quality): string
 {
     imagesavealpha($im, true);
@@ -125,7 +149,7 @@ function imagesRefusal(array $cfg, string $key, int $status, string $detail = ''
 {
     $codes = ['api.media.too_large' => 'too_big', 'api.media.too_many_px' => 'too_many_pixels',
               'api.media.too_big_to_process' => 'too_many_pixels', 'api.media.store_failed' => 'upload_failed',
-              'api.images.daily_limit' => 'daily_limit', 'api.images.quota' => 'quota'];
+              'api.images.daily_limit' => 'daily_limit', 'api.images.quota' => 'quota', 'api.images.shape' => 'bad_shape'];
     $vars += ['kb' => (int)floor(imagesMaxBytes($cfg) / 1024), 'mp' => imagesMaxMpx($cfg), 'px' => $detail,
               'kind' => strtoupper($detail), 'n' => imagesPerDay($cfg), 'max' => imagesQuotaMb($cfg)];
     return ['ok' => false, 'status' => $status, 'code' => $codes[$key] ?? 'bad_type', 'message' => __($key, $vars)];
@@ -148,16 +172,27 @@ function imagesCleanName(string $name): string
     return mb_substr(trim($name), 0, 120);
 }
 
-function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $name, string $source = 'upload', ?string $sourceUrl = null): array
+function imagesShapeOk(int $w, int $h, float $maxRatio): bool
+{
+    if ($maxRatio <= 0) return true;
+    return $w > 0 && $h > 0 && max($w / $h, $h / $w) <= $maxRatio;
+}
+
+function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $name, string $source = 'upload', ?string $sourceUrl = null, array $opts = []): array
 {
     $sha = hash('sha256', $bytes);
     $quota = imagesQuotaMb($cfg) * 1048576;
     $usage = ['today' => 0, 'bytes' => 0];
+    $ratio = (float)($opts['max_ratio'] ?? 0);
     if ($userId !== null) {
         $st = $db->prepare("SELECT id FROM images WHERE user_id = ? AND blob_sha = ? LIMIT 1");
         $st->execute([$userId, $sha]);
         $have = (int)($st->fetchColumn() ?: 0);
-        if ($have > 0) return ['ok' => true, 'row' => imagesRow($db, $have), 'existing' => true];
+        if ($have > 0) {
+            $row = imagesRow($db, $have);
+            if ($row !== null && !imagesShapeOk((int)$row['full_w'], (int)$row['full_h'], $ratio)) return imagesRefusal($cfg, 'api.images.shape', 400);
+            return ['ok' => true, 'row' => $row, 'existing' => true];
+        }
         $usage = imagesUsage($db, $userId);
         if (imagesPerDay($cfg) > 0 && $usage['today'] >= imagesPerDay($cfg)) {
             return imagesRefusal($cfg, 'api.images.daily_limit', 429);
@@ -166,14 +201,17 @@ function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $n
             return imagesRefusal($cfg, 'api.images.quota', 403, '', ['used' => (int)ceil($usage['bytes'] / 1048576)]);
         }
     }
-    $st = $db->prepare("SELECT bytes FROM image_blobs WHERE sha256 = ?");
+    $st = $db->prepare("SELECT bytes, full_w, full_h FROM image_blobs WHERE sha256 = ?");
     $st->execute([$sha]);
-    $size = $st->fetchColumn();
+    $known = $st->fetch(PDO::FETCH_ASSOC);
+    $size = $known === false ? false : (int)$known['bytes'];
+    if ($known !== false && !imagesShapeOk((int)$known['full_w'], (int)$known['full_h'], $ratio)) return imagesRefusal($cfg, 'api.images.shape', 400);
     if ($size === false) {
         $p = imagesProcess($bytes, $cfg);
         if (empty($p['ok'])) {
             return imagesRefusal($cfg, (string)($p['error'] ?? 'api.media.store_failed'), (int)($p['status'] ?? 400), (string)($p['detail'] ?? ''));
         }
+        if (!imagesShapeOk((int)$p['full_w'], (int)$p['full_h'], $ratio)) return imagesRefusal($cfg, 'api.images.shape', 400);
         $size = strlen($p['page']) + strlen((string)$p['full']);
         if ($userId !== null && $quota > 0 && $usage['bytes'] + $size > $quota) {
             return imagesRefusal($cfg, 'api.images.quota', 403, '', ['used' => (int)ceil($usage['bytes'] / 1048576)]);
@@ -240,15 +278,15 @@ function imagesRowOut(array $cfg, array $r): array
     ];
 }
 
-function imagesLimits(PDO $db, array $cfg, int $userId): array
+function imagesLimits(PDO $db, array $cfg, int $userId, ?int $maxBytes = null): array
 {
     $u = imagesUsage($db, $userId);
-    return ['max_bytes' => imagesMaxBytes($cfg), 'max_edge' => imagesMaxEdge($cfg), 'max_mpx' => imagesMaxMpx($cfg),
+    return ['max_bytes' => $maxBytes ?? imagesMaxBytes($cfg), 'max_edge' => imagesMaxEdge($cfg), 'max_mpx' => imagesMaxMpx($cfg),
             'per_day' => imagesPerDay($cfg), 'today' => $u['today'],
             'quota_bytes' => imagesQuotaMb($cfg) * 1048576, 'used_bytes' => $u['bytes']];
 }
 
-function imagesList(PDO $db, array $cfg, int $userId, int $page): array
+function imagesList(PDO $db, array $cfg, int $userId, int $page, ?int $maxBytes = null): array
 {
     $st = $db->prepare("SELECT COUNT(*) FROM images WHERE user_id = ?");
     $st->execute([$userId]);
@@ -263,7 +301,7 @@ function imagesList(PDO $db, array $cfg, int $userId, int $page): array
     $st->bindValue(3, ($page - 1) * IMAGES_PER_PAGE, PDO::PARAM_INT);
     $st->execute();
     $rows = array_map(fn($r) => imagesRowOut($cfg, $r), $st->fetchAll(PDO::FETCH_ASSOC));
-    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'per_page' => IMAGES_PER_PAGE, 'limits' => imagesLimits($db, $cfg, $userId)];
+    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'per_page' => IMAGES_PER_PAGE, 'limits' => imagesLimits($db, $cfg, $userId, $maxBytes)];
 }
 
 function imagesTextSources(bool $publishedOnly): array
@@ -271,11 +309,13 @@ function imagesTextSources(bool $publishedOnly): array
     return $publishedOnly
         ? ["SELECT description FROM whitelist WHERE description LIKE ? AND content_status = 'approved' AND banned = 0",
            "SELECT description FROM hash_content WHERE description LIKE ? AND content_status = 'approved'",
-           "SELECT body FROM page_content WHERE body LIKE ? AND enabled = 1"]
+           "SELECT body FROM page_content WHERE body LIKE ? AND enabled = 1",
+           "SELECT body FROM hash_comments WHERE body LIKE ? AND status = 'visible'"]
         : ["SELECT description FROM whitelist WHERE description LIKE ?",
            "SELECT description FROM hash_content WHERE description LIKE ?",
            "SELECT description FROM wl_content_edits WHERE description LIKE ?",
-           "SELECT body FROM page_content WHERE body LIKE ?"];
+           "SELECT body FROM page_content WHERE body LIKE ?",
+           "SELECT body FROM hash_comments WHERE body LIKE ? AND status <> 'deleted'"];
 }
 
 function imagesReferenced(PDO $db, int $id, bool $publishedOnly): bool
@@ -322,8 +362,8 @@ function imagesServe(PDO $db, int $id, int $w, int $h, string $ext, bool $wantFu
     $isPage = $w === (int)$row['w'] && $h === (int)$row['h'];
     $isFull = $w === (int)$row['full_w'] && $h === (int)$row['full_h'];
     if (!$isPage && !$isFull) return null;
-    $public = imagesIsPublic($db, $row);
     $owner = $viewerId !== null && $row['user_id'] !== null && $viewerId === (int)$row['user_id'];
+    $public = $row['public_at'] !== null || (!$owner && !$moderator && imagesIsPublic($db, $row));
     if (!$public && !$owner && !$moderator) return null;
     $variant = ($wantFull || !$isPage) ? 'full' : 'page';
     if ($variant === 'full') {
@@ -337,6 +377,18 @@ function imagesServe(PDO $db, int $id, int $w, int $h, string $ext, bool $wantFu
     return ['data' => (string)$data, 'mime' => (string)$row['mime'], 'public' => $public,
             'etag' => '"' . substr((string)$row['blob_sha'], 0, 16) . '-' . $variant . '"',
             'name' => 'image-' . $id . '.' . imagesExt($row)];
+}
+
+function imagesPublishIn(PDO $db, array $cfg, string $text): int
+{
+    $base = imagesBase($cfg);
+    if ($base === '' || !str_contains($text, '/i/')) return 0;
+    if (!preg_match_all('~' . preg_quote($base, '~') . 'i/(\d{1,10})-\d{1,5}x\d{1,5}\.(?:webp|gif)~i', $text, $m)) return 0;
+    $ids = array_values(array_unique(array_map('intval', $m[1])));
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $st = $db->prepare("UPDATE images SET public_at = NOW() WHERE public_at IS NULL AND id IN ($in)");
+    $st->execute($ids);
+    return $st->rowCount();
 }
 
 function imagesDelete(PDO $db, int $id): bool
@@ -369,4 +421,478 @@ function imagesSweep(PDO $db, array $cfg, bool $force = false): int
         if (!isset($used[$id]) && imagesDelete($db, $id)) $gone++;
     }
     return $gone;
+}
+
+function imagesLikeEscape(string $s): string
+{
+    return addcslashes($s, '\\%_');
+}
+
+function imagesDomainsClean($raw): array
+{
+    $items = is_array($raw) ? $raw : preg_split('/[\s,;]+/', (string)$raw);
+    $out = [];
+    foreach ($items ?: [] as $d) {
+        if (!is_string($d)) continue;
+        $d = strtolower(trim($d));
+        if ($d === '') continue;
+        if (preg_match('#^[a-z][a-z0-9+.-]*://#', $d)) $d = (string)(parse_url($d, PHP_URL_HOST) ?? '');
+        $d = trim(explode('/', $d)[0], " \t.");
+        if (str_starts_with($d, '*.')) $d = substr($d, 2);
+        if (function_exists('idn_to_ascii') && preg_match('/[^\x00-\x7F]/', $d)) {
+            $d = strtolower((string)(idn_to_ascii($d, IDNA_DEFAULT, INTL_IDNA_VARIANT_UTS46) ?: ''));
+        }
+        if (strlen($d) > 253 || !preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/', $d)) continue;
+        $out[$d] = true;
+        if (count($out) >= IMAGES_REMOTE_DOMAINS_MAX) break;
+    }
+    return array_keys($out);
+}
+
+function imagesRemoteHosts(PDO $db, bool $fresh = false): array
+{
+    static $hosts = null;
+    if ($hosts !== null && !$fresh) return $hosts;
+    $all = [];
+    try {
+        $st = $db->query("SELECT image_domains FROM api_clients WHERE enabled = 1 AND image_domains <> ''");
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+            foreach (imagesDomainsClean((string)$raw) as $d) $all[$d] = true;
+        }
+    } catch (\Throwable $e) {
+        $all = [];
+    }
+    $hosts = array_keys($all);
+    return $hosts;
+}
+
+function imagesHostMatches(string $host, array $domains): bool
+{
+    $host = strtolower(rtrim($host, '.'));
+    if ($host === '') return false;
+    foreach ($domains as $d) {
+        if ($host === $d || str_ends_with($host, '.' . $d)) return true;
+    }
+    return false;
+}
+
+function imagesRemoteUrls(string $text, array $domains): array
+{
+    if ($text === '' || !$domains || !preg_match_all('~https?://[^\s\[\]"\'<>()]+~i', $text, $m, PREG_OFFSET_CAPTURE)) return [];
+    $out = [];
+    foreach ($m[0] as [$url, $at]) {
+        $url = rtrim((string)$url, '.,;:!?');
+        if (strlen($url) > IMAGES_REMOTE_URL_MAX) continue;
+        $p = parse_url($url);
+        if (!is_array($p) || empty($p['host']) || isset($p['user']) || isset($p['pass'])) continue;
+        if (!imagesHostMatches((string)$p['host'], $domains)) continue;
+        $tagged = $at >= 5 && strcasecmp(substr($text, $at - 5, 5), '[img]') === 0;
+        if (!$tagged && !preg_match('/\.(?:jpe?g|png|gif|webp|avif|bmp)$/i', (string)($p['path'] ?? ''))) continue;
+        $out[$url] = true;
+    }
+    return array_keys($out);
+}
+
+function imagesReplaceUrl(string $text, string $from, string $to): string
+{
+    if ($from === '' || $from === $to || !str_contains($text, $from)) return $text;
+    $re = '~' . preg_quote($from, '~') . '(?=[.,;:!?]*(?:[\s\[\]"\'<>()]|$))~';
+    return preg_replace_callback($re, static fn() => $to, $text) ?? $text;
+}
+
+function imagesRewriteTargets(): array
+{
+    return [
+        ["SELECT id AS k, description AS t FROM whitelist WHERE description LIKE ?",
+         "UPDATE whitelist SET description = ? WHERE id = ? AND description = ?"],
+        ["SELECT id AS k, description AS t FROM hash_content WHERE description LIKE ?",
+         "UPDATE hash_content SET description = ? WHERE id = ? AND description = ?"],
+        ["SELECT id AS k, description AS t FROM wl_content_edits WHERE description LIKE ?",
+         "UPDATE wl_content_edits SET description = ? WHERE id = ? AND description = ?"],
+        ["SELECT id AS k, body AS t FROM hash_comments WHERE body LIKE ?",
+         "UPDATE hash_comments SET body = ? WHERE id = ? AND body = ?"],
+        ["SELECT CONCAT(page, CHAR(9), lang) AS k, body AS t FROM page_content WHERE body LIKE ?",
+         "UPDATE page_content SET body = ? WHERE CONCAT(page, CHAR(9), lang) = ? AND body = ?"],
+    ];
+}
+
+function imagesRewrite(PDO $db, string $from, string $to): int
+{
+    if ($from === '' || $from === $to) return 0;
+    $n = 0;
+    foreach (imagesRewriteTargets() as [$sel, $sql]) {
+        try {
+            $st = $db->prepare($sel);
+            $st->execute(['%' . imagesLikeEscape($from) . '%']);
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!$rows) continue;
+            $up = $db->prepare($sql);
+            foreach ($rows as $r) {
+                $old = (string)$r['t'];
+                $new = imagesReplaceUrl($old, $from, $to);
+                if ($new === $old) continue;
+                $up->execute([$new, $r['k'], $old]);
+                $n += $up->rowCount();
+            }
+        } catch (\Throwable $e) {
+            continue;
+        }
+    }
+    return $n;
+}
+
+function imagesRemoteEnqueue(PDO $db, array $urls): int
+{
+    $n = 0;
+    $st = $db->prepare("INSERT IGNORE INTO image_remote (url_sha, url, host) VALUES (?, ?, ?)");
+    foreach ($urls as $u) {
+        $u = (string)$u;
+        if ($u === '' || strlen($u) > IMAGES_REMOTE_URL_MAX) continue;
+        $st->execute([hash('sha256', $u), $u, mb_substr(strtolower((string)parse_url($u, PHP_URL_HOST)), 0, 255)]);
+        $n += $st->rowCount();
+    }
+    return $n;
+}
+
+function imagesRemoteDone(PDO $db, array $cfg, array $urls): array
+{
+    $out = [];
+    if (!$urls || imagesBase($cfg) === '') return $out;
+    $st = $db->prepare("SELECT i.id, b.mime, b.w, b.h FROM image_remote r
+                          JOIN images i ON i.id = r.image_id JOIN image_blobs b ON b.sha256 = i.blob_sha
+                         WHERE r.url_sha = ? AND r.status = 'done'");
+    foreach ($urls as $u) {
+        $st->execute([hash('sha256', (string)$u)]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if ($r) $out[(string)$u] = imagesUrl($cfg, (int)$r['id'], (int)$r['w'], (int)$r['h'], imagesExt($r));
+    }
+    return $out;
+}
+
+function imagesRemoteSettle(PDO $db, array $cfg, string $text): string
+{
+    try {
+        $hosts = imagesRemoteHosts($db);
+        if (!$hosts) return $text;
+        $urls = imagesRemoteUrls($text, $hosts);
+        if (!$urls) return $text;
+        imagesRemoteEnqueue($db, $urls);
+        foreach (imagesRemoteDone($db, $cfg, $urls) as $from => $to) $text = imagesReplaceUrl($text, (string)$from, $to);
+    } catch (\Throwable $e) {
+        return $text;
+    }
+    return $text;
+}
+
+function imagesRemoteScan(PDO $db, array $cfg, array $hosts, bool $force = false): int
+{
+    if (!$hosts || (!$force && time() - (int)($cfg['images_remote_scan_at'] ?? 0) < IMAGES_REMOTE_SCAN_SECONDS)) return 0;
+    $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('images_remote_scan_at', ?)")->execute([(string)time()]);
+    $found = [];
+    foreach (imagesRewriteTargets() as [$sel]) {
+        foreach ($hosts as $h) {
+            try {
+                $st = $db->prepare($sel);
+                $st->execute(['%' . imagesLikeEscape($h) . '/%']);
+                while (($r = $st->fetch(PDO::FETCH_ASSOC)) !== false) {
+                    foreach (imagesRemoteUrls((string)$r['t'], $hosts) as $u) $found[$u] = true;
+                }
+            } catch (\Throwable $e) {
+                continue;
+            }
+        }
+    }
+    if (!$found) return 0;
+    $urls = array_keys($found);
+    $n = imagesRemoteEnqueue($db, $urls);
+    foreach (imagesRemoteDone($db, $cfg, $urls) as $from => $to) imagesRewrite($db, (string)$from, $to);
+    return $n;
+}
+
+function imagesPublicIp(string $ip): bool
+{
+    $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE | (defined('FILTER_FLAG_GLOBAL_RANGE') ? FILTER_FLAG_GLOBAL_RANGE : 0);
+    return filter_var($ip, FILTER_VALIDATE_IP, $flags) !== false;
+}
+
+function imagesRemoteResolve(string $host): array
+{
+    $ips = [];
+    foreach ((array)@gethostbynamel($host) as $ip) if (is_string($ip) && $ip !== '') $ips[] = $ip;
+    if (function_exists('dns_get_record')) {
+        foreach ((array)@dns_get_record($host, DNS_AAAA) as $r) {
+            if (is_array($r) && !empty($r['ipv6'])) $ips[] = (string)$r['ipv6'];
+        }
+    }
+    return array_values(array_unique($ips));
+}
+
+function imagesRemoteFetch(string $url, array $domains, int $maxBytes, array $io = []): array
+{
+    $p = parse_url($url);
+    if (!is_array($p)) return ['ok' => false, 'error' => 'bad_url'];
+    $scheme = strtolower((string)($p['scheme'] ?? ''));
+    $host = strtolower((string)($p['host'] ?? ''));
+    if (!in_array($scheme, ['http', 'https'], true) || $host === '' || isset($p['user']) || isset($p['pass'])) return ['ok' => false, 'error' => 'bad_url'];
+    $port = (int)($p['port'] ?? ($scheme === 'https' ? 443 : 80));
+    if ($port !== ($scheme === 'https' ? 443 : 80)) return ['ok' => false, 'error' => 'bad_port'];
+    if (filter_var(trim($host, '[]'), FILTER_VALIDATE_IP) !== false || !imagesHostMatches($host, $domains)) return ['ok' => false, 'error' => 'not_allowed'];
+    $resolve = $io['resolve'] ?? 'imagesRemoteResolve';
+    $ips = array_values(array_filter(array_map('strval', (array)$resolve($host)), static fn($ip) => $ip !== ''));
+    $public = array_values(array_filter($ips, 'imagesPublicIp'));
+    if (!$ips || count($public) !== count($ips)) return ['ok' => false, 'error' => 'private_address'];
+    $get = $io['get'] ?? 'imagesRemoteGet';
+    $r = $get($url, $host, $port, $public[0], $maxBytes);
+    if (!empty($r['ok']) && strlen((string)($r['bytes'] ?? '')) > $maxBytes) return ['ok' => false, 'error' => 'too_big'];
+    return is_array($r) ? $r : ['ok' => false, 'error' => 'network'];
+}
+
+function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $maxBytes): array
+{
+    if (!function_exists('curl_init')) return ['ok' => false, 'error' => 'no_curl'];
+    $buf = '';
+    $over = false;
+    $ch = curl_init($url);
+    if ($ch === false) return ['ok' => false, 'error' => 'network'];
+    curl_setopt_array($ch, [
+        CURLOPT_RESOLVE => [$host . ':' . $port . ':' . (str_contains($ip, ':') ? '[' . $ip . ']' : $ip)],
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_MAXREDIRS => 0,
+        CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        CURLOPT_CONNECTTIMEOUT => IMAGES_REMOTE_CONNECT,
+        CURLOPT_TIMEOUT => IMAGES_REMOTE_TIMEOUT,
+        CURLOPT_NOSIGNAL => true,
+        CURLOPT_USERAGENT => 'TryHackX-Tracker/' . (defined('TRACKER_VERSION') ? TRACKER_VERSION : '1') . ' (image copy)',
+        CURLOPT_HTTPHEADER => ['Accept: image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8'],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_WRITEFUNCTION => static function ($c, string $chunk) use (&$buf, &$over, $maxBytes): int {
+            if (strlen($buf) + strlen($chunk) > $maxBytes) {
+                $over = true;
+                return 0;
+            }
+            $buf .= $chunk;
+            return strlen($chunk);
+        },
+    ]);
+    $ok = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $errno = curl_errno($ch);
+    if ($over) return ['ok' => false, 'error' => 'too_big'];
+    if ($ok === false || $errno !== 0) return ['ok' => false, 'error' => $errno === CURLE_OPERATION_TIMEDOUT ? 'timeout' : 'network'];
+    if ($code >= 300 && $code < 400) return ['ok' => false, 'error' => 'redirect'];
+    if ($code !== 200) return ['ok' => false, 'error' => 'http_' . $code];
+    if ($buf === '') return ['ok' => false, 'error' => 'empty'];
+    return ['ok' => true, 'bytes' => $buf];
+}
+
+function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tries, array $hosts, array $io = []): array
+{
+    $f = imagesRemoteFetch($url, $hosts, imagesMaxBytes($cfg), $io);
+    $stored = null;
+    if (!empty($f['ok'])) {
+        $name = basename((string)parse_url($url, PHP_URL_PATH));
+        $stored = imagesStore($db, $cfg, null, (string)$f['bytes'], $name !== '' ? $name : 'image', 'copy', $url);
+        if (empty($stored['ok'])) $f = ['ok' => false, 'error' => (string)($stored['code'] ?? 'bad_type')];
+    }
+    if (empty($f['ok'])) {
+        $error = mb_substr((string)($f['error'] ?? 'network'), 0, 64);
+        $tries++;
+        $final = $tries >= IMAGES_REMOTE_TRIES
+              || in_array($error, ['not_allowed', 'bad_url', 'bad_port', 'bad_type', 'too_big', 'too_many_pixels'], true);
+        $wait = [5, 30, 120, 720][$tries - 1] ?? 1440;
+        $up = $db->prepare("UPDATE image_remote SET tries = ?, error = ?, status = ?, next_at = NOW() + INTERVAL ? MINUTE WHERE url_sha = ?");
+        $up->bindValue(1, min(255, $tries), PDO::PARAM_INT);
+        $up->bindValue(2, $error);
+        $up->bindValue(3, $final ? 'failed' : 'pending');
+        $up->bindValue(4, $wait, PDO::PARAM_INT);
+        $up->bindValue(5, $sha);
+        $up->execute();
+        return ['ok' => false, 'error' => $error, 'final' => $final];
+    }
+    $row = $stored['row'];
+    $id = (int)$row['id'];
+    $db->prepare("UPDATE images SET public_at = COALESCE(public_at, NOW()) WHERE id = ?")->execute([$id]);
+    $db->prepare("UPDATE image_remote SET status = 'done', image_id = ?, error = '', done_at = NOW() WHERE url_sha = ?")->execute([$id, $sha]);
+    $to = imagesUrl($cfg, $id, (int)$row['w'], (int)$row['h'], imagesExt($row));
+    return ['ok' => true, 'image' => $id, 'url' => $to, 'rewritten' => imagesRewrite($db, $url, $to)];
+}
+
+function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
+{
+    $out = ['hosts' => 0, 'queued' => 0, 'copied' => 0, 'failed' => 0, 'rewritten' => 0, 'error' => null];
+    $hosts = imagesRemoteHosts($db, true);
+    $out['hosts'] = count($hosts);
+    if (!$hosts) return $out;
+    if (imagesBase($cfg) === '') {
+        $out['error'] = 'site_url';
+        return $out;
+    }
+    try {
+        $out['queued'] = imagesRemoteScan($db, $cfg, $hosts, !empty($io['force_scan']));
+        $start = microtime(true);
+        $budget = (float)($io['budget'] ?? IMAGES_REMOTE_BUDGET);
+        $st = $db->prepare("SELECT url_sha, url, tries FROM image_remote WHERE status = 'pending' AND next_at <= NOW() ORDER BY next_at, created_at LIMIT ?");
+        $st->bindValue(1, IMAGES_REMOTE_PER_RUN, PDO::PARAM_INT);
+        $st->execute();
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if (microtime(true) - $start > $budget) break;
+            $c = imagesRemoteCopy($db, $cfg, (string)$r['url_sha'], (string)$r['url'], (int)$r['tries'], $hosts, $io);
+            if (!empty($c['ok'])) {
+                $out['copied']++;
+                $out['rewritten'] += (int)$c['rewritten'];
+            } else {
+                $out['failed']++;
+            }
+        }
+    } catch (\Throwable $e) {
+        $out['error'] = $e->getMessage();
+    }
+    return $out;
+}
+
+function imagesPanelSummary(PDO $db): array
+{
+    $r = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM(public_at IS NOT NULL), 0) AS pub, COALESCE(SUM(source = 'copy'), 0) AS copies FROM images")->fetch(PDO::FETCH_ASSOC) ?: [];
+    $bytes = (int)$db->query("SELECT COALESCE(SUM(bytes), 0) FROM image_blobs")->fetchColumn();
+    $queue = ['pending' => 0, 'failed' => 0, 'done' => 0];
+    try {
+        foreach ($db->query("SELECT status, COUNT(*) AS n FROM image_remote GROUP BY status")->fetchAll(PDO::FETCH_ASSOC) as $x) {
+            $queue[(string)$x['status']] = (int)$x['n'];
+        }
+    } catch (\Throwable $e) {
+        $queue = ['pending' => 0, 'failed' => 0, 'done' => 0];
+    }
+    return ['images' => (int)($r['n'] ?? 0), 'public' => (int)($r['pub'] ?? 0), 'copies' => (int)($r['copies'] ?? 0),
+            'bytes' => $bytes, 'queue' => $queue];
+}
+
+function imagesPanelRowOut(array $cfg, array $r): array
+{
+    return imagesRowOut($cfg, $r) + [
+        'user_id' => $r['user_id'] === null ? null : (int)$r['user_id'],
+        'user' => $r['username'] !== null ? (string)$r['username'] : '',
+        'source' => (string)$r['source'],
+        'source_url' => (string)($r['source_url'] ?? ''),
+        'public_at' => $r['public_at'] !== null ? (string)$r['public_at'] : '',
+    ];
+}
+
+function imagesPanelList(PDO $db, array $cfg, array $q): array
+{
+    $where = [];
+    $args = [];
+    $state = (string)($q['state'] ?? '');
+    if ($state === 'public') $where[] = 'i.public_at IS NOT NULL';
+    elseif ($state === 'private') $where[] = 'i.public_at IS NULL';
+    elseif ($state === 'copied') $where[] = "i.source = 'copy'";
+    $find = trim(mb_substr((string)($q['q'] ?? ''), 0, 120));
+    if ($find !== '') {
+        if (preg_match('/^#?(\d{1,10})$/', $find, $m)) {
+            $where[] = 'i.id = ?';
+            $args[] = (int)$m[1];
+        } else {
+            $where[] = '(u.username LIKE ? OR i.name LIKE ? OR i.source_url LIKE ?)';
+            $like = '%' . imagesLikeEscape($find) . '%';
+            array_push($args, $like, $like, $like);
+        }
+    }
+    $where = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+    $orderBy = ['old' => ' ORDER BY i.id ASC', 'big' => ' ORDER BY b.bytes DESC, i.id DESC'][(string)($q['sort'] ?? '')] ?? ' ORDER BY i.id DESC';
+    $st = $db->prepare("SELECT COUNT(*) FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha LEFT JOIN users u ON u.id = i.user_id" . $where);
+    $st->execute($args);
+    $total = (int)$st->fetchColumn();
+    $pages = max(1, (int)ceil($total / IMAGES_PANEL_PER_PAGE));
+    $page = max(1, min((int)($q['page'] ?? 1), $pages));
+    $sql = "SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at,
+                   b.mime, b.animated, b.w, b.h, b.full_w, b.full_h, b.bytes, u.username
+              FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha LEFT JOIN users u ON u.id = i.user_id" . $where . $orderBy . " LIMIT ? OFFSET ?";
+    $st = $db->prepare($sql);
+    $k = 1;
+    foreach ($args as $a) $st->bindValue($k++, $a, is_int($a) ? PDO::PARAM_INT : PDO::PARAM_STR);
+    $st->bindValue($k++, IMAGES_PANEL_PER_PAGE, PDO::PARAM_INT);
+    $st->bindValue($k, ($page - 1) * IMAGES_PANEL_PER_PAGE, PDO::PARAM_INT);
+    $st->execute();
+    $rows = array_map(fn($r) => imagesPanelRowOut($cfg, $r), $st->fetchAll(PDO::FETCH_ASSOC));
+    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per_page' => IMAGES_PANEL_PER_PAGE];
+}
+
+function imagesWhereUsed(PDO $db, int $id): array
+{
+    if ($id <= 0) return [];
+    $like = '%/i/' . $id . '-%';
+    $out = [];
+    $ask = static function (string $sql) use ($db, $like): array {
+        try {
+            $st = $db->prepare($sql);
+            $st->execute([$like]);
+            return $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable $e) {
+            return [];
+        }
+    };
+    foreach ($ask("SELECT id, info_hash, content_status AS state FROM whitelist WHERE description LIKE ? LIMIT 50") as $r) {
+        $out[] = ['kind' => 'description', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
+    }
+    foreach ($ask("SELECT id, info_hash, content_status AS state FROM hash_content WHERE description LIKE ? LIMIT 50") as $r) {
+        $out[] = ['kind' => 'description', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
+    }
+    foreach ($ask("SELECT id, info_hash, status AS state FROM wl_content_edits WHERE description LIKE ? LIMIT 50") as $r) {
+        $out[] = ['kind' => 'proposal', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
+    }
+    foreach ($ask("SELECT id, info_hash, status AS state FROM hash_comments WHERE body LIKE ? LIMIT 50") as $r) {
+        $out[] = ['kind' => 'comment', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
+    }
+    foreach ($ask("SELECT page, lang, enabled FROM page_content WHERE body LIKE ? LIMIT 50") as $r) {
+        $out[] = ['kind' => 'page', 'id' => 0, 'hash' => '', 'page' => (string)$r['page'], 'lang' => (string)$r['lang'],
+                  'state' => (int)$r['enabled'] === 1 ? 'enabled' : 'disabled'];
+    }
+    return array_slice($out, 0, IMAGES_USED_MAX);
+}
+
+function imagesPanelDelete(PDO $db, int $id): bool
+{
+    if (!imagesDelete($db, $id)) return false;
+    try {
+        $db->prepare("UPDATE image_remote SET status = 'failed', error = 'removed', image_id = NULL WHERE image_id = ?")->execute([$id]);
+    } catch (\Throwable $e) {
+        return true;
+    }
+    return true;
+}
+
+function imagesRemoteList(PDO $db, string $status, int $page): array
+{
+    $status = in_array($status, ['pending', 'failed', 'done'], true) ? $status : 'pending';
+    $st = $db->prepare("SELECT COUNT(*) FROM image_remote WHERE status = ?");
+    $st->execute([$status]);
+    $total = (int)$st->fetchColumn();
+    $pages = max(1, (int)ceil($total / IMAGES_REMOTE_PER_PAGE));
+    $page = max(1, min($page, $pages));
+    $st = $db->prepare("SELECT url_sha, url, host, status, tries, error, image_id, created_at, next_at, done_at
+                          FROM image_remote WHERE status = ? ORDER BY created_at DESC, url_sha LIMIT ? OFFSET ?");
+    $st->bindValue(1, $status);
+    $st->bindValue(2, IMAGES_REMOTE_PER_PAGE, PDO::PARAM_INT);
+    $st->bindValue(3, ($page - 1) * IMAGES_REMOTE_PER_PAGE, PDO::PARAM_INT);
+    $st->execute();
+    $rows = array_map(static fn($r) => [
+        'id' => (string)$r['url_sha'], 'url' => (string)$r['url'], 'host' => (string)$r['host'], 'status' => (string)$r['status'],
+        'tries' => (int)$r['tries'], 'error' => (string)$r['error'], 'image_id' => $r['image_id'] === null ? null : (int)$r['image_id'],
+        'created_at' => (string)$r['created_at'], 'next_at' => (string)$r['next_at'], 'done_at' => (string)($r['done_at'] ?? ''),
+    ], $st->fetchAll(PDO::FETCH_ASSOC));
+    return ['status' => $status, 'rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per_page' => IMAGES_REMOTE_PER_PAGE];
+}
+
+function imagesRemoteRetry(PDO $db, string $sha): bool
+{
+    $st = $db->prepare("UPDATE image_remote SET status = 'pending', tries = 0, error = '', next_at = NOW() WHERE url_sha = ? AND status = 'failed'");
+    $st->execute([$sha]);
+    return $st->rowCount() === 1;
+}
+
+function imagesRemoteForget(PDO $db, string $sha): bool
+{
+    $st = $db->prepare("DELETE FROM image_remote WHERE url_sha = ? AND status <> 'done'");
+    $st->execute([$sha]);
+    return $st->rowCount() === 1;
 }

@@ -36,7 +36,7 @@ $wipe = function (array $ids) use ($db): void {
     $db->prepare("DELETE FROM users WHERE id IN ($q)")->execute($ids);
 };
 $wipe($oldIds);
-$db->exec("DELETE FROM page_content WHERE page = 'imgtest'");
+$db->exec("DELETE FROM page_content WHERE page IN ('imgtest', 'imgtest2')");
 $uid = [];
 foreach ($names as $name) {
     userCreate($db, $cfgI, $name, $name . '@example.org', 'SmokePass123!', '127.0.0.1');
@@ -184,6 +184,18 @@ check('a reference counts for "in use": a page, also a page that is not live yet
       && !imagesReferenced($db, $ib, false));
 $db->exec("UPDATE page_content SET enabled = 0 WHERE page = 'imgtest'");
 check('… and an unpublished page keeps a picture alive without making it public', imagesReferenced($db, $ia, false) && !imagesReferenced($db, $ia, true));
+$fresh = imagesStore($db, $cfgI, $A, $pic(300, 200), 'fresh.png');
+$if = (int)($fresh['row']['id'] ?? 0);
+$ownView = imagesServe($db, $if, 300, 200, 'webp', false, $A, false);
+$modView = imagesServe($db, $if, 300, 200, 'webp', false, null, true);
+$db->prepare("INSERT INTO page_content (page, lang, format, body, enabled) VALUES ('imgtest2', 'en', 'bbcode', ?, 1)")
+   ->execute(['[img]https://img.test/i/' . $if . '-300x200.webp[/img]']);
+$stranger = imagesServe($db, $if, 300, 200, 'webp', false, null, false);
+check('the uploader\'s and the moderators\' own views never use up a stranger\'s check: published a minute later, it is everybody\'s at once',
+      $ownView !== null && $ownView['public'] === false && $modView !== null && $modView['public'] === false
+      && $stranger !== null && $stranger['public'] === true && imagesRow($db, $if)['public_at'] !== null);
+$db->exec("DELETE FROM page_content WHERE page = 'imgtest2'");
+imagesDelete($db, $if);
 
 $old = imagesStore($db, $cfgI, $B, $pic(320, 240), 'old.png');
 $io = (int)($old['row']['id'] ?? 0);
@@ -253,7 +265,7 @@ $db->prepare("INSERT INTO images (user_id, blob_sha, name) VALUES (?, ?, 'no fil
 $noFile = (int)$db->lastInsertId();
 check('a picture whose file is gone is still deleted, not left behind', imagesDelete($db, $noFile)
       && (int)$db->query("SELECT COUNT(*) FROM images WHERE id = " . $noFile)->fetchColumn() === 0);
-$db->exec("DELETE FROM page_content WHERE page = 'imgtest'");
+$db->exec("DELETE FROM page_content WHERE page IN ('imgtest', 'imgtest2')");
 $wipe([$A, $B]);
 $forgetDay();
 $fakeLeft = $db->prepare("SELECT COUNT(*) FROM image_blobs WHERE sha256 = ?");

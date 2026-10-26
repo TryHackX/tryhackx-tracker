@@ -51,7 +51,7 @@ add('settings', {
     'images_quota_mb': ('Space per account, MB', 'Miejsce na konto, MB'),
     'images_quota_mb_hint': ('0 = no limit.', '0 = bez limitu.'),
     'images_unused_hours': ('Unused pictures removed after, hours', 'Nieużyte obrazy usuwane po, godzin'),
-    'images_unused_hours_hint': ('A picture no description, proposal or page refers to.', 'Obraz, do którego nie odwołuje się żaden opis, propozycja ani strona.'),
+    'images_unused_hours_hint': ('A picture no description, proposal, page or comment refers to.', 'Obraz, do którego nie odwołuje się żaden opis, propozycja, strona ani komentarz.'),
 })
 
 add('api.images', {
@@ -60,8 +60,8 @@ add('api.images', {
                     'W ciągu ostatnich 24 godzin wgrano już tyle obrazów, ile ta strona przyjmuje (:n). Spróbuj później.'),
     'quota': ('Your pictures already take :used MB of the :max MB your account may keep. Delete the ones you no longer need.',
               'Twoje obrazy zajmują już :used MB z :max MB, które może mieć Twoje konto. Usuń te, których już nie potrzebujesz.'),
-    'in_use': ('That picture is used in a description, a proposal or a page, so it stays.',
-               'Ten obraz jest użyty w opisie, propozycji albo na stronie, więc zostaje.'),
+    'in_use': ('That picture is used in a description, a proposal, a page or a comment, so it stays.',
+               'Ten obraz jest użyty w opisie, propozycji, na stronie albo w komentarzu, więc zostaje.'),
     'not_found': ('There is no such picture among yours.', 'Nie ma takiego obrazu wśród Twoich.'),
     'unknown_op': ('Unknown operation.', 'Nieznana operacja.'),
 })

@@ -47,8 +47,9 @@
     const queue = [];
     let running = 0;
     let seq = 0;
-    let limits = null;
-    let limitsAsk = null;
+    const limitsFor = {};
+    const limitsAsk = {};
+    const placeArg = (place) => (place ? '&place=' + encodeURIComponent(place) : '');
 
     function el(tag, cls, attrs, kids) {
         const n = document.createElement(tag);
@@ -76,20 +77,20 @@
     const isImage = (file) => !!file && (/^image\//i.test(file.type || '') || (!file.type && IMAGE_EXT.test(file.name || '')));
     const hasFiles = (dt) => !!dt && Array.from(dt.types || []).indexOf('Files') !== -1;
 
-    async function list(page) {
+    async function list(page, place) {
         try {
-            const r = await fetch(API + 'images&page=' + encodeURIComponent(page), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+            const r = await fetch(API + 'images&page=' + encodeURIComponent(page) + placeArg(place), { credentials: 'same-origin', headers: { Accept: 'application/json' } });
             const j = await r.json();
-            if (j && j.success && j.limits && typeof j.limits === 'object') limits = j.limits;
+            if (j && j.success && j.limits && typeof j.limits === 'object') limitsFor[place || ''] = j.limits;
             return j;
         } catch (e) {
             return null;
         }
     }
 
-    async function post(body) {
+    async function post(body, place) {
         try {
-            const r = await fetch(API + 'images', {
+            const r = await fetch(API + 'images' + placeArg(place), {
                 method: 'POST', credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 body: JSON.stringify(body),
@@ -100,19 +101,20 @@
         }
     }
 
-    function ensureLimits() {
-        if (limits) return Promise.resolve(limits);
-        if (!limitsAsk) limitsAsk = list(1).then(() => { limitsAsk = null; return limits; });
-        return limitsAsk;
+    function ensureLimits(place) {
+        const k = place || '';
+        if (limitsFor[k]) return Promise.resolve(limitsFor[k]);
+        if (!limitsAsk[k]) limitsAsk[k] = list(1, k).then(() => { limitsAsk[k] = null; return limitsFor[k] || null; });
+        return limitsAsk[k];
     }
 
-    function send(file, node, onProgress) {
+    function send(file, node, onProgress, place) {
         return new Promise((resolve) => {
             const fd = new FormData();
             fd.append('csrf_token', csrfToken(node));
             fd.append('file', file, file.name || 'image.png');
             const x = new XMLHttpRequest();
-            x.open('POST', API + 'images');
+            x.open('POST', API + 'images' + placeArg(place));
             x.setRequestHeader('Accept', 'application/json');
             x.upload.addEventListener('progress', (e) => { if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total); });
             x.addEventListener('load', () => {
@@ -186,6 +188,9 @@
         const ups = part('ups'), msg = part('msg'), say = part('say'), panel = part('panel');
         if (!root || !addBtn || !fileIn || !mineBtn || !ups || !msg || !panel) return null;
         const fmt = typeof opts.format === 'function' ? opts.format : () => 'bbcode';
+        const place = root.dataset.place || '';
+        const labelsOn = root.dataset.labels !== '0';
+        const sep = place === 'comment' ? ' ' : '\n';
         const fmtEl = document.getElementById(id + '-format');
         const editor = ta.closest('.rt-editor') || ta;
         let pending = 0;
@@ -261,9 +266,10 @@
         }
 
         function bump(image) {
-            if (!limits) return;
-            limits.today = (Number(limits.today) || 0) + 1;
-            limits.used_bytes = (Number(limits.used_bytes) || 0) + (Number(image.bytes) || 0);
+            const lim = limitsFor[place];
+            if (!lim) return;
+            lim.today = (Number(lim.today) || 0) + 1;
+            lim.used_bytes = (Number(lim.used_bytes) || 0) + (Number(image.bytes) || 0);
             view.quota();
         }
 
@@ -271,7 +277,7 @@
             try {
                 job.state.textContent = t.key('js.images.percent', { n: t.num(0) });
                 job.bar.value = 0;
-                const r = await send(job.file, ta, (p) => progress(job, p));
+                const r = await send(job.file, ta, (p) => progress(job, p), place);
                 const j = r.json;
                 if (j && j.success && j.image && safeUrl(j.image.url)) {
                     swap(job, imageMarkup(j.image.url, fmt()));
@@ -303,7 +309,7 @@
             msg.replaceChildren();
             pending++;
             let lim = null;
-            try { lim = await ensureLimits(); } finally { pending--; }
+            try { lim = await ensureLimits(place); } finally { pending--; }
             const max = lim ? Number(lim.max_bytes) || 0 : 0;
             const good = [];
             files.forEach((file) => {
@@ -315,7 +321,7 @@
             if (!good.length) return;
             const jobs = good.map((file, i) => {
                 const name = shortName(file);
-                return { file, name, ph: t('js.images.placeholder', { name, n: ++seq }), tail: i < good.length - 1 ? '\n' : '' };
+                return { file, name, ph: t('js.images.placeholder', { name, n: ++seq }), tail: i < good.length - 1 ? sep : '' };
             });
             const pos = at === null ? null : Math.max(0, Math.min(at, ta.value.length));
             const [from, to] = pos === null ? range() : [pos, pos];
@@ -358,7 +364,7 @@
                 prevBtn.addEventListener('click', () => { if (v.page > 1) load(v.page - 1); });
                 nextBtn.addEventListener('click', () => { if (v.page < v.pages) load(v.page + 1); });
                 labelsBtn.addEventListener('click', () => {
-                    if (!picked.size || !labelsAllowed(fmt())) return;
+                    if (!picked.size || !labelsOn || !labelsAllowed(fmt())) return;
                     if (!insertText(labelsBlock([...picked.values()]), true)) return;
                     picked.clear();
                     grid.querySelectorAll('.rt-images-pick input').forEach((b) => { b.checked = false; });
@@ -371,6 +377,7 @@
 
             function quota() {
                 if (!built) return;
+                const limits = limitsFor[place];
                 if (!limits) { quotaEl.replaceChildren(); return; }
                 const today = Number(limits.today) || 0, perDay = Number(limits.per_day) || 0;
                 const used = Number(limits.used_bytes) || 0, cap = Number(limits.quota_bytes) || 0;
@@ -388,7 +395,7 @@
 
             function sync() {
                 if (!built) return;
-                const on = labelsAllowed(fmt());
+                const on = labelsOn && labelsAllowed(fmt());
                 labelsBtn.hidden = !on;
                 labelsHint.hidden = !on;
                 grid.querySelectorAll('.rt-images-pick').forEach((p) => { p.hidden = !on; });
@@ -404,14 +411,15 @@
                 if (typeof window.askInPlace !== 'function') return;
                 const at = [...grid.children].indexOf(li);
                 window.askInPlace(btn, t.key('js.images.delete_q'), async () => {
-                    const j = await post({ op: 'delete', id: r.id, csrf_token: csrfToken(ta) });
+                    const j = await post({ op: 'delete', id: r.id, csrf_token: csrfToken(ta) }, place);
                     msg.replaceChildren();
                     if (!j || !j.success) {
                         note(serverSays(j) || t.key('js.images.delete_failed'));
                         return false;
                     }
                     picked.delete(r.id);
-                    if (limits) limits.used_bytes = Math.max(0, (Number(limits.used_bytes) || 0) - (Number(r.bytes) || 0));
+                    const lim = limitsFor[place];
+                    if (lim) lim.used_bytes = Math.max(0, (Number(lim.used_bytes) || 0) - (Number(r.bytes) || 0));
                     announce(t.key('js.images.deleted'));
                     load(grid.children.length <= 1 && v.page > 1 ? v.page - 1 : v.page, at);
                     return true;
@@ -467,7 +475,7 @@
                 const mine = ++loadSeq;
                 status.hidden = false;
                 status.textContent = t.key('js.images.mine_loading');
-                const j = await list(n);
+                const j = await list(n, place);
                 if (mine !== loadSeq) return;
                 quota();
                 if (!j || !j.success) {

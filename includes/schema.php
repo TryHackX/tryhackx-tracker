@@ -224,6 +224,7 @@ function trackerSchemaStatements(): array {
             -- abuse reports gets them REVIEWED unless somebody deliberately says otherwise.
             -- Also a guarded ALTER (upgrades) — the two definitions must stay identical.
             `abuse_auto_block` TINYINT(1) NOT NULL DEFAULT 0,
+            `image_domains` VARCHAR(1000) NOT NULL DEFAULT '',
             `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
             `last_used_at` DATETIME DEFAULT NULL,
             `last_used_ip` VARCHAR(45) DEFAULT NULL,
@@ -1620,6 +1621,21 @@ function trackerSchemaStatements(): array {
             KEY `idx_imgup_user` (`user_id`, `created_at`),
             KEY `idx_imgup_created` (`created_at`)
         ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_remote` (
+            `url_sha` CHAR(64) NOT NULL PRIMARY KEY,
+            `url` VARCHAR(500) NOT NULL,
+            `host` VARCHAR(255) NOT NULL DEFAULT '',
+            `status` ENUM('pending','done','failed') NOT NULL DEFAULT 'pending',
+            `tries` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `error` VARCHAR(64) NOT NULL DEFAULT '',
+            `image_id` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `next_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `done_at` DATETIME DEFAULT NULL,
+            KEY `idx_imgrem_due` (`status`, `next_at`),
+            KEY `idx_imgrem_image` (`image_id`)
+        ) $engine",
     ];
 }
 
@@ -1668,6 +1684,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
         if (!schemaColumnExists($db, 'api_clients', $col)) $aparts[] = $sql;
     }
     if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
+    if (!schemaColumnExists($db, 'api_clients', 'image_domains')) {
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `image_domains` VARCHAR(1000) NOT NULL DEFAULT ''";
+    }
     // index_hashes carries a FULLTEXT index, so ADD COLUMN cannot be INSTANT — it is a full table
     // rebuild on a live 200k-row table. Do BOTH changes in ONE ALTER (one rebuild, not two), no
     // AFTER clause (column position doesn't matter, and AFTER also blocks INSTANT on newer MySQL).
@@ -3083,7 +3102,8 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     }
 
     schemaGrantOnce($db, 'v96_images', [
-        'member' => ['content.images'],
+        'member'    => ['content.images', 'comment.images'],
+        'moderator' => ['panel.images.view', 'panel.images.manage'],
     ]);
 
     if (schemaOnce($db, 'v95_formats')) {
@@ -3471,6 +3491,12 @@ function trackerSchemaDefaultSettings(): array {
         'images_per_day'              => '60',
         'images_quota_mb'             => '250',
         'images_unused_hours'         => '48',
+        'comment_images_upload'       => '0',
+        'comment_images_links'        => '1',
+        'comment_images_max'          => '18',
+        'comment_image_max_mb'        => '4',
+        'comment_thumb_h'             => '240',
+        'comment_thumb_w'             => '360',
         'desc_max_chars'              => '4000',
         'desc_max_images'             => '3',
         'desc_max_links'              => '10',

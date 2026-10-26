@@ -1,6 +1,6 @@
 <?php
 $viewer = usersEnabled($cfg) ? currentUser($db) : null;
-$moderator = (function_exists('panelCan') && panelCan($db, $cfg, 'panel.whitelist.content'))
+$moderator = (function_exists('panelCan') && (panelCan($db, $cfg, 'panel.whitelist.content') || panelCan($db, $cfg, 'panel.images.view')))
           || ($viewer !== null && userCan($db, $cfg, 'content.delete_any'));
 if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
 

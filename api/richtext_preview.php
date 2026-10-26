@@ -69,7 +69,7 @@ if ($for === 'comment') {
     // A COMMENT previews as its thread will draw it (commentRenderHtml(): the comment's own allow-list, the
     // writer's right to link — a guest's links are text —, the @-names and the emotes) and is judged by
     // exactly what its save refuses (commentProblem()). The counter counts what a READER sees against the
-    // comment's limit; pictures are never allowed. The source is capped before anything is walked.
+    // comment's limit. The source is capped before anything is walked.
     $me = currentUser($db);
     $clean = commentClean($text);
     $cap = commentSourceCap($cfg);
@@ -78,17 +78,18 @@ if ($for === 'comment') {
                       'length' => mb_strlen($clean), 'limit' => $cap], 400);
     }
     $mayLink = commentWriterMayLink($cfg, $me);
-    $p = commentParse($clean, $cfg, $mayLink);
+    $imgRules = commentImageRules($db, $cfg, $me);
+    $p = commentParse($clean, $cfg, $mayLink, $imgRules);
     // A new account's links are drawn as text (1.71.0, includes/antispam.php) — the Preview shows them so.
-    $ctx = commentRenderContext($db, $cfg, $me, [$clean]) + ['links' => $mayLink && !antispamLinksTextNow($db, $cfg, $me)];
-    $bad = $clean === '' ? null : commentProblem($clean, $cfg, $mayLink);
+    $ctx = commentRenderContext($db, $cfg, $me, [$clean]) + ['links' => $mayLink && !antispamLinksTextNow($db, $cfg, $me), 'images' => $imgRules];
+    $bad = $clean === '' ? null : commentProblem($clean, $cfg, $mayLink, $imgRules);
     jsonResponse([
         'success' => true,
         'html'    => commentRenderHtml($clean, 'bbcode', $cfg, $ctx),
         'format'  => 'bbcode',
         'length'  => (int)$p['chars'],
         'limit'   => commentMax($cfg),
-        'images'  => ['used' => 0, 'limit' => 0],
+        'images'  => ['used' => (int)$p['images'], 'limit' => $imgRules !== null ? (int)$imgRules['max'] : 0],
         'links'   => ['used' => (int)$p['links'], 'limit' => $mayLink ? COMMENT_MAX_LINKS : 0],
         'problem' => $bad !== null ? __('api.comment.' . $bad['code'], $bad['vars']) : null,
     ]);

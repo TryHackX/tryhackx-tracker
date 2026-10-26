@@ -121,7 +121,8 @@ check('… and inside the Info panel\'s editor template, under its card, above i
       && strpos($io, 'id="info-desc-preview"') < $ioAt && $ioAt < strpos($io, '<details class="rt-syntax-fold">', (int)strpos($io, 'id="info-desc-preview"')));
 
 $layout = (string)file_get_contents($root . '/templates/layout.php');
-$tag = "<?php if (function_exists('imagesMayUpload') && imagesMayUpload(\$db, \$cfg, \$navUser)): ?>\n"
+$tag = "<?php if ((function_exists('imagesMayUpload') && imagesMayUpload(\$db, \$cfg, \$navUser))\n"
+     . "              || (function_exists('commentImagesMayUpload') && commentImagesMayUpload(\$db, \$cfg, \$navUser))): ?>\n"
      . "    <script src=\"<?= \$baseUrl ?>assets/js/images-editor.js<?= assetVer('assets/js/images-editor.js') ?>\"></script>\n"
      . "    <?php endif; ?>";
 check('the layout loads the script only for a reader who may upload, and before app.js mounts the editors',

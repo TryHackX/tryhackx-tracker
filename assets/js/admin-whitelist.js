@@ -1490,6 +1490,11 @@
                 scopeTd.appendChild(document.createTextNode(' '));
                 scopeTd.appendChild(el('span', { className: 'text-muted wl-small', text: c.required_fields.join(', ') }));
             }
+            if (c.image_domains && c.image_domains.length) {
+                scopeTd.appendChild(document.createTextNode(' '));
+                scopeTd.appendChild(el('span', { className: 'text-muted wl-small', title: c.image_domains.join(', '),
+                    text: t.key('js.wl.cl_imgdomains_badge', { list: c.image_domains.join(', ') }) }));
+            }
             tr.appendChild(scopeTd);
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
@@ -1513,7 +1518,7 @@
                 // Only what this scope actually has. api_client_update treats a missing key as
                 // "leave it alone", so a federation key keeps whatever it was created with instead
                 // of being quietly rewritten by a dialog that never showed those two controls.
-                const body = { id: c.id, label: v.label };
+                const body = { id: c.id, label: v.label, image_domains: v.image_domains };
                 if (v.auto_approve !== undefined) body.auto_approve = v.auto_approve;
                 if (v.abuse_auto_block !== undefined) body.abuse_auto_block = v.abuse_auto_block;
                 if (v.required_fields !== undefined) body.required_fields = v.required_fields;
@@ -1543,6 +1548,7 @@
         const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         const label = $('cl-opts-label'), scope = $('cl-opts-scope'), approve = $('cl-opts-approve');
         const abuse = $('cl-opts-abuse');
+        const imgDomains = $('cl-opts-imgdomains');
         const boxes = [...modalEl.querySelectorAll('.cl-opts-field')];
         const aboxes = [...modalEl.querySelectorAll('.cl-opts-afield')];
         const docs = $('cl-opts-docs'), openLink = $('cl-opts-docs-open');
@@ -1560,6 +1566,7 @@
         // take torrents off the tracker on its own.
         abuse.value = client && client.abuse_auto_block === true ? 'auto' : 'review';
         const have = new Set((client && client.required_fields) || []);
+        imgDomains.value = client && Array.isArray(client.image_domains) ? client.image_domains.join('\n') : '';
         boxes.forEach(b => { b.checked = have.has(b.value); });
         aboxes.forEach(b => { b.checked = have.has(b.value); });
 
@@ -1575,7 +1582,7 @@
         const canUsers = () => scope.value === 'users' || scope.value === 'all';
 
         const read = () => {
-            const v = { label: label.value.trim(), scope: scope.value };
+            const v = { label: label.value.trim(), scope: scope.value, image_domains: imgDomains.value.split(/[\s,;]+/).filter(Boolean) };
             // `required_fields` is ONE column and two vocabularies. Only the blocks this scope can
             // actually use contribute to it, so a key can never be sent demanding a field the
             // endpoint it may call has never heard of.

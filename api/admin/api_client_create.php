@@ -21,8 +21,9 @@ $autoApprove = array_key_exists('auto_approve', $input) ? (!empty($input['auto_a
 // torrent off the tracker starts with nobody having said it may (see api/v1/blacklist_submit.php).
 $autoBlock = !empty($input['abuse_auto_block']) && $input['abuse_auto_block'] !== '0' && $input['abuse_auto_block'] !== 'false' ? 1 : 0;
 $fields = apiClientCleanFields($input['required_fields'] ?? [], $scope);
-$db->prepare("UPDATE api_clients SET auto_approve = ?, abuse_auto_block = ?, required_fields = ? WHERE id = ?")
-   ->execute([$autoApprove, $autoBlock, implode(',', $fields), (int)$c['id']]);
+$domains = imagesDomainsClean($input['image_domains'] ?? []);
+$db->prepare("UPDATE api_clients SET auto_approve = ?, abuse_auto_block = ?, required_fields = ?, image_domains = ? WHERE id = ?")
+   ->execute([$autoApprove, $autoBlock, implode(',', $fields), implode(' ', $domains), (int)$c['id']]);
 jsonResponse([
     'success' => true,
     'id' => $c['id'],
@@ -34,6 +35,7 @@ jsonResponse([
     'auto_approve' => $autoApprove === 1,
     'abuse_auto_block' => $autoBlock === 1,
     'required_fields' => $fields,
+    'image_domains' => $domains,
     // The address of the instructions to send with the key. It carries no secret — only which
     // choices were made — so it is safe in the same mail as the key without being the key.
     // Each chapter's own answer (1.73.0): the registrations' approval and the reports' blocking — an abuse key's

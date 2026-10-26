@@ -32,7 +32,8 @@ $from = strpos($js, '// ── TWIN:');
 $to = strpos($js, '// ── TWIN END ──');
 $twin = ($from !== false && $to !== false && $to > $from) ? substr($js, $from, $to - $from) : '';
 check('comments.js carries the twin between its markers (commentCleanJs, commentUrlJs, commentTitleJs, visibleChars)',
-      $twin !== '' && str_contains($twin, 'function commentCleanJs(raw)') && str_contains($twin, 'function visibleChars(src, links)'));
+      $twin !== '' && str_contains($twin, 'function commentCleanJs(raw)') && str_contains($twin, 'function visibleChars(src, links, img)')
+      && str_contains($twin, 'function ownImageJs(url, base)'));
 
 // The audit's cases, and the shapes a comment really has.
 $cases = [
@@ -84,6 +85,46 @@ if (!is_array($got) || count($got) !== count($cases)) {
     $tabs = trim(str_repeat("word\t", 130));
     check('… "130 words between tabs" counts what the server counts (1036 — over a limit of 500), not 649',
           $got[9][0] === $server($tabs, true) && $server($tabs, true) > 1000, json_encode([$got[9], $server($tabs, true)]));
+}
+
+$imgOn = ['base' => 'https://tracker.example/', 'remote' => true, 'hosts' => [], 'max' => 50, 'w' => 360, 'h' => 240];
+$imgOff = ['remote' => false] + $imgOn;
+$own = 'https://tracker.example/i/5-960x540.webp';
+$icases = [
+    '[img]' . $own . '[/img] after', '[img]https://x.example/a.png[/img] text', '[IMG]HTTPS://TRACKER.EXAMPLE/i/6-10x10.gif[/IMG]',
+    '[img]not a url[/img]', '[img]https://x.example/a.png', '[url=https://e.example]w [img]' . $own . '[/img][/url]',
+    '[code][img]' . $own . '[/img][/code]', '[img][/img]', '[img] https://x.example/a.png [/img]', '[img]"https://x.example/q.png"[/img]',
+    '[b][img]https://x.example/a.png[/img][/b] z', '[img]' . $own . '[img]' . $own . '[/img]', '[img]https://tracker.example/i/0-0x10.webp[/img]',
+];
+mt_srand(1770);
+$ibits = array_merge($bits, ['[img]', '[/img]', '[IMG]', $own, 'https://x.example/p.png', 'https://tracker.example/i/9-30x20.gif',
+                             '[img]' . $own . '[/img]', '[img]https://x.example/z.jpg[/img]', '[img]bad address[/img]']);
+for ($i = 0; $i < 400; $i++) {
+    $s = '';
+    $len = mt_rand(1, 40);
+    for ($j = 0; $j < $len; $j++) $s .= $ibits[mt_rand(0, count($ibits) - 1)];
+    $icases[] = $s;
+}
+$itmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ctwi_' . bin2hex(random_bytes(4));
+file_put_contents($itmp . '.js', $twin . "\nconst cases = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));\n"
+    . "const on = { base: 'https://tracker.example/', remote: true }, off = { base: 'https://tracker.example/', remote: false };\n"
+    . "process.stdout.write(JSON.stringify(cases.map((s) => [visibleChars(s, true, on), visibleChars(s, false, on), visibleChars(s, true, off), visibleChars(s, false, off)])));\n");
+file_put_contents($itmp . '.json', json_encode($icases, JSON_UNESCAPED_UNICODE));
+$iraw = (string)@shell_exec('node ' . escapeshellarg($itmp . '.js') . ' ' . escapeshellarg($itmp . '.json') . ' 2>&1');
+@unlink($itmp . '.js'); @unlink($itmp . '.json');
+$igot = json_decode($iraw, true);
+$ichars = static fn(string $s, bool $links, array $img): int => (int)commentParse(commentClean($s), $cfg, $links, $img)['chars'];
+if (!is_array($igot) || count($igot) !== count($icases)) {
+    check('node ran the twin on every text with pictures', false, substr($iraw, 0, 600));
+} else {
+    $ibad = [];
+    foreach ($icases as $i => $s) {
+        $want = [$ichars($s, true, $imgOn), $ichars($s, false, $imgOn), $ichars($s, true, $imgOff), $ichars($s, false, $imgOff)];
+        if ($igot[$i] !== $want) $ibad[] = json_encode($s, JSON_UNESCAPED_UNICODE) . ' js ' . json_encode($igot[$i]) . ' php ' . json_encode($want);
+    }
+    check('pictures (1.77.0): this site\'s counts nothing, another site\'s nothing as a link and its address as text, a refused one is typed text — '
+          . count($icases) . ' texts, with and without links, with pictures from links on and off', $ibad === [], count($ibad) . ' differ: ' . implode(' | ', array_slice($ibad, 0, 4)));
+    check('… "[img]' . $own . '[/img] after" counts the six characters after it', $igot[0] === [6, 6, 6, 6] && $ichars($icases[0], true, $imgOn) === 6, json_encode($igot[0]));
 }
 
 echo "\n$n checks, $fails failed\n";

@@ -3200,6 +3200,49 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                 </div>
             </div>
 
+            <div class="settings-section" id="section-comment-images" data-group="formatting" data-title="<?= _h('settings.cimg_title') ?>">
+                <h5><i class="bi bi-chat-left-text"></i> <?= _h('settings.cimg_title') ?></h5>
+                <p class="settings-hint mb-2"><?= _h('settings.cimg_subtitle') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="comment_images_upload">
+                        <label for="set-comment_images_upload" class="form-label"><?= _h('settings.comment_images_upload') ?></label>
+                        <select id="set-comment_images_upload" class="form-select bg-dark text-light border-secondary" name="comment_images_upload">
+                            <option value="0" <?= ($cfg['comment_images_upload'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                            <option value="1" <?= ($cfg['comment_images_upload'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.comment_images_upload_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_images_links">
+                        <label for="set-comment_images_links" class="form-label"><?= _h('settings.comment_images_links') ?></label>
+                        <select id="set-comment_images_links" class="form-select bg-dark text-light border-secondary" name="comment_images_links">
+                            <option value="1" <?= ($cfg['comment_images_links'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['comment_images_links'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.comment_images_links_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_images_max">
+                        <label for="set-comment_images_max" class="form-label"><?= _h('settings.comment_images_max') ?></label>
+                        <input id="set-comment_images_max" type="number" class="form-control bg-dark text-light border-secondary" name="comment_images_max" value="<?= sanitize($cfg['comment_images_max'] ?? '18') ?>" min="0" max="50">
+                        <small class="settings-hint"><?= _h('settings.comment_images_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_image_max_mb">
+                        <label for="set-comment_image_max_mb" class="form-label"><?= _h('settings.comment_image_max_mb') ?></label>
+                        <input id="set-comment_image_max_mb" type="number" class="form-control bg-dark text-light border-secondary" name="comment_image_max_mb" value="<?= sanitize($cfg['comment_image_max_mb'] ?? '4') ?>" min="1" max="20">
+                        <small class="settings-hint"><?= _h('settings.comment_image_max_mb_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_thumb_h">
+                        <label for="set-comment_thumb_h" class="form-label"><?= _h('settings.comment_thumb_h') ?></label>
+                        <input id="set-comment_thumb_h" type="number" class="form-control bg-dark text-light border-secondary" name="comment_thumb_h" value="<?= sanitize($cfg['comment_thumb_h'] ?? '240') ?>" min="80" max="600">
+                        <small class="settings-hint"><?= _h('settings.comment_thumb_h_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="comment_thumb_w">
+                        <label for="set-comment_thumb_w" class="form-label"><?= _h('settings.comment_thumb_w') ?></label>
+                        <input id="set-comment_thumb_w" type="number" class="form-control bg-dark text-light border-secondary" name="comment_thumb_w" value="<?= sanitize($cfg['comment_thumb_w'] ?? '360') ?>" min="80" max="800">
+                        <small class="settings-hint"><?= _h('settings.comment_thumb_w_hint') ?></small>
+                    </div>
+                </div>
+            </div>
+
             <?php /* ── The shoutbox (1.58.0, includes/shout.php) ────────────────────────────────
                      Everything the room needs, and one control that is not a setting: Purge, which
                      deletes rows and therefore asks for the owner's password (assets/js/admin-shout.js

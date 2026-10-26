@@ -36,6 +36,10 @@ if (array_key_exists('required_fields', $input)) {
     $sets[] = 'required_fields = ?';
     $params[] = implode(',', apiClientCleanFields($input['required_fields'], $rowScope));
 }
+if (array_key_exists('image_domains', $input)) {
+    $sets[] = 'image_domains = ?';
+    $params[] = implode(' ', imagesDomainsClean($input['image_domains']));
+}
 if (!$sets) {
     jsonResponse(['error' => __('api.federation.nothing_to_update')], 400);
 }

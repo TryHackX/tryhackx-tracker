@@ -517,6 +517,12 @@
                              is the thing the word buys. */ ?>
                     <div class="cl-can" id="cl-opts-can"></div>
 
+                    <div class="cl-field">
+                        <label class="cl-label" for="cl-opts-imgdomains"><?= _h('a.wl.cl_imgdomains') ?></label>
+                        <textarea class="form-control form-control-sm bg-dark text-light border-secondary" id="cl-opts-imgdomains" rows="2" maxlength="1000" spellcheck="false" placeholder="<?= _h('a.wl.cl_imgdomains_ph') ?>"></textarea>
+                        <div class="cl-hint"><?= _h('a.wl.cl_imgdomains_hint') ?></div>
+                    </div>
+
                     <?php /* Only for a key that can SUBMIT. A federation key never creates a
                              whitelist row, so asking how its submissions should be approved is
                              asking about something that cannot happen. */ ?>

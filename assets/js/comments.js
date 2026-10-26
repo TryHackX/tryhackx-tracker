@@ -147,9 +147,14 @@
         if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t[t.length - 1] === t[0]) t = cmTrim(t.slice(1, -1));
         return [...t].slice(0, max).join('');
     }
-    function visibleChars(src, links) {
+    function ownImageJs(url, base) {
+        if (!base || url.length <= base.length || url.slice(0, base.length).toLowerCase() !== String(base).toLowerCase()) return false;
+        const m = /^i\/(\d{1,10})-(\d{1,5})x(\d{1,5})\.(?:webp|gif)$/.exec(url.slice(base.length));
+        return !!m && Number(m[2]) >= 1 && Number(m[3]) >= 1;
+    }
+    function visibleChars(src, links, img) {
         const s = commentCleanJs(src);
-        const re = /\[(?:(b|i|u|s)|\/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?)\]/gi;
+        const re = /\[(?:(b|i|u|s)|\/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?|(img))\]/gi;
         const len = (x) => [...x].length;
         let n = 0, pos = 0, m, nLinks = 0, nextUrlCloser = -1;
         const stack = [], lit = { quote: 0, spoiler: 0 };
@@ -196,6 +201,19 @@
                 re.lastIndex = pos;
                 continue;
             }
+            if (m[8]) {
+                if (!img || has('url')) { text(tok); continue; }
+                const c = s.slice(pos).search(/\[\/img\]/i);
+                if (c < 0) { text(tok); continue; }
+                const url = commentUrlJs(s.slice(pos, pos + c));
+                if (url === null) { text(tok); continue; }
+                const own = ownImageJs(url, img.base);
+                if (!own && !img.remote) { text(tok); continue; }
+                if (!own && !links) text(url);
+                pos += c + '[/img]'.length;
+                re.lastIndex = pos;
+                continue;
+            }
             // [url] / [url=…]: only a writer who may link makes a link of it; otherwise it is text
             if (!links || has('url') || stack.length >= CM_MAX_DEPTH) { text(tok); continue; }
             if (m[6]) {
@@ -220,6 +238,158 @@
         return n;
     }
     // ── TWIN END ──
+
+    const IMG_TAG = /\[img\]([^\[\]]*?)\[\/img\]/gi;
+    const IMG_LINK = /\.(?:jpe?g|png|gif|webp|avif|bmp)(?:[?#]\S*)?$/i;
+    const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch (e) { return ''; } };
+    const hostMatches = (host, list) => !!host && (list || []).some((d) => host === d || host.endsWith('.' + d));
+
+    function imagesBar(id, me) {
+        const part = (tag, cls, suffix) => { const n = el(tag, cls); n.id = id + '-images' + suffix; return n; };
+        const root = part('div', 'rt-images cm-images', '');
+        root.dataset.place = 'comment';
+        root.dataset.labels = '0';
+        const bar = el('div', 'rt-images-bar');
+        bar.setAttribute('role', 'group');
+        bar.setAttribute('aria-labelledby', id + '-images-head');
+        const head = part('span', 'rt-images-head', '-head');
+        head.append(glyph('bi-image'), ' ', t.key('js.comments.img_head'));
+        const add = part('button', 'btn btn-secondary btn-small', '-add');
+        add.type = 'button';
+        add.setAttribute('aria-describedby', id + '-images-hint');
+        add.append(glyph('bi-upload'), ' ', t.key('js.comments.img_choose'));
+        const mine = part('button', 'btn btn-secondary btn-small rt-images-toggle', '-mine');
+        mine.type = 'button';
+        mine.setAttribute('aria-expanded', 'false');
+        mine.setAttribute('aria-controls', id + '-images-panel');
+        mine.append(glyph('bi-collection'), ' ', t.key('js.comments.img_mine'));
+        const file = part('input', '', '-file');
+        file.type = 'file';
+        file.accept = 'image/*';
+        file.multiple = true;
+        file.hidden = true;
+        const hint = part('span', 'rt-images-hint', '-hint');
+        hint.textContent = t.key('js.comments.img_hint', { mb: Math.max(1, Math.round((Number(me.images.max_bytes) || 0) / 1048576)) });
+        bar.append(head, add, mine, file, hint);
+        const ups = part('ul', 'rt-images-ups', '-ups');
+        ups.hidden = true;
+        const msg = part('div', 'rt-images-msg', '-msg');
+        msg.setAttribute('role', 'alert');
+        const say = part('span', 'rt-images-sr', '-say');
+        say.setAttribute('aria-live', 'polite');
+        const panel = part('div', 'rt-images-panel', '-panel');
+        panel.setAttribute('role', 'region');
+        panel.setAttribute('aria-labelledby', id + '-images-mine');
+        panel.setAttribute('data-esc-layer', '');
+        panel.hidden = true;
+        root.append(bar, ups, msg, say, panel);
+        return root;
+    }
+
+    function imageStrip(ta, me) {
+        const box = el('div', 'cm-imgs');
+        box.hidden = true;
+        const max = Number(me.images.max) || 0;
+        const found = () => {
+            const out = [];
+            const re = new RegExp(IMG_TAG.source, 'gi');
+            let m;
+            while ((m = re.exec(ta.value)) !== null) out.push({ url: m[1].trim(), at: m.index, len: m[0].length });
+            return out;
+        };
+        const removeAt = (i) => {
+            const f = found()[i];
+            if (!f) return;
+            let from = f.at, to = f.at + f.len;
+            if (ta.value[to] === ' ') to++;
+            else if (from > 0 && ta.value[from - 1] === ' ') from--;
+            ta.setRangeText('', from, to, 'start');
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            ta.focus();
+        };
+        const chip = (url, i) => {
+            const c = el('span', 'cm-img-chip');
+            c.title = url;
+            const own = ownImageJs(url, me.images.base || '');
+            const host = hostOf(url);
+            const copy = !own && hostMatches(host, me.images.hosts);
+            if (own || copy) {
+                const im = el('img');
+                im.alt = '';
+                im.decoding = 'async';
+                im.referrerPolicy = 'no-referrer';
+                im.addEventListener('error', () => im.replaceWith(glyph('bi-image')));
+                im.src = url;
+                c.appendChild(im);
+            } else {
+                c.appendChild(glyph('bi-link-45deg'));
+            }
+            const note = el('span', 'cm-img-chip-note');
+            note.append(el('span', 'cm-img-chip-host', own ? t.key('js.comments.img_here') : host),
+                el('span', 'cm-img-chip-kind', t.key(own ? 'js.comments.img_kind_own' : (copy ? 'js.comments.img_kind_copy' : 'js.comments.img_kind_link'))));
+            c.appendChild(note);
+            const x = el('button', 'cm-img-chip-x');
+            x.type = 'button';
+            x.setAttribute('aria-label', t.key('js.comments.img_remove'));
+            x.setAttribute('data-tip', t.key('js.comments.img_remove'));
+            x.appendChild(glyph('bi-x-lg'));
+            x.addEventListener('click', () => removeAt(i));
+            c.appendChild(x);
+            return c;
+        };
+        let last = null;
+        const sync = () => {
+            const urls = found().map((f) => f.url);
+            const sig = urls.join('\n');
+            if (sig === last) return;
+            last = sig;
+            box.textContent = '';
+            box.hidden = urls.length === 0;
+            if (!urls.length) return;
+            urls.forEach((u, i) => box.appendChild(chip(u, i)));
+            box.appendChild(el('span', 'cm-imgs-count' + (max && urls.length > max ? ' is-over' : ''), t.key('js.comments.img_count', { n: urls.length, max })));
+        };
+        ta.addEventListener('input', sync);
+        setTimeout(sync, 0);
+        return box;
+    }
+
+    function pasteImages(ta, me) {
+        ta.addEventListener('paste', (e) => {
+            const cd = e.clipboardData;
+            if (!cd || ta.readOnly || ta.disabled) return;
+            const raw = String(cd.getData('text/plain') || '').trim();
+            if (!raw || raw.length > 500 || /\s/.test(raw) || commentUrlJs(raw) === null) return;
+            const own = ownImageJs(raw, me.images.base || '');
+            if (!own && (!me.images.links || !IMG_LINK.test(raw))) return;
+            const start = ta.selectionStart, end = ta.selectionEnd;
+            const before = ta.value.slice(0, start);
+            if (/\[(?:img|url)(?:=[^\]]*)?\]\s*$/i.test(before)) return;
+            e.preventDefault();
+            const after = ta.value.slice(end);
+            const pre = before && !/\s$/.test(before) ? ' ' : '';
+            const post = after && !/^\s/.test(after) ? ' ' : '';
+            ta.setRangeText(pre + '[img]' + raw + '[/img]' + post, start, end, 'end');
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+
+    const wakeImages = (() => {
+        let queued = false;
+        const run = () => {
+            queued = false;
+            document.querySelectorAll('img.cm-img[data-src]').forEach((im) => {
+                const src = im.getAttribute('data-src') || '';
+                im.removeAttribute('data-src');
+                if (/^https?:\/\//i.test(src)) im.src = src;
+            });
+        };
+        return () => {
+            if (queued) return;
+            queued = true;
+            if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 1500 }); else setTimeout(run, 200);
+        };
+    })();
 
     /**
      * The editor: the markup window.RichText.mount() finds by convention round an id (`<id>-count`,
@@ -307,14 +477,21 @@
         const help = el('div', 'form-hint cm-help');
         help.id = id + '-help';
         help.setAttribute('aria-live', 'polite');
-        wrap.append(ed, help);
+        wrap.append(ed);
+        if (me.images) {
+            if (me.images.upload) wrap.append(imagesBar(id, me));
+            wrap.append(imageStrip(ta, me));
+            pasteImages(ta, me);
+        }
+        wrap.append(help);
         return { wrap, ta };
     }
 
     function mountEditor(id, me) {
         if (!window.RichText || typeof window.RichText.mount !== 'function') return;
         const max = Number(me.max) || 500;
-        window.RichText.mount(id, { previewFor: 'comment', measure: (text) => ({ used: visibleChars(text, !!me.links), limit: max }) });
+        const img = me.images ? { base: me.images.base || '', remote: !!me.images.links } : null;
+        window.RichText.mount(id, { previewFor: 'comment', measure: (text) => ({ used: visibleChars(text, !!me.links, img), limit: max }) });
     }
 
     /* ─────────────────────────── the @ list (the shoutbox's, for a comment) ─────────────────────────── */
@@ -452,6 +629,7 @@
         const status = el('p', 'text-muted cm-status', t.key('js.common.loading'));
         const compose = el('div', 'cm-compose');
         body.append(pendingNote, earlierBtn, list, empty, status, compose);
+        if ('MutationObserver' in window) new MutationObserver(wakeImages).observe(body, { childList: true, subtree: true });
 
         let loaded = false, loading = false, oldest = 0, me = null, earlierPages = 0;
         // The tree (1.72.0). `nodes`: comment id → {row, node, art, kids, box, level, root, isRoot} — every comment
@@ -1034,7 +1212,8 @@
             if (!src || !src.success) { tip(acts, (src && src.message) || t.key('js.comments.failed')); return; }
             const id = 'cm-ed-' + r.id;
             // A moderator's correction of somebody else's words keeps THEIR right to link, and may say why.
-            const edMe = Object.assign({}, me || {}, { picker: me && me.picker ? me.picker : null });
+            const edMe = Object.assign({}, me || {}, { picker: me && me.picker ? me.picker : null,
+                images: me && me.images ? (src.own ? me.images : Object.assign({}, me.images, { upload: false })) : null });
             const { wrap, ta } = buildEditor(id, edMe, t.key('js.comments.placeholder_edit'));
             const box = el('div', 'cm-edit-box');
             box.appendChild(wrap);
@@ -1123,7 +1302,9 @@
             const who = el('p', 'text-muted cm-as');
             who.textContent = me.guest ? t.key(me.review ? 'js.comments.as_guest_review' : 'js.comments.as_guest') : t.key('js.comments.as_member', { name: me.name || '' });
             const { wrap, ta } = buildEditor(id, me, t.key(me.mentions ? 'js.comments.placeholder' : 'js.comments.placeholder_plain'));
-            const hint = el('p', 'form-hint cm-hint', t.key(me.links ? 'js.comments.hint' : 'js.comments.hint_nolinks'));
+            const hintKey = me.images ? (me.links ? 'js.comments.hint_img' : 'js.comments.hint_img_nolinks') : (me.links ? 'js.comments.hint' : 'js.comments.hint_nolinks');
+            const hint = el('p', 'form-hint cm-hint', t.key(hintKey));
+            if (me.images) hint.append(' ', t.key(me.images.upload ? 'js.comments.img_tip_upload' : 'js.comments.img_tip'));
             // A new account's links are shown as text (1.71.0, the anti-spam layer): said before anybody types one.
             if (me.links && me.links_text) hint.append(' ', t.key('js.comments.links_text', { days: me.new_days || '' }));
             const foot = el('div', 'cm-compose-foot');

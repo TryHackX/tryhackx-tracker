@@ -541,7 +541,7 @@ $r = $post($u($aliceId), "  \n ");
 check('an empty comment: 400 empty', $r['status'] === 400 && ($r['body']['error'] ?? '') === 'empty');
 $r = commentPostRequest($db, $cfgOn, $u($aliceId), ['csrf_token' => $T, 'hash' => CM_H1, 'body' => str_repeat('x', COMMENT_RAW_BYTES + 1)], '127.0.0.44');
 check('a body of more than 256 KB is refused for its size before anything is read', $r['status'] === 413);
-$r = $post($u($aliceId), '[img]https://x.example/a.png[/img] ' . str_repeat('y', 480));
+$r = $post($u($aliceId), '[color=red]colour[/color] ' . str_repeat('y', 480));
 check('a text over the limit: 400 too_long, with the numbers', $r['status'] === 400 && ($r['body']['error'] ?? '') === 'too_long');
 $cfgLinksOff = array_merge($cfgOn, ['comment_links' => '0']);
 $r = $post($u($aliceId), '[url]https://example.org[/url]', $cfgLinksOff);
@@ -986,14 +986,14 @@ $GLOBALS['runner'] = $runner;
 $httpId = cmUser($db, $cfgOn, 'cmtest_http');
 $sess = ['user_id' => $httpId, 'user_login_time' => time(), 'csrf_token' => 'cm-child-token'];
 $runPost = fn(string $endpoint, array $body, array $session): array => $run($endpoint, 'POST', $body, [], $session);
-$j = $runPost('comment_post', ['csrf_token' => 'cm-child-token', 'hash' => CM_H1, 'body' => '[b]From the endpoint[/b] [img]x[/img]'], $sess);
+$j = $runPost('comment_post', ['csrf_token' => 'cm-child-token', 'hash' => CM_H1, 'body' => '[b]From the endpoint[/b] [size=9]x[/size]'], $sess);
 check('the endpoint file, as a request: signed in by the session, written, and answered with the server\'s HTML',
-      !empty($j['success']) && ($j['comment']['html'] ?? '') === '<strong>From the endpoint</strong> [img]x[/img]' && ($j['comment']['user'] ?? '') === 'cmtest_http', json_encode($j));
+      !empty($j['success']) && ($j['comment']['html'] ?? '') === '<strong>From the endpoint</strong> [size=9]x[/size]' && ($j['comment']['user'] ?? '') === 'cmtest_http', json_encode($j));
 $j2 = $runPost('comment_post', ['csrf_token' => 'another', 'hash' => CM_H1, 'body' => 'x'], $sess);
 check('… refused without the session\'s token', ($j2['error'] ?? '') === 'csrf' && empty($j2['success']), json_encode($j2));
 $j3 = $run('comment_list', 'GET', [], ['hash' => CM_H1], $sess);
 check('comment_list as a request: the newest page with that comment last, and the composer\'s answer',
-      !empty($j3['success']) && (end($j3['rows'])['html'] ?? '') === '<strong>From the endpoint</strong> [img]x[/img]' && ($j3['me']['can_post'] ?? false) === true, json_encode(array_keys($j3)));
+      !empty($j3['success']) && (end($j3['rows'])['html'] ?? '') === '<strong>From the endpoint</strong> [size=9]x[/size]' && ($j3['me']['can_post'] ?? false) === true, json_encode(array_keys($j3)));
 $j4 = $runPost('comment_delete', ['csrf_token' => 'cm-child-token', 'id' => (int)($j['comment']['id'] ?? 0)], $sess);
 check('comment_delete as a request: your own, taken back', !empty($j4['success']) && ($j4['right'] ?? '') === 'own', json_encode($j4));
 

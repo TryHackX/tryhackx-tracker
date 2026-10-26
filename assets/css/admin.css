@@ -3526,3 +3526,15 @@ img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255
 .admin-body .btn-outline-primary   { --bs-btn-color: #6ea8fe; --bs-btn-disabled-color: #6ea8fe; }
 /* An inline <code> (an IP in the Log, a path in a hint) in Bootstrap's dark-theme pink: 6.7:1, not #d63384's 3.7. */
 .admin-body { --bs-code-color: #e685b5; }
+.img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 0.75rem; }
+.img-none { grid-column: 1 / -1; text-align: center; }
+.img-card { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; padding: 0.5rem; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; background: rgba(255, 255, 255, 0.03); }
+.img-thumb { display: flex; align-items: center; justify-content: center; height: 160px; overflow: hidden; border-radius: 4px; background: rgba(0, 0, 0, 0.3); }
+.img-thumb img { max-width: 100%; max-height: 160px; width: auto; height: auto; object-fit: contain; }
+.img-meta { display: grid; gap: 0.1rem; min-width: 0; font-size: 0.8rem; }
+.img-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-acts { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.img-used { font-size: 0.8rem; }
+.img-used-list { margin: 0; padding-left: 1.1rem; }
+.img-used-list li { overflow-wrap: anywhere; }
+.img-queue .img-q-url { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
