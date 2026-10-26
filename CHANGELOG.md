@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.76.0] — 2026-10-26
+
+Address lists on the Traffic page can be edited; a post copied from the forum reads on the tracker as it does on the forum, label grids and all; every place that takes formatted text has its own formats in Settings; the seeds and peers refresh is shared and limited per address. Schema 95.
+
+- **An address list can be edited.** A list on the Traffic page's Address lists card could not be changed once added:
+  fixing one range of a pasted list meant deleting the list and adding it again. A pencil beside each list now opens it
+  in the same dialog as Add: its name, what it does (block or allow), when a block list applies (always or only under
+  pressure), and its pasted text or its download address and refresh interval. A change to what the firewall does asks
+  for "Push to firewall"; a new download address is fetched at once, and if that fails the entries already loaded stay
+  in force.
+- **A pasted list keeps the text it was written as.** The edit dialog shows a pasted list as it was pasted, ranges such
+  as /24 and the comments beside them, rather than as the firewall's entries. Lists added before this release kept no
+  text: they open with their ranges in address order and without comments, a note says so, and the text is kept from
+  the first save on.
+- **A post copied from the forum reads as it does on the forum.** Descriptions take a third format, Flarum: Markdown and
+  BBCode together, as the forum writes them, with the forum's own tags: the label grids
+  (`[thxlabels=N][thxrow]…[/thxrow][/thxlabels]`, up to four columns, two on a narrow screen), centred blocks, headings,
+  spoilers (`>!…!<`, `||…||` and whole blocks), quotes with their author, code blocks, the forum's uploaded pictures and
+  files, and mentions (as the name). A picture's bare address shows the picture and a YouTube address becomes a link to
+  the video. `[magnet]` blocks are left out: the torrent's page is the magnet. Pasting such a post into a text box where
+  Flarum is on switches the box to Flarum by itself and says so.
+- **Longer descriptions, and no silent cut.** A description's character limit can be set up to 500 000 (it was 20 000)
+  and its pictures up to 100 (it was 50); the defaults are unchanged. The box no longer cuts a longer paste at the limit
+  without a word: its counter turns red, and saving says how long the text is and what the limit is.
+- **A description's pictures open full size** in the viewer the shoutbox uses, with the description's other pictures a
+  click or an arrow key away; Esc closes it.
+- **Every place that takes formatted text has its own formats.** Settings has a new group, Formatting & images, with one
+  table: which of BBCode, Markdown and Flarum may be used in torrent descriptions, private messages, list descriptions,
+  the shoutbox, moderators' texts (answers to reports, warnings, appeal decisions, notifications, mail to a reporter),
+  pages and bulk mail. The description switches moved into it. Each editor offers only what is on for its place and the
+  server refuses the rest; with every box of a row cleared, BBCode stays. Updating gives every place the formats
+  descriptions allowed, plus Flarum. Comments and the profile description keep their own short BBCode.
+- **The seeds and peers refresh is shared and limited per address.** While a torrent's refresh cooldown runs, whoever
+  presses Refresh gets the numbers the last refresh fetched, without asking the tracker again and without it counting
+  against them; past the cooldown, an address (an IPv6 /64 counts as one) may refresh at most 30 torrents an hour, a new
+  setting beside the refresh's own (0 = no limit). The button itself stays off until switched on.
+- **Schema 95** adds the table that keeps the pasted text of address lists and lets the format columns of descriptions,
+  messages, list descriptions, shouts, report answers, warnings, appeals, sent mail, notifications and pages hold the
+  new format. It runs by itself at the first request after the update.
+
 ## [1.75.7] — 2026-10-24
 
 Changing one kernel buffer on the Traffic page no longer drops the others at the next reboot. Schema 94, no migration.
