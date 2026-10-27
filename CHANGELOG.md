@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.83.0] — 2026-10-27
+
+Reports of pictures, after the owner's "add reporting images: in the picture viewer, a report, handled in the reports like the rest". Schema 103.
+
+- **Report a picture.** The picture viewer has a flag in its corner for this site's own pictures, shown to a member who
+  may report: the same box as for words (a reason, Send) and "Reported" afterwards. Not one's own picture, not one the
+  reader cannot see, one open report per member per picture, the same limits as every report.
+- **The Pictures queue** on the Reports page (`panel.reports.images.view` / `.handle`, given to moderators once): the
+  picture, its name, size and address, where it is used, who uploaded it or that it was copied from the forum, and
+  every report. Close, warn, silence or ban the uploader as for words, silently or as a warning.
+- **Remove the picture**, and if wanted **block the file**. The picture is deleted from the server; where it was
+  shown, readers see "Picture removed by moderation" at once — the texts get a new address of the placeholder, so no
+  browser keeps showing the picture from its cache. Blocked, the same file cannot be uploaded again, its other copies
+  here go as well, and a copy from the forum is pointed at the placeholder instead of being fetched again.
+- The reporters hear what became of their report; the uploader is told only when the moderator chooses a warning.
+
 ## [1.82.3] — 2026-10-27
 
 - **The panel's Index search, one more case.** Over 10 000 names matching and a sort or a filter the catalogue cannot
