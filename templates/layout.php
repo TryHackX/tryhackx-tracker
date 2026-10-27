@@ -158,6 +158,9 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
               || (function_exists('profileVotesEnabled') && profileVotesEnabled($cfg))): ?>
     <script src="<?= $baseUrl ?>assets/js/favourites.js<?= assetVer('assets/js/favourites.js') ?>"></script>
     <?php endif; ?>
+    <?php if (function_exists('profileImagesEnabled') && profileImagesEnabled($cfg)): ?>
+    <script src="<?= $baseUrl ?>assets/js/user-images.js<?= assetVer('assets/js/user-images.js') ?>"></script>
+    <?php endif; ?>
     <?php /* People: the inbox, friends and blocks, the directory, and the buttons a public profile
              grows. Same rule as above — every entry point asks for its own markup first. */ ?>
     <?php if (pmEnabled($cfg) || friendsEnabled($cfg) || directoryEnabled($cfg)): ?>

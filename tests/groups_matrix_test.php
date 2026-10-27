@@ -294,7 +294,7 @@ try {
                        'comment.edit_own', 'comment.delete_own', 'comment.moderate', 'content.report',
                        'panel.reports.comments.view', 'panel.reports.comments.handle', 'panel.reports.descriptions.view',
                        'panel.reports.descriptions.handle', 'panel.reports.shouts.view', 'panel.reports.shouts.handle', 'comment.reply',
-                       'panel.moderation.view', 'panel.moderation.handle', 'panel.moderation.rules'];
+                       'panel.moderation.view', 'panel.moderation.handle', 'panel.moderation.rules', 'images.public'];
     $prodAdmin = array_values(array_diff(array_keys(userPermissionList()), $prodAdminLacks));
     $sdb->exec("UPDATE user_groups SET permissions = " . $sdb->quote(json_encode(array_fill_keys($prodAdmin, true))) . " WHERE slug = 'admin'");
     trackerSchemaDataMigrations($sdb, $scfg);
@@ -617,8 +617,8 @@ check('every recommended set is contained in what a new install ships ("add" cha
 
 // Consent and capabilities: two kinds, every registered id exactly one of them.
 $consentIds = userConsentPermissions();
-check('the consent ids are content.public, favourites.public, lists.public, rating.public and uploads.public',
-      $sorted($consentIds) === ['content.public', 'favourites.public', 'lists.public', 'rating.public', 'uploads.public'], implode(',', $consentIds));
+check('the consent ids are content.public, favourites.public, images.public, lists.public, rating.public and uploads.public',
+      $sorted($consentIds) === ['content.public', 'favourites.public', 'images.public', 'lists.public', 'rating.public', 'uploads.public'], implode(',', $consentIds));
 check('… every one registered, and consent + capabilities = the registry, with nothing in both',
       array_values(array_diff($consentIds, $registry)) === [] && array_intersect($consentIds, userCapabilityPermissions()) === []
       && $sorted(array_merge($consentIds, userCapabilityPermissions())) === $sorted($registry));
@@ -698,7 +698,8 @@ check('the moderator every install has: nothing either way; one a pre-1.72.0 NEW
 $pa = userGroupRecommendedPlan($row('admin', $prodAdmin ?? []));
 $pac = userGroupRecommendedPlan($row('admin', $prodAdmin ?? []), true);
 check('the owner\'s admin group: add = the capabilities it lacks — its missing consent listed apart, and added only with $consent',
-      $sorted($pa['add']) === $sorted(array_diff($prodAdminLacks ?? ['?'], ['content.public'])) && $pa['consent_add'] === ['content.public']
+      $sorted($pa['add']) === $sorted(array_diff($prodAdminLacks ?? ['?'], ['content.public', 'images.public']))
+      && $sorted($pa['consent_add']) === ['content.public', 'images.public']
       && $sorted($pac['add']) === $sorted($prodAdminLacks ?? ['?']) && $pac['consent'] === true && $pa['consent'] === false,
       json_encode(['add' => $pa['add'], 'consent_add' => $pa['consent_add']]));
 check('… and a reset of the admin group would remove nothing: its set is every id, and never a capability',

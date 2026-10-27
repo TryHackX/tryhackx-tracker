@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // content_credit_public / descriptions_public (1.70.0): my name on my descriptions, and my list of them.
     // votes_listed (1.70.0): my name and my vote in a torrent's "who has this" — see includes/who.php.
     foreach (['fav_public', 'fav_listed', 'lists_public', 'content_credit_public', 'descriptions_public', 'votes_listed',
-              'profile_listed', 'votes_public'] as $flag) {
+              'profile_listed', 'votes_public', 'images_public'] as $flag) {
         if (!array_key_exists($flag, $input)) continue;
         $sets[] = "`$flag` = ?";
         $args[] = !empty($input[$flag]) ? 1 : 0;
@@ -93,4 +93,6 @@ jsonResponse([
     'descriptions_public' => (int)($u['descriptions_public'] ?? 0) === 1,
     'descriptions_may_publish' => function_exists('profileDescsContext')
         && (($dc = profileDescsContext($db, $cfg, $u))['may_publish']) && !$dc['name_hidden'],
+    'images_public' => (int)($u['images_public'] ?? 0) === 1,
+    'images_may_publish' => function_exists('profileImagesContext') && profileImagesContext($db, $cfg, $u)['may_publish'],
 ]);

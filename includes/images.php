@@ -365,6 +365,7 @@ function imagesLimits(PDO $db, array $cfg, int $userId, ?int $maxBytes = null): 
 
 function imagesList(PDO $db, array $cfg, int $userId, int $page, ?int $maxBytes = null): array
 {
+    imagesRefsEnsure($db, $cfg);
     $st = $db->prepare("SELECT COUNT(*) FROM images WHERE user_id = ? AND removal_at IS NULL");
     $st->execute([$userId]);
     $total = (int)$st->fetchColumn();
@@ -384,6 +385,7 @@ function imagesList(PDO $db, array $cfg, int $userId, int $page, ?int $maxBytes 
 
 function imagesReferenced(PDO $db, int $id, bool $publishedOnly): bool
 {
+    imagesRefsEnsure($db);
     foreach (imagesRefsWhere($db, $id) as $r) {
         $state = imagesRefState($db, (string)$r['src'], (string)$r['src_key'])['state'];
         if ($publishedOnly ? $state === 'published' : $state !== 'dead') return true;
@@ -803,6 +805,7 @@ function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tr
 
 function imagesRemoteRepoint(PDO $db, array $cfg, array $old, array $new): int
 {
+    imagesRefsEnsure($db, $cfg);
     $oldId = (int)$old['id'];
     $map = [];
     foreach ([['w', 'h'], ['full_w', 'full_h']] as [$w, $h]) {
@@ -1044,6 +1047,7 @@ function imagesPanelRowOut(array $cfg, array $r): array
 
 function imagesPanelList(PDO $db, array $cfg, array $q): array
 {
+    imagesRefsEnsure($db, $cfg);
     $where = [];
     $args = [];
     $state = (string)($q['state'] ?? '');

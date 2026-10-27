@@ -19,6 +19,18 @@ function imagesRefsReady(PDO $db, ?array $cfg = null): bool
     return $at > 0;
 }
 
+function imagesRefsEnsure(PDO $db, ?array $cfg = null): void
+{
+    static $busy = false;
+    if ($busy || imagesRefsReady($db, $cfg)) return;
+    $busy = true;
+    try {
+        imagesRefsRebuild($db, imagesRefsCfg($db, $cfg));
+    } finally {
+        $busy = false;
+    }
+}
+
 function imagesRefsCfg(PDO $db, ?array $cfg): array
 {
     if ($cfg !== null) return $cfg;
@@ -154,13 +166,15 @@ function imagesVisibility(PDO $db, array $row): array
     $owner = $row['user_id'] !== null ? (int)$row['user_id'] : null;
     $public = (string)($row['source'] ?? '') === 'copy';
     $live = false;
+    $blocking = false;
     foreach ($refs as $r) {
         $s = imagesRefState($db, (string)$r['src'], (string)$r['src_key']);
         if ($s['state'] === 'dead') continue;
         $live = true;
+        if (in_array((string)$r['src'], ['wl', 'idx', 'page'], true)) $blocking = true;
         if ($s['state'] === 'published' && ($s['trusted'] || $s['author'] === $owner)) $public = true;
     }
-    return ['public' => $public, 'live' => $live, 'refs' => count($refs)];
+    return ['public' => $public, 'live' => $live, 'blocking' => $blocking, 'refs' => count($refs)];
 }
 
 function imagesVisibilitySync(PDO $db, array $ids): array
@@ -176,7 +190,7 @@ function imagesVisibilitySync(PDO $db, array $ids): array
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if (!$row) continue;
         $v = imagesVisibility($db, $row);
-        if ($row['removal_at'] !== null && !$v['live']) {
+        if ($row['removal_at'] !== null && !$v['blocking']) {
             if (imagesDelete($db, $id)) $out['deleted']++;
             continue;
         }
@@ -362,5 +376,117 @@ function imagesRemoteSettleRows(PDO $db, array $cfg, array $shas): int
             if ($new !== $text && imagesRefsWrite($db, $src, $key, $text, $new, $cfg)) $n++;
         }
     }
+    return $n;
+}
+
+function imagesRemovalIds(PDO $db, int $userId, int $plus): array
+{
+    $st = $db->prepare("SELECT id FROM images WHERE user_id = ? AND (removal_at IS NOT NULL OR id = ?)");
+    $st->execute([$userId, $plus]);
+    return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+}
+
+function imagesRemovalPropose(PDO $db, array $cfg, string $kind, int $recId, int $userId, array $ids): ?int
+{
+    $rec = contentRowById($db, $kind, $recId);
+    if (!$rec || $rec['description'] === null) return null;
+    $text = (string)$rec['description'];
+    $new = imagesStripFromText($cfg, $text, $ids);
+    if ($new === $text) return null;
+    $sql = match ($kind) {
+        'wl' => "SELECT id FROM wl_content_edits WHERE whitelist_id = ? AND status = 'pending' AND user_id = ? AND note = ? LIMIT 1",
+        default => "SELECT id FROM wl_content_edits WHERE hash_content_id = ? AND status = 'pending' AND user_id = ? AND note = ? LIMIT 1",
+    };
+    $st = $db->prepare($sql);
+    $st->execute([$recId, $userId, IMAGES_REMOVAL_NOTE]);
+    $have = (int)($st->fetchColumn() ?: 0);
+    if ($have > 0) {
+        $db->prepare("UPDATE wl_content_edits SET description = ?, description_format = ?, source_url = ? WHERE id = ? AND status = 'pending'")
+           ->execute([$new !== '' ? $new : null, (string)$rec['description_format'], $rec['source_url'], $have]);
+        $id = $have;
+    } else {
+        $db->prepare("INSERT INTO wl_content_edits (whitelist_id, hash_content_id, info_hash, source_url, description, description_format,
+                             kind, ip, user_id, note)
+                      VALUES (?, ?, ?, ?, ?, ?, 'edit', '', ?, ?)")
+           ->execute([$kind === 'wl' ? $recId : null, $kind === 'idx' ? $recId : null, (string)$rec['info_hash'], $rec['source_url'],
+                      $new !== '' ? $new : null, (string)$rec['description_format'], $userId, IMAGES_REMOVAL_NOTE]);
+        $id = (int)$db->lastInsertId();
+    }
+    imagesRefsTouch($db, $cfg, 'edit', (string)$id);
+    return $id;
+}
+
+function imagesStripRow(PDO $db, array $cfg, string $src, string $key, int $imageId, int $userId): bool
+{
+    $text = imagesRefsTextOf($db, $src, $key);
+    if ($text === null) return false;
+    $new = imagesStripFromText($cfg, $text, [$imageId]);
+    if ($new === $text) return false;
+    if ($src === 'cm') {
+        $up = $db->prepare("UPDATE hash_comments SET body = ?, edited_at = NOW(), edited_by = ? WHERE id = ? AND body = ? AND status <> 'deleted'");
+        $up->execute([$new, $userId, (int)$key, $text]);
+        if ($up->rowCount() < 1) return false;
+        imagesRefsTouch($db, $cfg, 'cm', $key);
+        return true;
+    }
+    return imagesRefsWrite($db, $src, $key, $text, $new, $cfg);
+}
+
+function imagesRequestRemoval(PDO $db, array $cfg, array $img, array $me): array
+{
+    imagesRefsEnsure($db, $cfg);
+    $id = (int)$img['id'];
+    $uid = (int)$me['id'];
+    $out = ['deleted' => false, 'proposals' => 0, 'stripped' => 0, 'kept' => 0];
+    $ids = imagesRemovalIds($db, $uid, $id);
+    $st = $db->prepare("SELECT src, src_key FROM image_refs WHERE image_id = ?");
+    $st->execute([$id]);
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $src = (string)$r['src'];
+        $key = (string)$r['src_key'];
+        $state = imagesRefState($db, $src, $key);
+        if ($state['state'] === 'dead') continue;
+        $mine = $state['author'] === $uid;
+        $direct = ($src === 'cm' && $mine) || ($src === 'edit' && $mine) || (($src === 'wl' || $src === 'idx') && $mine && $state['state'] !== 'published');
+        if ($direct) {
+            if (imagesStripRow($db, $cfg, $src, $key, $id, $uid)) $out['stripped']++; else $out['kept']++;
+            continue;
+        }
+        if ($src === 'wl' || $src === 'idx') {
+            if (imagesRemovalPropose($db, $cfg, $src, (int)$key, $uid, $ids) !== null) $out['proposals']++; else $out['kept']++;
+            continue;
+        }
+        $out['kept']++;
+    }
+    $db->prepare("UPDATE images SET removal_at = NOW() WHERE id = ? AND user_id = ?")->execute([$id, $uid]);
+    $out['deleted'] = imagesVisibilitySync($db, [$id])['deleted'] > 0;
+    return $out;
+}
+
+function imagesCancelRemoval(PDO $db, array $cfg, array $img, int $uid): int
+{
+    $id = (int)$img['id'];
+    $db->prepare("UPDATE images SET removal_at = NULL WHERE id = ? AND user_id = ?")->execute([$id, $uid]);
+    $st = $db->prepare("SELECT id FROM images WHERE user_id = ? AND removal_at IS NOT NULL");
+    $st->execute([$uid]);
+    $left = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    $st = $db->prepare("SELECT id, whitelist_id, hash_content_id FROM wl_content_edits WHERE status = 'pending' AND user_id = ? AND note = ?");
+    $st->execute([$uid, IMAGES_REMOVAL_NOTE]);
+    $n = 0;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $e) {
+        $kind = $e['whitelist_id'] !== null ? 'wl' : 'idx';
+        $rec = contentRowById($db, $kind, (int)($e['whitelist_id'] ?? $e['hash_content_id']));
+        $text = (string)($rec['description'] ?? '');
+        $new = $left ? imagesStripFromText($cfg, $text, $left) : $text;
+        if ($new === $text) {
+            $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW(), note = ? WHERE id = ? AND status = 'pending'")
+               ->execute([defined('CONTENT_WITHDRAWN_NOTE') ? CONTENT_WITHDRAWN_NOTE : 'withdrawn', (int)$e['id']]);
+        } else {
+            $db->prepare("UPDATE wl_content_edits SET description = ? WHERE id = ? AND status = 'pending'")->execute([$new !== '' ? $new : null, (int)$e['id']]);
+        }
+        imagesRefsTouch($db, $cfg, 'edit', (string)$e['id']);
+        $n++;
+    }
+    imagesVisibilitySync($db, [$id]);
     return $n;
 }

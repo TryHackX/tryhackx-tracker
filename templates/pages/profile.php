@@ -69,6 +69,8 @@ $showVotes = function_exists('profileVotesShownTo') && profileVotesShownTo($db, 
 // asks too: the site's switch and descriptions on; for somebody else, the reader may read descriptions,
 // their group's GRANT of content.public, their own yes, and their name shown on their descriptions.
 $showDescs = function_exists('profileDescsShownTo') && profileDescsShownTo($db, $cfg, $profile, $viewer);
+$showImages = function_exists('profileImagesShownTo') && profileImagesShownTo($db, $cfg, $profile, $viewer)
+    && (!$isSelf || ((int)($profile['images_public'] ?? 0) === 1 && userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'images.public')));
 $showUploads = uploadsPossible($cfg) && uploadsPublicEnabled($cfg)
     && ($isSelf || userIdHasGrantedPermission($db, $cfg, (int)$profile['id'], 'uploads.public'));
 $canMagnet = userCan($db, $cfg, 'index.magnet');
@@ -190,7 +192,7 @@ if ($profCover !== null) {
 </div>
 </div><?php /* /#profile-top */ ?>
 
-<?php if (!$showFav && !$showVotes && !$showDescs && !$showUploads && !$showLists): ?>
+<?php if (!$showFav && !$showVotes && !$showDescs && !$showUploads && !$showLists && !$showImages): ?>
 <p class="text-muted"><?= _h('profile.nothing_shared') ?></p>
 <?php endif; ?>
 
@@ -243,6 +245,13 @@ if ($profCover !== null) {
     <section class="profile-section" id="profile-descs">
         <h2 id="profile-descs-heading"><?= _h('profile.descriptions') ?></h2>
         <?php $pdUser = (string)$profile['username']; $pdSelf = $isSelf; $pdExtra = $profExtra; include __DIR__ . '/../partials/descs_section.php'; ?>
+    </section>
+    <?php endif; ?>
+
+    <?php if ($showImages): ?>
+    <section class="profile-section" id="profile-images">
+        <h2><?= _h('profile.images') ?></h2>
+        <div class="ug-root" data-user="<?= sanitize((string)$profile['username']) ?>" data-own="0"></div>
     </section>
     <?php endif; ?>
 

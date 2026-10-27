@@ -26,6 +26,8 @@ $accVotes = function_exists('profileVotesContext') ? profileVotesContext($db, $c
 // the list's privacy switch after the likes one, and the name switch every credit of theirs follows.
 $accDescs = function_exists('profileDescsContext') ? profileDescsContext($db, $cfg, $meUser)
     : ['credit_ok' => false, 'enabled' => false, 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false, 'name_hidden' => false];
+$accImages = function_exists('profileImagesContext') ? profileImagesContext($db, $cfg, $meUser)
+    : ['enabled' => false, 'may_publish' => false, 'publish_blocked' => false];
 $accLists = listsContext($db, $cfg, $meUser);
 $accPeople = peopleContext($db, $cfg, $meUser);
 // "Account standing" (1.75.0, includes/moderation.php): the silence or ban that runs now with its end, and the warnings that
@@ -104,6 +106,9 @@ $accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] ||
     <?php /* The descriptions this account wrote (1.70.0), right after Likes / Ratings — the router's list
              in assets/js/favourites.js names it too. */ ?>
     <button type="button" class="rt-tab" data-pane="descriptions"><?= _h('account.tab_descriptions') ?></button>
+    <?php endif; ?>
+    <?php if ($accImages['enabled']): ?>
+    <button type="button" class="rt-tab" data-pane="images"><?= _h('account.tab_images') ?></button>
     <?php endif; ?>
     <?php if ($accShowUploads): ?>
     <button type="button" class="rt-tab" data-pane="uploads"><?= _h('account.tab_uploads') ?></button>
@@ -557,6 +562,14 @@ $accTzSite = new DateTimeZone(siteTimezone($cfg));
             <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'content.public']) ?></p>
             <?php endif; ?>
             <?php endif; ?>
+            <?php if ($accImages['may_publish'] || $accImages['publish_blocked']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-images-public"<?= (int)($meUser['images_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.images_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.images_public_hint') ?></p>
+            <?php if ($accImages['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'images.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
             <?php /* My name on the descriptions I write and edit (1.70.0): ON unless I say otherwise — names
                      have always been shown there. Off, every credit of mine says "a member". */ ?>
             <?php if ($accDescs['credit_ok']): ?>
@@ -699,6 +712,14 @@ $accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUr
     <div id="account-descs" class="profile-section">
         <?php $pdUser = ''; $pdSelf = true; $pdExtra = $accExtra; include __DIR__ . '/../partials/descs_section.php'; ?>
     </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accImages['enabled']): ?>
+<div class="acc-pane" id="acc-pane-images" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.images_heading') ?></h2>
+    <p class="text-muted ug-intro"><?= _h('account.images_intro') ?></p>
+    <div class="ug-root profile-section" id="account-images" data-own="1"></div>
 </div>
 <?php endif; ?>
 

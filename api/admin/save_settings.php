@@ -187,6 +187,7 @@ $allowed = [
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
     'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_per_day_mb', 'images_quota_mb', 'images_unused_hours',
     'comment_images_upload', 'comment_images_links', 'comment_images_max', 'comment_image_max_mb', 'comment_thumb_h', 'comment_thumb_w',
+    'images_gallery_enabled',
     'forum_desc_conflict', 'info_resize', 'info_desc_fold',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
@@ -584,7 +585,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
           'pm_archive_returns', 'auto_penalties_enabled',
-          'info_resize',
+          'info_resize', 'images_gallery_enabled',
           'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
           'who_votes_enabled', 'who_lists_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',

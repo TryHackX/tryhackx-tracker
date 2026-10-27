@@ -1002,7 +1002,7 @@ require $a["file"];
     // browser's digits). The listener it had redrew the rows under the reader and, holding no answer, asked again.
     check('the list\'s script: built with textContent only, its words t.key() words (they follow a live language switch), started with the others; the router knows the pane; the switches post their flags',
           $dj !== '' && !str_contains($dj, 'innerHTML') && str_contains($dj, "t.key('js.descs.") && str_contains($fj, "        initDescs();\n")
-          && str_contains($fj, "'sounds', 'descriptions'];") && str_contains($fj, "['acc-descs-public', 'descriptions_public'], ['acc-credit-public', 'content_credit_public']"));
+          && str_contains($fj, "'sounds', 'descriptions', 'images'];") && str_contains($fj, "['acc-descs-public', 'descriptions_public'], ['acc-credit-public', 'content_credit_public']"));
     $aj = $src('assets/js/app.js');
     check('the Info panel\'s script: the chain with the icon library\'s arrow, Edit and Delete beside Propose (classes of their own), the kind sent',
           str_contains($aj, "i.className = 'bi bi-arrow-right';") && str_contains($aj, "button('info-desc-edit'") && str_contains($aj, "button('info-desc-delete'")

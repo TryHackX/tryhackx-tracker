@@ -4835,6 +4835,51 @@ a.btn.btn-danger-soft { color: #ff8a80; }
 .pmreport-box textarea.pm-input { padding-right: calc(0.6rem - 4px); padding-bottom: calc(0.5rem - 4px); }
 .form-group > textarea:focus, .pmreport-box textarea.pm-input:focus { border-color: transparent; outline: 1px solid var(--accent); outline-offset: -1px; }
 /* A forced-colours scheme (Windows high contrast) can paint even a transparent border: there the fields are as they were. */
+.ug-intro { margin: -0.25rem 0 0.9rem; font-size: 0.85rem; }
+.ug-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin-bottom: 0.75rem; }
+.ug-filter { min-width: 11rem; padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-code); color: var(--text); font: inherit; font-size: 0.82rem; }
+.ug-total { font-size: 0.82rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ug-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0.65rem; }
+.ug-card { position: relative; display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, 0.02); overflow: hidden; transition: border-color 0.15s; }
+.ug-card:hover { border-color: rgba(74, 158, 255, 0.45); }
+.ug-thumb { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 1 / 1; padding: 0; border: 0; overflow: hidden; cursor: zoom-in;
+            background-color: #15181d; background-image: linear-gradient(45deg, #1b1f25 25%, transparent 25%), linear-gradient(-45deg, #1b1f25 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1b1f25 75%), linear-gradient(-45deg, transparent 75%, #1b1f25 75%);
+            background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+.ug-thumb img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; transition: transform 0.2s; }
+.ug-thumb:hover img { transform: scale(1.03); }
+.ug-thumb:focus { outline: none; }
+.ug-thumb:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; }
+.ug-badges { position: absolute; top: 0.35rem; left: 0.35rem; right: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.25rem; pointer-events: none; }
+.ug-badge { padding: 0.05rem 0.4rem; border-radius: 4px; background: rgba(0, 0, 0, 0.72); color: #dfe6ee; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.02em; }
+.ug-badge-wait { background: rgba(255, 179, 0, 0.85); color: #1b1300; }
+.ug-card.is-removal .ug-thumb img { opacity: 0.45; }
+.ug-meta { padding: 0.4rem 0.55rem 0.1rem; font-size: 0.74rem; line-height: 1.35; color: var(--text-muted); min-width: 0; }
+.ug-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.ug-dims { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ug-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; padding: 0.35rem 0.45rem 0.45rem; }
+.ug-acts > .ug-del, .ug-acts > .ug-keep { margin-left: auto; }
+.ug-acts .shout-confirm { flex: 1 1 100%; margin-left: 0; min-width: 0; }
+.ug-card.shout-asking .ug-acts > .ic-btn { display: none; }
+.ug-del:hover { border-color: var(--error); color: #ff8a80; background: rgba(244, 67, 54, 0.10); }
+#ug-where-overlay { z-index: 1200; }
+.ug-where-box { max-width: 36em; }
+.ug-where-pic { display: flex; align-items: center; gap: 0.75rem; min-width: 0; padding: 0.4rem 0 0.75rem; margin-bottom: 0.25rem; border-bottom: 1px solid var(--border); }
+.ug-where-pic img { flex: 0 0 auto; width: 4.5rem; height: 4.5rem; object-fit: contain; border-radius: 4px;
+                    background-color: #15181d; background-image: linear-gradient(45deg, #1b1f25 25%, transparent 25%), linear-gradient(-45deg, #1b1f25 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1b1f25 75%), linear-gradient(-45deg, transparent 75%, #1b1f25 75%);
+                    background-size: 12px 12px; background-position: 0 0, 0 6px, 6px -6px, -6px 0; }
+.ug-where-what { min-width: 0; font-size: 0.78rem; line-height: 1.4; color: var(--text-muted); }
+.ug-where-row { display: flex; align-items: baseline; gap: 0.75rem; min-width: 0; padding: 0.45rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.ug-where-row:last-child { border-bottom: 0; }
+.ug-where-kind { flex: 0 0 8rem; font-size: 0.76rem; color: var(--text-muted); }
+.ug-where-row a { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+    .ug-where-kind { flex-basis: 5.5rem; }
+}
+.ug-empty { margin: 0.5rem 0; color: var(--text-muted); font-size: 0.85rem; }
+.ug-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.6rem; margin-top: 0.9rem; font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+    .ug-grid { grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 0.5rem; }
+}
 @media (forced-colors: active) {
     .form-group > textarea, .pmreport-box textarea.pm-input { border-width: 1px; outline: 0; }
     .form-group > textarea { padding-right: 0.8rem; padding-bottom: 0.6rem; }

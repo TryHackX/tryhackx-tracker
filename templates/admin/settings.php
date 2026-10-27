@@ -3227,6 +3227,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <input id="set-images_unused_hours" type="number" class="form-control bg-dark text-light border-secondary" name="images_unused_hours" value="<?= sanitize($cfg['images_unused_hours'] ?? '48') ?>" min="1" max="720">
                         <small class="settings-hint"><?= _h('settings.images_unused_hours_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="images_gallery_enabled">
+                        <label for="set-images_gallery_enabled" class="form-label"><?= _h('settings.images_gallery_enabled') ?></label>
+                        <select id="set-images_gallery_enabled" class="form-select bg-dark text-light border-secondary" name="images_gallery_enabled">
+                            <option value="1" <?= ($cfg['images_gallery_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['images_gallery_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.images_gallery_enabled_hint') ?></small>
+                    </div>
                 </div>
             </div>
 

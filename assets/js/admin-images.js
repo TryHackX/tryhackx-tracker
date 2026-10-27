@@ -58,16 +58,37 @@
         if (hb) hb.textContent = hosts && hosts.length ? word('js.aimg.hosts', { list: hosts.join(', ') }) : word('js.aimg.hosts_none');
     }
 
-    async function toggleUsed(r, box, b) {
-        if (!box.hidden) {
-            box.hidden = true;
-            b.setAttribute('aria-expanded', 'false');
-            return;
+    let usedModal = null;
+    let usedFrom = null;
+    let usedSeq = 0;
+    async function showUsed(r, b) {
+        if (!usedModal) {
+            usedModal = el('div', { className: 'modal img-used-modal', id: 'img-used-modal', tabindex: '-1', 'aria-labelledby': 'img-used-title' }, [
+                el('div', { className: 'modal-dialog modal-dialog-centered modal-dialog-scrollable' }, [
+                    el('div', { className: 'modal-content bg-dark' }, [
+                        el('div', { className: 'modal-header border-secondary' }, [
+                            el('h5', { className: 'modal-title text-light', id: 'img-used-title' }),
+                            el('button', { type: 'button', className: 'btn-close btn-close-white', 'data-bs-dismiss': 'modal', 'aria-label': word('js.common.close') }),
+                        ]),
+                        el('div', { className: 'modal-body', id: 'img-used-body' }),
+                    ]),
+                ]),
+            ]);
+            document.body.appendChild(usedModal);
+            usedModal.addEventListener('hidden.bs.modal', () => {
+                usedSeq++;
+                if (usedFrom && usedFrom.isConnected) usedFrom.focus();
+                usedFrom = null;
+            });
         }
-        box.hidden = false;
-        b.setAttribute('aria-expanded', 'true');
+        const mine = ++usedSeq;
+        usedFrom = b;
+        $('img-used-title').textContent = word('js.aimg.where') + ' — #' + r.id;
+        const box = $('img-used-body');
         box.textContent = word('js.common.loading');
+        bootstrap.Modal.getOrCreateInstance(usedModal).show();
         const j = await apiCall('admin/images&view=used&id=' + encodeURIComponent(r.id));
+        if (mine !== usedSeq) return;
         box.textContent = '';
         if (!j || !j.success) {
             box.appendChild(el('div', { className: 'text-danger', text: failWord(j) }));
@@ -142,17 +163,15 @@
             el('div', { className: 'img-line text-muted', text: fmtDate(r.created_at) }),
             r.name ? el('div', { className: 'img-line text-muted img-name', title: r.name, text: r.name }) : null,
         ]);
-        const usedBox = el('div', { className: 'img-used' });
-        usedBox.hidden = true;
-        const whereBtn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary img-where', title: word('js.aimg.where'), 'aria-expanded': 'false' },
+        const whereBtn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary img-where', title: word('js.aimg.where'), 'aria-haspopup': 'dialog' },
             [el('i', { className: 'bi bi-diagram-3', 'aria-hidden': 'true' }), ' ', word('js.aimg.where_short')]);
-        whereBtn.addEventListener('click', () => toggleUsed(r, usedBox, whereBtn));
+        whereBtn.addEventListener('click', () => showUsed(r, whereBtn));
         const acts = el('div', { className: 'img-acts' }, [
             whereBtn,
             button('bi-box-arrow-up-right', word('js.aimg.open_full'), 'btn-outline-secondary', () => window.open(r.full_url, '_blank', 'noopener')),
             S.mayManage ? button('bi-trash', word('js.aimg.delete'), 'btn-outline-danger img-del', (b) => remove(r, b)) : null,
         ]);
-        return el('div', { className: 'img-card', id: 'img-card-' + r.id }, [thumb, meta, acts, usedBox]);
+        return el('div', { className: 'img-card', id: 'img-card-' + r.id }, [thumb, meta, acts]);
     }
 
     async function load(keep) {

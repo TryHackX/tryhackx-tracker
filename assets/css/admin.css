@@ -3566,9 +3566,10 @@ img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255
 .img-acts { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: auto; }
 .img-acts .img-where { flex: 1 1 auto; }
 .img-acts .img-del { margin-left: auto; }
-.img-used { font-size: 0.8rem; }
+.img-used-modal .modal-body { font-size: 0.85rem; }
 .img-used-list { margin: 0; padding-left: 1.1rem; }
 .img-used-list li { overflow-wrap: anywhere; }
+.img-used-list li + li { margin-top: 0.35rem; }
 .img-queue .img-q-url { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .rq-subtabs { margin-bottom: 0.75rem; }

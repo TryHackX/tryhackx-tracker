@@ -261,7 +261,7 @@ if ($op === 'bulk') {
 if ($op === 'edits') {
     $st = $db->query(
         "SELECT e.id, e.whitelist_id, e.hash_content_id, e.info_hash, e.source_url, e.description, e.description_format,
-                e.kind AS edit_kind, e.created_at, e.ip, e.user_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
+                e.kind AS edit_kind, e.created_at, e.ip, e.user_id, e.note, u.username AS author, u.avatar_sha AS author_avatar_sha,
                 u.content_credit_public AS author_credit_public,
                 COALESCE(w.name, i.name) AS name,
                 COALESCE(w.source_url, c.source_url) AS cur_source_url,
@@ -318,10 +318,12 @@ if ($op === 'edit_apply' || $op === 'edit_reject') {
     $cur = contentRowById($db, (string)$e['kind'], (int)$e['target_id']);
     $pv = $cur ? contentEditPreview($cur, $e) : ['kind' => $e['edit_kind'], 'share' => 0, 'as_rewrite' => false];
     if (!contentEditApply($db, $cfg, $e)) jsonResponse(['error' => __('api.content.proposal_gone')], 404);
-    $asEdit = $pv['kind'] === 'edit' && !$pv['as_rewrite'];
+    $removal = defined('IMAGES_REMOVAL_NOTE') && (string)($e['note'] ?? '') === IMAGES_REMOVAL_NOTE;
+    $asEdit = $removal || ($pv['kind'] === 'edit' && !$pv['as_rewrite']);
     auditNote(['detail' => ['proposal' => $eid, 'kind' => $asEdit ? 'edit' : 'rewrite', 'share' => $asEdit ? $pv['share'] : null]]);
     jsonResponse(['success' => true, 'kind' => $asEdit ? 'edit' : 'rewrite', 'share' => $asEdit ? $pv['share'] : null,
-                  'message' => $asEdit ? __('api.content.edit_applied', ['pct' => $pv['share']]) : __('api.content.proposal_applied')]);
+                  'message' => $removal ? __('api.content.removal_applied', ['pct' => $pv['share']])
+                      : ($asEdit ? __('api.content.edit_applied', ['pct' => $pv['share']]) : __('api.content.proposal_applied'))]);
 }
 
 $id = (int)($input['id'] ?? 0);

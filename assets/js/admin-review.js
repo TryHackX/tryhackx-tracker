@@ -444,7 +444,8 @@
     }
 
     function editCard(row) {
-        const isEdit = row.edit_kind === 'edit' && !row.as_rewrite;
+        const removal = row.note === 'removal of a picture its owner deleted';
+        const isEdit = removal || (row.edit_kind === 'edit' && !row.as_rewrite);
         const card = el('div', { className: 'rv-card rv-st-wait' + (isEdit ? ' rv-kind-edit' : ' rv-kind-rewrite') });
         card.appendChild(el('div', { className: 'rv-head' }, [
             el('div', { className: 'rv-title' }, [
@@ -462,11 +463,14 @@
                 row.kind === 'idx' ? el('span', { className: 'wl-badge wl-b-warn', text: t.key('js.wl.rv_index_only') }) : '',
             ]),
         ]));
+        if (removal) {
+            card.appendChild(el('div', { className: 'rv-note' }, [icon('bi-image'), ' ', t.key('js.review.removal')]));
+        }
         card.appendChild(el('div', { className: 'rv-kind-line wl-small' }, [
             isEdit
                 ? el('span', { className: 'rv-share', text: t.key('js.wl.edit_share', { pct: row.share }) })
                 : el('span', { className: 'text-muted', text: row.edit_kind === 'edit' ? t.key('js.wl.edit_as_rewrite') : t.key('js.wl.rewrite_line') }),
-            isEdit && row.cur_author ? el('span', { className: 'text-muted' }, [' ', t.key('js.wl.edit_author_stays', { user: row.cur_author })]) : '',
+            isEdit && row.cur_author ? el('span', { className: 'text-muted' }, [' ', t.key(removal ? 'js.review.removal_author_stays' : 'js.wl.edit_author_stays', { user: row.cur_author })]) : '',
         ]));
         const cmp = el('div', { className: 'rv-diff' });
         const side = (label, html, url, trusted) => {
@@ -491,7 +495,7 @@
         const acts = el('div', { className: 'rv-acts' });
         acts.appendChild(textBtn('bi-check-lg', 'btn-outline-success', t.key('js.wl.apply'), async () => {
             if (!await confirmAction(isEdit ? t.key('js.wl.apply_edit_title') : t.key('js.wl.apply_rewrite_title'),
-                isEdit ? t.key('js.wl.apply_edit_body', { pct: row.share }) : t.key('js.wl.apply_rewrite_body'),
+                isEdit ? t.key(removal ? 'js.review.removal_apply_body' : 'js.wl.apply_edit_body', { pct: row.share }) : t.key('js.wl.apply_rewrite_body'),
                 { code: row.info_hash, after: t.key('js.wl.apply_rewrite_after'), okLabel: t.key('js.wl.apply') })) return;
             const j = await apiCall('admin/wl_content', 'POST', { op: 'edit_apply', id: row.id, sha: row.sha });
             if (j && j.changed) {

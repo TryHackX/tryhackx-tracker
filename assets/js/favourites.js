@@ -2185,7 +2185,7 @@
         // Every pane the page may carry: a name missing here falls back to the overview (1.69.0 added
         // `votes`, the likes / ratings tab right after Favourites; 1.70.0 `descriptions`, whose TAB sits
         // right after that one — the order of the tabs is the template's, this list is only who exists).
-        var panes = ['overview', 'favourites', 'votes', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds', 'descriptions'];
+        var panes = ['overview', 'favourites', 'votes', 'uploads', 'lists', 'messages', 'people', 'members', 'sounds', 'descriptions', 'images'];
         function show(name) {
             // `#messages:somebody` opens the inbox AT that conversation — the part before the colon
             // is the pane, the rest belongs to people.js. A tab bar that did not know that fell
@@ -2248,7 +2248,7 @@
         }
         [['acc-fav-public', 'fav_public'], ['acc-fav-listed', 'fav_listed'], ['acc-votes-public', 'votes_public'], ['acc-votes-listed', 'votes_listed'],
          ['acc-descs-public', 'descriptions_public'], ['acc-credit-public', 'content_credit_public'],
-         ['acc-lists-public', 'lists_public'], ['acc-profile-listed', 'profile_listed']].forEach(function (pair) {
+         ['acc-lists-public', 'lists_public'], ['acc-profile-listed', 'profile_listed'], ['acc-images-public', 'images_public']].forEach(function (pair) {
             var input = document.getElementById(pair[0]);
             if (!input) return;
             input.addEventListener('change', async function () {

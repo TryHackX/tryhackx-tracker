@@ -46,6 +46,7 @@ require_once __DIR__ . '/includes/profilebio.php';
 require_once __DIR__ . '/includes/profilevotes.php';
 // The descriptions a member wrote, on the profile (v81): the gate, the parameters and the bounded read.
 require_once __DIR__ . '/includes/profiledescs.php';
+require_once __DIR__ . '/includes/profileimages.php';
 // Comments on a torrent (v83): the renderer, the rules, the people told, and every request the endpoints make.
 require_once __DIR__ . '/includes/comments.php';
 // Reports of comments, descriptions and shouts, and warnings (1.71.0): after comments.php, whose rows it reads.
@@ -384,6 +385,7 @@ $apiRoutes = [
     // The descriptions a member wrote (1.70.0, includes/profiledescs.php): GET only, the same 404 for
     // every no.
     'user_descriptions'          => 'api/user_descriptions.php',
+    'user_images'                => 'api/user_images.php',
     'hash_favourites'            => 'api/hash_favourites.php',
     // "Who has this" (1.70.0, includes/who.php): favourites, likes / ratings and lists, one section a
     // request, GET only, the same 404 for every no.

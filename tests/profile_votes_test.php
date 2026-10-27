@@ -679,7 +679,7 @@ check('the two new icons are in the Font Awesome map, as solid thumbs', ($map['h
       && ($map['hand-thumbs-down-fill'] ?? '') === 'fa-solid fa-thumbs-down' && str_contains($fj, "'bi bi-hand-thumbs-up-fill'"));
 check('the layout loads the script (and the tab router in it) while the feature is on',
       str_contains($src('templates/layout.php'), "|| (function_exists('profileVotesEnabled') && profileVotesEnabled(\$cfg))): ?>"));
-check('the privacy endpoint saves the flag with the others', str_contains($src('api/user_privacy.php'), "'profile_listed', 'votes_public'] as \$flag"));
+check('the privacy endpoint saves the flag with the others', str_contains($src('api/user_privacy.php'), "'profile_listed', 'votes_public', 'images_public'] as \$flag"));
 
 /* ══ 8. a vote taken back leaves the list at once (1.71.0) ═════════════════ */
 // Last, on section 5's own fixtures: the sections before count the owner's twelve votes. The owner takes back

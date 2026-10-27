@@ -66,8 +66,8 @@ add('api.images', {
                  'Ten obraz przekroczyłby :mb MB wgranych w ciągu ostatnich 24 godzin — tyle ta strona przyjmuje. Spróbuj później.'),
     'quota': ('Your pictures already take :used MB of the :max MB your account may keep. Delete the ones you no longer need.',
               'Twoje obrazy zajmują już :used MB z :max MB, które może mieć Twoje konto. Usuń te, których już nie potrzebujesz.'),
-    'in_use': ('That picture is used in a description, a proposal, a page or a comment, so it stays.',
-               'Ten obraz jest użyty w opisie, propozycji, na stronie albo w komentarzu, więc zostaje.'),
+    'in_use': ('That picture is used in a description, a proposal, a page or a comment, so it stays here. Delete it on the Images tab of your account to have it taken out of them.',
+               'Ten obraz jest użyty w opisie, propozycji, na stronie albo w komentarzu, więc tu zostaje. Usuń go na karcie Obrazy w swoim koncie, aby został z nich usunięty.'),
     'not_found': ('There is no such picture among yours.', 'Nie ma takiego obrazu wśród Twoich.'),
     'unknown_op': ('Unknown operation.', 'Nieznana operacja.'),
 })
