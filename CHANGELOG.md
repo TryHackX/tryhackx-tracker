@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.83.1] — 2026-10-27
+
+The owner's notes after turning down the forum's descriptions: the torrents vanished from the search, sending again
+said "skipped", and the pictures stayed. With homepage-blocks 2.12.3.
+
+- **The search lists every registered torrent whatever became of its description.** The description filter started
+  from "hide rejected", and on a blacklist-mode tracker its select is not even drawn — 159 torrents were simply gone.
+  It starts from "any" now; "hide rejected" is still one of its choices.
+- **Bringing a forum text back publishes it** when the key publishes, also when the text changed on the forum since it
+  was turned down (it used to wait for a moderator then).
+- **The forum hears "turned down" as its own count** (`declined` in the describe summary), not mixed into "skipped".
+- **Moderation → Delete the selected** (with the panel password): the texts go, a description from the forum is
+  forgotten so the forum's next Send / refresh all sends it again as new, and the pictures copied for them that
+  nothing else uses are deleted at once.
+
 ## [1.83.0] — 2026-10-27
 
 Reports of pictures, after the owner's "add reporting images: in the picture viewer, a report, handled in the reports like the rest". Schema 103.
