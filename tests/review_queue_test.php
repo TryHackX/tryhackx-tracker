@@ -5,7 +5,7 @@ if (!is_file($root . '/config/database.php')) { fwrite(STDERR, "config/database.
 $libs = ['config/app.php', 'config/database.php', 'includes/settings.php', 'includes/functions.php', 'includes/schema.php',
          'includes/whitelist.php', 'includes/index.php', 'includes/richtext.php', 'includes/content.php', 'includes/mail.php',
          'includes/users.php', 'includes/favourites.php', 'includes/usermedia.php', 'includes/images.php', 'includes/auth.php',
-         'includes/api_auth.php', 'includes/audit.php', 'includes/lang.php', 'includes/forumdescs.php'];
+         'includes/api_auth.php', 'includes/audit.php', 'includes/lang.php', 'includes/forumdescs.php', 'includes/reputation.php'];
 foreach ($libs as $f) require_once $root . '/' . $f;
 
 $fails = 0; $n = 0;

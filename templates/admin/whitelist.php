@@ -104,6 +104,13 @@
                             <option value="rejected"><?= _h('a.wl.review_rejected') ?></option>
                             <option value="none"><?= _h('a.wl.review_none') ?></option>
                         </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-content" title="<?= _h('a.wl.content_filter') ?>">
+                            <option value=""><?= _h('a.wl.content_any') ?></option>
+                            <option value="approved"><?= _h('a.wl.content_approved') ?></option>
+                            <option value="pending"><?= _h('a.wl.content_pending') ?></option>
+                            <option value="rejected"><?= _h('a.wl.content_rejected') ?></option>
+                            <option value="none"><?= _h('a.wl.content_none') ?></option>
+                        </select>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="wl-filter-banned" title="<?= _h('a.wl.f_banned_title') ?>">
                             <option value="active"><?= _h('a.wl.st_active') ?></option>
                             <option value="banned"><?= _h('a.wl.st_banned') ?></option>

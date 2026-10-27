@@ -37,6 +37,7 @@ if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {
 $canFiles = userCan($db, $cfg, 'index.files');
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
+$canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
 
 // Let go of the session before the slow part.
 //
@@ -85,6 +86,9 @@ try {
         'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
         'include_whitelist' => $canWl,
         'content'           => (string)($_GET['content'] ?? 'not_rejected'),
+        'desc_only'         => $canContent && ($_GET['desc'] ?? '') === '1',
+        'search_desc'       => $canContent && ($_GET['in_desc'] ?? '') === '1',
+        'desc_flags'        => $canContent,
         // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
         'hash_search'       => $canMagnet,
     ]);
@@ -149,6 +153,7 @@ foreach ($res['rows'] as $r) {
             : null;
     }
     $row['content_status'] = (string)($r['content_status'] ?? 'none');
+    if ($canContent) $row['desc'] = (int)($r['desc'] ?? 0);
     $rows[] = $row;
 }
 
@@ -156,6 +161,6 @@ jsonResponse([
     'success' => true, 'rows' => $rows, 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'],
     // 1.74.0 (PERF-2): true when `total` is only how far the search counted — the page shows "N+".
     'total_capped' => !empty($res['total_capped']),
-    'can' => ['files' => $canFiles, 'magnet' => $canMagnet, 'whitelist' => $canWl],
+    'can' => ['files' => $canFiles, 'magnet' => $canMagnet, 'whitelist' => $canWl, 'content' => $canContent],
     'rep_in_results' => $repInResults,
 ]);

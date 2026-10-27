@@ -4394,7 +4394,7 @@ window.siteToast = siteToast;
     // The query parameters the search page owns. Named here rather than inside initSearch()
     // because the panel's own Share button strips them: a link to ONE torrent must not carry the
     // sender's query, filter and page number with it.
-    const OWNED = ['search', 'search_files', 'content', 'sort', 'page', 'per_page', 'hash'];
+    const OWNED = ['search', 'search_files', 'in_desc', 'desc', 'content', 'sort', 'page', 'per_page', 'hash'];
 
     /** The CSRF token of whichever page this panel is on (csrfToken(): the layout's, since 1.71.0 on every page). */
     function csrfForContent() {
@@ -4787,6 +4787,7 @@ window.siteToast = siteToast;
             .filter(Boolean);
         const input = $id('search-input'), clearBtn = $id('search-clear');
         const bestBox = $id('search-best'), filesBox = $id('search-files');
+        const descBox = $id('search-desc'), inDescBox = $id('search-in-desc');
         // Mirrors indexSearchTooShort() in includes/index.php, same regex and same floor. A one- or
         // two-character term cannot use the fulltext index and scans the whole catalogue twice, and
         // the 400 ms debounce below sends exactly that on the first keystroke of every search — so it
@@ -4881,6 +4882,8 @@ window.siteToast = siteToast;
             const q = input.value.trim();
             if (q) st.search = q;
             if (filesBox && filesBox.checked) st.search_files = '1';
+            if (inDescBox && inDescBox.checked) st.in_desc = '1';
+            if (descBox && descBox.checked) st.desc = '1';
             if (contentSel && contentSel.value !== contentDefault) st.content = contentSel.value;
             // serializeSort() answers the API, and for "no relevance, no column" its answer is the
             // request-level fallback `seeders:desc`. Writing that into the address would read back as
@@ -4957,6 +4960,8 @@ window.siteToast = siteToast;
             return {
                 search: String(p.get('search') || '').slice(0, 200),
                 files: p.get('search_files') === '1',
+                inDesc: p.get('in_desc') === '1',
+                desc: p.get('desc') === '1',
                 content: (contentSel && c && [...contentSel.options].some(o => o.value === c)) ? c : contentDefault,
                 sort: parseSort(p.get('sort')),
                 perPage: (perPageSel && per && [...perPageSel.options].some(o => o.value === per)) ? per : null,
@@ -4970,6 +4975,8 @@ window.siteToast = siteToast;
             try {
                 input.value = st.search;
                 if (filesBox) filesBox.checked = st.files;
+                if (inDescBox) inDescBox.checked = st.inDesc;
+                if (descBox) descBox.checked = st.desc;
                 if (contentSel) contentSel.value = st.content;
                 // This load only. The `change` listener is what saves the preference, and setting
                 // .value from script does not fire it — which is exactly the behaviour wanted here.
@@ -5052,6 +5059,8 @@ window.siteToast = siteToast;
             // Only with something to look for (1.70.0): without a term the answer is the same, and the
             // flag alone kept the server from reusing its cached count of the whole catalogue.
             if (filesOn && q) qs.set('search_files', '1');
+            if (inDescBox && inDescBox.checked && q) qs.set('in_desc', '1');
+            if (descBox && descBox.checked) qs.set('desc', '1');
             if (contentSel && contentSel.value) qs.set('content', contentSel.value);
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
@@ -5095,8 +5104,22 @@ window.siteToast = siteToast;
                 }
                 // The state of the words attached to it, not of the torrent. Only shown when there
                 // is a state to show: an index row nobody has written about has none.
-                if (r.content_status === 'approved' || r.content_status === 'rejected' || r.content_status === 'pending') {
+                if ((r.content_status === 'approved' && !r.desc) || r.content_status === 'rejected' || r.content_status === 'pending') {
                     nameTd.appendChild(contentStatusIcon(r.content_status));
+                }
+                if (r.desc) {
+                    const marks = document.createElement('span');
+                    marks.className = 'search-desc-marks';
+                    [[1, 'bi-file-earmark-text', 'js.app.desc_has_text'], [2, 'bi-image', 'js.app.desc_has_pics'], [4, 'bi-play-btn', 'js.app.desc_has_video']].forEach(([bit, glyph, key]) => {
+                        if (!(r.desc & bit)) return;
+                        const i = document.createElement('i');
+                        i.className = 'bi ' + glyph;
+                        i.setAttribute('role', 'img');
+                        i.title = t.key(key);
+                        i.setAttribute('aria-label', t.key(key));
+                        marks.appendChild(i);
+                    });
+                    nameTd.appendChild(marks);
                 }
                 if (r.files_count) {
                     const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
@@ -5458,6 +5481,8 @@ window.siteToast = siteToast;
             run(1, urlMode);
         }
         if (filesBox) filesBox.addEventListener('change', () => searchOptionChanged());
+        if (inDescBox) inDescBox.addEventListener('change', () => searchOptionChanged());
+        if (descBox) descBox.addEventListener('change', () => run(1));
         if (contentSel) contentSel.addEventListener('change', () => run(1));
         updateSortIcons();
         // Whatever the address says, before the first request — so a link into a sorted page 3 of a

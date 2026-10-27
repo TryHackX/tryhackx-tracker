@@ -6,7 +6,7 @@
     const { apiCall, el, esc, showToast, confirmAction, flashTip, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot } = A;
     const $ = (id) => document.getElementById(id);
 
-    const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
+    const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', desc: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
     const nearRadius = () => Math.max(1, parseInt(document.body.dataset.nearPages || '2', 10) || 2);
     // index_files_admin_mode. 'button' is what the panel has always done — one slice, then "Load the
     // whole file list"; 'scroll' fires that same second request when the operator reaches the end of
@@ -169,6 +169,7 @@
         if (state.searchFiles) qs.set('search_files', '1');
         if (state.meta) qs.set('meta', state.meta);
         if (state.life) qs.set('life', state.life);
+        if (state.desc) qs.set('desc', state.desc);
         return qs;
     }
     let loadSeq = 0;
@@ -232,6 +233,9 @@
             const marks = [];
             if (r.protected) marks.push(el('i', { className: 'bi bi-shield-fill idx-mark', role: 'img', title: t.key('js.index.protected_title'), 'aria-label': t.key('js.index.protected_title') }));
             if (r.promoted) marks.push(el('i', { className: 'bi bi-star-fill idx-mark', role: 'img', title: t.key('js.index.promoted_title'), 'aria-label': t.key('js.index.promoted_title') }));
+            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-btn', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
+                if (r.desc & bit) marks.push(el('i', { className: 'bi ' + glyph + ' idx-mark idx-desc-mark', role: 'img', title: t.key(key), 'aria-label': t.key(key) }));
+            });
             tr.appendChild(el('td', { className: 'wl-name-cell' }, el('div', { className: 'idx-name-row' },
                 [el('span', { className: 'idx-name', text: r.name || '—', title: r.name || '' }), ...marks])));
             tr.appendChild(el('td', { className: 'font-mono', text: r.total_size ? fmtBytes(r.total_size) : '—' }));
@@ -621,6 +625,7 @@
         });
         $('idx-filter-meta').addEventListener('change', () => { state.meta = $('idx-filter-meta').value; state.page = 1; load(); });
         $('idx-filter-life').addEventListener('change', () => { state.life = $('idx-filter-life').value; state.page = 1; load(); });
+        $('idx-filter-desc').addEventListener('change', () => { state.desc = $('idx-filter-desc').value; state.page = 1; load(); });
         const idxPp = $('idx-perpage');
         if (idxPp) {
             try { const v = localStorage.getItem('thx_idx_perpage'); if (v && [...idxPp.options].some(o => o.value === v)) idxPp.value = v; } catch (e) {}

@@ -5,6 +5,7 @@ $canSearch = $searchOn && userCan($db, $cfg, 'index.view');
 $canFiles = $canSearch && userCan($db, $cfg, 'index.files');
 $canMagnet = $canSearch && userCan($db, $cfg, 'index.magnet');
 $canWl = $canSearch && userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
+$canDesc = $canSearch && userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
 // The Share buttons. Nothing about the view is secret — the address is built from controls the
 // reader can see — so this switch is about whether the operator wants the site handing out links,
 // not about access. The state is written into the address either way; only the buttons go.
@@ -60,6 +61,10 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
         <label class="search-check" title="<?= _h('search.best_title') ?>"><input type="checkbox" id="search-best" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.best') ?></label>
         <?php if ($canFiles): ?>
         <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+        <?php endif; ?>
+        <?php if ($canDesc): ?>
+        <label class="search-check" title="<?= _h('search.in_desc_title') ?>"><input type="checkbox" id="search-in-desc"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.in_desc') ?></label>
+        <label class="search-check" title="<?= _h('search.desc_only_title') ?>"><input type="checkbox" id="search-desc"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.desc_only') ?></label>
         <?php endif; ?>
         <?php
         // WHEN THIS FILTER IS WORTH SHOWING, WHICH IS NARROWER THAN IT LOOKS.

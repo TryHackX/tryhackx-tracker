@@ -82,6 +82,7 @@
         S.pages = r.pages || 1;
         S.page = r.page || 1;
         S.mayPunish = !!r.may_punish;
+        S.repMode = r.rep_mode === 'stars' ? 'stars' : 'thumbs';
         paintCounts(r);
         $('rq-total').textContent = S.total
             ? t.key(S.f.status === 'pending' ? 'js.wl.n_waiting' : 'js.wl.n_shown', { n: num(S.total) }) : '';
@@ -164,9 +165,12 @@
             el('code', { className: 'rq-hash', title: r.info_hash, text: String(r.info_hash).slice(0, 12) }),
         ]);
         if (r.votes_count) {
+            const stars = S.repMode === 'stars';
             meta.appendChild(el('span', {
-                className: 'wl-badge ' + (r.score_x100 >= 5000 ? 'wl-b-ok' : 'wl-b-warn'),
-                text: t.key(r.votes_count === 1 ? 'js.wl.rating_one' : 'js.wl.rating_many', { pct: Math.round(r.score_x100 / 100), n: r.votes_count }),
+                className: 'wl-badge ' + (r.score_x100 >= (stars ? 250 : 5000) ? 'wl-b-ok' : 'wl-b-warn'),
+                text: stars
+                    ? t.key(r.votes_count === 1 ? 'js.wl.rating_stars_one' : 'js.wl.rating_stars_many', { stars: num(Math.round(r.score_x100 / 10) / 10), n: r.votes_count })
+                    : t.key(r.votes_count === 1 ? 'js.wl.rating_one' : 'js.wl.rating_many', { pct: Math.round(r.score_x100 / 100), n: r.votes_count }),
             }));
         }
         const acts = el('div', { className: 'rq-acts' });
@@ -517,11 +521,21 @@
     }
 
     function showSub(sub) {
+        const pane = sub === 'edits' ? 'edits' : 'queue';
+        if (sub === 'published' || (S.sub === 'published' && sub === 'queue')) {
+            const published = sub === 'published';
+            S.f.status = published ? 'approved' : DEFAULTS.status;
+            S.f.sort = published ? 'newest' : DEFAULTS.sort;
+            $('rq-status').value = S.f.status;
+            $('rq-sort').value = S.f.sort;
+            S.page = 1;
+            S.sel.clear();
+        }
         S.sub = sub;
         document.querySelectorAll('#rq-subtabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
-        $('rq-pane-queue').classList.toggle('d-hidden', sub !== 'queue');
-        $('rq-pane-edits').classList.toggle('d-hidden', sub !== 'edits');
-        if (sub === 'edits') loadEdits(); else load();
+        $('rq-pane-queue').classList.toggle('d-hidden', pane !== 'queue');
+        $('rq-pane-edits').classList.toggle('d-hidden', pane !== 'edits');
+        if (pane === 'edits') loadEdits(); else load();
     }
 
     function refilter() {

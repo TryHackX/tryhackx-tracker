@@ -87,6 +87,10 @@
                             <option value="protected"><?= _h('a.index.l_protected') ?></option>
                             <option value="promoted"><?= _h('a.index.l_promoted') ?></option>
                         </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="idx-filter-desc" title="<?= _h('a.index.f_desc_title') ?>">
+                            <option value=""><?= _h('a.index.d_all') ?></option>
+                            <option value="yes"><?= _h('a.index.d_yes') ?></option>
+                        </select>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="idx-perpage" title="<?= _h('a.index.perpage_title') ?>">
                             <option value="15"><?= _h('search.perpage', ['n' => 15]) ?></option>
                             <option value="25" selected><?= _h('search.perpage', ['n' => 25]) ?></option>

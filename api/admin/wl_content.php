@@ -47,7 +47,7 @@ $wlcFace = static fn(array $r): string => (($r['author'] ?? null) !== null && fu
     ? userAvatarField(['username' => (string)$r['author'], 'avatar_sha' => $r['author_avatar_sha'] ?? null], 20, getBaseUrl(), $cfg)
     : '';
 
-$wlcFilter = static function (array $in): array {
+$wlcFilter = static function (array $in, bool $stars = false): array {
     // What to show. 'pending' is the queue; the other two are the record of what was decided, which
     // is the only way to answer "why is this published" or "who rejected mine" without reading the
     // database by hand.
@@ -109,7 +109,12 @@ $wlcFilter = static function (array $in): array {
         'newest' => 'q.created_at DESC, q.id DESC',
         'long'   => 'q.chars DESC, q.id ASC',
         'short'  => 'q.chars ASC, q.id ASC',
-        'score'  => 'CASE WHEN q.votes_count = 0 THEN 5000 ELSE q.score_x100 END ASC, q.votes_count DESC, q.created_at ASC',
+        'score'  => match ($stars) {
+            true    => 'CASE WHEN q.votes_count = 0 THEN 250 ELSE q.score_x100 END ASC, q.votes_count DESC, q.created_at ASC',
+            default => 'CASE WHEN q.votes_count = 0 THEN 5000 ELSE q.score_x100 END ASC, q.votes_count DESC, q.created_at ASC',
+        },
+        'best'   => '(q.votes_count = 0) ASC, q.score_x100 DESC, q.votes_count DESC, q.created_at DESC',
+        'pics'   => 'q.pics DESC, q.created_at DESC, q.id DESC',
     ];
     if (!isset($orders[$sort])) $sort = 'oldest';
     $fromW = "FROM whitelist w LEFT JOIN forum_descs f ON f.info_hash = w.info_hash LEFT JOIN users u ON u.id = w.content_user_id WHERE " . $whereW;
@@ -118,13 +123,21 @@ $wlcFilter = static function (array $in): array {
             'fromW' => $fromW, 'fromC' => $fromC, 'args' => array_merge($argsW, $argsC)];
 };
 
-$wlcKeys = static function (PDO $db, array $f, int $limit, int $offset, bool $withSha = false): array {
+$wlcPics = static function (string $col): string {
+    return "(CHAR_LENGTH(COALESCE($col, '')) - CHAR_LENGTH(REPLACE(LOWER(COALESCE($col, '')), '[img', ''))) DIV 4
+            + (CHAR_LENGTH(COALESCE($col, '')) - CHAR_LENGTH(REPLACE(COALESCE($col, ''), '![', ''))) DIV 2
+            + (CHAR_LENGTH(COALESCE($col, '')) - CHAR_LENGTH(REPLACE(LOWER(COALESCE($col, '')), 'upl-image-preview', ''))) DIV 17";
+};
+
+$wlcKeys = static function (PDO $db, array $f, int $limit, int $offset, bool $withSha = false) use ($wlcPics): array {
     $shaW = $withSha ? ", SHA2(CONCAT(w.description_format, CHAR(10), COALESCE(w.description, '')), 256) AS sha" : '';
     $shaC = $withSha ? ", SHA2(CONCAT(c.description_format, CHAR(10), COALESCE(c.description, '')), 256) AS sha" : '';
+    $picsW = $f['sort'] === 'pics' ? $wlcPics('w.description') : '0';
+    $picsC = $f['sort'] === 'pics' ? $wlcPics('c.description') : '0';
     $sql = "SELECT * FROM (
-                SELECT 'wl' AS kind, w.id, w.created_at, CHAR_LENGTH(COALESCE(w.description, '')) AS chars, w.votes_count, w.score_x100" . $shaW . " " . $f['fromW'] . "
+                SELECT 'wl' AS kind, w.id, w.created_at, CHAR_LENGTH(COALESCE(w.description, '')) AS chars, w.votes_count, w.score_x100, " . $picsW . " AS pics" . $shaW . " " . $f['fromW'] . "
                 UNION ALL
-                SELECT 'idx' AS kind, c.id, c.created_at, CHAR_LENGTH(COALESCE(c.description, '')) AS chars, 0 AS votes_count, 0 AS score_x100" . $shaC . " " . $f['fromC'] . "
+                SELECT 'idx' AS kind, c.id, c.created_at, CHAR_LENGTH(COALESCE(c.description, '')) AS chars, COALESCE(i.votes_count, 0) AS votes_count, COALESCE(i.score_x100, 0) AS score_x100, " . $picsC . " AS pics" . $shaC . " " . $f['fromC'] . "
             ) q ORDER BY " . $f['order'] . " LIMIT " . $limit . " OFFSET " . $offset;
     $st = $db->prepare($sql);
     $st->execute($f['args']);
@@ -166,8 +179,9 @@ $wlcRows = static function (PDO $db, array $cfg, array $keys) use ($wlcFace, $wl
     if ($byKind['idx']) {
         $in = implode(',', array_fill(0, count($byKind['idx']), '?'));
         $st = $db->prepare("SELECT 'idx' AS kind, c.id, c.info_hash, i.name, 'index' AS source, c.source_url, c.description_format, c.content_status,
-                                   c.content_rejected_note, c.content_reviewed_at, c.created_at, 0 AS votes_up, 0 AS votes_down, 0 AS votes_count,
-                                   0 AS score_x100, c.content_user_id AS author_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
+                                   c.content_rejected_note, c.content_reviewed_at, c.created_at, COALESCE(i.votes_up, 0) AS votes_up,
+                                   COALESCE(i.votes_down, 0) AS votes_down, COALESCE(i.votes_count, 0) AS votes_count,
+                                   COALESCE(i.score_x100, 0) AS score_x100, c.content_user_id AS author_id, u.username AS author, u.avatar_sha AS author_avatar_sha,
                                    u.content_credit_public AS author_credit_public, NULL AS forum_url, NULL AS forum_author, NULL AS forum_state,
                                    NULL AS forum_note, NULL AS forum_at, 0 AS from_forum,
                                    SHA2(CONCAT(c.description_format, CHAR(10), COALESCE(c.description, '')), 256) AS sha, "
@@ -194,7 +208,7 @@ $wlcRows = static function (PDO $db, array $cfg, array $keys) use ($wlcFace, $wl
 };
 
 if ($op === 'list') {
-    $f = $wlcFilter($input);
+    $f = $wlcFilter($input, repMode($cfg) === 'stars');
     $per = (int)($input['per'] ?? 25);
     if (!in_array($per, [25, 50, 100], true)) $per = 25;
     $cs = $db->prepare("SELECT (SELECT COUNT(*) " . $f['fromW'] . ") + (SELECT COUNT(*) " . $f['fromC'] . ")");
@@ -208,14 +222,14 @@ if ($op === 'list') {
     // the filter would read 0 while a queue sat behind it.
     jsonResponse(['success' => true, 'rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per' => $per,
                   'status' => $f['status'], 'source' => $f['source'], 'format' => $f['format'], 'sort' => $f['sort'],
-                  'waiting' => contentPendingCount($db), 'edits_pending' => $edits,
+                  'waiting' => contentPendingCount($db), 'edits_pending' => $edits, 'rep_mode' => repMode($cfg),
                   'may_punish' => panelCan($db, $cfg, 'panel.moderation.handle'),
                   'autopublish' => ($cfg['wl_content_autopublish'] ?? '0') === '1',
                   'review_on' => ($cfg['wl_content_review'] ?? '1') === '1']);
 }
 
 if ($op === 'ids') {
-    $f = $wlcFilter($input);
+    $f = $wlcFilter($input, repMode($cfg) === 'stars');
     jsonResponse(['success' => true, 'items' => $wlcKeys($db, $f, 2000, 0, true)]);
 }
 
@@ -346,7 +360,8 @@ if ($op === 'reject') {
 }
 
 // clear — the one that cannot be undone
-requireAdminReauth((string)($input['password'] ?? ''), $cfg);
+$viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
+if ($viaUser <= 0 || !userIdHasPermission($db, $cfg, $viaUser, 'content.delete_any')) requireAdminReauth((string)($input['password'] ?? ''), $cfg);
 $rec = contentRowById($db, $kind, $id);
 if ($rec !== null) contentDelete($db, $cfg, $rec + ['kind' => $kind], ['id' => 0], 'any', ['notify' => false]);
 jsonResponse(['success' => true, 'message' => __('api.content.deleted'), 'waiting' => contentPendingCount($db)]);

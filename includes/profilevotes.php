@@ -158,7 +158,7 @@ function profileVotesParams(array $q): array
 /** The SQL that keeps a member's votes in the current mode, and only those. Literal, chosen by mode. */
 function profileVotesModeSql(array $cfg): string
 {
-    return repMode($cfg) === 'stars' ? 'v.vote BETWEEN 1 AND 10' : 'v.vote IN (-1, 1)';
+    return repMode($cfg) === 'stars' ? "v.scale = 'stars'" : "v.scale = 'thumbs'";
 }
 
 /**

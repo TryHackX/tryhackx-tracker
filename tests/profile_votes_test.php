@@ -287,9 +287,10 @@ $wl = function (string $hash, string $name, int $size, int $seed, bool $banned =
     $db->prepare("INSERT INTO whitelist (info_hash, name, source, meta_status, total_size, files_count, scrape_seeders, scrape_leechers, banned)
                   VALUES (?, ?, 'admin', 'done', ?, 1, ?, 0, ?)")->execute([$hash, $name, $size, $seed, $banned ? 1 : 0]);
 };
-$vote = function (string $hash, string $type, string $key, int $value, string $at) use ($db): void {
-    $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, weight, created_at, updated_at) VALUES (?, ?, ?, ?, 100, ?, ?)
-                  ON DUPLICATE KEY UPDATE vote = VALUES(vote), updated_at = VALUES(updated_at)")->execute([$hash, $type, $key, $value, $at, $at]);
+$vote = function (string $hash, string $type, string $key, int $value, string $at, ?string $scale = null) use ($db): void {
+    $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, scale, weight, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 100, ?, ?)
+                  ON DUPLICATE KEY UPDATE vote = VALUES(vote), scale = VALUES(scale), updated_at = VALUES(updated_at)")
+       ->execute([$hash, $type, $key, $value, $scale ?? ($value >= 2 ? 'stars' : 'thumbs'), $at, $at]);
 };
 $others = 0;
 $extra = function (string $hash, array $values) use ($vote, &$others): void {
@@ -347,9 +348,8 @@ check('thumbs: the owner\'s twelve votes, and only them (±1; not the star value
       $all['total'] === 12 && count($all['rows']) === 12 && !in_array($X1, array_column($all['rows'], 'info_hash'), true)
       && !in_array($T[13], array_column($all['rows'], 'info_hash'), true), $all['total'] . ' ' . $order($all));
 $stAll = $list($cfgStars, $ownT, [], $me);
-check('stars: the same owner lists the 1..10 values — the star rating and the thumbs up (a 1 is half a star), never a -1',
-      in_array($X1, array_column($stAll['rows'], 'info_hash'), true) && $stAll['total'] === 9
-      && !array_filter($stAll['rows'], fn($r) => $r['own_vote'] < 1), $stAll['total'] . ' rows');
+check('stars: the same owner lists only the votes cast as stars — the star rating, never a thumb up or down',
+      in_array($X1, array_column($stAll['rows'], 'info_hash'), true) && $stAll['total'] === 1, $stAll['total'] . ' rows');
 check('an anonymous vote is never on anybody\'s list (not the owner\'s, whose id it carries as its key)',
       !array_filter(array_merge($all['rows'], $stAll['rows']), fn($r) => $r['info_hash'] === $T[13]));
 $r12 = array_values(array_filter($all['rows'], fn($r) => $r['info_hash'] === $T[12]))[0] ?? [];
@@ -444,7 +444,7 @@ $ownS = pvUser($db, $cfgStars, 'pvtest_stars');
 $S = [];
 for ($i = 1; $i <= 9; $i++) { $S[$i] = $H('e7e7', 0x100 + $i); $idx($S[$i], 'PV Star ' . $i, $i * 100, $i, 0); }
 $sOwn = [1 => 10, 8, 6, 4, 2, 1, 7, 5];
-foreach ($sOwn as $i => $v) $vote($S[$i], 'user', (string)$ownS, $v, sprintf('2026-09-02 %02d:00:00', $i));
+foreach ($sOwn as $i => $v) $vote($S[$i], 'user', (string)$ownS, $v, sprintf('2026-09-02 %02d:00:00', $i), 'stars');
 $extra($S[1], [10, 10]);     // 500
 $extra($S[2], [8, 8]);       // 400
 $extra($S[3], [6, 6, 6]);    // 300
@@ -461,11 +461,9 @@ $sorder = function (array $res) use ($S): string {
 };
 $sAll = $list($cfgStars, $ownS, [], $me);
 check('stars: the eight ratings, 1..10, and not the thumb down', $sAll['total'] === 8 && $sorder($sAll) === 'S8,S7,S6,S5,S4,S3,S2,S1', $sorder($sAll));
-// The one value both modes share: their half-star rating (1) reads as a thumb up in thumbs mode — the
-// table does not say which mode a vote was cast in — and nothing else of theirs is a thumb.
 $sThumbs = $list($cfgOn, $ownS, [], $me);
-check('thumbs: the same owner lists the thumb down, and the one rating that IS a thumb up (1), nothing else',
-      $sThumbs['total'] === 2 && $sorder($sThumbs) === 'S9,S6', $sorder($sThumbs));
+check('thumbs: the same owner lists only their thumb down — a half-star rating (1) was cast as a star, not a thumb',
+      $sThumbs['total'] === 1 && $sorder($sThumbs) === 'S9', $sorder($sThumbs));
 $s1 = array_values(array_filter($sAll['rows'], fn($r) => $r['info_hash'] === $S[1]))[0] ?? [];
 $s7 = array_values(array_filter($sAll['rows'], fn($r) => $r['info_hash'] === $S[7]))[0] ?? [];
 check('a star row: their 10 (five stars), the average in hundredths (500), no up and down',

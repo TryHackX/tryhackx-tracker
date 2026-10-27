@@ -2148,6 +2148,11 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     if ($lifeFilter === 'protected') $where[] = "protected_until IS NOT NULL AND protected_until >= NOW()";
     elseif ($lifeFilter === 'grace')  $where[] = "meta_status <> 'done' AND grace_until >= NOW()";
     elseif ($lifeFilter === 'promoted') $where[] = "promoted_at IS NOT NULL";
+    if (($q['desc'] ?? '') === 'yes') {
+        $descClause = indexDescribedClause($db, true);
+        $where[] = $descClause[0];
+        foreach ($descClause[1] as $v) $params[] = $v;
+    }
     $minSeeders = (int)($q['min_seeders'] ?? 0);
     if ($minSeeders > 0) $where[] = "GREATEST(COALESCE(scrape_seeders, 0), last_seeders) >= " . $minSeeders;
 
@@ -2230,6 +2235,11 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         $row['promoted'] = $row['promoted_at'] !== null;
     }
     unset($row);
+    if (!empty($q['desc_flags']) && $rows) {
+        $fl = indexDescFlags($db, array_column($rows, 'info_hash'), true);
+        foreach ($rows as &$row) $row['desc'] = $fl[$row['info_hash']] ?? 0;
+        unset($row);
+    }
 
     return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
 }
@@ -2299,6 +2309,41 @@ function indexIsStatementTimeout(\Throwable $e): bool {
  * when the database stopped the search for time (production 2026-10-06, five 500s): neither the fulltext pass nor the
  * LIKE fallback behind it is retried then — the fallback is the slower of the two.
  */
+function indexDescribedClause(PDO $db, bool $withWl): array {
+    $lim = INDEX_FILE_MATCH_CAP + 1;
+    $hashes = $db->query("SELECT info_hash FROM hash_content WHERE content_status = 'approved' AND description IS NOT NULL LIMIT $lim")->fetchAll(PDO::FETCH_COLUMN);
+    if ($withWl) {
+        $more = $db->query("SELECT info_hash FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description IS NOT NULL LIMIT $lim")->fetchAll(PDO::FETCH_COLUMN);
+        $hashes = array_values(array_unique(array_merge($hashes, $more)));
+    }
+    if (count($hashes) > INDEX_FILE_MATCH_CAP) {
+        $clause = "info_hash IN (SELECT info_hash FROM hash_content WHERE content_status = 'approved' AND description IS NOT NULL)";
+        if ($withWl) $clause = "(" . $clause . " OR info_hash IN (SELECT info_hash FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description IS NOT NULL))";
+        return [$clause, []];
+    }
+    if (!$hashes) return ['1 = 0', []];
+    return ['info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')', array_map('strval', $hashes)];
+}
+
+function indexDescFlags(PDO $db, array $hashes, bool $withWl): array {
+    $hashes = array_values(array_unique(array_filter(array_map('strval', $hashes), static fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
+    if (!$hashes) return [];
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    $cols = "info_hash, 1 | ((description LIKE '%[img%' OR description LIKE '%![%' OR description LIKE '%upl-image%') << 1)
+             | ((description LIKE '%youtu%' OR description LIKE '%.mp4%' OR description LIKE '%.webm%') << 2) AS f";
+    $out = [];
+    foreach ($withWl ? ['hash_content', 'whitelist'] : ['hash_content'] as $tbl) {
+        $sql = match ($tbl) {
+            'whitelist' => "SELECT $cols FROM whitelist WHERE info_hash IN ($in) AND banned = 0 AND content_status = 'approved' AND description IS NOT NULL",
+            default     => "SELECT $cols FROM hash_content WHERE info_hash IN ($in) AND content_status = 'approved' AND description IS NOT NULL",
+        };
+        $st = $db->prepare($sql);
+        $st->execute($hashes);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $out[(string)$r['info_hash']] = (int)$r['f'];
+    }
+    return $out;
+}
+
 function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $page = max(1, (int)($q['page'] ?? 1));
     // 200 is what the page offers and the endpoint accepts (1.75.0: this clamp said 100, so the reader who picked "200 / page"
@@ -2327,6 +2372,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     if (!in_array($contentFilter, ['not_rejected', 'rejected', 'approved', 'approved_or_none', 'none', 'pending'], true)) {
         $contentFilter = 'not_rejected';
     }
+    $descOnly = !empty($q['desc_only']);
+    $inDesc = !empty($q['search_desc']);
 
     // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
     // ignores its direction (best first is the only sensible order)
@@ -2524,6 +2571,23 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         }
         $q['__files_capped'] = $capped;
     }
+    if ($inDesc && $search !== '' && !$isHash) {
+        $like = '%' . indexLikeEscape($search) . '%';
+        $lim = INDEX_FILE_MATCH_CAP;
+        try {
+            if ($withWl) {
+                $st = $db->prepare("SELECT id FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description LIKE ? LIMIT $lim");
+                $st->execute([$like]);
+                $fileIds = array_values(array_unique(array_merge($fileIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)))));
+            }
+            $st = $db->prepare("SELECT info_hash FROM hash_content WHERE content_status = 'approved' AND description LIKE ? LIMIT $lim");
+            $st->execute([$like]);
+            $fileHashes = array_values(array_unique(array_merge($fileHashes, $st->fetchAll(PDO::FETCH_COLUMN))));
+        } catch (\Throwable $e) {
+            error_log('[index] the search inside descriptions failed: ' . $e->getMessage());
+        }
+    }
+    $descIdx = $descOnly ? indexDescribedClause($db, false) : null;
 
     // one arm = [select SQL, params, count SQL, count params, is-it-a-union, keys SQL, keys params]; fulltext first,
     // LIKE fallback. `$cat` (1.74.0): the index arm read from index_catalog — the same WHERE over the narrow table, whose
@@ -2541,7 +2605,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // on. `$fast` builds the ALL-WORDS arm instead: the same select, WHERE MATCH('+w1* +w2* …') in place of the OR and no
     // file-name half — see $run().
     $noRank = ['hit' => false, 'ord' => false, 'top' => 0, 'alone' => false];
-    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank): array {
+    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank, $descIdx, $inDesc): array {
         $rank = $rank ?: $noRank;
         $cat = $cat && !$wl;
         $tbl = $wl ? 'whitelist' : ($cat ? 'index_catalog' : 'index_hashes');
@@ -2573,6 +2637,14 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             $where[] = '1 = 0';
         }
         $params = [];
+        if ($descIdx !== null) {
+            if ($wl) {
+                $where[] = "content_status = 'approved' AND description IS NOT NULL";
+            } else {
+                $where[] = $descIdx[0];
+                foreach ($descIdx[1] as $p) $params[] = $p;
+            }
+        }
         $scoreSql = '0';
         $scoreParams = [];
         $rankSel = '';          // ", <expr> AS words_hit, <expr> AS in_order" — empty for a query of one word
@@ -2624,7 +2696,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                     $nameSql = "name LIKE ?";
                     $nameParams = ['%' . indexLikeEscape($search) . '%'];
                 }
-                if (!$fast && $searchFiles && $keys) {
+                if (!$fast && ($searchFiles || $inDesc) && $keys) {
                     $split = [$nameSql, $nameParams,
                               $col . ' IN (' . implode(',', array_fill(0, count($keys), '?')) . ')', array_values($keys)];
                 } else {
@@ -2767,7 +2839,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         return $rows;
     };
 
-    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter): array {
+    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter, $descOnly): array {
         // Whether the relevance column is a real score or the literal 0 — see $orderFor.
         $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
         $rank = $rankFor($scored);
@@ -2777,7 +2849,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $arms = [$buildArm(false, $useFt, $withWl, $useCat, $rank)];
         if ($withWl) $arms[] = $buildArm(true, $useFt, false, false, $rank);
         // [total, capped]
-        $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter, $useCat, $cap): array {
+        $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter, $useCat, $cap, $descOnly): array {
         $total = 0;
         $capped = false;
         foreach ($arms as $k => $a) {
@@ -2785,7 +2857,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             // the index poll, not with the reader. Counting it on every page view cost 1 102 ms of
             // full scan for an answer that was the same as a minute ago. From the catalogue (1.74.0)
             // it is the narrow table's own, a fraction of that, under a key of its own.
-            if ($search === '' && !$searchFiles) {
+            if ($search === '' && !$searchFiles && !$descOnly) {
                 $count = static function () use ($db, $a): array {
                     $c = $db->prepare($a[2]); $c->execute($a[3]);
                     return ['n' => (int)$c->fetchColumn()];
@@ -2873,6 +2945,11 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         unset($r['score'], $r['words_hit'], $r['in_order']);   // sort keys, not part of a row
     }
     unset($r);
+    if (!empty($q['desc_flags']) && $rows) {
+        $fl = indexDescFlags($db, array_column($rows, 'info_hash'), $withWl);
+        foreach ($rows as &$r) $r['desc'] = $fl[$r['info_hash']] ?? 0;
+        unset($r);
+    }
     return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page,
             'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
 }

@@ -1074,6 +1074,10 @@ $auditDiff = function_exists('auditSettingsDiff') ? auditSettingsDiff($cfg, $dat
 
 setSettings($db, $data);
 
+if (array_key_exists('rep_mode', $data) && (string)$data['rep_mode'] !== (string)($cfg['rep_mode'] ?? 'thumbs') && function_exists('repRecountAll')) {
+    repRecountAll($db, $data + $cfg);
+}
+
 if ($auditDiff) {
     auditNote([
         'summary' => count($auditDiff) . ' setting' . (count($auditDiff) === 1 ? '' : 's') . ' changed: '

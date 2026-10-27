@@ -242,7 +242,7 @@ $blind  = $member('whot_blind', $gBlind);
 $noIdx  = $member('whot_noidx', $gNoIdx);
 $everyone = array_merge(array_values($M), [$S1, $S2]);
 $db->exec("UPDATE users SET fav_public = 1, fav_listed = 1, votes_public = 1, votes_listed = 1, lists_public = 1 WHERE id IN (" . implode(',', $everyone) . ")");
-$vIns = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote) VALUES (?, 'user', ?, ?)");
+$vIns = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, scale) SELECT ?, 'user', ?, x.v, IF(x.v >= 2, 'stars', 'thumbs') FROM (SELECT ? AS v) x");
 $fIns = $db->prepare("INSERT INTO user_favourites (user_id, info_hash) VALUES (?, ?)");
 $lIns = $db->prepare("INSERT INTO user_lists (user_id, name, slug, visibility, created_at, updated_at) VALUES (?, ?, ?, 'public', '2026-01-01 00:00:00', ?)");
 $iIns = $db->prepare("INSERT INTO user_list_items (list_id, info_hash, name) VALUES (?, ?, 'Who fixture')");
@@ -329,9 +329,9 @@ $db->prepare("UPDATE user_blocks SET hide_profile = 0 WHERE user_id = ? AND bloc
 check('… and a block that only stops messages hides nothing', in_array($m01, $names($votes()), true));
 $db->prepare("DELETE FROM user_blocks WHERE user_id = ?")->execute([$M[1]]);
 $st = $votes($cfgStars);
-check('stars: the star votes and the thumbs up (a vote of 1 is half a star in either mode) — no thumb down, which has no star',
-      $st['mode'] === 'stars' && $st['total'] === 22 && $names($st)[0] === 'whot_s2' && $names($st)[1] === 'whot_s1'
-      && array_column($st['rows'], 'vote') === array_merge([10, 7], array_fill(0, 20, 1)) && !in_array('whot_m21', $names($st), true), json_encode(array_slice($st['rows'], 0, 3)));
+check('stars: only the votes cast as stars — no thumb, up or down',
+      $st['mode'] === 'stars' && $st['total'] === 2 && $names($st) === ['whot_s2', 'whot_s1']
+      && array_column($st['rows'], 'vote') === [10, 7] && !in_array('whot_m21', $names($st), true), json_encode(array_slice($st['rows'], 0, 3)));
 check('anonymous votes never appear, in either mode', !array_filter(array_merge($base['rows'], $st['rows']), fn($r) => !str_starts_with($r['username'], 'whot_')));
 check('the section is about THIS hash: another one has nobody', whoVotesPage($db, $cfgOn, $H2, $reader, $all)['total'] === 0);
 $db->exec("UPDATE user_groups SET permissions = '{}' WHERE slug = 'whot_grant'");
@@ -361,8 +361,8 @@ check('a member takes their thumb back: out of the likes at once, the rows and t
       json_encode([$tb['error'] ?? null, $after['total']]));
 $tb = $takeBack($S1, $cfgStars);
 $after = $votes($cfgStars);
-check('… and a rating taken back leaves the ratings the same way (22 → 21, whot_s1 gone, whot_s2 first still)',
-      !empty($tb['success']) && $tb['removed'] === true && $after['total'] === 21 && !in_array('whot_s1', $names($after), true) && $names($after)[0] === 'whot_s2',
+check('… and a rating taken back leaves the ratings the same way (2 → 1, whot_s1 gone, whot_s2 first still)',
+      !empty($tb['success']) && $tb['removed'] === true && $after['total'] === 1 && !in_array('whot_s1', $names($after), true) && $names($after)[0] === 'whot_s2',
       json_encode([$tb['error'] ?? null, $after['total']]));
 $vIns->execute([$H, (string)$M[25], -1]);
 $vIns->execute([$H, (string)$S1, 7]);
@@ -371,7 +371,7 @@ register_shutdown_function(function () use ($rlKeys) {
     // the hour's budget the two removals spent, taken back from the vote's own file (config/ratelimit/, 1.74.0)
     rateLimitForget('repvote', fn(string $s): bool => in_array($s, $rlKeys, true));
 });
-check('… (both put back for what follows: 25 likes, 22 ratings)', $votes()['total'] === 25 && $votes($cfgStars)['total'] === 22);
+check('… (both put back for what follows: 25 likes, 2 ratings)', $votes()['total'] === 25 && $votes($cfgStars)['total'] === 2);
 $fjWho = $src('assets/js/favourites.js');
 check('the overlay asks its likes again when a vote changes under it, on its own torrent, while it is open',
       preg_match("/document\.addEventListener\('rating:changed', function \(e\) \{\s*var d = e && e\.detail;\s*if \(box\.hidden \|\| !d \|\| d\.hash !== hash\) return;\s*secs\.forEach\(function \(s\) \{ if \(s\.name === 'votes' && s\.state !== 'gone'\) load\(s, false\); \}\);/", $fjWho) === 1);

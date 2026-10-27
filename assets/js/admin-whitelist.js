@@ -14,7 +14,7 @@
     // ───────────────────────── state ─────────────────────────
     const state = {
         view: 'whitelist',
-        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', review: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
+        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', review: '', content: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
         bn: { page: 1, search: '', rows: new Map() },
         ab: { page: 1, search: '', status: 'active', rows: new Map() },
         cl: { rows: new Map() },
@@ -352,6 +352,7 @@
         if (w.source) p.set('source', w.source);
         if (w.meta) p.set('meta', w.meta);
         if (w.review) p.set('review', w.review);
+        if (w.content) p.set('content', w.content);
         p.set('banned', w.banned);
         if (w.ip) p.set('ip', w.ip);
         if (w.group) p.set('group', 'ip');
@@ -413,6 +414,9 @@
             tr.appendChild(hashCell);
             const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
             nameTd.appendChild(el('span', { text: row.name || '—' }));
+            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-btn', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
+                if (row.desc & bit) nameTd.appendChild(el('i', { className: 'bi ' + glyph + ' wl-desc-mark', role: 'img', title: t.key(key), 'aria-label': t.key(key) }));
+            });
             // WHO sent it stays readable at a glance, under the name where the column has room — the
             // narrow Source column could not hold it and ellipsised to "…" (1.63.1), and a moderator
             // going through the waiting queue should not have to hover every row to learn the partner.
@@ -965,9 +969,11 @@
         // Ratings: the LIST already showed these and the detail panel did not, which is a strange
         // place to lose information — you click a row to see MORE.
         if (it.votes_count) {
-            const pct = Math.round((it.score_x100 || 0) / 100);
+            const stars = r.rep_mode === 'stars';
+            const score = it.score_x100 || 0;
+            const label = stars ? '★ ' + t.num(Math.round(score / 10) / 10) : Math.round(score / 100) + '%';
             row(t.key('js.wl.lbl_rating'), [
-                badge(pct + '%', pct >= 50 ? 'wl-b-ok' : 'wl-b-warn'), ' ',
+                badge(label, score >= (stars ? 250 : 5000) ? 'wl-b-ok' : 'wl-b-warn'), ' ',
                 el('span', { className: 'text-muted wl-small' },
                     [t.key(it.votes_count === 1 ? 'js.wl.from_rating' : 'js.wl.from_ratings', { n: it.votes_count })]
                         .concat(it.votes_up || it.votes_down ? [' ', t.key('js.wl.up_down', { up: it.votes_up || 0, down: it.votes_down || 0 })] : [])),
@@ -1548,6 +1554,8 @@
         $('wl-filter-banned').addEventListener('change', (e) => { state.wl.banned = e.target.value; state.wl.page = 1; loadWhitelist(); });
         const revSel = $('wl-filter-review');
         if (revSel) revSel.addEventListener('change', (e) => { state.wl.review = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const contentSel = $('wl-filter-content');
+        if (contentSel) contentSel.addEventListener('change', (e) => { state.wl.content = e.target.value; state.wl.page = 1; loadWhitelist(); });
         const waitBtn = $('wl-waiting');
         if (waitBtn) waitBtn.addEventListener('click', () => {
             // A toggle, not a one-way trip: pressing it again gives the operator their table back.

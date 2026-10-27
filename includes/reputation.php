@@ -158,10 +158,10 @@ function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
     // second vote into a change of mind, atomically — two requests racing each other collide here,
     // in the database, rather than both passing a SELECT that was true a millisecond ago.
     $db->prepare(
-        "INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, weight, created_at, updated_at)
-              VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE vote = VALUES(vote), weight = VALUES(weight), updated_at = NOW()")
-       ->execute([$hash, $voter['type'], $voter['key'], $vote, (int)$voter['weight']]);
+        "INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, scale, weight, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE vote = VALUES(vote), scale = VALUES(scale), weight = VALUES(weight), updated_at = NOW()")
+       ->execute([$hash, $voter['type'], $voter['key'], $vote, repMode($cfg), (int)$voter['weight']]);
 
     repRecount($db, $hash, $cfg);
     return ['success' => true] + repFor($db, $cfg, $hash);
@@ -210,8 +210,8 @@ function repRecount(PDO $db, string $hash, ?array $cfg = null): void {
                 SUM(CASE WHEN vote = 1 THEN weight ELSE 0 END) wup,
                 SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown,
                 SUM(vote * CAST(weight AS SIGNED)) wsum, SUM(weight) wtot
-           FROM hash_votes WHERE info_hash = ?");
-    $st->execute([$hash]);
+           FROM hash_votes WHERE info_hash = ? AND scale = ?");
+    $st->execute([$hash, $mode]);
     $r = $st->fetch() ?: [];
     $n    = (int)($r['n'] ?? 0);
     $up   = (int)($r['up'] ?? 0);
@@ -246,10 +246,10 @@ function repFor(PDO $db, array $cfg, string $hash): array {
                                SUM(CASE WHEN vote = 1 THEN weight ELSE 0 END) wup,
                                SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown,
                                SUM(vote * CAST(weight AS SIGNED)) wsum, SUM(weight) wtot
-                          FROM hash_votes WHERE info_hash = ?");
-    $st->execute([strtolower($hash)]);
-    $r = $st->fetch() ?: [];
+                          FROM hash_votes WHERE info_hash = ? AND scale = ?");
     $mode  = repMode($cfg);
+    $st->execute([strtolower($hash), $mode]);
+    $r = $st->fetch() ?: [];
     $total = (int)($r['n'] ?? 0);
     $min   = repMinVotes($cfg);
     $enough = $total >= $min;
@@ -287,9 +287,18 @@ function repFor(PDO $db, array $cfg, string $hash): array {
 function repMyVote(PDO $db, array $cfg, string $hash): int {
     $voter = repVoterKey($db, $cfg);
     if ($voter === null) return 0;
-    $st = $db->prepare("SELECT vote FROM hash_votes WHERE info_hash = ? AND voter_type = ? AND voter_key = ? LIMIT 1");
-    $st->execute([strtolower($hash), $voter['type'], $voter['key']]);
+    $st = $db->prepare("SELECT vote FROM hash_votes WHERE info_hash = ? AND voter_type = ? AND voter_key = ? AND scale = ? LIMIT 1");
+    $st->execute([strtolower($hash), $voter['type'], $voter['key'], repMode($cfg)]);
     return (int)($st->fetchColumn() ?: 0);
+}
+
+function repRecountAll(PDO $db, array $cfg): int {
+    $n = 0;
+    foreach ($db->query("SELECT DISTINCT info_hash FROM hash_votes")->fetchAll(PDO::FETCH_COLUMN) as $hash) {
+        repRecount($db, (string)$hash, $cfg);
+        $n++;
+    }
+    return $n;
 }
 
 // How much CAPTCHA pressure a vote adds: `captcha_pts_vote`, spent by api/rate_hash.php through the site's one points

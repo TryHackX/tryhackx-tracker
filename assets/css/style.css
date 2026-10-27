@@ -2048,6 +2048,7 @@ body.page-account .container, body.page-u .container { max-width: 80em; }
     vertical-align: 0.1em;
 }
 button.search-files-chip { cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+.search-desc-marks { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: 0.4rem; color: var(--text-muted); font-size: 0.8rem; vertical-align: middle; }
 button.search-files-chip:hover { border-color: var(--accent); color: var(--accent); }
 /* fixed-width action buttons — "Copy" → "✓" must not change the column width */
 .search-actions { white-space: nowrap; }

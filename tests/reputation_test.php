@@ -188,8 +188,8 @@ if ($db === null) {
         // cannot come back quietly.
         $starHash = str_repeat('f', 40);
         $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?")->execute([$starHash]);
-        $ins = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, weight)
-                             VALUES (?, 'user', ?, ?, ?)");
+        $ins = $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, scale, weight)
+                             VALUES (?, 'user', ?, ?, 'stars', ?)");
         // 5 stars (10), 4 stars (8), 3.5 stars (7) from three accounts of equal weight → mean 3.83
         foreach ([[1, 10], [2, 8], [3, 7]] as [$who, $v]) $ins->execute([$starHash, (string)$who, $v, 100]);
         $starCfg = ['rep_enabled' => '1', 'rep_mode' => 'stars', 'rep_min_votes' => '1'];
@@ -215,8 +215,8 @@ if ($db === null) {
         // A down-vote in thumbs mode: the query that used to overflow.
         $mixHash = str_repeat('a', 39) . 'b';
         $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?")->execute([$mixHash]);
-        $ins->execute([$mixHash, '11', -1, 100]);
-        $ins->execute([$mixHash, '12', 1, 100]);
+        $db->prepare("INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, scale, weight) VALUES (?, 'user', '11', -1, 'thumbs', 100), (?, 'user', '12', 1, 'thumbs', 100)")
+           ->execute([$mixHash, $mixHash]);
         $thumbs = repFor($db, ['rep_enabled' => '1', 'rep_mode' => 'thumbs', 'rep_min_votes' => '1'], $mixHash);
         check('thumbs: a down-vote no longer overflows the weighted sum',
               $thumbs['percent'] === 50 && $thumbs['total'] === 2, json_encode($thumbs));

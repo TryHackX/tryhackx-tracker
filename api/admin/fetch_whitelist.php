@@ -126,6 +126,11 @@ if (in_array($reviewFilter, ['none', 'pending', 'approved', 'rejected'], true)) 
     $where[] = "review_status = ?";
     $params[] = $reviewFilter;
 }
+$contentFilter = (string)($_GET['content'] ?? '');
+if (in_array($contentFilter, ['none', 'pending', 'approved', 'rejected'], true)) {
+    $where[] = "content_status = ?";
+    $params[] = $contentFilter;
+}
 $ipFilter = trim($_GET['ip'] ?? '');
 if ($ipFilter !== '') {
     $where[] = "(ip = ? OR ip_bucket = ?)";
@@ -216,6 +221,11 @@ foreach ($rows as &$row) {
     $row['source_ref'] = $ref;
     $row['submitter_id'] = $row['submitter_id'] !== null ? (int)$row['submitter_id'] : null;
     $row['submitter_public'] = (int)$row['submitter_public'] === 1;
+    $d = (string)($row['description'] ?? '');
+    $row['desc'] = ($row['content_status'] === 'approved' && $d !== '')
+        ? 1 | ((stripos($d, '[img') !== false || str_contains($d, '![') || stripos($d, 'upl-image') !== false) ? 2 : 0)
+            | ((stripos($d, 'youtu') !== false || stripos($d, '.mp4') !== false || stripos($d, '.webm') !== false) ? 4 : 0)
+        : 0;
     if ($row['ip'] !== '') $ipsOnPage[$row['ip']] = true;
     if ($row['api_client_id'] !== null) $clientsOnPage[$row['api_client_id']] = true;
 }

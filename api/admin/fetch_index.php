@@ -11,6 +11,8 @@ $res = indexListSelect($db, $cfg, [
     'search_files' => ($_GET['search_files'] ?? '') === '1',
     'meta'         => $_GET['meta'] ?? '',
     'life'         => $_GET['life'] ?? '',
+    'desc'         => $_GET['desc'] ?? '',
+    'desc_flags'   => true,
 ]);
 
 $counts = ['total' => 0, 'protected' => 0, 'pending_meta' => 0];
