@@ -119,7 +119,7 @@ $heads = ['templates/layout.php', 'install.php'];
 foreach (glob($root . '/templates/admin/*.php') as $f) {
     if (str_contains((string)file_get_contents($f), '</html>')) $heads[] = 'templates/admin/' . basename($f);
 }
-check('there are eleven templates with a <head> plus the installer', count($heads) === 12, implode(', ', $heads));
+check('there are twelve templates with a <head> plus the installer', count($heads) === 13, implode(', ', $heads));
 $noHelper = [];
 foreach ($heads as $h) {
     $src = (string)file_get_contents($root . '/' . $h);

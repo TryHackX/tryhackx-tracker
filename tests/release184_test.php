@@ -59,7 +59,7 @@ check('a movie: 2160p from 3840 wide, H.265, TrueHD with Atmos, BluRay, a movie 
 check('ranges: units, open ends, a swapped pair, nonsense refused', factsRange('10GB..', 'size') === [10 * 1024 ** 3, null]
       && factsRange('10G..', 'size') === [10 * 1024 ** 3, null] && factsRange('..50', 'count') === [null, 50]
       && factsRange('20..10', 'count') === [10, 20] && factsRange('abc', 'count') === null && factsRange('7..', 'imdb') === [7.0, null]);
-check('tags from the address: | is either, a comma is and; unknown ones dropped', factsTagsParam('q:1080p|q:2160p,a:atmos,x:nope') === [['q:1080p', 'q:2160p'], ['a:atmos']]);
+check('tags from the address: | is either, a comma is and; unknown ones dropped', factsTagsParam('q:1080p|q:2160p,a:atmos,z:nope') === [['q:1080p', 'q:2160p'], ['a:atmos']]);
 $cat = factsCatalog();
 check('the filter panel\'s catalogue has every group with its words', count($cat) > 35
       && array_filter($cat, fn($c) => $c['id'] === 'l:lektor_pl' && $c['g'] === 'l' && $c['l'] === 'PL voice-over')

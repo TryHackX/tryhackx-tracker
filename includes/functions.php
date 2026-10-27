@@ -34,7 +34,7 @@ require_once __DIR__ . '/icons.php';
  * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
  * keeps those two honest with each other.
  */
-const TRACKER_VERSION = '1.84.2';
+const TRACKER_VERSION = '1.85.0';
 
 /**
  * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
@@ -1637,6 +1637,7 @@ function siteRoutes(): array {
         // route exists whatever the settings say, and the template answers with the list or with the
         // not-found page.
         'emotes'       => 'templates/pages/emotes.php',
+        'tags'         => 'templates/pages/tags.php',
         // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is in index.php
         // where $action is built: it is lower-cased and stripped of everything but [a-z0-9_-], while
         // userValidUsername() allows a dot and both cases. A name can never be an action, so the

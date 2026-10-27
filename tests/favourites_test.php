@@ -333,7 +333,7 @@ foreach (["config/app.php", "config/database.php", "includes/settings.php", "inc
           "includes/whitelist.php", "includes/richtext.php", "includes/reputation.php", "includes/schedule.php", "includes/index.php",
           "includes/auth.php", "includes/mail.php", "includes/users.php", "includes/favourites.php", "includes/usermedia.php",
           "includes/profilebio.php", "includes/profilevotes.php", "includes/profiledescs.php", "includes/lists.php", "includes/people.php",
-          "includes/audit.php", "includes/lang.php", "includes/facts.php"] as $f) if (is_file($f)) require_once $f;
+          "includes/audit.php", "includes/lang.php", "includes/facts.php", "includes/tags.php"] as $f) if (is_file($f)) require_once $f;
 $db = getDb();
 $cfg = array_merge(getSettings($db), $a["cfg"]);
 $GLOBALS["db"] = $db; $GLOBALS["cfg"] = $cfg;

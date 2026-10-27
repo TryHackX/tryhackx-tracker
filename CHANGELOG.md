@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.0] — 2026-10-27
+
+Tags people add by hand, their permissions and settings, the Tags pages. Schema 107.
+
+- **Add a tag in the Info panel:** "Edit tags" under the chips — find a tag (with suggestions as you type, the automatic
+  ones by name: hevc, lektor, 1080p) or type a new one and create it. A new tag from a member waits for a moderator;
+  until then only its author and the moderators see it. A name that is an automatic tag becomes that tag ("Lektor PL",
+  "HEVC"), so the same thing never has two tags. Your own tags have an × to take them back.
+- **Correcting the automatic tags:** a member may add an automatic tag by hand (1080p to a torrent whose name does not
+  say it); a moderator may take a wrong one off ("CAM" on a film called Sitter Cam) — it is blocked for that torrent,
+  gone from its chips and from the filters, and does not come back when the name or description is read again.
+- **Filters:** the tags people added are a group of their own in the filter panel (with their counts), and every filter
+  works per set of tags: a torrent found as 1080p by its name and as "Lektor PL" by a tag added by hand matches both.
+- **Permissions:** `tags.add` and `tags.create` (members), `tags.moderate` (moderators), `panel.tags.view` (moderators:
+  the panel's Tags page and its queue) and `panel.tags.manage` (rename, colour, hide, merge, delete — the owner's).
+  With accounts off tags can only be read.
+- **The panel's Tags page:** every tag with its state, uses, author and date; approve or reject what waits (rejecting
+  takes the tag off every torrent and it cannot be made again), rename, a colour and a description, hide, merge into
+  another tag, delete. **The public Tags page** (`?action=tags`, linked from the filter panel): every tag with how many
+  torrents have it, searchable, each a link to the search.
+- **Settings → Tags and filters:** tags by hand on or off, whether a member's new tag waits, at most 40 tags a torrent,
+  32 characters a name, 20 new tags a member a day.
+- Tags from the forum's discussions are the next step (1.85.1 with the forum's 2.13.0).
+
 ## [1.84.2] — 2026-10-27
 
 Fast filters over the torrent names, the bit rates in full, filters built from the data, and a settings section for the

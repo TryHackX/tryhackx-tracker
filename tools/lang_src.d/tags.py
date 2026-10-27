@@ -93,7 +93,7 @@ add('js.tags', {
     'unhide': ('Show again', 'Pokaż znowu'),
     'delete': ('Delete', 'Usuń'),
     'delete_confirm': ('Delete ":name"? It comes off :n torrents.', 'Usunąć „:name”? Zniknie z torrentów: :n.'),
-    'pending_title': ('Waiting for a moderator — only you and the moderators see it', 'Czeka na moderatora — widzisz go tylko ty i moderatorzy'),
+    'pending_title': ('Waiting for a moderator — only you and the moderators see it', 'Czeka na moderatora — widzisz go tylko Ty i moderatorzy'),
     'remove': ('Remove the tag :name', 'Usuń tag :name'),
     'add_ph': ('Find a tag to add…', 'Znajdź tag do dodania…'),
     'add_or_create_ph': ('Find a tag or type a new one…', 'Znajdź tag albo wpisz nowy…'),

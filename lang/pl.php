@@ -5541,7 +5541,7 @@ Można je ponownie pobrać z DHT albo zaimportować jeszcze raz, jeśli zachowas
     'js.tags.n_tags' => 'tagów: :n',
     'js.tags.name' => 'Nazwa',
     'js.tags.no_color' => 'bez własnego koloru',
-    'js.tags.pending_title' => 'Czeka na moderatora — widzisz go tylko ty i moderatorzy',
+    'js.tags.pending_title' => 'Czeka na moderatora — widzisz go tylko Ty i moderatorzy',
     'js.tags.reject' => 'Odrzuć',
     'js.tags.reject_confirm' => 'Odrzucić „:name”? Zniknie z torrentów: :n.',
     'js.tags.remove' => 'Usuń tag :name',

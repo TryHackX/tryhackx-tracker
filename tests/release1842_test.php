@@ -174,7 +174,7 @@ $js = $src('assets/js/filters.js');
 check('the page: a tag search, counts on the tags and empty ones hidden, genres, the video bit rate filter, labelled bit rate chips',
       str_contains($js, "el('div', 'sf-tagsearch')") && str_contains($js, "b.dataset.n === '0'") && str_contains($js, "['g', 'genre']")
       && str_contains($js, "{ key: 'vbitrate', label: 'vbitrate', group: 'quality', facts: true, desc: true, minOnly: true, mbps: true }")
-      && str_contains($js, 'function rateText(k, r)') && str_contains($js, 'const lim = f.max > 0 ? f.max : 6;')
+      && str_contains($js, 'function rateText(k, r)') && str_contains($js, 'const lim = o.all ? tags.length : (f.max > 0 ? f.max : 6);')
       && str_contains($src('assets/js/app.js'), "'imdb', 'filmweb', 'vbitrate'];") && str_contains($src('assets/css/admin.css'), '.admin-body .sf-n {')
       && str_contains($src('assets/css/style.css'), '.sf-n {'));
 $plL = include $root . '/lang/pl.php';

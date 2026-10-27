@@ -867,7 +867,7 @@ foreach (["config/app.php", "config/database.php", "includes/settings.php", "inc
           "includes/auth.php", "includes/richtext.php", "includes/reputation.php", "includes/mail.php", "includes/users.php",
           "includes/favourites.php", "includes/sounds.php", "includes/shout.php", "includes/usermedia.php", "includes/profilebio.php",
           "includes/profilevotes.php", "includes/profiledescs.php", "includes/lists.php", "includes/people.php", "includes/audit.php",
-          "includes/cluster.php", "includes/opentracker.php", "includes/lang.php"] as $f) require_once $f;
+          "includes/cluster.php", "includes/opentracker.php", "includes/lang.php", "includes/facts.php", "includes/tags.php"] as $f) require_once $f;
 $db = getDb();
 $cfg = array_merge(getSettings($db), $a["cfg"]);
 $GLOBALS["db"] = $db; $GLOBALS["cfg"] = $cfg;
