@@ -321,3 +321,20 @@ function repClear(PDO $db, array $cfg, string $hash): int {
     if ($n) repRecount($db, $hash, $cfg);
     return $n;
 }
+
+function repHistogram(PDO $db, string $hash): array
+{
+    $out = [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0];
+    $st = $db->prepare("SELECT vote, COUNT(*) FROM hash_votes WHERE info_hash = ? AND scale = 'stars' GROUP BY vote");
+    $st->execute([strtolower($hash)]);
+    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$v, $c]) $out[max(1, min(5, (int)ceil((int)$v / 2)))] += (int)$c;
+    return $out;
+}
+
+function repLastRated(PDO $db, string $hash): ?string
+{
+    $st = $db->prepare("SELECT MAX(COALESCE(updated_at, created_at)) FROM hash_votes WHERE info_hash = ?");
+    $st->execute([strtolower($hash)]);
+    $v = $st->fetchColumn();
+    return is_string($v) && $v !== '' ? substr($v, 0, 10) : null;
+}

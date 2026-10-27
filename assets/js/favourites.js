@@ -253,6 +253,10 @@
             var chips = window.FactChips.render(r.facts, null, null);
             if (chips) main.appendChild(chips);
         }
+        if (r.thumb && window.ThumbSlider) {
+            var thumbBox = el('div', { className: 'pf-thumb' });
+            if (window.ThumbSlider.mount(thumbBox, r.thumb)) row.insertBefore(thumbBox, row.firstChild);
+        }
         if (opts.statusBadges && r.status) {
             main.appendChild(el('span', { className: 'pf-badge pf-st-' + r.status, text: t.key('js.fav.status_' + r.status) }));
         }

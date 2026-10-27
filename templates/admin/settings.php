@@ -1495,6 +1495,45 @@
                         </select>
                         <small class="settings-hint"><?= _h('settings.facts_chips_lists_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="thumbs_search">
+                        <label for="set-thumbs_search" class="form-label"><?= _h('settings.thumbs_search') ?></label>
+                        <select id="set-thumbs_search" class="form-select bg-dark text-light border-secondary" name="thumbs_search">
+                            <option value="1" <?= ($cfg['thumbs_search'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['thumbs_search'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.thumbs_search_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="thumbs_lists">
+                        <label for="set-thumbs_lists" class="form-label"><?= _h('settings.thumbs_lists') ?></label>
+                        <select id="set-thumbs_lists" class="form-select bg-dark text-light border-secondary" name="thumbs_lists">
+                            <option value="1" <?= ($cfg['thumbs_lists'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['thumbs_lists'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.thumbs_lists_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="thumbs_info">
+                        <label for="set-thumbs_info" class="form-label"><?= _h('settings.thumbs_info') ?></label>
+                        <select id="set-thumbs_info" class="form-select bg-dark text-light border-secondary" name="thumbs_info">
+                            <option value="1" <?= ($cfg['thumbs_info'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['thumbs_info'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.thumbs_info_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="thumbs_width">
+                        <label for="set-thumbs_width" class="form-label"><?= _h('settings.thumbs_width') ?></label>
+                        <input type="number" min="40" max="160" step="1" id="set-thumbs_width" class="form-control bg-dark text-light border-secondary" name="thumbs_width" value="<?= (int)($cfg['thumbs_width'] ?? 64) ?>">
+                        <small class="settings-hint"><?= _h('settings.thumbs_width_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="thumbs_speed">
+                        <label for="set-thumbs_speed" class="form-label"><?= _h('settings.thumbs_speed') ?></label>
+                        <input type="number" min="2" max="15" step="1" id="set-thumbs_speed" class="form-control bg-dark text-light border-secondary" name="thumbs_speed" value="<?= (int)($cfg['thumbs_speed'] ?? 4) ?>">
+                        <small class="settings-hint"><?= _h('settings.thumbs_speed_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="thumbs_max">
+                        <label for="set-thumbs_max" class="form-label"><?= _h('settings.thumbs_max') ?></label>
+                        <input type="number" min="1" max="10" step="1" id="set-thumbs_max" class="form-control bg-dark text-light border-secondary" name="thumbs_max" value="<?= (int)($cfg['thumbs_max'] ?? 10) ?>">
+                        <small class="settings-hint"><?= _h('settings.thumbs_max_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="facts_chips_max">
                         <label for="set-facts_chips_max" class="form-label"><?= _h('settings.facts_chips_max') ?></label>
                         <input type="number" min="1" max="20" step="1" id="set-facts_chips_max" class="form-control bg-dark text-light border-secondary" name="facts_chips_max" value="<?= (int)($cfg['facts_chips_max'] ?? 6) ?>">

@@ -134,6 +134,7 @@ $readerTime = static function ($dt) use ($readerTz, $dbZone): string {
 };
 
 $factsMap = $canContent ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), $signedIn) : [];
+$thumbMap = ($canContent && function_exists('thumbsOn') && thumbsOn($cfg, 'search')) ? thumbsFor($db, $cfg, array_column($res['rows'], 'info_hash'), $signedIn) : [];
 $tagViewer = usersEnabled($cfg) ? currentUser($db) : null;
 $tagMap = factsChipsOn($cfg, 'search') ? tagsForHashes($db, array_column($res['rows'], 'info_hash'), $tagViewer ? (int)$tagViewer['id'] : null,
                                                      $tagViewer !== null && userCan($db, $cfg, 'tags.moderate')) : [];
@@ -172,6 +173,7 @@ foreach ($res['rows'] as $r) {
     $chips = tagsMergeChips(factsRowChips($factsMap[strtolower((string)$r['info_hash'])] ?? null, (string)($r['name'] ?? ''), $cfg, 'search'),
                             $tagMap[strtolower((string)$r['info_hash'])] ?? null, $cfg);
     if ($chips !== null) $row['facts'] = $chips;
+    if (isset($thumbMap[strtolower((string)$r['info_hash'])])) $row['thumb'] = $thumbMap[strtolower((string)$r['info_hash'])];
     $rows[] = $row;
 }
 

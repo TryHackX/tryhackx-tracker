@@ -113,3 +113,4 @@ lang/*.php
 
 # Local scratch harnesses (battery, screenshots) — never part of the release
 scratchpad/
+thumbs/

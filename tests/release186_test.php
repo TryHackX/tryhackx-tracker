@@ -121,7 +121,7 @@ $enL = include $root . '/lang/en.php';
 $words = ['js.filters.duration', 'js.filters.c_seen', 'js.filters.g_dates', 'js.filters.t_mine', 'js.filters.chip_not', 'js.filters.tags_hint', 'search.sortby_year_desc',
           'search.sortby_steam', 'js.app.sort_limited', 'perm.tags.favourite', 'tags.mine_h2', 'js.tags.fav_on', 'api.tags.fav_limit', 'settings.facts_chips_lists'];
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL)) && $plL['js.filters.chip_not'] === 'bez :name');
-check('version and changelog', TRACKER_VERSION === '1.86.0' && str_contains($src('CHANGELOG.md'), '## [1.86.0]'));
+check('version and changelog', version_compare(TRACKER_VERSION, '1.86.0', '>=') && str_contains($src('CHANGELOG.md'), '## [1.86.0]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

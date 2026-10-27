@@ -239,6 +239,7 @@ jsonResponse([
         ? ((($wl['source'] ?? '') === 'forum') ? __('api.index.source_auto_forum') : __('api.index.source_auto_importer'))
         : null,
     'description_html' => $descHtml,
+    'gallery' => ($canContent && $hasWords && function_exists('thumbsOn') && thumbsOn($cfg, 'info')) ? thumbsGallery($db, $hash, richtextViewerSignedIn($db)) : [],
     'facts'            => $infoFacts,
     'tag_edit'         => $tagEdit,
     // 1.53.0: who wrote it, whether the reader is being kept from it, what they may do, and what became
@@ -287,6 +288,8 @@ jsonResponse([
     // Ratings ride along with the rest of the panel: one request, not two, because the button and
     // the numbers appear together and a second round trip would show one before the other.
     'rating' => repEnabled($cfg) ? repFor($db, $cfg, $hash) : null,
+    'rating_hist' => repEnabled($cfg) && repMode($cfg) === 'stars' ? repHistogram($db, $hash) : null,
+    'rated_at' => repEnabled($cfg) ? repLastRated($db, $hash) : null,
     'my_vote' => repEnabled($cfg) ? repMyVote($db, $cfg, $hash) : 0,
     'can_vote' => repEnabled($cfg) && repVoteRefusal($db, $cfg) === null,
     'vote_refusal' => repEnabled($cfg) ? repVoteRefusal($db, $cfg) : null,

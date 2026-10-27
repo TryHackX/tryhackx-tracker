@@ -4841,3 +4841,16 @@ add('js.app', {
     'sort_limited': ('This sort reaches only so deep — narrow the search or the filters to see further.',
                      'To sortowanie sięga tylko do pewnej głębokości — zawęź wyszukiwanie lub filtry, by zobaczyć dalej.'),
 })
+
+
+add('js.app', {
+    'thumbs_open': ('Open the pictures', 'Otwórz obrazy'),
+    'rated_at': ('Last rated :date', 'Ostatnia ocena: :date'),
+    'rate_open': ('Rate it', 'Oceń'),
+    'rate_close': ('Close', 'Zamknij'),
+    'hist_row': (':n votes for :s stars', 'Głosy na :s gwiazdek: :n'),
+    'gal_label': ('Pictures from the description (:n)', 'Obrazy z opisu (:n)'),
+    'gal_open': ('Open picture :n of :total', 'Otwórz obraz :n z :total'),
+    'gal_prev': ('Earlier pictures', 'Wcześniejsze obrazy'),
+    'gal_next': ('More pictures', 'Dalsze obrazy'),
+})

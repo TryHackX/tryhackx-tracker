@@ -925,6 +925,7 @@ function factsStore(PDO $db, string $hash, string $src, string $text, string $ti
                   $f['duration_min'], $f['imdb'], $f['filmweb'], $f['pics'], $f['tags'] ? ',' . implode(',', $f['tags']) . ',' : '', mb_substr($genres, 0, 400),
                   $f['vbitrate_max'], $f['vmode'], $f['obitrate'], $f['obitrate_max'], $f['omode'], $f['abitrate'], $f['abitrate_max'], $f['amode'],
                   $f['acodec'] !== null ? mb_substr($f['acodec'], 0, 24) : null, $f['achannels']]);
+    if (function_exists('thumbsFromText')) thumbsFromText($db, $hash, $text);
     return $f;
 }
 
@@ -1424,7 +1425,9 @@ function factsSortedSearch(PDO $db, array $cfg, array $q, string $key, bool $asc
 
 function factsListAttach(PDO $db, array $cfg, array $rows): array
 {
-    if (!$rows || !factsChipsOn($cfg, 'lists')) return $rows;
+    $chipsOn = factsChipsOn($cfg, 'lists');
+    $thumbsOn = function_exists('thumbsOn') && thumbsOn($cfg, 'lists');
+    if (!$rows || (!$chipsOn && !$thumbsOn)) return $rows;
     $hashes = [];
     foreach ($rows as $r) {
         if (!empty($r['info_hash'])) $hashes[] = strtolower((string)$r['info_hash']);
@@ -1432,12 +1435,15 @@ function factsListAttach(PDO $db, array $cfg, array $rows): array
     if (!$hashes) return $rows;
     $canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
     $signedIn = function_exists('richtextViewerSignedIn') && richtextViewerSignedIn($db);
-    $desc = $canContent ? factsChipsFor($db, $hashes, $signedIn) : [];
+    $desc = $chipsOn && $canContent ? factsChipsFor($db, $hashes, $signedIn) : [];
     $me = usersEnabled($cfg) ? currentUser($db) : null;
-    $extra = function_exists('tagsForHashes') ? tagsForHashes($db, $hashes, $me ? (int)$me['id'] : null, $me !== null && userCan($db, $cfg, 'tags.moderate')) : [];
+    $extra = $chipsOn && function_exists('tagsForHashes') ? tagsForHashes($db, $hashes, $me ? (int)$me['id'] : null, $me !== null && userCan($db, $cfg, 'tags.moderate')) : [];
+    $thumbs = $thumbsOn && $canContent ? thumbsFor($db, $cfg, $hashes, $signedIn) : [];
     foreach ($rows as &$r) {
         $h = strtolower((string)($r['info_hash'] ?? ''));
         if ($h === '') continue;
+        if (isset($thumbs[$h])) $r['thumb'] = $thumbs[$h];
+        if (!$chipsOn) continue;
         $chips = factsRowChips($desc[$h] ?? null, (string)($r['name'] ?? ''), $cfg, 'lists');
         if (function_exists('tagsMergeChips')) $chips = tagsMergeChips($chips, $extra[$h] ?? null, $cfg);
         if ($chips !== null) $r['facts'] = $chips;

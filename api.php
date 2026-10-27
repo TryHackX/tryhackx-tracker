@@ -42,6 +42,7 @@ require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/images.php';
 require_once __DIR__ . '/includes/facts.php';
 require_once __DIR__ . '/includes/tags.php';
+require_once __DIR__ . '/includes/thumbs.php';
 // The description on a profile (v74): its renderer, its rules and the save the endpoint runs.
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile (v75): the gate, the parameters and the one query.

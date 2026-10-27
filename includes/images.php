@@ -458,6 +458,7 @@ function imagesDelete(PDO $db, int $id): bool
     $st->execute([$id]);
     $sha = $st->fetchColumn();
     if ($sha === false) return false;
+    if (function_exists('thumbsForget')) thumbsForget($db, $id);
     $db->prepare("DELETE FROM images WHERE id = ?")->execute([$id]);
     $db->prepare("DELETE FROM image_refs WHERE image_id = ?")->execute([$id]);
     $db->prepare("DELETE FROM image_remote WHERE image_id = ? AND status = 'done'")->execute([$id]);
@@ -1231,6 +1232,7 @@ function imagesModerationRemove(PDO $db, array $cfg, int $id, bool $block, strin
         $ins->execute([$one, (string)$r['blob_sha'], $r['user_id'] !== null ? (int)$r['user_id'] : null, (string)$r['source'] === 'copy' ? 'copy' : 'upload',
                        (string)$r['name'], (string)$r['mime'], (int)$r['w'], (int)$r['h'], (int)$r['full_w'], (int)$r['full_h'], $block ? 1 : 0, mb_substr($by, 0, 64)]);
         $db->prepare("UPDATE image_remote SET status = 'ignored', error = 'moderation' WHERE image_id = ?")->execute([$one]);
+        if (function_exists('thumbsForget')) thumbsForget($db, $one);
         $map = [];
         foreach ([['w', 'h'], ['full_w', 'full_h']] as [$a, $b]) {
             $from = imagesUrl($cfg, $one, (int)$r[$a], (int)$r[$b], imagesExt($r));

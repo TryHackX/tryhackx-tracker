@@ -55,6 +55,7 @@ require_once $root . '/includes/retention.php';
 require_once $root . '/includes/images.php';
 require_once $root . '/includes/facts.php';
 require_once $root . '/includes/tags.php';
+require_once $root . '/includes/thumbs.php';
 
 /**
  * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
@@ -212,6 +213,10 @@ try {
         factsCountsTick($db, $cfg);
         tagsUsesTick($db);
         tagsForumReconcile($db, $cfg);
+    }
+    if (function_exists('thumbsTick')) {
+        $thumbsRun = thumbsTick($db, $cfg);
+        if (($thumbsRun['read'] > 0 || $thumbsRun['gone'] > 0 || $thumbsRun['made'] > 0) && in_array('-v', $argv ?? [], true)) echo "[thumbs] read {$thumbsRun['read']} descriptions, made {$thumbsRun['made']} lost files again, removed {$thumbsRun['gone']}\n";
     }
     // The stability probe: start one that was asked for, and restore one whose process has died.
     // The reap is the important half — a tuner that is killed must not leave the machine on the limit

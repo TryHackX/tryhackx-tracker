@@ -3444,6 +3444,55 @@ window.siteToast = siteToast;
     let infoLayer = null;
     let infoDescFold = 0;
 
+    function infoGallery(list) {
+        const box = document.createElement('div');
+        box.className = 'info-gal info-section';
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', t.key('js.app.gal_label', {n: list.length}));
+        const track = document.createElement('div');
+        track.className = 'info-gal-track';
+        const full = list.map((g) => ({ src: g.f, alt: '' }));
+        list.forEach((g, i) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'info-gal-item';
+            b.style.setProperty('--r', g.w > 0 && g.h > 0 ? (g.w / g.h).toFixed(3) : '1');
+            b.setAttribute('aria-label', t.key('js.app.gal_open', {n: i + 1, total: list.length}));
+            const img = document.createElement('img');
+            img.alt = '';
+            img.decoding = 'async';
+            img.loading = i < 4 ? 'eager' : 'lazy';
+            img.src = g.t;
+            b.appendChild(img);
+            b.addEventListener('click', () => { if (window.SiteLightbox) window.SiteLightbox.show(full, i, img); });
+            track.appendChild(b);
+        });
+        box.appendChild(track);
+        const still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        const nav = (dir) => {
+            const n = document.createElement('button');
+            n.type = 'button';
+            n.className = 'info-gal-nav ' + (dir < 0 ? 'info-gal-prev' : 'info-gal-next');
+            n.setAttribute('aria-label', t.key(dir < 0 ? 'js.app.gal_prev' : 'js.app.gal_next'));
+            n.appendChild(iconEl('bi ' + (dir < 0 ? 'bi-chevron-left' : 'bi-chevron-right')));
+            n.addEventListener('click', () => track.scrollBy({ left: dir * Math.max(120, track.clientWidth * 0.8), behavior: still ? 'auto' : 'smooth' }));
+            box.appendChild(n);
+            return n;
+        };
+        const prev = nav(-1), next = nav(1);
+        const sync = () => {
+            const end = track.scrollWidth - track.clientWidth - 8;
+            box.classList.toggle('can-prev', track.scrollLeft > 8);
+            box.classList.toggle('can-next', track.scrollLeft < end);
+            prev.disabled = track.scrollLeft <= 8;
+            next.disabled = track.scrollLeft >= end;
+        };
+        track.addEventListener('scroll', sync, { passive: true });
+        box.addEventListener('pointerenter', sync);
+        requestAnimationFrame(sync);
+        return box;
+    }
+
     function foldDescription(d) {
         const wrap = document.createElement('div');
         wrap.className = 'info-desc info-section';
@@ -3591,6 +3640,54 @@ window.siteToast = siteToast;
      * The half star at your own rating is PRESSED (1.71.0): aria-pressed, a mark under it, and a tooltip
      * saying that pressing it again takes the rating back — which is what pressing it does.
      */
+    function buildHist(hist, total) {
+        const box = document.createElement('div');
+        box.className = 'rep-hist';
+        [5, 4, 3, 2, 1].forEach(s => {
+            const n = Number(hist[s] || 0);
+            const lab = document.createElement('span');
+            lab.className = 'rep-hist-s';
+            lab.append(String(s), ' ', iconEl('bi bi-star-fill'));
+            const bar = document.createElement('span');
+            bar.className = 'rep-hist-bar';
+            bar.title = t.key('js.app.hist_row', { n: t.num(n), s: s });
+            const fill = document.createElement('span');
+            fill.style.width = (total > 0 ? Math.round(n * 100 / total) : 0) + '%';
+            bar.appendChild(fill);
+            const cnt = document.createElement('span');
+            cnt.className = 'rep-hist-n';
+            cnt.textContent = t.num(n);
+            box.append(lab, bar, cnt);
+        });
+        return box;
+    }
+
+    function rateOpenButton(r, json, hash) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-secondary btn-small rep-open';
+        b.append(iconEl('bi bi-star'), ' ', t.key('js.app.rate_open'));
+        b.addEventListener('click', () => {
+            const dlg = document.createElement('dialog');
+            dlg.className = 'rep-dialog';
+            dlg.setAttribute('aria-label', t.key('js.app.rate_open'));
+            const head = document.createElement('div');
+            head.className = 'rep-dialog-head';
+            head.textContent = t.key('js.app.rate_open');
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.className = 'btn btn-secondary btn-small';
+            close.textContent = t.key('js.app.rate_close');
+            close.addEventListener('click', () => dlg.close());
+            dlg.append(head, buildStars(r, json, hash), close);
+            dlg.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('.star-hit')) setTimeout(() => dlg.close(), 60); });
+            dlg.addEventListener('close', () => dlg.remove());
+            document.body.appendChild(dlg);
+            if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+        });
+        return b;
+    }
+
     function buildStars(r, json, hash) {
         const wrap = document.createElement('div');
         wrap.className = 'stars-wrap';
@@ -3843,6 +3940,8 @@ window.siteToast = siteToast;
             }
         }
 
+        if (Array.isArray(json.gallery) && json.gallery.length) body.appendChild(infoGallery(json.gallery));
+
         const st = json.stats || {};
 
         // 1. the numbers people actually opened this for, before anything else.
@@ -3992,13 +4091,15 @@ window.siteToast = siteToast;
         // Two modes share this block. Whichever it is, the COUNT is always shown next to the
         // score: "5 stars" and "5 stars from one vote" are different claims, and a widget that
         // renders them identically is making the stronger one on no evidence.
-        if (json.rating) {
+        if (json.rating && (json.rating.total > 0 || json.can_vote)) {
             const rep = document.createElement('div');
             rep.className = 'rep-block info-section';
             const r = json.rating;
 
             if (r.mode === 'stars') {
                 rep.appendChild(buildStars(r, json, hash));
+                if (json.can_vote && window.matchMedia && window.matchMedia('(max-width: 576px)').matches) rep.appendChild(rateOpenButton(r, json, hash));
+                if (json.rating_hist && r.total > 0) rep.appendChild(buildHist(json.rating_hist, r.total));
             } else if (r.percent !== null) {
                 const bar = document.createElement('div');
                 bar.className = 'rep-bar';
@@ -4048,6 +4149,12 @@ window.siteToast = siteToast;
                 // The server's sentence (repVoteRefusal()), found back in the page's bundle (api.rep.*): it keeps its key.
                 why.textContent = t.find(json.vote_refusal, 'api.rep.');
                 rep.appendChild(why);
+            }
+            if (json.rated_at && r.total > 0) {
+                const ratedAt = document.createElement('div');
+                ratedAt.className = 'rep-label text-muted rep-at';
+                ratedAt.textContent = t.key('js.app.rated_at', { date: json.rated_at });
+                rep.appendChild(ratedAt);
             }
             body.appendChild(rep);
         }
@@ -5181,6 +5288,19 @@ window.siteToast = siteToast;
                 if (r.facts && window.FactChips) {
                     const chips = window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null);
                     if (chips) nameTd.appendChild(chips);
+                }
+                if (r.thumb && window.ThumbSlider) {
+                    const thumbBox = document.createElement('div');
+                    thumbBox.className = 'search-thumb';
+                    if (window.ThumbSlider.mount(thumbBox, r.thumb)) {
+                        const nameBody = document.createElement('div');
+                        nameBody.className = 'search-name-body';
+                        nameBody.append(...nameTd.childNodes);
+                        const nameWrap = document.createElement('div');
+                        nameWrap.className = 'search-name-wrap';
+                        nameWrap.append(thumbBox, nameBody);
+                        nameTd.appendChild(nameWrap);
+                    }
                 }
                 tr.appendChild(nameTd);
                 const sizeTd = document.createElement('td');

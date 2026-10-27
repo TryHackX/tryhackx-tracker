@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.87.0] — 2026-10-27
+
+- **Covers in the lists.** A result whose description has pictures shows a small cover on the left (2:3), the posters
+  from the labels first and then the rest in the text's order, up to 10. Only the first picture loads with the page;
+  while the row is in view the next ones fade in one by one (a counter says 3/7), a pointer over it holds it, and a
+  click opens the pictures. Nothing moves for a reader who asked their system for less motion; 56 px on a phone.
+  The name and its tags stand in the middle beside it.
+  The same covers on profile lists. The covers are small files (160×240 WebP) the web server sends without PHP,
+  made only for public pictures and taken away the moment a picture stops being public or is removed. Settings →
+  Tags and filters: on or off per place, width, seconds per picture, how many.
+- **Pictures at the top of Info.** The description's pictures in a strip under the name, without opening the
+  description: each in its own shape, 120 px high (96 on a phone), arrows at the sides while there is more to see (or a
+  swipe), a click opens them all in the viewer. Up to 30, so a description with 16 screenshots shows all 16. Small
+  files beside the covers (240 px high). Settings → Tags and filters: on or off.
+- **Ratings.** Info shows how many votes each star got and when the torrent was last rated; a rating with no votes
+  is not shown to a reader who could not vote anyway; on a phone "Rate it" opens the stars in a window.
+- Schema 111: `hash_thumbs`; the janitor makes the covers of the descriptions already there (40 a minute) and makes
+  again a cover file that went missing from the disk (after a restore without `thumbs/`, say).
+
 ## [1.86.0] — 2026-10-27
 
 - **Without a tag.** A tag in the filters is clicked once for "with it", again for "without it" (struck through, red),

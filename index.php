@@ -34,6 +34,7 @@ require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/images.php';
 require_once __DIR__ . '/includes/facts.php';
 require_once __DIR__ . '/includes/tags.php';
+require_once __DIR__ . '/includes/thumbs.php';
 // The description on a profile (v74): its own small renderer and the rules it is saved by.
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile and the account page (v75): the one gate both ask.

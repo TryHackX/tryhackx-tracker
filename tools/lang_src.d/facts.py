@@ -153,3 +153,21 @@ add('js.filters', {
     'chip_not': ('without :name', 'bez :name'),
     'tag_not_title': ('Without :name — click to let it go', 'Bez :name — kliknij, by wyłączyć'),
 })
+
+
+add('settings', {
+    'thumbs_search': ('Covers in the search', 'Okładki w wyszukiwarce'),
+    'thumbs_search_hint': ("A small cover beside each result with pictures in its description; it changes by itself while the row is in view.",
+                           'Mała okładka przy każdym wyniku, który ma obrazy w opisie; zmienia się sama, gdy wiersz jest widoczny.'),
+    'thumbs_lists': ('Covers on profile lists', 'Okładki na listach profilu'),
+    'thumbs_lists_hint': ('Favourites, uploads and lists.', 'Ulubione, wysłane i listy.'),
+    'thumbs_info': ('Pictures at the top of Info', 'Obrazy na górze okna Info'),
+    'thumbs_info_hint': ("A strip of the description's pictures under the name, without opening the description; arrows or a swipe move it, a click opens the pictures.",
+                         'Pasek obrazów z opisu pod nazwą, bez rozwijania opisu; strzałki albo przesunięcie palcem go przewijają, klik otwiera obrazy.'),
+    'thumbs_width': ('Cover width (px)', 'Szerokość okładki (px)'),
+    'thumbs_width_hint': ('40–160; on a phone always 56.', '40–160; na telefonie zawsze 56.'),
+    'thumbs_speed': ('Seconds per picture', 'Sekundy na obraz'),
+    'thumbs_speed_hint': ('2–15. Nothing moves for a reader who asked their system for less motion.', '2–15. U osoby, która wyłączyła animacje w systemie, nic się nie przesuwa.'),
+    'thumbs_max': ('Pictures per torrent, at most', 'Obrazów na torrent, najwyżej'),
+    'thumbs_max_hint': ('1–10; posters from the labels first.', '1–10; najpierw plakaty z etykiet.'),
+})
