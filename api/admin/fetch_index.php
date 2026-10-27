@@ -3,6 +3,7 @@
 // The query builder lives in includes/index.php (indexListSelect) — shared with the public search.
 $perPage = (int)($_GET['per_page'] ?? 0);
 if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = (int)($cfg['items_per_page'] ?? 25);
+[$filterWhere, $filterParams] = factsListFilters($db, $cfg, factsRequest($_GET), 'GREATEST(COALESCE(scrape_seeders, 0), last_seeders)');
 try {
     $res = indexListSelect($db, $cfg, [
         'page'         => $_GET['page'] ?? 1,
@@ -14,6 +15,8 @@ try {
         'life'         => $_GET['life'] ?? '',
         'desc'         => $_GET['desc'] ?? '',
         'desc_flags'   => true,
+        'filter_where' => $filterWhere,
+        'filter_params' => $filterParams,
     ]);
 } catch (\Throwable $e) {
     if ($e instanceof IndexSearchTooBroad) {
@@ -39,7 +42,8 @@ try {
 
 $factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), true) : [];
 foreach ($res['rows'] as &$row) {
-    if (isset($factsMap[strtolower((string)$row['info_hash'])])) $row['facts'] = $factsMap[strtolower((string)$row['info_hash'])];
+    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg);
+    if ($chips !== null) $row['facts'] = $chips;
 }
 unset($row);
 jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'total_capped' => !empty($res['total_capped']), 'page' => $res['page'], 'pages' => $res['pages'],

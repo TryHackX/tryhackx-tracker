@@ -14,7 +14,7 @@
     // ───────────────────────── state ─────────────────────────
     const state = {
         view: 'whitelist',
-        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', review: '', content: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {} },
+        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', review: '', content: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {}, filters: null },
         bn: { page: 1, search: '', rows: new Map() },
         ab: { page: 1, search: '', status: 'active', rows: new Map() },
         cl: { rows: new Map() },
@@ -356,6 +356,7 @@
         p.set('banned', w.banned);
         if (w.ip) p.set('ip', w.ip);
         if (w.group) p.set('group', 'ip');
+        if (w.filters) Object.entries(w.filters.params()).forEach(([k, v]) => p.set(k, v));
         const pp = $('wl-perpage');
         if (pp && pp.value !== '25') p.set('per_page', pp.value);
         return p.toString();
@@ -425,7 +426,7 @@
             // cell's single line it was cut mid-letter by the cell's edge, a long label with no "…" and nothing to read.
             if (partner) nameTd.appendChild(el('div', { className: 'wl-small cell-sub', text: t.key('js.wl.partner', { name: partner }), title: t.key('js.wl.partner', { name: partner }) }));
             if (row.facts && window.FactChips) {
-                const chips = window.FactChips.render(row.facts, null);
+                const chips = window.FactChips.render(row.facts, state.wl.filters ? (id) => state.wl.filters.addTag(id) : null);
                 if (chips) nameTd.appendChild(chips);
             }
             tr.appendChild(nameTd);
@@ -1550,6 +1551,13 @@
         bindSearchClear(searchInput, $('wl-search-clear'), () => { state.wl.search = ''; state.wl.page = 1; loadWhitelist(); });
         $('wl-search-files').addEventListener('change', (e) => { state.wl.searchFiles = e.target.checked; if (state.wl.search) loadWhitelist(); });
         $('wl-filter-source').addEventListener('change', (e) => { state.wl.source = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const fHost = $('wl-filters');
+        if (fHost && window.SearchFilters) {
+            let catalog = [];
+            try { catalog = JSON.parse(fHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
+            state.wl.filters = window.SearchFilters.mount(fHost, { catalog, facts: fHost.dataset.facts === '1', desc: fHost.dataset.desc === '1', ui: 'panel',
+                                                                   onChange: () => { state.wl.page = 1; loadWhitelist(); } });
+        }
         $('wl-filter-meta').addEventListener('change', (e) => { state.wl.meta = e.target.value; state.wl.page = 1; loadWhitelist(); });
         const wlPp = $('wl-perpage');
         if (wlPp) {

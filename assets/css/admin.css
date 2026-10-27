@@ -1787,7 +1787,7 @@ input[type="number"] {
 .idx-mkv-k { color: #8a8a9a; } .idx-mkv-v { color: #e6e6ee; font-family: 'JetBrains Mono', Consolas, monospace; text-align: right; word-break: break-all; }
 .idx-magnet { display: flex; gap: 0.4rem; } .idx-magnet input { font-size: 0.72rem; }
 .wl-copybox .wl-copybox-btn + .wl-copybox-btn { margin-left: 0.18rem; }
-.wl-bulkbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #222; }
+.wl-bulkbar:not(.d-hidden) { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #222; }
 .wl-bulkbar #idx-sel-count { color: #9aa; font-size: 0.85rem; margin-right: auto; }
 @media (max-width: 992px) { .idx-mgrid { grid-template-columns: 1fr; } }
 
@@ -3714,3 +3714,37 @@ a.source-tab { text-decoration: none; }
     #img-total, #img-q-total, .rq-toolbar #rq-total { margin-left: 0; }
 }
 .wl-name .fchips, .wl-name-cell .fchips { max-height: 2.8rem; overflow: hidden; }
+.admin-body .sf-host { --accent: #4a9eff; --text: #e6edf3; --text-muted: #8b949e; --warning: #ffc107; margin-top: 0.55rem; }
+.admin-body .sf-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+.admin-body .sf-type { display: inline-flex; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }
+.admin-body .sf-type-btn { background: transparent; color: var(--text-muted); border: 0; padding: 0.2rem 0.7rem; font: inherit; font-size: 0.8rem; cursor: pointer; }
+.admin-body .sf-type-btn + .sf-type-btn { border-left: 1px solid #3a3a3a; }
+.admin-body .sf-type-btn:hover { color: var(--text); }
+.admin-body .sf-type-btn.is-on { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); }
+.admin-body .sf-type-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.admin-body .sf-more .bi, .admin-body .sf-clear .bi { line-height: 1; }
+.admin-body .sf-clear[hidden] { display: none; }
+.admin-body .sf-active { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.admin-body .sf-chip {
+    display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.15rem 0.05rem 0.55rem; font-size: 0.75rem; color: var(--text);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-radius: 999px; white-space: nowrap;
+}
+.admin-body .sf-chip-x { display: inline-flex; background: none; border: 0; color: inherit; padding: 0 0.2rem; cursor: pointer; line-height: 1; font-size: 0.9rem; }
+.admin-body .sf-chip-x:hover { color: var(--warning); }
+.admin-body .sf-panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.2s ease; }
+.admin-body .sf-panel.sf-open { grid-template-rows: 1fr; }
+.admin-body .sf-panel-inner { overflow: hidden; min-height: 0; }
+.admin-body .sf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.6rem 1rem; padding-top: 0.6rem; }
+.admin-body .sf-group { border: 1px solid #2f2f2f; border-radius: 8px; padding: 0.35rem 0.75rem 0.65rem; margin: 0; min-width: 0; }
+.admin-body .sf-group > legend { float: none; width: auto; margin: 0; padding: 0 0.3rem; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+.admin-body .sf-range, .admin-body .sf-tags { margin-top: 0.4rem; }
+.admin-body .sf-label { display: block; margin-bottom: 0.2rem; font-size: 0.78rem; color: var(--text-muted); }
+.admin-body .sf-range-row { display: flex; align-items: center; gap: 0.35rem; }
+.admin-body .sf-input { flex: 1 1 0; min-width: 0; width: 6rem; }
+.admin-body .sf-input.sf-bad { border-color: #e05252 !important; box-shadow: 0 0 0 1px #e05252; }
+.admin-body .sf-dash { color: var(--text-muted); }
+.admin-body .sf-hint { margin-top: 0.15rem; font-size: 0.7rem; }
+.admin-body .sf-tag-list { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.admin-body .sf-tag { font-size: 0.76rem; }
+.admin-body .sf-check { margin-top: 0.45rem; font-size: 0.82rem; }

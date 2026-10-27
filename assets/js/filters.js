@@ -7,8 +7,8 @@
         { key: 'filecount', label: 'files', group: 'release' },
         { key: 'year', label: 'year', group: 'release', facts: true, year: true },
         { key: 'seeders', label: 'seeders', group: 'popularity', minOnly: true },
-        { key: 'imdb', label: 'imdb', group: 'ratings', facts: true, minOnly: true, rating: true },
-        { key: 'filmweb', label: 'filmweb', group: 'ratings', facts: true, minOnly: true, rating: true },
+        { key: 'imdb', label: 'imdb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
+        { key: 'filmweb', label: 'filmweb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
     ];
     const GROUPS = [['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language']];
     const PARAMS = ['type', 'tags', 'pics'].concat(RANGES.map(r => r.key));
@@ -25,10 +25,10 @@
         i.setAttribute('aria-hidden', 'true');
         return i;
     }
-    function store(get, value) {
+    function store(key, get, value) {
         try {
-            if (get) return localStorage.getItem(OPEN_KEY) === '1';
-            localStorage.setItem(OPEN_KEY, value ? '1' : '0');
+            if (get) return localStorage.getItem(key) === '1';
+            localStorage.setItem(key, value ? '1' : '0');
         } catch (e) { return false; }
         return false;
     }
@@ -46,14 +46,18 @@
     }
 
     function mount(host, opts) {
-        const S = { type: '', pics: false, sel: new Set(), ranges: {}, open: store(true) };
+        const panelUi = opts.ui === 'panel';
+        const openKey = panelUi ? OPEN_KEY + '-' + (host.id || 'panel') : OPEN_KEY;
+        const btnCls = panelUi ? 'btn btn-sm btn-outline-secondary' : 'btn btn-secondary btn-small';
+        const S = { type: '', pics: false, sel: new Set(), ranges: {}, open: store(openKey, true) };
         const catalog = Array.isArray(opts.catalog) ? opts.catalog : [];
         const labelOf = new Map(catalog.map(c => [c.id, c.l]));
         const facts = !!opts.facts;
+        const desc = !!opts.desc;
         let timer = 0;
 
         const bar = el('div', 'sf-bar');
-        const clear = el('button', 'btn btn-secondary btn-small sf-clear');
+        const clear = el('button', btnCls + ' sf-clear');
         clear.type = 'button';
         clear.append(icon('bi-x-circle'), ' ', t.key('js.filters.clear'));
         bar.appendChild(clear);
@@ -69,7 +73,7 @@
             return b;
         });
         if (facts) bar.appendChild(seg);
-        const more = el('button', 'btn btn-secondary btn-small sf-more');
+        const more = el('button', btnCls + ' sf-more');
         more.type = 'button';
         more.setAttribute('aria-expanded', 'false');
         bar.appendChild(more);
@@ -95,7 +99,7 @@
         (facts ? ['release', 'quality', 'language', 'ratings', 'popularity', 'description'] : ['release', 'popularity']).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
-            if (r.facts && !facts) return;
+            if ((r.facts && !facts) || (r.desc && !desc)) return;
             const box = el('div', 'sf-range');
             const id = 'sf-' + r.key;
             const lab = el('label', 'sf-label', t.key('js.filters.' + r.label));
@@ -103,7 +107,7 @@
             box.appendChild(lab);
             const row = el('div', 'sf-range-row');
             const mk = (end) => {
-                const i = el('input', 'profile-search sf-input');
+                const i = el('input', panelUi ? 'form-control form-control-sm bg-dark text-light border-secondary sf-input' : 'profile-search sf-input');
                 i.type = 'text';
                 i.id = id + '-' + end;
                 i.inputMode = r.unit ? 'text' : 'decimal';
@@ -156,12 +160,18 @@
                 wrap.appendChild(list);
                 section(sec).appendChild(wrap);
             });
-            const pics = el('label', 'search-check sf-check');
-            const pin = el('input');
+        }
+        if (facts && desc) {
+            const pics = el('label', panelUi ? 'form-check sf-check' : 'search-check sf-check');
+            const pin = el('input', panelUi ? 'form-check-input' : null);
             pin.type = 'checkbox';
             pin.addEventListener('change', () => { S.pics = pin.checked; changed(true); });
-            pics.append(pin, el('span', 'search-check-box'), ' ', t.key('js.filters.pics'));
-            pics.querySelector('.search-check-box').setAttribute('aria-hidden', 'true');
+            if (panelUi) {
+                pics.append(pin, el('span', 'form-check-label', t.key('js.filters.pics')));
+            } else {
+                pics.append(pin, el('span', 'search-check-box'), ' ', t.key('js.filters.pics'));
+                pics.querySelector('.search-check-box').setAttribute('aria-hidden', 'true');
+            }
             section('description').appendChild(pics);
             S.picsInput = pin;
         }
@@ -251,7 +261,7 @@
             Object.keys(inputs).forEach(k => { inputs[k].min.value = ''; if (inputs[k].max) inputs[k].max.value = ''; inputs[k].min.classList.remove('sf-bad'); if (inputs[k].max) inputs[k].max.classList.remove('sf-bad'); });
             changed(true);
         });
-        more.addEventListener('click', () => { S.open = !S.open; store(false, S.open); paint(); });
+        more.addEventListener('click', () => { S.open = !S.open; store(openKey, false, S.open); paint(); });
         paint();
 
         return {

@@ -147,6 +147,7 @@
                         </div>
                     </div>
                 </div>
+                <div class="sf-host" id="idx-filters" data-facts="1" data-desc="1" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog() : [])) ?>"></div>
                 <div class="wl-bulkbar d-hidden" id="idx-bulkbar">
                     <span id="idx-sel-count"><?= _h('a.index.sel_count', ['n' => 0]) ?></span>
                     <button type="button" class="btn btn-sm btn-outline-success" id="btn-idx-promote"><i class="bi bi-arrow-up-circle"></i> <?= __('a.index.promote') ?></button>

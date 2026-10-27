@@ -7,6 +7,7 @@
     const $ = (id) => document.getElementById(id);
 
     const state = { page: 1, pages: 1, search: '', searchFiles: false, meta: '', life: '', desc: '', sort: [{ col: 'last', dir: 'desc' }], selected: new Set(), rows: [] };
+    let filters = null;
     const nearRadius = () => Math.max(1, parseInt(document.body.dataset.nearPages || '2', 10) || 2);
     // index_files_admin_mode. 'button' is what the panel has always done — one slice, then "Load the
     // whole file list"; 'scroll' fires that same second request when the operator reaches the end of
@@ -170,6 +171,7 @@
         if (state.meta) qs.set('meta', state.meta);
         if (state.life) qs.set('life', state.life);
         if (state.desc) qs.set('desc', state.desc);
+        if (filters) Object.entries(filters.params()).forEach(([k, v]) => qs.set(k, v));
         return qs;
     }
     let loadSeq = 0;
@@ -239,7 +241,7 @@
             const nameCell = el('td', { className: 'wl-name-cell' }, el('div', { className: 'idx-name-row' },
                 [el('span', { className: 'idx-name', text: r.name || '—', title: r.name || '' }), ...marks]));
             if (r.facts && window.FactChips) {
-                const chips = window.FactChips.render(r.facts, null);
+                const chips = window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null);
                 if (chips) nameCell.appendChild(chips);
             }
             tr.appendChild(nameCell);
@@ -632,6 +634,13 @@
         $('idx-filter-meta').addEventListener('change', () => { state.meta = $('idx-filter-meta').value; state.page = 1; load(); });
         $('idx-filter-life').addEventListener('change', () => { state.life = $('idx-filter-life').value; state.page = 1; load(); });
         $('idx-filter-desc').addEventListener('change', () => { state.desc = $('idx-filter-desc').value; state.page = 1; load(); });
+        const fHost = $('idx-filters');
+        if (fHost && window.SearchFilters) {
+            let catalog = [];
+            try { catalog = JSON.parse(fHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
+            filters = window.SearchFilters.mount(fHost, { catalog, facts: fHost.dataset.facts === '1', desc: fHost.dataset.desc === '1', ui: 'panel',
+                                                          onChange: () => { state.page = 1; load(); } });
+        }
         const idxPp = $('idx-perpage');
         if (idxPp) {
             try { const v = localStorage.getItem('thx_idx_perpage'); if (v && [...idxPp.options].some(o => o.value === v)) idxPp.value = v; } catch (e) {}

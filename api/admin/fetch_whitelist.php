@@ -138,6 +138,10 @@ if ($ipFilter !== '') {
     $params[] = $ipFilter;
 }
 
+[$filterWhere, $filterParams] = factsListFilters($db, $cfg, factsRequest($_GET), 'COALESCE(scrape_seeders, 0)');
+foreach ($filterWhere as $fw) $where[] = $fw;
+foreach ($filterParams as $fp) $params[] = $fp;
+
 $columns = "id, info_hash, name, source, source_ref, api_client_id, ip, ip_bucket, banned, meta_status, meta_error,
             total_size, files_count, scrape_seeders, scrape_leechers, scrape_completed, scraped_at, created_at, updated_at,
             source_url, description, description_format, content_status, content_rejected_note,
@@ -232,7 +236,8 @@ foreach ($rows as &$row) {
 unset($row);
 $factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($rows, 'info_hash'), true) : [];
 foreach ($rows as &$row) {
-    if (isset($factsMap[strtolower((string)$row['info_hash'])])) $row['facts'] = $factsMap[strtolower((string)$row['info_hash'])];
+    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg);
+    if ($chips !== null) $row['facts'] = $chips;
 }
 unset($row);
 
