@@ -4,6 +4,61 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.80.0] — 2026-10-27
+
+The review queue moves to Moderation and is built for a long queue: rows open on demand, filters, orders, decisions in bulk and a way to act on the author. Descriptions from the forum follow the forum more faithfully, pictures load faster, the Info panel can be resized and folds long descriptions, and the renderer no longer slows down on hostile text. Schema 99.
+
+- **The queue in Moderation.** Descriptions and proposed changes waiting for a decision are under Moderation → To
+  review, for anyone with the right to review descriptions, with a count beside the menu item. Each row says what was
+  sent, by whom and when, and opens to show the whole text as a visitor would see it, its pictures in a viewer. Filters
+  by state, source (from the forum or written here), format and author, a search, five orders and 25, 50 or 100 rows a
+  page. The Whitelist page's To review tab is now a link to it.
+- **Decisions in bulk, and on the author.** Select a page, or everything that matches, and publish or reject it in one
+  go. A row can also warn, silence or ban its author, rejecting the text in the same step if the moderator wants.
+- **Nothing decided unseen.** A text that changed after the moderator opened it — a forum edit, say — is not published
+  or applied; the moderator is asked to look again. Deleting a text from the queue withdraws the proposals waiting on
+  it.
+- **Descriptions from the forum.**
+  - An older version arriving after a newer one changes nothing; the forum is answered `stale`.
+  - When a description written here is deleted, the forum's version waiting behind it goes into the queue instead of
+    being answered `unchanged` for ever.
+  - A registration deleted here takes the forum's record of it along, so a torrent registered again takes its topic's
+    text again.
+  - A topic sent again whose text is the same once trimmed writes nothing and adds nothing to the history.
+  - A key switched from the queue to publishing releases, the next time the forum sends it, what waited only because
+    of the queue; a text queued because a moderator deleted or rejected the one before it still waits.
+  - A description from the forum rejected here is remembered as declined and comes back only when the post changes.
+  - A registration still waiting for a person, or turned down, takes no description yet. With Rewrite proposals per
+    torrent at 0, the forum's version of a description changed here is kept aside rather than proposed.
+  - One hash that fails no longer fails the call: it is answered `error` and the rest go on. A topic with several
+    hashes looks its author and its pictures up once.
+- **Pictures.**
+  - Pictures go out without a session cookie, cached for a day with a tag and answered 304 when unchanged; a picture
+    only its owner or a moderator may see is never cached.
+  - A partner's picture is copied up to Largest file, MB of the picture settings (on many servers it was 2 MB), and
+    copying ignores proxy settings in the environment.
+  - Animated GIFs are cleaned: frames, palettes and looping stay; comments, metadata and anything after the end of the
+    file are dropped.
+  - The Images page shows its numbers at the top and the pictures as cards; each opens in a viewer with the original,
+    where it is used, and delete.
+  - The Pictures bar is the footer of the text box: drop pictures on it or choose files, My pictures beside it. A
+    comment cannot be sent while its pictures are still uploading.
+  - Another site's picture in a comment counts as a link, a reported comment shows its pictures, and a deleted
+    account's pictures lose their names.
+- **The Info panel.** A member can drag its edge to resize it; the size is remembered in that browser, and a button
+  puts it back. A long description is folded with a button to show it whole. Both are in Settings → User Accounts
+  (Resizable Info panel, Fold descriptions taller than), and resizing is a right of its own, given to members. YouTube
+  videos play inside the panel again, and the link that sent the reader off to YouTube is gone.
+- **The renderer stays fast on hostile text.** Quotes, code fences and links left open, or long runs of brackets and
+  spoilers, no longer slow it down: half a million characters render in about two seconds at worst, where some shapes
+  took minutes. Placeholder bytes typed into a text never turn into a link or code, and a picture's description can
+  never end its attribute.
+- **Smaller fixes.** The tab counts sit next to their names, the account and profile pages are wider, an API key's
+  chips have a row of their own, the comments keep their distance from the description, the new pages' page
+  navigation works, and the texts about the forum's descriptions point at Moderation.
+- **Schema 99** adds the two Info panel settings and gives members the right to resize the panel. It runs by itself at
+  the first request after the update.
+
 ## [1.79.1] — 2026-10-26
 
 The tracker no longer copies its own pictures. When a key's image domain also covered the tracker's own host (`tryhackx.org` covers `tracker.tryhackx.org`), every picture it had copied was found again in the descriptions and copied once more, every ten minutes, a little worse each time.
