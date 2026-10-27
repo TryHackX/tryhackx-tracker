@@ -1091,5 +1091,78 @@
         if (btn) btn.closest('.toast')?.remove();
     });
 
-    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting, adminRichField, richFormats };
+    function resizableDialog(modal, key) {
+        const dlg = modal ? modal.querySelector('.modal-dialog') : null;
+        const content = dlg ? dlg.querySelector('.modal-content') : null;
+        if (!content || content.querySelector('.dlg-grip')) return;
+        const head = content.querySelector('.modal-header');
+        const reset = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary dlg-size-reset', title: t.key('js.app.info_size_reset_tip'),
+                                     'aria-label': t.key('js.app.info_size_reset') }, [el('i', { className: 'bi bi-arrows-angle-contract', 'aria-hidden': 'true' })]);
+        if (head) head.insertBefore(reset, head.querySelector('.btn-close'));
+        const stored = () => {
+            try {
+                const v = JSON.parse(localStorage.getItem(key) || 'null');
+                return v && v.w > 0 ? { w: Number(v.w), h: Number(v.h) || 0 } : null;
+            } catch (e) {
+                return null;
+            }
+        };
+        const fit = (v) => ({
+            w: Math.round(Math.min(Math.max(v.w, 480), window.innerWidth - 24)),
+            h: v.h ? Math.round(Math.min(Math.max(v.h, 300), window.innerHeight - 48)) : 0,
+        });
+        const apply = (v) => {
+            const f = v && window.innerWidth >= 768 ? fit(v) : null;
+            dlg.classList.toggle('dlg-sized', !!f);
+            dlg.classList.toggle('dlg-sized-h', !!(f && f.h));
+            if (f) dlg.style.setProperty('--dlg-w', f.w + 'px'); else dlg.style.removeProperty('--dlg-w');
+            if (f && f.h) dlg.style.setProperty('--dlg-h', f.h + 'px'); else dlg.style.removeProperty('--dlg-h');
+            reset.hidden = !f;
+        };
+        const keep = (v) => {
+            try {
+                if (v) localStorage.setItem(key, JSON.stringify(v)); else localStorage.removeItem(key);
+            } catch (e) {
+                return;
+            }
+        };
+        const clear = () => { keep(null); apply(null); };
+        reset.addEventListener('click', clear);
+        ['e', 'w', 's', 'se', 'sw'].forEach(dir => {
+            const grip = el('span', { className: 'dlg-grip dlg-grip-' + dir, 'aria-hidden': 'true' });
+            grip.addEventListener('dblclick', clear);
+            grip.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                const r = content.getBoundingClientRect();
+                const x0 = e.clientX, y0 = e.clientY;
+                const before = stored();
+                let last = null;
+                grip.setPointerCapture(e.pointerId);
+                dlg.classList.add('dlg-resizing');
+                const move = (ev) => {
+                    const dx = ev.clientX - x0;
+                    const w = dir.includes('e') ? r.width + 2 * dx : (dir.includes('w') ? r.width - 2 * dx : r.width);
+                    const h = dir.includes('s') ? r.height + ev.clientY - y0 : (before ? before.h : 0);
+                    last = fit({ w, h });
+                    apply(last);
+                };
+                const up = () => {
+                    grip.removeEventListener('pointermove', move);
+                    grip.removeEventListener('pointerup', up);
+                    grip.removeEventListener('pointercancel', up);
+                    dlg.classList.remove('dlg-resizing');
+                    if (last) keep(last);
+                };
+                grip.addEventListener('pointermove', move);
+                grip.addEventListener('pointerup', up);
+                grip.addEventListener('pointercancel', up);
+            });
+            content.appendChild(grip);
+        });
+        apply(stored());
+        window.addEventListener('resize', () => apply(stored()));
+    }
+
+    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting, adminRichField, richFormats, resizableDialog };
 })();

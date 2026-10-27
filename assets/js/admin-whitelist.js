@@ -770,6 +770,7 @@
 
     async function openDetails(id, isPoll = false) {
         const modalEl = $('wlDetailsModal');
+        window.AdminCommon.resizableDialog(modalEl, 'thx-wl-detail-size');
         const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         const body = $('wd-body');
         const byHash = isHash(id);

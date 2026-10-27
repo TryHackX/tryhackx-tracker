@@ -51,8 +51,14 @@ $modWaiting = $modReview ? contentPendingCount($db) + (int)$db->query("SELECT CO
             <div id="rq-pane-queue">
                 <div class="admin-toolbar-card rq-toolbar">
                     <div class="toolbar-row rq-filters">
-                        <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary rq-search" id="rq-search" maxlength="200" placeholder="<?= _h('a.moderation.rv_search_ph') ?>" aria-label="<?= _h('a.moderation.rv_search_ph') ?>">
-                        <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary rq-author" id="rq-author" maxlength="64" placeholder="<?= _h('a.moderation.rv_author_ph') ?>" aria-label="<?= _h('a.moderation.rv_author_ph') ?>">
+                        <span class="rq-search-wrap">
+                            <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary rq-search" id="rq-search" maxlength="200" placeholder="<?= _h('a.moderation.rv_search_ph') ?>" aria-label="<?= _h('a.moderation.rv_search_ph') ?>">
+                            <button type="button" class="search-clear-btn" id="rq-search-clear" title="<?= _h('a.wl.clear_search') ?>"><i class="bi bi-x-lg"></i></button>
+                        </span>
+                        <span class="rq-search-wrap rq-author-wrap">
+                            <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary rq-author" id="rq-author" maxlength="64" placeholder="<?= _h('a.moderation.rv_author_ph') ?>" aria-label="<?= _h('a.moderation.rv_author_ph') ?>">
+                            <button type="button" class="search-clear-btn" id="rq-author-clear" title="<?= _h('a.wl.clear_search') ?>"><i class="bi bi-x-lg"></i></button>
+                        </span>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="rq-status" aria-label="<?= _h('a.moderation.rv_status') ?>">
                             <option value="pending"><?= _h('a.moderation.rv_status_pending') ?></option>
                             <option value="approved"><?= _h('a.moderation.rv_status_approved') ?></option>

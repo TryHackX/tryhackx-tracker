@@ -557,6 +557,8 @@
         const soon = A.debounce(refilter, (A.DEBOUNCE && A.DEBOUNCE.search) || 400);
         $('rq-search').addEventListener('input', () => { S.f.search = $('rq-search').value.trim(); soon(); });
         $('rq-author').addEventListener('input', () => { S.f.author = $('rq-author').value.trim(); soon(); });
+        A.bindSearchClear($('rq-search'), $('rq-search-clear'), () => $('rq-search').dispatchEvent(new Event('input')));
+        A.bindSearchClear($('rq-author'), $('rq-author-clear'), () => $('rq-author').dispatchEvent(new Event('input')));
         [['rq-status', 'status'], ['rq-source', 'source'], ['rq-format', 'format'], ['rq-sort', 'sort'], ['rq-per', 'per']].forEach(([id, k]) => {
             $(id).addEventListener('change', () => {
                 S.f[k] = k === 'per' ? (parseInt($(id).value, 10) || 25) : $(id).value;
@@ -567,6 +569,8 @@
             S.f = Object.assign({}, DEFAULTS);
             $('rq-search').value = '';
             $('rq-author').value = '';
+            $('rq-search-clear').classList.remove('visible');
+            $('rq-author-clear').classList.remove('visible');
             $('rq-status').value = DEFAULTS.status;
             $('rq-source').value = '';
             $('rq-format').value = '';

@@ -328,6 +328,7 @@
     // the button it puts in the header copies that address back.
     let hashView = null;
     async function openModal(hash) {
+        window.AdminCommon.resizableDialog($('idxModal'), 'thx-idx-detail-size');
         modal = modal || bootstrap.Modal.getOrCreateInstance($('idxModal'));
         hashView = hashView || bindHashModal($('idxModal'), 'admin-index');
         hashView.show(hash);
