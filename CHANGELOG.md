@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.82.1] — 2026-10-27
+
+The owner's notes on 1.82.0: magnet cards count clicks and refresh, the editor's menus sit right, the panel's windows resize, the panel's Index searches names quickly, and the forum can bring back a text the tracker turned down. Schema 102; with homepage-blocks 2.12.2.
+
+- **Magnet cards.** Opening or copying a magnet counts once a person a day, and the card shows the count. Refresh asks
+  the tracker for the seeders and leechers at once, with the limits the Info panel's refresh has. The whole hash is
+  shown after the size and the swarm numbers, shortened only when the card is too narrow, and in full in its tooltip.
+  A reader without `index.magnet` still gets no hash anywhere.
+- **The editor.** Insert and Paragraph sit together left of the emoji button, which keeps the right edge. Their labels
+  line up with the icons, and a menu opens inside the window it is in — moved left, or upwards, when it would not fit.
+- **The panel.** The Whitelist and Index windows can be resized from their edges and corners and remember their size,
+  like the Info panel. The review search has the panel's own clear button.
+- **The panel's Index search.** A name search without other filters, sorted by date, size, files or name, reads the
+  narrow catalogue the public search uses, and counts up to 10 000.
+- **Descriptions from the forum** (homepage-blocks 2.12.2):
+  - A topic sent with `"restore": true` brings back a text a moderator here turned down or deleted: published when
+    the key publishes, otherwise into the queue. Without it nothing changes, as before.
+  - The pictures of a turned-down description stay for the grace period (Unused pictures removed after, hours) and
+    then go, so a rejection made by mistake can still be undone.
+
 ## [1.82.0] — 2026-10-27
 
 Magnet links become cards in descriptions, comments and the shoutbox, the editor gains two menus, Moderation lists the published descriptions, the search finds torrents that have a description, votes keep their scale, and the Index page stops counting its table on every look. Schema 101; with homepage-blocks 2.12.1.
