@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.80.1] — 2026-10-27
+
+A partner's picture bigger than PHP's upload limit is copied again.
+
+- **A copy is not an upload.** The janitor's PHP usually allows uploads of 2 MB, and a copied picture was measured
+  against that limit as if a browser had sent it, so a partner's picture over 2 MB was refused as too big. A copy is
+  now measured only against Largest file, MB of the picture settings.
+
 ## [1.80.0] — 2026-10-27
 
 The review queue moves to Moderation and is built for a long queue: rows open on demand, filters, orders, decisions in bulk and a way to act on the author. Descriptions from the forum follow the forum more faithfully, pictures load faster, the Info panel can be resized and folds long descriptions, and the renderer no longer slows down on hostile text. Schema 99.
