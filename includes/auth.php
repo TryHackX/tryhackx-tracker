@@ -48,7 +48,7 @@ function adminNavItems(): array {
     // (templates/admin/dashboard.php draws only the tabs the session may see).
     return [
         ['action' => 'admin',           'label' => 'Reports',   'icon' => 'bi-flag',        'anchor' => '',                  'perm' => 'panel.reports.view',
-         'any' => ['panel.messages.view', 'panel.reports.comments.view', 'panel.reports.descriptions.view', 'panel.reports.shouts.view']],
+         'any' => ['panel.messages.view', 'panel.reports.comments.view', 'panel.reports.descriptions.view', 'panel.reports.shouts.view', 'panel.reports.images.view']],
         ['action' => 'admin-whitelist', 'label' => 'Whitelist', 'icon' => 'bi-list-check',  'anchor' => '',                  'perm' => 'panel.whitelist.view'],
         ['action' => 'admin-index',     'label' => 'Index',     'icon' => 'bi-collection',  'anchor' => '#section-index',    'perm' => 'panel.whitelist.view'],
         ['action' => 'admin-traffic',   'label' => 'Traffic',   'icon' => 'bi-speedometer2','anchor' => '#section-netlimit', 'perm' => 'panel.traffic.view'],

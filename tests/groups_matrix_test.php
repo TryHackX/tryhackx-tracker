@@ -122,6 +122,7 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               'panel.reports.comments.view', 'panel.reports.comments.handle',
               'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
               'panel.reports.shouts.view', 'panel.reports.shouts.handle',
+              'panel.reports.images.view', 'panel.reports.images.handle',
               // v88 (1.72.0): reply to a comment.
               'comment.reply',
               // v94 (1.75.0): the Moderation page — read it and act on it (the rules are nobody's but the Admin group's).
@@ -192,6 +193,7 @@ $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                         ['panel.reports.comments.view', 'panel.reports.comments.handle',
                                          'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
                                          'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
+                                        ['panel.reports.images.view', 'panel.reports.images.handle'],
                                         ['comment.reply'],
                                         ['panel.moderation.view', 'panel.moderation.handle'],
                                         ['panel.images.view', 'panel.images.manage']));
