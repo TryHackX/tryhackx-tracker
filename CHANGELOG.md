@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.4] — 2026-10-27
+
+- A forum's genre tag is matched to the genre whose whole name it begins with: "Komediowe" is Komedia, not Komediodramat,
+  which only shares a longer start with it (production has 37 genres read from the descriptions).
+
 ## [1.85.3] — 2026-10-27
 
 - **Tags from the forum.** A forum with homepage-blocks 2.13.0 sends each discussion's tags with its description — only the

@@ -49,7 +49,9 @@ register_shutdown_function(function () use ($tidy, $db, $keptCounts): void {
 });
 $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('facts_counts', ?)")->execute([json_encode(['at' => time(), 'n' => [],
     'g' => ['dramat' => 'Dramat', 'dramat-historyczny' => 'Dramat historyczny', 'komedia' => 'Komedia', 'akcja' => 'Akcja', 'animacja' => 'Animacja',
-            'fantasy' => 'Fantasy', 'kryminal' => 'Kryminał', 'dla-dzieci' => 'Dla dzieci']])]);
+            'fantasy' => 'Fantasy', 'kryminal' => 'Kryminał', 'dla-dzieci' => 'Dla dzieci', 'komediodramat' => 'Komediodramat',
+            'komedia-kryminalna' => 'Komedia kryminalna', 'animowany' => 'Animowany', 'romans' => 'Romans', 'romantyczne' => 'Romantyczne',
+            'surrealistyczny' => 'Surrealistyczny', 'przygodowy' => 'Przygodowy']])]);
 
 $prop = fn(string $name, string $slug): string => tagsForumTarget($db, $name, $slug);
 $got = [$prop('Ultra HD (2160p)', 'ultra-hd-2160p'), $prop('Full HD (1080p)', 'full-hd-1080p'), $prop('HD (720p)', 'hd-720p'), $prop('VHS / SD', 'vhs-sd'),
@@ -57,9 +59,10 @@ $got = [$prop('Ultra HD (2160p)', 'ultra-hd-2160p'), $prop('Full HD (1080p)', 'f
 check('proposals: the qualities, sources, HDR and CAM/TS the tracker knows',
       $got === ['q:2160p', 'q:1080p', 'q:720p', 'q:sd', 's:bluray', 's:webdl', 's:webrip', 's:remux', 'h:hdr', 's:cam', 's:cam'], json_encode($got));
 $got = [$prop('Dramatyczne', 'dramatyczne'), $prop('Komediowe', 'komediowe'), $prop('Akcji', 'akcji'), $prop('Animowane', 'animowane'),
-        $prop('Fantastyczne', 'fantastyczne'), $prop('Kryminalne', 'kryminalne')];
-check('… a genre read from the descriptions, by the word it begins with (Dramatyczne is Dramat, not Dramat historyczny)',
-      $got === ['g:dramat', 'g:komedia', 'g:akcja', 'g:animacja', 'g:fantasy', 'g:kryminal'], json_encode($got));
+        $prop('Fantastyczne', 'fantastyczne'), $prop('Kryminalne', 'kryminalne'), $prop('Romantyczne', 'romantyczne'), $prop('Surrealistyczne', 'surrealistyczne'),
+        $prop('Przygodowe', 'przygodowe')];
+check('… a genre read from the descriptions, whose whole name the word begins with (Dramatyczne is Dramat, Komediowe Komedia — not Dramat historyczny or Komediodramat)',
+      $got === ['g:dramat', 'g:komedia', 'g:akcja', 'g:animacja', 'g:fantasy', 'g:kryminal', 'g:romantyczne', 'g:surrealistyczny', 'g:przygodowy'], json_encode($got));
 $got = [$prop('PL', 'pl'), $prop('IVO', 'ivo'), $prop('3D / SBS / OU', '3d-sbs-ou'), $prop('Dla młodzieży', 'dla-mlodziezy')];
 check('… and anything else a new tag', $got === ['x:pl', 'x:ivo', 'x:3d-sbs-ou', 'x:dla-mlodziezy'], json_encode($got));
 
@@ -214,7 +217,7 @@ $words = ['a.tags.forum_title', 'a.tags.forum_intro', 'js.tags.f_empty', 'js.tag
           'settings.tags_forum', 'settings.tags_forum_review', 'settings.tags_forum_review_hint'];
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL))
       && $plL['js.tags.f_turn_on'] === 'Włącz import' && __('a.tags.forum_title') === 'Tags from the forum');
-check('version and changelog', TRACKER_VERSION === '1.85.3' && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
+check('version and changelog', TRACKER_VERSION === '1.85.4' && str_contains($src('CHANGELOG.md'), '## [1.85.4]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

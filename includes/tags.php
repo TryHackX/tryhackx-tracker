@@ -500,7 +500,7 @@ function tagsForumAuto(PDO $db, string $name, string $slug): ?string
     foreach (array_keys($genres) as $g) {
         $g = (string)$g;
         $cp = strspn($s ^ $g, "\0");
-        if ($cp < max(4, min(strlen($s), strlen($g)) - 3) || $cp * 100 - strlen($g) <= $score) continue;
+        if ($cp < 4 || $cp < strlen($g) - 2 || $cp * 100 - strlen($g) <= $score) continue;
         $best = $g;
         $score = $cp * 100 - strlen($g);
     }
