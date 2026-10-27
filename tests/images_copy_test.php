@@ -296,6 +296,21 @@ check('… once: a second pass finds nothing to do, and the janitor\'s pass runs
       && array_key_exists('repaired', imagesRemoteTick($db, $cfgO, ['resolve' => $resolveOk, 'get' => $getPng]))
       && str_contains($src('tools/janitor.php'), "repaired=%d"));
 
+$iniMax = userMediaMaxBytes(imagesMediaCfg($cfgI));
+if ($iniMax < imagesMaxMb($cfgI) * 1048576 - 2097152 && function_exists('imagepng')) {
+    $big = imagecreatetruecolor(1000, 1000);
+    for ($y = 0; $y < 1000; $y++) for ($x = 0; $x < 1000; $x++) imagesetpixel($big, $x, $y, mt_rand(0, 0xFFFFFF));
+    ob_start();
+    imagepng($big, null, 0);
+    $bigBytes = (string)ob_get_clean();
+    $U6 = 'https://forum.copy.test/assets/files/large.png';
+    imagesRemoteEnqueue($db, [$U6]);
+    $c6 = imagesRemoteCopy($db, $cfgI, hash('sha256', $U6), $U6, 0, ['copy.test'],
+                           ['resolve' => $resolveOk, 'get' => fn(): array => ['ok' => true, 'bytes' => $bigBytes]]);
+    check('a partner\'s picture bigger than this PHP\'s upload limit, within Largest file, is copied: that limit is for uploads',
+          !empty($c6['ok']) && strlen($bigBytes) > $iniMax, json_encode($c6) . ' bytes=' . strlen($bigBytes) . ' ini=' . $iniMax);
+}
+
 check('the copying runs in the janitor\'s slow half, never in a request',
       str_contains($src('tools/janitor.php'), '$ir = imagesRemoteTick($db, $cfg);')
       && strpos($src('tools/janitor.php'), '$ir = imagesRemoteTick($db, $cfg);') < strpos($src('tools/janitor.php'), 'function janitorHeavyDispatch('));

@@ -350,12 +350,12 @@ function userMediaEncode(\GdImage $im): string
  * answered there, so a picture that would not fit is refused having cost a few hundred bytes of
  * parsing rather than the decode that would have taken the process down.
  */
-function userMediaPrepare(string $bytes, array $cfg, int $maxEdge): array
+function userMediaPrepare(string $bytes, array $cfg, int $maxEdge, ?int $maxBytes = null): array
 {
     // 1. how much
     $len = strlen($bytes);
     if ($len < USER_MEDIA_MIN_BYTES) return ['ok' => false, 'status' => 400, 'error' => 'api.media.too_small'];
-    $max = userMediaMaxBytes($cfg);
+    $max = $maxBytes ?? userMediaMaxBytes($cfg);
     if ($len > $max) return ['ok' => false, 'status' => 413, 'error' => 'api.media.too_large', 'detail' => (string)$len];
 
     // 2. what, by the magic bytes

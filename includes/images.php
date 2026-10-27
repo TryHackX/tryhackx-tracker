@@ -175,10 +175,10 @@ function imagesGifClean(string $b): ?string
     return null;
 }
 
-function imagesProcess(string $bytes, array $cfg): array
+function imagesProcess(string $bytes, array $cfg, ?int $maxBytes = null): array
 {
     $edge = imagesMaxEdge($cfg);
-    $p = userMediaPrepare($bytes, imagesMediaCfg($cfg), $edge);
+    $p = userMediaPrepare($bytes, imagesMediaCfg($cfg), $edge, $maxBytes);
     if (empty($p['ok'])) return $p;
     $gif = $p['from'] === 'gif' && strlen($bytes) <= IMAGES_GIF_MAX_BYTES && imagesGifFrames($bytes) > 1 ? imagesGifClean($bytes) : null;
     if ($gif !== null && imagesGifFrames($gif) > 1) {
@@ -268,7 +268,7 @@ function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $n
     $size = $known === false ? false : (int)$known['bytes'];
     if ($known !== false && !imagesShapeOk((int)$known['full_w'], (int)$known['full_h'], $ratio)) return imagesRefusal($cfg, 'api.images.shape', 400);
     if ($size === false) {
-        $p = imagesProcess($bytes, $cfg);
+        $p = imagesProcess($bytes, $cfg, $source === 'copy' ? imagesMaxMb($cfg) * 1048576 : null);
         if (empty($p['ok'])) {
             return imagesRefusal($cfg, (string)($p['error'] ?? 'api.media.store_failed'), (int)($p['status'] ?? 400), (string)($p['detail'] ?? ''));
         }
