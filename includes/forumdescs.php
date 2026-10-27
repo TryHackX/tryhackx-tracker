@@ -107,6 +107,7 @@ function forumDescTopic($t): ?array {
         'gone'          => ($t['gone'] ?? false) === true,
         'audience'      => ($t['audience'] ?? 'guests') === 'members' ? 'members' : 'guests',
         'restore'       => ($t['restore'] ?? false) === true,
+        'tags'          => function_exists('tagsForumList') ? tagsForumList($t['tags'] ?? null) : null,
     ];
 }
 
@@ -299,6 +300,7 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
         $db->prepare("UPDATE whitelist SET api_client_id = ?, source_ref = COALESCE(source_ref, ?) WHERE id = ? AND api_client_id IS NULL")
            ->execute([$cid, forumDescRef($topic), (int)$w['id']]);
     }
+    if (($topic['tags'] ?? null) !== null && function_exists('tagsForumSet')) tagsForumSet($db, $cfg, $cid, $hash, $topic['tags']);
 
     $who = 'account:' . $cid . ':' . $topic['author_id'];
     if (!array_key_exists($who, $memo)) $memo[$who] = forumDescAccount($db, $client, $topic['author_id']);
@@ -477,6 +479,7 @@ function forumDescHideLocked(PDO $db, array $client, array $topic, string $hash)
     if ($f !== null ? ((int)$f['client_id'] !== $cid || (int)$f['discussion_id'] !== $disc) : ($bound !== null && $bound !== $disc)) {
         return ['status' => 'other_topic', 'detail' => null];
     }
+    if (function_exists('tagsForumClear')) tagsForumClear($db, $cid, $hash);
     if ($f !== null && !in_array((string)$f['state'], ['declined', 'removed'], true)) {
         if ($f['import_sha'] !== null && $w['description'] !== null
             && hash_equals((string)$f['import_sha'], forumDescSha((string)$w['description_format'], (string)$w['description']))) {

@@ -156,3 +156,50 @@ add('settings', {
     'tags_create_per_day_hint': ('0 = none (they can still add existing ones); moderators have no limit.',
                                  '0 = żadnych (nadal mogą dodawać istniejące); moderatorzy nie mają limitu.'),
 })
+
+
+add('settings', {
+    'tags_forum': ('Tags from the forum', 'Tagi z forum'),
+    'tags_forum_hint': ("A forum's discussion tags come with its descriptions; what each one becomes here is set once on the Tags page.",
+                        'Tagi dyskusji przychodzą razem z opisami z forum; na co każdy się przekłada, ustala się raz na stronie Tagi.'),
+    'tags_forum_review': ('A tag the forum sends for the first time', 'Tag wysłany przez forum pierwszy raz'),
+    'tags_forum_review_bypass': ('applies at once', 'działa od razu'),
+    'tags_forum_review_queue': ('waits on the Tags page', 'czeka na stronie Tagi'),
+    'tags_forum_review_hint': ("Only once that forum's import is on; until then every tag from it waits.",
+                               'Dopiero gdy import z tego forum jest włączony; wcześniej każdy tag z niego czeka.'),
+})
+
+add('a.tags', {
+    'forum_title': ('Tags from the forum', 'Tagi z forum'),
+    'forum_intro': ("Each tag a forum sends has its match here: a quality, source or genre the tracker already knows, or a new tag in the forum's colour. "
+                    "Nothing reaches the torrents while that forum's import is off. A forum tag a moderator takes off a torrent does not come back.",
+                    'Każdy tag wysłany przez forum ma tu swój odpowiednik: jakość, źródło albo gatunek, które tracker już zna, lub nowy tag w kolorze z forum. '
+                    'Dopóki import z danego forum jest wyłączony, nic nie trafia do torrentów. Tag z forum zdjęty przez moderatora z torrentu nie wraca.'),
+})
+
+add('js.tags', {
+    'f_empty': ('No forum has sent tags yet. They come with the descriptions from a forum with homepage-blocks 2.13.0 or newer.',
+                'Żadne forum nie wysłało jeszcze tagów. Przychodzą razem z opisami z forum, które ma homepage-blocks 2.13.0 lub nowsze.'),
+    'f_off': ('Tags from the forum are off in Settings — nothing below reaches the torrents.',
+              'Tagi z forum są wyłączone w Ustawieniach — nic z poniższych nie trafia do torrentów.'),
+    'f_import_on': ('import on', 'import włączony'),
+    'f_import_off': ('import off — proposals only', 'import wyłączony — tylko propozycje'),
+    'f_n_proposed': (':n to decide', 'do decyzji: :n'),
+    'f_approve_all': ('Approve every proposal', 'Zatwierdź wszystkie propozycje'),
+    'f_turn_on': ('Turn the import on', 'Włącz import'),
+    'f_turn_off': ('Turn the import off', 'Wyłącz import'),
+    'f_on_confirm': ('From now on the approved tags from ":name" go onto its torrents.', 'Od teraz zatwierdzone tagi z „:name” trafiają do jego torrentów.'),
+    'f_off_confirm': ('Every tag from ":name" comes off the torrents; the matches stay.', 'Wszystkie tagi z „:name” znikną z torrentów; dopasowania zostają.'),
+    'f_col_forum': ('On the forum', 'Na forum'),
+    'f_col_n': ('Torrents', 'Torrenty'),
+    'f_col_target': ('Here', 'Tutaj'),
+    'f_col_state': ('State', 'Stan'),
+    'f_col_actions': ('Actions', 'Akcje'),
+    'f_target': ('What ":name" becomes here', 'Na co przekłada się „:name”'),
+    'f_new': ('A new tag ":name"', 'Nowy tag „:name”'),
+    'f_ignore': ('Ignore this tag', 'Pomijaj ten tag'),
+    'f_st_proposed': ('proposed', 'propozycja'),
+    'f_st_approved': ('approved', 'zatwierdzony'),
+    'f_st_ignored': ('ignored', 'pomijany'),
+    'f_done': ('Done (:n).', 'Gotowe (:n).'),
+})

@@ -211,6 +211,7 @@ try {
         if ($factsRead > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read $factsRead descriptions\n";
         factsCountsTick($db, $cfg);
         tagsUsesTick($db);
+        tagsForumReconcile($db, $cfg);
     }
     // The stability probe: start one that was asked for, and restore one whose process has died.
     // The reap is the important half — a tuner that is killed must not leave the machine on the limit

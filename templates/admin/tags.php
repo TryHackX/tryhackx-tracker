@@ -54,6 +54,12 @@
             </table>
         </div>
         <div class="admin-pagination" id="tags-pagination"></div>
+
+        <div class="admin-toolbar-card mt-4" id="tags-forum">
+            <h2 class="tags-f-title"><i class="bi bi-chat-square-text"></i> <?= _h('a.tags.forum_title') ?></h2>
+            <small class="settings-hint d-block mb-2"><?= _h('a.tags.forum_intro') ?></small>
+            <div id="tags-forum-body"></div>
+        </div>
     </div>
 
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>

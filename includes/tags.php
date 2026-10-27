@@ -4,6 +4,8 @@ const TAG_ORIGIN_MEMBER = 1;
 const TAG_ORIGIN_MODERATOR = 2;
 const TAG_ORIGIN_FORUM = 4;
 const TAGS_LIST_CAP = 10000;
+const TAGS_FORUM_MAX = 30;
+const TAGS_FORUM_GENRES = ['animowane' => 'animacja', 'animowany' => 'animacja', 'fantastyka-naukowa' => 'sci-fi', 'dreszczowce' => 'thriller'];
 
 function tagsEnabled(array $cfg): bool
 {
@@ -188,6 +190,7 @@ function tagsForHashes(PDO $db, array $hashes, ?int $viewerId, bool $moderate): 
     $hashes = array_values(array_unique(array_filter(array_map('strtolower', array_map('strval', $hashes)), fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
     if (!$hashes || !tagsReady($db)) return [];
     $out = [];
+    $genres = null;
     foreach (array_chunk($hashes, 500) as $chunk) {
         $in = implode(',', array_fill(0, count($chunk), '?'));
         $st = $db->prepare("SELECT ht.info_hash, ht.tag, ht.origin, ht.added_by, t.name, t.color, t.status, t.hidden
@@ -203,8 +206,8 @@ function tagsForHashes(PDO $db, array $hashes, ?int $viewerId, bool $moderate): 
                 $chip = ['id' => $id, 'g' => 'x', 'l' => (string)$r['name']];
                 if ($r['color']) $chip['c'] = (string)$r['color'];
                 if ($r['status'] === 'pending') $chip['p'] = 1;
-            } elseif (factsTagValid($id) && !str_starts_with($id, 'g:')) {
-                $chip = ['id' => $id, 'g' => substr($id, 0, 1), 'l' => factsTagLabel($id)];
+            } elseif (factsTagValid($id)) {
+                $chip = ['id' => $id, 'g' => substr($id, 0, 1), 'l' => str_starts_with($id, 'g:') ? tagsGenreLabel($id, $genres ??= tagsGenreLabels($db)) : factsTagLabel($id)];
             } else {
                 continue;
             }
@@ -316,6 +319,11 @@ function tagsHashChips(PDO $db, array $cfg, string $hash, ?int $viewerId, bool $
 function tagsUsesTick(PDO $db): void
 {
     if (!tagsReady($db)) return;
+    if (tagsForumReady($db)) {
+        $db->exec("DELETE hf FROM hash_forum_tags hf LEFT JOIN whitelist w ON w.info_hash = hf.info_hash LEFT JOIN api_clients c ON c.id = hf.client_id
+                   WHERE w.info_hash IS NULL OR c.id IS NULL");
+        $db->exec("DELETE m FROM tag_forum_map m LEFT JOIN api_clients c ON c.id = m.client_id WHERE c.id IS NULL");
+    }
     $db->exec("DELETE ht FROM hash_tags ht LEFT JOIN index_hashes h ON h.info_hash = ht.info_hash LEFT JOIN whitelist w ON w.info_hash = ht.info_hash
                WHERE h.info_hash IS NULL AND w.info_hash IS NULL");
     $db->exec("UPDATE tags t LEFT JOIN (SELECT SUBSTRING(tag, 3) AS slug, COUNT(*) AS n FROM hash_tags WHERE tag LIKE 'x:%' GROUP BY tag) c ON c.slug = t.slug
@@ -407,4 +415,310 @@ function tagsAdminAction(PDO $db, array $cfg, string $op, array $in, bool $manag
         return ['ok' => true, 'n' => count($ids)];
     }
     return ['ok' => false, 'error' => 'invalid'];
+}
+
+function tagsForumOn(array $cfg): bool
+{
+    return tagsEnabled($cfg) && ($cfg['tags_forum'] ?? '1') === '1';
+}
+
+function tagsForumReady(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready) return true;
+    try {
+        $ready = (bool)$db->query("SHOW TABLES LIKE 'hash_forum_tags'")->fetchColumn()
+              && (bool)$db->query("SHOW COLUMNS FROM api_clients LIKE 'tags_import'")->fetchColumn();
+    } catch (\Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+function tagsForumList($raw): ?array
+{
+    if (!is_array($raw)) return null;
+    $clean = static fn($v): string => is_string($v) ? trim((string)preg_replace('/[\x00-\x1F\x7F]/u', '', $v)) : '';
+    $out = [];
+    foreach ($raw as $t) {
+        if (count($out) >= TAGS_FORUM_MAX) break;
+        if (!is_array($t)) continue;
+        $slug = $clean($t['slug'] ?? null);
+        if ($slug === '' || mb_strlen($slug) > 100 || isset($out[$slug])) continue;
+        $parent = $clean($t['parent'] ?? null);
+        $out[$slug] = [
+            'slug'   => $slug,
+            'name'   => tagsName(is_string($t['name'] ?? null) ? $t['name'] : '', 100) ?? $slug,
+            'color'  => tagsColor(is_string($t['color'] ?? null) ? $t['color'] : null),
+            'parent' => $parent !== '' && mb_strlen($parent) <= 100 ? $parent : null,
+        ];
+    }
+    return array_values($out);
+}
+
+function tagsGenreLabels(PDO $db): array
+{
+    try {
+        $st = $db->prepare("SELECT `value` FROM settings WHERE `key` = 'facts_counts'");
+        $st->execute();
+        $c = json_decode((string)($st->fetchColumn() ?: ''), true);
+    } catch (\Throwable $e) {
+        return [];
+    }
+    return is_array($c['g'] ?? null) ? $c['g'] : [];
+}
+
+function tagsGenreLabel(string $id, array $genres): string
+{
+    $slug = substr($id, 2);
+    if (isset($genres[$slug])) return (string)$genres[$slug];
+    $s = str_replace('-', ' ', $slug);
+    return mb_strtoupper(mb_substr($s, 0, 1)) . mb_substr($s, 1);
+}
+
+function tagsForumAuto(PDO $db, string $name, string $slug): ?string
+{
+    $parts = array_values(array_filter(array_map('trim', preg_split('~[/()|,+]~u', $name) ?: []), fn($p) => $p !== ''));
+    foreach (array_merge([$name, $slug], $parts) as $c) {
+        if (($id = tagsAutoMatch($c)) !== null) return $id;
+        $s = tagsSlug($c);
+        if ($s === '') continue;
+        foreach (FACTS_LABELS as $id => $label) {
+            foreach (explode('/', $label) as $piece) {
+                if (tagsSlug($piece) === $s) return $id;
+            }
+        }
+    }
+    $genres = tagsGenreLabels($db);
+    $s = tagsSlug($name) ?: tagsSlug($slug);
+    if ($s === '' || !$genres) return null;
+    $alias = TAGS_FORUM_GENRES[$s] ?? null;
+    if ($alias !== null && isset($genres[$alias])) return 'g:' . $alias;
+    if (isset($genres[$s])) return factsTagValid('g:' . $s) ? 'g:' . $s : null;
+    $best = null;
+    $score = 0;
+    foreach (array_keys($genres) as $g) {
+        $g = (string)$g;
+        $cp = strspn($s ^ $g, "\0");
+        if ($cp < max(4, min(strlen($s), strlen($g)) - 3) || $cp * 100 - strlen($g) <= $score) continue;
+        $best = $g;
+        $score = $cp * 100 - strlen($g);
+    }
+    return $best !== null && factsTagValid('g:' . $best) ? 'g:' . $best : null;
+}
+
+function tagsForumTarget(PDO $db, string $name, string $slug): string
+{
+    $auto = tagsForumAuto($db, $name, $slug);
+    if ($auto !== null) return $auto;
+    $s = tagsSlug($name) ?: tagsSlug($slug);
+    return 'x:' . ($s !== '' ? $s : substr(sha1($slug), 0, 12));
+}
+
+function tagsForumEnsure(PDO $db, string $target, string $name, ?string $color): ?string
+{
+    if (!factsTagValid($target)) return null;
+    if (!tagsIsExplicit($target)) return $target;
+    $row = tagsRow($db, $target);
+    if ($row && $row['status'] === 'rejected') return null;
+    if ($row) {
+        if ($row['status'] === 'pending') $db->prepare("UPDATE tags SET status = 'approved' WHERE id = ?")->execute([(int)$row['id']]);
+        return $target;
+    }
+    $label = tagsName(mb_substr($name, 0, 40), 40) ?? substr($target, 2);
+    $db->prepare("INSERT IGNORE INTO tags (slug, name, color, status, origin, created_by, created_at) VALUES (?, ?, ?, 'approved', 'forum', NULL, UTC_TIMESTAMP())")
+       ->execute([substr($target, 2), mb_substr($label, 0, 40), tagsColor($color)]);
+    return tagsRow($db, $target) ? $target : null;
+}
+
+function tagsForumSet(PDO $db, array $cfg, int $clientId, string $hash, array $tags): void
+{
+    if (!tagsForumReady($db)) return;
+    $hash = strtolower($hash);
+    $slugs = array_values(array_unique(array_map(fn($t) => (string)$t['slug'], $tags)));
+    $in = implode(',', array_fill(0, max(1, count($slugs)), '?'));
+    if ($slugs) {
+        $st = $db->prepare("SELECT forum_slug FROM tag_forum_map WHERE client_id = ? AND forum_slug IN ($in)");
+        $st->execute(array_merge([$clientId], $slugs));
+        $known = array_flip(array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN)));
+        $st = $db->prepare("SELECT tags_import FROM api_clients WHERE id = ?");
+        $st->execute([$clientId]);
+        $auto = (int)$st->fetchColumn() === 1 && ($cfg['tags_forum_review'] ?? 'bypass') !== 'queue';
+        $seen = $db->prepare("UPDATE tag_forum_map SET name = ?, color = ?, parent = ?, seen_at = UTC_TIMESTAMP() WHERE client_id = ? AND forum_slug = ?");
+        $add = $db->prepare("INSERT IGNORE INTO tag_forum_map (client_id, forum_slug, name, color, parent, target, state, seen_at, decided_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), IF(? = 'approved', UTC_TIMESTAMP(), NULL))");
+        foreach ($tags as $t) {
+            if (isset($known[$t['slug']])) {
+                $seen->execute([$t['name'], $t['color'], $t['parent'], $clientId, $t['slug']]);
+                continue;
+            }
+            $target = tagsForumTarget($db, $t['name'], $t['slug']);
+            $state = $auto && tagsForumEnsure($db, $target, $t['name'], $t['color']) !== null ? 'approved' : 'proposed';
+            $add->execute([$clientId, $t['slug'], $t['name'], $t['color'], $t['parent'], $target, $state, $state]);
+        }
+    }
+    $where = $slugs ? "AND forum_slug NOT IN ($in)" : '';
+    $db->prepare("DELETE FROM hash_forum_tags WHERE info_hash = ? AND client_id = ? $where")->execute(array_merge([$hash, $clientId], $slugs));
+    $put = $db->prepare("INSERT IGNORE INTO hash_forum_tags (info_hash, client_id, forum_slug) VALUES (?, ?, ?)");
+    foreach ($slugs as $s) $put->execute([$hash, $clientId, $s]);
+    tagsForumReconcile($db, $cfg, $hash);
+}
+
+function tagsForumClear(PDO $db, int $clientId, string $hash): void
+{
+    if (!tagsForumReady($db)) return;
+    $hash = strtolower($hash);
+    $db->prepare("DELETE FROM hash_forum_tags WHERE info_hash = ? AND client_id = ?")->execute([$hash, $clientId]);
+    tagsForumReconcile($db, [], $hash);
+}
+
+function tagsForumReconcile(PDO $db, array $cfg, ?string $hash = null, int $limit = 2000): array
+{
+    $done = ['added' => 0, 'removed' => 0];
+    if (!tagsReady($db) || !tagsForumReady($db)) return $done;
+    $limit = max(1, $limit);
+    $args = $hash !== null ? [strtolower($hash)] : [];
+    $on = tagsForumOn($cfg);
+    $where = $hash !== null ? 'AND ht.info_hash = ?' : '';
+    $sql = $on
+        ? "SELECT ht.info_hash, ht.tag, ht.origin FROM hash_tags ht
+            WHERE (ht.origin & 4) <> 0 $where
+              AND NOT EXISTS (SELECT 1 FROM hash_forum_tags hf
+                                JOIN tag_forum_map m ON m.client_id = hf.client_id AND m.forum_slug = hf.forum_slug AND m.state = 'approved' AND m.target = ht.tag
+                                JOIN api_clients c ON c.id = hf.client_id AND c.tags_import = 1
+                               WHERE hf.info_hash = ht.info_hash)
+            LIMIT $limit"
+        : "SELECT ht.info_hash, ht.tag, ht.origin FROM hash_tags ht WHERE (ht.origin & 4) <> 0 $where LIMIT $limit";
+    $st = $db->prepare($sql);
+    $st->execute($args);
+    $drop = $db->prepare("DELETE FROM hash_tags WHERE info_hash = ? AND tag = ? AND origin = 4");
+    $keep = $db->prepare("UPDATE hash_tags SET origin = origin & ~4 WHERE info_hash = ? AND tag = ?");
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        if ((int)$r['origin'] === TAG_ORIGIN_FORUM) $drop->execute([$r['info_hash'], $r['tag']]);
+        if ((int)$r['origin'] !== TAG_ORIGIN_FORUM || $drop->rowCount() === 0) $keep->execute([$r['info_hash'], $r['tag']]);
+        $done['removed']++;
+    }
+    if (!$on) return $done;
+    $where = $hash !== null ? 'AND hf.info_hash = ?' : '';
+    $st = $db->prepare("SELECT DISTINCT hf.info_hash, m.target FROM hash_forum_tags hf
+                          JOIN tag_forum_map m ON m.client_id = hf.client_id AND m.forum_slug = hf.forum_slug AND m.state = 'approved' AND m.target IS NOT NULL
+                          JOIN api_clients c ON c.id = hf.client_id AND c.tags_import = 1
+                          LEFT JOIN hash_tags ht ON ht.info_hash = hf.info_hash AND ht.tag = m.target
+                          LEFT JOIN hash_tag_blocks b ON b.info_hash = hf.info_hash AND b.tag = m.target
+                          LEFT JOIN tags t ON m.target LIKE 'x:%' AND t.slug = SUBSTRING(m.target, 3)
+                         WHERE (ht.info_hash IS NULL OR (ht.origin & 4) = 0) AND b.info_hash IS NULL
+                           AND (m.target NOT LIKE 'x:%' OR (t.id IS NOT NULL AND t.status <> 'rejected' AND t.hidden = 0)) $where
+                         LIMIT $limit");
+    $st->execute($args);
+    $put = $db->prepare("INSERT INTO hash_tags (info_hash, tag, origin, added_by, created_at) VALUES (?, ?, 4, NULL, UTC_TIMESTAMP())
+                         ON DUPLICATE KEY UPDATE origin = origin | 4");
+    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$h, $tag]) {
+        if (!factsTagValid((string)$tag)) continue;
+        $put->execute([$h, $tag]);
+        $done['added']++;
+    }
+    return $done;
+}
+
+function tagsForumLabel(PDO $db, string $target, string $name, array $genres): array
+{
+    if (tagsIsExplicit($target)) {
+        $row = tagsRow($db, $target);
+        return $row ? ['l' => (string)$row['name'], 'g' => 'x', 'new' => false, 'st' => (string)$row['status']] : ['l' => $name, 'g' => 'x', 'new' => true];
+    }
+    if (str_starts_with($target, 'g:')) return ['l' => tagsGenreLabel($target, $genres), 'g' => 'g', 'new' => false];
+    return ['l' => factsTagLabel($target), 'g' => substr($target, 0, 1), 'new' => false];
+}
+
+function tagsForumTargets(PDO $db, array $cfg): array
+{
+    $out = [];
+    $seen = [];
+    foreach (factsCatalog($cfg) as $c) {
+        $out[] = ['id' => $c['id'], 'g' => $c['g'], 'l' => $c['l']];
+        $seen[$c['id']] = true;
+    }
+    foreach (tagsGenreLabels($db) as $slug => $label) {
+        if (isset($seen['g:' . $slug]) || !factsTagValid('g:' . $slug)) continue;
+        $out[] = ['id' => 'g:' . $slug, 'g' => 'g', 'l' => mb_substr((string)$label, 0, 40)];
+    }
+    foreach ($db->query("SELECT slug, name FROM tags WHERE status <> 'rejected' AND hidden = 0 ORDER BY name LIMIT 1000")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[] = ['id' => 'x:' . $r['slug'], 'g' => 'x', 'l' => (string)$r['name']];
+    }
+    return $out;
+}
+
+function tagsForumAdmin(PDO $db, array $cfg): array
+{
+    $base = ['on' => tagsForumOn($cfg), 'review' => ($cfg['tags_forum_review'] ?? 'bypass') === 'queue' ? 'queue' : 'bypass', 'clients' => [], 'targets' => []];
+    if (!tagsReady($db) || !tagsForumReady($db)) return $base;
+    $clients = [];
+    foreach ($db->query("SELECT id, label, tags_import FROM api_clients ORDER BY id")->fetchAll(PDO::FETCH_ASSOC) as $c) {
+        $clients[(int)$c['id']] = ['id' => (int)$c['id'], 'label' => (string)$c['label'], 'on' => (int)$c['tags_import'] === 1, 'proposed' => 0, 'rows' => []];
+    }
+    $genres = tagsGenreLabels($db);
+    $st = $db->query("SELECT m.client_id, m.forum_slug, m.name, m.color, m.parent, m.target, m.state,
+                             (SELECT COUNT(*) FROM hash_forum_tags hf WHERE hf.client_id = m.client_id AND hf.forum_slug = m.forum_slug) AS n
+                        FROM tag_forum_map m ORDER BY m.client_id, n DESC, m.name");
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $cid = (int)$r['client_id'];
+        if (!isset($clients[$cid])) continue;
+        $clients[$cid]['rows'][] = ['slug' => (string)$r['forum_slug'], 'name' => (string)$r['name'], 'color' => $r['color'], 'parent' => $r['parent'],
+                                    'target' => (string)$r['target'], 'state' => (string)$r['state'], 'n' => (int)$r['n'],
+                                    'to' => tagsForumLabel($db, (string)$r['target'], (string)$r['name'], $genres)];
+        if ($r['state'] === 'proposed') $clients[$cid]['proposed']++;
+    }
+    $base['clients'] = array_values(array_filter($clients, fn($c) => $c['rows'] || $c['on']));
+    $base['targets'] = tagsForumTargets($db, $cfg);
+    return $base;
+}
+
+function tagsForumDecide(PDO $db, array $cfg, string $op, array $input): array
+{
+    if (!tagsReady($db) || !tagsForumReady($db)) return ['ok' => false, 'error' => 'unavailable'];
+    $cid = (int)($input['client'] ?? 0);
+    $st = $db->prepare("SELECT 1 FROM api_clients WHERE id = ?");
+    $st->execute([$cid]);
+    if ($cid < 1 || !$st->fetchColumn()) return ['ok' => false, 'error' => 'invalid'];
+    if ($op === 'forum_import') {
+        $db->prepare("UPDATE api_clients SET tags_import = ? WHERE id = ?")->execute([!empty($input['on']) ? 1 : 0, $cid]);
+        $done = tagsForumReconcile($db, $cfg, null, 50000);
+        tagsUsesTick($db);
+        return ['ok' => true, 'n' => 1] + $done;
+    }
+    if ($op === 'forum_all') {
+        $st = $db->prepare("SELECT * FROM tag_forum_map WHERE client_id = ? AND state = 'proposed' ORDER BY forum_slug");
+        $st->execute([$cid]);
+    } else {
+        $slugs = array_values(array_unique(array_filter(array_map(fn($s) => is_string($s) ? $s : '', (array)($input['slugs'] ?? [$input['slug'] ?? ''])), fn($s) => $s !== '')));
+        if (!$slugs || count($slugs) > 500) return ['ok' => false, 'error' => 'invalid'];
+        $in = implode(',', array_fill(0, count($slugs), '?'));
+        $st = $db->prepare("SELECT * FROM tag_forum_map WHERE client_id = ? AND forum_slug IN ($in)");
+        $st->execute(array_merge([$cid], $slugs));
+    }
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows && $op !== 'forum_all') return ['ok' => false, 'error' => 'invalid'];
+    $set = $db->prepare("UPDATE tag_forum_map SET target = ?, state = ?, decided_at = UTC_TIMESTAMP() WHERE client_id = ? AND forum_slug = ?");
+    $n = 0;
+    foreach ($rows as $r) {
+        $target = (string)$r['target'];
+        if ($op === 'forum_target') {
+            $target = is_string($input['target'] ?? null) ? $input['target'] : '';
+            if ($target === 'new') {
+                $s = tagsSlug((string)$r['name']) ?: tagsSlug((string)$r['forum_slug']);
+                $target = $s !== '' ? 'x:' . $s : '';
+            }
+        }
+        if ($op === 'forum_ignore') {
+            $set->execute([$target, 'ignored', $cid, $r['forum_slug']]);
+        } else {
+            $ok = tagsForumEnsure($db, $target, (string)$r['name'], $r['color'] !== null ? (string)$r['color'] : null);
+            if ($ok === null) return ['ok' => false, 'error' => tagsIsExplicit($target) ? 'rejected' : 'unknown'];
+            $set->execute([$ok, 'approved', $cid, $r['forum_slug']]);
+        }
+        $n++;
+    }
+    $done = tagsForumReconcile($db, $cfg, null, 50000);
+    tagsUsesTick($db);
+    return ['ok' => true, 'n' => $n] + $done;
 }

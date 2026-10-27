@@ -1539,6 +1539,22 @@
                         <input type="number" min="0" max="500" step="1" id="set-tags_create_per_day" class="form-control bg-dark text-light border-secondary" name="tags_create_per_day" value="<?= (int)($cfg['tags_create_per_day'] ?? 20) ?>">
                         <small class="settings-hint"><?= _h('settings.tags_create_per_day_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="tags_forum">
+                        <label for="set-tags_forum" class="form-label"><?= _h('settings.tags_forum') ?></label>
+                        <select id="set-tags_forum" class="form-select bg-dark text-light border-secondary" name="tags_forum">
+                            <option value="1" <?= ($cfg['tags_forum'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['tags_forum'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tags_forum_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tags_forum_review">
+                        <label for="set-tags_forum_review" class="form-label"><?= _h('settings.tags_forum_review') ?></label>
+                        <select id="set-tags_forum_review" class="form-select bg-dark text-light border-secondary" name="tags_forum_review">
+                            <option value="bypass" <?= ($cfg['tags_forum_review'] ?? 'bypass') !== 'queue' ? 'selected' : '' ?>><?= _h('settings.tags_forum_review_bypass') ?></option>
+                            <option value="queue" <?= ($cfg['tags_forum_review'] ?? 'bypass') === 'queue' ? 'selected' : '' ?>><?= _h('settings.tags_forum_review_queue') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tags_forum_review_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="facts_filter_counts">
                         <label for="set-facts_filter_counts" class="form-label"><?= _h('settings.facts_filter_counts') ?></label>
                         <select id="set-facts_filter_counts" class="form-select bg-dark text-light border-secondary" name="facts_filter_counts">

@@ -309,6 +309,8 @@ function settingsCatalogKeywords(): array {
         'tags_max_per_torrent'      => 'tags per torrent limit maximum many tagi limit',
         'tags_name_max'             => 'tag name length characters long nazwa dlugosc',
         'tags_create_per_day'       => 'tags create per day limit member spam nowe tagi dziennie',
+        'tags_forum'                => 'tags forum flarum discussion import map tagi z forum dyskusji',
+        'tags_forum_review'         => 'tags forum new first time approve queue map tagi z forum nowe zatwierdzanie',
         // #section-user2fa
         'user_2fa_enabled'          => 'two factor authentication 2fa members accounts totp authenticator app',
         'user_2fa_required'         => 'two factor required force 2fa panel access moderators admins',

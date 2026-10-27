@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.3] — 2026-10-27
+
+- **Tags from the forum.** A forum with homepage-blocks 2.13.0 sends each discussion's tags with its description — only the
+  tags the chosen audience can see. Panel → Tags → "Tags from the forum" lists every one with what it becomes here: a tag the
+  tracker already knows ("Full HD (1080p)" → 1080p, "BluRay", "WEB-DL", "HDR", "CAM"/"TS"), a genre read from the
+  descriptions ("Dramatyczne" → Drama), or a new tag in the forum's colour. Nothing reaches the torrents until that forum's
+  import is on; after that a tag the forum sends for the first time applies at once or waits (Settings → Tags and filters).
+- A withdrawn or released topic takes its forum tags off; a forum tag a moderator takes off a torrent stays off; the janitor
+  puts right every 10 minutes whatever an interrupted request left.
+- `v1/whitelist/ping` says `describe_tags`, so a forum sends tags only to a tracker that takes them.
+- Schema 108: `tag_forum_map`, `hash_forum_tags`, `api_clients.tags_import`.
+
 ## [1.85.2] — 2026-10-27
 
 - **Several tags at once, quicker still:** the torrents with a description or a hand-added tag (a few hundred) are

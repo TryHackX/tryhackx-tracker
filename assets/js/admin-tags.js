@@ -34,6 +34,7 @@
         if (!r || !r.success) { showToast((r && (r.message || r.error)) || t.key('js.tags.failed'), 'error'); return false; }
         showToast(t.key('js.tags.done'), 'success');
         load();
+        loadForum();
         return true;
     }
 
@@ -107,6 +108,105 @@
         });
     }
 
+    const F = { manage: false, on: true, clients: [], targets: [] };
+    const FSTATE = { proposed: ['js.tags.f_st_proposed', 'wl-b-pending'], approved: ['js.tags.f_st_approved', 'wl-b-ok'], ignored: ['js.tags.f_st_ignored', 'wl-b-muted'] };
+    const FGROUPS = ['q', 'v', 'h', 'a', 's', 'l', 'g', 'x'];
+
+    function btnText(cls, label, fn) {
+        const b = el('button', { type: 'button', className: 'btn btn-sm ' + cls }, label);
+        b.addEventListener('click', fn);
+        return b;
+    }
+
+    async function loadForum() {
+        const r = await apiCall('admin/tag_forum');
+        if (!r || r.error) return;
+        F.manage = !!r.manage;
+        F.on = r.on !== false;
+        F.clients = r.clients || [];
+        F.targets = r.targets || [];
+        renderForum();
+    }
+
+    async function forumAct(op, client, extra) {
+        const r = await apiCall('admin/tag_action', 'POST', Object.assign({ op: op, client: client }, extra || {}));
+        if (!r || !r.success) { showToast((r && (r.message || r.error)) || t.key('js.tags.failed'), 'error'); loadForum(); return; }
+        showToast(t.key('js.tags.f_done', { n: t.num(r.n || 0) }), 'success');
+        loadForum();
+        load();
+    }
+
+    function targetSelect(c, row) {
+        const sel = el('select', { className: 'form-select form-select-sm bg-dark text-light border-secondary tags-f-target', 'aria-label': t.key('js.tags.f_target', { name: row.name }) });
+        const fresh = el('option', { value: 'new' }, t.key('js.tags.f_new', { name: row.name }));
+        sel.appendChild(fresh);
+        let picked = row.to && row.to.new ? fresh : null;
+        const groups = {};
+        F.targets.forEach(x => { (groups[x.g] = groups[x.g] || []).push(x); });
+        FGROUPS.forEach(g => {
+            if (!groups[g]) return;
+            const og = el('optgroup', { label: t.key('js.filters.t_' + g) });
+            groups[g].forEach(x => {
+                const o = el('option', { value: x.id }, x.l);
+                if (!picked && x.id === row.target) picked = o;
+                og.appendChild(o);
+            });
+            sel.appendChild(og);
+        });
+        if (!picked) {
+            picked = el('option', { value: row.target }, (row.to && row.to.l) || row.target);
+            sel.insertBefore(picked, fresh.nextSibling);
+        }
+        picked.selected = true;
+        sel.disabled = !F.manage;
+        sel.addEventListener('change', () => forumAct('forum_target', c.id, { slug: row.slug, target: sel.value }));
+        return sel;
+    }
+
+    function renderForum() {
+        const box = $('tags-forum-body');
+        if (!box) return;
+        box.textContent = '';
+        if (!F.on) box.appendChild(el('div', { className: 'wl-small text-warning mb-2', text: t.key('js.tags.f_off') }));
+        if (!F.clients.length) { box.appendChild(el('div', { className: 'wl-small text-muted', text: t.key('js.tags.f_empty') })); return; }
+        F.clients.forEach(c => {
+            const head = el('div', { className: 'tags-f-head' }, [
+                el('strong', { text: c.label }),
+                el('span', { className: 'wl-badge ' + (c.on ? 'wl-b-ok' : 'wl-b-muted') }, t.key(c.on ? 'js.tags.f_import_on' : 'js.tags.f_import_off')),
+            ]);
+            if (c.proposed) head.appendChild(el('span', { className: 'wl-badge wl-b-pending' }, t.key('js.tags.f_n_proposed', { n: t.num(c.proposed) })));
+            if (F.manage) {
+                if (c.proposed) head.appendChild(btnText('btn-outline-success', t.key('js.tags.f_approve_all'), () => forumAct('forum_all', c.id)));
+                const label = t.key(c.on ? 'js.tags.f_turn_off' : 'js.tags.f_turn_on');
+                head.appendChild(btnText(c.on ? 'btn-outline-warning' : 'btn-success', label, async () => {
+                    if (await confirmAction(label, t.key(c.on ? 'js.tags.f_off_confirm' : 'js.tags.f_on_confirm', { name: c.label }))) forumAct('forum_import', c.id, { on: !c.on });
+                }));
+            }
+            box.appendChild(head);
+            const tb = el('tbody', {});
+            c.rows.forEach(row => {
+                const st = FSTATE[row.state] || FSTATE.proposed;
+                const acts = el('td', { className: 'th-actions' });
+                if (F.manage && row.state !== 'approved') acts.appendChild(btn('bi-check-lg', 'btn-outline-success', t.key('js.tags.approve'), () => forumAct('forum_approve', c.id, { slug: row.slug })));
+                if (F.manage && row.state !== 'ignored') acts.appendChild(btn('bi-x-lg', 'btn-outline-warning', t.key('js.tags.f_ignore'), () => forumAct('forum_ignore', c.id, { slug: row.slug })));
+                tb.appendChild(el('tr', {}, [
+                    el('td', {}, el('div', { className: 'tags-name' }, [swatch(row.color), el('span', { text: row.name }),
+                        el('span', { className: 'wl-small text-muted', text: row.parent ? row.parent + ' / ' + row.slug : row.slug })])),
+                    el('td', { className: 'font-mono', text: t.num(row.n || 0) }),
+                    el('td', {}, targetSelect(c, row)),
+                    el('td', { className: 'col-badge' }, el('span', { className: 'wl-badge ' + st[1] }, t.key(st[0]))),
+                    acts,
+                ]));
+            });
+            box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover wl-table dash-table tags-f-table' }, [
+                el('thead', {}, el('tr', {}, [el('th', { text: t.key('js.tags.f_col_forum') }), el('th', { className: 'tags-f-n', text: t.key('js.tags.f_col_n') }),
+                    el('th', { className: 'tags-f-to', text: t.key('js.tags.f_col_target') }), el('th', { className: 'col-badge', text: t.key('js.tags.f_col_state') }),
+                    el('th', { className: 'th-actions', text: t.key('js.tags.f_col_actions') })])),
+                tb,
+            ])));
+        });
+    }
+
     function init() {
         const q = $('tags-f-q');
         q.addEventListener('input', debounce(() => { S.q = q.value.trim(); S.page = 1; load(); }, DEBOUNCE.search));
@@ -114,6 +214,7 @@
         $('tags-f-sort').addEventListener('change', (e) => { S.sort = e.target.value; S.page = 1; load(); });
         if (new URLSearchParams(location.search).get('status') === 'pending') { S.status = 'pending'; $('tags-f-status').value = 'pending'; }
         load();
+        loadForum();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

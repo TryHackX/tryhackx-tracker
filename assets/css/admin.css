@@ -3758,5 +3758,13 @@ a.source-tab { text-decoration: none; }
 .tags-swatch { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 1px solid #555; background: transparent; }
 .tags-edit { display: flex; flex-direction: column; gap: 0.35rem; max-width: 26rem; }
 .tags-edit-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.tags-f-title { font-size: 1rem; margin: 0 0 0.25rem; }
+.tags-f-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0 0.4rem; }
+.admin-wide .tags-f-table { min-width: 720px; }
+.tags-f-table .tags-f-n { width: 96px; }
+.tags-f-table .tags-f-to { width: 300px; }
+.tags-f-table .col-badge { width: 130px; }
+.admin-wide .tags-f-table .th-actions { width: 104px; }
+.tags-f-target { width: 100%; }
 .admin-body .sf-n { margin-left: 0.3rem; opacity: 0.65; font-size: 0.68rem; }
 .admin-body .sf-tag[hidden], .admin-body .sf-tags[hidden], .admin-body .sf-group[hidden], .admin-body .sf-range[hidden], .admin-body .sf-check[hidden] { display: none; }
