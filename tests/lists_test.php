@@ -365,7 +365,7 @@ foreach ($hostilePlain as $p) {
 }
 check('an old plain text, rewritten, reads as exactly its words: no tag but paragraphs and breaks, no emoji, icon, emote or link, and a second rewrite changes nothing',
       $plainBad === [], implode(' | ', array_slice($plainBad, 0, 3)));
-check('… where the same texts NOT rewritten would have become markup (the control: 8 of the 9 do)', $controlBad >= 8, (string)$controlBad);
+check('… where the same texts NOT rewritten would have become markup (the control: 7 of the 9 do; the renderer drops control characters itself)', $controlBad >= 7, (string)$controlBad);
 check('the rewrite is the invisible word joiner, and only where a rule would begin: a text with nothing to escape is left byte for byte',
       schemaListDescPlainToBbcode('[b]x') === "[\u{2060}b]x" && schemaListDescPlainToBbcode(':fire:') === ":\u{2060}fire:"
       && schemaListDescPlainToBbcode('see https://a.example') === "see https\u{2060}://a.example"

@@ -178,6 +178,30 @@ check('the scan runs at most once in ten minutes unless the janitor is told othe
       imagesRemoteScan($db, array_merge($cfgI, ['images_remote_scan_at' => (string)time()]), ['copy.test']) === 0);
 $served = $img ? imagesServe($db, (int)$img['id'], 960, 640, 'webp', false, null, false) : null;
 check('a copy is served to anybody, cached for good', $served !== null && $served['public'] === true && $served['mime'] === 'image/webp');
+$cgi = dirname(PHP_BINARY) . DIRECTORY_SEPARATOR . (PHP_OS_FAMILY === 'Windows' ? 'php-cgi.exe' : 'php-cgi');
+if ($served !== null && is_file($cgi)) {
+    $hit = function (string $etag = '') use ($cgi, $root, $img): string {
+        $env = ['REDIRECT_STATUS' => '200', 'GATEWAY_INTERFACE' => 'CGI/1.1', 'REQUEST_METHOD' => 'GET', 'SCRIPT_FILENAME' => $root . '/api.php',
+                'SCRIPT_NAME' => '/api.php', 'QUERY_STRING' => 'endpoint=image&id=' . (int)$img['id'] . '&w=960&h=640&ext=webp',
+                'REMOTE_ADDR' => '127.0.0.49', 'SERVER_NAME' => 'localhost', 'SERVER_PORT' => '80', 'HTTP_HOST' => 'localhost',
+                'SYSTEMROOT' => (string)getenv('SYSTEMROOT'), 'TRACKER_DB' => (string)(getenv('TRACKER_DB') ?: 'tracker_test')];
+        if ($etag !== '') $env['HTTP_IF_NONE_MATCH'] = $etag;
+        $p = proc_open([$cgi, '-d', 'display_errors=0'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $root, $env);
+        $out = (string)stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($p);
+        $cut = strpos($out, "\r\n\r\n");
+        return $cut === false ? $out : substr($out, 0, $cut);
+    };
+    $head = $hit();
+    preg_match('/^ETag: (.+)$/mi', $head, $tag);
+    check('a picture goes out as a request would get it: no session cookie, a day in the cache, its tag, no expiry from 1981',
+          stripos($head, 'Set-Cookie') === false && stripos($head, 'Cache-Control: public, max-age=86400') !== false
+          && !empty($tag[1]) && stripos($head, 'Expires') === false && stripos($head, "Content-Security-Policy: default-src 'none'") !== false, $head);
+    $again = $hit(trim($tag[1] ?? ''));
+    check('… and asked again with that tag, it is 304 with no body', stripos($again, 'Status: 304') !== false, $again);
+}
 
 $sum = imagesPanelSummary($db);
 check('the panel\'s summary: pictures, space, public, copied, and the queue by state',

@@ -170,6 +170,13 @@ check('inside a link\'s words or in code, a picture tag is text', !str_contains(
 $xss = $P('[img]https://img.test/i/5-960x540.webp"onerror="alert(1)[/img] [img]https://x.example/a.png?a=<b>&c="d"[/img]')['html'];
 check('an address cannot carry an attribute or a tag in with it',
       !preg_match('/<[^>]+\son[a-z]+\s*=/i', $xss) && !str_contains($xss, '<b>') && substr_count($xss, '<a ') === 2, $xss);
+$manyText = '[img]https://x.example/1.png[/img] [img]https://x.example/2.png[/img] [img]https://x.example/3.png[/img] '
+          . '[img]https://x.example/4.png[/img] [img]https://cdn.assoc.test/5.png[/img]';
+$many = $P($manyText);
+check('another site\'s pictures are links and count as links: past the most a comment may hold, the address is text and the save says too many; a key\'s domain is not counted',
+      substr_count($many['html'], 'class="cm-img-link"') === 4 && $many['links'] === COMMENT_MAX_LINKS + 1
+      && !str_contains($many['html'], 'href="https://x.example/4.png"') && str_contains($many['html'], 'https://x.example/4.png')
+      && (commentProblem(commentClean($manyText), $cfgOn, true, $rules)['code'] ?? null) === 'too_many_links', $many['html']);
 
 $prob = fn(string $s, array $c = [], ?array $r = null, bool $links = true) => commentProblem(commentClean($s), array_merge($cfgOn, $c), $links, $r ?? $rules)['code'] ?? null;
 check('what the save says: no pictures for you, a bad address, links switched off, a link you may not write, too many',

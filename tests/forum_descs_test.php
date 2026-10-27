@@ -333,6 +333,15 @@ try {
     check('… so registered again, the topic\'s text comes in as a first description',
           $imp($k1, $topic(19, 'Forum nineteenth', [$H(19)]), $H(19))['status'] === 'created');
 
+    $id27 = $reg(27, $k1);
+    $db->prepare("UPDATE whitelist SET description = 'Written here', description_format = 'bbcode', content_status = 'approved' WHERE id = ?")->execute([$id27]);
+    $imp($k1, $topic(27, 'Forum 27', [$H(27)]), $H(27));
+    contentDelete($db, $cfgF, contentRecordFor($db, $H(27)), ['id' => 0, 'username' => 'fdtest'], 'any', ['notify' => false]);
+    $db->prepare("UPDATE whitelist SET description = 'Written again', description_format = 'bbcode', content_status = 'approved' WHERE id = ?")->execute([$id27]);
+    $r = $imp($k1, $topic(27, 'Forum 27', [$H(27)]), $H(27));
+    check('a forum version whose proposal went with a deleted text is proposed again against the new one',
+          $r['status'] === 'proposed' && count($pending($H(27))) === 1 && $pending($H(27))[0]['description'] === 'Forum 27', json_encode($r));
+
     $id20 = $reg(20, $k1);
     $imp($k1, $topic(20, 'Twentieth', [$H(20)]), $H(20));
     $r = $imp($k1, $topic(20, "Twentieth\n\n", [$H(20)]), $H(20));

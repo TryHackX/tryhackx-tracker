@@ -275,5 +275,29 @@ $left = $db->prepare("SELECT COUNT(*) FROM image_blobs WHERE sha256 = ?");
 $left->execute([hash('sha256', $bytesA)]);
 check('cleanup: the accounts, their pictures and the files only they held are gone', (int)$left->fetchColumn() === 0 && (int)$fakeLeft->fetchColumn() === 0);
 
+if (function_exists('imagecreatetruecolor') && function_exists('imagegif')) {
+    $frame = function (array $rgb): string {
+        $im = imagecreatetruecolor(40, 30);
+        imagefill($im, 0, 0, imagecolorallocate($im, ...$rgb));
+        ob_start();
+        imagegif($im);
+        return (string)ob_get_clean();
+    };
+    $fa = $frame([200, 20, 20]);
+    $fb = $frame([20, 200, 20]);
+    $headEnd = function (string $g): int { $p = 13; $k = ord($g[10]); if ($k & 0x80) $p += 3 * (1 << (($k & 7) + 1)); return $p; };
+    $body = fn(string $g): string => substr($g, $headEnd($g), -1);
+    $gce = "\x21\xF9\x04\x04\x0A\x00\x00\x00";
+    $anim = substr($fa, 0, $headEnd($fa)) . "\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00" . "\x21\xFE\x0Csecret note!\x00"
+          . "\x21\xFF\x0BXMP DataXMP\x05<x/>\x00\x00" . $gce . $body($fa) . $gce . $body($fb) . "\x3B";
+    $clean = imagesGifClean($anim . "PK\x03\x04ZIPDATA-after-the-end");
+    check('an animated GIF keeps its frames and its looping, and loses comments, metadata and whatever was hidden after its end',
+          $clean !== null && imagesGifFrames($clean) === 2 && str_contains($clean, 'NETSCAPE2.0') && !str_contains($clean, 'secret')
+          && !str_contains($clean, 'XMP Data') && !str_contains($clean, 'ZIPDATA') && substr($clean, -1) === "\x3B" && @imagecreatefromstring($clean) !== false);
+    check('… a cut-off or false GIF is refused, and so is one with more frames than any picture needs',
+          imagesGifClean(substr($anim, 0, -20)) === null && imagesGifClean('hello') === null
+          && imagesGifClean(substr($fa, 0, $headEnd($fa)) . str_repeat($gce . $body($fa), IMAGES_GIF_MAX_FRAMES + 1) . "\x3B") === null);
+}
+
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

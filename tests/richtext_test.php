@@ -768,5 +768,31 @@ check('youtube: the frame sends the page\'s origin (the embed refuses to play wi
 check('youtube: the words of the player reach the public pages (their prefix is in the public bundle)',
       (bool)preg_match("/const LANG_JS_PUBLIC = \\[[^\\]]*'js\\.video\\.'/s", (string)file_get_contents($root . '/includes/lang.php')));
 
+$cfgBig = array_merge($cfg, ['desc_allow_flarum' => '1', 'desc_max_chars' => '500000', 'desc_max_images' => '100', 'desc_max_links' => '100']);
+$smuggle = "a \x00LINK0\x00 b \x00CODE0\x00 c \x01HIDE0\x01 d \x03 e \x05 f \x06 g [url=https://tryhackx.org/x]x[/url] `k`";
+$leaks = [];
+foreach (['bbcode', 'markdown', 'flarum'] as $f) {
+    $out = richtextRender($smuggle, $f, $cfgBig, true);
+    if (preg_match('/[\x00-\x06]/', $out) || !str_contains($out, 'LINK0') || !str_contains($out, 'CODE0') || !str_contains($out, 'HIDE0')) $leaks[] = $f;
+}
+check('the renderer\'s own placeholder bytes, typed by an author, are dropped and never turn into a link, code or a hidden part', !$leaks, implode(', ', $leaks));
+$alt = richtextAlt("x\x00LINK3\x00 <b>y</b> \" onerror=alert(1) \x07");
+check('a picture\'s description is plain text: no placeholder, no tag, no quote that ends the attribute',
+      !preg_match('/[\x00-\x1F"<>]/', $alt) && str_contains($alt, '&quot; onerror=alert(1)') && str_starts_with($alt, 'x'), $alt);
+$shapes = ['fence-open' => str_repeat("```x\n", 20000), 'tilde-open' => str_repeat("~~~x\n", 20000), 'md-link-open' => str_repeat('[a](', 25000),
+           'quote-open' => str_repeat('[quote=a]', 11000), 'hide-open' => str_repeat('[hide=', 16000), 'brackets' => str_repeat('[', 100000),
+           'gt-lines' => str_repeat("> a\n", 25000), 'backticks' => str_repeat('`a', 50000), 'spoiler-pipes' => str_repeat('||a', 33000),
+           'url-many' => str_repeat('https://a.example/x ', 5000)];
+$slow = [];
+foreach ($shapes as $k => $text) {
+    foreach (['bbcode', 'markdown', 'flarum'] as $f) {
+        $t0 = microtime(true);
+        richtextRender($text, $f, $cfgBig, true);
+        $dt = microtime(true) - $t0;
+        if ($dt > 3.0) $slow[] = $k . '/' . $f . ' ' . round($dt, 2) . 's';
+    }
+}
+check('a hostile text of 100,000 characters renders in well under a few seconds, whatever its shape', !$slow, implode(', ', $slow));
+
 echo "\n$n checks, $fails failed\n";
 exit($fails > 0 ? 1 : 0);

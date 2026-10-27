@@ -209,7 +209,13 @@
                 if (url === null) { text(tok); continue; }
                 const own = ownImageJs(url, img.base);
                 if (!own && !img.remote) { text(tok); continue; }
-                if (!own && !links) text(url);
+                if (!own) {
+                    let host = '';
+                    try { host = new URL(url).hostname.toLowerCase(); } catch (e) { host = ''; }
+                    const partner = !!host && (img.hosts || []).some((d) => host === d || host.endsWith('.' + d));
+                    if (!links) text(url);
+                    else if (!partner && ++nLinks > CM_MAX_LINKS) text(url);
+                }
                 pos += c + '[/img]'.length;
                 re.lastIndex = pos;
                 continue;

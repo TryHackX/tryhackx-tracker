@@ -39,7 +39,7 @@ foreach ($topics as $i => $raw) {
         try {
             $r = forumDescImport($db, $cfg, $client, $topic, $h, $limit, $memo);
         } catch (\Throwable $e) {
-            error_log('describe ' . $h . ': ' . $e->getMessage());
+            error_log('[api v1] whitelist/describe: ' . $h . ' failed: ' . $e->getMessage());
             $r = ['status' => 'error', 'detail' => 'try again later'];
         }
         $results[] = ['topic' => $i, 'discussion_id' => $topic['discussion_id'], 'hash' => $h !== '' ? mb_substr($h, 0, 64) : null,

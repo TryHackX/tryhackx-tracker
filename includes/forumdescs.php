@@ -244,12 +244,18 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
               && hash_equals((string)$f['import_sha'], forumDescSha((string)$w['description_format'], (string)$w['description']));
     $removed = $fromForum && !$occupied;
     $cleared = $f !== null && !$fromForum && !$occupied && in_array($f['state'], ['proposed', 'drift'], true);
+    $lost = false;
+    if ($occupied && $f !== null && $f['state'] === 'proposed') {
+        $st = $db->prepare("SELECT 1 FROM wl_content_edits WHERE id = ? AND status = 'pending' LIMIT 1");
+        $st->execute([(int)$f['edit_id']]);
+        $lost = $st->fetchColumn() === false;
+    }
     $held = ($f['note'] ?? null) === 'review';
     $release = $untouched && $status === 'pending' && $mode === 'publish' && !$held;
     $publish = static function () use ($db, $w): void {
         $db->prepare("UPDATE whitelist SET content_status = 'approved' WHERE id = ? AND content_status = 'pending'")->execute([(int)$w['id']]);
     };
-    if (!$cleared && $f !== null && $f['forum_sha'] !== null && hash_equals((string)$f['forum_sha'], (string)$row['forum_sha'])) {
+    if (!$cleared && !$lost && $f !== null && $f['forum_sha'] !== null && hash_equals((string)$f['forum_sha'], (string)$row['forum_sha'])) {
         if ($removed || $f['state'] === 'removed') return $done('removed', ['state' => 'removed']);
         if ($f['state'] === 'declined') return $done('declined');
         if ($f['state'] === 'imported' && $release) {
