@@ -499,6 +499,7 @@ function settingsCatalogKeywords(): array {
         'images_max_mpx'            => 'pictures images megapixels resolution limit obrazy megapiksele',
         'images_webp_quality'       => 'pictures images webp quality compression obrazy jakosc kompresja',
         'images_per_day'            => 'pictures images uploads per day limit spam obrazy wgrania dziennie limit',
+        'images_per_day_mb'         => 'pictures images uploads megabytes MB volume per day limit obrazy wgrania megabajty rozmiar dziennie limit',
         'images_quota_mb'           => 'pictures images quota space account storage obrazy miejsce limit konto',
         'images_unused_hours'       => 'pictures images unused cleanup delete janitor obrazy nieuzywane sprzatanie usuwanie',
         'comment_images_upload'     => 'comments pictures images upload paste drop komentarze obrazy wgrywanie wklejanie',

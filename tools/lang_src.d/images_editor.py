@@ -63,6 +63,7 @@ add('js.images', {
     'labels_inserted':  ('Labels inserted.', 'Wstawiono etykiety.'),
     'quota_today':      ('Uploaded today: :today of :limit', 'Przesłane dziś: :today z :limit'),
     'quota_today_free': ('Uploaded today: :today', 'Przesłane dziś: :today'),
+    'quota_today_mb':   ('Today\'s size: :used of :limit', 'Dzisiejszy rozmiar: :used z :limit'),
     'quota_space':      ('Space used: :used of :quota', 'Zajęte miejsce: :used z :quota'),
     'quota_space_free': ('Space used: :used', 'Zajęte miejsce: :used'),
     'page':             ('Page :page of :pages', 'Strona :page z :pages'),

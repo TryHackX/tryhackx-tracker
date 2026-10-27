@@ -391,7 +391,11 @@
                     : t.key('js.images.quota_space_free', { used: usedTxt })]);
                 a.classList.toggle('is-full', perDay > 0 && today >= perDay);
                 b.classList.toggle('is-full', cap > 0 && used >= cap);
-                quotaEl.replaceChildren(a, b);
+                const dayUsed = Number(limits.today_bytes) || 0, dayCap = Number(limits.per_day_bytes) || 0;
+                const c = dayCap > 0 ? el('span', 'rt-images-quota-part', null,
+                    [t.key('js.images.quota_today_mb', { used: dayUsed > 0 ? t.bytes(dayUsed) : t.num(0), limit: t.bytes(dayCap) })]) : null;
+                if (c) c.classList.toggle('is-full', dayUsed >= dayCap);
+                quotaEl.replaceChildren(...[a, c, b].filter(Boolean));
             }
 
             function sync() {

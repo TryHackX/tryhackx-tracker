@@ -185,7 +185,7 @@ $allowed = [
     'bulk_mail_daily_cap', 'mail_sender_address', 'auto_penalties_enabled',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
     'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
-    'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_quota_mb', 'images_unused_hours',
+    'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_per_day_mb', 'images_quota_mb', 'images_unused_hours',
     'comment_images_upload', 'comment_images_links', 'comment_images_max', 'comment_image_max_mb', 'comment_thumb_h', 'comment_thumb_w',
     'forum_desc_conflict', 'info_resize', 'info_desc_fold',
     // whitelist registration audience + metadata worker concurrency (schema v8)
@@ -442,7 +442,7 @@ $intClamp = [
     'livesync_port' => [1024, 65535, 9696],
     'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120], 'rate_limit_sl_refresh' => [0, 100000, 30],
     'images_max_mb' => [1, 20, 8], 'images_max_edge' => [640, 4096, 2048], 'images_max_mpx' => [4, 40, 24], 'images_webp_quality' => [50, 95, 82],
-    'images_per_day' => [0, 1000, 60], 'images_quota_mb' => [0, 100000, 250], 'images_unused_hours' => [1, 720, 48],
+    'images_per_day' => [0, 1000, 60], 'images_per_day_mb' => [0, 100000, 100], 'images_quota_mb' => [0, 100000, 250], 'images_unused_hours' => [1, 720, 48],
     'comment_images_max' => [0, 50, 18], 'comment_image_max_mb' => [1, 20, 4], 'comment_thumb_h' => [80, 600, 240], 'comment_thumb_w' => [80, 800, 360],
     'info_desc_fold' => [0, 5000, 640],
     'rate_limit_user_login' => [0, 1000, 10],

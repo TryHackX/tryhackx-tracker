@@ -158,6 +158,10 @@ check('the day counts uploads, not pictures kept: deleting one does not give the
       !empty($p1['ok']) && $p1Gone && ($p2['code'] ?? '') === 'daily_limit' && imagesUsage($db, $A)['today'] === 2, json_encode([$p2['code'] ?? null, imagesUsage($db, $A)]));
 $db->prepare("UPDATE image_uploads SET created_at = NOW() - INTERVAL 3 DAY WHERE user_id = ?")->execute([$B]);
 $keptB = (int)$db->query("SELECT COUNT(*) FROM image_uploads WHERE user_id = " . $B)->fetchColumn();
+$mbDay = imagesStore($db, array_merge($cfgI, ['images_per_day_mb' => '1', 'images_per_day' => '0']), $A, $noisy, 'big-day.png');
+check('a day\'s volume is a limit too: the next file would pass the megabytes the site takes in 24 hours',
+      ($mbDay['code'] ?? '') === 'daily_mb' && ($mbDay['status'] ?? 0) === 429 && str_contains((string)($mbDay['message'] ?? ''), '1 MB'),
+      json_encode([$mbDay['code'] ?? null, $mbDay['message'] ?? null]));
 check('the day\'s uploads and the account\'s space are limits, said in numbers', ($day['code'] ?? '') === 'daily_limit' && ($day['status'] ?? 0) === 429
       && str_contains((string)($day['message'] ?? ''), '1') && ($quota['code'] ?? '') === 'quota' && str_contains((string)($quota['message'] ?? ''), '1 MB'),
       json_encode([$day['message'] ?? null, $quota['message'] ?? null]));
@@ -286,7 +290,7 @@ $tpl = $src('templates/admin/settings.php');
 $save = $src('api/admin/save_settings.php');
 $kw = settingsCatalogKeywords();
 $miss = [];
-foreach (['images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_quota_mb', 'images_unused_hours'] as $k) {
+foreach (['images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_per_day_mb', 'images_quota_mb', 'images_unused_hours'] as $k) {
     if (!str_contains($tpl, 'name="' . $k . '"')) $miss[] = "$k page";
     if (!preg_match("/'" . $k . "' => \\[\\d+, \\d+, \\d+\\]/", $save) || substr_count($save, "'" . $k . "'") < 2) $miss[] = "$k save";
     if (!isset($kw[$k])) $miss[] = "$k catalogue";

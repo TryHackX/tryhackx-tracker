@@ -3212,6 +3212,11 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <input id="set-images_per_day" type="number" class="form-control bg-dark text-light border-secondary" name="images_per_day" value="<?= sanitize($cfg['images_per_day'] ?? '60') ?>" min="0" max="1000">
                         <small class="settings-hint"><?= _h('settings.images_per_day_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="images_per_day_mb">
+                        <label for="set-images_per_day_mb" class="form-label"><?= _h('settings.images_per_day_mb') ?></label>
+                        <input id="set-images_per_day_mb" type="number" class="form-control bg-dark text-light border-secondary" name="images_per_day_mb" value="<?= sanitize($cfg['images_per_day_mb'] ?? '100') ?>" min="0" max="100000">
+                        <small class="settings-hint"><?= _h('settings.images_per_day_mb_hint') ?></small>
+                    </div>
                     <div class="col-md-3" data-setting="images_quota_mb">
                         <label for="set-images_quota_mb" class="form-label"><?= _h('settings.images_quota_mb') ?></label>
                         <input id="set-images_quota_mb" type="number" class="form-control bg-dark text-light border-secondary" name="images_quota_mb" value="<?= sanitize($cfg['images_quota_mb'] ?? '250') ?>" min="0" max="100000">
