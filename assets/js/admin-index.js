@@ -190,7 +190,7 @@
         state.rows = data.rows || [];
         state.pages = data.pages || 1;
         renderRows(data);
-        $('idx-total').textContent = t.key('js.index.n_rows', { n: t.num(data.total || 0) });
+        $('idx-total').textContent = t.key('js.index.n_rows', { n: data.total_capped ? t.num(data.total || 0) + '+' : t.num(data.total || 0) });
         renderPagination($('idx-pagination'), { total: data.total, page: data.page, pages: data.pages, onPage: (p) => { state.page = p; load(); } });
         syncBulkbar();
     }

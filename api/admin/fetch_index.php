@@ -27,4 +27,5 @@ try {
     $counts = ['total' => null, 'protected' => null, 'pending_meta' => null];
 }
 
-jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'], 'counts' => $counts, 'enabled' => indexEnabled($cfg)]);
+jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'total_capped' => !empty($res['total_capped']), 'page' => $res['page'], 'pages' => $res['pages'],
+              'counts' => $counts, 'enabled' => indexEnabled($cfg)]);

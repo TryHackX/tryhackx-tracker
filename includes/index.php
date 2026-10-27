@@ -2124,6 +2124,47 @@ function indexLikeEscape(string $s): string {
  * searches with a LIKE fallback. Returns ['rows','total','page','pages','per_page']; rows carry
  * int-cast numerics plus derived booleans `protected` and `promoted`.
  */
+const INDEX_LIST_CATALOG_CAP = 10000;
+
+function indexListFromCatalog(PDO $db, string $search, string $col, bool $desc, int $perPage, int $offset, string $columns): ?array {
+    $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
+    $like = '%' . indexLikeEscape($search) . '%';
+    $dir = $desc ? 'DESC' : 'ASC';
+    $hashes = null;
+    $total = 0;
+    foreach ($ft !== '' ? [['MATCH(name) AGAINST(? IN BOOLEAN MODE)', $ft], ['name LIKE ?', $like]] : [['name LIKE ?', $like]] as [$where, $arg]) {
+        try {
+            $sql = "SELECT COUNT(*) FROM (SELECT 1 FROM index_catalog WHERE " . $where . " LIMIT " . (INDEX_LIST_CATALOG_CAP + 1) . ") x";
+            $st = $db->prepare($sql);
+            $st->execute([$arg]);
+            $total = (int)$st->fetchColumn();
+            $sql = "SELECT info_hash FROM index_catalog WHERE " . $where . " ORDER BY " . $col . " " . $dir . ", info_hash " . $dir . " LIMIT ? OFFSET ?";
+            $st = $db->prepare($sql);
+            $st->bindValue(1, $arg, PDO::PARAM_STR);
+            $st->bindValue(2, $perPage, PDO::PARAM_INT);
+            $st->bindValue(3, $offset, PDO::PARAM_INT);
+            $st->execute();
+            $hashes = $st->fetchAll(PDO::FETCH_COLUMN);
+            break;
+        } catch (\Throwable $e) {
+            $hashes = null;
+        }
+    }
+    if ($hashes === null) return null;
+    $capped = $total > INDEX_LIST_CATALOG_CAP;
+    $total = min($total, INDEX_LIST_CATALOG_CAP);
+    if (!$hashes) return [$total, [], $capped];
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    $sql = "SELECT " . $columns . " FROM index_hashes WHERE info_hash IN (" . $in . ")";
+    $st = $db->prepare($sql);
+    $st->execute($hashes);
+    $byHash = [];
+    foreach ($st->fetchAll() as $r) $byHash[$r['info_hash']] = $r;
+    $rows = [];
+    foreach ($hashes as $h) if (isset($byHash[$h])) $rows[] = $byHash[$h];
+    return [$total, $rows, $capped];
+}
+
 function indexListSelect(PDO $db, array $cfg, array $q): array {
     $page = max(1, (int)($q['page'] ?? 1));
     $perPage = max(1, min(200, (int)($q['per_page'] ?? ($cfg['items_per_page'] ?? 25))));
@@ -2293,8 +2334,15 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         return [$total, $stmt->fetchAll()];
     };
 
-    $total = 0; $rows = [];
-    if ($fulltextClause) {
+    $total = 0; $rows = []; $capped = false;
+    $first = explode(':', trim(explode(',', trim((string)($q['sort'] ?? 'last:desc')))[0]));
+    $catCols = ['last' => 'last_seen', 'size' => 'total_size', 'files' => 'files_count', 'name' => 'name'];
+    $cat = $search !== '' && !indexIsHashPrefix($search) && !$searchFiles && !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes'
+        && $minSeeders <= 0 && isset($catCols[$first[0] ?? '']) && indexCatalogReady($db)
+        ? indexListFromCatalog($db, $search, $catCols[$first[0]], strtolower($first[1] ?? 'asc') === 'desc', $perPage, $offset, $columns) : null;
+    if ($cat !== null) {
+        [$total, $rows, $capped] = $cat;
+    } elseif ($fulltextClause) {
         try { [$total, $rows] = $runQuery($fulltextClause); }
         catch (\Throwable $e) { [$total, $rows] = $runQuery($likeClause); }
     } else {
@@ -2316,7 +2364,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         unset($row);
     }
 
-    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+    return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
 }
 
 /**
