@@ -87,6 +87,7 @@ function profileImagesWhere(PDO $db, int $imageId): array
         $u['name'] = $hash !== '' && function_exists('commentTorrentName') ? commentTorrentName($db, $hash) : '';
         if ($u['kind'] === 'comment' && function_exists('commentLink')) $u['link'] = commentLink($hash, (int)$u['id']);
         elseif ($hash !== '') $u['link'] = '?action=search&hash=' . $hash;
+        elseif (in_array($u['kind'], IMAGES_PLACE_SOURCES, true)) $u['link'] = imagesPlaceLink((string)$u['kind']);
         else $u['link'] = '?action=' . rawurlencode((string)($u['page'] ?? ''));
         $out[] = $u;
     }

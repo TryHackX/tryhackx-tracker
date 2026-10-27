@@ -539,6 +539,7 @@ function shoutPost(PDO $db, array $cfg, array $user, string $body, string $forma
     // the same answer the composer's Preview gives (1.67.0).
     $format = in_array($format, shoutFormatChoices($cfg), true) ? $format : shoutFormat($cfg);
     $bad = shoutBodyProblem($cfg, $body, $format);
+    if ($bad === null && function_exists('imagesPlaceCheck')) $bad = imagesPlaceCheck($db, $cfg, 'shout', $body, $format, $user);
     if ($bad !== null) return $refuse(['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null]);
 
     $bucket = function_exists('ipBucket') && $ip !== '' ? ipBucket($ip) : '';
@@ -546,6 +547,7 @@ function shoutPost(PDO $db, array $cfg, array $user, string $body, string $forma
        ->execute([$uid, $body, $format, mb_substr($bucket, 0, 45)]);
     $id = (int)$db->lastInsertId();
     antispamRecord($db, $ticket);
+    if (function_exists('imagesRefsTouch') && str_contains($body, '/i/')) imagesRefsTouch($db, $cfg, 'shout', (string)$id);
 
     foreach (shoutParseMentions($db, $body, $uid) as $mid) {
         // IGNORE: the primary key is the pair, and two mentions of one person in one line are one.
@@ -1216,6 +1218,7 @@ function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body, string
     // of it renders, which is not a correction — and it is the one the reader has been reading.
     $format = (string)$row['body_format'];
     $bad = shoutBodyProblem($cfg, $body, $format);
+    if ($bad === null && function_exists('imagesPlaceCheck')) $bad = imagesPlaceCheck($db, $cfg, 'shout', $body, $format, $me, (string)$row['body']);
     if ($bad !== null) return $refuse(['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null]);
 
     $changed = $body !== (string)$row['body'];
@@ -1225,6 +1228,7 @@ function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body, string
         $st->execute([$body, $meId, $id]);
         if ($st->rowCount() < 1) return $refuse(['ok' => false, 'error' => 'not_found', 'row' => null]);   // deleted meanwhile
         antispamRecord($db, $ticket);
+        if (function_exists('imagesRefsTouch') && (str_contains($body, '/i/') || str_contains((string)$row['body'], '/i/'))) imagesRefsTouch($db, $cfg, 'shout', (string)$id);
         $authorId = $row['user_id'] === null ? 0 : (int)$row['user_id'];
         shoutSyncMentions($db, $id, $body, $authorId);
         // Somebody ELSE's words: an audited act, like taking a line down — who changed it and when,

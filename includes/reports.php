@@ -140,7 +140,7 @@ function reportTextFormat($f, array $cfg): string
  * and links are the same everywhere: a moderator's text is words, and a remote picture in it is fetched from a host of the
  * moderator's choosing with the reader's address.
  */
-function reportTextValidate(string $text, string $format, array $cfg, int $max = REPORT_TEXT_MAX): ?string
+function reportTextValidate(string $text, string $format, array $cfg, int $max = REPORT_TEXT_MAX, bool $pictures = false): ?string
 {
     $text = trim($text);
     if ($text === '') return null;
@@ -149,11 +149,12 @@ function reportTextValidate(string $text, string $format, array $cfg, int $max =
     if ($format === 'plain') return null;
     if (!in_array($format, richtextFormats($cfg, 'report'), true)) return __('api.report_text.bad_format');
     $c = richtextCount($text, $format, $cfg);
-    if ($c['images'] > REPORT_TEXT_MAX_IMAGES) return __('api.report_text.no_images');
+    $maxImages = $pictures && function_exists('imagesPlaceMax') ? imagesPlaceMax($cfg, 'mod') : REPORT_TEXT_MAX_IMAGES;
+    if ($c['images'] > 0 && (!$pictures || !function_exists('imagesPlaceModProblem') || imagesPlaceModProblem($cfg, richtextRender($text, $format, $cfg, true)) !== null)) return __('api.report_text.no_images');
     if ($c['links'] > REPORT_TEXT_MAX_LINKS) return __('api.report_text.too_many_links', ['n' => $c['links'], 'max' => REPORT_TEXT_MAX_LINKS]);
     // …and the rule itself, last, so a limit added to it later cannot be missed here.
     $msg = richtextValidate($text, $format, array_merge($cfg, ['desc_max_chars' => (string)$max,
-        'desc_max_images' => (string)REPORT_TEXT_MAX_IMAGES, 'desc_max_links' => (string)REPORT_TEXT_MAX_LINKS]), 'report');
+        'desc_max_images' => (string)$maxImages, 'desc_max_links' => (string)REPORT_TEXT_MAX_LINKS]), 'report');
     return $msg !== null ? __('api.report_text.refused', ['why' => $msg]) : null;
 }
 
@@ -163,7 +164,7 @@ function reportTextHtml(string $text, string $format, array $cfg): string
     if (trim($text) === '') return '';
     if (function_exists('richtextRender') && in_array($format, richtextRichFormats(), true)) {
         $html = richtextRender($text, $format, $cfg, true);
-        if ($html !== '') return $html;
+        if ($html !== '') return function_exists('imagesPlaceHtml') ? imagesPlaceHtml($cfg, $html) : $html;
     }
     return nl2br(htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false);
 }
@@ -862,6 +863,9 @@ function contentReportCloseRows(PDO $db, array $ids, string $outcome, string $no
                              WHERE status = 'open' AND id IN ($in)");
         $st->execute(array_merge([$outcome, $note, $reply !== '' ? mb_substr($reply, 0, 500) : null, mb_substr($by, 0, 64)], $ids));
     }
+    if (function_exists('imagesRefsTouch') && str_contains($reply, '/i/')) {
+        foreach ($ids as $rid) imagesRefsTouch($db, null, 'crep', (string)$rid);
+    }
     return $st->rowCount();
 }
 
@@ -943,7 +947,7 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
     $replyFormat = reportTextFormat($input['reply_format'] ?? 'plain', $cfg);
     $reasonFormat = reportTextFormat($input['reason_format'] ?? 'plain', $cfg);
     foreach ([[$reply, $replyFormat, 'reply'], [$reason, $reasonFormat, 'reason']] as [$txt, $fmt, $field]) {
-        if (($why = reportTextValidate($txt, $fmt, $cfg)) !== null) return contentReportPanelFail(400, 'invalid_text', ['message' => $why, 'field' => $field]);
+        if (($why = reportTextValidate($txt, $fmt, $cfg, REPORT_TEXT_MAX, true)) !== null) return contentReportPanelFail(400, 'invalid_text', ['message' => $why, 'field' => $field]);
     }
     $days = max(0, min(3650, (int)($input['days'] ?? 0)));
 

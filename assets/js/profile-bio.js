@@ -232,6 +232,9 @@
         root.appendChild(editor);
         // What it picks goes in at the caret and fires `input`: the counter and the box's height follow.
         if (emojiBtn) picker = window.EmojiPicker.attach({ textarea: ta, button: emojiBtn, data: root.dataset });
+        if (window.ImagesEditor && typeof window.ImagesEditor.mini === 'function') {
+            window.ImagesEditor.mini({ textarea: ta, place: 'bio', format: function () { return 'bbcode'; }, host: tools, cls: 'profile-bio-tool' });
+        }
 
         tools.addEventListener('click', function (e) {
             var b = e.target.closest ? e.target.closest('[data-tag]') : null;
@@ -367,6 +370,7 @@
     async function save() {
         var anti = window.Antispam || null;
         if (busy || !ta || (anti && anti.waiting(saveBtn))) return;
+        if (window.ImagesEditor && window.ImagesEditor.busy(ta)) return;
         setBusy(true);
         showError('');
         var doPost = async function (extra) {

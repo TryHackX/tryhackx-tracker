@@ -120,7 +120,7 @@
             var label = u.name ? u.name : (u.page ? u.page + ' (' + u.lang + ')' : '#' + u.id);
             return el('div', 'ug-where-row', null, [
                 el('span', 'ug-where-kind', { text: T.key('js.images.ug_kind_' + (u.kind || 'description')) }),
-                el('a', null, { href: u.link, text: label }),
+                u.link ? el('a', null, { href: u.link, text: label }) : el('span', null, { text: label }),
             ]);
         }));
     }

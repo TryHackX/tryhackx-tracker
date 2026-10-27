@@ -200,7 +200,7 @@ function userModerate(PDO $db, array $cfg, array $req): array
     // The words the member reads: lines kept, a format of the site's, judged here so that "too long" is said, not cut off.
     $reason = reportTextClean($req['reason'] ?? '', REPORT_TEXT_MAX + 1);
     $fmt = reportTextFormat($req['reason_format'] ?? 'plain', $cfg);
-    if (($msg = reportTextValidate($reason, $fmt, $cfg)) !== null) return moderationFail(400, 'invalid_text', ['message' => $msg, 'field' => 'reason']);
+    if (($msg = reportTextValidate($reason, $fmt, $cfg, REPORT_TEXT_MAX, true)) !== null) return moderationFail(400, 'invalid_text', ['message' => $msg, 'field' => 'reason']);
     if ($reason === '') $fmt = 'plain';
     if (!$lift && $loud && $reason === '') return moderationFail(400, 'reason_required');
     $days = max(0, min(MODERATION_MAX_DAYS, (int)($req['days'] ?? 0)));
@@ -253,6 +253,7 @@ function userModerate(PDO $db, array $cfg, array $req): array
                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $ins->execute([$userId, $reason, $fmt, $kind, $srcId, $hash, $action, $loud ? 1 : 0, $byId, $byName]);
             $out['warning'] = (int)$db->lastInsertId();
+            if (function_exists('imagesRefsTouch') && str_contains($reason, '/i/')) imagesRefsTouch($db, $cfg, 'warn', (string)$out['warning']);
             // The count AFTER the lock: the first plain read from here on is the transaction's snapshot.
             $out['count'] = moderationCount($db, $userId);
             if ($loud && ($cfg['auto_penalties_enabled'] ?? '0') === '1') {

@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.88.0] — 2026-10-28
+
+- **Pictures in messages, the shoutbox, the profile and lists.** A picture button in each editor (and a pasted
+  screenshot) uploads to this tracker and puts the picture in; sending waits for it. Settings → Pictures → "Pictures
+  in other places": how many per entry, per place (messages 4, the shoutbox 1, the profile 2, a list 4; 0 = off).
+  The same daily limits as every upload. New permissions `images.upload` and `images.link` (a picture already public
+  here, a description's poster, put into these places), both for members and moderators.
+- **Never public, never hosting.** A picture from these places is served only with a session and only to who may
+  read the entry: the two people of a conversation; any signed-in member for the shoutbox, a profile and a public
+  list; the owner and their friends for a list for friends; the owner for a private one; and the moderators. Never
+  cached on the way, never a public address, so the tracker cannot be used to host pictures for other sites.
+  Somebody else's private picture cannot be put in. Pictures from other sites keep their old rules in each place.
+- **Moderators' texts.** A warning and the answer to a report may show pictures from this tracker by their address
+  (4 at most), to the member it is written to.
+- **Every `/i/…` and every cover** says `Cross-Origin-Resource-Policy: same-site`: other sites cannot embed them
+  (the forum is the same site).
+- **Clean-up with the entries.** Each place is a source of the picture register; when a shout, a message, a list or a
+  warning goes, its pictures go after the hours in "Unused pictures are deleted after".
+- Schema 112: the register's `src` takes the new places; the settings `images_in_pm` / `_shout` / `_bio` / `_list` /
+  `_mod`.
+
 ## [1.87.0] — 2026-10-27
 
 - **Covers in the lists.** A result whose description has pictures shows a small cover on the left (2:3), the posters

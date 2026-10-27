@@ -113,6 +113,8 @@ function userPermissionList(bool $english = false): array {
         'content.public'  => 'Let the descriptions they wrote be listed on their public profile',
         'content.images'  => 'Upload pictures and put them into the descriptions they write',
         'images.public'   => 'Let the pictures they uploaded be shown as a gallery on their public profile',
+        'images.upload'   => 'Upload pictures for messages, the shoutbox, their profile and their lists, where Settings allows them there',
+        'images.link'     => 'Put a picture that is already public on this tracker (a description\'s poster) into a message, a shout, their profile or a list',
         // ── favourites, profiles and uploads (v47) ──
         // Four ids for four separate decisions, because "may they keep a list" and "may that list be
         // read by a stranger" are not the same question and an operator will want to answer them
@@ -368,7 +370,7 @@ function userGroupPresets(): array {
                         // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
                         'panel.moderation.view', 'panel.moderation.handle',
                         'panel.images.view', 'panel.images.manage',
-                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite'],
+                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite', 'images.upload', 'images.link'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -419,7 +421,7 @@ function userGroupPresets(): array {
                         'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
                         'comment.images',
                         // v84: report a comment, a description or a shout to the moderators.
-                        'content.report', 'tags.add', 'tags.create', 'tags.favourite'],
+                        'content.report', 'tags.add', 'tags.create', 'tags.favourite', 'images.upload', 'images.link'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -643,7 +645,7 @@ function userLegacyDefault(string $perm): bool {
     // would otherwise let every passer-by take any description down.
     // content.report (v84) for the same reason: a report is filed by an account and answered to it — with
     // accounts off there is nobody to file one or to be told what became of it.
-    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any', 'content.report', 'content.images', 'images.public'], true)) return false;
+    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any', 'content.report', 'content.images', 'images.public', 'images.upload', 'images.link'], true)) return false;
     if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
     // The other way round from rating.* and content.*, and for the reason that decides both: those
     // two work without accounts, so answering false would switch them off for every install that

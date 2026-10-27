@@ -149,7 +149,7 @@ $plL = include $root . '/lang/pl.php';
 $enL = include $root . '/lang/en.php';
 $words = ['js.app.thumbs_open', 'js.app.rated_at', 'js.app.rate_open', 'js.app.rate_close', 'js.app.hist_row', 'settings.thumbs_search', 'settings.thumbs_speed_hint', 'settings.thumbs_max', 'settings.thumbs_info', 'settings.thumbs_info_hint', 'js.app.gal_label', 'js.app.gal_open', 'js.app.gal_prev', 'js.app.gal_next'];
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL)) && $plL['js.app.rate_open'] === 'Oceń');
-check('version and changelog', TRACKER_VERSION === '1.87.0' && str_contains($src('CHANGELOG.md'), '## [1.87.0]'));
+check('version and changelog', version_compare(TRACKER_VERSION, '1.87.0', '>=') && str_contains($src('CHANGELOG.md'), '## [1.87.0]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

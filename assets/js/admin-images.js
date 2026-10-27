@@ -104,7 +104,8 @@
             if (u.name) what = u.name;
             else if (u.hash) what = u.hash.slice(0, 12) + '…';
             else if (u.page) what = u.page + ' (' + u.lang + ')';
-            const a = el('a', { href: site + u.link, target: '_blank', rel: 'noopener', text: word('js.aimg.kind_' + u.kind) + (what ? ': ' + what : '') });
+            const label = word('js.aimg.kind_' + u.kind) + (what ? ': ' + what : '');
+            const a = u.link ? el('a', { href: site + u.link, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label });
             ul.appendChild(el('li', null, [a, ' ', el('span', { className: 'text-muted', text: stateWord(u.state) })]));
         });
         box.appendChild(ul);

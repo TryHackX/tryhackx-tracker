@@ -193,7 +193,7 @@ function listDescVisible(string $text, string $format): int
  * null. The cheap, bounding questions first: the text's size before it is walked, the syntax before it is
  * rendered — and one render, by richtextCount(), for the pictures and the links.
  */
-function listDescProblem(string $clean, string $format, array $cfg): ?array
+function listDescProblem(string $clean, string $format, array $cfg, ?PDO $db = null, ?array $writer = null, string $before = ''): ?array
 {
     if ($clean === '') return null;
     $cap = listDescSourceCap($cfg);
@@ -205,7 +205,19 @@ function listDescProblem(string $clean, string $format, array $cfg): ?array
     $max = listsDescMax($cfg);
     if ($n > $max) return ['code' => 'too_long', 'vars' => ['n' => $n, 'max' => $max]];
     $c = richtextCount($clean, $format, $cfg);
-    if ($c['images'] > 0) return ['code' => 'no_images', 'vars' => []];
+    if ($c['images'] > 0) {
+        $html = richtextRender($clean, $format, $cfg, true);
+        $pics = function_exists('imagesPlacePictures') ? imagesPlacePictures($cfg, $html) : ['own' => [], 'foreign' => $c['images']];
+        if ($pics['foreign'] > 0 || !$pics['own'] || imagesPlaceMax($cfg, 'list') === 0) return ['code' => 'no_images', 'vars' => []];
+        if (count($pics['own']) > imagesPlaceMax($cfg, 'list')) {
+            return ['code' => 'images', 'vars' => ['why' => __('api.images.place_too_many', ['n' => count($pics['own']), 'max' => imagesPlaceMax($cfg, 'list')])]];
+        }
+        if ($db !== null) {
+            $keep = $before !== '' && str_contains($before, '/i/') ? imagesPlacePictures($cfg, richtextRender($before, $format, $cfg, true))['own'] : [];
+            $why = imagesPlaceProblem($db, $cfg, 'list', $html, $writer, $keep);
+            if ($why !== null) return ['code' => 'images', 'vars' => ['why' => $why]];
+        }
+    }
     $maxLinks = richtextMaxLinks($cfg);
     if ($c['links'] > $maxLinks) return ['code' => 'too_many_links', 'vars' => ['n' => $c['links'], 'max' => $maxLinks]];
     return null;
@@ -228,7 +240,8 @@ function listDescRender(?PDO $db, array $cfg, ?string $text, $format, bool $link
     if (trim($text) === '') return '';
     $html = richtextRenderIn('list', $db, $text, listDescFormatOf($format), $linksText ? ['rt_links_text' => '1'] + $cfg : $cfg,
                              function_exists('richtextViewerSignedIn') ? richtextViewerSignedIn($db) : false);
-    $html = preg_replace('#<img class="rt-img"[^>]*>#', '', $html) ?? $html;
+    $html = function_exists('imagesPlaceHtml') && imagesPlaceMax($cfg, 'list') > 0 ? imagesPlaceHtml($cfg, $html, false)
+          : (preg_replace('#<img class="rt-img"[^>]*>#', '', $html) ?? $html);
     return preg_replace('#<p>\s*</p>#', '', $html) ?? $html;
 }
 
@@ -325,7 +338,7 @@ function listEditRequest(PDO $db, array $cfg, array $me, array $own, array $inpu
         // description is words other people read. Taking yours away never waits for anybody.
         $until = function_exists('pmMutedUntil') ? pmMutedUntil($me) : null;
         if ($until !== null) return $fail(403, 'muted', ['until' => $until]);
-        $bad = listDescProblem($desc, $fmt, $cfg);
+        $bad = listDescProblem($desc, $fmt, $cfg, $db, $me, (string)$wasText);
         if ($bad !== null) return $fail(400, $bad['code'], $bad['vars']);
     }
     $fmt = listDescFormatOf($fmt);
@@ -338,6 +351,7 @@ function listEditRequest(PDO $db, array $cfg, array $me, array $own, array $inpu
     }
     $db->prepare("UPDATE user_lists SET name = ?, description = ?, description_format = ?, visibility = ? WHERE id = ? AND user_id = ?")
        ->execute([$name, $desc, $fmt, $vis, (int)$own['id'], (int)$me['id']]);
+    if (function_exists('imagesRefsTouch') && (str_contains($desc, '/i/') || str_contains((string)$wasText, '/i/'))) imagesRefsTouch($db, $cfg, 'list', (string)$own['id']);
     return ['status' => 200, 'body' => [
         'success'            => true,
         'name'               => $name,

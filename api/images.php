@@ -3,7 +3,9 @@ if (!usersEnabled($cfg)) jsonResponse(['error' => __('api.images.not_allowed'), 
 $me = currentUser($db);
 if ($me === null) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 403);
 $forComment = (string)($_GET['place'] ?? '') === 'comment';
-$may = $forComment ? function_exists('commentImagesMayUpload') && commentImagesMayUpload($db, $cfg, $me) : imagesMayUpload($db, $cfg, $me);
+$place = (string)($_GET['place'] ?? '');
+$may = $forComment ? function_exists('commentImagesMayUpload') && commentImagesMayUpload($db, $cfg, $me)
+     : (in_array($place, IMAGES_PLACES, true) ? imagesPlaceMayUpload($db, $cfg, $me, $place) : imagesMayUpload($db, $cfg, $me));
 $uid = (int)$me['id'];
 $maxBytes = $forComment ? commentImageMaxBytes($cfg) : imagesMaxBytes($cfg);
 

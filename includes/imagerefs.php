@@ -1,5 +1,5 @@
 <?php
-const IMAGES_REF_SOURCES = ['wl', 'idx', 'edit', 'cm', 'page'];
+const IMAGES_REF_SOURCES = ['wl', 'idx', 'edit', 'cm', 'page', 'pm', 'shout', 'bio', 'list', 'warn', 'crep', 'mrep'];
 const IMAGES_PUBLIC_RECHECK_MINUTES = 30;
 const IMAGES_REFS_REBUILD_SECONDS = 3600;
 const IMAGES_REFS_SCAN_BATCH = 500;
@@ -40,6 +40,12 @@ function imagesRefsCfg(PDO $db, ?array $cfg): array
 
 function imagesRefsTextOf(PDO $db, string $src, string $key): ?string
 {
+    if (in_array($src, IMAGES_PLACE_SOURCES, true)) {
+        $st = $db->prepare((string)imagesPlaceTextSql($src));
+        $st->execute([(int)$key]);
+        $t = $st->fetchColumn();
+        return $t === false || $t === null ? null : (string)$t;
+    }
     if ($src === 'page') {
         $p = explode("\t", $key, 2);
         if (count($p) !== 2) return null;
@@ -116,6 +122,7 @@ function imagesRefsSync(PDO $db, array $cfg, string $src, string $key, ?string $
 function imagesRefState(PDO $db, string $src, string $key): array
 {
     $dead = ['state' => 'dead', 'author' => null, 'trusted' => false, 'exists' => false];
+    if (in_array($src, IMAGES_PLACE_SOURCES, true)) return imagesPlaceRefState($db, $src, (int)$key);
     if ($src === 'page') {
         $p = explode("\t", $key, 2);
         if (count($p) !== 2) return $dead;
@@ -207,7 +214,7 @@ function imagesRefsTouch(PDO $db, ?array $cfg, string $src, string $key): void
     try {
         $cfg = imagesRefsCfg($db, $cfg);
         $text = imagesRefsTextOf($db, $src, $key);
-        $r = imagesRefsSync($db, $cfg, $src, $key, $text);
+        $r = imagesRefsSync($db, $cfg, $src, $key, $text, in_array($src, IMAGES_PLACE_SOURCES, true) ? [] : null);
         if ($r['images']) imagesVisibilitySync($db, $r['images']);
         if ($r['remote'] && imagesRefState($db, $src, $key)['state'] !== 'dead') {
             imagesRemoteEnqueue($db, array_values($r['remote']));
@@ -221,6 +228,7 @@ function imagesRefsTouch(PDO $db, ?array $cfg, string $src, string $key): void
 
 function imagesRefsScanSql(string $src): string
 {
+    if (in_array($src, IMAGES_PLACE_SOURCES, true)) return imagesPlaceScanSql($src);
     return match ($src) {
         'wl'   => "SELECT id AS k, description AS t FROM whitelist WHERE id > ? AND description IS NOT NULL ORDER BY id LIMIT " . IMAGES_REFS_SCAN_BATCH,
         'idx'  => "SELECT id AS k, description AS t FROM hash_content WHERE id > ? AND description IS NOT NULL ORDER BY id LIMIT " . IMAGES_REFS_SCAN_BATCH,
@@ -251,7 +259,7 @@ function imagesRefsRebuild(PDO $db, array $cfg): array
                 if ($src !== 'page') $after = (int)$key;
                 $text = (string)$r['t'];
                 if (!str_contains($text, 'http')) continue;
-                $p = imagesRefsParse($cfg, $text, $hosts);
+                $p = imagesRefsParse($cfg, $text, in_array($src, IMAGES_PLACE_SOURCES, true) ? [] : $hosts);
                 if (!$p['own'] && !$p['remote']) continue;
                 $out['rows']++;
                 foreach ($p['own'] as $id) $want[$id . "\n" . $key] = [$id, $key];

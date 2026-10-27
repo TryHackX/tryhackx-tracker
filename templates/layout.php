@@ -125,6 +125,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
            'def' => userAvatarDefaultMode($cfg) === 'image' ? substr(strtolower((string)$cfg['avatar_default_sha']), 0, 16) : '']
         : ['avatars' => false, 'def' => '']) ?>;
     const APP_REPORT_IMAGES = <?= json_encode($reportsHere && contentReportKindOn($cfg, 'image')) ?>;
+    const APP_IMG_PLACES = <?= json_encode((object)(function_exists('imagesPlacesFor') ? imagesPlacesFor($db, $cfg, $navUser) : [])) ?>;
     <?php if (($cfg['contact_obfuscate'] ?? '0') === '1' && !empty($cfg['site_email'])): ?>
     const OBF_EMAIL = <?= obfuscateEmail($cfg['site_email']) ?>;
     <?php endif; ?>
@@ -145,6 +146,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <script src="<?= $baseUrl ?>assets/js/magnetcard.js<?= assetVer('assets/js/magnetcard.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/filters.js<?= assetVer('assets/js/filters.js') ?>"></script>
     <?php if ((function_exists('imagesMayUpload') && imagesMayUpload($db, $cfg, $navUser))
+              || (function_exists('imagesPlacesFor') && imagesPlacesFor($db, $cfg, $navUser))
               || (function_exists('commentImagesMayUpload') && commentImagesMayUpload($db, $cfg, $navUser))): ?>
     <script src="<?= $baseUrl ?>assets/js/images-editor.js<?= assetVer('assets/js/images-editor.js') ?>"></script>
     <?php endif; ?>

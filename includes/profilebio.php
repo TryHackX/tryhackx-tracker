@@ -142,6 +142,7 @@ function profileBioParse(string $s, array $cfg): array
     $chars = 0;
     $links = 0;
     $bad = 0;
+    $images = 0;
     $stack = [];            // ['tag' => b|i|u|s|url, 'mark' => $chars when it opened, 'url' => …]
     $text = function (string $t) use (&$out, &$chars): void {
         if ($t === '') return;
@@ -164,7 +165,7 @@ function profileBioParse(string $s, array $cfg): array
         return false;
     };
 
-    $re = '~\[(?:(b|i|u|s)|/(b|i|u|s|url)|url(?:(=)([^\]\n]*))?)\]~i';
+    $re = '~\[(?:(b|i|u|s)|/(b|i|u|s|url)|url(?:(=)([^\]\n]*))?|(img))\]~i';
     $pos = 0;
     $nextCloser = -1;       // where the next [/url] starts, found once and reused (see [url] below)
     while (preg_match($re, $s, $m, PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL, $pos)) {
@@ -195,6 +196,18 @@ function profileBioParse(string $s, array $cfg): array
             foreach ($reopen as $t) $open($t);
             continue;
         }
+        if ($m[5][0] !== null) {
+            $url = null;
+            if (!$inLink() && function_exists('imagesOwnStoreUrl') && preg_match('~\[/img\]~i', $s, $im, PREG_OFFSET_CAPTURE, $pos)) {
+                $url = profileBioUrl(substr($s, $pos, (int)$im[0][1] - $pos));
+                if ($url !== null && imagesOwnStoreUrl(imagesBase($cfg), $url) === null) $url = null;
+            }
+            if ($url === null) { $text($tok); continue; }
+            $pos = (int)$im[0][1] + strlen($im[0][0]);
+            $images++;
+            $out .= '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="" src="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '">';
+            continue;
+        }
 
         // [url=…] and [url]
         if ($inLink() || count($stack) >= PROFILE_BIO_MAX_DEPTH) { $text($tok); continue; }
@@ -222,7 +235,7 @@ function profileBioParse(string $s, array $cfg): array
     }
     $text(substr($s, $pos));
     while ($stack) $close(array_pop($stack));
-    return ['html' => $out, 'chars' => $chars, 'links' => $links, 'bad_links' => $bad, 'lines' => profileBioLines($s)];
+    return ['html' => $out, 'chars' => $chars, 'links' => $links, 'bad_links' => $bad, 'images' => $images, 'lines' => profileBioLines($s)];
 }
 
 /**
@@ -388,12 +401,21 @@ function profileBioSaveRequest(PDO $db, array $cfg, ?array $me, array $input, st
     }
     if (!$clearing) {
         $bad = profileBioProblem($clean, $cfg);
+        if ($bad === null && function_exists('imagesPlaceProblem') && str_contains($clean, '/i/')) {
+            $wst = $db->prepare("SELECT bio FROM users WHERE id = ?");
+            $wst->execute([$uid]);
+            $was = (string)($wst->fetchColumn() ?: '');
+            $keep = $was !== '' && str_contains($was, '/i/') ? imagesPlacePictures($cfg, profileBioParse(profileBioClean($was), $cfg)['html'])['own'] : [];
+            $why = imagesPlaceProblem($db, $cfg, 'bio', profileBioParse($clean, $cfg)['html'], $me, $keep);
+            if ($why !== null) $bad = ['code' => 'images', 'vars' => ['why' => $why]];
+        }
         if ($bad !== null) {
             antispamRelease($db, $ticket);
             return $fail(400, $bad['code'], $bad['vars']);
         }
     }
     profileBioStore($db, $uid, $clean);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'bio', (string)$uid);
     antispamRecord($db, $ticket);
     $p = $clearing ? ['html' => '', 'chars' => 0] : profileBioParse($clean, $cfg);
     return ['status' => 200, 'body' => [

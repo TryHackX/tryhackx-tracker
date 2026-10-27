@@ -109,6 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bad = richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)$max]), 'message');
             if ($bad !== null) jsonResponse(['error' => 'invalid_body', 'detail' => $bad], 400);
         }
+        if (function_exists('imagesPlaceCheck') && ($pic = imagesPlaceCheck($db, $cfg, 'pm', $body, $format, $me)) !== null) {
+            jsonResponse(['error' => $pic], 400);
+        }
 
         $tid = (int)$them['id'];
         $thread = pmThreadFor($db, $uid, $tid);
@@ -117,6 +120,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $theyHadVisible = pmHasVisible($db, $thread, $tid);
         $db->prepare("INSERT INTO user_messages (thread_id, sender_id, body, body_format) VALUES (?, ?, ?, ?)")
            ->execute([(int)$thread['id'], $uid, $body, $format]);
+        $pmId = (int)$db->lastInsertId();
+        if (function_exists('imagesRefsTouch') && str_contains($body, '/i/')) imagesRefsTouch($db, $cfg, 'pm', (string)$pmId);
         // Whose Archive it leaves (1.73.0, pmAfterMessage()): the writer's always — writing in a conversation brings
         // it back to your inbox; the other side's when pm_archive_returns says so (as hiding always did: "I am done
         // with this for now", not "never show me this person again") or when all they had of it was in the Trash.

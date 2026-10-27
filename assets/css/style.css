@@ -5000,6 +5000,11 @@ a.btn.btn-danger-soft { color: #ff8a80; }
 .info-gal-nav:disabled { opacity: 0; pointer-events: none; }
 @media (max-width: 576px) { .info-gal-item { height: 96px; max-width: 240px; } }
 @media (prefers-reduced-motion: reduce) { .info-gal-item img { transition: none; } }
+.rt-images-mini-say { margin-top: 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
+.rt-images-mini-say:empty { display: none; }
+.rt-img-link { display: inline-flex; align-items: center; gap: 0.3rem; }
+.settings-places td:first-child { white-space: nowrap; }
+.settings-places input[type="number"] { max-width: 6rem; }
 .rep-hist { display: grid; grid-template-columns: auto 1fr auto; gap: 0.15rem 0.5rem; align-items: center; max-width: 22rem; margin-top: 0.5rem; font-size: 0.8rem; }
 .rep-hist-s { white-space: nowrap; color: var(--text-muted); }
 .rep-hist-s .bi { color: #ffc107; font-size: 0.7rem; }

@@ -6140,6 +6140,9 @@ window.siteToast = siteToast;
     syncFormat();
     countTyping();
     if (window.ImagesEditor && typeof window.ImagesEditor.attach === 'function') window.ImagesEditor.attach({ id, textarea: ta, format: fmt });
+    if (opts.images && tools && !document.getElementById(id + '-images') && window.ImagesEditor && typeof window.ImagesEditor.mini === 'function') {
+        window.ImagesEditor.mini({ textarea: ta, place: opts.images, format: fmt, host: tools });
+    }
     }
 
     mountRichtext('wl-desc');

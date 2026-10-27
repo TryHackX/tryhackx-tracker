@@ -836,6 +836,7 @@
             if (!ta || !sendBtn || sendBtn.disabled) return;
             var body = ta.value.trim();
             if (!body) { ta.focus(); return; }
+            if (window.ImagesEditor && window.ImagesEditor.busy(ta)) return;
             sendBtn.disabled = true;
             await postShout(body, function () { ta.value = ''; countUpdate(); fitComposer(); });
             if (!(window.Antispam && window.Antispam.waiting(sendBtn))) sendBtn.disabled = false;
@@ -1362,7 +1363,7 @@
             // The write/preview tabs, the syntax help and the counter under them, from the editor the
             // rest of the site writes in. Never in 'plain': there is no syntax to preview.
             if (format !== 'plain' && window.RichText && typeof window.RichText.mount === 'function') {
-                window.RichText.mount('shout-body', { previewFor: 'shout' });
+                window.RichText.mount('shout-body', { previewFor: 'shout', images: 'shout' });
             }
         }
         var picker = null;

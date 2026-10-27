@@ -3417,6 +3417,42 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <small class="settings-hint"><?= _h('settings.images_gallery_enabled_hint') ?></small>
                     </div>
                 </div>
+                <div class="mt-3 settings-places">
+                    <h6 class="mb-1"><?= _h('settings.images_places_h') ?></h6>
+                    <p class="settings-hint mb-2"><?= _h('settings.images_places_hint') ?></p>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-sm align-middle mb-0">
+                            <thead><tr><th><?= _h('settings.images_places_where') ?></th><th><?= _h('settings.images_places_max') ?></th><th><?= _h('settings.images_places_who') ?></th></tr></thead>
+                            <tbody>
+                            <tr data-setting="images_in_pm">
+                                <td><label for="set-images_in_pm"><?= _h('settings.images_in_pm') ?></label></td>
+                                <td><input id="set-images_in_pm" type="number" class="form-control form-control-sm bg-dark text-light border-secondary" name="images_in_pm" value="<?= sanitize($cfg['images_in_pm'] ?? '4') ?>" min="0" max="10"></td>
+                                <td class="settings-hint"><?= _h('settings.images_in_pm_who') ?></td>
+                            </tr>
+                            <tr data-setting="images_in_shout">
+                                <td><label for="set-images_in_shout"><?= _h('settings.images_in_shout') ?></label></td>
+                                <td><input id="set-images_in_shout" type="number" class="form-control form-control-sm bg-dark text-light border-secondary" name="images_in_shout" value="<?= sanitize($cfg['images_in_shout'] ?? '1') ?>" min="0" max="10"></td>
+                                <td class="settings-hint"><?= _h('settings.images_in_shout_who') ?></td>
+                            </tr>
+                            <tr data-setting="images_in_bio">
+                                <td><label for="set-images_in_bio"><?= _h('settings.images_in_bio') ?></label></td>
+                                <td><input id="set-images_in_bio" type="number" class="form-control form-control-sm bg-dark text-light border-secondary" name="images_in_bio" value="<?= sanitize($cfg['images_in_bio'] ?? '2') ?>" min="0" max="10"></td>
+                                <td class="settings-hint"><?= _h('settings.images_in_bio_who') ?></td>
+                            </tr>
+                            <tr data-setting="images_in_list">
+                                <td><label for="set-images_in_list"><?= _h('settings.images_in_list') ?></label></td>
+                                <td><input id="set-images_in_list" type="number" class="form-control form-control-sm bg-dark text-light border-secondary" name="images_in_list" value="<?= sanitize($cfg['images_in_list'] ?? '4') ?>" min="0" max="10"></td>
+                                <td class="settings-hint"><?= _h('settings.images_in_list_who') ?></td>
+                            </tr>
+                            <tr data-setting="images_in_mod">
+                                <td><label for="set-images_in_mod"><?= _h('settings.images_in_mod') ?></label></td>
+                                <td><input id="set-images_in_mod" type="number" class="form-control form-control-sm bg-dark text-light border-secondary" name="images_in_mod" value="<?= sanitize($cfg['images_in_mod'] ?? '4') ?>" min="0" max="10"></td>
+                                <td class="settings-hint"><?= _h('settings.images_in_mod_who') ?></td>
+                            </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <div class="settings-section" id="section-comment-images" data-group="formatting" data-title="<?= _h('settings.cimg_title') ?>">

@@ -589,8 +589,82 @@
         return inst;
     }
 
+    function mini(opts) {
+        const ta = opts && opts.textarea;
+        const place = opts && opts.place;
+        const host = opts && opts.host;
+        if (!ta || !place || !host) return null;
+        if (instances.has(ta)) return instances.get(ta);
+        const allowed = typeof APP_IMG_PLACES === 'object' && APP_IMG_PLACES ? APP_IMG_PLACES : {};
+        if (!(Number(allowed[place]) > 0)) return null;
+        const fmt = typeof opts.format === 'function' ? opts.format : () => 'bbcode';
+        const label = t.key('js.images.mini_add');
+        const btn = el('button', opts.cls || null, { type: 'button', title: label, 'aria-label': label }, [icon('bi-image')]);
+        const file = el('input', null, { type: 'file', accept: 'image/*', hidden: '' });
+        file.multiple = true;
+        const say = el('div', 'rt-images-mini-say', { role: 'status', 'aria-live': 'polite' });
+        let pending = 0;
+
+        function put(markup) {
+            const len = ta.value.length;
+            const s = Math.min(typeof ta.selectionStart === 'number' ? ta.selectionStart : len, len);
+            const e = Math.min(Math.max(typeof ta.selectionEnd === 'number' ? ta.selectionEnd : s, s), len);
+            const before = ta.value.slice(0, s);
+            const after = ta.value.slice(e);
+            const ins = (before && !/\s$/.test(before) ? ' ' : '') + markup + (after && !/^\s/.test(after) ? ' ' : '');
+            ta.value = before + ins + after;
+            const at = before.length + ins.length;
+            ta.focus();
+            ta.setSelectionRange(at, at);
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+
+        async function upload(files) {
+            const list = Array.from(files || []).filter(isImage);
+            if (!list.length) return;
+            btn.disabled = true;
+            for (const f of list) {
+                pending++;
+                say.textContent = t.key('js.images.mini_sending');
+                const r = await send(f, ta, () => {}, place);
+                pending--;
+                const j = r && r.json;
+                if (j && j.success && j.image && safeUrl(j.image.url)) {
+                    put(imageMarkup(j.image.url, fmt()));
+                    say.textContent = '';
+                    continue;
+                }
+                say.textContent = serverSays(j) || t.key('js.images.mini_failed');
+                if (j && STOP.indexOf(j.code) !== -1) break;
+            }
+            btn.disabled = false;
+        }
+
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => file.click());
+        file.addEventListener('change', () => {
+            const fs = Array.from(file.files || []);
+            file.value = '';
+            upload(fs);
+        });
+        ta.addEventListener('paste', (e) => {
+            const fs = e.clipboardData ? Array.from(e.clipboardData.files || []).filter(isImage) : [];
+            if (!fs.length) return;
+            e.preventDefault();
+            upload(fs);
+        });
+        if (host.classList.contains('rt-tools')) host.appendChild(el('span', 'rt-tool-group', null, [btn]));
+        else host.appendChild(btn);
+        host.appendChild(file);
+        ta.insertAdjacentElement('afterend', say);
+        const inst = { busy: () => pending > 0 };
+        instances.set(ta, inst);
+        return inst;
+    }
+
     window.ImagesEditor = {
         attach,
+        mini,
         busy: (ta) => { const i = ta ? instances.get(ta) : null; return !!(i && i.busy()); },
         balanceRows,
         labelsBlock,

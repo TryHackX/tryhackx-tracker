@@ -122,6 +122,7 @@ check('… and inside the Info panel\'s editor template, under its card, above i
 
 $layout = (string)file_get_contents($root . '/templates/layout.php');
 $tag = "<?php if ((function_exists('imagesMayUpload') && imagesMayUpload(\$db, \$cfg, \$navUser))\n"
+     . "              || (function_exists('imagesPlacesFor') && imagesPlacesFor(\$db, \$cfg, \$navUser))\n"
      . "              || (function_exists('commentImagesMayUpload') && commentImagesMayUpload(\$db, \$cfg, \$navUser))): ?>\n"
      . "    <script src=\"<?= \$baseUrl ?>assets/js/images-editor.js<?= assetVer('assets/js/images-editor.js') ?>\"></script>\n"
      . "    <?php endif; ?>";

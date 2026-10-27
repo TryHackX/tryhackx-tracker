@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/usermedia.php';
 require_once __DIR__ . '/imagerefs.php';
+require_once __DIR__ . '/imageplaces.php';
 
 const IMAGES_PAGE_EDGE = 960;
 const IMAGES_PER_PAGE = 40;
@@ -415,7 +416,7 @@ function imagesServe(PDO $db, int $id, int $w, int $h, string $ext, bool $wantFu
     if (!$isPage && !$isFull) return null;
     $owner = $viewerId !== null && $row['user_id'] !== null && $viewerId === (int)$row['user_id'];
     $public = ($owner || $moderator) ? $row['public_at'] !== null : imagesIsPublic($db, $row);
-    if (!$public && !$owner && !$moderator) return null;
+    if (!$public && !$owner && !$moderator && !($viewerId !== null && imagesPlaceViewerMay($db, $id, $viewerId))) return null;
     $variant = ($wantFull || !$isPage) ? 'full' : 'page';
     if ($variant === 'full') {
         $st = $db->prepare("SELECT COALESCE(data_full, data_page) FROM image_blobs WHERE sha256 = ?");
@@ -435,6 +436,7 @@ function imagesSend(array $img): void
     header('ETag: ' . $img['etag']);
     header('Cache-Control: ' . ($img['public'] ? 'public, max-age=86400' : 'private, no-store'));
     header('X-Content-Type-Options: nosniff');
+    header('Cross-Origin-Resource-Policy: same-site');
     header_remove('Expires');
     header_remove('Pragma');
     header_remove('Content-Security-Policy');
@@ -1133,6 +1135,12 @@ function imagesWhereUsed(PDO $db, int $id): array
                 $en = $st->fetchColumn();
                 if ($en === false) continue;
                 $out[] = ['kind' => 'page', 'id' => 0, 'hash' => '', 'page' => $page, 'lang' => $lang, 'state' => (int)$en === 1 ? 'enabled' : 'disabled'];
+                continue;
+            }
+            if (in_array($src, IMAGES_PLACE_SOURCES, true)) {
+                $s = imagesPlaceRefState($db, $src, (int)$key);
+                if (!$s['exists']) continue;
+                $out[] = ['kind' => $src, 'id' => (int)$key, 'hash' => '', 'state' => $s['state']];
                 continue;
             }
             $sql = match ($src) {

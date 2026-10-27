@@ -941,13 +941,14 @@
         if (rich && window.RichText && typeof window.RichText.mount === 'function') {
             // The preview endpoint is told what this is: a message is gated on being allowed to send
             // one, not on being allowed to upload a torrent.
-            window.RichText.mount('pm-body', { previewFor: 'message' });
+            window.RichText.mount('pm-body', { previewFor: 'message', images: 'pm' });
         }
 
         send.addEventListener('click', async function () {
             if (send.disabled) return;
             var body = ta.value.trim();
             if (!body) { ta.focus(); return; }
+            if (window.ImagesEditor && window.ImagesEditor.busy(ta)) { msg.textContent = t.key('js.images.wait_uploads'); return; }
             var fmtEl = rich ? document.getElementById('pm-body-format') : null;
             send.disabled = true;
             var payload = {

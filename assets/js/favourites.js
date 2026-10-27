@@ -1092,6 +1092,7 @@
         if (window.RichText && typeof window.RichText.mount === 'function') {
             window.RichText.mount('le-desc', {
                 previewFor: 'list',
+                images: 'list',
                 measure: function (text, f) { return { used: listDescVisible(text, f), limit: max }; },
             });
         }
@@ -1181,6 +1182,7 @@
 
         async function doSave() {
             if (!cur || saving) return;
+            if (window.ImagesEditor && window.ImagesEditor.busy(ta)) { say(t.key('js.images.wait_uploads'), true); return; }
             var s = now();
             if (!s.name) { say(t.key('js.lists.name_required'), true); nameIn.focus(); return; }
             saving = true;

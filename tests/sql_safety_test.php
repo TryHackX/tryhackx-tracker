@@ -164,6 +164,7 @@ $REVIEWED = [
 
     // A query that is itself a literal, passed by reference.
     'includes/index.php:$a'                    => '$a[2] is a literal SQL string from the $arms array above it',
+    'includes/imagerefs.php:$src'              => 'a key into imagesPlaceTextSql(), whose every answer is a literal statement',
     // The two branches of the file-list search, split out of an OR that no index could serve. Both
     // are built here from $where — literal fragments chosen by key — plus one clause the same
     // function wrote ('name LIKE ?', a MATCH(), or 'info_hash IN (?,?,…)' whose length is the count

@@ -54,7 +54,7 @@ $reason = reportTextClean($input['reason'] ?? '', REPORT_TEXT_MAX + 1);
 $reasonFormat = reportTextFormat($input['reason_format'] ?? 'plain', $cfg);
 if ($id < 1) jsonResponse(['error' => __('api.report.invalid_id')], 400);
 foreach ([[$reply, $replyFormat, 'reply'], [$reason, $reasonFormat, 'reason']] as [$txt, $fmt, $field]) {
-    if (($why = reportTextValidate($txt, $fmt, $cfg)) !== null) jsonResponse(['error' => 'invalid_text', 'message' => $why, 'field' => $field], 400);
+    if (($why = reportTextValidate($txt, $fmt, $cfg, REPORT_TEXT_MAX, true)) !== null) jsonResponse(['error' => 'invalid_text', 'message' => $why, 'field' => $field], 400);
 }
 
 $st = $db->prepare("SELECT r.*, reporter.username AS reporter_name, reported.username AS reported_name
@@ -86,7 +86,7 @@ $tellReporter = function (string $titleKey) use ($db, $cfg, $rep, $reply, $reply
  * Write the moderator's note (the panel's own) and answer (the reporter's, with its format) on the report, closing it
  * when $closing. 1.75.0: one place for what four statements did, and the answer's format with it.
  */
-$writeAnswer = function (bool $closing) use ($db, $id, $note, $reply, $replyFormat): void {
+$writeAnswer = function (bool $closing) use ($db, $cfg, $id, $note, $reply, $replyFormat): void {
     $by = mb_substr((string)(auditActor($db)['name'] ?? 'admin'), 0, 64);
     $fmt = $reply !== '' ? $replyFormat : 'plain';
     // One of two literal fragments — nothing the request wrote (tests/sql_safety_test.php: a clause assembled from literals).
@@ -100,6 +100,7 @@ $writeAnswer = function (bool $closing) use ($db, $id, $note, $reply, $replyForm
         $db->prepare("UPDATE message_reports SET " . $extraSql . "note = ?, reply = ?, handled_by = ?, handled_at = NOW() WHERE id = ?")
            ->execute([$note, $reply !== '' ? mb_substr($reply, 0, 500) : null, $by, $id]);
     }
+    if (function_exists('imagesRefsTouch') && str_contains($reply, '/i/')) imagesRefsTouch($db, $cfg, 'mrep', (string)$id);
 };
 /** The reported account's own notices, in its language too. */
 $authorLang = recipientLangOf($db, $cfg, (int)$rep['reported_user_id']);

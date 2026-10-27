@@ -33,6 +33,9 @@ RewriteBase /tracker/
     Header set X-Frame-Options "SAMEORIGIN"
     Header set Referrer-Policy "strict-origin-when-cross-origin"
     Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    <FilesMatch "^\d+-[0-9a-f]{8}(-s)?\.webp$">
+        Header set Cross-Origin-Resource-Policy "same-site"
+    </FilesMatch>
     # Content-Security-Policy — THE FALLBACK, not the policy this application sends.
     #
     # Since 1.39.0 the real policy is built per request in includes/csp.php and sent by PHP, because
