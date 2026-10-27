@@ -175,7 +175,7 @@ check('the bar\'s words are the dictionary\'s, in both languages',
       str_contains($bar, htmlspecialchars($en['rt.images_drop'], ENT_QUOTES, 'UTF-8')) && ($pl['rt.images'] ?? '') === 'Obrazy'
       && ($pl['rt.images_mine'] ?? '') === 'Moje obrazy' && ($pl['js.images.labels'] ?? '') === 'Wstaw jako etykiety');
 $iconsBad = [];
-foreach (['bi-image', 'bi-collection'] as $ic) if (!str_contains($bar, 'class="bi ' . $ic . '"')) $iconsBad[] = $ic;
+foreach (['bi-collection'] as $ic) if (!str_contains($bar, 'class="bi ' . $ic . '"')) $iconsBad[] = $ic;
 if (!str_contains($bar, 'class="bi bi-cloud-arrow-up rt-images-drop-icon"')) $iconsBad[] = 'bi-cloud-arrow-up';
 foreach (["icon('bi-ui-checks-grid')", "iconBtn('bi-chevron-left'", "iconBtn('bi-chevron-right'", "iconBtn('bi-link-45deg'", "iconBtn('bi-code-slash'", "iconBtn('bi-trash'"] as $ic) {
     if (!str_contains($js, $ic)) $iconsBad[] = $ic;

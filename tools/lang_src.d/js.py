@@ -34,8 +34,6 @@ add('js.common', {
 
 # ── whitelist page ──────────────────────────────────────────────────────────
 add('js.wl', {
-    'review_empty_hint': ('Source links and descriptions land here when review is on and someone submits one.',
-                          'Linki źródłowe i opisy trafiają tutaj, gdy recenzja jest włączona i ktoś je prześle.'),
 })
 
 # ── app ──────────────────────────────────────────────────────────────────
@@ -1382,8 +1380,6 @@ add('js.wl', {
         'Usuń ten tekst'),
     'description': ('Description',
         'Opis'),
-    'description_fmt': ('Description (:fmt)',
-        'Opis (:fmt)'),
     'details': ('Details',
         'Szczegóły'),
     'disabled_click_enable': ('Disabled — click to enable',
@@ -1732,8 +1728,6 @@ add('js.wl', {
         'Przywrócono :n wierszy do stanu „done”'),
     'review_load_failed': ('Could not load the queue.',
         'Nie udało się wczytać kolejki.'),
-    'review_off': ('Review is switched off, so new links and descriptions are published immediately. Anything here was submitted while it was on.',
-        'Recenzja jest wyłączona, więc nowe linki i opisy są publikowane od razu. To, co tu widać, zgłoszono, gdy była włączona.'),
     'rewrite': ('rewrite',
         'poprawka'),
     'rewrite_title': ('A rewrite waiting for a decision',
@@ -1742,8 +1736,6 @@ add('js.wl', {
         'opublikowane'),
     'rv_rejected': ('rejected',
         'odrzucone'),
-    'rv_sort_title': ('Sorted worst-first: the ones people have complained about come before the ones nobody has an opinion on',
-        'Sortowanie od najgorszych: te, na które ludzie narzekali, idą przed tymi, o których nikt nie ma zdania'),
     'rv_state_title': ('This submission is :state',
         'Stan zgłoszenia: :state'),
     'rv_waiting': ('waiting',
@@ -1901,8 +1893,6 @@ add('js.wl', {
         'zaktualizowano :time'),
     'urgent': ('urgent',
         'pilne'),
-    'via_source': ('via :source',
-        'przez :source'),
     'view': ('View',
         'Pokaż'),
     'view_request': ('View request (:size)',

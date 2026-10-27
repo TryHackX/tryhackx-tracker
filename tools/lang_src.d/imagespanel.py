@@ -26,5 +26,5 @@ add('js.aimg', {
 })
 
 add('js.comments', {
-    'img_drop': ('Drop or choose pictures', 'Upuść lub wybierz obrazy'),
+    'img_drop': ('Drop pictures here, or choose files', 'Upuść tu obrazy albo wybierz pliki'),
 })

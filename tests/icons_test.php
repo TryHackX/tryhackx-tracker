@@ -548,7 +548,7 @@ $spot = [
     'templates/partials/shoutbox_widget.php'=> ['bi bi-type-bold', 'bi bi-code-slash', 'bi bi-link-45deg', 'bi bi-quote', 'bi bi-eye-slash', 'bi bi-emoji-smile'],
     'templates/pages/account.php'           => ['bi bi-x-lg', 'bi bi-play-fill', 'bi bi-palette', 'bi bi-subscript'],
     'templates/pages/whitelist.php'         => ['bi bi-palette', 'bi bi-subscript', 'bi bi-superscript', 'bi bi-eye-slash'],
-    'templates/partials/images_bar.php'     => ['bi bi-image', 'bi bi-cloud-arrow-up', 'bi bi-collection'],
+    'templates/partials/images_bar.php'     => ['bi bi-cloud-arrow-up', 'bi bi-collection'],
     'assets/js/images-editor.js'            => ["icon('bi-ui-checks-grid')", "iconBtn('bi-chevron-left'", "iconBtn('bi-chevron-right'",
                                                 "iconBtn('bi-link-45deg'", "iconBtn('bi-code-slash'", "iconBtn('bi-trash'"],
     'templates/pages/register.php'          => ['bi bi-x-lg'],
