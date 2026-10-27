@@ -172,15 +172,16 @@ check('no inline handler and no inline script in the bar', $handlers === [] && s
 $en = include $root . '/lang/en.php';
 $pl = include $root . '/lang/pl.php';
 check('the bar\'s words are the dictionary\'s, in both languages',
-      str_contains($bar, htmlspecialchars($en['rt.images_choose'], ENT_QUOTES, 'UTF-8')) && ($pl['rt.images'] ?? '') === 'Obrazy'
+      str_contains($bar, htmlspecialchars($en['rt.images_drop'], ENT_QUOTES, 'UTF-8')) && ($pl['rt.images'] ?? '') === 'Obrazy'
       && ($pl['rt.images_mine'] ?? '') === 'Moje obrazy' && ($pl['js.images.labels'] ?? '') === 'Wstaw jako etykiety');
 $iconsBad = [];
-foreach (['bi-image', 'bi-upload', 'bi-collection'] as $ic) if (!str_contains($bar, 'class="bi ' . $ic . '"')) $iconsBad[] = $ic;
+foreach (['bi-image', 'bi-collection'] as $ic) if (!str_contains($bar, 'class="bi ' . $ic . '"')) $iconsBad[] = $ic;
+if (!str_contains($bar, 'class="bi bi-cloud-arrow-up rt-images-drop-icon"')) $iconsBad[] = 'bi-cloud-arrow-up';
 foreach (["icon('bi-ui-checks-grid')", "iconBtn('bi-chevron-left'", "iconBtn('bi-chevron-right'", "iconBtn('bi-link-45deg'", "iconBtn('bi-code-slash'", "iconBtn('bi-trash'"] as $ic) {
     if (!str_contains($js, $ic)) $iconsBad[] = $ic;
 }
 $map = iconFaMap();
-foreach (['image', 'upload', 'collection', 'ui-checks-grid', 'chevron-left', 'chevron-right', 'link-45deg', 'code-slash', 'trash', 'check-lg'] as $nm) {
+foreach (['image', 'cloud-arrow-up', 'collection', 'ui-checks-grid', 'chevron-left', 'chevron-right', 'link-45deg', 'code-slash', 'trash', 'check-lg'] as $nm) {
     if (!isset($map[$nm])) $iconsBad[] = 'no Font Awesome twin for ' . $nm;
 }
 check('every icon the bar and the panel draw is one the Font Awesome map knows', $iconsBad === [], implode(', ', $iconsBad));

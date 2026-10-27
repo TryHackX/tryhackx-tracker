@@ -1,9 +1,9 @@
 <?php
 if (!usersEnabled($cfg)) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 404);
 $me = currentUser($db);
+if ($me === null) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 403);
 $forComment = (string)($_GET['place'] ?? '') === 'comment';
 $may = $forComment ? function_exists('commentImagesMayUpload') && commentImagesMayUpload($db, $cfg, $me) : imagesMayUpload($db, $cfg, $me);
-if (!$may) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 403);
 $uid = (int)$me['id'];
 $maxBytes = $forComment ? commentImageMaxBytes($cfg) : imagesMaxBytes($cfg);
 
@@ -15,6 +15,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
 $tooBig = fn() => jsonResponse(['error' => __('api.media.too_large', ['kb' => (int)floor($maxBytes / 1024)]), 'code' => 'too_big'], 413);
 
 if (stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'multipart/form-data') === 0) {
+    if (!$may) jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'not_allowed'], 403);
+    if (!empty($me['pm_muted_until']) && strtotime((string)$me['pm_muted_until']) > time()) {
+        jsonResponse(['error' => __('api.images.not_allowed'), 'code' => 'muted'], 403);
+    }
     if (!$_FILES && !$_POST) $tooBig();
     if (!verifyCsrfToken((string)($_POST['csrf_token'] ?? ''))) jsonResponse(['error' => __('api.csrf.invalid'), 'code' => 'csrf'], 403);
     if (!rateLimitAllow('imgupload', 'u' . $uid, IMAGES_RATE_PER_MINUTE, 60)

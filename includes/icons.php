@@ -159,7 +159,9 @@ function iconFaEntries(): array {
         'arrow-right'                => ['arrow-right', 's'],
         'arrow-up'                   => ['arrow-up', 's'],
         'arrow-up-circle'            => ['circle-up', 'r'],
+        'arrows-angle-contract'      => ['down-left-and-up-right-to-center', 's'],
         'arrows-move'                => ['arrows-up-down-left-right', 's'],
+        'asterisk'                   => ['asterisk', 's'],
         'award'                      => ['award', 's'],
         'bar-chart-steps'            => ['chart-gantt', 's'],
         'bell'                       => ['bell', 'r'],
@@ -176,6 +178,7 @@ function iconFaEntries(): array {
         'card-text'                  => ['rectangle-list', 'r'],
         'chat-left-dots'             => ['comment-dots', 'r', 'pro' => 'message-dots'],   // Pro: Bootstrap's square bubble, not the round one
         'chat-left-text'             => ['message', 'r', 'pro' => 'message-lines'],   // Pro: the bubble with its lines of text, as Bootstrap's
+        'chat-square-text'           => ['message', 's'],
         'check-circle'               => ['circle-check', 'r'],
         'check-circle-fill'          => ['circle-check', 'f'],
         'check-lg'                   => ['check', 's'],
@@ -193,7 +196,9 @@ function iconFaEntries(): array {
         'circle-fill'                => ['circle', 'f'],
         'clipboard'                  => ['clipboard', 'r'],
         'clipboard-check'            => ['clipboard-check', 's'],
+        'clock'                      => ['clock', 'r'],
         'clock-history'              => ['clock-rotate-left', 's'],
+        'cloud-arrow-up'             => ['cloud-arrow-up', 's'],
         'cloud-download'             => ['cloud-arrow-down', 's'],
         'code-slash'                 => ['code', 's'],
         'collection'                 => ['layer-group', 's', 'approx' => 1, 'pro' => 'rectangle-history', 'prorole' => 'r'],   // ~ a stack of cards: a stack of layers
@@ -217,6 +222,7 @@ function iconFaEntries(): array {
         'envelope'                   => ['envelope', 'r'],
         'envelope-paper'             => ['envelope-open-text', 's', 'approx' => 1, 'prorole' => 'r'],   // ~ an envelope with its letter showing: the open one (in Pro, its outline)
         'eraser'                     => ['eraser', 's'],
+        'exclamation-circle'         => ['circle-exclamation', 's'],
         'exclamation-circle-fill'    => ['circle-exclamation', 'f'],
         'exclamation-octagon'        => ['circle-exclamation', 's', 'approx' => 1, 'pro' => 'octagon-exclamation', 'prorole' => 'r'],   // ~ no octagon in Free
         'exclamation-octagon-fill'   => ['circle-exclamation', 'f', 'approx' => 1, 'pro' => 'octagon-exclamation'],   // ~ no octagon in Free
@@ -253,6 +259,7 @@ function iconFaEntries(): array {
         'highlighter'                => ['highlighter', 's'],
         'hourglass-split'            => ['hourglass-half', 'r'],
         'image'                      => ['image', 'r'],
+        'images'                     => ['images', 's'],
         'inbox'                      => ['inbox', 's'],
         'info-circle'                => ['circle-info', 's', 'prorole' => 'r'],   // with -fill a pair, which only Pro can draw as one
         'info-circle-fill'           => ['circle-info', 'f'],
@@ -270,6 +277,7 @@ function iconFaEntries(): array {
         // style is loaded; otherwise Pro's outline (prorole, 1.71.0), and Free's solid.
         'magnet'                     => ['magnet', 's', 'prorole' => 'r', 'prostyle' => ['duotone', 'duotone-regular', 'duotone-light', 'duotone-thin']],
         'megaphone'                  => ['bullhorn', 's', 'pro' => 'megaphone', 'prorole' => 'r'],   // the Appeals tab: Pro has Bootstrap's cone, in outline
+        'mic-mute'                   => ['microphone-slash', 's'],
         'palette'                    => ['palette', 's'],
         'paperclip'                  => ['paperclip', 's'],
         // ~ Free has no badge with a tick (badge-check is Pro's): the tick in a circle, which reads as
@@ -285,6 +293,7 @@ function iconFaEntries(): array {
         'people-fill'                => ['users', 'f'],
         'person'                     => ['user', 'r'],
         'person-badge'               => ['id-badge', 'r'],
+        'person-exclamation'         => ['person-circle-exclamation', 's'],
         'person-gear'                => ['user-gear', 's'],
         'person-lock'                => ['user-lock', 's'],   // the Moderation page's "restricted now" tab (1.75.0)
         'person-plus'                => ['user-plus', 's'],
@@ -331,6 +340,7 @@ function iconFaEntries(): array {
         'superscript'                => ['superscript', 's'],
         'table'                      => ['table', 's'],
         'text-center'                => ['align-center', 's'],
+        'text-paragraph'             => ['paragraph', 's'],
         'three-dots'                 => ['ellipsis', 's'],
         'translate'                  => ['language', 's'],
         'trash'                      => ['trash-can', 'r'],

@@ -548,7 +548,7 @@ $spot = [
     'templates/partials/shoutbox_widget.php'=> ['bi bi-type-bold', 'bi bi-code-slash', 'bi bi-link-45deg', 'bi bi-quote', 'bi bi-eye-slash', 'bi bi-emoji-smile'],
     'templates/pages/account.php'           => ['bi bi-x-lg', 'bi bi-play-fill', 'bi bi-palette', 'bi bi-subscript'],
     'templates/pages/whitelist.php'         => ['bi bi-palette', 'bi bi-subscript', 'bi bi-superscript', 'bi bi-eye-slash'],
-    'templates/partials/images_bar.php'     => ['bi bi-image', 'bi bi-upload', 'bi bi-collection'],
+    'templates/partials/images_bar.php'     => ['bi bi-image', 'bi bi-cloud-arrow-up', 'bi bi-collection'],
     'assets/js/images-editor.js'            => ["icon('bi-ui-checks-grid')", "iconBtn('bi-chevron-left'", "iconBtn('bi-chevron-right'",
                                                 "iconBtn('bi-link-45deg'", "iconBtn('bi-code-slash'", "iconBtn('bi-trash'"],
     'templates/pages/register.php'          => ['bi bi-x-lg'],
@@ -561,7 +561,7 @@ $spot = [
                                                 'bi bi-lightbulb', 'bi bi-heart', 'bi bi-flag', 'bi bi-clock-history', 'bi bi-search', 'bi bi-x-lg'],
     'assets/js/shoutbox.js'                 => ['bi bi-x-lg', 'bi bi-pencil', 'bi bi-pin-angle-fill', 'bi bi-trash'],
     'assets/js/lightbox.js'                 => ['bi bi-x-lg', 'bi bi-box-arrow-up-right', 'bi bi-chevron-left', 'bi bi-chevron-right'],
-    'assets/js/ytplayer.js'                 => ['bi bi-play-fill', 'bi bi-box-arrow-up-right'],
+    'assets/js/ytplayer.js'                 => ['bi bi-play-fill'],
     // 1.70.0: the picker's button on every rich-text toolbar, and on the profile's own.
     'includes/emoji.php'                    => ['<i class="bi bi-emoji-smile" aria-hidden="true"></i>'],
     'assets/js/profile-bio.js'              => ["node('i', 'bi bi-emoji-smile')"],

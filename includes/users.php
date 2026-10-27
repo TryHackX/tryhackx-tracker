@@ -1342,7 +1342,7 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     // id, so a row left behind would go on answering at an address somebody may still have — the
     // image of a person who asked to be removed, served by a site that says they are gone.
     $del("DELETE FROM user_media WHERE user_id = ?", [$userId], 'pictures');
-    $del("UPDATE images SET user_id = NULL WHERE user_id = ?", [$userId], 'images_unlinked');
+    $del("UPDATE images SET user_id = NULL, name = '' WHERE user_id = ?", [$userId], 'images_unlinked');
     $del("DELETE FROM image_uploads WHERE user_id = ?", [$userId], 'image_uploads');
     // Submissions are NOT deleted — a whitelist row is a torrent the tracker serves, and deleting an
     // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a

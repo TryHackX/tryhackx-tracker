@@ -658,6 +658,7 @@ function contentReportRender(PDO $db, array $cfg, string $kind, string $text, st
         if ($kind === 'comment' && function_exists('commentRenderHtml')) {
             $ctx = commentRenderContext($db, $cfg, null, [$text]);
             $ctx['links'] = commentLinksOn($cfg) && ($authorId ?? 0) > 0;
+            if (($authorId ?? 0) > 0 && function_exists('commentImageView')) $ctx['images'] = commentImageView($db, $cfg);
             return commentRenderHtml($text, $format, $cfg, $ctx);
         }
         if ($kind === 'description' && $format !== 'plain' && function_exists('richtextRenderIn')) {

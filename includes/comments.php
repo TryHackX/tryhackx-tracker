@@ -633,11 +633,13 @@ function commentParse(string $s, array $cfg, bool $links = true, ?array $img = n
                 $out .= commentImageTag($url, $own, $img);
                 continue;
             }
+            $partner = imagesHostMatches((string)parse_url($url, PHP_URL_HOST), (array)($img['hosts'] ?? []));
             if (!$links) {
-                if (!imagesHostMatches((string)parse_url($url, PHP_URL_HOST), (array)($img['hosts'] ?? []))) $imgForeignText++;
+                if (!$partner) $imgForeignText++;
                 $text($url);
                 continue;
             }
+            if (!$partner && ++$nLinks > COMMENT_MAX_LINKS) { $text($url); continue; }
             $out .= '<a' . richtextLinkAttrs($url, $cfg) . ' class="cm-img-link" title="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
                   . '"><i class="bi bi-image" aria-hidden="true"></i> ' . htmlspecialchars(commentImageLabel($url), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</a>';
             continue;

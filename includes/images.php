@@ -8,6 +8,7 @@ const IMAGES_RATE_PER_MINUTE = 30;
 const IMAGES_SWEEP_SECONDS = 3600;
 const IMAGES_SWEEP_BATCH = 200;
 const IMAGES_GIF_MAX_BYTES = 8388608;
+const IMAGES_GIF_MAX_FRAMES = 1000;
 const IMAGES_REMOTE_PER_RUN = 30;
 const IMAGES_REMOTE_BUDGET = 40;
 const IMAGES_REMOTE_TIMEOUT = 15;
@@ -96,11 +97,6 @@ function imagesOwnUrlAt(string $base, string $url): ?array
     return ['id' => (int)$m[1], 'w' => (int)$m[2], 'h' => (int)$m[3], 'ext' => $m[4]];
 }
 
-function imagesOwnUrl(array $cfg, string $url): ?array
-{
-    return imagesOwnUrlAt(imagesBase($cfg), $url);
-}
-
 function imagesOwnAt(string $base, string $url): bool
 {
     $b = parse_url($base);
@@ -131,18 +127,67 @@ function imagesGifFrames(string $b): int
     return (int)preg_match_all('/\x00\x21\xF9\x04.{4}\x00(?:\x2C|\x21)/s', $b);
 }
 
+function imagesGifBlocksEnd(string $b, int $p): ?int
+{
+    $n = strlen($b);
+    while ($p < $n) {
+        $size = ord($b[$p]);
+        $p++;
+        if ($size === 0) return $p;
+        $p += $size;
+    }
+    return null;
+}
+
+function imagesGifClean(string $b): ?string
+{
+    $n = strlen($b);
+    $head = substr($b, 0, 6);
+    if ($n < 14 || ($head !== 'GIF89a' && $head !== 'GIF87a')) return null;
+    $p = 13;
+    $packed = ord($b[10]);
+    if ($packed & 0x80) $p += 3 * (1 << (($packed & 7) + 1));
+    if ($p > $n) return null;
+    $out = substr($b, 0, $p);
+    $frames = 0;
+    while ($p < $n) {
+        $c = ord($b[$p]);
+        if ($c === 0x3B) return $frames > 0 ? $out . "\x3B" : null;
+        if ($c === 0x21) {
+            if ($p + 2 >= $n) return null;
+            $label = ord($b[$p + 1]);
+            $end = imagesGifBlocksEnd($b, $p + 2);
+            if ($end === null) return null;
+            $keep = $label === 0xF9 || ($label === 0xFF && ord($b[$p + 2]) === 11 && substr($b, $p + 3, 11) === 'NETSCAPE2.0');
+            if ($keep) $out .= substr($b, $p, $end - $p);
+            $p = $end;
+            continue;
+        }
+        if ($c !== 0x2C || $p + 10 > $n || ++$frames > IMAGES_GIF_MAX_FRAMES) return null;
+        $local = ord($b[$p + 9]);
+        $q = $p + 10 + (($local & 0x80) ? 3 * (1 << (($local & 7) + 1)) : 0);
+        if ($q >= $n) return null;
+        $end = imagesGifBlocksEnd($b, $q + 1);
+        if ($end === null) return null;
+        $out .= substr($b, $p, $end - $p);
+        $p = $end;
+    }
+    return null;
+}
+
 function imagesProcess(string $bytes, array $cfg): array
 {
     $edge = imagesMaxEdge($cfg);
     $p = userMediaPrepare($bytes, imagesMediaCfg($cfg), $edge);
     if (empty($p['ok'])) return $p;
-    if ($p['from'] === 'gif' && strlen($bytes) <= IMAGES_GIF_MAX_BYTES && imagesGifFrames($bytes) > 1) {
-        $info = @getimagesizefromstring($bytes);
+    $gif = $p['from'] === 'gif' && strlen($bytes) <= IMAGES_GIF_MAX_BYTES && imagesGifFrames($bytes) > 1 ? imagesGifClean($bytes) : null;
+    if ($gif !== null && imagesGifFrames($gif) > 1) {
+        $info = @getimagesizefromstring($gif);
         $ow = (int)($info[0] ?? 0);
         $oh = (int)($info[1] ?? 0);
         if ($ow > 0 && $oh > 0 && max($ow, $oh) <= $edge) {
             return ['ok' => true, 'mime' => 'image/gif', 'animated' => 1, 'w' => $ow, 'h' => $oh, 'full_w' => $ow, 'full_h' => $oh,
-                    'page' => $bytes, 'full' => null];
+                    'page' => $gif, 'full' => null];
         }
     }
     $q = imagesQuality($cfg);
@@ -393,6 +438,28 @@ function imagesServe(PDO $db, int $id, int $w, int $h, string $ext, bool $wantFu
     return ['data' => (string)$data, 'mime' => (string)$row['mime'], 'public' => $public,
             'etag' => '"' . substr((string)$row['blob_sha'], 0, 16) . '-' . $variant . '"',
             'name' => 'image-' . $id . '.' . imagesExt($row)];
+}
+
+function imagesSend(array $img): void
+{
+    header('ETag: ' . $img['etag']);
+    header('Cache-Control: ' . ($img['public'] ? 'public, max-age=86400' : 'private, no-store'));
+    header('X-Content-Type-Options: nosniff');
+    header_remove('Expires');
+    header_remove('Pragma');
+    header_remove('Content-Security-Policy');
+    header_remove('Content-Security-Policy-Report-Only');
+    header("Content-Security-Policy: default-src 'none'");
+    if ($img['public'] && trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) === $img['etag']) {
+        http_response_code(304);
+        exit;
+    }
+    header('Content-Type: ' . $img['mime']);
+    header('Content-Length: ' . strlen($img['data']));
+    header('Content-Disposition: inline; filename="' . $img['name'] . '"');
+    header('Accept-Ranges: none');
+    echo $img['data'];
+    exit;
 }
 
 function imagesPublishIn(PDO $db, array $cfg, string $text): int
@@ -705,6 +772,8 @@ function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $
         CURLOPT_FOLLOWLOCATION => false,
         CURLOPT_MAXREDIRS => 0,
         CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+        CURLOPT_PROXY => '',
+        CURLOPT_NOPROXY => '*',
         CURLOPT_CONNECTTIMEOUT => IMAGES_REMOTE_CONNECT,
         CURLOPT_TIMEOUT => IMAGES_REMOTE_TIMEOUT,
         CURLOPT_NOSIGNAL => true,
@@ -734,7 +803,7 @@ function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $
 
 function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tries, array $hosts, array $io = []): array
 {
-    $f = imagesOwnAt(imagesBase($cfg), $url) ? ['ok' => false, 'error' => 'own_site'] : imagesRemoteFetch($url, $hosts, imagesMaxBytes($cfg), $io);
+    $f = imagesOwnAt(imagesBase($cfg), $url) ? ['ok' => false, 'error' => 'own_site'] : imagesRemoteFetch($url, $hosts, imagesMaxMb($cfg) * 1048576, $io);
     $stored = null;
     if (!empty($f['ok'])) {
         $name = basename((string)parse_url($url, PHP_URL_PATH));

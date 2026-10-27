@@ -113,6 +113,15 @@ ensureSchema($db, $cfg);
 if (headers_sent($hsFile, $hsLine)) {
     error_log('[tracker] output began at ' . $hsFile . ':' . $hsLine . ' before session_start — the session cookie cannot be set');
 }
+if ($endpoint === 'image') {
+    $early = imagesServe($db, (int)($_GET['id'] ?? 0), (int)($_GET['w'] ?? 0), (int)($_GET['h'] ?? 0),
+                         strtolower((string)($_GET['ext'] ?? '')), isset($_GET['full']), null, false);
+    if ($early !== null && $early['public']) {
+        sendSecurityHeaders($cfg, 'api');
+        imagesSend($early);
+    }
+    session_cache_limiter('');
+}
 if (!$isS2S) session_start(sessionCookieParams($cfg));
 // 'api': a JSON body has no subresources, so this response gets default-src 'none' — the strictest
 // policy there is, at no cost. It also means an endpoint that ever starts answering with HTML fails

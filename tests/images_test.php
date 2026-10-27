@@ -231,13 +231,14 @@ check('a picture with its size given is never stretched: fitted inside its box i
       && RICHTEXT_IMG_MAX_H === 520);
 
 check('the address is routed before the catch-all, and the stream is the avatars\' kind of stream',
-      str_contains($src('.htaccess'), "RewriteRule ^i/([0-9]+)-([0-9]+)x([0-9]+)\\.(webp|gif)$ api.php?endpoint=image&id=$1&w=$2&h=$3&ext=$4 [QSA,L]")
+      str_contains($src('.htaccess'), "RewriteRule ^i/([0-9]+)-([0-9]+)x([0-9]+)\\.(webp|gif)$ api.php?endpoint=image&id=$1&w=$2&h=$3&ext=$4 [L]")
+      && str_contains($src('.htaccess'), "RewriteCond %{QUERY_STRING} ^full=1$\nRewriteRule ^i/([0-9]+)-([0-9]+)x([0-9]+)\\.(webp|gif)$ api.php?endpoint=image&id=$1&w=$2&h=$3&ext=$4&full=1 [L]")
       && strpos($src('.htaccess'), 'endpoint=image&') < strpos($src('.htaccess'), 'RewriteRule ^(.*)$ index.php')
       && str_contains($src('api.php'), "'image'                      => 'api/image.php'") && str_contains($src('api.php'), "'images'                     => 'api/images.php'")
       && str_contains($src('api.php'), "'user_media', 'image', 'user_avatar_default'")
-      && str_contains($src('api/image.php'), "header(\"Content-Security-Policy: default-src 'none'\");")
-      && str_contains($src('api/image.php'), "'public, max-age=31536000, immutable' : 'private, no-store'")
-      && str_contains($src('api/image.php'), "header('X-Content-Type-Options: nosniff');"));
+      && str_contains($src('api/image.php'), 'imagesSend($img);') && str_contains($src('includes/images.php'), "header(\"Content-Security-Policy: default-src 'none'\");")
+      && str_contains($src('includes/images.php'), "'public, max-age=86400' : 'private, no-store'")
+      && str_contains($src('includes/images.php'), "header('X-Content-Type-Options: nosniff');"));
 check('uploads ask for the token and the limiter; a delete asks for the token and refuses a picture in use',
       str_contains($src('api/images.php'), "verifyCsrfToken((string)(\$_POST['csrf_token'] ?? ''))")
       && str_contains($src('api/images.php'), "rateLimitAllow('imgupload', 'u' . \$uid, IMAGES_RATE_PER_MINUTE, 60)")
