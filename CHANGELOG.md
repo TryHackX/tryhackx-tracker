@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.82.3] — 2026-10-27
+
+- **The panel's Index search, one more case.** Over 10 000 names matching and a sort or a filter the catalogue cannot
+  serve (first seen, peak, times seen, a status filter…) is refused at once with what to do — add a word, or sort by
+  last seen, size, files, name, seeders or leechers — instead of a query over the whole index: "1080p" by first seen
+  took 88 s on production, past the database's own time limit, which it does not stop.
+
 ## [1.82.2] — 2026-10-27
 
 The panel's Index search, after the owner's "dr house": every word counts, every sort is quick, and a search that runs out of time says so. No schema change.
