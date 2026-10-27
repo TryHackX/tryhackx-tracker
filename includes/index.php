@@ -1772,13 +1772,13 @@ function indexCatalogExists(PDO $db, bool $fresh = false): bool {
 }
 
 /** Write these catalogue rows (arrays keyed by IDX_CATALOG_COLS), new or changed; an unchanged row is left as it is. */
-function indexCatalogUpsertRows(PDO $db, array $rows): int {
+function indexCatalogUpsertRows(PDO $db, array $rows, bool $names = false): int {
     $n = 0;
     foreach (array_chunk($rows, 1000) as $chunk) {
         $args = [];
         foreach ($chunk as $r) foreach (IDX_CATALOG_COLS as $c) $args[] = $r[$c] ?? null;
         $tuple = '(' . implode(',', array_fill(0, count(IDX_CATALOG_COLS), '?')) . ')';
-        if (function_exists('factsNameStore') && factsMode($GLOBALS['cfg'] ?? []) === 'desc_name') factsNameStore($db, $chunk);
+        if ($names && function_exists('factsNameStore') && factsMode($GLOBALS['cfg'] ?? []) === 'desc_name') factsNameStore($db, $chunk);
         $st = $db->prepare("INSERT INTO index_catalog (" . implode(', ', IDX_CATALOG_COLS) . ") VALUES "
                          . implode(',', array_fill(0, count($chunk), $tuple))
                          . " ON DUPLICATE KEY UPDATE name = VALUES(name), eff_seeders = VALUES(eff_seeders),
@@ -1841,7 +1841,7 @@ function indexCatalogSyncRecent(PDO $db): int {
                                AND " . IDX_CATALOG_MEMBER);
         $st->execute([$since]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-        if ($rows) $n = indexCatalogUpsertRows($db, $rows);
+        if ($rows) $n = indexCatalogUpsertRows($db, $rows, true);
     }
     indexStateUpdate(function (array &$s) use ($nowDb) { $s['catalog_recent_from'] = $nowDb; return true; });
     return $n;
@@ -1882,7 +1882,7 @@ function indexCatalogWalk(PDO $db, ?float $seconds = null, ?int $maxRows = null)
         $last = $rows ? (string)$rows[count($rows) - 1]['info_hash'] : null;
         $end = count($rows) < IDX_CATALOG_CHUNK;
         $members = array_values(array_filter($rows, fn($r) => (int)$r['m'] === 1));
-        if ($members) $out['written'] += indexCatalogUpsertRows($db, $members);
+        if ($members) $out['written'] += indexCatalogUpsertRows($db, $members, $filling);
         // The catalogue's rows in this stretch of keys that are not members of it any more. The upper end is open on
         // the last chunk: anything the catalogue holds past the table's last key is gone from the table by definition.
         $keys = array_column($members, 'info_hash');

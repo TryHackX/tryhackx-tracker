@@ -10,7 +10,7 @@ const FACTS_ONGOING = 9999;
 
 const FACTS_LABELS = [
     'q:2160p' => '2160p', 'q:1440p' => '1440p', 'q:1080p' => '1080p', 'q:720p' => '720p', 'q:sd' => 'SD',
-    'v:h264' => 'H.264', 'v:h265' => 'H.265', 'v:av1' => 'AV1', 'v:vp9' => 'VP9', 'v:mpeg2' => 'MPEG-2', 'v:xvid' => 'XviD', 'v:vc1' => 'VC-1',
+    'v:h264' => 'AVC', 'v:h265' => 'HEVC', 'v:av1' => 'AV1', 'v:vp9' => 'VP9', 'v:mpeg2' => 'MPEG-2', 'v:xvid' => 'XviD', 'v:vc1' => 'VC-1',
     'h:hdr10' => 'HDR10', 'h:hdr10p' => 'HDR10+', 'h:dv' => 'Dolby Vision', 'h:hlg' => 'HLG', 'h:hdr' => 'HDR',
     'a:aac' => 'AAC', 'a:ac3' => 'AC-3', 'a:eac3' => 'E-AC-3', 'a:atmos' => 'Atmos', 'a:dts' => 'DTS', 'a:dtshdma' => 'DTS-HD MA',
     'a:truehd' => 'TrueHD', 'a:flac' => 'FLAC', 'a:opus' => 'Opus', 'a:mp3' => 'MP3', 'a:pcm' => 'PCM',

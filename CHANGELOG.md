@@ -4,7 +4,32 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.84.0] — 2026-10-27
+## [1.84.1] — 2026-10-27
+
+Tags from torrent names, for the whole catalogue, and the filters in the panel. Schema 105.
+
+- **Settings → "Tags and filters from": descriptions only (the default) or descriptions and torrent names.** With
+  names, a video torrent with no description gets its chips from the tokens of its name — resolution, codec, HDR,
+  audio, source, Lektor / dubbing / subtitles / PL / MULTi, series or movie, the year — and the search's filters reach
+  every torrent in the catalogue, not only the described ones. A description still wins where there is one. The
+  names are read into a small table (`name_facts`) by the janitor in the background, a few minutes for the whole
+  catalogue (`php tools/facts.php --names` does it at once); a torrent added later is read when it enters the
+  catalogue, the whitelist's names every ten minutes. Checked on 3 600 real names from the catalogue: a name with no
+  video token gets no tags (a program called "4K Video Downloader", an album "[WEB FLAC]", a title word like "Cam"),
+  and neither does a site's ".PL" in brackets, "Multi-Subs" or a film called "Opus".
+- **The filters in the panel:** the Index and Whitelist lists have the same bar as the search — All / Movies / Series,
+  More filters with size, files, year, quality, language, ratings, seeders and "with pictures" — and a chip clicked in
+  a row is a filter.
+- **The Index list's bulk bar** (Promote, Fetch metadata, Delete) shows only when rows are selected; its own style
+  overrode the hiding.
+- **The owner's notes on the panel:** the chips in the Index and Whitelist lists take as many rows as they need (they
+  were cut to two); the line at the left of the pinned Actions column is drawn only while columns scroll under it; the
+  ✓ and ✗ of the descriptions queue stand in the middle of their buttons (the icon was aligned to a text line the
+  button does not have); the author's name in the queue says what it did — the list shows only that author, a
+  message says how many, and a second click shows everyone again.
+- **Video codecs are named AVC and HEVC** (as MediaInfo and the descriptions say), and the ratings are written with
+  one decimal (Filmweb 8.0).
+
 
 Facts read from the descriptions, their tags as chips, and the search's advanced filters; with two of the panel's windows
 made wider. Schema 104.

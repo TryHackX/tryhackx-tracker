@@ -66,7 +66,7 @@ chdir($root);
 $_SERVER["REQUEST_METHOD"] = "GET"; $_SERVER["REMOTE_ADDR"] = "127.0.0.1"; $_SERVER["SCRIPT_NAME"] = "/api.php";
 $_GET = json_decode((string)file_get_contents($getFile), true) ?: [];
 foreach (["config/app.php", "config/database.php", "includes/settings.php", "includes/functions.php", "includes/schema.php",
-          "includes/whitelist.php", "includes/lang.php"] as $f) require_once $f;
+          "includes/whitelist.php", "includes/lang.php", "includes/facts.php"] as $f) require_once $f;
 class RecStmt extends PDOStatement {
     public static array $log = [];
     private array $bound = [];

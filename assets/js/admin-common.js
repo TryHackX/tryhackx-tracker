@@ -1164,5 +1164,19 @@
         window.addEventListener('resize', () => apply(stored()));
     }
 
+    function markOverflow() {
+        if (typeof ResizeObserver !== 'function') return;
+        const ro = new ResizeObserver((entries) => entries.forEach((e) => {
+            const w = e.target.closest('.table-responsive') || e.target;
+            w.classList.toggle('tbl-overflow', w.scrollWidth > w.clientWidth + 1);
+        }));
+        document.querySelectorAll('.table-responsive').forEach((w) => {
+            ro.observe(w);
+            const tb = w.querySelector('table');
+            if (tb) ro.observe(tb);
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markOverflow); else markOverflow();
+
     window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting, adminRichField, richFormats, resizableDialog };
 })();

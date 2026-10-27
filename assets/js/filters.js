@@ -329,8 +329,8 @@
             }
             if (f.year) box.appendChild(factChip('fchip fchip-fact', f.year, t.key('js.filters.year')));
             if (f.vbitrate) box.appendChild(factChip('fchip fchip-fact', fmtRate(f.vbitrate), t.key('js.filters.bitrate')));
-            if (f.imdb) box.appendChild(factChip('fchip fchip-fact', 'IMDb ' + f.imdb, 'IMDb'));
-            if (f.filmweb) box.appendChild(factChip('fchip fchip-fact', 'Filmweb ' + f.filmweb, 'Filmweb'));
+            if (f.imdb) box.appendChild(factChip('fchip fchip-fact', 'IMDb ' + Number(f.imdb).toFixed(1), 'IMDb'));
+            if (f.filmweb) box.appendChild(factChip('fchip fchip-fact', 'Filmweb ' + Number(f.filmweb).toFixed(1), 'Filmweb'));
             return box;
         },
     };

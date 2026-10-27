@@ -3542,11 +3542,15 @@ img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255
    box of 1062px at 1280 wide and 1114px at 1440 — and its last column holds the ONE way into a report, the "…": it was
    past the right edge until the table was scrolled sideways (the Whitelist's, the Index's and the Users' at 1280 by
    13–48px). The column sticks to the right edge of the table's visible box instead, over the columns that scroll under
-   it, on the row's own opaque ground (the hover's too: Bootstrap paints it as an inset shadow, kept below), with a line
-   at its left. The columns keep their order — panel_fixes_check.js compares the PHP and the JS headers in order. */
+   it, on the row's own opaque ground (the hover's too: Bootstrap paints it as an inset shadow, kept below). The columns
+   keep their order — panel_fixes_check.js compares the PHP and the JS headers in order. */
 .admin-wide .dash-table :is(th.th-actions, td.td-actions, td.th-actions, td.wl-actions),
 .wl-page .wl-table :is(th.th-actions, td.td-actions, td.th-actions, td.wl-actions) {
     position: sticky; right: 0; z-index: 2;
+    box-shadow: inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
+}
+.admin-wide .tbl-overflow .dash-table :is(th.th-actions, td.td-actions, td.th-actions, td.wl-actions),
+.wl-page .tbl-overflow .wl-table :is(th.th-actions, td.td-actions, td.th-actions, td.wl-actions) {
     box-shadow: inset 1px 0 0 #2f3b4a, inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
 }
 .admin-wide .dash-table td:is(.td-actions, .th-actions, .wl-actions),
@@ -3648,6 +3652,7 @@ img.js-avatar { border-radius: 50%; object-fit: cover; background: rgba(255, 255
 .rq-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.85rem; margin-top: 0.3rem; font-size: 0.78rem; color: #aab3bf; }
 .rq-author { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0; border: 0; background: none; color: #d6dde6; font-size: inherit; }
 button.rq-author:hover span { color: #6ab7ff; text-decoration: underline; }
+button.rq-author.is-on span { color: #6ab7ff; text-decoration: underline; }
 .rq-author .rq-av { width: 18px; height: 18px; }
 .rq-author-forum .bi { color: #9fb3c8; }
 .rq-src { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.02rem 0.45rem; border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; color: #c3cad5; text-decoration: none; }
@@ -3661,6 +3666,7 @@ a.rq-src:hover { border-color: #6ab7ff; color: #6ab7ff; }
 .rq-hash { color: #8a96a3; font-size: 0.74rem; }
 .rq-acts { display: flex; gap: 0.35rem; flex: 0 0 auto; }
 .rq-ic { width: 2rem; height: 2rem; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.btn.rq-ic:has(> .bi) { align-items: center; }
 .rq-detail { padding: 0 0.85rem 0.8rem 2.6rem; }
 .rq-dfacts { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.6rem; }
 .rq-desc { max-height: 70vh; overflow: auto; padding: 0.8rem 1rem; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; background: #14171c; }
@@ -3713,7 +3719,6 @@ a.source-tab { text-decoration: none; }
     #img-f-q, .rq-toolbar .rq-search-wrap { width: auto; max-width: none; }
     #img-total, #img-q-total, .rq-toolbar #rq-total { margin-left: 0; }
 }
-.wl-name .fchips, .wl-name-cell .fchips { max-height: 2.8rem; overflow: hidden; }
 .admin-body .sf-host { --accent: #4a9eff; --text: #e6edf3; --text-muted: #8b949e; --warning: #ffc107; margin-top: 0.55rem; }
 .admin-body .sf-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
 .admin-body .sf-type { display: inline-flex; border: 1px solid #3a3a3a; border-radius: 6px; overflow: hidden; }

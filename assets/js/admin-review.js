@@ -102,16 +102,21 @@
         paintBulk();
     }
 
+    function authorOn(name) {
+        return S.f.author !== '' && S.f.author.toLowerCase() === String(name).toLowerCase();
+    }
     function authorChip(r) {
         if (r.author) {
-            const b = el('button', { type: 'button', className: 'rq-author', title: t.key('js.review.author_only') },
+            const on = authorOn(r.author);
+            const b = el('button', { type: 'button', className: 'rq-author' + (on ? ' is-on' : ''), title: t.key(on ? 'js.review.author_all' : 'js.review.author_only'), 'aria-pressed': on ? 'true' : 'false' },
                 [face(r.author, r.author_avatar), el('span', { text: r.author })]);
             b.addEventListener('click', () => setAuthor(r.author));
             if (r.author_hidden) b.appendChild(el('span', { className: 'wl-badge wl-b-muted', title: t.key('js.wl.name_hidden_title'), text: t.key('js.wl.name_hidden') }));
             return b;
         }
         if (r.forum_author) {
-            const b = el('button', { type: 'button', className: 'rq-author rq-author-forum', title: t.key('js.review.author_only') },
+            const on = authorOn(r.forum_author);
+            const b = el('button', { type: 'button', className: 'rq-author rq-author-forum' + (on ? ' is-on' : ''), title: t.key(on ? 'js.review.author_all' : 'js.review.author_only'), 'aria-pressed': on ? 'true' : 'false' },
                 [icon('bi-chat-left-text'), el('span', { text: t.key('js.review.forum_author', { user: r.forum_author }) })]);
             b.addEventListener('click', () => setAuthor(r.forum_author));
             return b;
@@ -245,9 +250,12 @@
     }
 
     function setAuthor(name) {
-        $('rq-author').value = name;
-        S.f.author = name;
-        refilter();
+        const off = authorOn(name);
+        $('rq-author').value = off ? '' : name;
+        S.f.author = off ? '' : name;
+        S.page = 1;
+        S.sel.clear();
+        load().then(() => showToast(off ? t.key('js.review.author_every') : t.key('js.review.author_shown', { user: name, n: num(S.total) }), 'info'));
     }
 
     async function decide(r, op, note) {
