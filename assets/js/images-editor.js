@@ -340,6 +340,7 @@
 
         function over(on) {
             editor.classList.toggle('rt-images-over', on);
+            root.classList.toggle('rt-images-dragging', on);
         }
 
         const view = (() => {

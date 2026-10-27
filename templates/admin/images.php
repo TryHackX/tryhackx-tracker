@@ -26,7 +26,7 @@
         <div id="img-said" class="crep-said" aria-live="polite"></div>
 
         <div class="wl-view" id="img-view-list">
-            <p class="idx-note" id="img-summary"></p>
+            <div class="img-stats" id="img-summary"></div>
             <div class="admin-toolbar-card">
                 <div class="toolbar-row crep-filters">
                     <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary crep-name-in" id="img-f-q" maxlength="120" placeholder="<?= _h('a.img.f_q') ?>" aria-label="<?= _h('a.img.f_q') ?>">
@@ -45,7 +45,7 @@
                     <span id="img-total" class="text-muted wl-total"></span>
                 </div>
             </div>
-            <div class="msgrep-note settings-hint crep-note"><?= _h('a.img.note') ?></div>
+            <details class="img-help"><summary><i class="bi bi-info-circle" aria-hidden="true"></i> <?= _h('a.img.help') ?></summary><p class="settings-hint"><?= _h('a.img.note') ?></p></details>
             <div id="img-grid" class="img-grid"></div>
             <div class="admin-pagination" id="img-pagination"></div>
         </div>
@@ -85,6 +85,7 @@
     <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-images.js<?= assetVer('assets/js/admin-images.js') ?>"></script>
 </body>
 </html>

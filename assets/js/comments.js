@@ -254,10 +254,10 @@
         bar.setAttribute('aria-labelledby', id + '-images-head');
         const head = part('span', 'rt-images-head', '-head');
         head.append(glyph('bi-image'), ' ', t.key('js.comments.img_head'));
-        const add = part('button', 'btn btn-secondary btn-small', '-add');
+        const add = part('button', 'rt-images-drop rt-images-drop-compact', '-add');
         add.type = 'button';
         add.setAttribute('aria-describedby', id + '-images-hint');
-        add.append(glyph('bi-upload'), ' ', t.key('js.comments.img_choose'));
+        add.append(glyph('bi-cloud-arrow-up'), ' ', t.key('js.comments.img_drop'));
         const mine = part('button', 'btn btn-secondary btn-small rt-images-toggle', '-mine');
         mine.type = 'button';
         mine.setAttribute('aria-expanded', 'false');
@@ -973,6 +973,7 @@
                 if (send.disabled) return;
                 const body = ta.value.trim();
                 if (!body) { msg.textContent = t.key('js.comments.empty'); ta.focus(); return; }
+                if (window.ImagesEditor && window.ImagesEditor.busy(ta)) { msg.textContent = t.key('js.images.wait_uploads'); return; }
                 send.disabled = true;
                 msg.textContent = t.key('js.comments.sending');
                 const data = { csrf_token: csrfToken(sec), hash, body, parent: id };
@@ -1252,6 +1253,7 @@
                 if (save.disabled) return;
                 const body = ta.value.trim();
                 if (!body) { msg.textContent = t.key('js.comments.empty'); return; }
+                if (window.ImagesEditor && window.ImagesEditor.busy(ta)) { msg.textContent = t.key('js.images.wait_uploads'); return; }
                 save.disabled = true;
                 const payload = { csrf_token: csrfToken(sec), id: r.id, body };
                 if (reason && reason.value.trim()) payload.reason = reason.value.trim();
@@ -1321,6 +1323,7 @@
                 if (send.disabled) return;
                 const body = ta.value.trim();
                 if (!body) { msg.textContent = t.key('js.comments.empty'); ta.focus(); return; }
+                if (window.ImagesEditor && window.ImagesEditor.busy(ta)) { msg.textContent = t.key('js.images.wait_uploads'); return; }
                 send.disabled = true;
                 msg.textContent = t.key('js.comments.sending');
                 const data = { csrf_token: csrfToken(sec), hash, body };

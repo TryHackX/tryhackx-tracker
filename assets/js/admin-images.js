@@ -6,7 +6,7 @@
     const $ = (id) => document.getElementById(id);
     const site = document.body.dataset.site || '';
 
-    const S = { view: 'list', page: 1, q: '', state: '', sort: '', qStatus: 'pending', qPage: 1, mayManage: false };
+    const S = { view: 'list', page: 1, q: '', state: '', sort: '', qStatus: 'pending', qPage: 1, mayManage: false, rows: [] };
 
     const word = (key, params) => t.key(key, params);
     const hostOf = (u) => { try { return new URL(u).host; } catch (e) { return String(u || ''); } };
@@ -30,13 +30,22 @@
         return t.has(k) ? word(k) : String(s || '');
     }
 
+    function stat(icon, value, label) {
+        return el('div', { className: 'img-stat' }, [el('i', { className: 'bi ' + icon, 'aria-hidden': 'true' }),
+            el('div', null, [el('div', { className: 'img-stat-v', text: value }), el('div', { className: 'img-stat-l', text: label })])]);
+    }
+
     function summary(sum, hosts) {
         const box = $('img-summary');
         if (!box || !sum) return;
-        box.textContent = word('js.aimg.summary', {
-            n: t.num(sum.images), size: fmtBytes(sum.bytes), pub: t.num(sum.public), copies: t.num(sum.copies),
-        });
         const q = sum.queue || {};
+        box.replaceChildren(
+            stat('bi-images', t.num(sum.images), word('js.aimg.stat_pictures')),
+            stat('bi-hdd', fmtBytes(sum.bytes), word('js.aimg.stat_space')),
+            stat('bi-globe2', t.num(sum.public), word('js.aimg.stat_public')),
+            stat('bi-lock', t.num(Math.max(0, sum.images - sum.public)), word('js.aimg.stat_private')),
+            stat('bi-cloud-download', t.num(sum.copies), word('js.aimg.stat_copied')),
+            stat('bi-hourglass-split', t.num(Number(q.pending) || 0), word('js.aimg.stat_queue')));
         const badge = $('img-queue-badge');
         const waiting = (Number(q.pending) || 0) + (Number(q.failed) || 0);
         badge.textContent = waiting ? String(waiting) : '';
@@ -95,32 +104,49 @@
         showToast(failWord(j), 'danger');
     }
 
+    function zoom(r) {
+        if (!window.SiteLightbox) {
+            window.open(r.full_url, '_blank', 'noopener');
+            return;
+        }
+        const list = S.rows.map((x) => ({ src: x.full_url, href: x.full_url, alt: x.name || ('#' + x.id) }));
+        window.SiteLightbox.get().show(list, Math.max(0, S.rows.indexOf(r)), null);
+    }
+
     function card(r) {
         const img = el('img', { src: r.url, alt: '', loading: 'lazy', decoding: 'async' });
         if (r.w > 0 && r.h > 0) { img.width = r.w; img.height = r.h; }
-        const thumb = el('a', { className: 'img-thumb', href: r.full_url, target: '_blank', rel: 'noopener', title: word('js.aimg.open_full') }, [img]);
+        const flags = el('span', { className: 'img-flags' }, [
+            el('span', { className: 'img-flag ' + (r.used ? 'img-flag-pub' : 'img-flag-priv'), title: r.used && r.public_at ? fmtDate(r.public_at) : '',
+                text: word(r.used ? 'js.aimg.public' : 'js.aimg.private') }),
+            r.animated ? el('span', { className: 'img-flag', text: 'GIF' }) : null,
+        ]);
+        const thumb = el('a', { className: 'img-thumb', href: r.full_url, target: '_blank', rel: 'noopener', title: word('js.aimg.open_full') }, [img, flags]);
+        thumb.addEventListener('click', (e) => {
+            if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
+            e.preventDefault();
+            zoom(r);
+        });
         let who;
         if (r.source === 'copy') who = el('span', { className: 'img-who', title: r.source_url, text: word('js.aimg.copied_from', { host: hostOf(r.source_url) }) });
         else if (r.user) who = el('span', { className: 'img-who', text: word('js.aimg.by', { name: r.user }) });
         else who = el('span', { className: 'img-who text-muted', text: word('js.aimg.no_owner') });
-        const state = el('span', { className: 'badge-table ' + (r.used ? 'wl-b-ok' : 'wl-b-muted'), text: word(r.used ? 'js.aimg.public' : 'js.aimg.private'),
-                                   title: r.used && r.public_at ? fmtDate(r.public_at) : '' });
         const meta = el('div', { className: 'img-meta' }, [
-            el('div', { className: 'img-line' }, [el('strong', { text: '#' + r.id }), ' ', state, r.animated ? ' ' : null,
-                r.animated ? el('span', { className: 'badge-table wl-b-muted', text: 'GIF' }) : null]),
-            el('div', { className: 'img-line text-muted', text: r.full_w + '×' + r.full_h + ' · ' + fmtBytes(r.bytes) }),
+            el('div', { className: 'img-line img-top' }, [el('strong', { text: '#' + r.id }), ' ',
+                el('span', { className: 'text-muted', text: r.full_w + '×' + r.full_h + ' · ' + fmtBytes(r.bytes) })]),
             el('div', { className: 'img-line' }, [who]),
             el('div', { className: 'img-line text-muted', text: fmtDate(r.created_at) }),
             r.name ? el('div', { className: 'img-line text-muted img-name', title: r.name, text: r.name }) : null,
         ]);
         const usedBox = el('div', { className: 'img-used' });
         usedBox.hidden = true;
-        const whereBtn = button('bi-search', word('js.aimg.where'), 'btn-outline-secondary', (b) => toggleUsed(r, usedBox, b));
-        whereBtn.setAttribute('aria-expanded', 'false');
+        const whereBtn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary img-where', title: word('js.aimg.where'), 'aria-expanded': 'false' },
+            [el('i', { className: 'bi bi-diagram-3', 'aria-hidden': 'true' }), ' ', word('js.aimg.where_short')]);
+        whereBtn.addEventListener('click', () => toggleUsed(r, usedBox, whereBtn));
         const acts = el('div', { className: 'img-acts' }, [
             whereBtn,
             button('bi-box-arrow-up-right', word('js.aimg.open_full'), 'btn-outline-secondary', () => window.open(r.full_url, '_blank', 'noopener')),
-            S.mayManage ? button('bi-trash', word('js.aimg.delete'), 'btn-outline-danger', (b) => remove(r, b)) : null,
+            S.mayManage ? button('bi-trash', word('js.aimg.delete'), 'btn-outline-danger img-del', (b) => remove(r, b)) : null,
         ]);
         return el('div', { className: 'img-card', id: 'img-card-' + r.id }, [thumb, meta, acts, usedBox]);
     }
@@ -140,8 +166,9 @@
         S.mayManage = !!j.may_manage;
         summary(j.summary, j.hosts);
         $('img-total').textContent = t.plural(j.total, 'js.aimg.total', { n: t.num(j.total) });
-        if (!j.rows.length) grid.appendChild(el('div', { className: 'text-muted py-4 img-none', text: word('js.aimg.none') }));
-        j.rows.forEach((r) => grid.appendChild(card(r)));
+        S.rows = j.rows || [];
+        if (!S.rows.length) grid.appendChild(el('div', { className: 'text-muted py-4 img-none', text: word('js.aimg.none') }));
+        S.rows.forEach((r) => grid.appendChild(card(r)));
         renderPagination($('img-pagination'), { total: j.total, page: j.page, pages: j.pages, onPage: (n) => { S.page = n; load(); } });
     }
 
@@ -173,7 +200,11 @@
         j.rows.forEach((r) => {
             const url = el('td', { className: 'img-q-url' }, [el('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer', text: r.url, title: r.url })]);
             const st = [el('span', { className: 'badge-table ' + (r.status === 'done' ? 'wl-b-ok' : (r.status === 'failed' ? 'wl-b-bad' : 'wl-b-pending')), text: stateWord(r.status) })];
-            if (r.error) st.push(' ', el('span', { className: 'text-muted wl-small', text: t.has('js.aimg.err_' + r.error) ? word('js.aimg.err_' + r.error) : r.error }));
+            if (r.error) {
+                const http = /^http_(\d{3})$/.exec(r.error);
+                const text = http ? word('js.aimg.err_http', { code: http[1] }) : (t.has('js.aimg.err_' + r.error) ? word('js.aimg.err_' + r.error) : r.error);
+                st.push(' ', el('span', { className: 'text-muted wl-small', text }));
+            }
             const when = r.status === 'done' ? fmtDate(r.done_at) : (r.status === 'pending' ? word('js.aimg.next', { at: fmtDate(r.next_at) }) : fmtDate(r.created_at));
             const acts = el('td', { className: 'wl-actions' });
             if (r.status === 'done' && r.image_id) {

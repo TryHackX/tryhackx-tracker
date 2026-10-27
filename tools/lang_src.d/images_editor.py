@@ -13,8 +13,9 @@ add('rt', {
     'images':        ('Images', 'Obrazy'),
     'images_choose': ('Choose files', 'Wybierz pliki'),
     'images_mine':   ('My images', 'Moje obrazy'),
-    'images_hint':   ('You can also drop or paste images into the text.',
-                      'Możesz też upuścić lub wkleić obrazy w tekst.'),
+    'images_hint':   ('You can also paste a picture straight into the text.',
+                      'Możesz też wkleić obraz prosto w tekst.'),
+    'images_drop':   ('Drop pictures here, or choose files', 'Upuść tu obrazy albo wybierz pliki'),
 })
 
 add('js.images', {
