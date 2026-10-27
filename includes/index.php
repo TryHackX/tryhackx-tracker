@@ -1778,6 +1778,7 @@ function indexCatalogUpsertRows(PDO $db, array $rows): int {
         $args = [];
         foreach ($chunk as $r) foreach (IDX_CATALOG_COLS as $c) $args[] = $r[$c] ?? null;
         $tuple = '(' . implode(',', array_fill(0, count(IDX_CATALOG_COLS), '?')) . ')';
+        if (function_exists('factsNameStore') && factsMode($GLOBALS['cfg'] ?? []) === 'desc_name') factsNameStore($db, $chunk);
         $st = $db->prepare("INSERT INTO index_catalog (" . implode(', ', IDX_CATALOG_COLS) . ") VALUES "
                          . implode(',', array_fill(0, count($chunk), $tuple))
                          . " ON DUPLICATE KEY UPDATE name = VALUES(name), eff_seeders = VALUES(eff_seeders),
@@ -1817,6 +1818,9 @@ function indexCatalogForget(PDO $db, array $hashes): void {
     foreach (array_chunk(array_values($hashes), 2000) as $chunk) {
         $db->prepare("DELETE FROM index_catalog WHERE info_hash IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")")
            ->execute($chunk);
+        if (function_exists('factsNameReady') && factsNameReady($db)) {
+            $db->prepare("DELETE FROM name_facts WHERE info_hash IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")")->execute($chunk);
+        }
     }
 }
 
@@ -2282,10 +2286,13 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     }
     $minSeeders = (int)($q['min_seeders'] ?? 0);
     if ($minSeeders > 0) $where[] = "GREATEST(COALESCE(scrape_seeders, 0), last_seeders) >= " . $minSeeders;
+    $filtered = !empty($q['filter_where']);
+    foreach ($q['filter_where'] ?? [] as $fw) $where[] = $fw;
+    foreach ($q['filter_params'] ?? [] as $fp) $params[] = $fp;
     $metaOn = in_array($metaFilter, ['none', 'pending', 'fetching', 'done', 'failed'], true);
     $lifeOn = in_array($lifeFilter, ['protected', 'grace', 'promoted'], true);
     $snapKey = null;
-    if ($search === '' && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !($metaOn && $lifeOn)) {
+    if ($search === '' && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !$filtered && !($metaOn && $lifeOn)) {
         $snapKey = $metaOn ? 'meta_' . $metaFilter : ($lifeOn ? ['protected' => 'protected', 'grace' => 'in_grace', 'promoted' => 'promoted'][$lifeFilter] : 'total');
     }
 
@@ -2358,7 +2365,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     $first = explode(':', trim(explode(',', trim((string)($q['sort'] ?? 'last:desc')))[0]));
     $catCols = ['last' => 'last_seen', 'size' => 'total_size', 'files' => 'files_count', 'name' => 'name',
                 'seeders' => 'eff_seeders', 'sseeders' => 'eff_seeders', 'leechers' => 'eff_leechers'];
-    $plain = !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0;
+    $plain = !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !$filtered;
     $found = $nameClauses && indexCatalogReady($db, array_key_exists('catalog', $q) ? (bool)$q['catalog'] : null)
         ? indexListCatalogHits($db, $nameClauses, INDEX_LIST_CATALOG_CAP + 1) : null;
     if ($found !== null && count($found[0]) <= INDEX_LIST_CATALOG_CAP) {
@@ -2533,7 +2540,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $flt = ['size_min' => $num($q['size_min'] ?? null), 'size_max' => $num($q['size_max'] ?? null),
             'files_min' => $num($q['files_min'] ?? null), 'files_max' => $num($q['files_max'] ?? null),
             'seeders_min' => $num($q['seeders_min'] ?? null),
-            'hashes' => isset($q['only_hashes']) && is_array($q['only_hashes']) ? array_values(array_map('strval', $q['only_hashes'])) : null];
+            'hashes' => isset($q['only_hashes']) && is_array($q['only_hashes']) ? array_values(array_map('strval', $q['only_hashes'])) : null,
+            'names' => isset($q['name_clause']) && is_array($q['name_clause']) ? $q['name_clause'] : null];
     $filtered = count(array_filter($flt, fn($v) => $v !== null)) > 0;
 
     // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
@@ -2819,9 +2827,17 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             $where[] = ($wl ? 'COALESCE(scrape_seeders, 0)' : ($cat ? 'eff_seeders' : 'COALESCE(scrape_seeders, last_seeders)')) . ' >= ?';
             $params[] = $flt['seeders_min'];
         }
-        if ($flt['hashes'] !== null) {
-            $where[] = $flt['hashes'] ? 'info_hash IN (' . implode(',', array_fill(0, count($flt['hashes']), '?')) . ')' : '1 = 0';
-            foreach ($flt['hashes'] as $p) $params[] = $p;
+        if ($flt['hashes'] !== null || $flt['names'] !== null) {
+            $parts = [];
+            if ($flt['hashes']) {
+                $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($flt['hashes']), '?')) . ')';
+                foreach ($flt['hashes'] as $p) $params[] = $p;
+            }
+            if ($flt['names'] !== null) {
+                $parts[] = $flt['names'][0];
+                foreach ($flt['names'][1] as $p) $params[] = $p;
+            }
+            $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
         }
         $scoreSql = '0';
         $scoreParams = [];

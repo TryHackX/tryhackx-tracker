@@ -4884,7 +4884,7 @@ window.siteToast = siteToast;
         if (filtersHost && window.SearchFilters) {
             let catalog = [];
             try { catalog = JSON.parse(filtersHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
-            filters = window.SearchFilters.mount(filtersHost, { catalog, facts: filtersHost.dataset.facts === '1',
+            filters = window.SearchFilters.mount(filtersHost, { catalog, facts: filtersHost.dataset.facts === '1', desc: filtersHost.dataset.desc === '1',
                 moveRight: [$id('search-total'), $id('search-share')], onChange: () => run(1, 'push') });
             window.SearchFiltersPick = (id) => { if (infoHash) closeInfo(); filters.addTag(id); };
         }

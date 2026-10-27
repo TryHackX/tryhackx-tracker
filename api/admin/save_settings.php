@@ -38,7 +38,7 @@ $allowed = [
     // the in-place language switch (assets/js/lang-swap.js, read through langJsBundle())
     'lang_swap_enabled',
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
-    'search_share_enabled', 'search_count_common_words',
+    'search_share_enabled', 'search_count_common_words', 'facts_source',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
@@ -321,6 +321,12 @@ if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behav
 // ── Content-Security-Policy ──
 // Coerced rather than refused, and coerced to 'report': an unknown value is a bug in the form, and
 // the answer to a bug in the form is the setting that cannot break a page for a visitor.
+if (isset($data['facts_source']) && !in_array($data['facts_source'], ['desc', 'desc_name'], true)) {
+    $data['facts_source'] = 'desc';
+}
+if (isset($data['facts_source']) && $data['facts_source'] === 'desc_name' && ($cfg['facts_source'] ?? 'desc') !== 'desc_name') {
+    $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('name_facts_cursor', '')")->execute();
+}
 if (isset($data['csp_mode']) && !in_array($data['csp_mode'], CSP_MODES, true)) {
     $data['csp_mode'] = 'report';
 }

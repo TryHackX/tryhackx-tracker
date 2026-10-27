@@ -27,6 +27,16 @@ add('facts.tag', {
     't_series': ('Series', 'Serial'),
 })
 
+add('settings', {
+    'facts_source': ('Tags and filters from', 'Tagi i filtry z'),
+    'facts_source_desc': ('Descriptions only', 'Tylko z opisów'),
+    'facts_source_desc_name': ('Descriptions and torrent names', 'Z opisów i nazw torrentów'),
+    'facts_source_hint': ('With names, a video torrent without a description gets its chips from tokens in its name (1080p, x265, WEB-DL, Lektor…) and the filters cover the whole catalogue. A name can be wrong; a description wins where there is one.',
+                          'Z nazwami torrent wideo bez opisu dostaje chipy z tokenów w nazwie (1080p, x265, WEB-DL, Lektor…), a filtry obejmują cały katalog. Nazwa może kłamać; tam, gdzie jest opis, wygrywa opis.'),
+    'facts_source_reading': ('The names are being read in the background — the filters reach the whole catalogue within minutes.',
+                             'Nazwy są wczytywane w tle — filtry obejmą cały katalog w ciągu kilku minut.'),
+})
+
 add('js.filters', {
     'clear': ('Clear', 'Wyczyść'),
     'type': ('Kind', 'Rodzaj'),

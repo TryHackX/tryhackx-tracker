@@ -196,6 +196,14 @@ try {
         $imgGone = imagesSweep($db, $cfg);
         if ($imgGone > 0 && in_array('-v', $argv ?? [], true)) echo "[images] removed $imgGone unused pictures\n";
     }
+    if (function_exists('factsNameTick') && factsMode($cfg) === 'desc_name') {
+        if (($cfg['name_facts_cursor'] ?? '') !== 'done') {
+            $nameRead = factsNameTick($db, $cfg);
+            if ($nameRead['read'] > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read {$nameRead['read']} names\n";
+        } elseif (time() - (int)($cfg['name_facts_wl_at'] ?? 0) >= 600) {
+            factsNameWhitelist($db);
+        }
+    }
     if (function_exists('factsTick') && time() - (int)($cfg['facts_ticked_at'] ?? 0) >= 600) {
         $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('facts_ticked_at', ?)")->execute([(string)time()]);
         $factsRead = factsTick($db);

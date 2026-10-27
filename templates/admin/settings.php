@@ -1445,6 +1445,17 @@
                         </select>
                         <small class="settings-hint"><?= _h('settings.users_search_common_hint') ?></small>
                     </div>
+                    <div class="col-md-3">
+                        <label for="set-facts_source" class="form-label"><?= _h('settings.facts_source') ?></label>
+                        <select id="set-facts_source" class="form-select bg-dark text-light border-secondary" name="facts_source">
+                            <option value="desc" <?= ($cfg['facts_source'] ?? 'desc') !== 'desc_name' ? 'selected' : '' ?>><?= _h('settings.facts_source_desc') ?></option>
+                            <option value="desc_name" <?= ($cfg['facts_source'] ?? 'desc') === 'desc_name' ? 'selected' : '' ?>><?= _h('settings.facts_source_desc_name') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_source_hint') ?></small>
+                        <?php if (($cfg['facts_source'] ?? 'desc') === 'desc_name' && ($cfg['name_facts_cursor'] ?? '') !== 'done'): ?>
+                        <small class="settings-hint text-warning"><?= _h('settings.facts_source_reading') ?></small>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
 

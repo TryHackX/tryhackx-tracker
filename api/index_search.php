@@ -40,14 +40,15 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
 $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 $canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
 $signedIn = richtextViewerSignedIn($db);
-$size = factsRange($_GET['size'] ?? null, 'size');
-$files = factsRange($_GET['filecount'] ?? null, 'count');
-$seeders = factsRange($_GET['seeders'] ?? null, 'count');
-$onlyHashes = $canContent ? factsFilterHashes($db, [
-    'tags' => factsTagsParam($_GET['tags'] ?? ''), 'type' => (string)($_GET['type'] ?? ''), 'pics' => ($_GET['pics'] ?? '') === '1',
-    'year' => factsRange($_GET['year'] ?? null, 'year'), 'imdb' => factsRange($_GET['imdb'] ?? null, 'imdb'),
-    'filmweb' => factsRange($_GET['filmweb'] ?? null, 'filmweb'),
-], $signedIn) : null;
+$req = factsRequest($_GET);
+$size = $req['size'];
+$files = $req['files'];
+$seeders = $req['seeders'];
+$factsQ = $req['facts'];
+$byName = factsMode($cfg) === 'desc_name';
+$nameClause = $byName ? factsNameClause($factsQ) : null;
+$onlyHashes = $canContent ? factsFilterHashes($db, $factsQ, $signedIn) : null;
+if ($nameClause !== null && $onlyHashes === null) $onlyHashes = [];
 
 // Let go of the session before the slow part.
 //
@@ -108,6 +109,7 @@ try {
         'files_max'         => $files !== null && $files[1] !== null ? (int)$files[1] : null,
         'seeders_min'       => $seeders !== null && $seeders[0] !== null ? (int)$seeders[0] : null,
         'only_hashes'       => $onlyHashes,
+        'name_clause'       => $nameClause,
     ]);
 } catch (IndexSearchTimeout $e) {
     error_log('[index search] stopped for time: ' . mb_substr($search, 0, 80) . ' sort=' . $sort . ' — ' . $e->getMessage());
@@ -172,7 +174,8 @@ foreach ($res['rows'] as $r) {
     }
     $row['content_status'] = (string)($r['content_status'] ?? 'none');
     if ($canContent) $row['desc'] = (int)($r['desc'] ?? 0);
-    if (isset($factsMap[strtolower((string)$r['info_hash'])])) $row['facts'] = $factsMap[strtolower((string)$r['info_hash'])];
+    $chips = factsRowChips($factsMap[strtolower((string)$r['info_hash'])] ?? null, (string)($r['name'] ?? ''), $cfg);
+    if ($chips !== null) $row['facts'] = $chips;
     $rows[] = $row;
 }
 
