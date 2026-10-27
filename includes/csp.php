@@ -273,7 +273,7 @@ function cspPolicy(array $cfg, string $scope, ?string $page = null): string {
     // the origin that served it, and that origin is in style-src).
     foreach ($extra as $h) { $script[] = $h; $style[] = $h; $connect[] = $h; $frame[] = $h; }
 
-    if (!$panel && in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true)) $frame[] = 'https://www.youtube-nocookie.com';
+    if (in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true)) $frame[] = 'https://www.youtube-nocookie.com';
 
     // An empty source list is legal and means "block everything", but it prints as `frame-src ;`
     // and reads like a bug. Say 'none' out loud.

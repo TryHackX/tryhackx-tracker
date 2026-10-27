@@ -59,6 +59,7 @@
                         <option value="pending"><?= _h('a.img.q_pending') ?></option>
                         <option value="failed"><?= _h('a.img.q_failed') ?></option>
                         <option value="done"><?= _h('a.img.q_done') ?></option>
+                        <option value="ignored"><?= _h('a.img.q_ignored') ?></option>
                     </select>
                     <span id="img-q-total" class="text-muted wl-total"></span>
                 </div>

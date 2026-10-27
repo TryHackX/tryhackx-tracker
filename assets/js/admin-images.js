@@ -6,7 +6,11 @@
     const $ = (id) => document.getElementById(id);
     const site = document.body.dataset.site || '';
 
-    const S = { view: 'list', page: 1, q: '', state: '', sort: '', qStatus: 'pending', qPage: 1, mayManage: false, rows: [] };
+    const S = { view: 'list', offset: 0, per: 0, q: '', state: '', sort: '', qStatus: 'pending', qPage: 1, mayManage: false, rows: [] };
+    const perPage = () => {
+        const tracks = getComputedStyle($('img-grid')).gridTemplateColumns.split(' ').filter((x) => x && x !== 'none').length || 1;
+        return Math.max(12, Math.min(120, tracks * Math.max(1, Math.round(48 / tracks))));
+    };
 
     const word = (key, params) => t.key(key, params);
     const hostOf = (u) => { try { return new URL(u).host; } catch (e) { return String(u || ''); } };
@@ -151,9 +155,10 @@
         return el('div', { className: 'img-card', id: 'img-card-' + r.id }, [thumb, meta, acts, usedBox]);
     }
 
-    async function load() {
+    async function load(keep) {
         const grid = $('img-grid');
-        const p = new URLSearchParams({ page: String(S.page) });
+        S.per = keep || perPage();
+        const p = new URLSearchParams({ offset: String(S.offset), per: String(S.per) });
         if (S.q) p.set('q', S.q);
         if (S.state) p.set('state', S.state);
         if (S.sort) p.set('sort', S.sort);
@@ -167,9 +172,11 @@
         summary(j.summary, j.hosts);
         $('img-total').textContent = t.plural(j.total, 'js.aimg.total', { n: t.num(j.total) });
         S.rows = j.rows || [];
+        S.offset = Number(j.offset) || 0;
         if (!S.rows.length) grid.appendChild(el('div', { className: 'text-muted py-4 img-none', text: word('js.aimg.none') }));
         S.rows.forEach((r) => grid.appendChild(card(r)));
-        renderPagination($('img-pagination'), { total: j.total, page: j.page, pages: j.pages, onPage: (n) => { S.page = n; load(); } });
+        const per = Number(j.per_page) || S.per;
+        renderPagination($('img-pagination'), { total: j.total, page: j.page, pages: j.pages, onPage: (n) => { S.offset = (n - 1) * per; load(per); } });
     }
 
     async function queueAct(op, row, b) {
@@ -211,12 +218,12 @@
                 acts.appendChild(button('bi-image', word('js.aimg.show_image'), 'btn-outline-secondary', () => {
                     S.q = '#' + r.image_id;
                     $('img-f-q').value = S.q;
-                    S.page = 1;
+                    S.offset = 0;
                     show('list');
                 }));
             }
-            if (S.mayManage && r.status === 'failed') acts.appendChild(button('bi-arrow-repeat', word('js.aimg.retry'), 'btn-outline-secondary', (b) => queueAct('retry', r, b)));
-            if (S.mayManage && r.status !== 'done') acts.appendChild(button('bi-x-lg', word('js.aimg.forget'), 'btn-outline-danger', (b) => queueAct('forget', r, b)));
+            if (S.mayManage && (r.status === 'failed' || r.status === 'ignored')) acts.appendChild(button('bi-arrow-repeat', word('js.aimg.retry'), 'btn-outline-secondary', (b) => queueAct('retry', r, b)));
+            if (S.mayManage && (r.status === 'pending' || r.status === 'failed')) acts.appendChild(button('bi-x-lg', word('js.aimg.forget'), 'btn-outline-danger', (b) => queueAct('forget', r, b)));
             body.appendChild(el('tr', null, [url, el('td', null, st), el('td', { className: 'wl-num', text: String(r.tries) }),
                 el('td', { className: 'wl-date', text: when }), acts]));
         });
@@ -237,12 +244,13 @@
     }
 
     document.querySelectorAll('#img-tabs .source-tab').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
-    const research = debounce(() => { S.q = $('img-f-q').value.trim(); S.page = 1; load(); }, DEBOUNCE.search);
+    const research = debounce(() => { S.q = $('img-f-q').value.trim(); S.offset = 0; load(); }, DEBOUNCE.search);
     $('img-f-q').addEventListener('input', research);
-    $('img-f-state').addEventListener('change', (e) => { S.state = e.target.value; S.page = 1; load(); });
-    $('img-f-sort').addEventListener('change', (e) => { S.sort = e.target.value; S.page = 1; load(); });
+    $('img-f-state').addEventListener('change', (e) => { S.state = e.target.value; S.offset = 0; load(); });
+    $('img-f-sort').addEventListener('change', (e) => { S.sort = e.target.value; S.offset = 0; load(); });
+    window.addEventListener('resize', debounce(() => { if (S.view === 'list' && S.per && perPage() !== S.per) load(); }, 250));
     $('img-f-clear').addEventListener('click', () => {
-        S.q = ''; S.state = ''; S.sort = ''; S.page = 1;
+        S.q = ''; S.state = ''; S.sort = ''; S.offset = 0;
         $('img-f-q').value = ''; $('img-f-state').value = ''; $('img-f-sort').value = '';
         load();
     });

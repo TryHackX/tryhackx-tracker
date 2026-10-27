@@ -368,10 +368,10 @@ function imagesList(PDO $db, array $cfg, int $userId, int $page, ?int $maxBytes 
     $total = (int)$st->fetchColumn();
     $page = max(1, min($page, max(1, (int)ceil($total / IMAGES_PER_PAGE))));
     $st = $db->prepare("SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at, i.removal_at,
-                               EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id) AS used,
+                               (SELECT COUNT(*) FROM image_refs r WHERE r.image_id = i.id) AS used,
                                b.mime, b.animated, b.w, b.h, b.full_w, b.full_h, b.bytes
                           FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha
-                         WHERE i.user_id = ? AND i.removal_at IS NULL ORDER BY i.id DESC LIMIT ? OFFSET ?");
+                         WHERE i.user_id = ? AND i.removal_at IS NULL ORDER BY used DESC, i.id DESC LIMIT ? OFFSET ?");
     $st->bindValue(1, $userId, PDO::PARAM_INT);
     $st->bindValue(2, IMAGES_PER_PAGE, PDO::PARAM_INT);
     $st->bindValue(3, ($page - 1) * IMAGES_PER_PAGE, PDO::PARAM_INT);
@@ -959,8 +959,16 @@ function imagesPanelList(PDO $db, array $cfg, array $q): array
     $st = $db->prepare("SELECT COUNT(*) FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha LEFT JOIN users u ON u.id = i.user_id" . $where);
     $st->execute($args);
     $total = (int)$st->fetchColumn();
-    $pages = max(1, (int)ceil($total / IMAGES_PANEL_PER_PAGE));
-    $page = max(1, min((int)($q['page'] ?? 1), $pages));
+    $per = (int)($q['per'] ?? 0);
+    $per = $per > 0 ? max(12, min(120, $per)) : IMAGES_PANEL_PER_PAGE;
+    $pages = max(1, (int)ceil($total / $per));
+    if (isset($q['offset']) && is_numeric($q['offset'])) {
+        $offset = max(0, min((int)$q['offset'], max(0, $total - 1)));
+        $offset -= $offset % $per;
+    } else {
+        $offset = (max(1, min((int)($q['page'] ?? 1), $pages)) - 1) * $per;
+    }
+    $page = intdiv($offset, $per) + 1;
     $sql = "SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at, i.removal_at,
                    EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id) AS used,
                    b.mime, b.animated, b.w, b.h, b.full_w, b.full_h, b.bytes, u.username
@@ -968,11 +976,11 @@ function imagesPanelList(PDO $db, array $cfg, array $q): array
     $st = $db->prepare($sql);
     $k = 1;
     foreach ($args as $a) $st->bindValue($k++, $a, is_int($a) ? PDO::PARAM_INT : PDO::PARAM_STR);
-    $st->bindValue($k++, IMAGES_PANEL_PER_PAGE, PDO::PARAM_INT);
-    $st->bindValue($k, ($page - 1) * IMAGES_PANEL_PER_PAGE, PDO::PARAM_INT);
+    $st->bindValue($k++, $per, PDO::PARAM_INT);
+    $st->bindValue($k, $offset, PDO::PARAM_INT);
     $st->execute();
     $rows = array_map(fn($r) => imagesPanelRowOut($cfg, $r), $st->fetchAll(PDO::FETCH_ASSOC));
-    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per_page' => IMAGES_PANEL_PER_PAGE];
+    return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages, 'per_page' => $per, 'offset' => $offset];
 }
 
 function imagesWhereUsed(PDO $db, int $id): array
