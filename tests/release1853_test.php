@@ -217,7 +217,9 @@ $words = ['a.tags.forum_title', 'a.tags.forum_intro', 'js.tags.f_empty', 'js.tag
           'settings.tags_forum', 'settings.tags_forum_review', 'settings.tags_forum_review_hint'];
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL))
       && $plL['js.tags.f_turn_on'] === 'Włącz import' && __('a.tags.forum_title') === 'Tags from the forum');
-check('version and changelog', TRACKER_VERSION === '1.85.4' && str_contains($src('CHANGELOG.md'), '## [1.85.4]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
+check('an empty waiting badge stays hidden on the Tags page', str_contains($src('assets/css/admin.css'), '.wl-badge.d-hidden { display: none; }')
+      && str_contains($src('templates/admin/tags.php'), 'class="wl-badge wl-b-pending d-hidden" id="tags-pending-badge"'));
+check('version and changelog', TRACKER_VERSION === '1.85.5' && str_contains($src('CHANGELOG.md'), '## [1.85.5]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

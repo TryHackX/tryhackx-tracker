@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.5] — 2026-10-27
+
+- The Tags page no longer shows an empty badge beside the count when no new tag waits: the badge's own display
+  outweighed the class that hides it.
+
 ## [1.85.4] — 2026-10-27
 
 - A forum's genre tag is matched to the genre whose whole name it begins with: "Komediowe" is Komedia, not Komediodramat,
