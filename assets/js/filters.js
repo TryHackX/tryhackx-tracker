@@ -10,9 +10,17 @@
         { key: 'imdb', label: 'imdb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
         { key: 'filmweb', label: 'filmweb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
         { key: 'vbitrate', label: 'vbitrate', group: 'quality', facts: true, desc: true, minOnly: true, mbps: true },
+        { key: 'duration', label: 'duration', group: 'release', facts: true, desc: true },
+        { key: 'seasons', label: 'seasons', group: 'release', facts: true, desc: true },
+        { key: 'episodes', label: 'episodes', group: 'release', facts: true, desc: true },
+        { key: 'rating', label: 'rating', group: 'ratings', rep: true, minOnly: true, pct: true },
+        { key: 'votes', label: 'votes', group: 'ratings', rep: true, minOnly: true },
+        { key: 'steam', label: 'steam', group: 'ratings', rep: true, minOnly: true, pct: true },
+        { key: 'seen', label: 'seen', group: 'dates', date: true },
     ];
     const GROUPS = [['x', 'tags'], ['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language'], ['g', 'genre']];
-    const PARAMS = ['type', 'tags', 'pics'].concat(RANGES.map(r => r.key));
+    const PARAMS = ['type', 'tags', 'notags', 'pics'].concat(RANGES.map(r => r.key));
+    const TAG_ID = (id) => /^[qvhaslt]:[a-z0-9_]{1,20}$/.test(id) || /^g:[a-z0-9-]{2,40}$/.test(id) || /^x:[a-z0-9-]{1,64}$/.test(id);
     const OPEN_KEY = 'thx-search-filters-open';
 
     function el(tag, cls, text) {
@@ -37,6 +45,8 @@
         if (v === '') return true;
         if (r.unit) return /^\d+(?:[.,]\d+)?\s*(?:[kmgt](?:i?b)?|b)?$/i.test(v);
         if (r.year) return /^\d{4}$/.test(v);
+        if (r.date) return /^\d{4}-\d{2}-\d{2}$/.test(v);
+        if (r.pct) return /^\d{1,3}$/.test(v) && parseInt(v, 10) <= 100;
         if (r.rating) return /^\d{1,2}(?:[.,]\d)?$/.test(v) && parseFloat(v.replace(',', '.')) <= 10;
         if (r.mbps) return /^\d{1,3}(?:[.,]\d{1,2})?$/.test(v);
         return /^\d{1,9}$/.test(v);
@@ -51,11 +61,14 @@
         const panelUi = opts.ui === 'panel';
         const openKey = panelUi ? OPEN_KEY + '-' + (host.id || 'panel') : OPEN_KEY;
         const btnCls = panelUi ? 'btn btn-sm btn-outline-secondary' : 'btn btn-secondary btn-small';
-        const S = { type: '', pics: false, sel: new Set(), ranges: {}, open: store(openKey, true) };
+        const S = { type: '', pics: false, sel: new Set(), not: new Set(), ranges: {}, open: store(openKey, true) };
         const catalog = Array.isArray(opts.catalog) ? opts.catalog : [];
+        const favs = Array.isArray(opts.favs) ? opts.favs : [];
         const labelOf = new Map(catalog.map(c => [c.id, c.l]));
+        favs.forEach(c => { if (!labelOf.has(c.id)) labelOf.set(c.id, c.l); });
         const facts = !!opts.facts;
         const desc = !!opts.desc;
+        const rep = !!opts.rep;
         let timer = 0;
 
         const bar = el('div', 'sf-bar');
@@ -111,7 +124,7 @@
             lab.htmlFor = tagSearch.id;
             tagNone = el('div', 'sf-hint text-muted', t.key('js.filters.tag_none'));
             tagNone.hidden = true;
-            box.append(lab, tagSearch, tagNone);
+            box.append(lab, tagSearch, tagNone, el('div', 'sf-hint text-muted', t.key('js.filters.tags_hint')));
             if (!panelUi) {
                 const all = el('a', 'sf-alltags', t.key('js.filters.all_tags'));
                 all.href = '?action=tags';
@@ -120,10 +133,10 @@
             inner.insertBefore(box, grid);
             tagSearch.addEventListener('input', () => showTags());
         }
-        (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'description'] : ['release', 'popularity']).forEach(section);
+        (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'dates', 'description'] : ['release', 'ratings', 'popularity', 'dates']).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
-            if ((r.facts && !facts) || (r.desc && !desc)) return;
+            if ((r.facts && !facts) || (r.desc && !desc) || (r.rep && !rep)) return;
             const box = el('div', 'sf-range');
             const id = 'sf-' + r.key;
             const lab = el('label', 'sf-label', t.key('js.filters.' + r.label));
@@ -132,7 +145,7 @@
             const row = el('div', 'sf-range-row');
             const mk = (end) => {
                 const i = el('input', panelUi ? 'form-control form-control-sm bg-dark text-light border-secondary sf-input' : 'profile-search sf-input');
-                i.type = 'text';
+                i.type = r.date ? 'date' : 'text';
                 i.id = id + '-' + end;
                 i.inputMode = r.unit ? 'text' : 'decimal';
                 if (r.mbps) box.classList.add('sf-mbps');
@@ -167,6 +180,28 @@
             inputs[r.key] = { min, max, r };
         });
         const tagBtns = new Map();
+        const favBtns = new Map();
+        const tagButton = (c, g) => {
+            const b = el('button', 'fchip fchip-' + g + ' sf-tag', c.l);
+            b.type = 'button';
+            b.setAttribute('aria-pressed', 'false');
+            if (c.c) b.style.setProperty('--fc', c.c);
+            b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
+            b.addEventListener('click', () => { toggle(c.id); changed(true); });
+            return b;
+        };
+        if (facts && favs.length) {
+            const wrap = el('div', 'sf-tags sf-mine');
+            wrap.appendChild(el('div', 'sf-label', t.key('js.filters.t_mine')));
+            const list = el('div', 'sf-tag-list');
+            favs.forEach(c => {
+                const b = tagButton(c, c.g || 'x');
+                list.appendChild(b);
+                favBtns.set(c.id, b);
+            });
+            wrap.appendChild(list);
+            section('tags').appendChild(wrap);
+        }
         if (facts) {
             GROUPS.forEach(([g, sec]) => {
                 if (g === 'g' && !desc) return;
@@ -214,13 +249,15 @@
         host.append(bar, panel);
 
         function toggle(id) {
-            if (S.sel.has(id)) S.sel.delete(id); else S.sel.add(id);
+            if (S.sel.has(id)) { S.sel.delete(id); S.not.add(id); }
+            else if (S.not.has(id)) S.not.delete(id);
+            else S.sel.add(id);
         }
         function showTags() {
             const q = tagSearch ? tagSearch.value.trim().toLowerCase() : '';
             let any = false;
             tagBtns.forEach((b, id) => {
-                const on = S.sel.has(id);
+                const on = S.sel.has(id) || S.not.has(id);
                 const hit = !q || b.dataset.s.includes(q);
                 b.hidden = !on && (!hit || b.dataset.n === '0');
                 if (!b.hidden && hit) any = true;
@@ -242,7 +279,7 @@
             return out;
         }
         function count() {
-            return Object.keys(readRanges()).length + S.sel.size + (S.pics ? 1 : 0);
+            return Object.keys(readRanges()).length + S.sel.size + S.not.size + (S.pics ? 1 : 0);
         }
         function params() {
             const p = {};
@@ -256,6 +293,7 @@
             });
             const sets = Object.keys(byGroup).map(k => byGroup[k].join('|'));
             if (sets.length) p.tags = sets.join(',');
+            if (S.not.size) p.notags = [...S.not].join(',');
             Object.assign(p, readRanges());
             return p;
         }
@@ -282,15 +320,21 @@
                 b.classList.toggle('is-on', on);
                 b.setAttribute('aria-pressed', on ? 'true' : 'false');
             });
-            tagBtns.forEach((b, id) => {
+            const paintTag = (b, id) => {
                 const on = S.sel.has(id);
+                const not = S.not.has(id);
                 b.classList.toggle('is-on', on);
-                b.setAttribute('aria-pressed', on ? 'true' : 'false');
-            });
+                b.classList.toggle('is-not', not);
+                b.setAttribute('aria-pressed', on ? 'true' : (not ? 'mixed' : 'false'));
+                b.title = not ? t.key('js.filters.tag_not_title', { name: labelOf.get(id) || id }) : (b.dataset.n ? t.key('js.filters.count', { n: t.num(Number(b.dataset.n)) }) : '');
+            };
+            tagBtns.forEach(paintTag);
+            favBtns.forEach(paintTag);
             if (S.picsInput) S.picsInput.checked = S.pics;
             clear.hidden = !(n || S.type);
             active.textContent = '';
             [...S.sel].forEach(id => active.appendChild(chip(labelOf.get(id) || id, () => S.sel.delete(id))));
+            [...S.not].forEach(id => active.appendChild(chip(t.key('js.filters.chip_not', { name: labelOf.get(id) || id }), () => S.not.delete(id))));
             const rg = readRanges();
             Object.keys(rg).forEach(k => {
                 const [a, b] = splitRange(rg[k]);
@@ -305,7 +349,7 @@
             if (typeof opts.onChange === 'function') opts.onChange();
         }
         clear.addEventListener('click', () => {
-            S.type = ''; S.pics = false; S.sel.clear();
+            S.type = ''; S.pics = false; S.sel.clear(); S.not.clear();
             Object.keys(inputs).forEach(k => { inputs[k].min.value = ''; if (inputs[k].max) inputs[k].max.value = ''; inputs[k].min.classList.remove('sf-bad'); if (inputs[k].max) inputs[k].max.classList.remove('sf-bad'); });
             changed(true);
         });
@@ -326,9 +370,14 @@
                 S.type = ['movie', 'series'].includes(p.get('type')) ? p.get('type') : '';
                 S.pics = p.get('pics') === '1';
                 S.sel.clear();
+                S.not.clear();
                 String(p.get('tags') || '').split(',').forEach(set => set.split('|').forEach(id => {
                     id = id.trim();
-                    if (/^[qvhaslt]:[a-z0-9_]{1,20}$/.test(id) || /^g:[a-z0-9-]{2,40}$/.test(id) || /^x:[a-z0-9-]{1,64}$/.test(id)) S.sel.add(id);
+                    if (TAG_ID(id)) S.sel.add(id);
+                }));
+                String(p.get('notags') || '').split(',').forEach(set => set.split('|').forEach(id => {
+                    id = id.trim();
+                    if (TAG_ID(id) && !S.sel.has(id)) S.not.add(id);
                 }));
                 Object.keys(inputs).forEach(k => {
                     const raw = p.get(k);
@@ -539,6 +588,18 @@
     function tagsPage() {
         const q = document.getElementById('tags-page-q');
         if (!q) return;
+        document.querySelectorAll('.tag-fav').forEach(b => b.addEventListener('click', async () => {
+            const on = b.getAttribute('aria-pressed') !== 'true';
+            b.disabled = true;
+            const r = await postJ('tag_fav', { tag: b.dataset.id, on: on });
+            b.disabled = false;
+            if (!r || !r.success) { b.title = (r && r.message) || t.key('js.tags.failed'); return; }
+            b.setAttribute('aria-pressed', r.on ? 'true' : 'false');
+            b.title = t.key(r.on ? 'js.tags.fav_off' : 'js.tags.fav_on');
+            b.setAttribute('aria-label', b.title);
+            const i = b.querySelector('i');
+            if (i) i.className = 'bi ' + (r.on ? 'bi-star-fill' : 'bi-star');
+        }));
         const none = document.getElementById('tags-page-none');
         q.addEventListener('input', () => {
             const s = q.value.trim().toLowerCase();

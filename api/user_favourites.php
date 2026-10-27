@@ -153,6 +153,7 @@ if ($col === 'added' && $desc) $rows = array_reverse($rows);
 
 $total = count($rows);
 $slice = array_slice($rows, ($page - 1) * $perPage, $perPage);
+if (function_exists('factsListAttach')) $slice = factsListAttach($db, $cfg, $slice);
 foreach ($slice as &$r) {
     // The hash is not only a magnet HERE: it is the name the star posts back to un-star a row. A
     // reader who holds `favourites.use` and not `index.magnet` could add a favourite and then not

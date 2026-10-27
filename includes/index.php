@@ -2581,6 +2581,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $flt = ['size_min' => $num($q['size_min'] ?? null), 'size_max' => $num($q['size_max'] ?? null),
             'files_min' => $num($q['files_min'] ?? null), 'files_max' => $num($q['files_max'] ?? null),
             'seeders_min' => $num($q['seeders_min'] ?? null),
+            'seen_min' => is_string($q['seen_min'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $q['seen_min']) ? $q['seen_min'] : null,
+            'seen_max' => is_string($q['seen_max'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $q['seen_max']) ? $q['seen_max'] : null,
             'hashes' => isset($q['only_hashes']) && is_array($q['only_hashes']) ? array_values(array_map('strval', $q['only_hashes'])) : null,
             'names' => isset($q['name_clause']) && is_array($q['name_clause']) ? $q['name_clause'] : null,
             'conds' => isset($q['facts_conds']) && is_array($q['facts_conds']) && $q['facts_conds'] ? $q['facts_conds'] : null];
@@ -2869,6 +2871,11 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             $where[] = ($wl ? 'COALESCE(scrape_seeders, 0)' : ($cat ? 'eff_seeders' : 'COALESCE(scrape_seeders, last_seeders)')) . ' >= ?';
             $params[] = $flt['seeders_min'];
         }
+        foreach ([['seen_min', '>='], ['seen_max', '<=']] as [$k, $op]) {
+            if ($flt[$k] === null) continue;
+            $where[] = ($wl ? 'COALESCE(scraped_at, updated_at, created_at)' : 'last_seen') . ' ' . $op . ' ?';
+            $params[] = $flt[$k];
+        }
         if ($flt['hashes'] !== null || $flt['names'] !== null) {
             $parts = [];
             if ($flt['hashes']) {
@@ -2881,7 +2888,9 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             }
             $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
         }
-        foreach ($flt['conds'] ?? [] as [$cHashes, $cTpl, $cArgs]) {
+        foreach ($flt['conds'] ?? [] as $cond) {
+            [$cHashes, $cTpl, $cArgs] = $cond;
+            $cNot = !empty($cond[3]);
             $parts = [];
             if ($cHashes) {
                 $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($cHashes), '?')) . ')';
@@ -2891,7 +2900,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 $parts[] = str_replace('{T}', '`' . $tbl . '`', $cTpl);
                 foreach ($cArgs as $p) $params[] = $p;
             }
-            $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
+            $where[] = $parts ? ($cNot ? 'NOT ' : '') . '(' . implode(' OR ', $parts) . ')' : ($cNot ? '1 = 1' : '1 = 0');
         }
         $scoreSql = '0';
         $scoreParams = [];

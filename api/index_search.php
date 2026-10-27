@@ -69,7 +69,12 @@ if (function_exists('set_time_limit')) @set_time_limit($budget);
 
 // comma-separated multi-sort stack; unknown keys are dropped by indexSearchCatalogue
 $sort = (string)($_GET['sort'] ?? 'relevance:desc');
-if (!preg_match('/^(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?(,(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?)*$/', $sort)) {
+$factSort = null;
+if (preg_match('/^(year|imdb|filmweb|rating|votes|steam|desc):(asc|desc)$/', $sort, $sm)
+    && (!in_array($sm[1], ['rating', 'votes', 'steam'], true) || repEnabled($cfg))
+    && (!in_array($sm[1], ['imdb', 'filmweb', 'desc'], true) || $canContent)) {
+    $factSort = [$sm[1], $sm[2] === 'asc'];
+} elseif (!preg_match('/^(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?(,(relevance|seeders|leechers|size|last|name|files)(:(asc|desc))?)*$/', $sort)) {
     $sort = 'relevance:desc';
 }
 
@@ -81,7 +86,7 @@ if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = 25;
 // reader saw a blank error with nothing to do about it. 503 with a sentence in their language, and the code for the
 // page to recognise; nothing was retried behind their back (see indexSearchCatalogue()).
 try {
-    $res = indexSearchCatalogue($db, $cfg, [
+    $searchArgs = [
         'page'              => $_GET['page'] ?? 1,
         'per_page'          => $perPage,
         'sort'              => $sort,
@@ -95,7 +100,9 @@ try {
         'desc_flags'        => $canContent,
         // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
         'hash_search'       => $canMagnet,
-    ] + $flt);
+    ] + $flt;
+    $res = $factSort !== null ? factsSortedSearch($db, $cfg, $searchArgs, $factSort[0], $factSort[1], $canContent, $signedIn)
+                              : indexSearchCatalogue($db, $cfg, $searchArgs);
 } catch (IndexSearchTimeout $e) {
     error_log('[index search] stopped for time: ' . mb_substr($search, 0, 80) . ' sort=' . $sort . ' — ' . $e->getMessage());
     header('Retry-After: 30');
@@ -172,6 +179,7 @@ jsonResponse([
     'success' => true, 'rows' => $rows, 'total' => $res['total'], 'page' => $res['page'], 'pages' => $res['pages'],
     // 1.74.0 (PERF-2): true when `total` is only how far the search counted — the page shows "N+".
     'total_capped' => !empty($res['total_capped']),
+    'sort_limited' => !empty($res['sort_limited']),
     'can' => ['files' => $canFiles, 'magnet' => $canMagnet, 'whitelist' => $canWl, 'content' => $canContent],
     'rep_in_results' => $repInResults,
 ]);

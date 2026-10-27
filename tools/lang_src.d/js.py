@@ -4835,3 +4835,9 @@ add('', {
     'js.index.select_row': ('Select :name', 'Zaznacz: :name'),
     'js.users.pick_row':   ('Pick :name', 'Wybierz: :name'),
 })
+
+
+add('js.app', {
+    'sort_limited': ('This sort reaches only so deep — narrow the search or the filters to see further.',
+                     'To sortowanie sięga tylko do pewnej głębokości — zawęź wyszukiwanie lub filtry, by zobaczyć dalej.'),
+})

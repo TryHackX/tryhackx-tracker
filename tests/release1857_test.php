@@ -109,7 +109,7 @@ $words = ['settings.tags_add_review', 'settings.tags_add_review_approve', 'a.tag
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL)) && $plL['js.tags.suggested'] === 'Podpowiedzi:');
 check('a deleted account is no longer named in the tag log or on the tags it added', str_contains($src('includes/users.php'), "\$del(\"UPDATE hash_tag_log SET user_id = NULL WHERE user_id = ?\", [\$userId], 'tag log');")
       && str_contains($src('includes/users.php'), "\$del(\"UPDATE hash_tags SET added_by = NULL WHERE added_by = ?\", [\$userId], 'tags added');"));
-check('version and changelog', TRACKER_VERSION === '1.85.7' && str_contains($src('CHANGELOG.md'), '## [1.85.7]'));
+check('version and changelog', version_compare(TRACKER_VERSION, '1.85.7', '>=') && str_contains($src('CHANGELOG.md'), '## [1.85.7]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

@@ -144,7 +144,8 @@ $st->bindValue($i, ($page - 1) * $perPage, PDO::PARAM_INT);
 $st->execute();
 
 $rows = [];
-foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+$fetched = $st->fetchAll(PDO::FETCH_ASSOC);
+foreach ($fetched as $r) {
     $rows[] = [
         'info_hash'  => ($canMagnet && (int)$r['banned'] !== 1) ? $r['info_hash'] : null,
         'name'       => $r['name'],
@@ -162,6 +163,11 @@ foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         'public'         => (int)$r['submitter_public'] === 1,
     ];
 }
+$chipRows = !function_exists('factsListAttach') ? [] : factsListAttach($db, $cfg, array_map(fn($r) => ['info_hash' => (int)$r['banned'] === 1 ? null : $r['info_hash'], 'name' => $r['name']], $fetched));
+foreach ($rows as $i => &$row) {
+    if (isset($chipRows[$i]['facts'])) $row['facts'] = $chipRows[$i]['facts'];
+}
+unset($row);
 // Each row's star in the READER's state (1.72.1, favMarkRows()): one question for the page.
 $rows = favMarkRows($db, $cfg, $rows);
 

@@ -223,3 +223,8 @@ button.fchip:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc) 
 .tags-group h2 { font-size: 1rem; margin: 0 0 0.45rem; }
 .tags-list a { text-decoration: none; color: inherit; }
 .tags-list a[hidden], .tags-group[hidden] { display: none; }
+.sf-tag.is-not { color: #ff8a80; background: color-mix(in srgb, #ff5252 14%, transparent); border-color: color-mix(in srgb, #ff5252 55%, transparent); text-decoration: line-through; }
+.tag-fav { display: inline-flex; align-items: center; margin: 0 0.35rem 0 -0.1rem; padding: 0 0.15rem; border: 0; background: none; color: var(--text-muted); cursor: pointer; font-size: 0.8rem; }
+.tag-fav[aria-pressed="true"] { color: #ffd54f; }
+.tag-fav:hover, .tag-fav:focus-visible { color: #ffd54f; outline: none; }
+.sf-mine .sf-label { color: #ffd54f; }

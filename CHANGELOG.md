@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.86.0] — 2026-10-27
+
+- **Without a tag.** A tag in the filters is clicked once for "with it", again for "without it" (struck through, red),
+  a third time to let it go; the address keeps it as `notags=`. Works in the search and on the panel's Index and
+  Whitelist, by names, descriptions and tags people add.
+- **More filters:** running time, seasons and episodes (from descriptions), the site's rating in %, its votes and the
+  SteamDB score (`rating=`, `votes=`, `steam=`), and "seen between" two dates (`seen=`).
+- **New sorts** in the search's "Sort by": year (newest or oldest first), IMDb, Filmweb, the description's date, the
+  site's rating, its votes and the SteamDB score. Torrents without the value come after the ones that have it. A
+  result of up to 2 000 torrents is sorted whole; a bigger one walks the values in order and stops at 20 000 checked
+  (the page says so). The year sort reads a new key on the names' table, built by the janitor.
+- **My tags.** A star beside every tag on the Tags page; the starred ones open that page and lead the search's
+  filters as "My tags" (`tags.favourite`, members and moderators).
+- **Tags on profile lists:** favourites, uploads and lists show each torrent's chips (Settings → Tags and filters).
+- Schema 110: `name_facts.idx_nf_year`, `tag_favourites`.
+
 ## [1.85.7] — 2026-10-27
 
 - **Base tags.** Thirty ready tags in colours by kind: editions (Extended, Director's Cut, Uncut, Remaster, IMAX,

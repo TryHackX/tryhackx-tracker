@@ -217,6 +217,7 @@ function userPermissionList(bool $english = false): array {
         'tags.add'           => 'Add tags to a torrent, and take back the ones they added',
         'tags.create'        => 'Create a new tag (a moderator approves it unless Settings says otherwise)',
         'tags.moderate'      => 'Remove anybody\'s tag or a wrong automatic one, and approve or reject new tags',
+        'tags.favourite'     => 'Keep favourite tags (My tags) for quick filters',
 
         // ── the admin panel ──
         //
@@ -367,7 +368,7 @@ function userGroupPresets(): array {
                         // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
                         'panel.moderation.view', 'panel.moderation.handle',
                         'panel.images.view', 'panel.images.manage',
-                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view'],
+                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -418,7 +419,7 @@ function userGroupPresets(): array {
                         'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
                         'comment.images',
                         // v84: report a comment, a description or a shout to the moderators.
-                        'content.report', 'tags.add', 'tags.create'],
+                        'content.report', 'tags.add', 'tags.create', 'tags.favourite'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -1299,6 +1300,7 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
     $del("UPDATE hash_tag_log SET user_id = NULL WHERE user_id = ?", [$userId], 'tag log');
     $del("UPDATE hash_tags SET added_by = NULL WHERE added_by = ?", [$userId], 'tags added');
+    $del("DELETE FROM tag_favourites WHERE user_id = ?", [$userId], 'favourite tags');
     // …and what it SENT that sits in other people's notifications (1.74.0, PRIV-1): a friend request or its acceptance
     // names the account and nothing else, so it goes with it (v93 `sender_id`). What its comments said is emptied below,
     // with the comments (commentForgetAccount()).

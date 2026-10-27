@@ -39,7 +39,7 @@ $allowed = [
     'lang_swap_enabled',
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
     'search_share_enabled', 'search_count_common_words', 'facts_source',
-    'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
+    'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
     'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
@@ -323,7 +323,7 @@ if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behav
 // ── Content-Security-Policy ──
 // Coerced rather than refused, and coerced to 'report': an unknown value is a bug in the form, and
 // the answer to a bug in the form is the setting that cannot break a page for a visitor.
-foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts'] as $fk) {
+foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts'] as $fk) {
     if (isset($data[$fk])) $data[$fk] = in_array($data[$fk], ['0', 0, false], true) ? '0' : '1';
 }
 if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min((int)$data['facts_chips_max'] ?: 6, 20));

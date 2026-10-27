@@ -97,7 +97,7 @@ function tagsMessage(string $code): string
     $words = ['name' => __('api.tags.name'), 'rejected' => __('api.tags.rejected'), 'limit' => __('api.tags.limit'),
               'unavailable' => __('api.tags.unavailable'), 'unknown' => __('api.tags.unknown'), 'blocked' => __('api.tags.blocked'),
               'too_many' => __('api.tags.too_many'), 'forbidden' => __('api.tags.forbidden'), 'not_found' => __('api.tags.not_found'),
-              'target' => __('api.tags.target')];
+              'target' => __('api.tags.target'), 'fav_limit' => __('api.tags.fav_limit')];
     return $words[$code] ?? __('api.tags.invalid');
 }
 
@@ -932,4 +932,61 @@ function tagsChangesAction(PDO $db, string $op, array $items, ?int $actor, bool 
     }
     if ($n) tagsUsesTick($db);
     return ['ok' => true, 'n' => $n];
+}
+
+const TAGS_FAV_MAX = 200;
+
+function tagsFavReady(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready) return true;
+    try {
+        $ready = (bool)$db->query("SHOW TABLES LIKE 'tag_favourites'")->fetchColumn();
+    } catch (\Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+function tagsFavList(PDO $db, int $userId): array
+{
+    if (!tagsFavReady($db)) return [];
+    $st = $db->prepare("SELECT tag FROM tag_favourites WHERE user_id = ? ORDER BY created_at, tag LIMIT " . TAGS_FAV_MAX);
+    $st->execute([$userId]);
+    return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
+}
+
+function tagsFavChips(PDO $db, array $ids): array
+{
+    $genres = null;
+    $out = [];
+    foreach ($ids as $id) {
+        if (tagsIsExplicit($id)) {
+            $row = tagsRow($db, $id);
+            if (!$row || $row['status'] !== 'approved' || (int)$row['hidden'] === 1) continue;
+            $chip = ['id' => $id, 'g' => 'x', 'l' => (string)$row['name']];
+            if ($row['color']) $chip['c'] = (string)$row['color'];
+        } elseif (factsTagValid($id)) {
+            $chip = ['id' => $id, 'g' => substr($id, 0, 1), 'l' => str_starts_with($id, 'g:') ? tagsGenreLabel($id, $genres ??= tagsGenreLabels($db)) : factsTagLabel($id)];
+        } else {
+            continue;
+        }
+        $out[] = $chip;
+    }
+    return $out;
+}
+
+function tagsFavSet(PDO $db, int $userId, string $id, bool $on): array
+{
+    if (!tagsFavReady($db)) return ['ok' => false, 'error' => 'unavailable'];
+    if (!factsTagValid($id) || !tagsFavChips($db, [$id])) return ['ok' => false, 'error' => 'unknown'];
+    if (!$on) {
+        $db->prepare("DELETE FROM tag_favourites WHERE user_id = ? AND tag = ?")->execute([$userId, $id]);
+        return ['ok' => true, 'on' => false];
+    }
+    $st = $db->prepare("SELECT COUNT(*) FROM tag_favourites WHERE user_id = ?");
+    $st->execute([$userId]);
+    if ((int)$st->fetchColumn() >= TAGS_FAV_MAX) return ['ok' => false, 'error' => 'fav_limit'];
+    $db->prepare("INSERT IGNORE INTO tag_favourites (user_id, tag, created_at) VALUES (?, ?, UTC_TIMESTAMP())")->execute([$userId, $id]);
+    return ['ok' => true, 'on' => true];
 }

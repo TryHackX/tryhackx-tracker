@@ -94,6 +94,22 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
             <option value="rejected"><?= _h('search.c_rejected') ?></option>
         </select>
         <?php endif; ?>
+        <?php $sRep = function_exists('repEnabled') && repEnabled($cfg); ?>
+        <select id="search-sortby" title="<?= _h('search.sortby_title') ?>" aria-label="<?= _h('search.sortby_title') ?>">
+            <option value=""><?= _h('search.sortby_default') ?></option>
+            <option value="year:desc"><?= _h('search.sortby_year_desc') ?></option>
+            <option value="year:asc"><?= _h('search.sortby_year_asc') ?></option>
+            <?php if ($canDesc): ?>
+            <option value="imdb:desc"><?= _h('search.sortby_imdb') ?></option>
+            <option value="filmweb:desc"><?= _h('search.sortby_filmweb') ?></option>
+            <option value="desc:desc"><?= _h('search.sortby_desc') ?></option>
+            <?php endif; ?>
+            <?php if ($sRep): ?>
+            <option value="rating:desc"><?= _h('search.sortby_rating') ?></option>
+            <option value="votes:desc"><?= _h('search.sortby_votes') ?></option>
+            <option value="steam:desc"><?= _h('search.sortby_steam') ?></option>
+            <?php endif; ?>
+        </select>
         <select id="search-perpage" title="<?= _h('search.perpage_title') ?>">
             <?php foreach ([15, 25, 50, 100, 200] as $sPer): ?>
             <option value="<?= $sPer ?>"<?= $sPer === 25 ? ' selected' : '' ?>><?= _h('search.perpage', ['n' => $sPer]) ?></option>
@@ -107,7 +123,9 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
         <p class="search-hint text-muted" id="search-hint" hidden></p>
     </div>
     <?php $sFacts = $canDesc || (function_exists('factsMode') && factsMode($cfg) === 'desc_name'); ?>
-    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog($cfg) : [])) ?>"></div>
+    <?php $sMe = usersEnabled($cfg) ? currentUser($db) : null;
+    $sFavs = ($sMe && $sFacts && function_exists('tagsFavList') && userCan($db, $cfg, 'tags.favourite')) ? tagsFavChips($db, tagsFavList($db, (int)$sMe['id'])) : []; ?>
+    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-rep="<?= (function_exists('repEnabled') && repEnabled($cfg)) ? '1' : '0' ?>" data-favs="<?= sanitize(json_encode($sFavs)) ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog($cfg) : [])) ?>"></div>
 </form>
 <div id="search-alert" class="alert"></div>
 <div class="transparency-table-wrap">

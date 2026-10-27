@@ -129,3 +129,27 @@ add('js.filters', {
     'rate_title_a': ('The best audio track: codec, channels and bit rate', 'Najlepsza ścieżka dźwięku: kodek, kanały i bitrate'),
     'count': (':n torrents', 'torrentów: :n'),
 })
+
+
+add('js.filters', {
+    'duration': ('Running time (minutes)', 'Czas trwania (minuty)'),
+    'c_duration': ('Minutes', 'Minuty'),
+    'seasons': ('Seasons', 'Sezony'),
+    'c_seasons': ('Seasons', 'Sezony'),
+    'episodes': ('Episodes', 'Odcinki'),
+    'c_episodes': ('Episodes', 'Odcinki'),
+    'rating': ('Site rating from (%)', 'Ocena strony od (%)'),
+    'c_rating': ('Rating %', 'Ocena %'),
+    'votes': ('Votes, at least', 'Głosów, co najmniej'),
+    'c_votes': ('Votes', 'Głosy'),
+    'steam': ('SteamDB score from (%)', 'Wynik SteamDB od (%)'),
+    'c_steam': ('SteamDB %', 'SteamDB %'),
+    'seen': ('Seen between', 'Widziany między'),
+    'c_seen': ('Seen', 'Widziany'),
+    'g_dates': ('Dates', 'Daty'),
+    't_mine': ('My tags', 'Moje tagi'),
+    'tags_hint': ('Click a tag once for "with it", again for "without it", a third time to let it go.',
+                  'Kliknij tag raz: „z tym tagiem”, drugi raz: „bez tego tagu”, trzeci raz: wyłącz.'),
+    'chip_not': ('without :name', 'bez :name'),
+    'tag_not_title': ('Without :name — click to let it go', 'Bez :name — kliknij, by wyłączyć'),
+})

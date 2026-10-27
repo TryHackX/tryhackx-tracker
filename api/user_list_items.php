@@ -226,6 +226,7 @@ $pages = max(1, (int)ceil($total / $perPage));
 $page  = min($page, $pages);
 
 $slice = array_slice($items, ($page - 1) * $perPage, $perPage);
+if (function_exists('factsListAttach')) $slice = factsListAttach($db, $cfg, $slice);
 foreach ($slice as &$row) {
     // The same rule api/user_favourites.php applies to its own rows: no `index.magnet`, no hash —
     // and none for a banned row either, because the tracker refuses to serve it and a link that

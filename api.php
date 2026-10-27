@@ -184,6 +184,7 @@ $apiRoutes = [
     'admin/tag_action'            => 'api/admin/tag_action.php',
     'admin/tag_forum'             => 'api/admin/tag_forum.php',
     'admin/tag_changes'           => 'api/admin/tag_changes.php',
+    'tag_fav'                     => 'api/tag_fav.php',
     'admin/image_action'          => 'api/admin/image_action.php',
     'admin/change_status'   => 'api/admin/change_status.php',
     'admin/block_hash'      => 'api/admin/block_hash.php',

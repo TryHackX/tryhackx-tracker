@@ -93,7 +93,7 @@ $MEMBER = array_merge($GUEST, [
     'content.images', 'comment.images',
     'info.resize',
     'images.public',
-    'tags.add', 'tags.create',
+    'tags.add', 'tags.create', 'tags.favourite',
 ]);
 // ONLY the extras. A premium account is a member as well, so repeating the member row here would
 // mean a membership that lapses takes the whole site with it.
@@ -129,7 +129,7 @@ $MODERATOR = ['panel.access', 'panel.reports.view', 'panel.reports.status', 'pan
               // v94 (1.75.0): the Moderation page — read it and act on it (the rules are nobody's but the Admin group's).
               'panel.moderation.view', 'panel.moderation.handle',
               'panel.images.view', 'panel.images.manage',
-              'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view'];
+              'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite'];
 
 /* ══ 1. the presets ════════════════════════════════════════════════════════ */
 // includes/users.php has claimed since 1.21.0 that "users_test.php checks every id here is real".
@@ -199,7 +199,8 @@ $modSeedPlus = array_unique(array_merge($seedFor['moderator'] ?? [],
                                         ['comment.reply'],
                                         ['panel.moderation.view', 'panel.moderation.handle'],
                                         ['panel.images.view', 'panel.images.manage'],
-                                        ['tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view']));
+                                        ['tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view'],
+                                        ['tags.favourite']));
 check('the moderator preset and the moderator seed agree',
       array_values(array_diff($modSeedPlus, $presets['moderator']['perms'])) === []
       && array_values(array_diff($presets['moderator']['perms'], $modSeedPlus)) === [],
@@ -291,7 +292,7 @@ try {
     // neither have 1.69.0's v74 and v75 ones (profile.bio, rating.public) nor 1.70.0's v81 one
     // (content.delete_own, content.public) nor 1.71.0's v83 one (the comments) and v84 one (reporting), nor 1.72.0's
     // v88 one (replying), nor 1.75.0's v94 one (the Moderation page).
-    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports', 'schema_grant_v88_replies', 'schema_grant_v94_moderation', 'schema_grant_v96_images', 'schema_grant_v99_info_resize', 'schema_grant_v100_images_public', 'schema_grant_v107_tags')");
+    $sdb->exec("DELETE FROM settings WHERE `key` IN ('schema_once_v71_group_matrix', 'schema_grant_v72_shout_edit', 'schema_grant_v74_profile_bio', 'schema_grant_v75_rating_public', 'schema_grant_v81_content', 'schema_grant_v83_comments', 'schema_grant_v84_reports', 'schema_grant_v88_replies', 'schema_grant_v94_moderation', 'schema_grant_v96_images', 'schema_grant_v99_info_resize', 'schema_grant_v100_images_public', 'schema_grant_v107_tags', 'schema_grant_v110_tag_favourites')");
     // 1.72.0: the owner's Admin group, imitated — what production's held before this release (read 2026-09-29): every id
     // but the fifteen registered since v81, v88's comment.reply and v94's three panel.moderation.* ids, four of the five consent ids among them (the owner had
     // ticked them himself; content.public came later and he never had it).

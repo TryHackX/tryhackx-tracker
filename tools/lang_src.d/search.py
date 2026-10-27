@@ -84,3 +84,17 @@ add('', {
     'search.desc_source': ('Source link (optional)', 'Link źródłowy (opcjonalnie)'),
     'search.desc_send': ('Send', 'Wyślij'),
 })
+
+
+add('search', {
+    'sortby_title': ('Sort by', 'Sortuj według'),
+    'sortby_default': ('Sort: columns / best match', 'Sortuj: kolumny / trafność'),
+    'sortby_year_desc': ('Year, newest first', 'Rok, najnowsze'),
+    'sortby_year_asc': ('Year, oldest first', 'Rok, najstarsze'),
+    'sortby_imdb': ('IMDb, best first', 'IMDb, najlepsze'),
+    'sortby_filmweb': ('Filmweb, best first', 'Filmweb, najlepsze'),
+    'sortby_desc': ('Description, newest first', 'Opis, najnowsze'),
+    'sortby_rating': ('Site rating, best first', 'Ocena strony, najlepsze'),
+    'sortby_votes': ('Votes, most first', 'Głosy, najwięcej'),
+    'sortby_steam': ('SteamDB score, best first', 'Wynik SteamDB, najlepsze'),
+})

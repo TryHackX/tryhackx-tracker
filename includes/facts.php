@@ -561,7 +561,8 @@ function factsChipsMax(array $cfg): int
 
 function factsChipsOn(array $cfg, string $place): bool
 {
-    return (['search' => $cfg['facts_chips_search'] ?? '1', 'info' => $cfg['facts_chips_info'] ?? '1', 'panel' => $cfg['facts_chips_panel'] ?? '1'][$place] ?? '1') === '1';
+    return (['search' => $cfg['facts_chips_search'] ?? '1', 'info' => $cfg['facts_chips_info'] ?? '1', 'panel' => $cfg['facts_chips_panel'] ?? '1',
+             'lists' => $cfg['facts_chips_lists'] ?? '1'][$place] ?? '1') === '1';
 }
 
 function factsRowChips(?array $desc, string $name, array $cfg, string $place = ''): ?array
@@ -655,7 +656,8 @@ function factsNameWhitelist(PDO $db): int
 
 function factsNamePredicate(array $f): ?array
 {
-    if (!empty($f['pics']) || is_array($f['imdb'] ?? null) || is_array($f['filmweb'] ?? null) || is_array($f['vbitrate'] ?? null)) return null;
+    if (!empty($f['pics']) || is_array($f['imdb'] ?? null) || is_array($f['filmweb'] ?? null) || is_array($f['vbitrate'] ?? null)
+        || is_array($f['duration'] ?? null) || is_array($f['seasons'] ?? null) || is_array($f['episodes'] ?? null)) return null;
     $where = [];
     $args = [];
     foreach ($f['tags'] ?? [] as $set) {
@@ -710,21 +712,27 @@ function factsRequest(array $get): array
     return [
         'facts' => ['tags' => factsTagsParam($get['tags'] ?? ''), 'type' => (string)($get['type'] ?? ''), 'pics' => ($get['pics'] ?? '') === '1',
                     'year' => factsRange($get['year'] ?? null, 'year'), 'imdb' => factsRange($get['imdb'] ?? null, 'imdb'),
-                    'filmweb' => factsRange($get['filmweb'] ?? null, 'filmweb'), 'vbitrate' => factsRange($get['vbitrate'] ?? null, 'rate')],
+                    'filmweb' => factsRange($get['filmweb'] ?? null, 'filmweb'), 'vbitrate' => factsRange($get['vbitrate'] ?? null, 'rate'),
+                    'duration' => factsRange($get['duration'] ?? null, 'count'), 'seasons' => factsRange($get['seasons'] ?? null, 'count'),
+                    'episodes' => factsRange($get['episodes'] ?? null, 'count'), 'notags' => factsTagsParam($get['notags'] ?? ''),
+                    'rating' => factsRange($get['rating'] ?? null, 'pct'), 'votes' => factsRange($get['votes'] ?? null, 'count'),
+                    'steam' => factsRange($get['steam'] ?? null, 'pct')],
+        'seen' => factsRange($get['seen'] ?? null, 'date'),
         'size' => factsRange($get['size'] ?? null, 'size'),
         'files' => factsRange($get['filecount'] ?? null, 'count'),
         'seeders' => factsRange($get['seeders'] ?? null, 'count'),
     ];
 }
 
-function factsFilterConds(PDO $db, array $cfg, array $f, bool $canContent, bool $signedIn): array
+function factsFilterCondsMain(PDO $db, array $cfg, array $f, bool $canContent, bool $signedIn): array
 {
     $dims = [];
     foreach ($f['tags'] ?? [] as $set) $dims[] = [['tags' => [$set]], $set];
     if (in_array($f['type'] ?? '', ['movie', 'series'], true)) $dims[] = [['type' => $f['type']], ['t:' . $f['type']]];
     if (is_array($f['year'] ?? null)) $dims[] = [['year' => $f['year']], []];
     $descOnly = array_filter(['pics' => !empty($f['pics']) ? true : null, 'imdb' => $f['imdb'] ?? null, 'filmweb' => $f['filmweb'] ?? null,
-                              'vbitrate' => $f['vbitrate'] ?? null], fn($v) => $v !== null);
+                              'vbitrate' => $f['vbitrate'] ?? null, 'duration' => $f['duration'] ?? null, 'seasons' => $f['seasons'] ?? null,
+                              'episodes' => $f['episodes'] ?? null], fn($v) => $v !== null);
     if ($descOnly) $dims[] = [$descOnly, []];
     if (!$dims) return [];
     $byName = factsMode($cfg) === 'desc_name';
@@ -782,7 +790,10 @@ function factsEngineFilters(PDO $db, array $cfg, array $req, bool $canContent, b
     $size = $req['size'] ?? null;
     $files = $req['files'] ?? null;
     $seeders = $req['seeders'] ?? null;
+    $seen = $req['seen'] ?? null;
     return array_filter([
+        'seen_min' => $seen !== null && $seen[0] !== null ? $seen[0] . ' 00:00:00' : null,
+        'seen_max' => $seen !== null && $seen[1] !== null ? $seen[1] . ' 23:59:59' : null,
         'size_min' => $size !== null && $size[0] !== null ? (int)$size[0] : null,
         'size_max' => $size !== null && $size[1] !== null ? (int)$size[1] : null,
         'files_min' => $files !== null && $files[0] !== null ? (int)$files[0] : null,
@@ -1103,9 +1114,11 @@ function factsRange($raw, string $kind): ?array
         $v = trim($v);
         if ($v === '') return null;
         if ($kind === 'size') return factsBytes($v);
+        if ($kind === 'date') return preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) && strtotime($v) !== false ? $v : null;
         if (!preg_match('/^\d{1,9}(?:[.,]\d{1,2})?$/', $v)) return null;
         $n = (float)str_replace(',', '.', $v);
         if ($kind === 'rate') return (int)round($n * 1000);
+        if ($kind === 'pct') return (int)min(100, $n);
         return in_array($kind, ['imdb', 'filmweb'], true) ? min(10.0, $n) : (int)$n;
     };
     $min = $read($parts[0]);
@@ -1125,7 +1138,8 @@ function factsFilterHashes(PDO $db, array $f, bool $signedIn): ?array
         $where[] = '(' . implode(' OR ', $or) . ')';
     }
     if (in_array($f['type'] ?? '', ['movie', 'series'], true)) { $where[] = 'tags LIKE ?'; $args[] = '%,t:' . $f['type'] . ',%'; }
-    foreach (['year' => ['year_to', 'year_from'], 'imdb' => ['imdb', 'imdb'], 'filmweb' => ['filmweb', 'filmweb'], 'vbitrate' => ['vbitrate', 'vbitrate']] as $k => [$colMin, $colMax]) {
+    foreach (['year' => ['year_to', 'year_from'], 'imdb' => ['imdb', 'imdb'], 'filmweb' => ['filmweb', 'filmweb'], 'vbitrate' => ['vbitrate', 'vbitrate'],
+              'duration' => ['duration_min', 'duration_min'], 'seasons' => ['seasons', 'seasons'], 'episodes' => ['episodes', 'episodes']] as $k => [$colMin, $colMax]) {
         $r = $f[$k] ?? null;
         if (!is_array($r)) continue;
         if ($r[0] !== null) { $where[] = $colMin . ' >= ?'; $args[] = $r[0]; }
@@ -1139,4 +1153,295 @@ function factsFilterHashes(PDO $db, array $f, bool $signedIn): ?array
     $st->execute($args);
     $hashes = array_map('strtolower', $st->fetchAll(PDO::FETCH_COLUMN));
     return array_slice(array_keys(factsPublished($db, $hashes, $signedIn)), 0, FACTS_FILTER_CAP);
+}
+
+const FACTS_SORTS = ['year', 'imdb', 'filmweb', 'rating', 'votes', 'steam', 'desc'];
+const FACTS_SORT_ALL = 2000;
+const FACTS_SORT_SCAN = 20000;
+
+function factsFilterConds(PDO $db, array $cfg, array $f, bool $canContent, bool $signedIn): array
+{
+    $conds = factsFilterCondsMain($db, $cfg, $f, $canContent, $signedIn);
+    foreach ($f['notags'] ?? [] as $set) {
+        $c = factsExcludeCond($db, $cfg, $set, $canContent, $signedIn);
+        if ($c !== null) $conds[] = $c;
+    }
+    $rated = factsRatingCond($db, $cfg, $f);
+    if ($rated !== null) $conds[] = $rated;
+    return $conds;
+}
+
+function factsExcludeCond(PDO $db, array $cfg, array $set, bool $canContent, bool $signedIn): ?array
+{
+    $ids = array_values(array_filter($set, fn($id) => factsTagValid((string)$id)));
+    if (!$ids) return null;
+    $hashes = $canContent ? (factsFilterHashes($db, ['tags' => [$ids]], $signedIn) ?? []) : [];
+    $tpl = [];
+    $args = [];
+    if (function_exists('tagsFilterExplicit') && ($ex = tagsFilterExplicit($db, $ids)) !== null) {
+        if (isset($ex['hashes'])) $hashes = array_merge($hashes, $ex['hashes']);
+        else { $tpl[] = $ex['tpl']; array_push($args, ...$ex['args']); }
+    }
+    if (factsMode($cfg) === 'desc_name' && ($nf = factsNameTemplate(['tags' => [$ids]])) !== null) {
+        $tpl[] = $nf['tpl'];
+        array_push($args, ...$nf['args']);
+    }
+    $hashes = array_values(array_unique(array_map('strtolower', $hashes)));
+    if (!$hashes && !$tpl) return null;
+    return [$hashes, $tpl ? '(' . implode(' OR ', $tpl) . ')' : null, $args, true];
+}
+
+function factsRepValues(array $cfg, int $votes, int $scoreX100): ?array
+{
+    if ($votes < 1) return null;
+    $stars = function_exists('repMode') && repMode($cfg) === 'stars';
+    $p = $stars ? ($scoreX100 / 100 - 0.5) / 4.5 : $scoreX100 / 10000;
+    $p = max(0.0, min(1.0, $p));
+    $steam = $p - ($p - 0.5) * pow($votes + 1, -log10(2));
+    return ['rating' => round($p * 100, 1), 'votes' => $votes, 'steam' => round($steam * 100, 1)];
+}
+
+function factsRatedSet(PDO $db, array $cfg): array
+{
+    static $memo = null;
+    if ($memo !== null) return $memo;
+    $memo = [];
+    try {
+        $hashes = $db->query("SELECT DISTINCT info_hash FROM hash_votes LIMIT 20000")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (\Throwable $e) {
+        return $memo;
+    }
+    foreach (array_chunk(array_values(array_unique(array_map('strtolower', $hashes))), 1000) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        foreach (["SELECT info_hash, votes_count, score_x100 FROM index_hashes WHERE info_hash IN ($in) AND votes_count > 0",
+                  "SELECT info_hash, votes_count, score_x100 FROM whitelist WHERE info_hash IN ($in) AND votes_count > 0 AND banned = 0"] as $sql) {
+            $st = $db->prepare($sql);
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_NUM) as [$h, $n, $s]) {
+                $v = factsRepValues($cfg, (int)$n, (int)$s);
+                if ($v !== null) $memo[strtolower((string)$h)] = $v;
+            }
+        }
+    }
+    return $memo;
+}
+
+function factsRatingCond(PDO $db, array $cfg, array $f): ?array
+{
+    $want = array_filter(['rating' => $f['rating'] ?? null, 'votes' => $f['votes'] ?? null, 'steam' => $f['steam'] ?? null], 'is_array');
+    if (!$want) return null;
+    $hashes = [];
+    foreach (factsRatedSet($db, $cfg) as $h => $v) {
+        foreach ($want as $k => [$min, $max]) {
+            if (($min !== null && $v[$k] < $min) || ($max !== null && $v[$k] > $max)) continue 2;
+        }
+        $hashes[] = $h;
+    }
+    return [$hashes, null, [], false];
+}
+
+function factsDescDates(PDO $db, ?array $hashes, bool $signedIn): array
+{
+    $out = [];
+    $clause = '';
+    $args = [];
+    if ($hashes !== null) {
+        $hashes = array_values(array_unique(array_map('strtolower', $hashes)));
+        if (!$hashes) return [];
+        $clause = ' AND info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')';
+        $args = $hashes;
+    }
+    foreach (["SELECT info_hash, COALESCE(content_reviewed_at, created_at) FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description IS NOT NULL$clause LIMIT 50000",
+              "SELECT info_hash, COALESCE(content_reviewed_at, created_at) FROM hash_content WHERE content_status = 'approved' AND description IS NOT NULL$clause LIMIT 50000"] as $sql) {
+        try {
+            $st = $db->prepare($sql);
+            $st->execute($args);
+            foreach ($st->fetchAll(PDO::FETCH_NUM) as [$h, $at]) {
+                $h = strtolower((string)$h);
+                if (!isset($out[$h]) || strcmp((string)$at, $out[$h]) > 0) $out[$h] = (string)$at;
+            }
+        } catch (\Throwable $e) {
+            error_log('[facts] description dates: ' . $e->getMessage());
+        }
+    }
+    return array_intersect_key($out, factsPublished($db, array_keys($out), $signedIn));
+}
+
+function factsDescValues(PDO $db, string $col, ?array $hashes, bool $signedIn): array
+{
+    if (!in_array($col, ['imdb', 'filmweb', 'year_from'], true) || !factsTableReady($db)) return [];
+    $clause = '';
+    $args = [];
+    if ($hashes !== null) {
+        $hashes = array_values(array_unique(array_map('strtolower', $hashes)));
+        if (!$hashes) return [];
+        $clause = ' AND info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')';
+        $args = $hashes;
+    }
+    $sql = "SELECT info_hash, $col FROM desc_facts WHERE $col IS NOT NULL AND $col > 0$clause LIMIT 50000";
+    $st = $db->prepare($sql);
+    $st->execute($args);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$h, $v]) $out[strtolower((string)$h)] = (float)$v;
+    return array_intersect_key($out, factsPublished($db, array_keys($out), $signedIn));
+}
+
+function factsSortByNames(PDO $db, array $cfg): bool
+{
+    return factsMode($cfg) === 'desc_name' && factsNameReady($db);
+}
+
+function factsSortValues(PDO $db, array $cfg, string $key, array $rows, bool $canContent, bool $signedIn): array
+{
+    $hashes = array_map(fn($r) => strtolower((string)$r['info_hash']), $rows);
+    if (in_array($key, ['rating', 'votes', 'steam'], true)) {
+        $out = [];
+        foreach ($rows as $r) {
+            $v = factsRepValues($cfg, (int)($r['votes_count'] ?? 0), (int)($r['score_x100'] ?? 0));
+            if ($v !== null) $out[strtolower((string)$r['info_hash'])] = $v[$key];
+        }
+        return $out;
+    }
+    if ($key === 'desc') return $canContent ? factsDescDates($db, $hashes, $signedIn) : [];
+    if ($key === 'imdb' || $key === 'filmweb') return $canContent ? factsDescValues($db, $key, $hashes, $signedIn) : [];
+    if (!factsSortByNames($db, $cfg)) return $canContent ? factsDescValues($db, 'year_from', $hashes, $signedIn) : [];
+    $out = [];
+    if ($hashes) {
+        foreach (array_chunk($hashes, 1000) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $db->prepare("SELECT info_hash, nf_year FROM name_facts WHERE info_hash IN ($in) AND nf_year > 0");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_NUM) as [$h, $y]) $out[strtolower((string)$h)] = (float)$y;
+        }
+    }
+    return $out;
+}
+
+function factsSortStream(PDO $db, array $cfg, string $key, bool $asc, $after, int $limit, bool $canContent, bool $signedIn): array
+{
+    if ($after === 'end') return [[], 'end'];
+    if ($key === 'year' && factsSortByNames($db, $cfg)) {
+        $limit = max(1, $limit);
+        $orderClause = $asc ? 'nf_year ASC, info_hash ASC' : 'nf_year DESC, info_hash DESC';
+        $clause = $asc ? '(nf_year > ? OR (nf_year = ? AND info_hash > ?))' : '(nf_year < ? OR (nf_year = ? AND info_hash < ?))';
+        if ($after === null) {
+            $st = $db->prepare("SELECT info_hash, nf_year FROM name_facts WHERE nf_year > 0 ORDER BY $orderClause LIMIT $limit");
+            $st->execute();
+        } else {
+            $st = $db->prepare("SELECT info_hash, nf_year FROM name_facts WHERE nf_year > 0 AND $clause ORDER BY $orderClause LIMIT $limit");
+            $st->execute([$after[0], $after[0], $after[1]]);
+        }
+        $rows = $st->fetchAll(PDO::FETCH_NUM);
+        if (!$rows) return [[], 'end'];
+        $last = end($rows);
+        return [array_map(fn($r) => strtolower((string)$r[0]), $rows), count($rows) < $limit ? 'end' : [(int)$last[1], (string)$last[0]]];
+    }
+    if (in_array($key, ['rating', 'votes', 'steam'], true)) {
+        $vals = array_map(fn($v) => $v[$key], factsRatedSet($db, $cfg));
+    } elseif ($key === 'desc') {
+        $vals = $canContent ? factsDescDates($db, null, $signedIn) : [];
+    } else {
+        $vals = $canContent ? factsDescValues($db, $key === 'year' ? 'year_from' : $key, null, $signedIn) : [];
+    }
+    $keys = array_keys($vals);
+    usort($keys, fn($a, $b) => $asc ? [$vals[$a], $a] <=> [$vals[$b], $b] : [$vals[$b], $b] <=> [$vals[$a], $a]);
+    return [array_map('strval', $keys), 'end'];
+}
+
+function factsSortedSearch(PDO $db, array $cfg, array $q, string $key, bool $asc, bool $canContent, bool $signedIn): array
+{
+    $page = max(1, (int)($q['page'] ?? 1));
+    $perPage = max(1, min(200, (int)($q['per_page'] ?? 25)));
+    $offset = ($page - 1) * $perPage;
+    $base = ['sort' => 'last:desc', 'per_page' => 200, 'page' => 1] + $q;
+    $first = indexSearchCatalogue($db, $cfg, $base);
+    $total = (int)$first['total'];
+    $capped = !empty($first['total_capped']);
+    $out = ['rows' => [], 'total' => $total, 'total_capped' => $capped, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'sort_limited' => false];
+    $all = array_key_exists('sort_all', $q) ? max(0, (int)$q['sort_all']) : FACTS_SORT_ALL;
+    if (!$capped && $total <= $all) {
+        $rows = $first['rows'];
+        for ($p = 2; count($rows) < $total && $p <= (int)ceil(FACTS_SORT_ALL / 200); $p++) {
+            $more = indexSearchCatalogue($db, $cfg, ['page' => $p] + $base);
+            if (!$more['rows']) break;
+            array_push($rows, ...$more['rows']);
+        }
+        $vals = factsSortValues($db, $cfg, $key, $rows, $canContent, $signedIn);
+        $known = [];
+        $unknown = [];
+        foreach ($rows as $i => $r) {
+            $h = strtolower((string)$r['info_hash']);
+            if (isset($vals[$h])) $known[] = [$vals[$h], $i, $r];
+            else $unknown[] = $r;
+        }
+        usort($known, fn($a, $b) => $asc ? [$a[0], $a[1]] <=> [$b[0], $b[1]] : [$b[0], $a[1]] <=> [$a[0], $b[1]]);
+        $out['rows'] = array_slice(array_merge(array_column($known, 2), $unknown), $offset, $perPage);
+        return $out;
+    }
+    $matched = [];
+    $seenSet = [];
+    $scanned = 0;
+    $after = null;
+    $exhausted = false;
+    while (count($matched) < $offset + $perPage && $scanned < FACTS_SORT_SCAN) {
+        [$batch, $after] = factsSortStream($db, $cfg, $key, $asc, $after, 1000, $canContent, $signedIn);
+        if (!$batch) { $exhausted = true; break; }
+        foreach (array_chunk($batch, 200) as $chunk) {
+            $scanned += count($chunk);
+            foreach ($chunk as $h) $seenSet[$h] = true;
+            $r = indexSearchCatalogue($db, $cfg, ['only_hashes' => $chunk, 'page' => 1] + $base);
+            $byHash = [];
+            foreach ($r['rows'] as $row) $byHash[strtolower((string)$row['info_hash'])] = $row;
+            foreach ($chunk as $h) if (isset($byHash[$h])) $matched[] = $byHash[$h];
+            if (count($matched) >= $offset + $perPage || $scanned >= FACTS_SORT_SCAN) break;
+        }
+        if ($after === 'end' && count($matched) < $offset + $perPage) { $exhausted = true; break; }
+    }
+    $rows = array_slice($matched, $offset, $perPage);
+    if (count($rows) < $perPage && $exhausted) {
+        $need = $perPage - count($rows);
+        $skip = max(0, $offset - count($matched));
+        $cond = $key === 'year' && factsSortByNames($db, $cfg)
+            ? [[], '(SELECT 1 FROM name_facts nf WHERE nf.info_hash = {T}.info_hash AND nf.nf_year > 0 LIMIT 1) IS NOT NULL', [], true]
+            : [array_keys($seenSet), null, [], true];
+        $rest = $base;
+        $rest['facts_conds'] = array_merge($base['facts_conds'] ?? [], [$cond]);
+        $rest['per_page'] = $perPage;
+        $firstPage = intdiv($skip, $perPage) + 1;
+        $got = [];
+        for ($p = $firstPage; $p <= $firstPage + 1 && count($got) < ($skip % $perPage) + $need; $p++) {
+            $r = indexSearchCatalogue($db, $cfg, ['page' => $p] + $rest);
+            if (!$r['rows']) break;
+            array_push($got, ...$r['rows']);
+        }
+        array_push($rows, ...array_slice($got, $skip % $perPage, $need));
+    } elseif (count($rows) < $perPage && !$exhausted) {
+        $out['sort_limited'] = true;
+    }
+    $out['rows'] = $rows;
+    return $out;
+}
+
+function factsListAttach(PDO $db, array $cfg, array $rows): array
+{
+    if (!$rows || !factsChipsOn($cfg, 'lists')) return $rows;
+    $hashes = [];
+    foreach ($rows as $r) {
+        if (!empty($r['info_hash'])) $hashes[] = strtolower((string)$r['info_hash']);
+    }
+    if (!$hashes) return $rows;
+    $canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
+    $signedIn = function_exists('richtextViewerSignedIn') && richtextViewerSignedIn($db);
+    $desc = $canContent ? factsChipsFor($db, $hashes, $signedIn) : [];
+    $me = usersEnabled($cfg) ? currentUser($db) : null;
+    $extra = function_exists('tagsForHashes') ? tagsForHashes($db, $hashes, $me ? (int)$me['id'] : null, $me !== null && userCan($db, $cfg, 'tags.moderate')) : [];
+    foreach ($rows as &$r) {
+        $h = strtolower((string)($r['info_hash'] ?? ''));
+        if ($h === '') continue;
+        $chips = factsRowChips($desc[$h] ?? null, (string)($r['name'] ?? ''), $cfg, 'lists');
+        if (function_exists('tagsMergeChips')) $chips = tagsMergeChips($chips, $extra[$h] ?? null, $cfg);
+        if ($chips !== null) $r['facts'] = $chips;
+    }
+    unset($r);
+    return $rows;
 }

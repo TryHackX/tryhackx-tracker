@@ -249,6 +249,10 @@
             main.appendChild(el('span', { className: 'pf-name pf-gone', title: t.key('js.fav.gone_title'), text: t.key('js.fav.gone') }));
         }
         if (r.banned) main.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t.key('js.fav.blocked') }));
+        if (r.facts && window.FactChips) {
+            var chips = window.FactChips.render(r.facts, null, null);
+            if (chips) main.appendChild(chips);
+        }
         if (opts.statusBadges && r.status) {
             main.appendChild(el('span', { className: 'pf-badge pf-st-' + r.status, text: t.key('js.fav.status_' + r.status) }));
         }

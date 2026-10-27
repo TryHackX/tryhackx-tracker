@@ -253,3 +253,27 @@ add('js.tags', {
 add('api.tags', {
     'add_pending': ('Added — others see it once a moderator approves.', 'Dodano — inni zobaczą go po zatwierdzeniu przez moderatora.'),
 })
+
+
+add('perm', {
+    'tags.favourite': ('Keep favourite tags (My tags) for quick filters', 'Ulubione tagi (Moje tagi) do szybkich filtrów'),
+})
+
+add('tags', {
+    'mine_h2': ('My tags', 'Moje tagi'),
+    'mine_empty': ('Star a tag below and it shows here and among the search filters.', 'Oznacz tag gwiazdką poniżej, a pojawi się tutaj i w filtrach wyszukiwarki.'),
+})
+
+add('js.tags', {
+    'fav_on': ('Add to My tags', 'Dodaj do Moich tagów'),
+    'fav_off': ('Remove from My tags', 'Usuń z Moich tagów'),
+})
+
+add('api.tags', {
+    'fav_limit': ('You have as many favourite tags as allowed.', 'Masz już tyle ulubionych tagów, ile wolno.'),
+})
+
+add('settings', {
+    'facts_chips_lists': ('Tags on profile lists', 'Tagi na listach profilu'),
+    'facts_chips_lists_hint': ('Favourites, uploads and lists show each torrent\'s tags.', 'Ulubione, wysłane i listy pokazują tagi każdego torrentu.'),
+})

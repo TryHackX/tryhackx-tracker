@@ -300,6 +300,7 @@ function settingsCatalogKeywords(): array {
         'facts_chips_search'        => 'chips tags search results rows show hide tagi wyszukiwarka',
         'facts_chips_info'          => 'chips tags info panel torrent details show hide tagi',
         'facts_chips_panel'         => 'chips tags panel index whitelist lists show hide tagi',
+        'facts_chips_lists'         => 'chips tags profile favourites uploads lists show hide tagi listy profil',
         'facts_chips_max'           => 'chips tags how many shown more limit plus tagi ile',
         'facts_chips_rates'         => 'bitrate bit rate overall video audio average maximum vbr cbr chips',
         'facts_chips_ratings'       => 'imdb filmweb ratings chips oceny',

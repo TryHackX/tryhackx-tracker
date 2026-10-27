@@ -1487,6 +1487,14 @@
                         </select>
                         <small class="settings-hint"><?= _h('settings.facts_chips_panel_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="facts_chips_lists">
+                        <label for="set-facts_chips_lists" class="form-label"><?= _h('settings.facts_chips_lists') ?></label>
+                        <select id="set-facts_chips_lists" class="form-select bg-dark text-light border-secondary" name="facts_chips_lists">
+                            <option value="1" <?= ($cfg['facts_chips_lists'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_chips_lists'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_chips_lists_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="facts_chips_max">
                         <label for="set-facts_chips_max" class="form-label"><?= _h('settings.facts_chips_max') ?></label>
                         <input type="number" min="1" max="20" step="1" id="set-facts_chips_max" class="form-control bg-dark text-light border-secondary" name="facts_chips_max" value="<?= (int)($cfg['facts_chips_max'] ?? 6) ?>">

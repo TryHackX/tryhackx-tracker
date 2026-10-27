@@ -4407,7 +4407,9 @@ window.siteToast = siteToast;
     // because the panel's own Share button strips them: a link to ONE torrent must not carry the
     // sender's query, filter and page number with it.
     const OWNED = ['search', 'search_files', 'in_desc', 'desc', 'content', 'sort', 'page', 'per_page', 'hash',
-                   'type', 'tags', 'pics', 'size', 'filecount', 'year', 'seeders', 'imdb', 'filmweb', 'vbitrate'];
+                   'type', 'tags', 'notags', 'pics', 'size', 'filecount', 'year', 'seeders', 'imdb', 'filmweb', 'vbitrate',
+                   'duration', 'seasons', 'episodes', 'rating', 'votes', 'steam', 'seen'];
+    const FACT_SORT = /^(year|imdb|filmweb|rating|votes|steam|desc):(asc|desc)$/;
 
     /** The CSRF token of whichever page this panel is on (csrfToken(): the layout's, since 1.71.0 on every page). */
     function csrfForContent() {
@@ -4823,7 +4825,9 @@ window.siteToast = siteToast;
         // ── multi-column sort stack on the table headers (desc → asc → off, priority badges) ──
         const headers = [...document.querySelectorAll('#search-table th.search-sortable')];
         const sortStack = [];
+        const sortBy = $id('search-sortby');
         function serializeSort() {
+            if (sortBy && FACT_SORT.test(sortBy.value)) return sortBy.value;
             const parts = [];
             if (!bestBox || bestBox.checked) parts.push('relevance:desc');
             sortStack.forEach(x => parts.push(x.col + ':' + x.dir));
@@ -4850,7 +4854,13 @@ window.siteToast = siteToast;
                 }
             });
         }
+        if (sortBy) sortBy.addEventListener('change', () => {
+            sortStack.length = 0;
+            updateSortIcons();
+            run(1, 'push');
+        });
         headers.forEach(th => th.addEventListener('click', () => {
+            if (sortBy) sortBy.value = '';
             const col = th.dataset.sort;
             const idx = sortStack.findIndex(x => x.col === col);
             if (idx === -1) sortStack.push({ col, dir: 'desc' });
@@ -4892,7 +4902,9 @@ window.siteToast = siteToast;
         if (filtersHost && window.SearchFilters) {
             let catalog = [];
             try { catalog = JSON.parse(filtersHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
-            filters = window.SearchFilters.mount(filtersHost, { catalog, facts: filtersHost.dataset.facts === '1', desc: filtersHost.dataset.desc === '1',
+            let favs = [];
+            try { favs = JSON.parse(filtersHost.dataset.favs || '[]'); } catch (e) { favs = []; }
+            filters = window.SearchFilters.mount(filtersHost, { catalog, favs, rep: filtersHost.dataset.rep === '1', facts: filtersHost.dataset.facts === '1', desc: filtersHost.dataset.desc === '1',
                 moveRight: [$id('search-total'), $id('search-share')], onChange: () => run(1, 'push') });
             window.SearchFiltersPick = (id) => { if (infoHash) closeInfo(); filters.addTag(id); };
         }
@@ -4912,7 +4924,7 @@ window.siteToast = siteToast;
             // request-level fallback `seeders:desc`. Writing that into the address would read back as
             // an explicit Seeders sort, arrow and all — a different UI state from the one that wrote
             // it. `none` is the address's own word for that state and nothing else uses it.
-            const sort = (!sortStack.length && bestBox && !bestBox.checked) ? 'none' : serializeSort();
+            const sort = (sortBy && FACT_SORT.test(sortBy.value)) ? sortBy.value : ((!sortStack.length && bestBox && !bestBox.checked) ? 'none' : serializeSort());
             if (sort !== DEFAULT_SORT) st.sort = sort;
             if (page > 1) {
                 st.page = String(page);
@@ -4956,6 +4968,7 @@ window.siteToast = siteToast;
         function parseSort(raw) {
             if (!raw) return null;
             if (raw === 'none') return { best: false, stack: [] };
+            if (FACT_SORT.test(String(raw))) return { best: false, stack: [], fact: String(raw) };
             const parts = String(raw).split(',').filter(Boolean);
             if (!parts.length || parts.length > SORT_COLS.length + 1) return null;
             const out = { best: false, stack: [] };
@@ -5008,8 +5021,9 @@ window.siteToast = siteToast;
                 // .value from script does not fire it — which is exactly the behaviour wanted here.
                 if (perPageSel && st.perPage) perPageSel.value = st.perPage;
                 sortStack.length = 0;
+                if (sortBy) sortBy.value = st.sort && st.sort.fact && [...sortBy.options].some(o => o.value === st.sort.fact) ? st.sort.fact : '';
                 if (st.sort) {
-                    if (bestBox) bestBox.checked = st.sort.best;
+                    if (bestBox) bestBox.checked = st.sort.best || !!st.sort.fact;
                     st.sort.stack.forEach(x => sortStack.push({ col: x.col, dir: x.dir }));
                 } else if (bestBox) {
                     bestBox.checked = true;
@@ -5258,6 +5272,7 @@ window.siteToast = siteToast;
             note.hidden = json.total !== 0;
             note.textContent = json.total === 0 ? t.key('js.app.nothing_found') : '';
             renderPager(json.page, json.pages, json.total, !!json.total_capped);
+            showHint(json.sort_limited ? t.key('js.app.sort_limited') : '');
         }
         // First / Prev / Page [n] of M · X rows / Next / Last — same pattern as the admin tables, and the
         // chevrons are icons beside the words the way admin-common.js draws them (1.68.0; they used to
