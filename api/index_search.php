@@ -41,7 +41,7 @@ $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whi
 $canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
 $signedIn = richtextViewerSignedIn($db);
 $size = factsRange($_GET['size'] ?? null, 'size');
-$files = factsRange($_GET['files'] ?? null, 'count');
+$files = factsRange($_GET['filecount'] ?? null, 'count');
 $seeders = factsRange($_GET['seeders'] ?? null, 'count');
 $onlyHashes = $canContent ? factsFilterHashes($db, [
     'tags' => factsTagsParam($_GET['tags'] ?? ''), 'type' => (string)($_GET['type'] ?? ''), 'pics' => ($_GET['pics'] ?? '') === '1',

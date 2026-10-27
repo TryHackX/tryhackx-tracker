@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.84.0] — 2026-10-27
+
+Facts read from the descriptions, their tags as chips, and the search's advanced filters; with two of the panel's windows
+made wider. Schema 104.
+
+- **Facts from a description** (`desc_facts`, one small row per described torrent): the forum's "quick view" (year,
+  series or movie, seasons, episodes, running time, release type, language information, genre, IMDb and Filmweb) and
+  the MediaInfo blocks (video format and size — 1920×800 is still 1080p —, bit rate, HDR format, audio formats and
+  their languages, subtitle languages), with the forum's own rules for years, seasons and durations. Nothing in
+  `[hide]` is read. Read again whenever a description is written; the janitor catches up every ten minutes and
+  `php tools/facts.php` reads them all.
+- **Tags from the facts:** quality, video, HDR, audio, source, language, movie or series, genre. **Chips** under the
+  name in the search, the Info panel and the panel's Whitelist and Index lists — six at most, the rest behind "+N" —
+  coloured by group, with the year, the video bit rate and the ratings beside them. Only a reader who may read
+  descriptions sees them (signed-in members for a description the forum sent for members), and never from a
+  description that is not published.
+- **Advanced filters on the search page:** Clear, All / Movies / Series, and More filters with the release (size with
+  units, files, year), the quality, the language, the ratings, the seeders and "with pictures". A chip clicked in a row
+  is a filter; two of one group are either, of two groups both. The active filters stand as chips with ×, the whole
+  state is in the address, a typed value that is not a number is marked and not sent, and changing only the filters
+  counts against a separate, five times larger limit.
+- **The search toolbar no longer breaks a line** for the result count and Share: they sit at the right of the filter bar.
+- **The panel:** Edit user is wide, the account on the left and the warnings and moderation on the right; API key
+  settings is wide with its questions in two columns; both keep Cancel and Save in the footer.
+
 ## [1.83.1] — 2026-10-27
 
 The owner's notes after turning down the forum's descriptions: the torrents vanished from the search, sending again

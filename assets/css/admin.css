@@ -3713,4 +3713,4 @@ a.source-tab { text-decoration: none; }
     #img-f-q, .rq-toolbar .rq-search-wrap { width: auto; max-width: none; }
     #img-total, #img-q-total, .rq-toolbar #rq-total { margin-left: 0; }
 }
-.wl-name .fchips, .wl-name-cell .fchips { flex-wrap: nowrap; overflow: hidden; }
+.wl-name .fchips, .wl-name-cell .fchips { max-height: 2.8rem; overflow: hidden; }

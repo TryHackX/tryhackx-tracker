@@ -3,12 +3,12 @@
     if (window.SearchFilters) return;
 
     const RANGES = [
-        { key: 'size', group: 'release', unit: true },
-        { key: 'files', group: 'release' },
-        { key: 'year', group: 'release', facts: true, year: true },
-        { key: 'seeders', group: 'popularity', minOnly: true },
-        { key: 'imdb', group: 'ratings', facts: true, minOnly: true, rating: true },
-        { key: 'filmweb', group: 'ratings', facts: true, minOnly: true, rating: true },
+        { key: 'size', label: 'size', group: 'release', unit: true },
+        { key: 'filecount', label: 'files', group: 'release' },
+        { key: 'year', label: 'year', group: 'release', facts: true, year: true },
+        { key: 'seeders', label: 'seeders', group: 'popularity', minOnly: true },
+        { key: 'imdb', label: 'imdb', group: 'ratings', facts: true, minOnly: true, rating: true },
+        { key: 'filmweb', label: 'filmweb', group: 'ratings', facts: true, minOnly: true, rating: true },
     ];
     const GROUPS = [['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language']];
     const PARAMS = ['type', 'tags', 'pics'].concat(RANGES.map(r => r.key));
@@ -98,7 +98,7 @@
             if (r.facts && !facts) return;
             const box = el('div', 'sf-range');
             const id = 'sf-' + r.key;
-            const lab = el('label', 'sf-label', t.key('js.filters.' + r.key));
+            const lab = el('label', 'sf-label', t.key('js.filters.' + r.label));
             lab.htmlFor = id + '-min';
             box.appendChild(lab);
             const row = el('div', 'sf-range-row');
@@ -108,7 +108,7 @@
                 i.id = id + '-' + end;
                 i.inputMode = r.unit ? 'text' : 'decimal';
                 i.placeholder = t.key(end === 'min' ? 'js.filters.min' : 'js.filters.max');
-                i.setAttribute('aria-label', t.key('js.filters.input_label', { name: t.key('js.filters.' + r.key), end: t.key(end === 'min' ? 'js.filters.min' : 'js.filters.max') }));
+                i.setAttribute('aria-label', t.key('js.filters.input_label', { name: t.key('js.filters.' + r.label), end: t.key(end === 'min' ? 'js.filters.min' : 'js.filters.max') }));
                 i.autocomplete = 'off';
                 i.addEventListener('input', () => {
                     const ok = validValue(r, i.value.trim());
@@ -237,7 +237,7 @@
             const rg = readRanges();
             Object.keys(rg).forEach(k => {
                 const [a, b] = splitRange(rg[k]);
-                const label = t.key(a && b ? 'js.filters.chip_range' : a ? 'js.filters.chip_min' : 'js.filters.chip_max', { name: t.key('js.filters.c_' + k), a: a, b: b });
+                const label = t.key(a && b ? 'js.filters.chip_range' : a ? 'js.filters.chip_min' : 'js.filters.chip_max', { name: t.key('js.filters.c_' + inputs[k].r.label), a: a, b: b });
                 active.appendChild(chip(label, () => { inputs[k].min.value = ''; if (inputs[k].max) inputs[k].max.value = ''; }));
             });
             if (S.pics) active.appendChild(chip(t.key('js.filters.pics'), () => { S.pics = false; }));
