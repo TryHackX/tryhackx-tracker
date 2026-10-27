@@ -3756,16 +3756,21 @@ a.source-tab { text-decoration: none; }
 .admin-body .sf-check { margin-top: 0.45rem; font-size: 0.82rem; }
 .admin-body .sf-tagsearch { max-width: 22rem; padding-top: 0.6rem; }
 .tags-name { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; }
-.tags-swatch { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 1px solid #555; background: transparent; }
+.tags-chip { font-size: 0.8rem; padding: 0.1rem 0.6rem; text-decoration: none; }
+a.tags-chip:hover, a.tags-chip:focus-visible { background: color-mix(in srgb, var(--fc) 28%, transparent); text-decoration: none; outline: none; }
+.fchip.fchip-forum { --fc: #9aa3ad; color: color-mix(in srgb, var(--fc) 55%, #fff); }
 .tags-edit { display: flex; flex-direction: column; gap: 0.35rem; max-width: 26rem; }
 .tags-edit-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .tags-f-title { font-size: 1rem; margin: 0 0 0.25rem; }
 .tags-f-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0 0.4rem; }
 .admin-wide .tags-f-table { min-width: 720px; }
 .tags-f-table .tags-f-n { width: 96px; }
-.tags-f-table .tags-f-to { width: 300px; }
+.tags-f-table .tags-f-to { width: 440px; }
 .tags-f-table .col-badge { width: 130px; }
 .admin-wide .tags-f-table .th-actions { width: 104px; }
-.tags-f-target { width: 100%; }
+.tags-f-to-cell { display: flex; align-items: center; gap: 0.5rem; }
+.tags-f-to-cell .tags-f-chip, .tags-f-to-cell .tags-chip { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
+.tags-f-to-cell .tags-f-target { flex: 1 1 auto; min-width: 0; width: auto; }
+.tags-f-ignored td:not(.th-actions) { opacity: 0.5; }
 .admin-body .sf-n { margin-left: 0.3rem; opacity: 0.65; font-size: 0.68rem; }
 .admin-body .sf-tag[hidden], .admin-body .sf-tags[hidden], .admin-body .sf-group[hidden], .admin-body .sf-range[hidden], .admin-body .sf-check[hidden] { display: none; }

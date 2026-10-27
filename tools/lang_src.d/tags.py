@@ -203,3 +203,8 @@ add('js.tags', {
     'f_st_ignored': ('ignored', 'pomijany'),
     'f_done': ('Done (:n).', 'Gotowe (:n).'),
 })
+
+add('js.tags', {
+    'open_search': ('Open the search with this tag', 'Otwórz wyszukiwarkę z tym tagiem'),
+    'f_new_title': ('A new tag, made when this match is approved', 'Nowy tag — powstanie przy zatwierdzeniu'),
+})

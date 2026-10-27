@@ -205,13 +205,14 @@ button.fchip:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc) 
 .fchip-fact { --fc: #9aa3ad; background: transparent; border-color: #333; }
 .fchip-more { --fc: #9aa3ad; }
 .fchip.is-on { color: #fff; background: color-mix(in srgb, var(--fc) 40%, transparent); border-color: var(--fc); }
-.fchip-x { --fc: #8fa3bf; }
+.fchip-x { --fc: #8fa3bf; color: color-mix(in srgb, var(--fc) 55%, #fff); }
 .fchip-pending { border-style: dashed; opacity: 0.85; }
 .fchip-del { display: inline-flex; align-items: center; margin: 0 -0.15rem 0 0.2rem; padding: 0 0.1rem; border: 0; background: none; color: inherit; line-height: 1; cursor: pointer; font-size: 0.9em; }
 .fchip-del:hover, .fchip-del:focus-visible { color: #ff8a80; outline: none; }
 .info-tags .tag-edit-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; margin-top: 0.45rem; }
 .tag-edit-picker { flex: 1 1 16rem; min-width: 0; }
-.tag-edit-input { width: 100%; }
+.tag-edit-input { width: 100%; height: 2.1rem; }
+.tag-edit-bar .tag-edit-toggle { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.3rem; height: 2.1rem; padding: 0 0.85rem; }
 .tag-edit-sugg { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.35rem; }
 .tag-edit-say { margin-top: 0.3rem; font-size: 0.8rem; min-height: 1em; }
 .tags-page-search { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0.75rem 0 1rem; }

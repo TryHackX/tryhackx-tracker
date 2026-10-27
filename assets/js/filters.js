@@ -513,8 +513,8 @@
                     const i = host.querySelector('.tag-edit-input');
                     if (editing && i) i.focus();
                 });
-                bar.appendChild(toggle);
-                if (editing && edit.add) bar.appendChild(picker());
+                if (editing && edit.add) bar.append(picker(), toggle);
+                else bar.appendChild(toggle);
                 host.append(bar, say);
             };
             draw();

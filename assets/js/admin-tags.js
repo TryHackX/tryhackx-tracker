@@ -38,10 +38,19 @@
         return true;
     }
 
-    function swatch(color) {
-        const s = el('span', { className: 'tags-swatch' });
-        if (color) s.style.background = color;
+    const SITE = document.body.dataset.site || '';
+    const searchHref = (id) => SITE + '?action=search&tags=' + encodeURIComponent(id);
+
+    function chip(label, g, color, extra, title) {
+        const s = el('span', { className: 'fchip fchip-' + g + ' tags-chip' + (extra || ''), title: title || null }, label);
+        if (color) s.style.setProperty('--fc', color);
         return s;
+    }
+
+    function chipLink(id, label, g, color) {
+        const a = el('a', { className: 'fchip fchip-' + g + ' tags-chip', href: searchHref(id), target: '_blank', rel: 'noopener', title: t.key('js.tags.open_search') }, label);
+        if (color) a.style.setProperty('--fc', color);
+        return a;
     }
 
     function editRow(tr, row) {
@@ -79,16 +88,18 @@
         }
         S.rows.forEach(row => {
             const tr = el('tr', {});
-            const chip = el('span', { className: 'fchip fchip-x' }, row.name);
-            if (row.color) chip.style.setProperty('--fc', row.color);
-            const nameCell = el('td', {}, [el('div', { className: 'tags-name' }, [swatch(row.color), chip, el('span', { className: 'wl-small text-muted', text: row.tag })])]);
+            const live = row.status === 'approved' && !row.hidden;
+            const nameCell = el('td', {}, [el('div', { className: 'tags-name' }, [
+                live ? chipLink(row.tag, row.name, 'x', row.color) : chip(row.name, 'x', row.color, row.status === 'pending' ? ' fchip-pending' : ''),
+                el('span', { className: 'wl-small text-muted', text: row.tag })])]);
             if (row.description) nameCell.appendChild(el('div', { className: 'wl-small text-muted', text: row.description }));
             tr.appendChild(nameCell);
             const st = STATUS[row.status] || STATUS.approved;
             const stCell = el('td', { className: 'col-badge' }, el('span', { className: 'wl-badge ' + st[1] }, t.key(st[0])));
             if (row.hidden) stCell.appendChild(el('span', { className: 'wl-badge wl-b-muted ms-1' }, t.key('js.tags.st_hidden')));
             tr.appendChild(stCell);
-            tr.appendChild(el('td', { className: 'font-mono', text: t.num(row.uses || 0) }));
+            tr.appendChild(el('td', { className: 'font-mono' }, live && row.uses
+                ? el('a', { href: searchHref(row.tag), target: '_blank', rel: 'noopener', title: t.key('js.tags.open_search') }, t.num(row.uses)) : t.num(row.uses || 0)));
             tr.appendChild(el('td', { className: 'wl-small' }, [el('div', { text: row.created_by_name || t.key('js.tags.by_' + row.origin) }), el('div', { className: 'text-muted', text: fmtDate(row.created_at) })]));
             const acts = el('td', { className: 'th-actions' });
             if (row.status !== 'approved') acts.appendChild(btn('bi-check-lg', 'btn-outline-success', t.key('js.tags.approve'), () => act('approve', [row.id])));
@@ -189,11 +200,14 @@
                 const acts = el('td', { className: 'th-actions' });
                 if (F.manage && row.state !== 'approved') acts.appendChild(btn('bi-check-lg', 'btn-outline-success', t.key('js.tags.approve'), () => forumAct('forum_approve', c.id, { slug: row.slug })));
                 if (F.manage && row.state !== 'ignored') acts.appendChild(btn('bi-x-lg', 'btn-outline-warning', t.key('js.tags.f_ignore'), () => forumAct('forum_ignore', c.id, { slug: row.slug })));
-                tb.appendChild(el('tr', {}, [
-                    el('td', {}, el('div', { className: 'tags-name' }, [swatch(row.color), el('span', { text: row.name }),
+                const to = row.to || {};
+                const preview = to.new ? chip(to.l || row.name, 'x', row.color, ' fchip-pending', t.key('js.tags.f_new_title'))
+                    : chipLink(row.target, to.l || row.target, to.g || 'x', to.c || null);
+                tb.appendChild(el('tr', { className: row.state === 'ignored' ? 'tags-f-ignored' : null }, [
+                    el('td', {}, el('div', { className: 'tags-name' }, [chip(row.name, 'forum', row.color),
                         el('span', { className: 'wl-small text-muted', text: row.parent ? row.parent + ' / ' + row.slug : row.slug })])),
                     el('td', { className: 'font-mono', text: t.num(row.n || 0) }),
-                    el('td', {}, targetSelect(c, row)),
+                    el('td', {}, el('div', { className: 'tags-f-to-cell' }, [preview, targetSelect(c, row)])),
                     el('td', { className: 'col-badge' }, el('span', { className: 'wl-badge ' + st[1] }, t.key(st[0]))),
                     acts,
                 ]));

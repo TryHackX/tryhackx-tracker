@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.6] — 2026-10-27
+
+- **The Tags page looks like the site.** Each tag is the chip people see, in its own colour, and opens the search with
+  that tag (so does its number of torrents); "Tags from the forum" shows the forum's tag as a chip in the forum's colour
+  and, beside the choice, what it becomes here as the chip it will be — a new tag dashed until approved; an ignored
+  one is greyed out.
+- A tag with a dark colour of its own reads on the dark pages: its words are drawn lighter than its colour.
+- Info → Edit tags: the field and its Done button are one height, and Done stands after the field.
+
 ## [1.85.5] — 2026-10-27
 
 - The Tags page no longer shows an empty badge beside the count when no new tag waits: the badge's own display

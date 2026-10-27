@@ -219,7 +219,14 @@ check('the words in both languages', !array_diff($words, array_keys($plL)) && !a
       && $plL['js.tags.f_turn_on'] === 'Włącz import' && __('a.tags.forum_title') === 'Tags from the forum');
 check('an empty waiting badge stays hidden on the Tags page', str_contains($src('assets/css/admin.css'), '.wl-badge.d-hidden { display: none; }')
       && str_contains($src('templates/admin/tags.php'), 'class="wl-badge wl-b-pending d-hidden" id="tags-pending-badge"'));
-check('version and changelog', TRACKER_VERSION === '1.85.5' && str_contains($src('CHANGELOG.md'), '## [1.85.5]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
+check('the Tags page draws chips that open the search, and a forum tag beside the chip it becomes',
+      str_contains($src('assets/js/admin-tags.js'), "const searchHref = (id) => SITE + '?action=search&tags=' + encodeURIComponent(id);")
+      && str_contains($src('assets/js/admin-tags.js'), "el('div', { className: 'tags-f-to-cell' }, [preview, targetSelect(c, row)])")
+      && !str_contains($src('assets/js/admin-tags.js'), 'swatch(') && str_contains($src('assets/css/admin.css'), '.fchip.fchip-forum {')
+      && str_contains($src('assets/css/detail-panel.css'), '.fchip-x { --fc: #8fa3bf; color: color-mix(in srgb, var(--fc) 55%, #fff); }')
+      && str_contains($src('assets/js/filters.js'), 'if (editing && edit.add) bar.append(picker(), toggle);')
+      && str_contains($src('assets/css/detail-panel.css'), '.tag-edit-bar .tag-edit-toggle { flex: 0 0 auto; display: inline-flex;'));
+check('version and changelog', TRACKER_VERSION === '1.85.6' && str_contains($src('CHANGELOG.md'), '## [1.85.6]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

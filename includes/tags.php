@@ -624,7 +624,7 @@ function tagsForumLabel(PDO $db, string $target, string $name, array $genres): a
 {
     if (tagsIsExplicit($target)) {
         $row = tagsRow($db, $target);
-        return $row ? ['l' => (string)$row['name'], 'g' => 'x', 'new' => false, 'st' => (string)$row['status']] : ['l' => $name, 'g' => 'x', 'new' => true];
+        return $row ? ['l' => (string)$row['name'], 'g' => 'x', 'new' => false, 'st' => (string)$row['status'], 'c' => $row['color']] : ['l' => $name, 'g' => 'x', 'new' => true];
     }
     if (str_starts_with($target, 'g:')) return ['l' => tagsGenreLabel($target, $genres), 'g' => 'g', 'new' => false];
     return ['l' => factsTagLabel($target), 'g' => substr($target, 0, 1), 'new' => false];
