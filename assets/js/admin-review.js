@@ -196,8 +196,9 @@
             facts.appendChild(el('div', { className: 'rv-note' }, [el('strong', { text: t.key('js.wl.rejected_label') }), ' ', r.content_rejected_note]));
         }
         if (FORUM[r.forum_state]) {
+            const [chars, max] = String(r.forum_note || '').split('/');
             facts.appendChild(el('div', { className: 'rv-note' }, [el('strong', { text: t.key('js.wl.forum_label') }), ' ',
-                t.key(FORUM[r.forum_state], { note: r.forum_note || '', at: when(r.forum_at) })]));
+                t.key(FORUM[r.forum_state], { note: r.forum_note || '', at: when(r.forum_at), chars: num(Number(chars) || 0), max: num(Number(max) || 0) })]));
         }
         if (facts.childNodes.length) box.appendChild(facts);
         const desc = el('div', { className: 'rq-desc rt-body' });

@@ -779,6 +779,7 @@ function whitelistRemove(PDO $db, array $cfg, array $ids): int {
     if (!$ids) return 0;
     $ph = implode(',', array_fill(0, count($ids), '?'));
     $db->prepare("DELETE FROM whitelist_files WHERE whitelist_id IN ($ph)")->execute($ids);
+    $db->prepare("DELETE f FROM forum_descs f JOIN whitelist w ON w.info_hash = f.info_hash WHERE w.id IN ($ph)")->execute($ids);
     $st = $db->prepare("DELETE FROM whitelist WHERE id IN ($ph)");
     $st->execute($ids);
     $n = $st->rowCount();

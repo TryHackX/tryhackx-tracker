@@ -170,6 +170,10 @@ $U4 = 'https://forum.copy.test/assets/files/new.png';
 $settled = imagesRemoteSettle($db, $cfgI, "a [img]$U1" . "[/img] b [img]$U4" . "[/img]");
 check('a text being saved: a copied address becomes this site\'s at once, a new one joins the queue',
       $settled === "a [img]$own" . "[/img] b [img]$U4" . "[/img]" && ($rowOf($U4)['status'] ?? '') === 'pending', $settled);
+$U5 = 'https://forum.copy.test/assets/files/looked-at.png';
+$looked = imagesRemoteSettle($db, $cfgI, "a [img]$U1" . "[/img] c [img]$U5" . "[/img]", false);
+check('… a text only being compared shows the copies and queues nothing', $looked === "a [img]$own" . "[/img] c [img]$U5" . "[/img]"
+      && $rowOf($U5) === [], $looked);
 check('the scan runs at most once in ten minutes unless the janitor is told otherwise',
       imagesRemoteScan($db, array_merge($cfgI, ['images_remote_scan_at' => (string)time()]), ['copy.test']) === 0);
 $served = $img ? imagesServe($db, (int)$img['id'], 960, 640, 'webp', false, null, false) : null;

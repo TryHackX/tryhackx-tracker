@@ -145,6 +145,7 @@ function wlMaintDeadTick(PDO $db, array $cfg): array {
         foreach (array_chunk($list, 500) as $chunk) {
             $ph = implode(',', array_fill(0, count($chunk), '?'));
             $db->prepare("DELETE FROM whitelist_files WHERE whitelist_id IN ($ph)")->execute($chunk);
+            $db->prepare("DELETE f FROM forum_descs f JOIN whitelist w ON w.info_hash = f.info_hash WHERE w.id IN ($ph)")->execute($chunk);
             $d = $db->prepare("DELETE FROM whitelist WHERE id IN ($ph)");
             $d->execute($chunk);
             $out['deleted'] += $d->rowCount();

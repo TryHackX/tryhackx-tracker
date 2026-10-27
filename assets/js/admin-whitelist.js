@@ -1289,7 +1289,7 @@
             if (canSubmit()) {
                 v.auto_approve = approve.value !== 'review' ? 1 : 0;
                 v.describe_mode = describe.value;
-                v.describe_accounts = describe.value !== 'off' && describeAcc.value ? Number(describeAcc.value) : null;
+                v.describe_accounts = describeAcc.value ? Number(describeAcc.value) : null;
                 fields.push(...boxes.filter(b => b.checked).map(b => b.value));
             }
             if (canAbuse()) {
@@ -1305,6 +1305,7 @@
             // a report — an `all` key has both — as apiClientDocsUrl() (includes/api_auth.php) writes them.
             const url = docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1, v.describe_mode);
             describeAccField.hidden = describe.value === 'off';
+            describeAcc.options[0].textContent = t.key(canUsers() ? 'js.wl.cl_describe_acc_self' : 'js.wl.cl_describe_acc_none');
             docs.textContent = url;
             openLink.href = url;
         };

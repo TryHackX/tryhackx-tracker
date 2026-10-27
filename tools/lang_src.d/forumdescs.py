@@ -19,15 +19,16 @@ add('settings', {
     'forum_desc_conflict_replace': ('Replace it, the old one kept in its history', 'Zastąp go, a stary zachowaj w historii'),
     'forum_desc_conflict_hint': (
         'A new version of the post replaces a description nobody changed here. One that was written or edited here is '
-        'never overwritten on its own: the forum version waits under To review → Rewrites, or the description stays as '
-        'it is and is marked as different from the forum (the "From the forum: needs attention" filter), or — only for a '
-        'description that came from the forum — it is replaced and the old version kept in its history. Whether a key '
-        'sends descriptions at all, and whether they wait for a moderator, is set on that key (API clients tab).',
+        'never overwritten on its own: the forum version waits under Moderation → To review → Proposed changes, or the '
+        'description stays as it is and is marked as different from the forum (the "Forum: needs a look" state), or — '
+        'only for a description that came from the forum, and only on a key that publishes at once — it is replaced and '
+        'the old version kept in its history. Whether a key sends descriptions at all, and whether they wait for a '
+        'moderator, is set on that key (API clients tab).',
         'Nowa wersja posta zastępuje opis, którego nikt tutaj nie zmieniał. Opisu napisanego albo poprawionego tutaj '
-        'import nigdy sam nie nadpisuje: wersja z forum czeka w Do sprawdzenia → Poprawki albo opis zostaje bez zmian i '
-        'jest oznaczony jako różny od forum (filtr „Z forum: wymaga uwagi”), albo — tylko gdy opis pochodzi z forum — '
-        'zostaje zastąpiony, a stara wersja trafia do jego historii. Czy klucz w ogóle wysyła opisy i czy czekają na '
-        'moderatora, ustawia się przy kluczu (karta Klienci API).'),
+        'import nigdy sam nie nadpisuje: wersja z forum czeka w Moderacja → Do przejrzenia → Propozycje zmian albo opis '
+        'zostaje bez zmian i jest oznaczony jako różny od forum (stan „Forum: wymaga uwagi”), albo — tylko gdy opis '
+        'pochodzi z forum i tylko przy kluczu, który publikuje od razu — zostaje zastąpiony, a stara wersja trafia do '
+        'jego historii. Czy klucz w ogóle wysyła opisy i czy czekają na moderatora, ustawia się przy kluczu (karta Klienci API).'),
 })
 
 add('a.wl', {
@@ -53,6 +54,7 @@ add('a.wl', {
 
 add('js.wl', {
     'cl_describe_acc_self': ('Linked through this key', 'Połączone przez ten klucz'),
+    'cl_describe_acc_none': ('None — forum names only', 'Żaden — tylko nazwy z forum'),
     'cl_describe_badge_queue': ('descriptions: queue', 'opisy: kolejka'),
     'cl_describe_badge_publish': ('descriptions: published', 'opisy: od razu'),
     'from_forum': ('from the forum', 'z forum'),
@@ -62,13 +64,13 @@ add('js.wl', {
     'forum_label': ('Forum:', 'Forum:'),
     'forum_state_drift': ('the topic has a newer version (:at). This description was changed here, so it was left as it is.',
                           'temat ma nowszą wersję (:at). Ten opis zmieniono tutaj, więc został bez zmian.'),
-    'forum_state_too_long': ('the first post is too long to bring over (:note characters).',
-                             'pierwszy post jest za długi, by go przenieść (:note znaków).'),
+    'forum_state_too_long': ('the first post is too long to bring over (:chars characters, the limit is :max).',
+                             'pierwszy post jest za długi, by go przenieść (:chars znaków, limit :max).'),
     'forum_state_invalid': ('the first post was not brought over: :note', 'pierwszego posta nie przeniesiono: :note'),
     'forum_state_removed': ('the description from the forum was deleted here. It comes back only when the post changes, and then into the queue.',
                             'opis z forum usunięto tutaj. Wróci dopiero po zmianie posta, i to do kolejki.'),
-    'forum_state_declined': ('the version from the forum was turned down. A newer one will be filed again.',
-                             'wersję z forum odrzucono. Nowsza zostanie zgłoszona ponownie.'),
+    'forum_state_declined': ('the version from the forum was turned down. It comes back only when the topic\'s first post changes.',
+                             'wersję z forum odrzucono. Wróci dopiero, gdy pierwszy post tematu się zmieni.'),
 })
 
 add('js.app', {
@@ -83,8 +85,8 @@ add('js.app', {
                              'Najnowsza wersja na forum jest za długa, by ją przenieść (:chars znaków, limit :max); ta tutaj jest starsza.'),
     'forum_drift': ('The forum has a newer version of this description (:at). It was changed here, so it was not overwritten.',
                     'Na forum jest nowsza wersja tego opisu (:at). Opis zmieniono tutaj, więc nie został nadpisany.'),
-    'forum_proposed': ('A newer version from the forum waits for a moderator under To review → Rewrites.',
-                       'Nowsza wersja z forum czeka na moderatora w Do sprawdzenia → Poprawki.'),
+    'forum_proposed': ('A newer version from the forum waits for a moderator under Moderation → To review → Proposed changes.',
+                       'Nowsza wersja z forum czeka na moderatora w Moderacja → Do przejrzenia → Propozycje zmian.'),
     'forum_invalid': ('The version from the forum was not brought over: :note', 'Wersji z forum nie przeniesiono: :note'),
     'forum_removed': ('The description from the forum was deleted here. It comes back only when the post changes, and then into the queue.',
                       'Opis z forum usunięto tutaj. Wróci dopiero po zmianie posta, i to do kolejki.'),

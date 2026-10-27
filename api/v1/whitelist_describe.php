@@ -23,7 +23,7 @@ if (count($topics) > FORUM_DESC_MAX_TOPICS) {
 
 $limit = forumDescLimit($cfg, $payload['max_chars'] ?? null);
 $results = [];
-$summary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, ['skipped']), 0);
+$summary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, ['skipped', 'error']), 0);
 foreach ($topics as $i => $raw) {
     $topic = forumDescTopic($raw);
     $hashes = $topic['hashes'] ?? [];
@@ -34,8 +34,14 @@ foreach ($topics as $i => $raw) {
         $summary['invalid']++;
         continue;
     }
+    $memo = [];
     foreach ($hashes as $h) {
-        $r = forumDescImport($db, $cfg, $client, $topic, $h, $limit);
+        try {
+            $r = forumDescImport($db, $cfg, $client, $topic, $h, $limit, $memo);
+        } catch (\Throwable $e) {
+            error_log('describe ' . $h . ': ' . $e->getMessage());
+            $r = ['status' => 'error', 'detail' => 'try again later'];
+        }
         $results[] = ['topic' => $i, 'discussion_id' => $topic['discussion_id'], 'hash' => $h !== '' ? mb_substr($h, 0, 64) : null,
                       'status' => $r['status'], 'detail' => $r['detail']];
         $summary[in_array($r['status'], FORUM_DESC_SKIPPED, true) ? 'skipped' : $r['status']]++;

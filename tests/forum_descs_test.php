@@ -312,10 +312,81 @@ try {
           $imp($k1, $topic(17, $text17, [$H(17)]), $H(17))['status'] === 'unchanged'
           && $imp($k1, $topic(17, $text17 . "\nMore.", [$H(17)]), $H(17))['status'] === 'updated');
 
-    $fakeSummary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, ['skipped']), 0);
-    check('every status the import answers has a place in the summary', count($fakeSummary) === 10
+    $id18 = $reg(18, $k1);
+    $imp($k1, $topic(18, 'Eighteenth v2', [$H(18)], ['edited_at' => '2026-10-21T10:00:00+00:00']), $H(18));
+    $r = $imp($k1, $topic(18, 'Eighteenth v1', [$H(18)], ['edited_at' => '2026-10-20T09:00:00+00:00']), $H(18));
+    check('an older version arriving late changes nothing: stale', $r['status'] === 'stale' && $wl($H(18))['description'] === 'Eighteenth v2', json_encode($r));
+    check('… one with the same time is taken', $imp($k1, $topic(18, 'Eighteenth v3', [$H(18)], ['edited_at' => '2026-10-21T10:00:00+00:00']), $H(18))['status'] === 'updated'
+          && $wl($H(18))['description'] === 'Eighteenth v3');
+
+    $id19 = $reg(19, $k1);
+    $db->prepare("UPDATE whitelist SET description = 'Written here', description_format = 'bbcode', content_status = 'approved' WHERE id = ?")->execute([$id19]);
+    $imp($k1, $topic(19, 'Forum nineteenth', [$H(19)]), $H(19));
+    contentDelete($db, $cfgF, contentRecordFor($db, $H(19)), ['id' => 0, 'username' => 'fdtest'], 'any', ['notify' => false]);
+    $r = $imp($k1, $topic(19, 'Forum nineteenth', [$H(19)]), $H(19));
+    check('a text written here and then deleted lets the waiting forum version in, through the queue: queued',
+          $r['status'] === 'queued' && $wl($H(19))['description'] === 'Forum nineteenth' && $wl($H(19))['content_status'] === 'pending'
+          && forumDescFor($db, $H(19))['note'] === 'review', json_encode($r));
+    whitelistRemove($db, array_merge($cfgF, ['tracker_mode' => 'blacklist']), [$id19]);
+    check('a registration deleted takes the topic\'s record along', forumDescFor($db, $H(19)) === null);
+    $reg(19, $k1);
+    check('… so registered again, the topic\'s text comes in as a first description',
+          $imp($k1, $topic(19, 'Forum nineteenth', [$H(19)]), $H(19))['status'] === 'created');
+
+    $id20 = $reg(20, $k1);
+    $imp($k1, $topic(20, 'Twentieth', [$H(20)]), $H(20));
+    $r = $imp($k1, $topic(20, "Twentieth\n\n", [$H(20)]), $H(20));
+    check('a version that differs only in blank lines around it writes nothing: unchanged, no history',
+          $r['status'] === 'unchanged' && $archives($id20) === 0, json_encode([$r, $archives($id20)]));
+
+    $setMode($k1, 'queue');
+    $reg(21, $k1);
+    $reg(22, $k1);
+    $imp($k1, $topic(21, 'Twenty-first', [$H(21)]), $H(21));
+    $imp($k1, $topic(22, 'Twenty-second', [$H(22)]), $H(22));
+    $setMode($k1, 'publish');
+    $r = $imp($k1, $topic(21, 'Twenty-first', [$H(21)]), $H(21));
+    check('switched to publishing, a description that waited only because of the queue goes out with the next send',
+          $r['status'] === 'updated' && $wl($H(21))['content_status'] === 'approved', json_encode($r));
+    $r = $imp($k1, $topic(22, 'Twenty-second v2', [$H(22)]), $H(22));
+    check('… and so does a newer version of one', $r['status'] === 'updated' && $wl($H(22))['content_status'] === 'approved'
+          && $wl($H(22))['description'] === 'Twenty-second v2', json_encode($r));
+    $r = $imp($k1, $topic(7, 'Seventh, edited', [$H(7)]), $H(7));
+    check('… but one queued because a moderator had deleted the last one still waits', $r['status'] === 'unchanged'
+          && $wl($H(7))['content_status'] === 'pending', json_encode($r));
+
+    $id23 = $reg(23, $k1);
+    $db->prepare("UPDATE whitelist SET review_status = 'pending' WHERE id = ?")->execute([$id23]);
+    check('a registration that waits for a person takes no description yet',
+          $imp($k1, $topic(23, 'Twenty-third', [$H(23)]), $H(23))['status'] === 'not_registered' && ($wl($H(23))['description'] ?? null) === null);
+
+    $id24 = $reg(24, $k1);
+    $db->prepare("UPDATE whitelist SET description = 'Written here', description_format = 'bbcode', content_status = 'approved' WHERE id = ?")->execute([$id24]);
+    $r = $imp($k1, $topic(24, 'Forum 24', [$H(24)]), $H(24), array_merge($cfgF, ['wl_edit_max_pending' => '0']));
+    check('with proposals switched off, the forum version is not filed either: kept', $r['status'] === 'kept' && !$pending($H(24)), json_encode($r));
+
+    check('ids no topic can have are no topic', forumDescTopic(['discussion_id' => 4294967296, 'post_id' => 1]) === null
+          && forumDescTopic(['discussion_id' => '99999999999', 'post_id' => 1]) === null && forumDescTopic(['discussion_id' => 1.5, 'post_id' => 1]) === null
+          && forumDescTopic(['discussion_id' => '4294967295', 'post_id' => 1]) !== null);
+
+    $reg(25, $k1);
+    $reg(26, $k1);
+    $memo = [];
+    $t25 = $topic(25, 'Two hashes, one topic', [$H(25), $H(26)]);
+    $a = forumDescImport($db, $cfgF, $client($k1), $t25, $H(25), 5000, $memo);
+    $b = forumDescImport($db, $cfgF, $client($k1), $t25, $H(26), 5000, $memo);
+    check('a topic with two hashes looks its author and its pictures up once', $a['status'] === 'created' && $b['status'] === 'created'
+          && count($memo) === 2, json_encode(array_keys($memo)));
+    check('one hash that fails is answered error and the rest of the call goes on',
+          str_contains($src('api/v1/whitelist_describe.php'), "\$r = ['status' => 'error', 'detail' => 'try again later'];"));
+    check('the topic\'s record is read without a lock of its own: the registration row holds one already',
+          !str_contains($src('includes/forumdescs.php'), 'FROM forum_descs WHERE info_hash = ? LIMIT 1 FOR UPDATE'));
+
+    $fakeSummary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, ['skipped', 'error']), 0);
+    check('every status the import answers has a place in the summary', count($fakeSummary) === 11
           && !array_diff(['created', 'queued', 'updated', 'replaced', 'proposed', 'kept', 'unchanged', 'too_long', 'invalid'], array_keys($fakeSummary))
-          && FORUM_DESC_SKIPPED === ['not_registered', 'banned', 'other_topic', 'removed', 'declined']);
+          && FORUM_DESC_SKIPPED === ['not_registered', 'banned', 'other_topic', 'removed', 'declined', 'stale']
+          && str_contains($src('api/v1/whitelist_describe.php'), "array_merge(FORUM_DESC_STATUSES, ['skipped', 'error'])"));
 } finally {
     $tidy();
 }

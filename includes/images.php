@@ -681,16 +681,17 @@ function imagesRemoteDone(PDO $db, array $cfg, array $urls): array
     return $out;
 }
 
-function imagesRemoteSettle(PDO $db, array $cfg, string $text): string
+function imagesRemoteSettle(PDO $db, array $cfg, string $text, bool $queue = true): string
 {
     try {
         $hosts = imagesRemoteHosts($db);
         if (!$hosts) return $text;
         $urls = imagesRemoteUrls($text, $hosts, imagesBase($cfg));
         if (!$urls) return $text;
-        imagesRemoteEnqueue($db, $urls);
+        if ($queue) imagesRemoteEnqueue($db, $urls);
         foreach (imagesRemoteDone($db, $cfg, $urls) as $from => $to) $text = imagesReplaceUrl($text, (string)$from, $to);
     } catch (\Throwable $e) {
+        if ($e instanceof PDOException && in_array((int)($e->errorInfo[1] ?? 0), [1205, 1213], true)) throw $e;
         return $text;
     }
     return $text;

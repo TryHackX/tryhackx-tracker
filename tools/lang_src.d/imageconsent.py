@@ -11,8 +11,8 @@ def add(prefix, pairs):
 
 add('js.wl', {
     'cl_consent_yes': ('the partner allows copying', 'partner pozwala kopiować'),
-    'cl_consent_no': ('the partner refuses copying', 'partner nie pozwala kopiować'),
-    'cl_consent_none': ('the partner has not allowed copying', 'partner nie pozwolił kopiować'),
+    'cl_consent_no': ('the partner refuses copying', 'partner odmówił kopiowania'),
+    'cl_consent_none': ('the partner has not answered yet', 'partner jeszcze nie odpowiedział'),
 })
 
 add('apidocs', {

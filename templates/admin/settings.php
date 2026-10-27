@@ -2897,7 +2897,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                             <option value="1" <?= ($cfg['wl_content_review'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.content_review_yes') ?></option>
                             <option value="0" <?= ($cfg['wl_content_review'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.content_review_no') ?></option>
                         </select>
-                        <small class="settings-hint"><?= __('settings.content_review_hint_pre') ?> <a href="<?= $baseUrl ?>?action=admin-whitelist"><?= _h('settings.content_review_hint_link') ?></a>. <?= _h('settings.content_review_hint_post') ?></small>
+                        <small class="settings-hint"><?= __('settings.content_review_hint_pre') ?> <a href="<?= $baseUrl ?>?action=admin-moderation#review"><?= _h('settings.content_review_hint_link') ?></a>. <?= _h('settings.content_review_hint_post') ?></small>
                     </div>
                     <div class="col-md-3" data-setting="wl_content_autopublish">
                         <label for="set-wl_content_autopublish" class="form-label"><?= _h('settings.content_autopublish') ?></label>
