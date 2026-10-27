@@ -62,6 +62,7 @@ foreach ($items as $i => $it) {
             $ref = [];
             foreach (['post_id', 'discussion_id'] as $k) if (isset($it['ref'][$k]) && is_numeric($it['ref'][$k])) $ref[$k] = (int)$it['ref'][$k];
             if (!empty($it['ref']['url']) && is_string($it['ref']['url']) && preg_match('#^https?://#i', $it['ref']['url'])) $ref['url'] = mb_substr($it['ref']['url'], 0, 300);
+            if (($it['ref']['first'] ?? null) === true) $ref['first'] = true;
         }
     } elseif (is_string($it)) {
         $token = $it;

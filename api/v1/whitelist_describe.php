@@ -23,7 +23,7 @@ if (count($topics) > FORUM_DESC_MAX_TOPICS) {
 
 $limit = forumDescLimit($cfg, $payload['max_chars'] ?? null);
 $results = [];
-$summary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, ['skipped', 'error']), 0);
+$summary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['skipped', 'error']), 0);
 foreach ($topics as $i => $raw) {
     $topic = forumDescTopic($raw);
     $hashes = $topic['hashes'] ?? [];
@@ -37,7 +37,7 @@ foreach ($topics as $i => $raw) {
     $memo = [];
     foreach ($hashes as $h) {
         try {
-            $r = forumDescImport($db, $cfg, $client, $topic, $h, $limit, $memo);
+            $r = $topic['visible'] ? forumDescImport($db, $cfg, $client, $topic, $h, $limit, $memo) : forumDescHide($db, $client, $topic, $h);
         } catch (\Throwable $e) {
             error_log('[api v1] whitelist/describe: ' . $h . ' failed: ' . $e->getMessage());
             $r = ['status' => 'error', 'detail' => 'try again later'];

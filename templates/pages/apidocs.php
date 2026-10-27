@@ -131,10 +131,13 @@ $exDescribeReply = json_encode([
     'results' => [['topic' => 0, 'discussion_id' => 160, 'hash' => '0123456789abcdef0123456789abcdef01234567',
                    'status' => $docDescribe === 'queue' ? 'queued' : 'created', 'detail' => null]],
     'summary' => ['created' => $docDescribe === 'queue' ? 0 : 1, 'queued' => $docDescribe === 'queue' ? 1 : 0, 'updated' => 0,
-                  'replaced' => 0, 'proposed' => 0, 'kept' => 0, 'unchanged' => 0, 'too_long' => 0, 'invalid' => 0, 'skipped' => 0],
+                  'replaced' => 0, 'proposed' => 0, 'kept' => 0, 'unchanged' => 0, 'too_long' => 0, 'invalid' => 0,
+                  'withdrawn' => 0, 'released' => 0, 'skipped' => 0, 'error' => 0],
     'max_chars' => 500000, 'max_topics' => $docDescLimits[0], 'max_hashes' => $docDescLimits[1],
     'max_bytes' => $docDescLimits[2], 'server_time' => 1790000000,
 ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exWithdraw = json_encode(['topics' => [['discussion_id' => 160, 'post_id' => 162, 'visible' => false, 'gone' => true,
+    'hashes' => ['0123456789abcdef0123456789abcdef01234567']]]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 
 // "What happened to what I sent?" — the other half of a key that does not publish directly. The
 // example shows a row that was turned down, because that is the case the note exists for.
@@ -350,13 +353,21 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
         <tr><td><code>too_long</code></td><td><?= _h('apidocs.ds_too_long') ?></td></tr>
         <tr><td><code>invalid</code></td><td><?= _h('apidocs.ds_invalid') ?></td></tr>
         <tr><td><code>not_registered</code></td><td><?= _h('apidocs.ds_not_registered') ?></td></tr>
+        <tr><td><code>registered_elsewhere</code></td><td><?= _h('apidocs.ds_registered_elsewhere') ?></td></tr>
         <tr><td><code>banned</code></td><td><?= _h('apidocs.ds_banned') ?></td></tr>
         <tr><td><code>other_topic</code></td><td><?= _h('apidocs.ds_other_topic') ?></td></tr>
+        <tr><td><code>stale</code></td><td><?= _h('apidocs.ds_stale') ?></td></tr>
         <tr><td><code>removed</code></td><td><?= _h('apidocs.ds_removed') ?></td></tr>
         <tr><td><code>declined</code></td><td><?= _h('apidocs.ds_declined') ?></td></tr>
+        <tr><td><code>withdrawn</code></td><td><?= _h('apidocs.ds_withdrawn') ?></td></tr>
+        <tr><td><code>released</code></td><td><?= _h('apidocs.ds_released') ?></td></tr>
     </tbody>
 </table>
 </div>
+<p><?= __('apidocs.describe_withdraw') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/describe') ?>
+
+<?= sanitize($exWithdraw) ?></code></pre>
 <p class="text-muted"><?= __('apidocs.describe_off_note') ?></p>
 <?php endif; ?>
 <?php endif; ?>

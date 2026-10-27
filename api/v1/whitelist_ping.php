@@ -32,4 +32,5 @@ jsonResponse([
     'describe_max_chars' => FORUM_DESC_CHARS_CAP,
     'describe_max_bytes' => FORUM_DESC_MAX_BODY,
     'describe_max_topics' => FORUM_DESC_MAX_TOPICS,
+    'describe_max_hashes' => FORUM_DESC_MAX_HASHES,
 ] + imagesClientState($client));

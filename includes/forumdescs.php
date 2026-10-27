@@ -9,7 +9,8 @@ const FORUM_DESC_CHARS_CAP     = 1000000;
 const FORUM_DESC_MODES         = ['off', 'queue', 'publish'];
 const FORUM_DESC_CONFLICTS     = ['proposal', 'keep', 'replace'];
 const FORUM_DESC_STATUSES      = ['created', 'queued', 'updated', 'replaced', 'proposed', 'kept', 'unchanged', 'too_long', 'invalid'];
-const FORUM_DESC_SKIPPED       = ['not_registered', 'banned', 'other_topic', 'removed', 'declined', 'stale'];
+const FORUM_DESC_SKIPPED       = ['not_registered', 'registered_elsewhere', 'banned', 'other_topic', 'removed', 'declined', 'stale'];
+const FORUM_DESC_HIDDEN        = ['withdrawn', 'released'];
 const FORUM_DESC_SUPERSEDED    = 'superseded by a newer version from the forum';
 
 function forumDescMode(array $client): string {
@@ -81,6 +82,8 @@ function forumDescTopic($t): ?array {
         'content'       => $content,
         'chars'         => $content !== null ? mb_strlen($content) : (isset($t['chars']) && is_numeric($t['chars']) ? max(0, (int)$t['chars']) : 0),
         'hashes'        => $hashes,
+        'visible'       => ($t['visible'] ?? true) !== false,
+        'gone'          => ($t['gone'] ?? false) === true,
     ];
 }
 
@@ -113,6 +116,19 @@ function forumDescOwns(array $w, int $clientId): bool {
     return $by === $clientId || ($by === null && (string)$w['source'] === 'forum');
 }
 
+function forumDescBound(array $w, bool $firstOnly = true): ?int {
+    $ref = is_string($w['source_ref'] ?? null) ? json_decode((string)$w['source_ref'], true) : null;
+    if (!is_array($ref) || ($firstOnly && ($ref['first'] ?? false) !== true)) return null;
+    $id = forumDescId($ref['discussion_id'] ?? null);
+    return $id > 0 ? $id : null;
+}
+
+function forumDescRef(array $topic): string {
+    $ref = ['post_id' => $topic['post_id'], 'discussion_id' => $topic['discussion_id'], 'first' => true];
+    if ($topic['url'] !== '') $ref['url'] = mb_substr($topic['url'], 0, 300);
+    return (string)json_encode($ref, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+}
+
 function forumDescFor(PDO $db, string $hash): ?array {
     $st = $db->prepare("SELECT * FROM forum_descs WHERE info_hash = ? LIMIT 1");
     $st->execute([strtolower($hash)]);
@@ -121,16 +137,17 @@ function forumDescFor(PDO $db, string $hash): ?array {
 
 function forumDescSave(PDO $db, array $r): void {
     $db->prepare("INSERT INTO forum_descs (info_hash, client_id, discussion_id, post_id, url, author_ext_id, author_name,
-                         author_user_id, forum_at, forum_sha, forum_chars, import_sha, state, note, edit_id)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         author_user_id, forum_at, forum_sha, forum_chars, import_sha, state, note, edit_id, imported_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE client_id = VALUES(client_id), discussion_id = VALUES(discussion_id),
                          post_id = VALUES(post_id), url = VALUES(url), author_ext_id = VALUES(author_ext_id),
                          author_name = VALUES(author_name), author_user_id = VALUES(author_user_id), forum_at = VALUES(forum_at),
                          forum_sha = VALUES(forum_sha), forum_chars = VALUES(forum_chars), import_sha = VALUES(import_sha),
-                         state = VALUES(state), note = VALUES(note), edit_id = VALUES(edit_id)")
+                         state = VALUES(state), note = VALUES(note), edit_id = VALUES(edit_id), imported_at = VALUES(imported_at)")
        ->execute([$r['info_hash'], $r['client_id'], $r['discussion_id'], $r['post_id'], $r['url'], $r['author_ext_id'],
                   $r['author_name'], $r['author_user_id'], $r['forum_at'], $r['forum_sha'], $r['forum_chars'],
-                  $r['import_sha'], $r['state'], $r['note'] !== null ? mb_substr((string)$r['note'], 0, 255) : null, $r['edit_id']]);
+                  $r['import_sha'], $r['state'], $r['note'] !== null ? mb_substr((string)$r['note'], 0, 255) : null, $r['edit_id'],
+                  $r['imported_at'] ?? null]);
 }
 
 function forumDescWrite(PDO $db, array $w, string $fmt, string $text, string $status, ?int $acct, bool $keepCredits): void {
@@ -187,12 +204,13 @@ function forumDescImport(PDO $db, array $cfg, array $client, array $topic, strin
 
 function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic, string $hash, int $max, array &$memo = []): array {
     $cid = (int)$client['id'];
-    $st = $db->prepare("SELECT id, banned, review_status, api_client_id, source, source_url, description, description_format,
+    $st = $db->prepare("SELECT id, banned, review_status, api_client_id, source, source_ref, source_url, description, description_format,
                                content_status, content_user_id, content_credits
                           FROM whitelist WHERE info_hash = ? LIMIT 1 FOR UPDATE");
     $st->execute([$hash]);
     $w = $st->fetch(PDO::FETCH_ASSOC);
-    if (!$w || !forumDescOwns($w, $cid)) return ['status' => 'not_registered', 'detail' => null];
+    if (!$w) return ['status' => 'not_registered', 'detail' => null];
+    if (!forumDescOwns($w, $cid)) return ['status' => 'registered_elsewhere', 'detail' => null];
     if ((int)$w['banned'] === 1) return ['status' => 'banned', 'detail' => null];
     if (in_array((string)$w['review_status'], ['pending', 'rejected'], true)) {
         return ['status' => 'not_registered', 'detail' => 'registration ' . $w['review_status']];
@@ -204,9 +222,17 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
                         || ((int)$f['discussion_id'] !== $topic['discussion_id'] && $f['import_sha'] !== null))) {
         return ['status' => 'other_topic', 'detail' => null];
     }
+    $bound = forumDescBound($w);
+    if ($bound !== null && $bound !== $topic['discussion_id'] && ($f === null || (int)$f['discussion_id'] !== $topic['discussion_id'])) {
+        return ['status' => 'other_topic', 'detail' => null];
+    }
     if ($f !== null && (int)$f['discussion_id'] === $topic['discussion_id'] && $f['forum_at'] !== null
         && $topic['edited_at'] !== null && strcmp($topic['edited_at'], (string)$f['forum_at']) < 0) {
         return ['status' => 'stale', 'detail' => null];
+    }
+    if ($w['api_client_id'] === null) {
+        $db->prepare("UPDATE whitelist SET api_client_id = ?, source_ref = COALESCE(source_ref, ?) WHERE id = ? AND api_client_id IS NULL")
+           ->execute([$cid, forumDescRef($topic), (int)$w['id']]);
     }
 
     $who = 'account:' . $cid . ':' . $topic['author_id'];
@@ -228,6 +254,7 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
         'state'          => $f['state'] ?? 'imported',
         'note'           => $f['note'] ?? null,
         'edit_id'        => isset($f['edit_id']) ? (int)$f['edit_id'] : null,
+        'imported_at'    => $f['imported_at'] ?? null,
     ];
     $done = static function (string $status, array $set = [], ?string $detail = null) use ($db, $row): array {
         forumDescSave($db, array_merge($row, $set));
@@ -282,7 +309,8 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
         return $memo[$k] ??= trim(imagesRemoteSettle($db, $cfg, $text, $queue));
     };
     $imported = static fn(string $s, bool $review = false): array
-        => ['import_sha' => forumDescSha($fmt, $s), 'state' => 'imported', 'note' => $review ? 'review' : null, 'edit_id' => null];
+        => ['import_sha' => forumDescSha($fmt, $s), 'state' => 'imported', 'note' => $review ? 'review' : null, 'edit_id' => null,
+            'imported_at' => $topic['edited_at'] ?? date('Y-m-d H:i:s')];
 
     if (!$occupied || !in_array($status, ['pending', 'approved', 'rejected'], true)) {
         $review = $removed || $cleared || ($f !== null && $f['state'] === 'removed');
@@ -331,9 +359,61 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
     return $done('proposed', ['state' => 'proposed', 'note' => null, 'edit_id' => $editId]);
 }
 
+function forumDescTakeDown(PDO $db, array $w): void {
+    if ($w['source_url'] === null) {
+        contentClear($db, 'wl', (int)$w['id']);
+        return;
+    }
+    $db->prepare("UPDATE whitelist SET description = NULL WHERE id = ?")->execute([(int)$w['id']]);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, null, 'wl', (string)$w['id']);
+}
+
+function forumDescHide(PDO $db, array $client, array $topic, string $hash): array {
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['status' => 'invalid', 'detail' => 'not an info hash'];
+    $own = !$db->inTransaction();
+    if ($own) $db->beginTransaction();
+    try {
+        $r = forumDescHideLocked($db, $client, $topic, $hash);
+        if ($own) $db->commit();
+        return $r;
+    } catch (\Throwable $e) {
+        if ($own && $db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+}
+
+function forumDescHideLocked(PDO $db, array $client, array $topic, string $hash): array {
+    $cid = (int)$client['id'];
+    $st = $db->prepare("SELECT id, api_client_id, source, source_ref, source_url, description, description_format
+                          FROM whitelist WHERE info_hash = ? LIMIT 1 FOR UPDATE");
+    $st->execute([$hash]);
+    $w = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$w) return ['status' => 'not_registered', 'detail' => null];
+    if (!forumDescOwns($w, $cid)) return ['status' => 'registered_elsewhere', 'detail' => null];
+    $disc = $topic['discussion_id'];
+    $f = forumDescFor($db, $hash);
+    $bound = forumDescBound($w);
+    if ($f !== null ? ((int)$f['client_id'] !== $cid || (int)$f['discussion_id'] !== $disc) : ($bound !== null && $bound !== $disc)) {
+        return ['status' => 'other_topic', 'detail' => null];
+    }
+    if ($f !== null && !in_array((string)$f['state'], ['declined', 'removed'], true)) {
+        if ($f['import_sha'] !== null && $w['description'] !== null
+            && hash_equals((string)$f['import_sha'], forumDescSha((string)$w['description_format'], (string)$w['description']))) {
+            forumDescTakeDown($db, $w);
+        }
+        forumDescWithdraw($db, $f['edit_id'] !== null ? (int)$f['edit_id'] : null);
+        $db->prepare("UPDATE forum_descs SET import_sha = NULL, imported_at = NULL, state = 'withdrawn', note = NULL, edit_id = NULL WHERE info_hash = ?")
+           ->execute([$hash]);
+    }
+    if (!$topic['gone']) return ['status' => 'withdrawn', 'detail' => null];
+    $db->prepare("DELETE FROM forum_descs WHERE info_hash = ?")->execute([$hash]);
+    if (forumDescBound($w, false) === $disc) $db->prepare("UPDATE whitelist SET source_ref = NULL WHERE id = ?")->execute([(int)$w['id']]);
+    return ['status' => 'released', 'detail' => null];
+}
+
 function forumDescProposalDone(PDO $db, array $e, bool $applied): void {
     if ($applied) {
-        $db->prepare("UPDATE forum_descs SET import_sha = ?, state = 'imported', note = NULL, edit_id = NULL WHERE edit_id = ?")
+        $db->prepare("UPDATE forum_descs SET import_sha = ?, state = 'imported', note = NULL, edit_id = NULL, imported_at = forum_at WHERE edit_id = ?")
            ->execute([forumDescSha((string)$e['description_format'], (string)($e['description'] ?? '')), (int)$e['id']]);
         return;
     }
@@ -379,6 +459,7 @@ function forumDescInfo(PDO $db, array $cfg, string $hash, ?array $rec, bool $mod
         'shown'   => $shown,
         'author'  => $shown && $author === null && $f['author_name'] !== null ? (string)$f['author_name'] : null,
         'at'      => $f['forum_at'],
+        'shown_at' => $shown ? ($f['imported_at'] ?? $f['forum_at']) : null,
         'state'   => $tell ? $state : null,
         'note'    => $tell && $moderator && $state === 'invalid' ? $f['note'] : null,
         'chars'   => $tell && $state === 'too_long' ? (int)$f['forum_chars'] : null,

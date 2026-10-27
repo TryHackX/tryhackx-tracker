@@ -20,6 +20,7 @@
         invalid: 'js.wl.forum_state_invalid',
         removed: 'js.wl.forum_state_removed',
         declined: 'js.wl.forum_state_declined',
+        withdrawn: 'js.wl.forum_state_withdrawn',
     };
     const DEFAULTS = { status: 'pending', source: '', format: '', author: '', search: '', sort: 'oldest', per: 25 };
     const S = {

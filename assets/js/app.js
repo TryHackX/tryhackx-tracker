@@ -4491,7 +4491,8 @@ window.siteToast = siteToast;
         const a = document.createElement(forum.url ? 'a' : 'span');
         a.className = 'info-chip info-chip-forum';
         a.append(t.key('js.app.from_forum'));
-        a.title = forum.at ? t.key('js.app.from_forum_title_at', { at: forum.at }) : t.key('js.app.from_forum_title');
+        const at = forum.shown_at || forum.at;
+        a.title = at ? t.key('js.app.from_forum_title_at', { at: at }) : t.key('js.app.from_forum_title');
         if (forum.url) {
             a.href = forum.url;
             a.target = '_blank';
@@ -4507,7 +4508,8 @@ window.siteToast = siteToast;
 
     function forumNote(forum, older) {
         const keys = { too_long: older ? 'js.app.forum_too_long_newer' : 'js.app.forum_too_long', drift: 'js.app.forum_drift', proposed: 'js.app.forum_proposed',
-                       invalid: 'js.app.forum_invalid', removed: 'js.app.forum_removed', declined: 'js.app.forum_declined' };
+                       invalid: 'js.app.forum_invalid', removed: 'js.app.forum_removed', declined: 'js.app.forum_declined',
+                       withdrawn: 'js.app.forum_withdrawn' };
         const p = document.createElement('p');
         p.className = 'info-desc-note info-section text-muted';
         p.append(t.key(keys[forum.state] || 'js.app.forum_drift', { chars: t.num(Number(forum.chars || 0)),

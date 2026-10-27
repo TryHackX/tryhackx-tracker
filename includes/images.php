@@ -553,7 +553,7 @@ function imagesClientState(array $client): array
 {
     $domains = imagesDomainsClean((string)($client['image_domains'] ?? ''));
     $state = !$domains ? 'off' : (isset($client['image_consent']) && (int)$client['image_consent'] === 1 ? 'copy' : 'no_consent');
-    return ['images' => $state, 'image_domains' => $domains];
+    return ['images' => $state, 'image_domains' => $domains, 'copy_images' => isset($client['image_consent']) && (int)$client['image_consent'] === 1];
 }
 
 function imagesHostMatches(string $host, array $domains): bool

@@ -71,6 +71,10 @@ add('js.wl', {
                             'opis z forum usunięto tutaj. Wróci dopiero po zmianie posta, i to do kolejki.'),
     'forum_state_declined': ('the version from the forum was turned down. It comes back only when the topic\'s first post changes.',
                              'wersję z forum odrzucono. Wróci dopiero, gdy pierwszy post tematu się zmieni.'),
+    'forum_state_withdrawn': ("the topic is hidden on the forum now: the forum's own text was taken off here, a version changed here stays. "
+                              "It comes back when the topic can be seen again.",
+                              'temat jest teraz ukryty na forum: tekst z forum zdjęto tutaj, wersja zmieniona tutaj zostaje. '
+                              'Wróci, gdy temat znów będzie widoczny.'),
 })
 
 add('js.app', {
@@ -91,6 +95,10 @@ add('js.app', {
     'forum_removed': ('The description from the forum was deleted here. It comes back only when the post changes, and then into the queue.',
                       'Opis z forum usunięto tutaj. Wróci dopiero po zmianie posta, i to do kolejki.'),
     'forum_declined': ('The newest version from the forum was turned down.', 'Najnowszą wersję z forum odrzucono.'),
+    'forum_withdrawn': ("The topic is hidden on the forum now: the forum's own text was taken off here, a version changed here stays. "
+                        "It comes back when the topic can be seen again.",
+                        'Temat jest teraz ukryty na forum: tekst z forum zdjęto tutaj, wersja zmieniona tutaj zostaje. '
+                        'Wróci, gdy temat znów będzie widoczny.'),
     'forum_open': ('Open the topic', 'Otwórz temat'),
 })
 
@@ -153,10 +161,27 @@ add('apidocs', {
     'ds_too_long': ('Longer than the limit: nothing was written, nothing was cut.', 'Dłuższy niż limit: nic nie zapisano i nic nie ucięto.'),
     'ds_invalid': ('An empty post, or a format switched off on the tracker — the detail says which.',
                    'Pusty post albo format wyłączony na trackerze — szczegóły mówią, co.'),
-    'ds_not_registered': ('This key has not registered the hash: send it to v1/whitelist/submit first.',
-                          'Ten klucz nie zarejestrował hasha: najpierw wyślij go do v1/whitelist/submit.'),
+    'ds_not_registered': ('Nobody registered the hash on this tracker: send it to v1/whitelist/submit first.',
+                          'Nikt nie zarejestrował tego hasha na trackerze: najpierw wyślij go do v1/whitelist/submit.'),
+    'ds_registered_elsewhere': ('The hash is registered here, but not by this key — on the site or through another key — so its description is not this key\'s to write.',
+                                'Hash jest tu zarejestrowany, ale nie przez ten klucz — na stronie albo innym kluczem — więc jego opis nie należy do tego klucza.'),
     'ds_banned': ('The hash is banned on the tracker.', 'Hash jest zablokowany na trackerze.'),
-    'ds_other_topic': ('The hash is already described from another topic.', 'Hash ma już opis z innego tematu.'),
+    'ds_other_topic': ('The hash belongs to another topic: the one whose first post registered it, or the one that described it first.',
+                       'Hash należy do innego tematu: tego, którego pierwszy post go zarejestrował, albo tego, który opisał go pierwszy.'),
+    'ds_stale': ('An older version than the one already here: nothing was written.', 'Starsza wersja niż ta, która już tu jest: nic nie zapisano.'),
+    'ds_withdrawn': ("The topic was withdrawn: the forum's text was taken off and its waiting proposal withdrawn; a description changed here stays.",
+                     'Temat wycofano: tekst z forum zdjęto, a czekającą propozycję wycofano; opis zmieniony tutaj zostaje.'),
+    'ds_released': ('Withdrawn, and the hash is no longer bound to the topic: another topic may describe it.',
+                    'Wycofano, a hash nie jest już związany z tematem: może go opisać inny temat.'),
+    'describe_withdraw': (
+        'A topic guests can no longer see is sent with <code>"visible": false</code> and its hashes, without its text; add '
+        '<code>"gone": true</code> when the topic or its first post was deleted, or the hashes left the post. A tracker that '
+        'takes these says so with <code>describe_max_hashes</code> in the ping and the <code>withdrawn</code> and '
+        '<code>released</code> counts in the summary.',
+        'Temat, którego goście już nie widzą, wysyłasz z <code>"visible": false</code> i jego hashami, bez tekstu; dodaj '
+        '<code>"gone": true</code>, gdy temat albo jego pierwszy post usunięto lub hashe zniknęły z posta. Tracker, który to '
+        'przyjmuje, mówi o tym przez <code>describe_max_hashes</code> w pingu oraz liczniki <code>withdrawn</code> i '
+        '<code>released</code> w podsumowaniu.'),
     'ds_removed': ('The description was deleted here; the same text is not brought back.', 'Opis usunięto tutaj; ten sam tekst nie wraca.'),
     'ds_declined': ('A moderator turned this version down.', 'Moderator odrzucił tę wersję.'),
 })

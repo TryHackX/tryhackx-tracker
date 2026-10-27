@@ -138,9 +138,9 @@ try {
 
     check('a hash nobody registered is not_registered', $imp($k1, $topic(10, 'Text', [$H(10)]), $H(10))['status'] === 'not_registered');
     $reg(11, $k2);
-    check('a hash another key registered is not_registered', $imp($k1, $topic(11, 'Text', [$H(11)]), $H(11))['status'] === 'not_registered');
+    check('a hash another key registered is registered_elsewhere', $imp($k1, $topic(11, 'Text', [$H(11)]), $H(11))['status'] === 'registered_elsewhere');
     $reg(12, null, 'web');
-    check('a hash somebody registered on the site is not_registered', $imp($k1, $topic(12, 'Text', [$H(12)]), $H(12))['status'] === 'not_registered');
+    check('a hash somebody registered on the site is registered_elsewhere', $imp($k1, $topic(12, 'Text', [$H(12)]), $H(12))['status'] === 'registered_elsewhere');
     $reg(13, $k1, 'forum', 1);
     check('a banned hash is banned', $imp($k1, $topic(13, 'Text', [$H(13)]), $H(13))['status'] === 'banned');
     check('an entry that is not a hash is invalid', $imp($k1, $topic(13, 'Text', ['nothex']), 'nothex')['status'] === 'invalid');
@@ -278,7 +278,8 @@ try {
     $reg(9, null, 'forum');
     $imp($k1, $topic(90, 'Ninth', [$H(9)]), $H(9));
     check('a hash already described from another topic is other_topic', $imp($k1, $topic(91, 'Ninth elsewhere', [$H(9)]), $H(9))['status'] === 'other_topic');
-    check('… and from another key too', $imp($k2, $topic(90, 'Ninth again', [$H(9)]), $H(9))['status'] === 'other_topic');
+    check('… and another key is told the hash is registered elsewhere: the first key to describe the forum\'s old row took it',
+          $imp($k2, $topic(90, 'Ninth again', [$H(9)]), $H(9))['status'] === 'registered_elsewhere');
     $reg(14, $k1);
     $imp($k1, $topic(140, str_repeat('y', 6000), [$H(14)]), $H(14));
     check('a topic that never brought anything over leaves the hash to another topic',
@@ -391,11 +392,101 @@ try {
     check('the topic\'s record is read without a lock of its own: the registration row holds one already',
           !str_contains($src('includes/forumdescs.php'), 'FROM forum_descs WHERE info_hash = ? LIMIT 1 FOR UPDATE'));
 
-    $fakeSummary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, ['skipped', 'error']), 0);
-    check('every status the import answers has a place in the summary', count($fakeSummary) === 11
-          && !array_diff(['created', 'queued', 'updated', 'replaced', 'proposed', 'kept', 'unchanged', 'too_long', 'invalid'], array_keys($fakeSummary))
-          && FORUM_DESC_SKIPPED === ['not_registered', 'banned', 'other_topic', 'removed', 'declined', 'stale']
-          && str_contains($src('api/v1/whitelist_describe.php'), "array_merge(FORUM_DESC_STATUSES, ['skipped', 'error'])"));
+    $hide = fn(int $disc, array $hashes, bool $gone = false): ?array
+        => forumDescTopic(['discussion_id' => $disc, 'post_id' => $disc + 1000, 'visible' => false, 'gone' => $gone, 'hashes' => $hashes]);
+    $hid = fn(int $key, array $t, string $hash): array => forumDescHide($db, $client($key), $t, $hash);
+    $t30 = $hide(30, [$H(30)]);
+    check('a topic sent as not visible is a withdrawal, a deleted one a release; anything else is visible',
+          $t30 !== null && $t30['visible'] === false && $t30['gone'] === false && $hide(30, [$H(30)], true)['gone'] === true
+          && $topic(30, 'x', [$H(30)])['visible'] === true && $topic(30, 'x', [$H(30)], ['visible' => 0])['visible'] === true);
+    $id30 = $reg(30, $k1);
+    $imp($k1, $topic(30, 'Thirtieth', [$H(30)]), $H(30));
+    $r = $hid($k1, $t30, $H(30));
+    $f30 = forumDescFor($db, $H(30));
+    check('a hidden topic takes its text off when nobody changed it here: withdrawn, nothing left to show',
+          $r['status'] === 'withdrawn' && $wl($H(30))['description'] === null && $wl($H(30))['content_status'] === 'none'
+          && $f30['state'] === 'withdrawn' && $f30['import_sha'] === null, json_encode([$r, $wl($H(30)), $f30]));
+    check('… visible again, it comes back the way it went out: published at once, not into the queue',
+          $imp($k1, $topic(30, 'Thirtieth', [$H(30)]), $H(30))['status'] === 'created' && $wl($H(30))['content_status'] === 'approved'
+          && forumDescFor($db, $H(30))['state'] === 'imported');
+
+    $id31 = $reg(31, $k1);
+    $imp($k1, $topic(31, 'Thirty-first', [$H(31)]), $H(31));
+    $db->prepare("UPDATE whitelist SET description = 'Changed here 31' WHERE id = ?")->execute([$id31]);
+    $imp($k1, $topic(31, 'Thirty-first v2', [$H(31)]), $H(31));
+    $r = $hid($k1, $hide(31, [$H(31)]), $H(31));
+    check('a version changed here stays when the topic is hidden; the forum\'s waiting proposal is withdrawn',
+          $r['status'] === 'withdrawn' && $wl($H(31))['description'] === 'Changed here 31' && !$pending($H(31))
+          && forumDescFor($db, $H(31))['state'] === 'withdrawn', json_encode($r));
+    $i31 = forumDescInfo($db, $cfgF, $H(31), contentRecordFor($db, $H(31)), true);
+    check('… a moderator reads that the topic is hidden, a reader sees no forum chip on it',
+          ($i31['state'] ?? null) === 'withdrawn' && forumDescInfo($db, $cfgF, $H(31), contentRecordFor($db, $H(31)), false) === null, json_encode($i31));
+
+    $id32 = $reg(32, $k1);
+    $db->prepare("UPDATE whitelist SET source_ref = ? WHERE id = ?")
+       ->execute([json_encode(['post_id' => 1032, 'discussion_id' => 32, 'url' => 'https://forum.fd.test/d/32', 'first' => true]), $id32]);
+    check('a hash registered by a topic\'s first post belongs to that topic: another topic is other_topic, nothing written',
+          $imp($k1, $topic(33, 'Squatter', [$H(32)]), $H(32))['status'] === 'other_topic' && ($wl($H(32))['description'] ?? null) === null
+          && forumDescFor($db, $H(32)) === null);
+    check('… and its withdrawal from the other topic touches nothing', $hid($k1, $hide(33, [$H(32)], true), $H(32))['status'] === 'other_topic'
+          && $db->query("SELECT source_ref FROM whitelist WHERE id = " . $id32)->fetchColumn() !== null);
+    check('… while the topic itself describes it', $imp($k1, $topic(32, 'Thirty-second', [$H(32)]), $H(32))['status'] === 'created');
+    $r = $hid($k1, $hide(32, [$H(32)], true), $H(32));
+    $ref32 = $db->query("SELECT source_ref FROM whitelist WHERE id = " . $id32)->fetchColumn();
+    check('a deleted topic releases the hash: released, its record and its link gone, its text taken off',
+          $r['status'] === 'released' && forumDescFor($db, $H(32)) === null && $ref32 === null && $wl($H(32))['description'] === null,
+          json_encode([$r, $ref32]));
+    check('… so another topic may describe it now', $imp($k1, $topic(33, 'Thirty-third', [$H(32)]), $H(32))['status'] === 'created');
+
+    $id34 = $reg(34, $k1);
+    $db->prepare("UPDATE whitelist SET source_ref = ? WHERE id = ?")->execute([json_encode(['post_id' => 5000, 'discussion_id' => 340]), $id34]);
+    check('a hash first seen in a reply binds no topic: the first topic to describe it takes it',
+          $imp($k1, $topic(35, 'Thirty-fifth', [$H(34)]), $H(34))['status'] === 'created');
+
+    $reg(36, $k1);
+    check('a withdrawal for a hash no topic brought anything to answers harmlessly and binds nothing',
+          $hid($k1, $hide(36, [$H(36)]), $H(36))['status'] === 'withdrawn' && forumDescFor($db, $H(36)) === null);
+    check('… one for a hash nobody registered is not_registered, one for another key\'s is registered_elsewhere',
+          $hid($k1, $hide(36, [$H(39)]), $H(39))['status'] === 'not_registered' && $hid($k1, $hide(11, [$H(11)]), $H(11))['status'] === 'registered_elsewhere');
+
+    $id37 = $reg(37, null, 'forum');
+    $imp($k1, $topic(37, 'Thirty-seventh', [$H(37)]), $H(37));
+    $w37 = $db->query("SELECT api_client_id, source_ref FROM whitelist WHERE id = " . $id37)->fetch(PDO::FETCH_ASSOC);
+    $ref37 = json_decode((string)$w37['source_ref'], true);
+    check('the forum\'s old row is taken by the first key that describes it, and bound to that topic\'s first post',
+          (int)$w37['api_client_id'] === $k1 && ($ref37['discussion_id'] ?? 0) === 37 && ($ref37['post_id'] ?? 0) === 1037 && ($ref37['first'] ?? false) === true,
+          json_encode($w37));
+    check('… so another key is told it is registered elsewhere', $imp($k2, $topic(37, 'Thirty-seventh again', [$H(37)]), $H(37))['status'] === 'registered_elsewhere');
+
+    $id38 = $reg(38, $k1);
+    $imp($k1, $topic(38, 'Thirty-eighth', [$H(38)], ['edited_at' => '2026-10-22T08:00:00+00:00']), $H(38));
+    $at1 = date('Y-m-d H:i:s', strtotime('2026-10-22T08:00:00+00:00'));
+    $at2 = date('Y-m-d H:i:s', strtotime('2026-10-23T08:00:00+00:00'));
+    $f38 = forumDescFor($db, $H(38));
+    check('an import remembers the forum time of the version it brought over', $f38['imported_at'] === $at1, json_encode($f38));
+    $db->prepare("UPDATE whitelist SET description = 'Changed here 38' WHERE id = ?")->execute([$id38]);
+    $imp($k1, $topic(38, 'Thirty-eighth v2', [$H(38)], ['edited_at' => '2026-10-23T08:00:00+00:00']), $H(38), $cfgK);
+    $f38 = forumDescFor($db, $H(38));
+    $i38 = forumDescInfo($db, $cfgK, $H(38), contentRecordFor($db, $H(38)), true);
+    check('… a newer version left out keeps that time for what is shown, and the newer one for the note',
+          $f38['imported_at'] === $at1 && $f38['forum_at'] === $at2 && ($i38['shown_at'] ?? null) === $at1 && ($i38['at'] ?? null) === $at2,
+          json_encode([$f38['imported_at'], $f38['forum_at'], $i38]));
+
+    $fakeSummary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['skipped', 'error']), 0);
+    check('every status the import and the withdrawal answer has a place in the summary', count($fakeSummary) === 13
+          && !array_diff(['created', 'queued', 'updated', 'replaced', 'proposed', 'kept', 'unchanged', 'too_long', 'invalid', 'withdrawn', 'released'], array_keys($fakeSummary))
+          && FORUM_DESC_SKIPPED === ['not_registered', 'registered_elsewhere', 'banned', 'other_topic', 'removed', 'declined', 'stale']
+          && str_contains($src('api/v1/whitelist_describe.php'), "array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['skipped', 'error'])"));
+    check('a topic that is not visible goes to the withdrawal, any other to the import',
+          str_contains($src('api/v1/whitelist_describe.php'), "\$topic['visible'] ? forumDescImport(\$db, \$cfg, \$client, \$topic, \$h, \$limit, \$memo) : forumDescHide(\$db, \$client, \$topic, \$h)"));
+    check('the ping names the most hashes a topic may carry — how the forum knows withdrawals are taken',
+          str_contains($src('api/v1/whitelist_ping.php'), "'describe_max_hashes' => FORUM_DESC_MAX_HASHES,"));
+    check('a registration may say its post is the first of its topic, and nothing else is kept from that field',
+          str_contains($src('api/v1/whitelist_submit.php'), "if ((\$it['ref']['first'] ?? null) === true) \$ref['first'] = true;"));
+    check('the consent the key gave is echoed as a plain yes or no',
+          imagesClientState(['image_domains' => 'a.test', 'image_consent' => 1])['copy_images'] === true
+          && imagesClientState(['image_domains' => '', 'image_consent' => 1])['copy_images'] === true
+          && imagesClientState(['image_domains' => 'a.test', 'image_consent' => null])['copy_images'] === false);
 } finally {
     $tidy();
 }
