@@ -60,6 +60,8 @@ add('api.images', {
     'not_allowed': ('Your account may not upload pictures.', 'Twoje konto nie może wgrywać obrazów.'),
     'daily_limit': ('You have uploaded as many pictures in the last 24 hours as this site takes (:n). Try again later.',
                     'W ciągu ostatnich 24 godzin wgrano już tyle obrazów, ile ta strona przyjmuje (:n). Spróbuj później.'),
+    'recheck_queued': ('All :n copies will be compared with the partner\'s pictures over the next minutes.',
+                       'Wszystkie kopie (:n) zostaną porównane z obrazami partnera w ciągu kilku minut.'),
     'daily_mb': ('This picture would take your uploads of the last 24 hours past :mb MB, as much as this site takes. Try again later.',
                  'Ten obraz przekroczyłby :mb MB wgranych w ciągu ostatnich 24 godzin — tyle ta strona przyjmuje. Spróbuj później.'),
     'quota': ('Your pictures already take :used MB of the :max MB your account may keep. Delete the ones you no longer need.',

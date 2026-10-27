@@ -62,6 +62,7 @@
                         <option value="ignored"><?= _h('a.img.q_ignored') ?></option>
                     </select>
                     <span id="img-q-total" class="text-muted wl-total"></span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" id="img-q-recheck" hidden><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> <?= _h('a.img.recheck') ?></button>
                 </div>
             </div>
             <div class="table-responsive">

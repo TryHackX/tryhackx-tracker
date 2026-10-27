@@ -275,6 +275,7 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
         return $done('invalid', ['state' => 'invalid', 'note' => 'That format is not accepted here.'], 'That format is not accepted here.');
     }
 
+    if ($f !== null && function_exists('imagesRemoteRecheckSoon')) imagesRemoteRecheckSoon($db, $cfg, $text);
     $acct = $row['author_user_id'];
     $store = static function (bool $queue) use (&$memo, $db, $cfg, $text): string {
         $k = ($queue ? 'store:' : 'view:') . sha1($text);

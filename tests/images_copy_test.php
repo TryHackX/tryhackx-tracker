@@ -98,7 +98,7 @@ check('… and a public one is fetched AT the checked address (the connection is
 check('… a body over the limit is refused even when the transfer let it through',
       ($f('https://forum.copy.test/a.png', ['get' => fn() => ['ok' => true, 'bytes' => str_repeat('x', 2000)]], 1000)['error'] ?? '') === 'too_big');
 $g = $src('includes/images.php');
-$getFn = (string)substr($g, (int)strpos($g, 'function imagesRemoteGet('), 2600);
+$getFn = (string)substr($g, (int)strpos($g, 'function imagesRemoteGet('), 4600);
 check('the transfer: pinned with CURLOPT_RESOLVE, no redirect followed, http(s) only, timeouts, the body capped while it arrives',
       str_contains($getFn, 'CURLOPT_RESOLVE =>') && str_contains($getFn, 'CURLOPT_FOLLOWLOCATION => false') && str_contains($getFn, 'CURLOPT_MAXREDIRS => 0')
       && str_contains($getFn, 'CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS') && str_contains($getFn, 'CURLOPT_TIMEOUT => IMAGES_REMOTE_TIMEOUT')
@@ -299,6 +299,55 @@ check('… once: a second pass finds nothing to do, and the janitor\'s pass runs
       imagesOwnCopiesRepair($db, $cfgO) === ['queue' => 0, 'texts' => 0, 'images' => 0]
       && array_key_exists('repaired', imagesRemoteTick($db, $cfgO, ['resolve' => $resolveOk, 'get' => $getPng]))
       && str_contains($src('tools/janitor.php'), "repaired=%d"));
+
+$U7 = 'https://forum.copy.test/assets/files/changing.png';
+$db->prepare("INSERT INTO page_content (page, lang, format, body, enabled) VALUES ('imgcopytest', 'fr', 'bbcode', ?, 1)")->execute(["Changing: [img]$U7" . "[/img]"]);
+imagesRefsTouch($db, $cfgI, 'page', "imgcopytest\tfr");
+$v = 1;
+$revalGet = function (string $url, string $host, int $port, string $ip, int $max, array $cond = []) use (&$calls, &$v, $pic): array {
+    if (!str_contains($url, 'changing')) return ['ok' => false, 'error' => 'http_404'];
+    $calls[] = $cond;
+    if (($cond['etag'] ?? '') === '"v' . $v . '"') return ['ok' => true, 'not_modified' => true, 'etag' => '"v' . $v . '"'];
+    return ['ok' => true, 'bytes' => $pic(600, 400 + $v), 'etag' => '"v' . $v . '"'];
+};
+$due = $db->prepare("UPDATE image_remote SET check_after = NOW() - INTERVAL 1 MINUTE, next_at = NOW() - INTERVAL 1 MINUTE WHERE url_sha = ?");
+$within = function (string $url, int $fromH, int $toH) use ($db): bool {
+    $st = $db->prepare("SELECT check_after > NOW() + INTERVAL ? HOUR AND check_after < NOW() + INTERVAL ? HOUR FROM image_remote WHERE url_sha = ?");
+    $st->bindValue(1, $fromH, PDO::PARAM_INT);
+    $st->bindValue(2, $toH, PDO::PARAM_INT);
+    $st->bindValue(3, hash('sha256', $url));
+    $st->execute();
+    return (int)$st->fetchColumn() === 1;
+};
+$calls = [];
+$due->execute([hash('sha256', $U7)]);
+imagesRemoteTick($db, $cfgI, ['resolve' => $resolveOk, 'get' => $revalGet]);
+$r7 = $rowOf($U7);
+$first7 = (int)($r7['image_id'] ?? 0);
+check('a copy remembers the partner\'s tag and the file\'s fingerprint, and is looked at again a day later',
+      $first7 > 0 && $r7['etag'] === '"v1"' && strlen((string)$r7['bytes_sha']) === 64 && $within($U7, 23, 25), json_encode($r7));
+$calls = [];
+$due->execute([hash('sha256', $U7)]);
+$ta = imagesRemoteTick($db, $cfgI, ['resolve' => $resolveOk, 'get' => $revalGet]);
+check('… unchanged, the partner answers 304 to its own tag, nothing is downloaded and the next look is a week later',
+      $ta['rechecked'] >= 1 && $ta['changed'] === 0 && ($calls[0]['etag'] ?? '') === '"v1"' && (int)$rowOf($U7)['checks'] === 1
+      && (int)$rowOf($U7)['image_id'] === $first7 && $within($U7, 6 * 24, 8 * 24), json_encode([$ta, $calls, $rowOf($U7)]));
+$v = 2;
+$calls = [];
+$due->execute([hash('sha256', $U7)]);
+$tb = imagesRemoteTick($db, $cfgI, ['resolve' => $resolveOk, 'get' => $revalGet]);
+$r7b = $rowOf($U7);
+$new7 = imagesRow($db, (int)($r7b['image_id'] ?? 0));
+$fr = (string)$db->query("SELECT body FROM page_content WHERE page = 'imgcopytest' AND lang = 'fr'")->fetchColumn();
+check('a picture changed behind the same address is copied again: the page shows the new copy and the old copy is gone',
+      $tb['changed'] === 1 && $new7 !== null && (int)$new7['id'] !== $first7 && (int)$new7['full_h'] === 402
+      && str_contains($fr, imagesUrl($cfgI, (int)$new7['id'], (int)$new7['w'], (int)$new7['h'], 'webp')) && imagesRow($db, $first7) === null
+      && $r7b['etag'] === '"v2"' && (int)$r7b['checks'] === 0 && $within($U7, 23, 25), json_encode([$tb, $r7b, $fr]));
+$db->prepare("UPDATE image_remote SET check_after = NOW() + INTERVAL 5 DAY WHERE url_sha = ?")->execute([hash('sha256', $U7)]);
+$soon = imagesRemoteRecheckSoon($db, $cfgI, "new text [img]$U7" . "[/img]");
+$st = $db->prepare("SELECT check_after <= NOW() FROM image_remote WHERE url_sha = ?");
+$st->execute([hash('sha256', $U7)]);
+check('a topic whose text changed has its pictures looked at again at once', $soon === 1 && (int)$st->fetchColumn() === 1);
 
 $iniMax = userMediaMaxBytes(imagesMediaCfg($cfgI));
 if ($iniMax < imagesMaxMb($cfgI) * 1048576 - 2097152 && function_exists('imagepng')) {

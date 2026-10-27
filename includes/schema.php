@@ -3203,6 +3203,16 @@ function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
     schemaGrantOnce($db, 'v99_info_resize', ['member' => ['info.resize']]);
     schemaGrantOnce($db, 'v100_images_public', ['member' => ['images.public']]);
     try {
+        if (schemaOnce($db, 'v100_image_recheck')) {
+            $db->exec("UPDATE image_remote r JOIN images i ON i.id = r.image_id
+                          SET r.bytes_sha = i.blob_sha, r.checked_at = COALESCE(r.done_at, NOW()),
+                              r.check_after = NOW() + INTERVAL FLOOR(1 + RAND() * 168) HOUR
+                        WHERE r.status = 'done' AND r.bytes_sha = ''");
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v100 image recheck: ' . $e->getMessage());
+    }
+    try {
         if (schemaOnce($db, 'v100_forum_imported')) {
             $db->exec("UPDATE forum_descs SET imported_at = COALESCE(forum_at, updated_at) WHERE import_sha IS NOT NULL AND imported_at IS NULL");
         }

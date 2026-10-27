@@ -194,6 +194,7 @@
     async function loadQueue() {
         const body = $('img-q-body');
         const p = new URLSearchParams({ view: 'queue', status: S.qStatus, page: String(S.qPage) });
+        $('img-q-recheck').hidden = true;
         const j = await apiCall('admin/images&' + p.toString());
         body.textContent = '';
         if (!j || !j.success) {
@@ -201,6 +202,7 @@
             return;
         }
         S.mayManage = !!j.may_manage;
+        $('img-q-recheck').hidden = !S.mayManage || S.qStatus !== 'done';
         summary(j.summary, j.hosts);
         $('img-q-total').textContent = t.plural(j.total, 'js.aimg.copies', { n: t.num(j.total) });
         if (!j.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 5, className: 'text-muted py-4 text-center', text: word('js.aimg.q_none') })));
@@ -255,5 +257,13 @@
         load();
     });
     $('img-q-status').addEventListener('change', (e) => { S.qStatus = e.target.value; S.qPage = 1; loadQueue(); });
+    $('img-q-recheck').addEventListener('click', async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        const j = await apiCall('admin/image_action', 'POST', { op: 'recheck' });
+        b.disabled = false;
+        if (j && j.success) showToast(j.message || word('js.aimg.done'), 'success');
+        else showToast(failWord(j), 'error');
+    });
     show(location.hash === '#queue' ? 'queue' : 'list');
 })();

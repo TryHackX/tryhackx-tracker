@@ -17,6 +17,8 @@ const IMAGES_REMOTE_CONNECT = 5;
 const IMAGES_REMOTE_TRIES = 5;
 const IMAGES_REMOTE_SCAN_SECONDS = 600;
 const IMAGES_REMOTE_URL_MAX = 500;
+const IMAGES_RECHECK_PER_RUN = 20;
+const IMAGES_RECHECK_DAYS = [1, 7, 30, 90];
 const IMAGES_REMOTE_DOMAINS_MAX = 20;
 const IMAGES_REMOTE_PER_PAGE = 50;
 const IMAGES_PANEL_PER_PAGE = 48;
@@ -693,7 +695,7 @@ function imagesRemoteResolve(string $host): array
     return array_values(array_unique($ips));
 }
 
-function imagesRemoteFetch(string $url, array $domains, int $maxBytes, array $io = []): array
+function imagesRemoteFetch(string $url, array $domains, int $maxBytes, array $io = [], array $cond = []): array
 {
     $p = parse_url($url);
     if (!is_array($p)) return ['ok' => false, 'error' => 'bad_url'];
@@ -708,16 +710,20 @@ function imagesRemoteFetch(string $url, array $domains, int $maxBytes, array $io
     $public = array_values(array_filter($ips, 'imagesPublicIp'));
     if (!$ips || count($public) !== count($ips)) return ['ok' => false, 'error' => 'private_address'];
     $get = $io['get'] ?? 'imagesRemoteGet';
-    $r = $get($url, $host, $port, $public[0], $maxBytes);
+    $r = $get($url, $host, $port, $public[0], $maxBytes, $cond);
     if (!empty($r['ok']) && strlen((string)($r['bytes'] ?? '')) > $maxBytes) return ['ok' => false, 'error' => 'too_big'];
     return is_array($r) ? $r : ['ok' => false, 'error' => 'network'];
 }
 
-function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $maxBytes): array
+function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $maxBytes, array $cond = []): array
 {
     if (!function_exists('curl_init')) return ['ok' => false, 'error' => 'no_curl'];
     $buf = '';
     $over = false;
+    $seen = ['etag' => '', 'last_modified' => ''];
+    $headers = ['Accept: image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8'];
+    if (($cond['etag'] ?? '') !== '') $headers[] = 'If-None-Match: ' . preg_replace('/[\r\n]+/', '', (string)$cond['etag']);
+    if (($cond['last_modified'] ?? '') !== '') $headers[] = 'If-Modified-Since: ' . preg_replace('/[\r\n]+/', '', (string)$cond['last_modified']);
     $ch = curl_init($url);
     if ($ch === false) return ['ok' => false, 'error' => 'network'];
     curl_setopt_array($ch, [
@@ -731,7 +737,13 @@ function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $
         CURLOPT_TIMEOUT => IMAGES_REMOTE_TIMEOUT,
         CURLOPT_NOSIGNAL => true,
         CURLOPT_USERAGENT => 'TryHackX-Tracker/' . (defined('TRACKER_VERSION') ? TRACKER_VERSION : '1') . ' (image copy)',
-        CURLOPT_HTTPHEADER => ['Accept: image/avif,image/webp,image/png,image/jpeg,image/gif,image/*;q=0.8'],
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_HEADERFUNCTION => static function ($c, string $line) use (&$seen): int {
+            if (preg_match('/^(ETag|Last-Modified):\s*(.+?)\s*$/i', $line, $m)) {
+                $seen[strtolower($m[1]) === 'etag' ? 'etag' : 'last_modified'] = mb_substr($m[2], 0, strtolower($m[1]) === 'etag' ? 255 : 64);
+            }
+            return strlen($line);
+        },
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_WRITEFUNCTION => static function ($c, string $chunk) use (&$buf, &$over, $maxBytes): int {
@@ -748,10 +760,11 @@ function imagesRemoteGet(string $url, string $host, int $port, string $ip, int $
     $errno = curl_errno($ch);
     if ($over) return ['ok' => false, 'error' => 'too_big'];
     if ($ok === false || $errno !== 0) return ['ok' => false, 'error' => $errno === CURLE_OPERATION_TIMEDOUT ? 'timeout' : 'network'];
+    if ($code === 304 && $cond) return ['ok' => true, 'not_modified' => true] + $seen;
     if ($code >= 300 && $code < 400) return ['ok' => false, 'error' => 'redirect'];
     if ($code !== 200) return ['ok' => false, 'error' => 'http_' . $code];
     if ($buf === '') return ['ok' => false, 'error' => 'empty'];
-    return ['ok' => true, 'bytes' => $buf];
+    return ['ok' => true, 'bytes' => $buf] + $seen;
 }
 
 function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tries, array $hosts, array $io = []): array
@@ -781,14 +794,100 @@ function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tr
     $row = $stored['row'];
     $id = (int)$row['id'];
     $db->prepare("UPDATE images SET public_at = COALESCE(public_at, NOW()) WHERE id = ?")->execute([$id]);
-    $db->prepare("UPDATE image_remote SET status = 'done', image_id = ?, error = '', done_at = NOW() WHERE url_sha = ?")->execute([$id, $sha]);
+    $db->prepare("UPDATE image_remote SET status = 'done', image_id = ?, error = '', done_at = NOW(), etag = ?, last_modified = ?, bytes_sha = ?,
+                         checked_at = NOW(), check_after = NOW() + INTERVAL 1 DAY, checks = 0 WHERE url_sha = ?")
+       ->execute([$id, (string)($f['etag'] ?? ''), (string)($f['last_modified'] ?? ''), hash('sha256', (string)$f['bytes']), $sha]);
     $to = imagesUrl($cfg, $id, (int)$row['w'], (int)$row['h'], imagesExt($row));
     return ['ok' => true, 'image' => $id, 'url' => $to, 'rewritten' => imagesRemoteSettleRows($db, $cfg, [$sha])];
 }
 
+function imagesRemoteRepoint(PDO $db, array $cfg, array $old, array $new): int
+{
+    $oldId = (int)$old['id'];
+    $map = [];
+    foreach ([['w', 'h'], ['full_w', 'full_h']] as [$w, $h]) {
+        $from = imagesUrl($cfg, $oldId, (int)$old[$w], (int)$old[$h], imagesExt($old));
+        $to = imagesUrl($cfg, (int)$new['id'], (int)$new[$w], (int)$new[$h], imagesExt($new));
+        $map[$from . '?full=1'] = $to . '?full=1';
+        $map[$from] = $to;
+    }
+    $st = $db->prepare("SELECT src, src_key FROM image_refs WHERE image_id = ?");
+    $st->execute([$oldId]);
+    $n = 0;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $text = imagesRefsTextOf($db, (string)$r['src'], (string)$r['src_key']);
+        if ($text === null) continue;
+        $next = $text;
+        foreach ($map as $from => $to) $next = imagesReplaceUrl($next, $from, $to);
+        if ($next !== $text && imagesRefsWrite($db, (string)$r['src'], (string)$r['src_key'], $text, $next, $cfg)) $n++;
+    }
+    return $n;
+}
+
+function imagesRemoteRevalidate(PDO $db, array $cfg, array $r, array $hosts, array $io = []): string
+{
+    $sha = (string)$r['url_sha'];
+    $checks = (int)$r['checks'];
+    $later = static function (int $checks) use ($db, $sha): void {
+        $days = IMAGES_RECHECK_DAYS[min(max(0, $checks), count(IMAGES_RECHECK_DAYS) - 1)];
+        $up = $db->prepare("UPDATE image_remote SET checks = ?, checked_at = NOW(), check_after = NOW() + INTERVAL ? DAY WHERE url_sha = ?");
+        $up->bindValue(1, min(65535, $checks), PDO::PARAM_INT);
+        $up->bindValue(2, $days, PDO::PARAM_INT);
+        $up->bindValue(3, $sha);
+        $up->execute();
+    };
+    $old = $r['image_id'] !== null ? imagesRow($db, (int)$r['image_id']) : null;
+    if ($old === null) {
+        $db->prepare("UPDATE image_remote SET check_after = NULL WHERE url_sha = ?")->execute([$sha]);
+        return 'gone';
+    }
+    $cond = ['etag' => (string)$r['etag'], 'last_modified' => (string)$r['last_modified']];
+    $f = imagesRemoteFetch((string)$r['url'], $hosts, imagesMaxMb($cfg) * 1048576, $io, array_filter($cond, static fn($v) => $v !== ''));
+    if (empty($f['ok'])) {
+        $later(0);
+        return 'failed';
+    }
+    $etag = (string)($f['etag'] ?? '') !== '' ? (string)$f['etag'] : (string)$r['etag'];
+    $lm = (string)($f['last_modified'] ?? '') !== '' ? (string)$f['last_modified'] : (string)$r['last_modified'];
+    $db->prepare("UPDATE image_remote SET etag = ?, last_modified = ? WHERE url_sha = ?")->execute([$etag, $lm, $sha]);
+    if (!empty($f['not_modified']) || hash('sha256', (string)($f['bytes'] ?? '')) === (string)$r['bytes_sha']) {
+        $later($checks + 1);
+        return 'same';
+    }
+    $name = basename((string)parse_url((string)$r['url'], PHP_URL_PATH));
+    $stored = imagesStore($db, $cfg, null, (string)$f['bytes'], $name !== '' ? $name : 'image', 'copy', (string)$r['url']);
+    if (empty($stored['ok'])) {
+        $later(0);
+        return 'failed';
+    }
+    $new = $stored['row'];
+    if ((int)$new['id'] === (int)$old['id']) {
+        $later($checks + 1);
+        return 'same';
+    }
+    $db->prepare("UPDATE images SET public_at = COALESCE(public_at, NOW()) WHERE id = ?")->execute([(int)$new['id']]);
+    $db->prepare("UPDATE image_remote SET image_id = ?, bytes_sha = ?, done_at = NOW(), checks = 0, checked_at = NOW(), check_after = NOW() + INTERVAL 1 DAY
+                   WHERE url_sha = ?")->execute([(int)$new['id'], hash('sha256', (string)$f['bytes']), $sha]);
+    imagesRemoteRepoint($db, $cfg, $old, $new);
+    if (!imagesReferenced($db, (int)$old['id'], false)) imagesDelete($db, (int)$old['id']);
+    return 'changed';
+}
+
+function imagesRemoteRecheckSoon(PDO $db, array $cfg, string $text): int
+{
+    $hosts = imagesRemoteHosts($db);
+    if (!$hosts) return 0;
+    $shas = array_map(static fn($u) => hash('sha256', (string)$u), imagesRemoteUrls($text, $hosts, imagesBase($cfg)));
+    if (!$shas) return 0;
+    $in = implode(',', array_fill(0, count($shas), '?'));
+    $st = $db->prepare("UPDATE image_remote SET check_after = NOW() WHERE status = 'done' AND url_sha IN ($in) AND (check_after IS NULL OR check_after > NOW())");
+    $st->execute($shas);
+    return $st->rowCount();
+}
+
 function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
 {
-    $out = ['hosts' => 0, 'queued' => 0, 'copied' => 0, 'failed' => 0, 'rewritten' => 0, 'repaired' => 0, 'error' => null];
+    $out = ['hosts' => 0, 'queued' => 0, 'copied' => 0, 'failed' => 0, 'rewritten' => 0, 'repaired' => 0, 'rechecked' => 0, 'changed' => 0, 'error' => null];
     try {
         $out['repaired'] = imagesOwnCopiesRepair($db, $cfg)['images'];
     } catch (\Throwable $e) {
@@ -824,6 +923,16 @@ function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
             } else {
                 $out['failed']++;
             }
+        }
+        $st = $db->prepare("SELECT url_sha, url, image_id, etag, last_modified, bytes_sha, checks FROM image_remote
+                             WHERE status = 'done' AND check_after IS NOT NULL AND check_after <= NOW() AND (" . implode(' OR ', $where) . ")
+                             ORDER BY check_after LIMIT " . IMAGES_RECHECK_PER_RUN);
+        $st->execute($args);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if (microtime(true) - $start > $budget) break;
+            $res = imagesRemoteRevalidate($db, $cfg, $r, $hosts, $io);
+            $out['rechecked']++;
+            if ($res === 'changed') $out['changed']++;
         }
     } catch (\Throwable $e) {
         $out['error'] = $e->getMessage();

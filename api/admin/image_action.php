@@ -16,6 +16,14 @@ if ($op === 'delete') {
     jsonResponse(['success' => true, 'used' => $used, 'message' => __('api.images.panel_deleted')]);
 }
 
+if ($op === 'recheck') {
+    $st = $db->prepare("UPDATE image_remote SET check_after = NOW() WHERE status = 'done'");
+    $st->execute();
+    $n = $st->rowCount();
+    auditNote(['action' => 'image.recheck', 'target_type' => 'image_copy', 'target_id' => 'all', 'summary' => $n . ' copies to be looked at again']);
+    jsonResponse(['success' => true, 'n' => $n, 'message' => __('api.images.recheck_queued', ['n' => $n])]);
+}
+
 if ($op === 'retry' || $op === 'forget') {
     $sha = strtolower((string)($input['id'] ?? ''));
     $ok = preg_match('/^[0-9a-f]{64}$/', $sha) === 1 && ($op === 'retry' ? imagesRemoteRetry($db, $sha) : imagesRemoteForget($db, $sha));

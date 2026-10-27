@@ -128,6 +128,7 @@ add('a.img', {
     'q_failed': ('Failed', 'Nieudane'),
     'q_done': ('Copied', 'Skopiowane'),
     'q_ignored': ('Dropped', 'Pominięte'),
+    'recheck': ('Check every copy for changes now', 'Sprawdź teraz, czy kopie się zmieniły'),
     'q_url': ('Address', 'Adres'),
     'q_state': ('State', 'Stan'),
     'q_tries': ('Tries', 'Próby'),

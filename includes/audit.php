@@ -40,7 +40,7 @@ function auditActionGroups(): array {
         // comment.* (1.71.0, includes/comments.php): a moderator taking a comment down or editing somebody
         // else's, and a guest's held comment let through. The author tidying their own writes no line.
         'content'  => ['content.approve', 'content.reject', 'content.clear', 'content.edit_apply', 'content.edit_reject', 'content.delete',
-                       'comment.delete', 'comment.edit', 'comment.approve', 'image.delete', 'image.retry', 'image.forget'],
+                       'comment.delete', 'comment.edit', 'comment.approve', 'image.delete', 'image.retry', 'image.forget', 'image.recheck'],
         'hashes'   => ['whitelist.add', 'whitelist.delete', 'whitelist.ban', 'whitelist.unban',
                        'index.delete', 'index.promote', 'blacklist.add', 'blacklist.delete'],
         // creport.* (1.71.0, includes/reports.php): a member's report of a comment, a description or a shout, and
