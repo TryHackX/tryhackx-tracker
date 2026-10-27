@@ -26,6 +26,7 @@
  * queue should not type it forty times. Clear does.
  */
 require_once __DIR__ . '/../../includes/content.php';
+require_once __DIR__ . '/../../includes/reputation.php';
 requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');

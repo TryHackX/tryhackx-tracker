@@ -5860,7 +5860,7 @@ window.siteToast = siteToast;
         }
         box.textContent = t.key('js.app.rendering');
         const r = await postJson('richtext_preview', {
-            text, format: f, for: previewFor, csrf_token: csrfOfEditor(), hash: opts.hash || undefined });
+            text, format: f, for: previewFor, hash: opts.hash || undefined, csrf_token: csrfOfEditor() });
         if (!r) { box.textContent = t.key('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
         if (!r.success) { box.textContent = r.error || t.key('js.app.render_failed'); lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist

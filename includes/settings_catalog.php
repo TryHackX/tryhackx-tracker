@@ -494,6 +494,7 @@ function settingsCatalogKeywords(): array {
         'rt_formats_page'           => 'pages terms info page editor format bbcode markdown flarum strony regulamin edytor stron format',
         'rt_formats_mail'           => 'bulk mail newsletter format bbcode markdown flarum maile masowe format',
         'rt_youtube'                => 'youtube video player embed thumbnail nocookie link film filmy odtwarzacz miniatura osadzenie',
+        'rt_video_files'            => 'video file mp4 webm ogv player media wideo plik pliki odtwarzacz multimedia',
         'images_max_mb'             => 'pictures images upload file size limit megabytes obrazy zdjecia wgrywanie rozmiar pliku limit',
         'images_max_edge'           => 'pictures images resolution edge width height pixels resize obrazy rozdzielczosc krawedz piksele',
         'images_max_mpx'            => 'pictures images megapixels resolution limit obrazy megapiksele',
