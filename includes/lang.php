@@ -562,7 +562,7 @@ function langJsServeRequest(array $get, array $server): array {
  * in the dictionary's sentence, by the key its answer names), `api.rep.` why a reader may not rate and
  * `api.index.source_auto_` where an importer's link came from (the Info panel finds them back with t.find()).
  */
-const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.', 'js.pm.', 'js.people.', 'js.sec.', 'js.sounds.', 'js.shout.', 'js.media.', 'js.bio.', 'js.votes.', 'js.descs.', 'js.who.', 'js.comments.', 'js.report.', 'js.antispam.', 'js.images.', 'js.video.',
+const LANG_JS_PUBLIC = ['js.common.', 'js.app.', 'js.captcha.', 'js.timeline.', 'js.fav.', 'js.lists.', 'js.pm.', 'js.people.', 'js.sec.', 'js.sounds.', 'js.shout.', 'js.media.', 'js.bio.', 'js.votes.', 'js.descs.', 'js.who.', 'js.comments.', 'js.report.', 'js.antispam.', 'js.images.', 'js.video.', 'js.magnet.',
     'api.antispam.', 'api.rep.', 'api.index.source_auto_'];
 
 /**

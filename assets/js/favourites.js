@@ -999,7 +999,7 @@
      */
     function listDescStrip(text, fmt) {
         var s = String(text || '').replace(/\r\n?/g, '\n');
-        if (fmt === 'flarum') s = s.replace(/\[magnet\][\s\S]*?\[\/magnet\]/gi, '');
+        s = s.replace(/\[magnet(?:=[^\]\n]*)?\][\s\S]*?\[\/magnet\]/gi, '');
         if (fmt !== 'markdown') {
             s = s.replace(/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/gi, '');
             s = s.replace(/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|thxlabels|thxrow|del|\*)(?:=[^\]\n]*)?\]/gi, '');

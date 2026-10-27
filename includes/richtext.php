@@ -161,7 +161,7 @@ function richtextCount(string $text, string $format = 'bbcode', ?array $cfg = nu
     }
     // signedIn = true: hidden content still counts against the limits. A description is not allowed
     // fifty extra images just because they are behind a [hide].
-    $html = richtextRender($text, $format, $cfg, true);
+    $html = richtextRender($text, $format, ['rt_magnet_uri' => '1'] + $cfg, true);
     return [
         'images' => (int)preg_match_all('/<img\b/i', $html),
         'links'  => (int)preg_match_all('/<a\b/i', $html),
@@ -300,7 +300,7 @@ function richtextRenderForEmail(?string $text, string $format, array $cfg): stri
     // $signedIn is TRUE (1.75.0): a mail is addressed to somebody on purpose — a member, a reporter — by the person
     // who wrote it, so a [hide] block is their own words to that reader and shows its content; rendered for "a
     // guest" it said "sign in to read this" inside an inbox.
-    $html = richtextRender($text, $format, array_merge($cfg, ['shout_emoji_fa' => 'off']), true);
+    $html = richtextRender($text, $format, array_merge($cfg, ['shout_emoji_fa' => 'off', 'rt_magnet_uri' => '0']), true);
     if ($html === '') return '';
     // Icons draw from a web font no mail client loads, so they leave (1.68.0): a task box becomes
     // the brackets its author typed, and every other icon — a spoiler's chevron, the YouTube mark —
@@ -355,6 +355,10 @@ function richtextMailStyles(string $html): string
         'rt-callout-note' => 'border-left-color:#4a9eff', 'rt-callout-tip' => 'border-left-color:#2e9e55',
         'rt-callout-important' => 'border-left-color:#a06fd8', 'rt-callout-warning' => 'border-left-color:#c9a227',
         'rt-callout-caution' => 'border-left-color:#d4524a',
+        'rt-magnet' => 'display:block;margin:8px 0;padding:6px 10px;border:1px solid #8a94a6;border-radius:6px',
+        'rt-magnet-sm' => 'display:inline-block;margin:0;padding:1px 6px',
+        'rt-magnet-name' => 'font-weight:600', 'rt-magnet-meta' => 'display:block;font-size:12px',
+        'rt-magnet-size' => 'margin-right:8px', 'rt-magnet-note' => 'font-style:italic',
     ];
     $kind = ['note' => '#4a9eff', 'tip' => '#2e9e55', 'important' => '#a06fd8', 'warning' => '#c9a227', 'caution' => '#d4524a'];
     // The callout's label takes its callout's colour: asked as a PAIR, while the parent is still next to it.
@@ -472,6 +476,120 @@ function richtextVideoCfg(array $cfg): array {
     return in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true) ? ['rt_video_player' => '1'] + $cfg : $cfg;
 }
 
+function richtextSay(string $key, string $en): string {
+    return function_exists('langHas') && langHas($key) ? __($key) : $en;
+}
+
+function richtextBytes(int $n): string {
+    $u = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    $v = (float)max(0, $n);
+    $i = 0;
+    while ($v >= 1024 && $i < count($u) - 1) { $v /= 1024; $i++; }
+    $d = $i === 0 ? 0 : ($v >= 100 ? 0 : ($v >= 10 ? 1 : 2));
+    $dot = function_exists('langCurrent') && langCurrent() !== 'en' ? ',' : '.';
+    return number_format($v, $d, $dot, '') . ' ' . $u[$i];
+}
+
+function richtextMagnetParse(string $raw): ?array {
+    $u = trim((string)preg_replace('/[\r\n\t]+/', '', html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    $u = str_replace(' ', '%20', $u);
+    if (strlen($u) > 4000 || !preg_match('/^magnet:\?([^\s<>"\'`]+)$/i', $u, $q)) return null;
+    $hash = null;
+    $dn = '';
+    $xl = 0;
+    $tr = [];
+    foreach (explode('&', $q[1]) as $pair) {
+        $eq = strpos($pair, '=');
+        if ($eq === false) continue;
+        $k = strtolower(substr($pair, 0, $eq));
+        $v = substr($pair, $eq + 1);
+        if ($k === 'xt' && $hash === null && preg_match('/^urn:btih:([0-9a-f]{40}|[a-z2-7]{32})$/i', rawurldecode($v), $m)) {
+            $hash = strlen($m[1]) === 40 ? strtolower($m[1]) : strtolower((string)(function_exists('base32ToHex') ? base32ToHex($m[1]) : ''));
+        } elseif ($k === 'dn' && $dn === '') {
+            $dn = mb_substr((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', mb_scrub(rawurldecode(str_replace('+', ' ', $v)), 'UTF-8')), 0, 500);
+        } elseif ($k === 'xl' && $xl === 0 && preg_match('/^\d{1,16}$/', $v)) {
+            $xl = (int)$v;
+        } elseif ($k === 'tr' && count($tr) < 30) {
+            $t = rawurldecode($v);
+            if (preg_match('#^(?:https?|udp)://[^\s<>"\'`\\\\]{1,500}$#i', $t)) $tr[$t] = true;
+        }
+    }
+    if ($hash === null || !preg_match('/^[0-9a-f]{40}$/', $hash)) return null;
+    $dn = trim($dn);
+    $uri = 'magnet:?xt=urn:btih:' . $hash . ($dn !== '' ? '&dn=' . rawurlencode($dn) : '') . ($xl > 0 ? '&xl=' . $xl : '');
+    foreach (array_keys($tr) as $t) $uri .= '&tr=' . rawurlencode((string)$t);
+    return ['hash' => $hash, 'dn' => $dn, 'size' => $xl, 'uri' => $uri];
+}
+
+function richtextMagnetName(string $raw, bool $fromDn): string {
+    $n = (string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', mb_scrub($raw, 'UTF-8'));
+    if ($fromDn) $n = (string)preg_replace('/[_.]+/', ' ', $n);
+    $n = trim((string)preg_replace('/\s+/u', ' ', $n));
+    return mb_strlen($n) > 300 ? mb_substr($n, 0, 299) . '…' : $n;
+}
+
+function richtextMagnetCan(array $cfg): bool {
+    if (isset($cfg['rt_magnet_uri'])) return (string)$cfg['rt_magnet_uri'] === '1';
+    if (!function_exists('userCan') || !function_exists('getDb')) return false;
+    try {
+        return userCan(getDb(), $cfg, 'index.magnet');
+    } catch (\Throwable $e) {
+        return false;
+    }
+}
+
+function richtextMagnetCard(array $m, array $cfg, string $label = ''): string {
+    $self = strtolower(trim((string)($cfg['rt_magnet_self'] ?? '')));
+    if ($self !== '' && $self === $m['hash']) return '';
+    $e = static fn(string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $can = richtextMagnetCan($cfg);
+    $link = $can && ($cfg['rt_links_text'] ?? '') !== '1';
+    $name = richtextMagnetName($label !== '' ? $label : (string)$m['dn'], $label === '');
+    if ($name === '') $name = $can ? substr($m['hash'], 0, 16) . '…' : richtextSay('rt.magnet.unnamed', 'Magnet link');
+    $size = (int)$m['size'] > 0 ? richtextBytes((int)$m['size']) : '';
+    $uri = $e((string)$m['uri']);
+    $ic = '<i class="bi bi-magnet rt-magnet-ic" aria-hidden="true"></i>';
+    $open = $e(richtextSay('rt.magnet.open', 'Open in your torrent client'));
+    $copyT = $e(richtextSay('rt.magnet.copy', 'Copy the magnet link'));
+    $note = $e(richtextSay('rt.magnet.locked', 'The link itself is shown to members who may see magnet links.'));
+    $copy = $can ? '<button type="button" class="rt-magnet-copy" data-magnet="' . $uri . '" title="' . $copyT . '" aria-label="' . $copyT
+                 . '"><i class="bi bi-clipboard" aria-hidden="true"></i></button>' : '';
+    if (($cfg['rt_magnet_compact'] ?? '') === '1') {
+        return '<span class="rt-magnet rt-magnet-sm' . ($can ? '' : ' rt-magnet-locked') . '">' . $ic
+             . '<span class="rt-magnet-name" title="' . $e($name) . '">' . $e($name) . '</span>'
+             . ($size !== '' ? '<span class="rt-magnet-size">' . $size . '</span>' : '')
+             . ($link ? '<a class="rt-magnet-open" href="' . $uri . '" rel="nofollow noopener" title="' . $open . '" aria-label="' . $open
+                      . '"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a>' : '')
+             . ($can ? $copy : '<i class="bi bi-lock rt-magnet-lock" title="' . $note . '" aria-label="' . $note . '"></i>')
+             . '</span>';
+    }
+    $info = $e(richtextSay('rt.magnet.info', 'Details on this tracker'));
+    return '<div class="rt-magnet' . ($can ? '' : ' rt-magnet-locked') . '"' . ($can ? ' data-mh="' . $m['hash'] . '"' : '') . '>' . $ic
+         . '<div class="rt-magnet-main">'
+         . ($link ? '<a class="rt-magnet-name" href="' . $uri . '" rel="nofollow noopener" title="' . $open . '">' . $e($name) . '</a>'
+                  : '<span class="rt-magnet-name">' . $e($name) . '</span>')
+         . '<div class="rt-magnet-meta">'
+         . ($size !== '' ? '<span class="rt-magnet-size"><i class="bi bi-hdd" aria-hidden="true"></i> ' . $size . '</span>' : '')
+         . ($can ? '<span class="rt-magnet-hash">' . substr($m['hash'], 0, 12) . '…</span><span class="rt-magnet-sl" hidden></span>'
+                 : '<span class="rt-magnet-note"><i class="bi bi-lock" aria-hidden="true"></i> ' . $note . '</span>')
+         . '</div></div>'
+         . ($can ? '<div class="rt-magnet-acts">' . $copy . '<button type="button" class="rt-magnet-info" hidden title="' . $info . '" aria-label="' . $info
+                 . '"><i class="bi bi-info-circle" aria-hidden="true"></i></button></div>' : '')
+         . '</div>';
+}
+
+function richtextMagnets(string $s, array $cfg, callable $keep): string {
+    return richtextUpToLast($s, '[/magnet]', fn($h) => preg_replace_callback('/\[magnet(?:=([^\]\n]{1,300}))?\]([^\[\]]{1,12000}?)\[\/magnet\]/i',
+        function ($m) use ($cfg, $keep) {
+            $p = richtextMagnetParse($m[2]);
+            if ($p === null) return $m[0];
+            $label = trim(html_entity_decode((string)($m[1] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (strlen($label) >= 2 && ($label[0] === '"' || $label[0] === "'") && substr($label, -1) === $label[0]) $label = trim(substr($label, 1, -1));
+            $html = richtextMagnetCard($p, $cfg, $label);
+            return $html === '' ? '' : $keep($html);
+        }, $h) ?? $h);
+}
+
 /** An email address, or null. Used for [email] — a mailto: is still a link somebody will click. */
 function richtextSafeEmail(string $v): ?string {
     $v = trim(html_entity_decode($v, ENT_QUOTES, 'UTF-8'));
@@ -563,6 +681,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         $s = preg_replace_callback('/`([^`\n]+)`/',
             fn($m) => $keep('<code class="rt-inline">' . $m[1] . '</code>'), $s);
     }
+    if (stripos($s, '[/magnet]') !== false) $s = richtextMagnets($s, $cfg, $keep);
 
     // ── emoji shortcodes ──
     //
@@ -1067,8 +1186,6 @@ function richtextFlarumRules(string $s, array $cfg): string {
         $esc[] = $m[1];
         return "\x03" . (count($esc) - 1) . "\x03";
     }, $s) ?? $s;
-    $s = richtextUpToLast($s, '[/magnet]', fn($h) => preg_replace('/(?:^|\n)[ \t]*\[magnet\][\s\S]*?\[\/magnet\][ \t]*(?=\n|$)/i', '', $h) ?? $h);
-    $s = richtextUpToLast($s, '[/magnet]', fn($h) => preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/i', '', $h) ?? $h);
     $s = preg_replace('/@&quot;((?:(?!&quot;)[^\n]){1,64})&quot;#[pug]\d+/', '@$1', $s) ?? $s;
     $s = preg_replace_callback('/\[upl-image-preview\b([^\]]*)\]/i', function ($m) {
         $a = richtextFlarumAttrs($m[1]);
@@ -1220,7 +1337,7 @@ function richtextFlarumMedia(string $raw, array $cfg): ?string {
 function richtextFlarumGaps(string $s, array $stash): string {
     return preg_replace_callback('/\n*(<\/?(?:div|h[1-6]|ul|ol|li|pre|blockquote|table|details|summary)\b[^>]*>|<hr\b[^>]*>|\x00CODE(\d+)\x00|\x01HIDE\d+\x01)\n*/',
         function ($m) use ($stash) {
-            if (($m[2] ?? '') !== '' && !str_starts_with($stash[(int)$m[2]] ?? '', '<pre')) return $m[0];
+            if (($m[2] ?? '') !== '' && !preg_match('/^<(?:pre|div)\b/', $stash[(int)$m[2]] ?? '')) return $m[0];
             return $m[1];
         }, $s) ?? $s;
 }
@@ -1419,13 +1536,13 @@ function richtextExcerpt(?string $text, int $len = 160): string {
     // at the token was not enough -- `[hide]a[/hide] SECRET[/hide]` leaves a stray CLOSER with the
     // secret sitting in FRONT of it, so the cut kept precisely the part meant to be private.
     if (preg_match('/\[\/?(?:hide|postshide)\b/i', $s)) return '';
-    $s = preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/i', ' ', $s) ?? $s;
+    $s = preg_replace('/\[magnet(?:=[^\]\n]*)?\][\s\S]*?\[\/magnet\]/i', " \x07 ", $s) ?? $s;
     $s = preg_replace('/@"([^"\n]{1,64})"#[pug]\d+/', '@$1', $s) ?? $s;
     $s = trim(preg_replace('/\s+/', ' ', strip_tags($s)) ?? '');
     $s = preg_replace('/\[\/?[a-z][^\]]*\]/i', '', $s) ?? $s;
     $s = preg_replace('/\\\\(?=[\\\\`*_{}\[\]()#+\-.!~^|:@=<>])/', '', $s) ?? $s;
     $s = preg_replace('/[*_`#>~]+/', '', $s) ?? $s;
-    $s = trim($s);
+    $s = trim(str_replace("\x07", '[magnet]', $s));
     return mb_strlen($s) > $len ? mb_substr($s, 0, $len - 1) . '…' : $s;
 }
 
@@ -1461,7 +1578,7 @@ function richtextContentFor(PDO $db, array $cfg, string $hash, bool $asAdmin = f
     $out['source_url'] = $rec['source_url'] ?: null;
     $out['source_trusted'] = $out['source_url'] ? richtextIsTrusted((string)$out['source_url'], $cfg) : false;
     // With the site's emotes (1.70.0): the public Info panel and the panel's detail panels alike.
-    $out['description_html'] = richtextRenderIn('description', $db, $rec['description'] ?? '', $out['format'], $cfg,
+    $out['description_html'] = richtextRenderIn('description', $db, $rec['description'] ?? '', $out['format'], ['rt_magnet_self' => $hash] + $cfg,
                                                 richtextViewerSignedIn($db));
     $out['author_id'] = $rec['content_user_id'];
     $author = contentAuthorRow($db, $rec['content_user_id']);

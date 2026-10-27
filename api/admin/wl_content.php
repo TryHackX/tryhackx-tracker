@@ -245,7 +245,8 @@ if ($op === 'item') {
     // A moderator must see what they are approving, hidden parts included.
     jsonResponse(['success' => true, 'id' => $id, 'kind' => $kind,
                   'sha' => hash('sha256', (string)$row['description_format'] . "\n" . (string)($row['description'] ?? '')),
-                  'description_html' => richtextRenderIn('description', $db, (string)($row['description'] ?? ''), (string)$row['description_format'], $cfg, true)]);
+                  'description_html' => richtextRenderIn('description', $db, (string)($row['description'] ?? ''), (string)$row['description_format'],
+                                                         ['rt_magnet_self' => (string)$row['info_hash']] + $cfg, true)]);
 }
 
 if ($op === 'bulk') {
@@ -296,8 +297,8 @@ if ($op === 'edits') {
     // Both versions rendered, so the moderator compares what people will SEE rather than two blobs
     // of markup. A rewrite that looks tamer in source and worse on screen is the whole risk here.
     foreach ($rows as &$r) {
-        $r['new_html'] = richtextRenderIn('description', $db, $r['description'] ?? '', (string)$r['description_format'], $cfg, true);
-        $r['cur_html'] = richtextRenderIn('description', $db, $r['cur_description'] ?? '', (string)$r['cur_format'], $cfg, true);
+        $r['new_html'] = richtextRenderIn('description', $db, $r['description'] ?? '', (string)$r['description_format'], ['rt_magnet_self' => (string)$r['info_hash']] + $cfg, true);
+        $r['cur_html'] = richtextRenderIn('description', $db, $r['cur_description'] ?? '', (string)$r['cur_format'], ['rt_magnet_self' => (string)$r['info_hash']] + $cfg, true);
         $r['new_trusted'] = $r['source_url'] ? richtextIsTrusted((string)$r['source_url'], $cfg) : false;
         $r['author_avatar'] = $wlcFace($r);
         $r['author_hidden'] = $r['author'] !== null && (int)($r['author_credit_public'] ?? 1) !== 1;

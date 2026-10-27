@@ -5739,7 +5739,7 @@ window.siteToast = siteToast;
         flarum:   t.key('js.app.hint_flarum'),
     };
     const fmt = () => (fmtEl && (fmtEl.value === 'markdown' || fmtEl.value === 'flarum')) ? fmtEl.value : 'bbcode';
-    const looksLikeFlarum = (s) => /\[(?:thxlabels|thxrow|magnet|upl-[a-z-]+)\b/i.test(s)
+    const looksLikeFlarum = (s) => /\[(?:thxlabels|thxrow|upl-[a-z-]+)\b/i.test(s)
         || (/\[(?:b|i|u|s|center|img|url|code|quote|spoiler|size|color|list)\b[^\]]*\]/i.test(s)
             && /^(?:#{1,6} \S|_{3,}[ \t]*$|-{3,}[ \t]*$|> )/m.test(s));
 

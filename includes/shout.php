@@ -490,8 +490,8 @@ function shoutBodyHtml(string $body, string $format, array $cfg, array $ctx): st
     $html = $format === 'plain'
         ? (function_exists('emojiFaRenderHtml') ? emojiFaRenderHtml(nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false), $cfg)
                                                   : nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false))
-        : ($asText ? richtextRender($body, $format, ['rt_links_text' => '1'] + $cfg, true)
-                   : shoutLinkImages(richtextRender($body, $format, $cfg, true), (string)($ctx['img_title'] ?? '')));
+        : ($asText ? richtextRender($body, $format, ['rt_links_text' => '1', 'rt_magnet_compact' => '1'] + $cfg, true)
+                   : shoutLinkImages(richtextRender($body, $format, ['rt_magnet_compact' => '1'] + $cfg, true), (string)($ctx['img_title'] ?? '')));
     return shoutRenderEmotes(shoutLinkMentions($html, (array)($ctx['known'] ?? []), (string)($ctx['base'] ?? ''), (string)($ctx['me_name'] ?? '')),
                              (array)($ctx['emotes'] ?? []), (string)($ctx['base'] ?? ''), !empty($ctx['stickers']));
 }

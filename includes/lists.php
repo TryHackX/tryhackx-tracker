@@ -165,7 +165,7 @@ function listDescClean(string $raw): string
 function listDescStrip(string $text, string $format, bool $keepJoiner = false): string
 {
     $s = str_replace(["\r\n", "\r"], "\n", $text);
-    if ($format === 'flarum') $s = preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/iu', '', $s) ?? $s;
+    $s = preg_replace('/\[magnet(?:=[^\]\n]*)?\][\s\S]*?\[\/magnet\]/iu', '', $s) ?? $s;
     if ($format !== 'markdown') {
         $s = preg_replace('/\[img(?:=[^\]\n]*)?\][\s\S]*?\[\/img\]/iu', '', $s) ?? $s;
         $s = preg_replace('/\[\/?(?:b|i|u|s|sub|sup|color|size|font|highlight|mark|center|right|left|quote|spoiler|url|email|list|table|tr|th|td|code|hide|postshide|youtube|yt|hr|thxlabels|thxrow|del|\*)(?:=[^\]\n]*)?\]/iu', '', $s) ?? $s;

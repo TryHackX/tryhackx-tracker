@@ -545,7 +545,7 @@ function commentParse(string $s, array $cfg, bool $links = true, ?array $img = n
         }
     };
 
-    $re = '~\[(?:(b|i|u|s)|/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?|(img))\]~i';
+    $re = '~\[(?:(b|i|u|s)|/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?|(img)|(magnet)(?:=([^\]\n]{0,300}))?)\]~i';
     $pos = 0;
     $nextUrlCloser = -1;
     while (preg_match($re, $s, $m, PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL, $pos)) {
@@ -617,6 +617,20 @@ function commentParse(string $s, array $cfg, bool $links = true, ?array $img = n
                 $text($inner);
                 $out .= '</code>';
             }
+            continue;
+        }
+
+        if ($m[9][0] !== null) {
+            if (!preg_match('~\[/magnet\]~i', $s, $mm, PREG_OFFSET_CAPTURE, $pos)) { $text($tok); continue; }
+            if (!$links) { $urlTags++; $text($tok); continue; }
+            if ($has('url')) { $text($tok); continue; }
+            $mag = richtextMagnetParse(substr($s, $pos, (int)$mm[0][1] - $pos));
+            if ($mag === null) { $bad++; $text($tok); continue; }
+            if (++$nLinks > COMMENT_MAX_LINKS) { $text($tok); continue; }
+            $pos = (int)$mm[0][1] + strlen($mm[0][0]);
+            $label = $m[10][0] !== null ? commentTitle((string)$m[10][0], 300) : '';
+            $chars += mb_strlen(richtextMagnetName($label !== '' ? $label : (string)$mag['dn'], $label === ''), 'UTF-8');
+            $out .= richtextMagnetCard($mag, $cfg, $label);
             continue;
         }
 
@@ -772,6 +786,7 @@ function commentExcerpt(string $body, int $len = COMMENT_EXCERPT, string $imageW
     $t = commentClean($body);
     $word = $imageWord !== '' ? $imageWord : __('comment.image_word');
     $t = (string)preg_replace_callback('~\[img\][^\[\]]*\[/img\]~i', static fn() => ' ' . $word . ' ', $t);
+    $t = (string)preg_replace('~\[magnet(?:=[^\]\n]*)?\][^\[\]]*\[/magnet\]~i', ' [magnet] ', $t);
     $t = (string)preg_replace('~\[/?(?:b|i|u|s|code|url(?:=[^\]\n]*)?|quote(?:=[^\]\n]*)?|spoiler(?:=[^\]\n]*)?)\]~i', '', $t);
     $t = trim((string)preg_replace('/\s+/u', ' ', $t));
     return mb_strlen($t, 'UTF-8') > $len ? rtrim(mb_substr($t, 0, $len - 1, 'UTF-8')) . '…' : $t;

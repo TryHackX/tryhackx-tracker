@@ -282,6 +282,7 @@ $modWaiting = $modReview ? contentPendingCount($db) + (int)$db->query("SELECT CO
 <?php if ($modReview): ?>
     <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/magnetcard.js<?= assetVer('assets/js/magnetcard.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-review.js<?= assetVer('assets/js/admin-review.js') ?>"></script>
 <?php endif; ?>
     <script src="<?= $baseUrl ?>assets/js/admin-moderation.js<?= assetVer('assets/js/admin-moderation.js') ?>"></script>

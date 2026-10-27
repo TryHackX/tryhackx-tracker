@@ -607,8 +607,8 @@ check('flarum: ### is a heading and [b] is bold, side by side as on the forum',
       str_contains($h, '<h5 class="rt-h">Quick look:</h5>') && str_contains($h, '<strong>Title:</strong> Big Buck Bunny'));
 check('flarum: \\~ is a plain tilde — no backslash and no subscript',
       str_contains($h, '~10 min') && !str_contains($h, '\\~') && !str_contains($h, '<sub>10'));
-check('flarum: the magnet is left out entirely — no link, no text, no empty line where it stood',
-      !str_contains($h, 'magnet:') && !str_contains($h, 'btih') && !str_contains($h, 'WEB-DL<br><br>'));
+check('flarum: the magnet is a card with its name — no raw tag, no empty line where it stood',
+      str_contains($h, '<div class="rt-magnet') && str_contains($h, '>bbb<') && !str_contains($h, '[magnet]') && !str_contains($h, 'WEB-DL<br><br>'), $h);
 check('flarum: ___ and a --- after a blank line are rules', substr_count($h, '<hr class="rt-hr">') === 2, (string)substr_count($h, '<hr'));
 check('flarum: label grids in two places, each its own block — three and two, then one',
       preg_match_all('/<div class="rt-labels rt-labels-c(\d)">/', $h, $lm) === 2 && $lm[1] === ['3', '1']
@@ -619,7 +619,7 @@ check('flarum: [code] keeps its lines, and lines of * [b]…[/b] are a list',
 check('flarum: a bare YouTube address is the YouTube link, a bare picture address is the picture',
       str_contains($h, 'class="rt-video"') && str_contains($h, 'watch?v=aqz-KE-bpKQ') && str_contains($h, 'src="https://example.org/poster.png"'));
 $cnt = richtextCount($post, 'flarum', $cfgF);
-check('flarum: the counters see seven pictures and one link (the magnet is none)', $cnt === ['images' => 7, 'links' => 1], json_encode($cnt));
+check('flarum: the counters see seven pictures and two links (the magnet card is one)', $cnt === ['images' => 7, 'links' => 2], json_encode($cnt));
 check('flarum: no line break is left hanging beside a block', !preg_match('#<div class="rt-center"><br>|</h[45]><br>|<br></div>#', $h), $h);
 check('flarum: sixty such posts in one description render in one go',
       str_contains(richtextRender(str_repeat($post, 60), 'flarum', $cfgF, true), 'Quick look:'));
@@ -690,7 +690,7 @@ check('flarum: pathological input neither hangs the renderer nor empties the des
 
 $bb = richtextRender("[thxlabels=2][thxrow][img]https://example.org/a.jpg[/img][img]https://example.org/b.jpg[/img][/thxrow][/thxlabels]\n"
                    . "[magnet]magnet:?xt=urn:btih:abc[/magnet]", 'bbcode', $cfg, true);
-check('bbcode: [thxlabels] is a label grid there too, and [magnet] stays the words it is (only the forum format leaves it out)',
+check('bbcode: [thxlabels] is a label grid there too, and a [magnet] with no valid hash stays the words it is',
       str_contains($bb, '<div class="rt-labels rt-labels-c2"><div class="rt-labels-row">') && str_contains($bb, '[magnet]magnet:?xt=urn:btih:abc[/magnet]'), $bb);
 check('excerpt: a forum post loses its magnet and its backslashes',
       !str_contains(richtextExcerpt($post, 400), 'magnet:') && !str_contains(richtextExcerpt($post, 400), '\\'), richtextExcerpt($post, 400));
