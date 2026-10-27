@@ -284,6 +284,7 @@ function cspPolicy(array $cfg, string $scope, ?string $page = null): string {
         'script-src ' . implode(' ', array_unique($script)),
         'style-src ' . implode(' ', array_unique($style)),
         "img-src 'self' data: https:",
+        ...((string)($cfg['rt_video_files'] ?? '0') === '1' ? ["media-src 'self' https:"] : []),
         'font-src ' . implode(' ', array_unique($font)),
         'connect-src ' . implode(' ', array_unique($connect)),
         'frame-src ' . implode(' ', array_unique($frame)),

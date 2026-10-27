@@ -156,8 +156,9 @@ foreach ($map as $k => $v) {
 }
 check('every entry is one style class and one icon class, Free styles only', $badVal === [], implode(' | ', $badVal));
 // Brands only for brands: a brand glyph in fa-solid draws nothing, and vice versa.
-check('the one brand (YouTube) is in fa-brands, and nothing else is', ($map['youtube'] ?? '') === 'fa-brands fa-youtube'
-      && count(array_filter($map, fn($v) => str_starts_with($v, 'fa-brands'))) === 1);
+check('the brands (YouTube, Vimeo, Twitch) are in fa-brands, and nothing else is', ($map['youtube'] ?? '') === 'fa-brands fa-youtube'
+      && ($map['vimeo'] ?? '') === 'fa-brands fa-vimeo-v' && ($map['twitch'] ?? '') === 'fa-brands fa-twitch'
+      && count(array_filter($map, fn($v) => str_starts_with($v, 'fa-brands'))) === 3);
 // The pairs whose two halves MEAN something must stay two different glyphs: an empty star beside a
 // filled one is a favourite or not; a flag, reported or not.
 foreach ([['star', 'star-fill'], ['flag', 'flag-fill'], ['check-circle', 'check-circle-fill'], ['circle', 'circle-fill'],

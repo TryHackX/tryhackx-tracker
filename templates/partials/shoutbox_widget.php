@@ -445,6 +445,7 @@ $shoutFaVer  = $shoutFaMode !== 'off' ? emojiFaVersion($cfg) : '';
                     <span class="rt-tool-group">
                         <button type="button" data-md="code" title="<?= _h('rt.code') ?>"><i class="bi bi-code-slash" aria-hidden="true"></i></button>
                         <button type="button" data-md="link" title="<?= _h('rt.link') ?>"><i class="bi bi-link-45deg" aria-hidden="true"></i></button>
+                        <button type="button" data-md="magnet" title="<?= _h('rt.magnet_link') ?>"><i class="bi bi-magnet" aria-hidden="true"></i></button>
                         <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>"><i class="bi bi-quote" aria-hidden="true"></i></button>
                         <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>"><i class="bi bi-eye-slash" aria-hidden="true"></i></button>
                     </span>

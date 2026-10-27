@@ -5110,7 +5110,7 @@ window.siteToast = siteToast;
                 if (r.desc) {
                     const marks = document.createElement('span');
                     marks.className = 'search-desc-marks';
-                    [[1, 'bi-file-earmark-text', 'js.app.desc_has_text'], [2, 'bi-image', 'js.app.desc_has_pics'], [4, 'bi-play-btn', 'js.app.desc_has_video']].forEach(([bit, glyph, key]) => {
+                    [[1, 'bi-file-earmark-text', 'js.app.desc_has_text'], [2, 'bi-image', 'js.app.desc_has_pics'], [4, 'bi-play-circle', 'js.app.desc_has_video']].forEach(([bit, glyph, key]) => {
                         if (!(r.desc & bit)) return;
                         const i = document.createElement('i');
                         i.className = 'bi ' + glyph;
@@ -5717,6 +5717,8 @@ window.siteToast = siteToast;
             spoiler: ['||', '||'],
             table: ['| A | B |\n|---|---|\n| 1 | 2 |', '', true],
             hr: ['\n---\n', '', true],
+            magnet: ['[magnet]', '[/magnet]'], hide: ['[hide]', '[/hide]'],
+            h1: ['# ', ''], h2: ['## ', ''], h3: ['### ', ''],
         },
         bbcode: {
             bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], underline: ['[u]', '[/u]'],
@@ -5730,9 +5732,68 @@ window.siteToast = siteToast;
             spoiler: ['[spoiler=Title]', '[/spoiler]'], center: ['[center]', '[/center]'],
             table: ['[table]\n[tr][th]A[/th][th]B[/th][/tr]\n[tr][td]1[/td][td]2[/td][/tr]\n[/table]', '', true],
             hr: ['\n[hr]\n', '', true],
+            magnet: ['[magnet]', '[/magnet]'], youtube: ['[youtube]', '[/youtube]'], hide: ['[hide]', '[/hide]'],
+            left: ['[left]', '[/left]'], right: ['[right]', '[/right]'], quote_author: ['[quote=Name]', '[/quote]'],
+            alist: ['[list=a]\n[*] ', '\n[/list]'], rlist: ['[list=i]\n[*] ', '\n[/list]'],
         },
     };
-    SYNTAX.flarum = SYNTAX.bbcode;
+    SYNTAX.flarum = Object.assign({}, SYNTAX.bbcode, { h1: ['# ', ''], h2: ['## ', ''], h3: ['### ', ''] });
+    const rtGlyph = (cls) => { const i = document.createElement('i'); i.className = cls; i.setAttribute('aria-hidden', 'true'); return i; };
+    const MENUS = {
+        insert: ['bi-plus-lg', 'js.app.rt_menu_insert', [['magnet', 'bi-magnet', 'js.app.rt_magnet'], ['youtube', 'bi-youtube', 'js.app.rt_youtube'],
+                                                         ['hide', 'bi-lock', 'js.app.rt_hide']]],
+        para: ['bi-text-paragraph', 'js.app.rt_menu_para', [['h1', 'bi-type-h1', 'js.app.rt_h1'], ['h2', 'bi-type-h2', 'js.app.rt_h2'],
+                                                            ['h3', 'bi-type-h3', 'js.app.rt_h3'], ['left', 'bi-text-left', 'js.app.rt_left'],
+                                                            ['right', 'bi-text-right', 'js.app.rt_right'], ['quote_author', 'bi-quote', 'js.app.rt_quote_author'],
+                                                            ['alist', 'bi-list-ol', 'js.app.rt_alist'], ['rlist', 'bi-list-ol', 'js.app.rt_rlist']]],
+    };
+    const closeMenus = () => {
+        if (!tools) return;
+        tools.querySelectorAll('.rt-menu').forEach(m => {
+            m.hidden = true;
+            if (m.previousElementSibling) m.previousElementSibling.setAttribute('aria-expanded', 'false');
+        });
+    };
+    if (tools && tools.dataset.rtMenus) {
+        tools.dataset.rtMenus.split(/\s+/).forEach(name => {
+            const def = MENUS[name];
+            if (!def) return;
+            const group = document.createElement('span');
+            group.className = 'rt-tool-group rt-menu-wrap';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'rt-menu-btn';
+            btn.setAttribute('aria-haspopup', 'true');
+            btn.setAttribute('aria-expanded', 'false');
+            btn.append(rtGlyph('bi ' + def[0]), ' ', t.key(def[1]), ' ', rtGlyph('bi bi-chevron-down rt-menu-caret'));
+            const menu = document.createElement('div');
+            menu.className = 'rt-menu';
+            menu.setAttribute('role', 'menu');
+            menu.hidden = true;
+            def[2].forEach(([kind, ic, label]) => {
+                const it = document.createElement('button');
+                it.type = 'button';
+                it.dataset.md = kind;
+                it.setAttribute('role', 'menuitem');
+                it.append(rtGlyph('bi ' + ic), ' ', t.key(label));
+                menu.append(it);
+            });
+            btn.addEventListener('click', () => {
+                const open = menu.hidden;
+                closeMenus();
+                if (!open) return;
+                menu.hidden = false;
+                menu.classList.toggle('rt-menu-end', btn.getBoundingClientRect().left + menu.offsetWidth > document.documentElement.clientWidth - 8);
+                btn.setAttribute('aria-expanded', 'true');
+                const first = menu.querySelector('[data-md]:not([hidden])');
+                if (first) first.focus();
+            });
+            group.append(btn, menu);
+            tools.append(group);
+        });
+        document.addEventListener('click', (e) => { if (!tools.contains(e.target)) closeMenus(); });
+        tools.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+    }
     const HINT = {
         markdown: t.key('js.app.hint_markdown'),
         bbcode:   t.key('js.app.hint_bbcode'),
@@ -5853,7 +5914,9 @@ window.siteToast = siteToast;
     tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.rt)));
     if (tools) tools.addEventListener('click', (e) => {
         const b = e.target.closest('[data-md]');
-        if (b) wrap(b.dataset.md);
+        if (!b) return;
+        if (b.closest('.rt-menu')) closeMenus();
+        wrap(b.dataset.md);
     });
     ta.addEventListener('keydown', (e) => {
         if (!(e.ctrlKey || e.metaKey) || e.altKey) return;

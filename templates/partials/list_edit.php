@@ -92,7 +92,7 @@ if (($leCtx['public_why'] ?? '') === 'sharing_off') {
                         <span class="rt-format-fixed" id="le-desc-format-fixed"><?= richtextFormatLabel($leFormats[0]) ?></span>
                         <?php endif; ?>
                     </div>
-                    <div class="rt-tools" id="le-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+                    <div class="rt-tools" id="le-desc-tools" data-rt-menus="insert para" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
                         <span class="rt-tool-group" id="le-desc-tg-text">
                             <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
                             <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic" aria-hidden="true"></i></button>

@@ -185,7 +185,7 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
                 <span class="rt-format-fixed"><?= richtextFormatLabel($ioFormats[0]) ?></span>
                 <?php endif; ?>
             </div>
-            <div class="rt-tools" id="info-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+            <div class="rt-tools" id="info-desc-tools" data-rt-menus="insert para" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
                 <span class="rt-tool-group">
                     <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
                     <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic" aria-hidden="true"></i></button>

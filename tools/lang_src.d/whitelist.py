@@ -170,6 +170,7 @@ add('rt', {
     'spoiler':   ('Spoiler', 'Spoiler'),
     'center':    ('Centre', 'Wyśrodkowanie'),
     'hr':        ('Horizontal rule', 'Linia pozioma'),
+    'magnet_link': ('Magnet link', 'Link magnet'),
     'toolbar':   ('Formatting', 'Formatowanie'),
 })
 

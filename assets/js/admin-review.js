@@ -166,12 +166,9 @@
         ]);
         if (r.votes_count) {
             const stars = S.repMode === 'stars';
-            meta.appendChild(el('span', {
-                className: 'wl-badge ' + (r.score_x100 >= (stars ? 250 : 5000) ? 'wl-b-ok' : 'wl-b-warn'),
-                text: stars
-                    ? t.key(r.votes_count === 1 ? 'js.wl.rating_stars_one' : 'js.wl.rating_stars_many', { stars: num(Math.round(r.score_x100 / 10) / 10), n: r.votes_count })
-                    : t.key(r.votes_count === 1 ? 'js.wl.rating_one' : 'js.wl.rating_many', { pct: Math.round(r.score_x100 / 100), n: r.votes_count }),
-            }));
+            meta.appendChild(el('span', { className: 'wl-badge ' + (r.score_x100 >= (stars ? 250 : 5000) ? 'wl-b-ok' : 'wl-b-warn') }, stars
+                ? [icon('bi-star-fill'), ' ', t.key(r.votes_count === 1 ? 'js.wl.rating_stars_one' : 'js.wl.rating_stars_many', { stars: num(Math.round(r.score_x100 / 10) / 10), n: r.votes_count })]
+                : [t.key(r.votes_count === 1 ? 'js.wl.rating_one' : 'js.wl.rating_many', { pct: Math.round(r.score_x100 / 100), n: r.votes_count })]));
         }
         const acts = el('div', { className: 'rq-acts' });
         if (r.content_status !== 'approved' && r.content_status !== 'none') acts.appendChild(iconBtn('bi-check-lg', 'btn-outline-success', t.key('js.wl.publish'), () => decide(r, 'approve')));

@@ -3180,6 +3180,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         </select>
                         <small class="settings-hint"><?= _h('settings.rt_youtube_hint') ?></small>
                     </div>
+                    <div class="col-md-6" data-setting="rt_video_files">
+                        <label for="set-rt_video_files" class="form-label"><?= _h('settings.rt_video_files') ?></label>
+                        <select id="set-rt_video_files" class="form-select bg-dark text-light border-secondary" name="rt_video_files">
+                            <option value="0" <?= ($cfg['rt_video_files'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rt_video_files_link') ?></option>
+                            <option value="1" <?= ($cfg['rt_video_files'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rt_video_files_play') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.rt_video_files_hint') ?></small>
+                    </div>
                 </div>
             </div>
 

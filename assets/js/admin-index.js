@@ -233,7 +233,7 @@
             const marks = [];
             if (r.protected) marks.push(el('i', { className: 'bi bi-shield-fill idx-mark', role: 'img', title: t.key('js.index.protected_title'), 'aria-label': t.key('js.index.protected_title') }));
             if (r.promoted) marks.push(el('i', { className: 'bi bi-star-fill idx-mark', role: 'img', title: t.key('js.index.promoted_title'), 'aria-label': t.key('js.index.promoted_title') }));
-            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-btn', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
+            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-circle', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
                 if (r.desc & bit) marks.push(el('i', { className: 'bi ' + glyph + ' idx-mark idx-desc-mark', role: 'img', title: t.key(key), 'aria-label': t.key(key) }));
             });
             tr.appendChild(el('td', { className: 'wl-name-cell' }, el('div', { className: 'idx-name-row' },

@@ -147,6 +147,36 @@
         if (t.length >= 2 && (t[0] === '"' || t[0] === "'") && t[t.length - 1] === t[0]) t = cmTrim(t.slice(1, -1));
         return [...t].slice(0, max).join('');
     }
+    function magnetDecJs(x) {
+        const out = [];
+        const enc = new TextEncoder();
+        for (let i = 0; i < x.length;) {
+            if (x[i] === '%' && /^[0-9a-fA-F]{2}$/.test(x.substr(i + 1, 2))) { out.push(parseInt(x.substr(i + 1, 2), 16)); i += 3; continue; }
+            const ch = String.fromCodePoint(x.codePointAt(i));
+            enc.encode(ch).forEach((b) => out.push(b));
+            i += ch.length;
+        }
+        return new TextDecoder('utf-8').decode(new Uint8Array(out));
+    }
+    /** richtextMagnetParse() + richtextMagnetName(): the words a [magnet] card shows, or null when it is no magnet. */
+    function magnetNameJs(raw, label) {
+        const u = raw.replace(/[\r\n\t]+/g, '').replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, '').replace(/ /g, '%20');
+        if (new TextEncoder().encode(u).length > 4000 || !/^magnet:\?[^ \t\n\x0B\f\r<>"'`]+$/i.test(u)) return null;
+        let hash = false, dn = null;
+        u.slice(8).split('&').forEach((pair) => {
+            const eq = pair.indexOf('=');
+            if (eq < 0) return;
+            const k = pair.slice(0, eq).toLowerCase(), v = pair.slice(eq + 1);
+            if (k === 'xt' && !hash && /^urn:btih:(?:[0-9a-f]{40}|[a-z2-7]{32})$/i.test(magnetDecJs(v))) hash = true;
+            else if (k === 'dn' && !dn) dn = [...magnetDecJs(v.replace(/\+/g, ' ')).replace(/[\x00-\x1F\x7F]+/g, ' ')].slice(0, 500).join('');
+        });
+        if (!hash) return null;
+        const t = label !== undefined && label !== null ? commentTitleJs(label, 300) : '';
+        let n = (t !== '' ? t : (dn || '').replace(/^[ \t\n\r\0\x0B]+|[ \t\n\r\0\x0B]+$/g, '')).replace(/[\x00-\x1F\x7F]+/g, ' ');
+        if (t === '') n = n.replace(/[_.]+/g, ' ');
+        n = n.replace(/\s+/g, ' ').replace(/^ +| +$/g, '');
+        return [...n].length > 300 ? [...n].slice(0, 299).join('') + '…' : n;
+    }
     function ownImageJs(url, base) {
         if (!base || url.length <= base.length || url.slice(0, base.length).toLowerCase() !== String(base).toLowerCase()) return false;
         const m = /^i\/(\d{1,10})-(\d{1,5})x(\d{1,5})\.(?:webp|gif)$/.exec(url.slice(base.length));
@@ -154,7 +184,7 @@
     }
     function visibleChars(src, links, img) {
         const s = commentCleanJs(src);
-        const re = /\[(?:(b|i|u|s)|\/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?|(img))\]/gi;
+        const re = /\[(?:(b|i|u|s)|\/(b|i|u|s|url|quote|spoiler|code)|(quote|spoiler)(?:=([^\]\n]{0,80}))?|(code)|url(?:(=)([^\]\n]*))?|(img)|(magnet)(?:=([^\]\n]{0,300}))?)\]/gi;
         const len = (x) => [...x].length;
         let n = 0, pos = 0, m, nLinks = 0, nextUrlCloser = -1;
         const stack = [], lit = { quote: 0, spoiler: 0 };
@@ -198,6 +228,16 @@
                 if (c < 0) { text(tok); continue; }
                 text(s.slice(pos, pos + c).replace(/^\n+|\n+$/g, ''));
                 pos += c + '[/code]'.length;
+                re.lastIndex = pos;
+                continue;
+            }
+            if (m[9]) {
+                const c = s.slice(pos).search(/\[\/magnet\]/i);
+                if (c < 0 || !links || has('url')) { text(tok); continue; }
+                const name = magnetNameJs(s.slice(pos, pos + c), m[10]);
+                if (name === null || ++nLinks > CM_MAX_LINKS) { text(tok); continue; }
+                text(name);
+                pos += c + '[/magnet]'.length;
                 re.lastIndex = pos;
                 continue;
             }
@@ -440,7 +480,7 @@
         tools.appendChild(group([['bold', 'bi-type-bold', t.key('js.comments.tb_bold')], ['italic', 'bi-type-italic', t.key('js.comments.tb_italic')],
                                  ['underline', 'bi-type-underline', t.key('js.comments.tb_underline')], ['strike', 'bi-type-strikethrough', t.key('js.comments.tb_strike')]]));
         const blocks = [];
-        if (me.links) blocks.push(['link', 'bi-link-45deg', t.key('js.comments.tb_link')]);
+        if (me.links) blocks.push(['link', 'bi-link-45deg', t.key('js.comments.tb_link')], ['magnet', 'bi-magnet', t.key('js.comments.tb_magnet')]);
         blocks.push(['quote', 'bi-quote', t.key('js.comments.tb_quote')], ['spoiler', 'bi-eye-slash', t.key('js.comments.tb_spoiler')], ['code', 'bi-code-slash', t.key('js.comments.tb_code')]);
         tools.appendChild(group(blocks));
         if (me.picker) {

@@ -414,7 +414,7 @@
             tr.appendChild(hashCell);
             const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
             nameTd.appendChild(el('span', { text: row.name || '—' }));
-            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-btn', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
+            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-circle', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
                 if (row.desc & bit) nameTd.appendChild(el('i', { className: 'bi ' + glyph + ' wl-desc-mark', role: 'img', title: t.key(key), 'aria-label': t.key(key) }));
             });
             // WHO sent it stays readable at a glance, under the name where the column has room — the
@@ -971,7 +971,7 @@
         if (it.votes_count) {
             const stars = r.rep_mode === 'stars';
             const score = it.score_x100 || 0;
-            const label = stars ? '★ ' + t.num(Math.round(score / 10) / 10) : Math.round(score / 100) + '%';
+            const label = stars ? [el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' }), ' ', t.num(Math.round(score / 10) / 10)] : Math.round(score / 100) + '%';
             row(t.key('js.wl.lbl_rating'), [
                 badge(label, score >= (stars ? 250 : 5000) ? 'wl-b-ok' : 'wl-b-warn'), ' ',
                 el('span', { className: 'text-muted wl-small' },

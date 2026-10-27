@@ -20,6 +20,15 @@ add('settings', {
                         'Opisy torrentów, strony i wiadomości prywatne. Przed kliknięciem odtwarzania nic nie jest pobierane z YouTube, '
                         'poza miniaturą w ostatniej opcji, która pochodzi z serwera obrazów YouTube. Player to wersja YouTube '
                         'o podwyższonej prywatności (youtube-nocookie.com). Wszędzie indziej, także w mailach, link zostaje linkiem.'),
+    'rt_video_files': ('Video files (.mp4, .webm, .ogv)', 'Pliki wideo (.mp4, .webm, .ogv)'),
+    'rt_video_files_link': ('A link, as before', 'Link, jak dotąd'),
+    'rt_video_files_play': ('A player that loads when clicked', 'Player wczytywany po kliknięciu'),
+    'rt_video_files_hint': ("A bare https address of a video file in a description, a page or a private message. Nothing is fetched "
+                            "before the play button is pressed; then the reader's browser loads the file from that address. Switching "
+                            "this on lets pages play media from any https address.",
+                            'Goły adres https pliku wideo w opisie, na stronie albo w wiadomości prywatnej. Przed kliknięciem odtwarzania '
+                            'nic nie jest pobierane; potem przeglądarka czytelnika wczytuje plik spod tego adresu. Włączenie pozwala '
+                            'stronom odtwarzać multimedia z dowolnego adresu https.'),
 })
 
 add('js.video', {

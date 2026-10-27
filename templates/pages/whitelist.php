@@ -196,7 +196,7 @@ if ($wlSched) {
                      syncFormat in assets/js/app.js) — BBCode has [color] and Markdown does not, and
                      a button that inserts markup the renderer will not honour is worse than no
                      button at all. -->
-                <div class="rt-tools" id="wl-desc-tools" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+                <div class="rt-tools" id="wl-desc-tools" data-rt-menus="insert para" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
                     <span class="rt-tool-group">
                         <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
                         <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic" aria-hidden="true"></i></button>

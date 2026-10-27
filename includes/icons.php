@@ -340,6 +340,8 @@ function iconFaEntries(): array {
         'superscript'                => ['superscript', 's'],
         'table'                      => ['table', 's'],
         'text-center'                => ['align-center', 's'],
+        'text-left'                  => ['align-left', 's'],
+        'text-right'                 => ['align-right', 's'],
         'text-paragraph'             => ['paragraph', 's'],
         'three-dots'                 => ['ellipsis', 's'],
         'translate'                  => ['language', 's'],
@@ -348,6 +350,9 @@ function iconFaEntries(): array {
         'tree'                       => ['tree', 's'],   // the emoji picker's Animals & nature tab (1.69.0)
         'trophy'                     => ['trophy', 's'],   // the emoji picker's Activities tab (1.69.0)
         'type-bold'                  => ['bold', 's'],
+        'type-h1'                    => ['heading', 's'],
+        'type-h2'                    => ['heading', 's'],
+        'type-h3'                    => ['heading', 's'],
         'type-italic'                => ['italic', 's'],
         'type-strikethrough'         => ['strikethrough', 's'],
         'type-underline'             => ['underline', 's'],
@@ -362,6 +367,10 @@ function iconFaEntries(): array {
         'x-lg'                       => ['xmark', 's'],
         'x-octagon'                  => ['circle-xmark', 's', 'approx' => 1, 'pro' => 'octagon-xmark', 'prorole' => 'r'],   // ~ no octagon in Free
         'youtube'                    => ['youtube', 'b'],
+        'vimeo'                      => ['vimeo-v', 'b'],
+        'twitch'                     => ['twitch', 'b'],
+        'soundwave'                  => ['wave-square', 's'],
+        'film'                       => ['film', 's'],
     ];
 }
 

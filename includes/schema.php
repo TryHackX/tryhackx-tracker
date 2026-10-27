@@ -3614,6 +3614,7 @@ function trackerSchemaDefaultSettings(): array {
         'rt_formats_page'             => 'bbcode,markdown,flarum',
         'rt_formats_mail'             => 'bbcode,markdown,flarum',
         'rt_youtube'                  => 'link',
+        'rt_video_files'              => '0',
         'images_max_mb'               => '8',
         'images_max_edge'             => '2048',
         'images_max_mpx'              => '24',

@@ -467,13 +467,33 @@ function richtextYoutubeStart(string $v): int {
 }
 
 function richtextYoutubeData(string $id, int $start, array $cfg): string {
-    if (($cfg['rt_video_player'] ?? '') !== '1' || !preg_match('/^[A-Za-z0-9_-]{11}$/', $id)) return '';
+    if (($cfg['rt_video_player'] ?? '') !== '1' || !in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true)
+        || !preg_match('/^[A-Za-z0-9_-]{11}$/', $id)) return '';
     return ' data-yt="' . $id . '"' . ($start > 0 ? ' data-yt-start="' . $start . '"' : '')
          . (($cfg['rt_youtube'] ?? '') === 'thumb' ? ' data-yt-thumb="1"' : '');
 }
 
 function richtextVideoCfg(array $cfg): array {
-    return in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true) ? ['rt_video_player' => '1'] + $cfg : $cfg;
+    return in_array((string)($cfg['rt_youtube'] ?? 'link'), ['click', 'thumb'], true) || ($cfg['rt_video_files'] ?? '0') === '1'
+        ? ['rt_video_player' => '1'] + $cfg : $cfg;
+}
+
+function richtextMediaLink(string $raw, array $cfg): ?string {
+    $url = html_entity_decode($raw, ENT_QUOTES, 'UTF-8');
+    $a = richtextLinkAttrs($url, $cfg);
+    if ($a === '') return null;
+    $e = static fn(string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    if (preg_match('#^https://[^/?\#\s]+/(?:[^?\#\s]*/)?([^/?\#\s]+\.(?:mp4|webm|ogv))(?:[?\#]\S*)?$#i', $url, $m)) {
+        $play = ($cfg['rt_video_player'] ?? '') === '1' && ($cfg['rt_video_files'] ?? '0') === '1';
+        return '<a class="rt-video rt-vfile"' . $a . ($play ? ' data-vfile="1"' : '') . '><i class="bi bi-film" aria-hidden="true"></i> '
+             . $e(mb_strimwidth(rawurldecode($m[1]), 0, 80, '…')) . '</a>';
+    }
+    if (!preg_match('#^https?://(?:www\.|m\.|player\.)?(vimeo\.com|twitch\.tv|soundcloud\.com)/([^?\#\s]+)#i', $url, $m)) return null;
+    $site = ['vimeo.com' => ['bi-vimeo', 'Vimeo'], 'twitch.tv' => ['bi-twitch', 'Twitch'], 'soundcloud.com' => ['bi-soundwave', 'SoundCloud']][strtolower($m[1])];
+    $path = trim(rawurldecode($m[2]), '/');
+    if ($path === '') return null;
+    return '<a class="rt-video rt-media"' . $a . '><i class="bi ' . $site[0] . '" aria-hidden="true"></i> ' . $site[1] . ': '
+         . $e(mb_strimwidth($path, 0, 60, '…')) . '</a>';
 }
 
 function richtextSay(string $key, string $en): string {
@@ -503,7 +523,7 @@ function richtextMagnetParse(string $raw): ?array {
         if ($eq === false) continue;
         $k = strtolower(substr($pair, 0, $eq));
         $v = substr($pair, $eq + 1);
-        if ($k === 'xt' && $hash === null && preg_match('/^urn:btih:([0-9a-f]{40}|[a-z2-7]{32})$/i', rawurldecode($v), $m)) {
+        if ($k === 'xt' && $hash === null && preg_match('/^urn:btih:([0-9a-f]{40}|[a-z2-7]{32})$/iD', rawurldecode($v), $m)) {
             $hash = strlen($m[1]) === 40 ? strtolower($m[1]) : strtolower((string)(function_exists('base32ToHex') ? base32ToHex($m[1]) : ''));
         } elseif ($k === 'dn' && $dn === '') {
             $dn = mb_substr((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', mb_scrub(rawurldecode(str_replace('+', ' ', $v)), 'UTF-8')), 0, 500);
@@ -705,33 +725,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         // ── tables, before anything that touches line starts ──
         // A pipe table is recognised by its SEPARATOR row; without one, a paragraph containing pipes
         // is just a paragraph, which is what stops an innocent line becoming a one-cell table.
-        $s = preg_replace_callback('/^(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.*\|\n?)*)/m', function ($m) {
-            $cells = function (string $line): array {
-                $line = trim($line);
-                $line = preg_replace('/^\||\|$/', '', $line);
-                return array_map('trim', explode('|', $line));
-            };
-            $align = [];
-            foreach ($cells($m[2]) as $spec) {
-                $l = str_starts_with($spec, ':');
-                $r = str_ends_with($spec, ':');
-                $align[] = $l && $r ? 'center' : ($r ? 'right' : ($l ? 'left' : ''));
-            }
-            $td = function (array $vals, string $tag) use ($align): string {
-                $out = '';
-                foreach ($vals as $i => $v) {
-                    $a = $align[$i] ?? '';
-                    $out .= '<' . $tag . ($a !== '' ? ' class="rt-t-' . $a . '"' : '') . '>' . $v . '</' . $tag . '>';
-                }
-                return '<tr>' . $out . '</tr>';
-            };
-            $html = $td($cells($m[1]), 'th');
-            foreach (preg_split('/\n/', trim($m[3])) as $row) {
-                if (trim($row) === '') continue;
-                $html .= $td($cells($row), 'td');
-            }
-            return '<div class="rt-table-wrap"><table class="rt-table">' . $html . '</table></div>' . "\n";
-        }, $s);
+        $s = richtextPipeTables($s);
 
         // ── admonitions: > [!NOTE] and friends, before the plain blockquote rule ──
         $s = preg_replace_callback('/(?:^&gt;\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*\n?(?:^&gt;.*\n?)*)/mi', function ($m) {
@@ -741,6 +735,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
                  . ucfirst($kind) . '</div>' . trim($body) . '</div>' . "\n";
         }, $s);
 
+        $s = preg_replace('/^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/m', '<hr class="rt-hr">', $s);
         $s = preg_replace('/^######\s+(.+)$/m', '<h6 class="rt-h">$1</h6>', $s);
         $s = preg_replace('/^#{4,5}\s+(.+)$/m', '<h5 class="rt-h">$1</h5>', $s);
         $s = preg_replace('/^###\s+(.+)$/m', '<h5 class="rt-h">$1</h5>', $s);
@@ -882,6 +877,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     }, $s);
     $s = preg_replace_callback('#(https?://[^\s<]+)#i', function ($m) use ($cfg, $format) {
         if ($format === 'flarum' && ($media = richtextFlarumMedia($m[1], $cfg)) !== null) return $media;
+        if (($media = richtextMediaLink($m[1], $cfg)) !== null) return $media;
         $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
         return $a === '' ? $m[1] : '<a' . $a . '>' . $m[1] . '</a>';
     }, $s);
@@ -923,6 +919,36 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     }
 
     return richtextOwnImages(richtextParagraphs($s), $cfg);
+}
+
+function richtextPipeTables(string $s): string {
+    return preg_replace_callback('/^(\|.+\|)\n(\|[\s:|-]+\|)\n((?:\|.*\|\n?)*)/m', function ($m) {
+        $cells = function (string $line): array {
+            $line = trim($line);
+            $line = preg_replace('/^\||\|$/', '', $line);
+            return array_map('trim', explode('|', $line));
+        };
+        $align = [];
+        foreach ($cells($m[2]) as $spec) {
+            $l = str_starts_with($spec, ':');
+            $r = str_ends_with($spec, ':');
+            $align[] = $l && $r ? 'center' : ($r ? 'right' : ($l ? 'left' : ''));
+        }
+        $td = function (array $vals, string $tag) use ($align): string {
+            $out = '';
+            foreach ($vals as $i => $v) {
+                $a = $align[$i] ?? '';
+                $out .= '<' . $tag . ($a !== '' ? ' class="rt-t-' . $a . '"' : '') . '>' . $v . '</' . $tag . '>';
+            }
+            return '<tr>' . $out . '</tr>';
+        };
+        $html = $td($cells($m[1]), 'th');
+        foreach (preg_split('/\n/', trim($m[3])) as $row) {
+            if (trim($row) === '') continue;
+            $html .= $td($cells($row), 'td');
+        }
+        return '<div class="rt-table-wrap"><table class="rt-table">' . $html . '</table></div>' . "\n";
+    }, $s) ?? $s;
 }
 
 function richtextBbcodeRules(string $s, array $cfg): string {
@@ -1208,6 +1234,7 @@ function richtextFlarumRules(string $s, array $cfg): string {
     $s = preg_replace('/\[quote\s+author=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\]/i', '[quote=$1]', $s) ?? $s;
     $s = preg_replace('/\[spoiler\s+title=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\]/i', '[spoiler=$1]', $s) ?? $s;
     $s = preg_replace('/\[del\](.*?)\[\/del\]/is', '<s>$1</s>', $s) ?? $s;
+    $s = richtextPipeTables($s);
     $s = richtextBbcodeRules($s, $cfg);
     $s = richtextLitedownRules($s, $cfg);
     return preg_replace_callback('/\x03(\d+)\x03/', fn($m) => $esc[(int)$m[1]] ?? '', $s) ?? $s;

@@ -45,6 +45,10 @@ $cases = [
     "[b][i]crossed[/b] still italic[/i]", '[url=https://e.example/1]a[/url][url=https://e.example/2]b[/url][url=https://e.example/3]c[/url][url=https://e.example/4]d[/url]',
     "line\r\nline\u{2028}line\u{2029}line", "\u{FEFF}\u{2060}hidden\u{202E}marks", "  \n\n  lead and trail  \n\n ",
     'Zażółć gęślą jaźń 🚀 [b]pogrubione[/b]', '[quote][quote]nested[/quote][/quote]', '[/b] stray closer [/url] [/code]',
+    'see [magnet]magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Big.Buck_Bunny%20(2008)&tr=udp%3A%2F%2Fx[/magnet] ok',
+    '[magnet="Wersja 4K"]magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVSYVK3PPMRUNXXX[/magnet]', '[magnet]magnet:?xt=urn:btih:zz[/magnet]',
+    '[magnet]magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Zażółć+gęślą[/magnet] [magnet]no closer',
+    '[url=https://e.example/a]a[/url][magnet]magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567[/magnet][url=https://e.example/b]b[/url][url]https://e.example/c[/url]',
 ];
 // 600 seeded random texts.
 mt_srand(1740);
@@ -52,7 +56,9 @@ $bits = ['word', 'słowo', '🚀', ' ', ' ', "\t", "\n", "\n\n\n", "\r\n", "\u{2
          '[/i]', '[u]', '[/u]', '[s]', '[/s]', '[quote]', '[/quote]', '[quote="Bob"]', '[spoiler]', '[/spoiler]', '[spoiler=Note]',
          '[code]', '[/code]', '[url=https://e.example/p]', '[url=http://e.example:8080/x]', '[url=https://u:p@e.example/]',
          '[url=javascript:void(0)]', '[url=https://]', '[url= https://e.example/sp ]', '[url]', '[/url]', 'https://e.example/raw',
-         'not a link', '[URL=HTTPS://E.EXAMPLE/UP]', '[url="https://e.example/q"]', '[', ']', '=', 'x'];
+         'not a link', '[URL=HTTPS://E.EXAMPLE/UP]', '[url="https://e.example/q"]', '[', ']', '=', 'x',
+         '[magnet]', '[/magnet]', '[magnet=Alt name]', 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=A.b_c',
+         'magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVSYVK3PPMRUNXXX', '&dn=x%20y', 'magnet:?dn=only'];
 for ($i = 0; $i < 600; $i++) {
     $s = '';
     $len = mt_rand(1, 40);

@@ -46,7 +46,7 @@ $modWaiting = $modReview ? contentPendingCount($db) + (int)$db->query("SELECT CO
             <div class="source-tabs rq-subtabs" id="rq-subtabs">
                 <button type="button" class="source-tab active" data-sub="queue"><i class="bi bi-file-earmark-text"></i> <?= _h('a.moderation.rv_descs') ?> <span id="rq-q-count" class="wl-tab-count"></span></button>
                 <button type="button" class="source-tab" data-sub="edits"><i class="bi bi-pencil-square"></i> <?= _h('a.moderation.rv_edits') ?> <span id="rq-e-count" class="wl-tab-count"></span></button>
-                <button type="button" class="source-tab" data-sub="published"><i class="bi bi-journal-check"></i> <?= _h('a.moderation.rv_published') ?></button>
+                <button type="button" class="source-tab" data-sub="published"><i class="bi bi-patch-check"></i> <?= _h('a.moderation.rv_published') ?></button>
             </div>
             <div id="rq-pane-queue">
                 <div class="admin-toolbar-card rq-toolbar">

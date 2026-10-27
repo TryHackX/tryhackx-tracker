@@ -51,10 +51,31 @@
         a.replaceWith(el('span', { className: 'rt-yt-wrap' }, box));
     }
 
+    function upgradeFile(a) {
+        var src = a.getAttribute('href') || '';
+        if (a.hasAttribute('data-vfile-done') || !/^https:\/\//i.test(src)) return;
+        a.setAttribute('data-vfile-done', '1');
+        var box = el('span', { className: 'rt-yt rt-vf' }, [
+            el('span', { className: 'rt-yt-cap' }, a.textContent.trim()),
+            el('button', { type: 'button', className: 'rt-yt-play', title: t.key('js.video.play'), 'aria-label': t.key('js.video.play') },
+               el('i', { className: 'bi bi-play-fill', 'aria-hidden': 'true' })),
+        ]);
+        box.addEventListener('click', function () {
+            if (box.classList.contains('rt-yt-on')) return;
+            box.classList.add('rt-yt-on');
+            var v = el('video', { className: 'rt-yt-frame', src: src, controls: true, autoplay: true, preload: 'metadata', playsinline: true });
+            box.replaceChildren(v);
+            v.focus();
+        });
+        a.replaceWith(el('span', { className: 'rt-yt-wrap' }, box));
+    }
+
     function scan(root) {
         if (!root || root.nodeType !== 1 && root.nodeType !== 9) return;
         if (root.nodeType === 1 && root.matches('a.rt-video[data-yt]')) upgrade(root);
+        if (root.nodeType === 1 && root.matches('a.rt-vfile[data-vfile]')) upgradeFile(root);
         root.querySelectorAll('a.rt-video[data-yt]').forEach(upgrade);
+        root.querySelectorAll('a.rt-vfile[data-vfile]').forEach(upgradeFile);
     }
 
     window.SiteVideo = { scan: scan };

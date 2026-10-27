@@ -80,6 +80,7 @@ add('js.comments', {
     'tb_underline':     ('Underline', 'Podkreślenie'),
     'tb_strike':        ('Strikethrough', 'Przekreślenie'),
     'tb_link':          ('Link (Ctrl+K)', 'Odnośnik (Ctrl+K)'),
+    'tb_magnet':        ('Magnet link', 'Link magnet'),
     'tb_quote':         ('Quote', 'Cytat'),
     'tb_spoiler':       ('Spoiler', 'Spoiler'),
     'tb_code':          ('Code', 'Kod'),
