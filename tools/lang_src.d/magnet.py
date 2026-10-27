@@ -25,4 +25,7 @@ add('js.magnet', {
     'copied': ('Copied', 'Skopiowano'),
     'copy_failed': ('Could not copy', 'Nie udało się skopiować'),
     'copy_box': ('The magnet link, selected for copying', 'Link magnet, zaznaczony do skopiowania'),
+    'clicks': ('Opened or copied by this many people', 'Tyle osób otworzyło lub skopiowało'),
+    'refresh': ('Ask the tracker for the seeders and leechers now', 'Zapytaj tracker o seedy i leechy teraz'),
+    'refreshed': ('Refreshed', 'Odświeżono'),
 })

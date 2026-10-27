@@ -154,8 +154,14 @@ a.info-chip-forum:hover { border-color: var(--accent); opacity: 1; }
 .rt-magnet-main { flex: 1 1 12rem; min-width: 0; }
 .rt-magnet-name { display: block; font-weight: 600; overflow-wrap: anywhere; }
 .rt-magnet-meta { display: flex; flex-wrap: wrap; gap: 0.15rem 0.8rem; font-size: 0.82em; opacity: 0.85; }
-.rt-magnet-hash { font-family: Consolas, Menlo, monospace; }
+.rt-magnet-meta > span { flex: none; }
+.rt-magnet-meta > .rt-magnet-hash { flex: 1 1 10ch; min-width: 10ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                                    font-family: Consolas, Menlo, monospace; }
 .rt-magnet-sl { display: inline-flex; gap: 0.6rem; }
+.rt-magnet-clicks .bi { font-size: 0.9em; }
+@keyframes rt-magnet-spin { to { transform: rotate(360deg); } }
+.rt-magnet button.is-spinning .bi { animation: rt-magnet-spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .rt-magnet button.is-spinning .bi { animation: none; } .rt-magnet button.is-spinning { opacity: 0.5; } }
 .rt-magnet-stat .bi-arrow-up { color: #4caf50; }
 .rt-magnet-stat .bi-arrow-down { color: #ff9800; }
 .rt-magnet-acts { display: flex; flex: none; gap: 0.3rem; }

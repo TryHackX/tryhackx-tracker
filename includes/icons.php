@@ -156,6 +156,7 @@ function iconFaEntries(): array {
         'arrow-left'                 => ['arrow-left', 's'],   // a conversation's Back (1.71.0)
         'arrow-left-right'           => ['arrow-right-arrow-left', 's'],
         'arrow-repeat'               => ['arrows-rotate', 's'],
+        'cursor'                     => ['arrow-pointer', 's'],
         'arrow-right'                => ['arrow-right', 's'],
         'arrow-up'                   => ['arrow-up', 's'],
         'arrow-up-circle'            => ['circle-up', 'r'],

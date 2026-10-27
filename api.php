@@ -303,6 +303,7 @@ $apiRoutes = [
     'index_info'                 => 'api/index_info.php',
     'hash_check'                 => 'api/hash_check.php',
     'magnet_stats'               => 'api/magnet_stats.php',
+    'magnet_click'               => 'api/magnet_click.php',
     'content_submit'             => 'api/content_submit.php',
     // Taking a description down from the Info panel (1.70.0, includes/content.php): the author's own or,
     // with content.delete_any, anybody's published one.

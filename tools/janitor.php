@@ -186,6 +186,7 @@ try {
         $cspGone = cspPrune($db, $cfg);
         if ($cspGone > 0 && in_array('-v', $argv ?? [], true)) echo "[csp] pruned $cspGone violation rows\n";
     }
+    if (function_exists('richtextMagnetClicksPrune')) richtextMagnetClicksPrune($db);
     if (function_exists('richtextCachePrune')) {
         $rcGone = richtextCachePrune($db);
         if ($rcGone > 0 && in_array('-v', $argv ?? [], true)) echo "[richtext] pruned $rcGone cached descriptions\n";

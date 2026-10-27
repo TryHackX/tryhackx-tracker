@@ -344,6 +344,15 @@ function richtextRenderCached(PDO $db, ?string $text, string $format, array $cfg
     return $html;
 }
 
+function richtextMagnetClicksPrune(PDO $db): int {
+    try {
+        return (int)$db->exec("DELETE FROM magnet_click_log WHERE day < UTC_DATE() - INTERVAL 2 DAY");
+    } catch (\Throwable $e) {
+        error_log('[richtext] the magnet click log was not pruned: ' . $e->getMessage());
+        return 0;
+    }
+}
+
 function richtextCachePrune(PDO $db): int {
     try {
         $gone = (int)$db->exec("DELETE FROM render_cache WHERE used_at < NOW() - INTERVAL " . RICHTEXT_CACHE_KEEP_DAYS . " DAY");
@@ -638,13 +647,13 @@ function richtextMagnetCard(array $m, array $cfg, string $label = ''): string {
     $open = $e(richtextSay('rt.magnet.open', 'Open in your torrent client'));
     $copyT = $e(richtextSay('rt.magnet.copy', 'Copy the magnet link'));
     $note = $e(richtextSay('rt.magnet.locked', 'The link itself is shown to members who may see magnet links.'));
-    $copy = $can ? '<button type="button" class="rt-magnet-copy" data-magnet="' . $uri . '" title="' . $copyT . '" aria-label="' . $copyT
+    $copy = $can ? '<button type="button" class="rt-magnet-copy" data-h="' . $m['hash'] . '" data-magnet="' . $uri . '" title="' . $copyT . '" aria-label="' . $copyT
                  . '"><i class="bi bi-clipboard" aria-hidden="true"></i></button>' : '';
     if (($cfg['rt_magnet_compact'] ?? '') === '1') {
         return '<span class="rt-magnet rt-magnet-sm' . ($can ? '' : ' rt-magnet-locked') . '">' . $ic
              . '<span class="rt-magnet-name" title="' . $e($name) . '">' . $e($name) . '</span>'
              . ($size !== '' ? '<span class="rt-magnet-size">' . $size . '</span>' : '')
-             . ($link ? '<a class="rt-magnet-open" href="' . $uri . '" rel="nofollow noopener" title="' . $open . '" aria-label="' . $open
+             . ($link ? '<a class="rt-magnet-open" data-h="' . $m['hash'] . '" href="' . $uri . '" rel="nofollow noopener" title="' . $open . '" aria-label="' . $open
                       . '"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a>' : '')
              . ($can ? $copy : '<i class="bi bi-lock rt-magnet-lock" title="' . $note . '" aria-label="' . $note . '"></i>')
              . '</span>';
@@ -656,7 +665,8 @@ function richtextMagnetCard(array $m, array $cfg, string $label = ''): string {
                   : '<span class="rt-magnet-name">' . $e($name) . '</span>')
          . '<div class="rt-magnet-meta">'
          . ($size !== '' ? '<span class="rt-magnet-size"><i class="bi bi-hdd" aria-hidden="true"></i> ' . $size . '</span>' : '')
-         . ($can ? '<span class="rt-magnet-hash">' . substr($m['hash'], 0, 12) . '…</span><span class="rt-magnet-sl" hidden></span>'
+         . ($can ? '<span class="rt-magnet-sl" hidden></span><span class="rt-magnet-clicks" hidden></span>'
+                 . '<span class="rt-magnet-hash" title="' . $m['hash'] . '">' . $m['hash'] . '</span>'
                  : '<span class="rt-magnet-note"><i class="bi bi-lock" aria-hidden="true"></i> ' . $note . '</span>')
          . '</div></div>'
          . ($can ? '<div class="rt-magnet-acts">' . $copy . '<button type="button" class="rt-magnet-info" hidden title="' . $info . '" aria-label="' . $info

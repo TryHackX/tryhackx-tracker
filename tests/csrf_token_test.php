@@ -116,8 +116,8 @@ check('no public script reads a page\'s own token id (#search-csrf, #account-csr
       implode(' | ', array_filter($bad, fn($x) => str_contains($x, ' reads '))));
 check("every token a public script sends ($sites places) is the helper's answer — directly, or through a file's own csrf(), csrfOf(form), the Info panel's or the editor's",
       $sites >= 30 && !array_filter($bad, fn($x) => str_contains($x, ' sends ')), implode(' | ', array_filter($bad, fn($x) => str_contains($x, ' sends '))));
-check('the scripts with a csrf() of their own — favourites, people, shoutbox, account security, the profile\'s description, the picture editor — all wrap window.csrfToken()',
-      count($wrappers) === 6 && !array_filter($bad, fn($x) => str_contains($x, ' wraps ')), json_encode(array_keys($wrappers)));
+check('the scripts with a csrf() of their own — favourites, people, shoutbox, account security, the profile\'s description, the picture editor, the magnet cards — all wrap window.csrfToken()',
+      count($wrappers) === 7 && !array_filter($bad, fn($x) => str_contains($x, ' wraps ')), json_encode(array_keys($wrappers)));
 check('… the shoutbox asks with its widget (whose data-csrf names #shout-csrf); the profile\'s description with its own block',
       str_contains($wrappers['shoutbox.js'] ?? '', "window.csrfToken(document.getElementById('shoutbox'))") && str_contains($wrappers['profile-bio.js'] ?? '', 'window.csrfToken(root)'));
 check('the vote reads the page\'s token — not #search-csrf — and so does the Info panel\'s Refresh',

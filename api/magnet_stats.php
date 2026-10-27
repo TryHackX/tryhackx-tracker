@@ -15,6 +15,7 @@ foreach (explode(',', strtolower((string)($_GET['h'] ?? ''))) as $h) {
     if (count($hashes) >= 50) break;
 }
 $items = [];
+$clicks = [];
 if ($hashes) {
     $keys = array_keys($hashes);
     $in = implode(',', array_fill(0, count($keys), '?'));
@@ -30,5 +31,9 @@ if ($hashes) {
             $items[$r['info_hash']] ??= ['s' => (int)$r['scrape_seeders'], 'l' => (int)$r['scrape_leechers'], 'c' => (int)$r['scrape_completed']];
         }
     }
+    $st = $db->prepare("SELECT info_hash, clicks FROM magnet_clicks WHERE info_hash IN ($in)");
+    $st->execute($keys);
+    foreach ($st->fetchAll() as $r) $clicks[$r['info_hash']] = (int)$r['clicks'];
 }
-jsonResponse(['success' => true, 'items' => (object)$items]);
+jsonResponse(['success' => true, 'items' => (object)$items, 'clicks' => (object)$clicks,
+              'refresh' => ($cfg['search_allow_sl_refresh'] ?? '0') === '1']);
