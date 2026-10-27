@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.1] — 2026-10-27
+
+- **Filters with several tags at once are as quick as one.** 1.85.0 checked a torrent's name once for every set of tags
+  (production: "1080p + Lektor PL" 2.4 s, "2160p + series + 2020–2025" 3.5 s). Now the name is checked once for all of
+  them together, and only the few torrents that have a description or a tag added by hand are checked set by set — the
+  same answers, one lookup a row.
+- Tags from the forum's discussions move to the next release with the forum's 2.13.0.
+
 ## [1.85.0] — 2026-10-27
 
 Tags people add by hand, their permissions and settings, the Tags pages. Schema 107.

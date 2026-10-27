@@ -719,23 +719,58 @@ function factsFilterConds(PDO $db, array $cfg, array $f, bool $canContent, bool 
     $descOnly = array_filter(['pics' => !empty($f['pics']) ? true : null, 'imdb' => $f['imdb'] ?? null, 'filmweb' => $f['filmweb'] ?? null,
                               'vbitrate' => $f['vbitrate'] ?? null], fn($v) => $v !== null);
     if ($descOnly) $dims[] = [$descOnly, []];
+    if (!$dims) return [];
     $byName = factsMode($cfg) === 'desc_name';
-    $conds = [];
-    foreach ($dims as [$d, $ids]) {
+    $lists = [];
+    $extra = [];
+    foreach ($dims as $k => [$d, $ids]) {
         $hashes = $canContent ? (factsFilterHashes($db, $d, $signedIn) ?? []) : [];
-        $tpl = null;
-        $args = [];
-        if ($byName && ($nf = factsNameFilter($db, $d)) !== null) {
-            if (isset($nf['hashes'])) $hashes = array_merge($hashes, $nf['hashes']);
-            else { $tpl = $nf['tpl']; $args = $nf['args']; }
-        }
+        $extra[$k] = null;
         if ($ids && function_exists('tagsFilterExplicit') && ($ex = tagsFilterExplicit($db, $ids)) !== null) {
             if (isset($ex['hashes'])) $hashes = array_merge($hashes, $ex['hashes']);
-            else { $tpl = $tpl === null ? $ex['tpl'] : '(' . $tpl . ' OR ' . $ex['tpl'] . ')'; $args = array_merge($args, $ex['args']); }
+            else $extra[$k] = [$ex['tpl'], $ex['args']];
         }
-        $conds[] = [array_values(array_unique(array_map('strtolower', $hashes))), $tpl, $args];
+        $lists[$k] = array_values(array_unique(array_map('strtolower', $hashes)));
     }
-    return $conds;
+    $joint = $byName ? factsNameFilter($db, $f) : null;
+    $jointList = $joint['hashes'] ?? [];
+    $jointTpl = isset($joint['tpl']) ? [$joint['tpl'], $joint['args']] : null;
+    if (count($dims) === 1) {
+        $tpl = $jointTpl;
+        if ($extra[0] !== null) $tpl = $tpl === null ? $extra[0] : ['(' . $tpl[0] . ' OR ' . $extra[0][0] . ')', array_merge($tpl[1], $extra[0][1])];
+        return [[array_values(array_unique(array_merge($jointList, $lists[0]))), $tpl[0] ?? null, $tpl[1] ?? []]];
+    }
+    $union = array_values(array_unique(array_merge(...array_values($lists))));
+    $mixed = null;
+    if ($union || array_filter($extra)) {
+        $parts = [];
+        $args = [];
+        if ($union && !array_filter($extra)) {
+            $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($union), '?')) . ')';
+            $args = $union;
+        }
+        foreach ($dims as $k => [$d, $ids]) {
+            $or = [];
+            if ($lists[$k]) {
+                $or[] = 'info_hash IN (' . implode(',', array_fill(0, count($lists[$k]), '?')) . ')';
+                array_push($args, ...$lists[$k]);
+            }
+            if ($extra[$k] !== null) { $or[] = $extra[$k][0]; array_push($args, ...$extra[$k][1]); }
+            if ($byName && ($nf = factsNameFilter($db, $d)) !== null) {
+                if (isset($nf['hashes'])) {
+                    if ($nf['hashes']) { $or[] = 'info_hash IN (' . implode(',', array_fill(0, count($nf['hashes']), '?')) . ')'; array_push($args, ...$nf['hashes']); }
+                } else {
+                    $or[] = $nf['tpl'];
+                    array_push($args, ...$nf['args']);
+                }
+            }
+            $parts[] = $or ? '(' . implode(' OR ', $or) . ')' : '1 = 0';
+        }
+        $mixed = ['(' . implode(' AND ', $parts) . ')', $args];
+    }
+    if ($jointTpl !== null && $mixed !== null) $tpl = ['(' . $jointTpl[0] . ' OR ' . $mixed[0] . ')', array_merge($jointTpl[1], $mixed[1])];
+    else $tpl = $jointTpl ?? $mixed;
+    return [[$jointList, $tpl[0] ?? null, $tpl[1] ?? []]];
 }
 
 function factsEngineFilters(PDO $db, array $cfg, array $req, bool $canContent, bool $signedIn): array
