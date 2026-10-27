@@ -182,3 +182,26 @@ a.info-chip-forum:hover { border-color: var(--accent); opacity: 1; }
 .rt-magnet-sm .rt-magnet-size { opacity: 0.75; white-space: nowrap; }
 .rt-magnet-sm button, .rt-magnet-sm .rt-magnet-open { width: 1.6rem; height: 1.6rem; }
 .rt-magnet-sm .rt-magnet-url { flex-basis: 12rem; }
+
+.fchips { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.3rem; }
+.fchip {
+    --fc: #9aa3ad;
+    display: inline-flex; align-items: center; padding: 0.05rem 0.45rem;
+    font: inherit; font-size: 0.72rem; line-height: 1.5; white-space: nowrap;
+    color: var(--fc); background: color-mix(in srgb, var(--fc) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fc) 35%, transparent); border-radius: 999px;
+}
+button.fchip { cursor: pointer; }
+button.fchip:hover, button.fchip:focus-visible { background: color-mix(in srgb, var(--fc) 28%, transparent); outline: none; }
+button.fchip:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc) 60%, transparent); }
+.fchip-q { --fc: #4fc3f7; }
+.fchip-v { --fc: #ce93d8; }
+.fchip-h { --fc: #ffb74d; }
+.fchip-a { --fc: #81c784; }
+.fchip-s { --fc: #f48fb1; }
+.fchip-l { --fc: #4dd0e1; }
+.fchip-t { --fc: #b0bec5; }
+.fchip-g { --fc: #a9a9d6; }
+.fchip-fact { --fc: #9aa3ad; background: transparent; border-color: #333; }
+.fchip-more { --fc: #9aa3ad; }
+.fchip.is-on { color: #fff; background: color-mix(in srgb, var(--fc) 40%, transparent); border-color: var(--fc); }

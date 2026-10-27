@@ -3958,6 +3958,10 @@ window.siteToast = siteToast;
             body.appendChild(row);
         }
 
+        if (json.facts && window.FactChips) {
+            const chips = window.FactChips.render(json.facts, typeof window.SearchFiltersPick === 'function' ? window.SearchFiltersPick : null);
+            if (chips) { chips.classList.add('info-section', 'info-facts'); body.appendChild(chips); }
+        }
         // 2. what it is
         if (json.description_html) {
             const d = document.createElement('div');
@@ -4394,7 +4398,8 @@ window.siteToast = siteToast;
     // The query parameters the search page owns. Named here rather than inside initSearch()
     // because the panel's own Share button strips them: a link to ONE torrent must not carry the
     // sender's query, filter and page number with it.
-    const OWNED = ['search', 'search_files', 'in_desc', 'desc', 'content', 'sort', 'page', 'per_page', 'hash'];
+    const OWNED = ['search', 'search_files', 'in_desc', 'desc', 'content', 'sort', 'page', 'per_page', 'hash',
+                   'type', 'tags', 'pics', 'size', 'files', 'year', 'seeders', 'imdb', 'filmweb'];
 
     /** The CSRF token of whichever page this panel is on (csrfToken(): the layout's, since 1.71.0 on every page). */
     function csrfForContent() {
@@ -4873,6 +4878,16 @@ window.siteToast = siteToast;
         // reader's saved preference.
         const contentSel = $id('search-content');
         const contentDefault = contentSel ? contentSel.value : '';
+        const filtersHost = $id('search-filters');
+        let filters = null;
+        let lastFilterQ = null;
+        if (filtersHost && window.SearchFilters) {
+            let catalog = [];
+            try { catalog = JSON.parse(filtersHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
+            filters = window.SearchFilters.mount(filtersHost, { catalog, facts: filtersHost.dataset.facts === '1',
+                moveRight: [$id('search-total'), $id('search-share')], onChange: () => run(1, 'push') });
+            window.SearchFiltersPick = (id) => { if (infoHash) closeInfo(); filters.addTag(id); };
+        }
         const SORT_COLS = headers.map(th => th.dataset.sort);
         const DEFAULT_SORT = 'relevance:desc';
         let urlHeld = 0;        // > 0 while we are applying an address, so nothing writes one back
@@ -4896,6 +4911,7 @@ window.siteToast = siteToast;
                 if (perPageSel) st.per_page = perPageSel.value;
             }
             if (infoHash) st.hash = infoHash;
+            if (filters) Object.assign(st, filters.params());
             return st;
         }
 
@@ -4967,6 +4983,7 @@ window.siteToast = siteToast;
                 perPage: (perPageSel && per && [...perPageSel.options].some(o => o.value === per)) ? per : null,
                 page: (isFinite(pg) && pg >= 1) ? Math.min(pg, 1000000) : 1,
                 hash: /^[0-9a-f]{40}$/.test(h) ? h : null,
+                params: p,
             };
         }
 
@@ -4978,6 +4995,7 @@ window.siteToast = siteToast;
                 if (inDescBox) inDescBox.checked = st.inDesc;
                 if (descBox) descBox.checked = st.desc;
                 if (contentSel) contentSel.value = st.content;
+                if (filters) filters.fromParams(st.params || new URLSearchParams());
                 // This load only. The `change` listener is what saves the preference, and setting
                 // .value from script does not fire it — which is exactly the behaviour wanted here.
                 if (perPageSel && st.perPage) perPageSel.value = st.perPage;
@@ -5062,6 +5080,12 @@ window.siteToast = siteToast;
             if (inDescBox && inDescBox.checked && q) qs.set('in_desc', '1');
             if (descBox && descBox.checked) qs.set('desc', '1');
             if (contentSel && contentSel.value) qs.set('content', contentSel.value);
+            if (filters) {
+                const fp = filters.params();
+                Object.keys(fp).forEach(k => qs.set(k, fp[k]));
+                if (lastFilterQ === q) qs.set('refine', '1');
+                lastFilterQ = q;
+            }
             const json = await getJson('index_search&' + qs.toString());
             if (my !== seq) return;
             setLoading(false);
@@ -5131,6 +5155,10 @@ window.siteToast = siteToast;
                         fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
                     }
                     nameTd.appendChild(fc);
+                }
+                if (r.facts && window.FactChips) {
+                    const chips = window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null);
+                    if (chips) nameTd.appendChild(chips);
                 }
                 tr.appendChild(nameTd);
                 const sizeTd = document.createElement('td');

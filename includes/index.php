@@ -2529,6 +2529,12 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     }
     $descOnly = !empty($q['desc_only']);
     $inDesc = !empty($q['search_desc']);
+    $num = static fn($v) => is_int($v) || (is_string($v) && ctype_digit($v)) ? (int)$v : null;
+    $flt = ['size_min' => $num($q['size_min'] ?? null), 'size_max' => $num($q['size_max'] ?? null),
+            'files_min' => $num($q['files_min'] ?? null), 'files_max' => $num($q['files_max'] ?? null),
+            'seeders_min' => $num($q['seeders_min'] ?? null),
+            'hashes' => isset($q['only_hashes']) && is_array($q['only_hashes']) ? array_values(array_map('strval', $q['only_hashes'])) : null];
+    $filtered = count(array_filter($flt, fn($v) => $v !== null)) > 0;
 
     // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
     // ignores its direction (best first is the only sensible order)
@@ -2763,7 +2769,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // on. `$fast` builds the ALL-WORDS arm instead: the same select, WHERE MATCH('+w1* +w2* …') in place of the OR and no
     // file-name half — see $run().
     $noRank = ['hit' => false, 'ord' => false, 'top' => 0, 'alone' => false];
-    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank, $descIdx, $inDesc): array {
+    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank, $descIdx, $inDesc, $flt): array {
         $rank = $rank ?: $noRank;
         $cat = $cat && !$wl;
         $tbl = $wl ? 'whitelist' : ($cat ? 'index_catalog' : 'index_hashes');
@@ -2803,6 +2809,19 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 $where[] = $descIdx[0];
                 foreach ($descIdx[1] as $p) $params[] = $p;
             }
+        }
+        foreach ([['total_size', 'size_min', '>='], ['total_size', 'size_max', '<='], ['files_count', 'files_min', '>='], ['files_count', 'files_max', '<=']] as [$col, $k, $op]) {
+            if ($flt[$k] === null) continue;
+            $where[] = $col . ' ' . $op . ' ?';
+            $params[] = $flt[$k];
+        }
+        if ($flt['seeders_min'] !== null) {
+            $where[] = ($wl ? 'COALESCE(scrape_seeders, 0)' : ($cat ? 'eff_seeders' : 'COALESCE(scrape_seeders, last_seeders)')) . ' >= ?';
+            $params[] = $flt['seeders_min'];
+        }
+        if ($flt['hashes'] !== null) {
+            $where[] = $flt['hashes'] ? 'info_hash IN (' . implode(',', array_fill(0, count($flt['hashes']), '?')) . ')' : '1 = 0';
+            foreach ($flt['hashes'] as $p) $params[] = $p;
         }
         $scoreSql = '0';
         $scoreParams = [];
@@ -2998,7 +3017,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         return $rows;
     };
 
-    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter, $descOnly): array {
+    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter, $descOnly, $filtered): array {
         // Whether the relevance column is a real score or the literal 0 — see $orderFor.
         $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
         $rank = $rankFor($scored);
@@ -3008,7 +3027,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $arms = [$buildArm(false, $useFt, $withWl, $useCat, $rank)];
         if ($withWl) $arms[] = $buildArm(true, $useFt, false, false, $rank);
         // [total, capped]
-        $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter, $useCat, $cap, $descOnly): array {
+        $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter, $useCat, $cap, $descOnly, $filtered): array {
         $total = 0;
         $capped = false;
         foreach ($arms as $k => $a) {
@@ -3016,7 +3035,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             // the index poll, not with the reader. Counting it on every page view cost 1 102 ms of
             // full scan for an answer that was the same as a minute ago. From the catalogue (1.74.0)
             // it is the narrow table's own, a fraction of that, under a key of its own.
-            if ($search === '' && !$searchFiles && !$descOnly) {
+            if ($search === '' && !$searchFiles && !$descOnly && !$filtered) {
                 $count = static function () use ($db, $a): array {
                     $c = $db->prepare($a[2]); $c->execute($a[3]);
                     return ['n' => (int)$c->fetchColumn()];

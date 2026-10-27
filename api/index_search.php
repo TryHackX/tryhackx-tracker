@@ -30,7 +30,8 @@ if (indexSearchTooShort($search)) {
 }
 
 $perHour = (int)($cfg['rate_limit_index_search'] ?? 120);
-if (!rateLimitAllow('idxsearch', ipBucket(getClientIp($cfg)), $perHour, 3600)) {
+$refine = ($_GET['refine'] ?? '') === '1';
+if (!rateLimitAllow($refine ? 'idxfilter' : 'idxsearch', ipBucket(getClientIp($cfg)), $refine ? $perHour * 5 : $perHour, 3600)) {
     jsonResponse(['error' => 'rate_limit', 'retry_after' => 3600], 429);
 }
 
@@ -38,6 +39,15 @@ $canFiles = userCan($db, $cfg, 'index.files');
 $canMagnet = userCan($db, $cfg, 'index.magnet');
 $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 $canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
+$signedIn = richtextViewerSignedIn($db);
+$size = factsRange($_GET['size'] ?? null, 'size');
+$files = factsRange($_GET['files'] ?? null, 'count');
+$seeders = factsRange($_GET['seeders'] ?? null, 'count');
+$onlyHashes = $canContent ? factsFilterHashes($db, [
+    'tags' => factsTagsParam($_GET['tags'] ?? ''), 'type' => (string)($_GET['type'] ?? ''), 'pics' => ($_GET['pics'] ?? '') === '1',
+    'year' => factsRange($_GET['year'] ?? null, 'year'), 'imdb' => factsRange($_GET['imdb'] ?? null, 'imdb'),
+    'filmweb' => factsRange($_GET['filmweb'] ?? null, 'filmweb'),
+], $signedIn) : null;
 
 // Let go of the session before the slow part.
 //
@@ -92,6 +102,12 @@ try {
         'desc_flags'        => $canContent,
         // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
         'hash_search'       => $canMagnet,
+        'size_min'          => $size !== null && $size[0] !== null ? (int)$size[0] : null,
+        'size_max'          => $size !== null && $size[1] !== null ? (int)$size[1] : null,
+        'files_min'         => $files !== null && $files[0] !== null ? (int)$files[0] : null,
+        'files_max'         => $files !== null && $files[1] !== null ? (int)$files[1] : null,
+        'seeders_min'       => $seeders !== null && $seeders[0] !== null ? (int)$seeders[0] : null,
+        'only_hashes'       => $onlyHashes,
     ]);
 } catch (IndexSearchTimeout $e) {
     error_log('[index search] stopped for time: ' . mb_substr($search, 0, 80) . ' sort=' . $sort . ' — ' . $e->getMessage());
@@ -123,6 +139,7 @@ $readerTime = static function ($dt) use ($readerTz, $dbZone): string {
     catch (\Throwable $e) { return ''; }
 };
 
+$factsMap = $canContent ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), $signedIn) : [];
 $rows = [];
 foreach ($res['rows'] as $r) {
     $row = [
@@ -155,6 +172,7 @@ foreach ($res['rows'] as $r) {
     }
     $row['content_status'] = (string)($r['content_status'] ?? 'none');
     if ($canContent) $row['desc'] = (int)($r['desc'] ?? 0);
+    if (isset($factsMap[strtolower((string)$r['info_hash'])])) $row['facts'] = $factsMap[strtolower((string)$r['info_hash'])];
     $rows[] = $row;
 }
 

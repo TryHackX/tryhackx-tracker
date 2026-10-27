@@ -424,6 +424,10 @@
             // A line that ellipsises on its own with the whole of it in its title (1.73.0, admin.css `.cell-sub`): in the
             // cell's single line it was cut mid-letter by the cell's edge, a long label with no "…" and nothing to read.
             if (partner) nameTd.appendChild(el('div', { className: 'wl-small cell-sub', text: t.key('js.wl.partner', { name: partner }), title: t.key('js.wl.partner', { name: partner }) }));
+            if (row.facts && window.FactChips) {
+                const chips = window.FactChips.render(row.facts, null);
+                if (chips) nameTd.appendChild(chips);
+            }
             tr.appendChild(nameTd);
             tr.appendChild(el('td', { className: 'wl-size', text: row.total_size ? fmtBytes(row.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'wl-files-col', text: row.files_count != null ? String(row.files_count) : '—' }));

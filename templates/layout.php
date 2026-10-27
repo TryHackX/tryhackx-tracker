@@ -143,6 +143,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/magnetcard.js<?= assetVer('assets/js/magnetcard.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/filters.js<?= assetVer('assets/js/filters.js') ?>"></script>
     <?php if ((function_exists('imagesMayUpload') && imagesMayUpload($db, $cfg, $navUser))
               || (function_exists('commentImagesMayUpload') && commentImagesMayUpload($db, $cfg, $navUser))): ?>
     <script src="<?= $baseUrl ?>assets/js/images-editor.js<?= assetVer('assets/js/images-editor.js') ?>"></script>

@@ -37,5 +37,10 @@ try {
     $counts = ['total' => null, 'protected' => null, 'pending_meta' => null];
 }
 
+$factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), true) : [];
+foreach ($res['rows'] as &$row) {
+    if (isset($factsMap[strtolower((string)$row['info_hash'])])) $row['facts'] = $factsMap[strtolower((string)$row['info_hash'])];
+}
+unset($row);
 jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'total_capped' => !empty($res['total_capped']), 'page' => $res['page'], 'pages' => $res['pages'],
               'counts' => $counts, 'enabled' => indexEnabled($cfg)]);

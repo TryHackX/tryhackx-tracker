@@ -236,8 +236,13 @@
             [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-circle', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
                 if (r.desc & bit) marks.push(el('i', { className: 'bi ' + glyph + ' idx-mark idx-desc-mark', role: 'img', title: t.key(key), 'aria-label': t.key(key) }));
             });
-            tr.appendChild(el('td', { className: 'wl-name-cell' }, el('div', { className: 'idx-name-row' },
-                [el('span', { className: 'idx-name', text: r.name || '—', title: r.name || '' }), ...marks])));
+            const nameCell = el('td', { className: 'wl-name-cell' }, el('div', { className: 'idx-name-row' },
+                [el('span', { className: 'idx-name', text: r.name || '—', title: r.name || '' }), ...marks]));
+            if (r.facts && window.FactChips) {
+                const chips = window.FactChips.render(r.facts, null);
+                if (chips) nameCell.appendChild(chips);
+            }
+            tr.appendChild(nameCell);
             tr.appendChild(el('td', { className: 'font-mono', text: r.total_size ? fmtBytes(r.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'font-mono', text: r.files_count != null ? String(r.files_count) : '—' }));
             const sl = (r.scrape_seeders != null ? r.scrape_seeders : r.last_seeders) + ' / ' + (r.scrape_leechers != null ? r.scrape_leechers : r.last_leechers);

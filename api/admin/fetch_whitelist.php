@@ -230,6 +230,11 @@ foreach ($rows as &$row) {
     if ($row['api_client_id'] !== null) $clientsOnPage[$row['api_client_id']] = true;
 }
 unset($row);
+$factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($rows, 'info_hash'), true) : [];
+foreach ($rows as &$row) {
+    if (isset($factsMap[strtolower((string)$row['info_hash'])])) $row['facts'] = $factsMap[strtolower((string)$row['info_hash'])];
+}
+unset($row);
 
 // WHO SENT IT, BY NAME. A review queue that says "api_client_id 4" cannot be reviewed: the whole
 // point of holding a partner's submissions is that a person decides, and a person decides about a
