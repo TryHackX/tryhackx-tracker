@@ -5751,15 +5751,36 @@ window.siteToast = siteToast;
         if (!tools) return;
         tools.querySelectorAll('.rt-menu').forEach(m => {
             m.hidden = true;
+            m.classList.remove('rt-menu-up');
+            m.style.left = '';
             if (m.previousElementSibling) m.previousElementSibling.setAttribute('aria-expanded', 'false');
         });
     };
+    const placeMenu = (menu) => {
+        let bounds = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: window.innerHeight };
+        for (let el = menu.parentElement ? menu.parentElement.parentElement : null; el && el !== document.body; el = el.parentElement) {
+            if (el.classList.contains('rt-editor')) continue;
+            const cs = getComputedStyle(el);
+            if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+            const b = el.getBoundingClientRect();
+            bounds = { left: Math.max(bounds.left, b.left), top: Math.max(bounds.top, b.top),
+                       right: Math.min(bounds.right, b.right), bottom: Math.min(bounds.bottom, b.bottom) };
+            break;
+        }
+        const r = menu.getBoundingClientRect();
+        const over = r.right - (bounds.right - 8);
+        if (over > 0) menu.style.left = Math.round(Math.max(-over, bounds.left + 8 - r.left)) + 'px';
+        const btnH = menu.previousElementSibling ? menu.previousElementSibling.getBoundingClientRect().height : 0;
+        if (r.bottom > bounds.bottom - 8 && r.top - btnH - bounds.top > r.height + 8) menu.classList.add('rt-menu-up');
+    };
     if (tools && tools.dataset.rtMenus) {
+        const group = document.createElement('span');
+        group.className = 'rt-tool-group rt-menus';
         tools.dataset.rtMenus.split(/\s+/).forEach(name => {
             const def = MENUS[name];
             if (!def) return;
-            const group = document.createElement('span');
-            group.className = 'rt-tool-group rt-menu-wrap';
+            const wrap = document.createElement('span');
+            wrap.className = 'rt-menu-wrap';
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'rt-menu-btn';
@@ -5783,14 +5804,15 @@ window.siteToast = siteToast;
                 closeMenus();
                 if (!open) return;
                 menu.hidden = false;
-                menu.classList.toggle('rt-menu-end', btn.getBoundingClientRect().left + menu.offsetWidth > document.documentElement.clientWidth - 8);
+                placeMenu(menu);
                 btn.setAttribute('aria-expanded', 'true');
                 const first = menu.querySelector('[data-md]:not([hidden])');
                 if (first) first.focus();
             });
-            group.append(btn, menu);
-            tools.append(group);
+            wrap.append(btn, menu);
+            group.append(wrap);
         });
+        tools.insertBefore(group, tools.querySelector('.rt-tool-emoji'));
         document.addEventListener('click', (e) => { if (!tools.contains(e.target)) closeMenus(); });
         tools.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
     }
