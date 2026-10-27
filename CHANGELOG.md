@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.2] — 2026-10-27
+
+- **Several tags at once, quicker still:** the torrents with a description or a hand-added tag (a few hundred) are
+  checked set by set by the key, without reading the names' table once per set (1.85.1 on production: "1080p + Lektor
+  PL" 1.8 s, "HEVC + Atmos + movies" 1.5 s).
+
 ## [1.85.1] — 2026-10-27
 
 - **Filters with several tags at once are as quick as one.** 1.85.0 checked a torrent's name once for every set of tags

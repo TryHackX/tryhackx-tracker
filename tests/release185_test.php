@@ -201,7 +201,9 @@ check('the settings: on, new tags wait, 40 a torrent, 32 characters, 20 a day', 
       && str_contains($src('templates/admin/settings.php'), 'name="tags_review"') && TRACKER_SCHEMA_VERSION >= 107);
 $conds = factsFilterConds($db, $cfgT, factsRequest(['tags' => 'q:1080p,x:zyx-space-opera', 'type' => 'movie'])['facts'], true, true);
 check('several sets make ONE condition: the name checked once for all of them, the torrents with a description or a hand-added tag set by set',
-      count($conds) === 1 && substr_count((string)$conds[0][1], 'FROM name_facts nf') <= 4 && str_contains((string)$conds[0][1], 'info_hash IN'), json_encode($conds));
+      count($conds) === 1 && substr_count((string)$conds[0][1], 'FROM name_facts nf') <= 4 && str_contains((string)$conds[0][1], 'info_hash IN')
+      && factsNameTemplate(['tags' => [['q:1080p']]]) === ['tpl' => '(SELECT 1 FROM name_facts nf WHERE nf.info_hash = {T}.info_hash AND nf.nf_res IN (?) LIMIT 1) IS NOT NULL', 'args' => [3]],
+      json_encode($conds));
 $plL = include $root . '/lang/pl.php';
 check('the words, in both languages', __('js.tags.edit_tags') === 'Edit tags' && ($plL['js.tags.edit_tags'] ?? '') === 'Edytuj tagi'
       && ($plL['perm.panel.tags.manage'] ?? '') !== '' && __('a.head.nav.admin_tags') === 'Tags');

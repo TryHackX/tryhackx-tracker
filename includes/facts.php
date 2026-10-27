@@ -685,6 +685,13 @@ function factsNamePredicate(array $f): ?array
     return [implode(' AND ', $where), $args];
 }
 
+function factsNameTemplate(array $f): ?array
+{
+    $p = factsNamePredicate($f);
+    if ($p === null) return null;
+    return ['tpl' => '(SELECT 1 FROM name_facts nf WHERE nf.info_hash = {T}.info_hash AND ' . $p[0] . ' LIMIT 1) IS NOT NULL', 'args' => $p[1]];
+}
+
 function factsNameFilter(PDO $db, array $f, int $cap = FACTS_NAME_LIST_CAP): ?array
 {
     $p = factsNamePredicate($f);
@@ -756,13 +763,9 @@ function factsFilterConds(PDO $db, array $cfg, array $f, bool $canContent, bool 
                 array_push($args, ...$lists[$k]);
             }
             if ($extra[$k] !== null) { $or[] = $extra[$k][0]; array_push($args, ...$extra[$k][1]); }
-            if ($byName && ($nf = factsNameFilter($db, $d)) !== null) {
-                if (isset($nf['hashes'])) {
-                    if ($nf['hashes']) { $or[] = 'info_hash IN (' . implode(',', array_fill(0, count($nf['hashes']), '?')) . ')'; array_push($args, ...$nf['hashes']); }
-                } else {
-                    $or[] = $nf['tpl'];
-                    array_push($args, ...$nf['args']);
-                }
+            if ($byName && ($nf = factsNameTemplate($d)) !== null) {
+                $or[] = $nf['tpl'];
+                array_push($args, ...$nf['args']);
             }
             $parts[] = $or ? '(' . implode(' OR ', $or) . ')' : '1 = 0';
         }
