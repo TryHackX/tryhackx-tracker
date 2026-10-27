@@ -20,6 +20,7 @@ do {
     if ($n > 0) echo "read $n descriptions\n";
 } while ($n > 0);
 echo "done: $total descriptions read, " . (int)$db->query("SELECT COUNT(*) FROM desc_facts")->fetchColumn() . " with facts\n";
+factsCountsTick($db, $cfg);
 
 if (in_array('--names', $argv, true)) {
     if (factsMode($cfg) !== 'desc_name') { echo "names: the setting reads descriptions only — nothing to do\n"; exit(0); }
@@ -35,4 +36,5 @@ if (in_array('--names', $argv, true)) {
         echo "names with facts so far: $names\n";
     } while (!$r['done']);
     echo "names done: " . (int)$db->query("SELECT COUNT(*) FROM name_facts")->fetchColumn() . " rows\n";
+    factsCountsTick($db, getSettings($db, true));
 }

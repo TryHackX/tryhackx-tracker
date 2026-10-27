@@ -4399,7 +4399,7 @@ window.siteToast = siteToast;
     // because the panel's own Share button strips them: a link to ONE torrent must not carry the
     // sender's query, filter and page number with it.
     const OWNED = ['search', 'search_files', 'in_desc', 'desc', 'content', 'sort', 'page', 'per_page', 'hash',
-                   'type', 'tags', 'pics', 'size', 'filecount', 'year', 'seeders', 'imdb', 'filmweb'];
+                   'type', 'tags', 'pics', 'size', 'filecount', 'year', 'seeders', 'imdb', 'filmweb', 'vbitrate'];
 
     /** The CSRF token of whichever page this panel is on (csrfToken(): the layout's, since 1.71.0 on every page). */
     function csrfForContent() {

@@ -3753,3 +3753,6 @@ a.source-tab { text-decoration: none; }
 .admin-body .sf-tag-list { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .admin-body .sf-tag { font-size: 0.76rem; }
 .admin-body .sf-check { margin-top: 0.45rem; font-size: 0.82rem; }
+.admin-body .sf-tagsearch { max-width: 22rem; padding-top: 0.6rem; }
+.admin-body .sf-n { margin-left: 0.3rem; opacity: 0.65; font-size: 0.68rem; }
+.admin-body .sf-tag[hidden], .admin-body .sf-tags[hidden], .admin-body .sf-group[hidden], .admin-body .sf-range[hidden], .admin-body .sf-check[hidden] { display: none; }

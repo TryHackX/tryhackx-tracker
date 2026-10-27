@@ -4954,6 +4954,9 @@ a.btn.btn-danger-soft { color: #ff8a80; }
 .sf-tag-list { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .sf-tag { font-size: 0.76rem; }
 .sf-check { margin-top: 0.45rem; }
+.sf-tagsearch { max-width: 22rem; padding-top: 0.7rem; }
+.sf-n { margin-left: 0.3rem; opacity: 0.65; font-size: 0.68rem; }
+.sf-tag[hidden], .sf-tags[hidden], .sf-group[hidden], .sf-range[hidden], .sf-check[hidden] { display: none; }
 @media (max-width: 640px) {
     .sf-grid { grid-template-columns: 1fr; }
     .sf-right { margin-left: 0; width: 100%; justify-content: space-between; }

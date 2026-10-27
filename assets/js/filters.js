@@ -9,8 +9,9 @@
         { key: 'seeders', label: 'seeders', group: 'popularity', minOnly: true },
         { key: 'imdb', label: 'imdb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
         { key: 'filmweb', label: 'filmweb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
+        { key: 'vbitrate', label: 'vbitrate', group: 'quality', facts: true, desc: true, minOnly: true, mbps: true },
     ];
-    const GROUPS = [['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language']];
+    const GROUPS = [['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language'], ['g', 'genre']];
     const PARAMS = ['type', 'tags', 'pics'].concat(RANGES.map(r => r.key));
     const OPEN_KEY = 'thx-search-filters-open';
 
@@ -37,6 +38,7 @@
         if (r.unit) return /^\d+(?:[.,]\d+)?\s*(?:[kmgt](?:i?b)?|b)?$/i.test(v);
         if (r.year) return /^\d{4}$/.test(v);
         if (r.rating) return /^\d{1,2}(?:[.,]\d)?$/.test(v) && parseFloat(v.replace(',', '.')) <= 10;
+        if (r.mbps) return /^\d{1,3}(?:[.,]\d{1,2})?$/.test(v);
         return /^\d{1,9}$/.test(v);
     }
     function splitRange(raw) {
@@ -96,7 +98,24 @@
             grid.appendChild(f);
             return (sections[key] = f);
         };
-        (facts ? ['release', 'quality', 'language', 'ratings', 'popularity', 'description'] : ['release', 'popularity']).forEach(section);
+        let tagSearch = null;
+        let tagNone = null;
+        if (facts && catalog.length) {
+            const box = el('div', 'sf-tagsearch');
+            const lab = el('label', 'sf-label', t.key('js.filters.tag_search'));
+            tagSearch = el('input', panelUi ? 'form-control form-control-sm bg-dark text-light border-secondary sf-input' : 'profile-search sf-input');
+            tagSearch.type = 'search';
+            tagSearch.id = 'sf-tagsearch-' + (host.id || 'list');
+            tagSearch.placeholder = t.key('js.filters.tag_search_ph');
+            tagSearch.autocomplete = 'off';
+            lab.htmlFor = tagSearch.id;
+            tagNone = el('div', 'sf-hint text-muted', t.key('js.filters.tag_none'));
+            tagNone.hidden = true;
+            box.append(lab, tagSearch, tagNone);
+            inner.insertBefore(box, grid);
+            tagSearch.addEventListener('input', () => showTags());
+        }
+        (facts ? ['release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'description'] : ['release', 'popularity']).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
             if ((r.facts && !facts) || (r.desc && !desc)) return;
@@ -111,6 +130,7 @@
                 i.type = 'text';
                 i.id = id + '-' + end;
                 i.inputMode = r.unit ? 'text' : 'decimal';
+                if (r.mbps) box.classList.add('sf-mbps');
                 i.placeholder = t.key(end === 'min' ? 'js.filters.min' : 'js.filters.max');
                 i.setAttribute('aria-label', t.key('js.filters.input_label', { name: t.key('js.filters.' + r.label), end: t.key(end === 'min' ? 'js.filters.min' : 'js.filters.max') }));
                 i.autocomplete = 'off';
@@ -144,6 +164,7 @@
         const tagBtns = new Map();
         if (facts) {
             GROUPS.forEach(([g, sec]) => {
+                if (g === 'g' && !desc) return;
                 const tags = catalog.filter(c => c.g === g);
                 if (!tags.length) return;
                 const wrap = el('div', 'sf-tags');
@@ -153,6 +174,12 @@
                     const b = el('button', 'fchip fchip-' + g + ' sf-tag', c.l);
                     b.type = 'button';
                     b.setAttribute('aria-pressed', 'false');
+                    b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
+                    if (typeof c.n === 'number') {
+                        b.dataset.n = String(c.n);
+                        b.appendChild(el('span', 'sf-n', t.num(c.n)));
+                        b.title = t.key('js.filters.count', { n: t.num(c.n) });
+                    }
                     b.addEventListener('click', () => { toggle(c.id); changed(true); });
                     list.appendChild(b);
                     tagBtns.set(c.id, b);
@@ -182,6 +209,20 @@
 
         function toggle(id) {
             if (S.sel.has(id)) S.sel.delete(id); else S.sel.add(id);
+        }
+        function showTags() {
+            const q = tagSearch ? tagSearch.value.trim().toLowerCase() : '';
+            let any = false;
+            tagBtns.forEach((b, id) => {
+                const on = S.sel.has(id);
+                const hit = !q || b.dataset.s.includes(q);
+                b.hidden = !on && (!hit || b.dataset.n === '0');
+                if (!b.hidden && hit) any = true;
+            });
+            grid.querySelectorAll('.sf-tags').forEach(w => { w.hidden = ![...w.querySelectorAll('.sf-tag')].some(b => !b.hidden); });
+            grid.querySelectorAll('.sf-range, .sf-check').forEach(x => { x.hidden = q !== ''; });
+            grid.querySelectorAll('.sf-group').forEach(f => { f.hidden = ![...f.children].some(x => x.tagName !== 'LEGEND' && !x.hidden); });
+            if (tagNone) tagNone.hidden = !q || any;
         }
         function readRanges() {
             const out = {};
@@ -251,6 +292,7 @@
                 active.appendChild(chip(label, () => { inputs[k].min.value = ''; if (inputs[k].max) inputs[k].max.value = ''; }));
             });
             if (S.pics) active.appendChild(chip(t.key('js.filters.pics'), () => { S.pics = false; }));
+            showTags();
         }
         function changed(now) {
             paint();
@@ -303,13 +345,23 @@
     function fmtRate(k) {
         return k >= 1000 ? t.num(Math.round(k / 100) / 10) + ' Mb/s' : t.num(k) + ' kb/s';
     }
+    function rateText(k, r) {
+        const kind = k === 'a' && (r.c || r.ch) ? t.key('js.filters.k_audio_x', { codec: [r.c, r.ch].filter(Boolean).join(' ') })
+            : t.key(k === 'o' ? 'js.filters.k_overall' : (k === 'v' ? 'js.filters.k_video' : 'js.filters.k_audio'));
+        const mode = r.m === 'V' ? 'VBR' : (r.m === 'C' ? 'CBR' : '');
+        if (!r.r) return t.key('js.filters.chip_rate_only_max', { kind: kind, max: fmtRate(r.x) });
+        const withMax = r.x && r.x !== r.r;
+        const p = { kind: kind, avg: fmtRate(r.r), max: withMax ? fmtRate(r.x) : '', mode: mode };
+        return t.key(withMax ? (mode ? 'js.filters.chip_rate_max_mode' : 'js.filters.chip_rate_max') : (mode ? 'js.filters.chip_rate_mode' : 'js.filters.chip_rate'), p);
+    }
     window.FactChips = {
         render(f, onPick) {
-            if (!f || (!f.tags && !f.year && !f.vbitrate && !f.imdb && !f.filmweb)) return null;
+            if (!f || (!f.tags && !f.year && !f.rates && !f.imdb && !f.filmweb)) return null;
             const box = el('div', 'fchips');
             const tags = Array.isArray(f.tags) ? f.tags : [];
-            const shown = tags.slice(0, 6);
-            const rest = tags.slice(6);
+            const lim = f.max > 0 ? f.max : 6;
+            const shown = tags.slice(0, lim);
+            const rest = tags.slice(lim);
             const add = (tg) => {
                 const b = el(onPick ? 'button' : 'span', 'fchip fchip-' + tg.g, tg.l);
                 if (onPick) {
@@ -328,7 +380,10 @@
                 box.appendChild(m);
             }
             if (f.year) box.appendChild(factChip('fchip fchip-fact', f.year, t.key('js.filters.year')));
-            if (f.vbitrate) box.appendChild(factChip('fchip fchip-fact', fmtRate(f.vbitrate), t.key('js.filters.bitrate')));
+            ['o', 'v', 'a'].forEach(k => {
+                const r = f.rates && f.rates[k];
+                if (r && (r.r || r.x)) box.appendChild(factChip('fchip fchip-fact fchip-rate', rateText(k, r), t.key('js.filters.rate_title_' + k)));
+            });
             if (f.imdb) box.appendChild(factChip('fchip fchip-fact', 'IMDb ' + Number(f.imdb).toFixed(1), 'IMDb'));
             if (f.filmweb) box.appendChild(factChip('fchip fchip-fact', 'Filmweb ' + Number(f.filmweb).toFixed(1), 'Filmweb'));
             return box;

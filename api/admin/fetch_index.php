@@ -3,9 +3,9 @@
 // The query builder lives in includes/index.php (indexListSelect) — shared with the public search.
 $perPage = (int)($_GET['per_page'] ?? 0);
 if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = (int)($cfg['items_per_page'] ?? 25);
-[$filterWhere, $filterParams] = factsListFilters($db, $cfg, factsRequest($_GET), 'GREATEST(COALESCE(scrape_seeders, 0), last_seeders)');
+$flt = factsEngineFilters($db, $cfg, factsRequest($_GET), true, true);
 try {
-    $res = indexListSelect($db, $cfg, [
+    $q = [
         'page'         => $_GET['page'] ?? 1,
         'per_page'     => $perPage,
         'sort'         => $_GET['sort'] ?? 'last:desc',
@@ -15,10 +15,12 @@ try {
         'life'         => $_GET['life'] ?? '',
         'desc'         => $_GET['desc'] ?? '',
         'desc_flags'   => true,
-        'filter_where' => $filterWhere,
-        'filter_params' => $filterParams,
-    ]);
+    ];
+    $res = $flt ? indexListByEngine($db, $cfg, $q, $flt) : indexListSelect($db, $cfg, $q);
 } catch (\Throwable $e) {
+    if ($e instanceof IndexFiltersUnsupported) {
+        jsonResponse(['success' => false, 'error' => __($e->getMessage() === 'sort' ? 'api.index.filters_sort' : 'api.index.filters_state'), 'code' => 'filters_unsupported'], 422);
+    }
     if ($e instanceof IndexSearchTooBroad) {
         jsonResponse(['success' => false, 'error' => __('api.index.too_broad', ['n' => langNumber(INDEX_LIST_CATALOG_CAP)]), 'code' => 'too_broad'], 422);
     }
@@ -42,7 +44,7 @@ try {
 
 $factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), true) : [];
 foreach ($res['rows'] as &$row) {
-    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg);
+    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg, 'panel');
     if ($chips !== null) $row['facts'] = $chips;
 }
 unset($row);

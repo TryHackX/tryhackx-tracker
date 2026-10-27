@@ -138,7 +138,7 @@ if ($ipFilter !== '') {
     $params[] = $ipFilter;
 }
 
-[$filterWhere, $filterParams] = factsListFilters($db, $cfg, factsRequest($_GET), 'COALESCE(scrape_seeders, 0)');
+[$filterWhere, $filterParams] = factsListFilters($db, $cfg, factsRequest($_GET), 'COALESCE(scrape_seeders, 0)', 'whitelist');
 foreach ($filterWhere as $fw) $where[] = $fw;
 foreach ($filterParams as $fp) $params[] = $fp;
 
@@ -236,7 +236,7 @@ foreach ($rows as &$row) {
 unset($row);
 $factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($rows, 'info_hash'), true) : [];
 foreach ($rows as &$row) {
-    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg);
+    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg, 'panel');
     if ($chips !== null) $row['facts'] = $chips;
 }
 unset($row);

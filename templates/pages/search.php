@@ -107,7 +107,7 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
         <p class="search-hint text-muted" id="search-hint" hidden></p>
     </div>
     <?php $sFacts = $canDesc || (function_exists('factsMode') && factsMode($cfg) === 'desc_name'); ?>
-    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog() : [])) ?>"></div>
+    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog($cfg) : [])) ?>"></div>
 </form>
 <div id="search-alert" class="alert"></div>
 <div class="transparency-table-wrap">

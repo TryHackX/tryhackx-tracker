@@ -1445,7 +1445,14 @@
                         </select>
                         <small class="settings-hint"><?= _h('settings.users_search_common_hint') ?></small>
                     </div>
-                    <div class="col-md-3">
+                </div>
+            </div>
+
+            <div class="settings-section" id="section-facts" data-group="users" data-title="<?= _h('settings.facts_heading') ?>">
+                <h5><i class="bi bi-tags"></i> <?= _h('settings.facts_heading') ?></h5>
+                <small class="settings-hint d-block mb-3"><?= _h('settings.facts_intro') ?></small>
+                <div class="row g-3">
+                    <div class="col-md-4" data-setting="facts_source">
                         <label for="set-facts_source" class="form-label"><?= _h('settings.facts_source') ?></label>
                         <select id="set-facts_source" class="form-select bg-dark text-light border-secondary" name="facts_source">
                             <option value="desc" <?= ($cfg['facts_source'] ?? 'desc') !== 'desc_name' ? 'selected' : '' ?>><?= _h('settings.facts_source_desc') ?></option>
@@ -1455,6 +1462,59 @@
                         <?php if (($cfg['facts_source'] ?? 'desc') === 'desc_name' && ($cfg['name_facts_cursor'] ?? '') !== 'done'): ?>
                         <small class="settings-hint text-warning"><?= _h('settings.facts_source_reading') ?></small>
                         <?php endif; ?>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_chips_search">
+                        <label for="set-facts_chips_search" class="form-label"><?= _h('settings.facts_chips_search') ?></label>
+                        <select id="set-facts_chips_search" class="form-select bg-dark text-light border-secondary" name="facts_chips_search">
+                            <option value="1" <?= ($cfg['facts_chips_search'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_chips_search'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_chips_search_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_chips_info">
+                        <label for="set-facts_chips_info" class="form-label"><?= _h('settings.facts_chips_info') ?></label>
+                        <select id="set-facts_chips_info" class="form-select bg-dark text-light border-secondary" name="facts_chips_info">
+                            <option value="1" <?= ($cfg['facts_chips_info'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_chips_info'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_chips_info_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_chips_panel">
+                        <label for="set-facts_chips_panel" class="form-label"><?= _h('settings.facts_chips_panel') ?></label>
+                        <select id="set-facts_chips_panel" class="form-select bg-dark text-light border-secondary" name="facts_chips_panel">
+                            <option value="1" <?= ($cfg['facts_chips_panel'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_chips_panel'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_chips_panel_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_chips_max">
+                        <label for="set-facts_chips_max" class="form-label"><?= _h('settings.facts_chips_max') ?></label>
+                        <input type="number" min="1" max="20" step="1" id="set-facts_chips_max" class="form-control bg-dark text-light border-secondary" name="facts_chips_max" value="<?= (int)($cfg['facts_chips_max'] ?? 6) ?>">
+                        <small class="settings-hint"><?= _h('settings.facts_chips_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_chips_rates">
+                        <label for="set-facts_chips_rates" class="form-label"><?= _h('settings.facts_chips_rates') ?></label>
+                        <select id="set-facts_chips_rates" class="form-select bg-dark text-light border-secondary" name="facts_chips_rates">
+                            <option value="1" <?= ($cfg['facts_chips_rates'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_chips_rates'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_chips_rates_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_chips_ratings">
+                        <label for="set-facts_chips_ratings" class="form-label"><?= _h('settings.facts_chips_ratings') ?></label>
+                        <select id="set-facts_chips_ratings" class="form-select bg-dark text-light border-secondary" name="facts_chips_ratings">
+                            <option value="1" <?= ($cfg['facts_chips_ratings'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_chips_ratings'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_chips_ratings_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="facts_filter_counts">
+                        <label for="set-facts_filter_counts" class="form-label"><?= _h('settings.facts_filter_counts') ?></label>
+                        <select id="set-facts_filter_counts" class="form-select bg-dark text-light border-secondary" name="facts_filter_counts">
+                            <option value="1" <?= ($cfg['facts_filter_counts'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['facts_filter_counts'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.facts_filter_counts_hint') ?></small>
                     </div>
                 </div>
             </div>

@@ -2286,19 +2286,14 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     }
     $minSeeders = (int)($q['min_seeders'] ?? 0);
     if ($minSeeders > 0) $where[] = "GREATEST(COALESCE(scrape_seeders, 0), last_seeders) >= " . $minSeeders;
-    $filtered = !empty($q['filter_where']);
-    foreach ($q['filter_where'] ?? [] as $fw) $where[] = $fw;
-    foreach ($q['filter_params'] ?? [] as $fp) $params[] = $fp;
     $metaOn = in_array($metaFilter, ['none', 'pending', 'fetching', 'done', 'failed'], true);
     $lifeOn = in_array($lifeFilter, ['protected', 'grace', 'promoted'], true);
     $snapKey = null;
-    if ($search === '' && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !$filtered && !($metaOn && $lifeOn)) {
+    if ($search === '' && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !($metaOn && $lifeOn)) {
         $snapKey = $metaOn ? 'meta_' . $metaFilter : ($lifeOn ? ['protected' => 'protected', 'grace' => 'in_grace', 'promoted' => 'promoted'][$lifeFilter] : 'total');
     }
 
-    $columns = "info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers, last_completed, peak_seeders,
-                grace_until, protected_until, promoted_at, meta_status, meta_error, total_size, files_count,
-                scrape_seeders, scrape_leechers, scrape_completed, scraped_at";
+    $columns = INDEX_LIST_COLUMNS;
     $orderClause = implode(', ', $orderParts);
 
     $runQuery = function (?array $extra) use ($db, $where, $params, $columns, $orderClause, $perPage, $offset, $snapKey): array {
@@ -2365,7 +2360,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     $first = explode(':', trim(explode(',', trim((string)($q['sort'] ?? 'last:desc')))[0]));
     $catCols = ['last' => 'last_seen', 'size' => 'total_size', 'files' => 'files_count', 'name' => 'name',
                 'seeders' => 'eff_seeders', 'sseeders' => 'eff_seeders', 'leechers' => 'eff_leechers'];
-    $plain = !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !$filtered;
+    $plain = !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0;
     $found = $nameClauses && indexCatalogReady($db, array_key_exists('catalog', $q) ? (bool)$q['catalog'] : null)
         ? indexListCatalogHits($db, $nameClauses, INDEX_LIST_CATALOG_CAP + 1) : null;
     if ($found !== null && count($found[0]) <= INDEX_LIST_CATALOG_CAP) {
@@ -2386,6 +2381,15 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         [$total, $rows] = $runQuery($likeClause);
     }
 
+    $rows = indexListRowsShape($db, $rows, !empty($q['desc_flags']));
+    return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+}
+
+const INDEX_LIST_COLUMNS = "info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers, last_completed, peak_seeders,
+                grace_until, protected_until, promoted_at, meta_status, meta_error, total_size, files_count,
+                scrape_seeders, scrape_leechers, scrape_completed, scraped_at";
+
+function indexListRowsShape(PDO $db, array $rows, bool $descFlags): array {
     $now = time();
     foreach ($rows as &$row) {
         foreach (['seen_count', 'last_seeders', 'last_leechers', 'last_completed', 'peak_seeders', 'total_size', 'files_count', 'scrape_seeders', 'scrape_leechers', 'scrape_completed'] as $k) {
@@ -2395,13 +2399,50 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         $row['promoted'] = $row['promoted_at'] !== null;
     }
     unset($row);
-    if (!empty($q['desc_flags']) && $rows) {
+    if ($descFlags && $rows) {
         $fl = indexDescFlags($db, array_column($rows, 'info_hash'), true);
         foreach ($rows as &$row) $row['desc'] = $fl[$row['info_hash']] ?? 0;
         unset($row);
     }
+    return $rows;
+}
 
-    return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+final class IndexFiltersUnsupported extends \RuntimeException {}
+
+function indexListByEngine(PDO $db, array $cfg, array $q, array $flt): array {
+    $page = max(1, (int)($q['page'] ?? 1));
+    $perPage = max(1, min(200, (int)($q['per_page'] ?? ($cfg['items_per_page'] ?? 25))));
+    if (in_array((string)($q['meta'] ?? ''), ['none', 'pending', 'fetching', 'failed'], true)
+        || in_array((string)($q['life'] ?? ''), ['protected', 'grace', 'promoted'], true)) {
+        throw new IndexFiltersUnsupported('state');
+    }
+    $map = ['last' => 'last', 'size' => 'size', 'files' => 'files', 'name' => 'name', 'seeders' => 'seeders', 'sseeders' => 'seeders', 'leechers' => 'leechers'];
+    $sorts = [];
+    foreach (explode(',', trim((string)($q['sort'] ?? 'last:desc'))) as $part) {
+        $pieces = explode(':', trim($part));
+        if (($pieces[0] ?? '') === '') continue;
+        if (!isset($map[$pieces[0]])) throw new IndexFiltersUnsupported('sort');
+        $sorts[] = $map[$pieces[0]] . ':' . (strtolower($pieces[1] ?? 'asc') === 'desc' ? 'desc' : 'asc');
+    }
+    $r = indexSearchCatalogue($db, $cfg, [
+        'search' => trim((string)($q['search'] ?? '')), 'search_files' => !empty($q['search_files']) && $q['search_files'] !== '0',
+        'include_whitelist' => false, 'per_page' => $perPage, 'page' => $page, 'sort' => $sorts ? implode(',', $sorts) : 'last:desc',
+        'hash_search' => true, 'desc_only' => ($q['desc'] ?? '') === 'yes',
+    ] + $flt);
+    $hashes = array_column($r['rows'], 'info_hash');
+    $rows = [];
+    if ($hashes) {
+        $in = implode(',', array_fill(0, count($hashes), '?'));
+        $columns = INDEX_LIST_COLUMNS;
+        $st = $db->prepare("SELECT $columns FROM index_hashes WHERE info_hash IN ($in)");
+        $st->execute($hashes);
+        $byHash = [];
+        foreach ($st->fetchAll() as $row) $byHash[$row['info_hash']] = $row;
+        foreach ($hashes as $h) if (isset($byHash[$h])) $rows[] = $byHash[$h];
+    }
+    $total = (int)$r['total'];
+    return ['rows' => indexListRowsShape($db, $rows, !empty($q['desc_flags'])), 'total' => $total, 'total_capped' => !empty($r['total_capped']),
+            'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
 }
 
 /**
@@ -2834,7 +2875,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 foreach ($flt['hashes'] as $p) $params[] = $p;
             }
             if ($flt['names'] !== null) {
-                $parts[] = $flt['names'][0];
+                $parts[] = str_replace('{T}', '`' . $tbl . '`', $flt['names'][0]);
                 foreach ($flt['names'][1] as $p) $params[] = $p;
             }
             $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';

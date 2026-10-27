@@ -40,15 +40,7 @@ $canMagnet = userCan($db, $cfg, 'index.magnet');
 $canWl = userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
 $canContent = userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
 $signedIn = richtextViewerSignedIn($db);
-$req = factsRequest($_GET);
-$size = $req['size'];
-$files = $req['files'];
-$seeders = $req['seeders'];
-$factsQ = $req['facts'];
-$byName = factsMode($cfg) === 'desc_name';
-$nameClause = $byName ? factsNameClause($factsQ) : null;
-$onlyHashes = $canContent ? factsFilterHashes($db, $factsQ, $signedIn) : null;
-if ($nameClause !== null && $onlyHashes === null) $onlyHashes = [];
+$flt = factsEngineFilters($db, $cfg, factsRequest($_GET), $canContent, $signedIn);
 
 // Let go of the session before the slow part.
 //
@@ -103,14 +95,7 @@ try {
         'desc_flags'        => $canContent,
         // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
         'hash_search'       => $canMagnet,
-        'size_min'          => $size !== null && $size[0] !== null ? (int)$size[0] : null,
-        'size_max'          => $size !== null && $size[1] !== null ? (int)$size[1] : null,
-        'files_min'         => $files !== null && $files[0] !== null ? (int)$files[0] : null,
-        'files_max'         => $files !== null && $files[1] !== null ? (int)$files[1] : null,
-        'seeders_min'       => $seeders !== null && $seeders[0] !== null ? (int)$seeders[0] : null,
-        'only_hashes'       => $onlyHashes,
-        'name_clause'       => $nameClause,
-    ]);
+    ] + $flt);
 } catch (IndexSearchTimeout $e) {
     error_log('[index search] stopped for time: ' . mb_substr($search, 0, 80) . ' sort=' . $sort . ' — ' . $e->getMessage());
     header('Retry-After: 30');
@@ -174,7 +159,7 @@ foreach ($res['rows'] as $r) {
     }
     $row['content_status'] = (string)($r['content_status'] ?? 'none');
     if ($canContent) $row['desc'] = (int)($r['desc'] ?? 0);
-    $chips = factsRowChips($factsMap[strtolower((string)$r['info_hash'])] ?? null, (string)($r['name'] ?? ''), $cfg);
+    $chips = factsRowChips($factsMap[strtolower((string)$r['info_hash'])] ?? null, (string)($r['name'] ?? ''), $cfg, 'search');
     if ($chips !== null) $row['facts'] = $chips;
     $rows[] = $row;
 }

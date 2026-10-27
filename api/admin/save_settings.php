@@ -39,6 +39,7 @@ $allowed = [
     'lang_swap_enabled',
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
     'search_share_enabled', 'search_count_common_words', 'facts_source',
+    'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
@@ -321,6 +322,10 @@ if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behav
 // ── Content-Security-Policy ──
 // Coerced rather than refused, and coerced to 'report': an unknown value is a bug in the form, and
 // the answer to a bug in the form is the setting that cannot break a page for a visitor.
+foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts'] as $fk) {
+    if (isset($data[$fk])) $data[$fk] = in_array($data[$fk], ['0', 0, false], true) ? '0' : '1';
+}
+if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min(20, (int)$data['facts_chips_max'] ?: 6));
 if (isset($data['facts_source']) && !in_array($data['facts_source'], ['desc', 'desc_name'], true)) {
     $data['facts_source'] = 'desc';
 }

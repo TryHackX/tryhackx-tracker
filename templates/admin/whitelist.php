@@ -174,7 +174,7 @@
                         <button class="btn btn-sm btn-primary" id="btn-wl-add"><i class="bi bi-plus-lg"></i> <?= _h('a.wl.add_hashes') ?></button>
                     </div>
                 </div>
-                <div class="sf-host" id="wl-filters" data-facts="1" data-desc="1" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog() : [])) ?>"></div>
+                <div class="sf-host" id="wl-filters" data-facts="1" data-desc="1" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog($cfg) : [])) ?>"></div>
                 <div class="wl-chips d-hidden" id="wl-chips"></div>
             </div>
 

@@ -295,7 +295,15 @@ function settingsCatalogKeywords(): array {
         'search_share_enabled'      => 'share link copy url permalink address search results torrent bookmark',
         'index_search_include_whitelist' => 'search whitelist rows included results registered torrents',
         'search_count_common_words' => 'search ranking words matched groups common short stop words the of tv uk regexp cost slow best match relevance',
+        // #section-facts
         'facts_source'              => 'facts tags chips filters description name title tokens resolution codec 1080p hevc web-dl lektor fakty tagi nazwa opis',
+        'facts_chips_search'        => 'chips tags search results rows show hide tagi wyszukiwarka',
+        'facts_chips_info'          => 'chips tags info panel torrent details show hide tagi',
+        'facts_chips_panel'         => 'chips tags panel index whitelist lists show hide tagi',
+        'facts_chips_max'           => 'chips tags how many shown more limit plus tagi ile',
+        'facts_chips_rates'         => 'bitrate bit rate overall video audio average maximum vbr cbr chips',
+        'facts_chips_ratings'       => 'imdb filmweb ratings chips oceny',
+        'facts_filter_counts'       => 'filter counts numbers tags how many torrents liczniki filtry',
         // #section-user2fa
         'user_2fa_enabled'          => 'two factor authentication 2fa members accounts totp authenticator app',
         'user_2fa_required'         => 'two factor required force 2fa panel access moderators admins',

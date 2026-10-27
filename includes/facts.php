@@ -1,6 +1,6 @@
 <?php
 
-const FACTS_VERSION = 1;
+const FACTS_VERSION = 2;
 const FACTS_TEXT_MAX = 400000;
 const FACTS_FILTER_CAP = 5000;
 const FACTS_TICK_BATCH = 40;
@@ -18,6 +18,23 @@ const FACTS_LABELS = [
     'l:multi' => 'MULTi',
 ];
 const FACTS_WORDS = ['l:lektor_pl', 'l:dub_pl', 'l:sub_pl', 'l:audio_pl', 'l:audio_en', 'l:sub_en', 't:movie', 't:series'];
+const FACTS_NAME_RES = ['q:sd' => 1, 'q:720p' => 2, 'q:1080p' => 3, 'q:1440p' => 4, 'q:2160p' => 5];
+const FACTS_NAME_BITS = ['v:h264', 'v:h265', 'v:av1', 'v:vp9', 'v:mpeg2', 'v:xvid', 'v:vc1', 'h:hdr10', 'h:hdr10p', 'h:dv', 'h:hlg', 'h:hdr',
+    'a:aac', 'a:ac3', 'a:eac3', 'a:atmos', 'a:dts', 'a:dtshdma', 'a:truehd', 'a:flac', 'a:opus', 'a:mp3', 'a:pcm',
+    's:webdl', 's:webrip', 's:bluray', 's:remux', 's:hdtv', 's:dvd', 's:cam',
+    'l:multi', 'l:lektor_pl', 'l:dub_pl', 'l:sub_pl', 'l:audio_pl', 'l:audio_en', 'l:sub_en'];
+const FACTS_NAME_LIST_CAP = 10000;
+const FACTS_ALIASES = [
+    'q:2160p' => '4k uhd 2160 ultra hd', 'q:1440p' => '2k qhd 1440', 'q:1080p' => 'full hd fhd 1080 1080i', 'q:720p' => 'hd 720', 'q:sd' => 'sd 480p 576p',
+    'v:h264' => 'h264 h.264 x264 avc', 'v:h265' => 'h265 h.265 x265 hevc', 'v:xvid' => 'xvid divx', 'v:mpeg2' => 'mpeg2 mpeg-2', 'v:vc1' => 'vc1 vc-1',
+    'h:hdr10' => 'hdr hdr10', 'h:hdr10p' => 'hdr10+ hdr10plus', 'h:dv' => 'dv dovi dolby vision', 'h:hdr' => 'hdr',
+    'a:ac3' => 'ac3 ac-3 dd dolby digital', 'a:eac3' => 'eac3 e-ac-3 ddp dd+ dolby digital plus', 'a:dtshdma' => 'dts-hd ma dtshd master audio',
+    'a:truehd' => 'truehd true hd', 'a:pcm' => 'pcm lpcm',
+    's:webdl' => 'web-dl webdl web', 's:webrip' => 'webrip web-rip', 's:bluray' => 'bluray blu-ray bdrip brrip bd', 's:hdtv' => 'hdtv tvrip',
+    's:dvd' => 'dvd dvdrip', 's:cam' => 'cam ts telesync hdcam',
+    'l:multi' => 'multi', 'l:lektor_pl' => 'lektor polski pl', 'l:dub_pl' => 'dubbing dub polski pl', 'l:sub_pl' => 'napisy polskie pl subtitles',
+    'l:audio_pl' => 'polski pl audio', 'l:audio_en' => 'english eng angielski audio', 'l:sub_en' => 'napisy angielskie en english subtitles',
+];
 
 function factsTagLabel(string $id, array $genres = []): string
 {
@@ -71,6 +88,11 @@ function factsSections(string $plain): array
             $cur = count($sections) - 1;
             continue;
         }
+        if (preg_match('/^(general|video|audio|text|menu)(?:\s*#\s*\d+)?$/iu', $line, $hm)) {
+            $sections[] = ['type' => strtolower($hm[1]), 'f' => []];
+            $cur = count($sections) - 1;
+            continue;
+        }
         $fields = factsFields($line);
         if (!$fields) continue;
         $head = strtolower($fields[0][0]);
@@ -110,6 +132,7 @@ function factsNumber(string $raw): ?float
 
 function factsKbps(string $value): ?int
 {
+    $value = explode(' / ', $value)[0];
     if (!preg_match('/(\d{1,3}(?:[ \x{00A0}\x{202F}]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*(kb\/s|kbps|mb\/s|mbps|b\/s)/iu', $value, $m)) return null;
     $n = factsNumber($m[1]);
     if ($n === null || $n <= 0) return null;
@@ -288,6 +311,29 @@ function factsRating(string $plain, string $site): ?float
     return $v >= 0 && $v <= 10 ? round($v, 1) : null;
 }
 
+function factsRateMode(string $value): ?string
+{
+    $value = explode(' / ', $value)[0];
+    if (preg_match('/variable|zmienn/iu', $value)) return 'V';
+    if (preg_match('/constant|sta[łl]/iu', $value)) return 'C';
+    return null;
+}
+
+function factsChannels(string $value): ?string
+{
+    if (!preg_match('/(\d{1,2})\s*(?:channels?|kana)/iu', $value, $m)) return null;
+    $n = (int)$m[1];
+    return [1 => '1.0', 2 => '2.0', 3 => '2.1', 6 => '5.1', 7 => '6.1', 8 => '7.1'][$n] ?? ($n > 0 && $n <= 24 ? $n . 'ch' : null);
+}
+
+function factsAudioLabel(array $trackTags): ?string
+{
+    foreach (['a:truehd', 'a:dtshdma', 'a:dts', 'a:eac3', 'a:ac3', 'a:flac', 'a:pcm', 'a:opus', 'a:aac', 'a:mp3'] as $id) {
+        if (in_array($id, $trackTags, true)) return FACTS_LABELS[$id] . (in_array('a:atmos', $trackTags, true) ? ' Atmos' : '');
+    }
+    return null;
+}
+
 function factsFromDescription(string $text, string $title = ''): array
 {
     $plain = factsPlain($text);
@@ -295,6 +341,12 @@ function factsFromDescription(string $text, string $title = ''): array
     $tags = [];
     $res = null;
     $rates = [];
+    $vmax = [];
+    $vmode = null;
+    $orates = [];
+    $omax = [];
+    $omode = null;
+    $tracks = [];
     $audioLangs = [];
     $subLangs = [];
     $fallbackCodec = null;
@@ -307,9 +359,18 @@ function factsFromDescription(string $text, string $title = ''): array
             if ($w !== null && $h !== null) $res = max($res ?? 0, factsResClass($w, $h));
             $rate = factsField($sec, ['bit rate', 'nominal bit rate']);
             if ($rate !== null && ($k = factsKbps($rate)) !== null) $rates[] = $k;
+            $mx = factsField($sec, ['maximum bit rate']);
+            if ($mx !== null && ($k = factsKbps($mx)) !== null) $vmax[] = $k;
+            $vmode ??= factsRateMode((string)factsField($sec, ['bit rate mode']));
             foreach (factsHdr((string)factsField($sec, ['hdr format', 'transfer characteristics'])) as $x) $tags[$x] = true;
         } elseif ($sec['type'] === 'audio') {
-            foreach (factsAudio((string)factsField($sec, ['format']), (string)factsField($sec, ['commercial name']), (string)factsField($sec, ['title'])) as $x) $tags[$x] = true;
+            $trackTags = factsAudio((string)factsField($sec, ['format']), (string)factsField($sec, ['commercial name']), (string)factsField($sec, ['title']));
+            foreach ($trackTags as $x) $tags[$x] = true;
+            $ar = factsField($sec, ['bit rate', 'nominal bit rate']);
+            $am = factsField($sec, ['maximum bit rate']);
+            $tracks[] = ['rate' => $ar !== null ? factsKbps($ar) : null, 'max' => $am !== null ? factsKbps($am) : null,
+                         'mode' => factsRateMode((string)factsField($sec, ['bit rate mode'])), 'codec' => factsAudioLabel($trackTags),
+                         'ch' => factsChannels((string)factsField($sec, ['channel(s)', 'channels']))];
             $lang = factsLang((string)factsField($sec, ['language']));
             if ($lang !== null) $audioLangs[$lang] = true;
             $trackTitle = mb_strtolower((string)factsField($sec, ['title']));
@@ -320,8 +381,15 @@ function factsFromDescription(string $text, string $title = ''): array
             if ($lang !== null) $subLangs[$lang] = true;
         } else {
             $fallbackCodec ??= factsVideoCodec('', (string)factsField($sec, ['writing library']));
+            $o = factsField($sec, ['overall bit rate']);
+            if ($o !== null && ($k = factsKbps($o)) !== null) $orates[] = $k;
+            $om = factsField($sec, ['maximum overall bit rate']);
+            if ($om !== null && ($k = factsKbps($om)) !== null) $omax[] = $k;
+            $omode ??= factsRateMode((string)factsField($sec, ['overall bit rate mode']));
         }
     }
+    usort($tracks, fn($a, $b) => [$b['rate'] ?? $b['max'] ?? 0, count(array_filter($b, fn($v) => $v !== null))] <=> [$a['rate'] ?? $a['max'] ?? 0, count(array_filter($a, fn($v) => $v !== null))]);
+    $best = $tracks && ($tracks[0]['rate'] !== null || $tracks[0]['max'] !== null || $tracks[0]['ch'] !== null) ? $tracks[0] : null;
     if ($fallbackCodec !== null && !array_filter(array_keys($tags), fn($t) => str_starts_with($t, 'v:'))) $tags[$fallbackCodec] = true;
 
     $kindSays = null;
@@ -388,6 +456,10 @@ function factsFromDescription(string $text, string $title = ''): array
     return [
         'res' => $res,
         'vbitrate' => $rates ? (int)round(array_sum($rates) / count($rates)) : null,
+        'vbitrate_max' => $vmax ? max($vmax) : null, 'vmode' => $vmode,
+        'obitrate' => $orates ? (int)round(array_sum($orates) / count($orates)) : null, 'obitrate_max' => $omax ? max($omax) : null, 'omode' => $omode,
+        'abitrate' => $best['rate'] ?? null, 'abitrate_max' => $best['max'] ?? null, 'amode' => $best['mode'] ?? null,
+        'acodec' => $best['codec'] ?? null, 'achannels' => $best['ch'] ?? null,
         'year_from' => $yFrom, 'year_to' => $yTo,
         'seasons' => $seasons, 'episodes' => $episodes, 'duration_min' => $duration,
         'imdb' => factsRating($plain, 'IMDb'), 'filmweb' => factsRating($plain, 'Filmweb'),
@@ -477,11 +549,18 @@ function factsNameChips(string $name): ?array
     $f = factsFromName($name);
     if (!$f['tags']) return null;
     $tags = array_map(fn($id) => ['id' => $id, 'g' => substr($id, 0, 1), 'l' => factsTagLabel($id)], $f['tags']);
-    return array_filter(['tags' => $tags, 'year' => $f['year'] !== null ? (string)$f['year'] : null, 'from' => 'name'], fn($v) => $v !== null);
+    return array_filter(['tags' => $tags, 'year' => $f['year'] !== null ? (string)$f['year'] : null, 'from' => 'name', 'max' => factsChipsMax($GLOBALS['cfg'] ?? [])],
+                        fn($v) => $v !== null);
 }
 
-function factsRowChips(?array $desc, string $name, array $cfg): ?array
+function factsChipsMax(array $cfg): int
 {
+    return max(1, min(20, (int)($cfg['facts_chips_max'] ?? 6) ?: 6));
+}
+
+function factsRowChips(?array $desc, string $name, array $cfg, string $place = ''): ?array
+{
+    if ($place !== '' && ($cfg['facts_chips_' . $place] ?? '1') !== '1') return null;
     if ($desc !== null) return $desc;
     return factsMode($cfg) === 'desc_name' && $name !== '' ? factsNameChips($name) : null;
 }
@@ -496,6 +575,19 @@ function factsNameReady(PDO $db): bool
     return $ready;
 }
 
+function factsNameCodes(array $tags): array
+{
+    $kind = in_array('t:series', $tags, true) ? 2 : (in_array('t:movie', $tags, true) ? 1 : 0);
+    $res = 0;
+    $bits = 0;
+    foreach ($tags as $id) {
+        if (isset(FACTS_NAME_RES[$id])) $res = max($res, FACTS_NAME_RES[$id]);
+        $bit = array_search($id, FACTS_NAME_BITS, true);
+        if ($bit !== false) $bits |= 1 << $bit;
+    }
+    return [$kind, $res, $bits];
+}
+
 function factsNameStore(PDO $db, array $rows): int
 {
     if (!$rows || !factsNameReady($db)) return 0;
@@ -505,12 +597,13 @@ function factsNameStore(PDO $db, array $rows): int
         $hash = strtolower((string)($r['info_hash'] ?? ''));
         if (!preg_match('/^[0-9a-f]{40}$/', $hash)) continue;
         $f = factsFromName((string)($r['name'] ?? ''));
-        if ($f['tags']) $up[] = [$hash, ',' . implode(',', $f['tags']) . ',', $f['year']];
-        else $gone[] = $hash;
+        if (!$f['tags']) { $gone[] = $hash; continue; }
+        [$kind, $res, $bits] = factsNameCodes($f['tags']);
+        $up[] = [$hash, $kind, $res, (int)($f['year'] ?? 0), $bits];
     }
     foreach (array_chunk($up, 500) as $chunk) {
-        $sql = "INSERT INTO name_facts (info_hash, tags, year) VALUES " . implode(',', array_fill(0, count($chunk), '(?, ?, ?)'))
-             . " ON DUPLICATE KEY UPDATE tags = VALUES(tags), year = VALUES(year)";
+        $sql = "INSERT INTO name_facts (info_hash, nf_kind, nf_res, nf_year, nf_bits) VALUES " . implode(',', array_fill(0, count($chunk), '(?, ?, ?, ?, ?)'))
+             . " ON DUPLICATE KEY UPDATE nf_kind = VALUES(nf_kind), nf_res = VALUES(nf_res), nf_year = VALUES(nf_year), nf_bits = VALUES(nf_bits)";
         $st = $db->prepare($sql);
         $st->execute(array_merge(...$chunk));
     }
@@ -552,22 +645,49 @@ function factsNameWhitelist(PDO $db): int
     return $n;
 }
 
-function factsNameClause(array $f): ?array
+function factsNamePredicate(array $f): ?array
 {
-    if (!empty($f['pics']) || is_array($f['imdb'] ?? null) || is_array($f['filmweb'] ?? null)) return null;
+    if (!empty($f['pics']) || is_array($f['imdb'] ?? null) || is_array($f['filmweb'] ?? null) || is_array($f['vbitrate'] ?? null)) return null;
     $where = [];
     $args = [];
     foreach ($f['tags'] ?? [] as $set) {
+        $res = [];
+        $kinds = [];
+        $mask = 0;
+        foreach ($set as $id) {
+            if (isset(FACTS_NAME_RES[$id])) $res[] = FACTS_NAME_RES[$id];
+            elseif ($id === 't:movie' || $id === 't:series') $kinds[] = $id === 't:movie' ? 1 : 2;
+            elseif (($bit = array_search($id, FACTS_NAME_BITS, true)) !== false) $mask |= 1 << $bit;
+        }
         $or = [];
-        foreach ($set as $id) { $or[] = 'tags LIKE ?'; $args[] = '%,' . $id . ',%'; }
-        $where[] = '(' . implode(' OR ', $or) . ')';
+        if ($res) { $or[] = 'nf.nf_res IN (' . implode(',', array_fill(0, count($res), '?')) . ')'; array_push($args, ...$res); }
+        if ($kinds) { $or[] = 'nf.nf_kind IN (' . implode(',', array_fill(0, count($kinds), '?')) . ')'; array_push($args, ...$kinds); }
+        if ($mask) { $or[] = '(nf.nf_bits & ?) <> 0'; $args[] = $mask; }
+        if (!$or) return null;
+        $where[] = count($or) > 1 ? '(' . implode(' OR ', $or) . ')' : $or[0];
     }
-    if (in_array($f['type'] ?? '', ['movie', 'series'], true)) { $where[] = 'tags LIKE ?'; $args[] = '%,t:' . $f['type'] . ',%'; }
+    if (in_array($f['type'] ?? '', ['movie', 'series'], true)) { $where[] = 'nf.nf_kind = ?'; $args[] = $f['type'] === 'movie' ? 1 : 2; }
     $y = $f['year'] ?? null;
-    if (is_array($y) && $y[0] !== null) { $where[] = 'year >= ?'; $args[] = $y[0]; }
-    if (is_array($y) && $y[1] !== null) { $where[] = 'year <= ?'; $args[] = $y[1]; }
+    if (is_array($y) && ($y[0] !== null || $y[1] !== null)) {
+        $where[] = 'nf.nf_year > 0';
+        if ($y[0] !== null) { $where[] = 'nf.nf_year >= ?'; $args[] = $y[0]; }
+        if ($y[1] !== null) { $where[] = 'nf.nf_year <= ?'; $args[] = $y[1]; }
+    }
     if (!$where) return null;
-    return ['info_hash IN (SELECT info_hash FROM name_facts WHERE ' . implode(' AND ', $where) . ')', $args];
+    return [implode(' AND ', $where), $args];
+}
+
+function factsNameFilter(PDO $db, array $f, int $cap = FACTS_NAME_LIST_CAP): ?array
+{
+    $p = factsNamePredicate($f);
+    if ($p === null) return null;
+    if (!factsNameReady($db)) return ['hashes' => []];
+    $sql = "SELECT nf.info_hash FROM name_facts nf WHERE " . $p[0] . " LIMIT " . ($cap + 1);
+    $st = $db->prepare($sql);
+    $st->execute($p[1]);
+    $hashes = $st->fetchAll(PDO::FETCH_COLUMN);
+    if (count($hashes) <= $cap) return ['hashes' => $hashes];
+    return ['tpl' => '(SELECT 1 FROM name_facts nf WHERE nf.info_hash = {T}.info_hash AND ' . $p[0] . ' LIMIT 1) IS NOT NULL', 'args' => $p[1]];
 }
 
 function factsRequest(array $get): array
@@ -575,14 +695,37 @@ function factsRequest(array $get): array
     return [
         'facts' => ['tags' => factsTagsParam($get['tags'] ?? ''), 'type' => (string)($get['type'] ?? ''), 'pics' => ($get['pics'] ?? '') === '1',
                     'year' => factsRange($get['year'] ?? null, 'year'), 'imdb' => factsRange($get['imdb'] ?? null, 'imdb'),
-                    'filmweb' => factsRange($get['filmweb'] ?? null, 'filmweb')],
+                    'filmweb' => factsRange($get['filmweb'] ?? null, 'filmweb'), 'vbitrate' => factsRange($get['vbitrate'] ?? null, 'rate')],
         'size' => factsRange($get['size'] ?? null, 'size'),
         'files' => factsRange($get['filecount'] ?? null, 'count'),
         'seeders' => factsRange($get['seeders'] ?? null, 'count'),
     ];
 }
 
-function factsListFilters(PDO $db, array $cfg, array $req, string $seeders): array
+function factsEngineFilters(PDO $db, array $cfg, array $req, bool $canContent, bool $signedIn): array
+{
+    $only = $canContent ? factsFilterHashes($db, $req['facts'] ?? [], $signedIn) : null;
+    $names = factsMode($cfg) === 'desc_name' ? factsNameFilter($db, $req['facts'] ?? []) : null;
+    $clause = null;
+    if ($names !== null) {
+        if (isset($names['hashes'])) $only = array_values(array_unique(array_merge($only ?? [], $names['hashes'])));
+        else { $only = $only ?? []; $clause = [$names['tpl'], $names['args']]; }
+    }
+    $size = $req['size'] ?? null;
+    $files = $req['files'] ?? null;
+    $seeders = $req['seeders'] ?? null;
+    return array_filter([
+        'size_min' => $size !== null && $size[0] !== null ? (int)$size[0] : null,
+        'size_max' => $size !== null && $size[1] !== null ? (int)$size[1] : null,
+        'files_min' => $files !== null && $files[0] !== null ? (int)$files[0] : null,
+        'files_max' => $files !== null && $files[1] !== null ? (int)$files[1] : null,
+        'seeders_min' => $seeders !== null && $seeders[0] !== null ? (int)$seeders[0] : null,
+        'only_hashes' => $only,
+        'name_clause' => $clause,
+    ], fn($v) => $v !== null);
+}
+
+function factsListFilters(PDO $db, array $cfg, array $req, string $seeders, string $table): array
 {
     $where = [];
     $params = [];
@@ -592,20 +735,68 @@ function factsListFilters(PDO $db, array $cfg, array $req, string $seeders): arr
         if ($upper && $r[1] !== null) { $where[] = $col . ' <= ?'; $params[] = $r[1]; }
     }
     $hashes = factsFilterHashes($db, $req['facts'] ?? [], true);
-    $names = factsMode($cfg) === 'desc_name' ? factsNameClause($req['facts'] ?? []) : null;
+    $names = factsMode($cfg) === 'desc_name' ? factsNameFilter($db, $req['facts'] ?? []) : null;
     if ($hashes !== null || $names !== null) {
+        $list = array_values(array_unique(array_merge($hashes ?? [], $names['hashes'] ?? [])));
         $parts = [];
-        if ($hashes) {
-            $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')';
-            foreach ($hashes as $h) $params[] = $h;
+        if ($list) {
+            $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($list), '?')) . ')';
+            foreach ($list as $h) $params[] = $h;
         }
-        if ($names !== null) {
-            $parts[] = $names[0];
-            foreach ($names[1] as $v) $params[] = $v;
+        if (isset($names['tpl'])) {
+            $parts[] = str_replace('{T}', '`' . $table . '`', $names['tpl']);
+            foreach ($names['args'] as $v) $params[] = $v;
         }
         $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
     }
     return [$where, $params];
+}
+
+function factsCounts(PDO $db, array $cfg): array
+{
+    $n = [];
+    $genres = [];
+    if (factsTableReady($db)) {
+        $rows = $db->query("SELECT info_hash, tags, genres FROM desc_facts")->fetchAll(PDO::FETCH_ASSOC);
+        $pub = $rows ? factsPublished($db, array_map(fn($r) => strtolower((string)$r['info_hash']), $rows), true) : [];
+        foreach ($rows as $r) {
+            if (!isset($pub[strtolower((string)$r['info_hash'])])) continue;
+            $labels = [];
+            foreach (explode('|', (string)$r['genres']) as $pair) {
+                if (!str_contains($pair, '=')) continue;
+                [$k, $v] = explode('=', $pair, 2);
+                $labels[$k] = $v;
+            }
+            foreach (array_filter(explode(',', trim((string)$r['tags'], ','))) as $id) {
+                if (!factsTagValid($id)) continue;
+                $n[$id] = ($n[$id] ?? 0) + 1;
+                if (str_starts_with($id, 'g:')) $genres[substr($id, 2)] = $labels[substr($id, 2)] ?? substr($id, 2);
+            }
+        }
+    }
+    if (factsMode($cfg) === 'desc_name' && factsNameReady($db)) {
+        foreach ($db->query("SELECT nf_res, COUNT(*) FROM name_facts GROUP BY nf_res")->fetchAll(PDO::FETCH_NUM) as [$res, $c]) {
+            $id = array_search((int)$res, FACTS_NAME_RES, true);
+            if ($id !== false) $n[$id] = ($n[$id] ?? 0) + (int)$c;
+        }
+        foreach ($db->query("SELECT nf_kind, COUNT(*) FROM name_facts GROUP BY nf_kind")->fetchAll(PDO::FETCH_NUM) as [$kind, $c]) {
+            $id = [1 => 't:movie', 2 => 't:series'][(int)$kind] ?? null;
+            if ($id !== null) $n[$id] = ($n[$id] ?? 0) + (int)$c;
+        }
+        $sums = [];
+        foreach (array_keys(FACTS_NAME_BITS) as $i) $sums[] = 'SUM((nf_bits >> ' . (int)$i . ') & 1)';
+        $columns = implode(', ', $sums);
+        $row = $db->query("SELECT $columns FROM name_facts")->fetch(PDO::FETCH_NUM) ?: [];
+        foreach (FACTS_NAME_BITS as $i => $id) if (!empty($row[$i])) $n[$id] = ($n[$id] ?? 0) + (int)$row[$i];
+    }
+    arsort($n);
+    return ['at' => time(), 'n' => $n, 'g' => $genres];
+}
+
+function factsCountsTick(PDO $db, array $cfg): void
+{
+    $c = factsCounts($db, $cfg);
+    $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('facts_counts', ?)")->execute([json_encode($c, JSON_UNESCAPED_UNICODE)]);
 }
 
 function factsTableReady(PDO $db): bool
@@ -622,14 +813,20 @@ function factsStore(PDO $db, string $hash, string $src, string $text, string $ti
 {
     $f = factsFromDescription($text, $title);
     $genres = implode('|', array_map(fn($k, $v) => $k . '=' . str_replace(['|', '='], ' ', $v), array_keys($f['genres']), $f['genres']));
-    $st = $db->prepare("INSERT INTO desc_facts (info_hash, src, ver, text_sha, res, vbitrate, year_from, year_to, seasons, episodes, duration_min, imdb, filmweb, pics, tags, genres, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
+    $st = $db->prepare("INSERT INTO desc_facts (info_hash, src, ver, text_sha, res, vbitrate, year_from, year_to, seasons, episodes, duration_min, imdb, filmweb, pics, tags, genres,
+                                                vbitrate_max, vmode, obitrate, obitrate_max, omode, abitrate, abitrate_max, amode, acodec, achannels, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())
                         ON DUPLICATE KEY UPDATE src = VALUES(src), ver = VALUES(ver), text_sha = VALUES(text_sha), res = VALUES(res), vbitrate = VALUES(vbitrate),
+                            vbitrate_max = VALUES(vbitrate_max), vmode = VALUES(vmode), obitrate = VALUES(obitrate), obitrate_max = VALUES(obitrate_max),
+                            omode = VALUES(omode), abitrate = VALUES(abitrate), abitrate_max = VALUES(abitrate_max), amode = VALUES(amode),
+                            acodec = VALUES(acodec), achannels = VALUES(achannels),
                             year_from = VALUES(year_from), year_to = VALUES(year_to), seasons = VALUES(seasons), episodes = VALUES(episodes),
                             duration_min = VALUES(duration_min), imdb = VALUES(imdb), filmweb = VALUES(filmweb), pics = VALUES(pics), tags = VALUES(tags),
                             genres = VALUES(genres), updated_at = VALUES(updated_at)");
     $st->execute([$hash, $src, FACTS_VERSION, sha1($text), $f['res'], $f['vbitrate'], $f['year_from'], $f['year_to'], $f['seasons'], $f['episodes'],
-                  $f['duration_min'], $f['imdb'], $f['filmweb'], $f['pics'], $f['tags'] ? ',' . implode(',', $f['tags']) . ',' : '', mb_substr($genres, 0, 400)]);
+                  $f['duration_min'], $f['imdb'], $f['filmweb'], $f['pics'], $f['tags'] ? ',' . implode(',', $f['tags']) . ',' : '', mb_substr($genres, 0, 400),
+                  $f['vbitrate_max'], $f['vmode'], $f['obitrate'], $f['obitrate_max'], $f['omode'], $f['abitrate'], $f['abitrate_max'], $f['amode'],
+                  $f['acodec'] !== null ? mb_substr($f['acodec'], 0, 24) : null, $f['achannels']]);
     return $f;
 }
 
@@ -734,15 +931,27 @@ function factsChips(array $r): array
         $to = (int)$r['year_to'];
         $year = $to === FACTS_ONGOING ? $from . '–' : ($to > $from ? $from . '–' . $to : (string)$from);
     }
+    $cfg = $GLOBALS['cfg'] ?? [];
+    $int = static fn($v) => $v !== null && $v !== '' ? (int)$v : null;
+    $rates = [];
+    if (($cfg['facts_chips_rates'] ?? '1') === '1') {
+        foreach (['o' => ['obitrate', 'obitrate_max', 'omode'], 'v' => ['vbitrate', 'vbitrate_max', 'vmode'], 'a' => ['abitrate', 'abitrate_max', 'amode']] as $k => [$avg, $max, $mode]) {
+            $one = array_filter(['r' => $int($r[$avg] ?? null), 'x' => $int($r[$max] ?? null), 'm' => ($r[$mode] ?? null) ?: null], fn($v) => $v !== null);
+            if ($k === 'a') $one += array_filter(['c' => ($r['acodec'] ?? null) ?: null, 'ch' => ($r['achannels'] ?? null) ?: null], fn($v) => $v !== null);
+            if (isset($one['r']) || isset($one['x'])) $rates[$k] = $one;
+        }
+    }
+    $ratings = ($cfg['facts_chips_ratings'] ?? '1') === '1';
     return array_filter([
         'tags' => $tags,
         'year' => $year,
-        'vbitrate' => $r['vbitrate'] !== null ? (int)$r['vbitrate'] : null,
+        'rates' => $rates,
         'seasons' => $r['seasons'] !== null ? (int)$r['seasons'] : null,
         'episodes' => $r['episodes'] !== null ? (int)$r['episodes'] : null,
         'duration' => $r['duration_min'] !== null ? (int)$r['duration_min'] : null,
-        'imdb' => $r['imdb'] !== null ? (float)$r['imdb'] : null,
-        'filmweb' => $r['filmweb'] !== null ? (float)$r['filmweb'] : null,
+        'imdb' => $ratings && $r['imdb'] !== null ? (float)$r['imdb'] : null,
+        'filmweb' => $ratings && $r['filmweb'] !== null ? (float)$r['filmweb'] : null,
+        'max' => factsChipsMax($cfg),
     ], fn($v) => $v !== null && $v !== []);
 }
 
@@ -761,15 +970,25 @@ function factsTagsParam($raw): array
     return $out;
 }
 
-function factsCatalog(): array
+function factsCatalog(array $cfg = []): array
 {
+    $counts = json_decode((string)($cfg['facts_counts'] ?? ''), true);
+    $n = ($cfg['facts_filter_counts'] ?? '1') === '1' && is_array($counts['n'] ?? null) ? $counts['n'] : null;
     $out = [];
     foreach (array_merge(array_keys(FACTS_LABELS), FACTS_WORDS) as $id) {
         if (str_starts_with($id, 't:')) continue;
-        $out[] = ['id' => $id, 'g' => substr($id, 0, 1), 'l' => factsTagLabel($id)];
+        $c = ['id' => $id, 'g' => substr($id, 0, 1), 'l' => factsTagLabel($id), 'a' => FACTS_ALIASES[$id] ?? ''];
+        if ($n !== null) $c['n'] = (int)($n[$id] ?? 0);
+        $out[] = $c;
+    }
+    foreach (is_array($counts['g'] ?? null) ? $counts['g'] : [] as $slug => $label) {
+        if (!preg_match('/^[a-z0-9-]{2,40}$/', (string)$slug)) continue;
+        $c = ['id' => 'g:' . $slug, 'g' => 'g', 'l' => mb_substr((string)$label, 0, 40), 'a' => ''];
+        if ($n !== null) $c['n'] = (int)($n['g:' . $slug] ?? 0);
+        $out[] = $c;
     }
     $order = array_flip(FACTS_GROUPS);
-    usort($out, fn($a, $b) => [$order[$a['g']] ?? 99] <=> [$order[$b['g']] ?? 99]);
+    usort($out, fn($a, $b) => [$order[$a['g']] ?? 99, -($a['n'] ?? 0)] <=> [$order[$b['g']] ?? 99, -($b['n'] ?? 0)]);
     return $out;
 }
 
@@ -793,6 +1012,7 @@ function factsRange($raw, string $kind): ?array
         if ($kind === 'size') return factsBytes($v);
         if (!preg_match('/^\d{1,9}(?:[.,]\d{1,2})?$/', $v)) return null;
         $n = (float)str_replace(',', '.', $v);
+        if ($kind === 'rate') return (int)round($n * 1000);
         return in_array($kind, ['imdb', 'filmweb'], true) ? min(10.0, $n) : (int)$n;
     };
     $min = $read($parts[0]);
@@ -812,7 +1032,7 @@ function factsFilterHashes(PDO $db, array $f, bool $signedIn): ?array
         $where[] = '(' . implode(' OR ', $or) . ')';
     }
     if (in_array($f['type'] ?? '', ['movie', 'series'], true)) { $where[] = 'tags LIKE ?'; $args[] = '%,t:' . $f['type'] . ',%'; }
-    foreach (['year' => ['year_to', 'year_from'], 'imdb' => ['imdb', 'imdb'], 'filmweb' => ['filmweb', 'filmweb']] as $k => [$colMin, $colMax]) {
+    foreach (['year' => ['year_to', 'year_from'], 'imdb' => ['imdb', 'imdb'], 'filmweb' => ['filmweb', 'filmweb'], 'vbitrate' => ['vbitrate', 'vbitrate']] as $k => [$colMin, $colMax]) {
         $r = $f[$k] ?? null;
         if (!is_array($r)) continue;
         if ($r[0] !== null) { $where[] = $colMin . ' >= ?'; $args[] = $r[0]; }
