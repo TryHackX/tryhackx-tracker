@@ -135,18 +135,49 @@ function forumDescFor(PDO $db, string $hash): ?array {
     return $st->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
+function forumDescLimits(PDO $db, string $hash): ?array {
+    try {
+        $st = $db->prepare("SELECT forum_chars, forum_images, forum_links FROM forum_descs WHERE info_hash = ? AND import_sha IS NOT NULL LIMIT 1");
+        $st->execute([strtolower($hash)]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    return $r ? ['chars' => (int)$r['forum_chars'], 'images' => (int)$r['forum_images'], 'links' => (int)$r['forum_links']] : null;
+}
+
+function forumDescLimitsBackfill(PDO $db, array $cfg): int {
+    try {
+        if ($db->query("SELECT 1 FROM settings WHERE `key` = 'schema_once_v101_forum_limits'")->fetchColumn() !== false) return 0;
+        $rows = $db->query("SELECT f.info_hash, w.description, w.description_format FROM forum_descs f
+                              JOIN whitelist w ON w.info_hash = f.info_hash
+                             WHERE f.import_sha IS NOT NULL AND w.description IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+        $up = $db->prepare("UPDATE forum_descs SET forum_images = GREATEST(forum_images, ?), forum_links = GREATEST(forum_links, ?) WHERE info_hash = ?");
+        foreach ($rows as $r) {
+            $c = richtextCount((string)$r['description'], (string)$r['description_format'], $cfg);
+            $up->execute([min(65535, $c['images']), min(65535, $c['links']), $r['info_hash']]);
+        }
+        if (function_exists('schemaOnce')) schemaOnce($db, 'v101_forum_limits');
+        return count($rows);
+    } catch (\Throwable $e) {
+        error_log('[forumdescs] the record limits were not filled in: ' . $e->getMessage());
+        return 0;
+    }
+}
+
 function forumDescSave(PDO $db, array $r): void {
     $db->prepare("INSERT INTO forum_descs (info_hash, client_id, discussion_id, post_id, url, author_ext_id, author_name,
-                         author_user_id, forum_at, forum_sha, forum_chars, import_sha, state, note, edit_id, imported_at)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         author_user_id, forum_at, forum_sha, forum_chars, forum_images, forum_links, import_sha, state, note, edit_id, imported_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE client_id = VALUES(client_id), discussion_id = VALUES(discussion_id),
                          post_id = VALUES(post_id), url = VALUES(url), author_ext_id = VALUES(author_ext_id),
                          author_name = VALUES(author_name), author_user_id = VALUES(author_user_id), forum_at = VALUES(forum_at),
-                         forum_sha = VALUES(forum_sha), forum_chars = VALUES(forum_chars), import_sha = VALUES(import_sha),
+                         forum_sha = VALUES(forum_sha), forum_chars = VALUES(forum_chars), forum_images = VALUES(forum_images),
+                         forum_links = VALUES(forum_links), import_sha = VALUES(import_sha),
                          state = VALUES(state), note = VALUES(note), edit_id = VALUES(edit_id), imported_at = VALUES(imported_at)")
        ->execute([$r['info_hash'], $r['client_id'], $r['discussion_id'], $r['post_id'], $r['url'], $r['author_ext_id'],
                   $r['author_name'], $r['author_user_id'], $r['forum_at'], $r['forum_sha'], $r['forum_chars'],
-                  $r['import_sha'], $r['state'], $r['note'] !== null ? mb_substr((string)$r['note'], 0, 255) : null, $r['edit_id'],
+                  min(65535, (int)($r['forum_images'] ?? 0)), min(65535, (int)($r['forum_links'] ?? 0)), $r['import_sha'], $r['state'], $r['note'] !== null ? mb_substr((string)$r['note'], 0, 255) : null, $r['edit_id'],
                   $r['imported_at'] ?? null]);
 }
 
@@ -238,6 +269,10 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
     $who = 'account:' . $cid . ':' . $topic['author_id'];
     if (!array_key_exists($who, $memo)) $memo[$who] = forumDescAccount($db, $client, $topic['author_id']);
     $fmt = $topic['format'];
+    $sha = $topic['content'] !== null ? forumDescSha($fmt, $topic['content']) : null;
+    $counts = $f !== null && $sha !== null && $f['forum_sha'] !== null && hash_equals((string)$f['forum_sha'], $sha)
+        ? ['images' => (int)($f['forum_images'] ?? 0), 'links' => (int)($f['forum_links'] ?? 0)]
+        : ($topic['content'] !== null && $topic['chars'] <= $max ? richtextCount($topic['content'], $fmt, $cfg) : ['images' => 0, 'links' => 0]);
     $row = [
         'info_hash'      => $hash,
         'client_id'      => $cid,
@@ -248,8 +283,10 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
         'author_name'    => $topic['author_name'] !== '' ? $topic['author_name'] : null,
         'author_user_id' => $memo[$who],
         'forum_at'       => $topic['edited_at'],
-        'forum_sha'      => $topic['content'] !== null ? forumDescSha($fmt, $topic['content']) : null,
+        'forum_sha'      => $sha,
         'forum_chars'    => $topic['chars'],
+        'forum_images'   => $counts['images'],
+        'forum_links'    => $counts['links'],
         'import_sha'     => $f['import_sha'] ?? null,
         'state'          => $f['state'] ?? 'imported',
         'note'           => $f['note'] ?? null,

@@ -92,6 +92,10 @@ function janitorHeavy(PDO $db, array $cfg, array $argv): void
         }
     }
 
+    if ($ix['enabled'] && indexCountsTick($db) && in_array('-v', $argv ?? [], true)) echo "[index] the shared counts were refreshed\n";
+
+    if (function_exists('forumDescLimitsBackfill') && ($fl = forumDescLimitsBackfill($db, $cfg)) > 0) echo "[forumdescs] record limits counted for $fl imported descriptions\n";
+
     // whitelist upkeep: refresh stale swarm counts, and the dead-row pass on its own schedule
     // submissions proving themselves: metadata in, at least one peer, or give up with a reason
     $wp = wlProbeTick($db, $cfg);
@@ -181,6 +185,10 @@ try {
     if (function_exists('cspPrune')) {
         $cspGone = cspPrune($db, $cfg);
         if ($cspGone > 0 && in_array('-v', $argv ?? [], true)) echo "[csp] pruned $cspGone violation rows\n";
+    }
+    if (function_exists('richtextCachePrune')) {
+        $rcGone = richtextCachePrune($db);
+        if ($rcGone > 0 && in_array('-v', $argv ?? [], true)) echo "[richtext] pruned $rcGone cached descriptions\n";
     }
     if (function_exists('imagesSweep')) {
         $imgGone = imagesSweep($db, $cfg);

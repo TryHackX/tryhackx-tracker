@@ -65,6 +65,17 @@ function richtextMaxLinks(array $cfg): int {
     return max(0, min(100, (int)($cfg['desc_max_links'] ?? 10)));
 }
 
+const RICHTEXT_RECORD_CHARS_CAP = 1000000;
+
+function richtextRecordLimits(array $cfg): array {
+    $rec = is_array($cfg['rt_record_limits'] ?? null) ? $cfg['rt_record_limits'] : [];
+    return [
+        'chars'  => max(richtextMaxChars($cfg), min(RICHTEXT_RECORD_CHARS_CAP, (int)($rec['chars'] ?? 0))),
+        'images' => max(richtextMaxImages($cfg), min(1000, (int)($rec['images'] ?? 0))),
+        'links'  => max(richtextMaxLinks($cfg), min(1000, (int)($rec['links'] ?? 0))),
+    ];
+}
+
 /**
  * Is this a URL we are willing to put in an href or a src?
  *
@@ -172,7 +183,8 @@ function richtextCount(string $text, string $format = 'bbcode', ?array $cfg = nu
 function richtextValidate(string $text, string $format, array $cfg, string $place = 'description'): ?string {
     $text = trim($text);
     if ($text === '') return null;
-    $max = richtextMaxChars($cfg);
+    $lim = richtextRecordLimits($cfg);
+    $max = $lim['chars'];
     if ($max > 0 && mb_strlen($text) > $max) {
         return 'That description is ' . mb_strlen($text) . ' characters; the limit is ' . $max . '.';
     }
@@ -180,13 +192,13 @@ function richtextValidate(string $text, string $format, array $cfg, string $plac
         return 'That format is not accepted here.';
     }
     $c = richtextCount($text, $format, $cfg);
-    $maxImg = richtextMaxImages($cfg);
+    $maxImg = $lim['images'];
     if ($c['images'] > $maxImg) {
         return $maxImg === 0
             ? 'Images are not allowed in descriptions here.'
             : 'That description has ' . $c['images'] . ' images; the limit is ' . $maxImg . '.';
     }
-    $maxLink = richtextMaxLinks($cfg);
+    $maxLink = $lim['links'];
     if ($c['links'] > $maxLink) {
         return 'That description has ' . $c['links'] . ' links; the limit is ' . $maxLink . '.';
     }
@@ -285,9 +297,63 @@ function richtextViewerSignedIn(?PDO $db = null): bool {
  * database (a caller that has none, the CLI) it is richtextRender().
  */
 function richtextRenderIn(string $for, ?PDO $db, ?string $text, string $format, array $cfg, bool $signedIn = false): string {
-    $html = richtextRender($text, $format, in_array($for, ['description', 'message'], true) ? richtextVideoCfg($cfg) : $cfg, $signedIn);
+    $rcfg = in_array($for, ['description', 'message'], true) ? richtextVideoCfg($cfg) : $cfg;
+    $html = $for === 'description' && $db !== null ? richtextRenderCached($db, $text, $format, $rcfg, $signedIn)
+                                                   : richtextRender($text, $format, $rcfg, $signedIn);
     if ($html === '' || $db === null || !function_exists('emoteMapFor') || !str_contains($html, ':')) return $html;
     return emoteRenderHtml($html, emoteMapFor($db, $cfg, $for));
+}
+
+const RICHTEXT_CACHE_MIN_CHARS = 20000;
+const RICHTEXT_CACHE_KEEP_DAYS = 14;
+const RICHTEXT_CACHE_MAX_ROWS = 3000;
+
+function richtextCacheKey(string $text, string $format, array $cfg, bool $signedIn): string {
+    $keep = [];
+    foreach ($cfg as $k => $v) {
+        if (is_scalar($v) && preg_match('/^(?:rt_|link_|site_url$|shout_emoji|icon_|fa_)/', (string)$k)) $keep[(string)$k] = (string)$v;
+    }
+    ksort($keep);
+    return hash('sha256', implode("\n", [defined('TRACKER_VERSION') ? TRACKER_VERSION : '', $format, function_exists('langCurrent') ? langCurrent() : '',
+                                          $signedIn ? '1' : '0', richtextMagnetCan($cfg) ? '1' : '0', json_encode($keep), $text]));
+}
+
+function richtextRenderCached(PDO $db, ?string $text, string $format, array $cfg, bool $signedIn): string {
+    $text = (string)$text;
+    if (strlen($text) < RICHTEXT_CACHE_MIN_CHARS) return richtextRender($text, $format, $cfg, $signedIn);
+    $key = richtextCacheKey($text, $format, $cfg, $signedIn);
+    try {
+        $st = $db->prepare("SELECT html, used_at < NOW() - INTERVAL 1 DAY AS old FROM render_cache WHERE k = ?");
+        $st->execute([$key]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        $html = $row ? @gzinflate((string)$row['html']) : false;
+        if (is_string($html)) {
+            if ((int)$row['old'] === 1) $db->prepare("UPDATE render_cache SET used_at = NOW() WHERE k = ?")->execute([$key]);
+            return $html;
+        }
+    } catch (\Throwable $e) {
+        return richtextRender($text, $format, $cfg, $signedIn);
+    }
+    $html = richtextRender($text, $format, $cfg, $signedIn);
+    try {
+        $db->prepare("INSERT INTO render_cache (k, html, used_at) VALUES (?, ?, NOW())
+                      ON DUPLICATE KEY UPDATE html = VALUES(html), used_at = NOW()")->execute([$key, gzdeflate($html, 6)]);
+    } catch (\Throwable $e) {
+        error_log('[richtext] a long description was not stored in the render cache: ' . $e->getMessage());
+    }
+    return $html;
+}
+
+function richtextCachePrune(PDO $db): int {
+    try {
+        $gone = (int)$db->exec("DELETE FROM render_cache WHERE used_at < NOW() - INTERVAL " . RICHTEXT_CACHE_KEEP_DAYS . " DAY");
+        $limit = (int)$db->query("SELECT COUNT(*) FROM render_cache")->fetchColumn() - RICHTEXT_CACHE_MAX_ROWS;
+        if ($limit > 0) $gone += (int)$db->exec("DELETE FROM render_cache ORDER BY used_at ASC LIMIT " . $limit);
+        return $gone;
+    } catch (\Throwable $e) {
+        error_log('[richtext] the render cache was not pruned: ' . $e->getMessage());
+        return 0;
+    }
 }
 
 function richtextRenderForEmail(?string $text, string $format, array $cfg): string {

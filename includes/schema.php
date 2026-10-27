@@ -1665,6 +1665,8 @@ function trackerSchemaStatements(): array {
             `forum_at` DATETIME DEFAULT NULL,
             `forum_sha` CHAR(64) DEFAULT NULL,
             `forum_chars` INT UNSIGNED NOT NULL DEFAULT 0,
+            `forum_images` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `forum_links` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
             `import_sha` CHAR(64) DEFAULT NULL,
             `state` VARCHAR(16) NOT NULL DEFAULT 'imported',
             `note` VARCHAR(255) DEFAULT NULL,
@@ -1692,6 +1694,14 @@ function trackerSchemaStatements(): array {
             `src_key` VARCHAR(48) NOT NULL,
             PRIMARY KEY (`url_sha`, `src`, `src_key`),
             KEY `idx_irref_src` (`src`, `src_key`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `render_cache` (
+            `k` CHAR(64) CHARACTER SET ascii NOT NULL,
+            `html` MEDIUMBLOB NOT NULL,
+            `used_at` DATETIME NOT NULL,
+            PRIMARY KEY (`k`),
+            KEY `idx_rc_used` (`used_at`)
         ) $engine",
     ];
 }
@@ -2736,6 +2746,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (!schemaIndexExists($db, 'index_hashes', 'idx_index_seen')) {
         $iparts[] = "ADD KEY `idx_index_seen` (`seen_count`)";
     }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_grace')) {
+        $iparts[] = "ADD KEY `idx_index_meta_grace` (`meta_status`, `grace_until`)";
+    }
     if ($iparts) {
         // Same reasoning as the ALTER above: FULLTEXT on this table means a rebuild, minutes long,
         // holding a shared lock — never inside a page view. The janitor picks it up on its next tick.
@@ -2807,6 +2820,10 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     }
     if (schemaTableExists($db, 'hash_votes') && !schemaColumnExists($db, 'hash_votes', 'scale')) {
         $out[] = "ALTER TABLE `hash_votes` ADD COLUMN `scale` ENUM('thumbs','stars') NOT NULL DEFAULT 'thumbs' AFTER `vote`";
+    }
+    if (schemaTableExists($db, 'forum_descs') && !schemaColumnExists($db, 'forum_descs', 'forum_images')) {
+        $out[] = "ALTER TABLE `forum_descs` ADD COLUMN `forum_images` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `forum_chars`, "
+               . "ADD COLUMN `forum_links` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `forum_images`";
     }
     return $out;
 }

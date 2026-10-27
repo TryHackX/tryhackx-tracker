@@ -17,18 +17,9 @@ $res = indexListSelect($db, $cfg, [
 
 $counts = ['total' => 0, 'protected' => 0, 'pending_meta' => 0];
 try {
-    $counts['total'] = indexTotalCached($db);
-    // Two full-table aggregates over 1.9 M rows, on an endpoint the page re-polls every 5 s while
-    // anything is pending. They are labels. Fifteen seconds of staleness on a label costs nobody
-    // anything; two uncached COUNT(*) per poll cost the database its cache for everyone else.
-    $c = indexStatusCached($db, 'listcounts', function () use ($db): array {
-        return [
-            'protected'    => (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn(),
-            'pending_meta' => (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE meta_status IN ('pending','fetching')")->fetchColumn(),
-        ];
-    }, 15);
-    $counts['protected'] = (int)($c['protected'] ?? 0);
-    $counts['pending_meta'] = (int)($c['pending_meta'] ?? 0);
+    $c = indexSharedCounts($db, 'counts', 'indexCountsCompute')[0];
+    $counts = ['total' => (int)$c['total'], 'protected' => (int)$c['protected'],
+               'pending_meta' => (int)$c['meta_pending'] + (int)$c['meta_fetching']];
 } catch (\Throwable $e) {
     // Unknown, not zero (1.74.0, QUAL-26): full-table counts that can run into max_statement_time on a big index must
     // not take the list with them, so the rows go out and the counts say null — and the log says why.

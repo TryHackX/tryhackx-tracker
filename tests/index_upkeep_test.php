@@ -102,13 +102,15 @@ check('a second look inside IDX_STATUS_TTL (' . IDX_STATUS_TTL . ' s) asks the d
       $sel === 0 && $s2['counts'] === $s1['counts'], "selects=$sel");
 check('… and IDX_STATUS_TTL is at least the five minutes the card can wait', IDX_STATUS_TTL >= 300);
 $f = indexStatusCacheFile('counts');
+$staleCopy = static fn(): bool => is_file($f) && (json_decode((string)file_get_contents($f), true)['stale'] ?? false) === true;
 indexRequestMeta($db, [uh(5)], 5, $cfgP);
-check('the operator\'s own action on the page drops the cache, so the card shows it at once', !is_file($f));
-indexStatus($db, $cfg);
+check('the operator\'s own action on the page marks the shared copy stale and keeps it, so the card shows it at once', $staleCopy());
+$s3 = indexStatus($db, $cfg);
+check('… and the next look on a table this small counts again at once', $s3['counts_stale'] === false && !$staleCopy());
 $db->beginTransaction();          // cancelling touches every queued row of the database: put back afterwards
 indexMetaCancel($db);
 $db->rollBack();
-check('… and so does cancelling the queue', !is_file($f));
+check('… and so does cancelling the queue', $staleCopy());
 
 /* ── PERF-5: the prune takes files by key ─────────────────────────────────── */
 $db->exec("DELETE FROM index_hashes WHERE info_hash LIKE '" . UP . "%'");

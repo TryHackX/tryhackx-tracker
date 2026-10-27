@@ -4676,7 +4676,7 @@ window.siteToast = siteToast;
             }
         }
         if (ta && window.RichText && typeof window.RichText.mount === 'function') {
-            window.RichText.mount('info-desc', { previewFor: 'description' });
+            window.RichText.mount('info-desc', { previewFor: 'description', hash });
             // The toolbar and the counter follow the text and the format put in above.
             if (pre && fmtEl && fmtEl.tagName === 'SELECT') fmtEl.dispatchEvent(new Event('change'));
             if (pre) ta.dispatchEvent(new Event('input', { bubbles: true }));
@@ -5860,7 +5860,7 @@ window.siteToast = siteToast;
         }
         box.textContent = t.key('js.app.rendering');
         const r = await postJson('richtext_preview', {
-            text, format: f, for: previewFor, csrf_token: csrfOfEditor() });
+            text, format: f, for: previewFor, csrf_token: csrfOfEditor(), hash: opts.hash || undefined });
         if (!r) { box.textContent = t.key('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
         if (!r.success) { box.textContent = r.error || t.key('js.app.render_failed'); lastShown = { key, ok: false }; return; }
         // The server built this from fully escaped input with a fixed tag whitelist

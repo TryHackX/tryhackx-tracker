@@ -453,7 +453,8 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
         if ($e !== null) return ['ok' => false, 'error' => $e, 'code' => 400];
     }
     if ($desc !== '') {
-        $e = richtextValidate($desc, $fmt, $cfg);
+        $lim = function_exists('forumDescLimits') ? forumDescLimits($db, $hash) : null;
+        $e = richtextValidate($desc, $fmt, $lim !== null ? ['rt_record_limits' => $lim] + $cfg : $cfg);
         if ($e !== null) return ['ok' => false, 'error' => $e, 'code' => 400];
     }
 

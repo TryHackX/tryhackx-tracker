@@ -106,8 +106,11 @@ if (!in_array($fmt, $fmtChoices, true)) $fmt = $fmtChoices[0];
 // under the box has to say the number the send would actually be judged against.
 // A list's is capped by the text as typed (listDescSourceCap()) — its own limit is counted as a reader
 // sees it, below.
+$recHash = strtolower((string)($input['hash'] ?? ''));
+$recLim = $for === 'description' && preg_match('/^[0-9a-f]{40}$/', $recHash) && function_exists('forumDescLimits') ? forumDescLimits($db, $recHash) : null;
+$rcfg = $recLim !== null ? ['rt_record_limits' => $recLim] + $cfg : $cfg;
 $max = $for === 'message' ? pmMaxChars($cfg)
-     : ($for === 'shout' ? shoutMaxChars($cfg) : ($for === 'list' ? listDescSourceCap($cfg) : richtextMaxChars($cfg)));
+     : ($for === 'shout' ? shoutMaxChars($cfg) : ($for === 'list' ? listDescSourceCap($cfg) : richtextRecordLimits($rcfg)['chars']));
 if ($max > 0 && mb_strlen($text) > $max) {
     jsonResponse(['error' => __('api.content.description_too_long', ['length' => mb_strlen($text), 'limit' => $max]),
                   'too_long' => true, 'length' => mb_strlen($text), 'limit' => $max], 400);
@@ -152,7 +155,7 @@ if ($for === 'shout') {
     // The site's emotes and stickers as the page that shows it will draw them (1.70.0) — and not
     // counted as pictures: the counts above are the renderer's own.
     $html = richtextRenderIn($for, $db, $text, $fmt, $cfg, richtextViewerSignedIn($db));
-    $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $cfg, $for);
+    $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $rcfg, $for);
 }
 jsonResponse([
     'success' => true,
@@ -160,7 +163,7 @@ jsonResponse([
     'format'  => $fmt,
     'length'  => mb_strlen($text),
     'limit'   => $max,
-    'images'  => ['used' => $counts['images'], 'limit' => richtextMaxImages($cfg)],
-    'links'   => ['used' => $counts['links'], 'limit' => richtextMaxLinks($cfg)],
+    'images'  => ['used' => $counts['images'], 'limit' => richtextRecordLimits($rcfg)['images']],
+    'links'   => ['used' => $counts['links'], 'limit' => richtextRecordLimits($rcfg)['links']],
     'problem' => $problem,
 ]);

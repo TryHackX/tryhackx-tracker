@@ -120,16 +120,82 @@ function indexStatusCached(PDO $db, string $key, callable $compute, int $ttl = 3
         if (is_array($c) && isset($c['at'], $c['v']) && (time() - (int)$c['at']) < $ttl) return $c['v'];
     }
     $v = $compute();
-    // A tmp+rename so a reader never sees half a file; a failed write just means the next caller
-    // recomputes, which is the correct way for a cache to fail.
-    $tmp = $file . '.tmp.' . getmypid();
-    if (@file_put_contents($tmp, json_encode(['at' => time(), 'v' => $v])) !== false) @rename($tmp, $file);
+    indexStatusCacheWrite($key, $v);
     return $v;
 }
 
-/** Drop them when a poll or a prune has just changed the numbers. */
+function indexStatusCacheWrite(string $key, array $v, bool $stale = false, ?int $at = null): void {
+    $file = indexStatusCacheFile($key);
+    // A tmp+rename so a reader never sees half a file; a failed write just means the next caller
+    // recomputes, which is the correct way for a cache to fail.
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, json_encode(['at' => $at ?? time(), 'v' => $v, 'stale' => $stale])) !== false) @rename($tmp, $file);
+}
+
 function indexStatusCacheDrop(): void {
-    foreach (['counts', 'flow'] as $k) @unlink(indexStatusCacheFile($k));
+    foreach (['counts', 'flow'] as $k) {
+        $c = is_file(indexStatusCacheFile($k)) ? json_decode((string)@file_get_contents(indexStatusCacheFile($k)), true) : null;
+        if (is_array($c) && isset($c['at'], $c['v']) && is_array($c['v']) && empty($c['stale'])) indexStatusCacheWrite($k, $c['v'], true, (int)$c['at']);
+    }
+}
+
+const IDX_COUNTS_INLINE_ROWS = 200000;
+const IDX_COUNTS_SEEN_WINDOW = 900;
+
+function indexCountsSeenFile(): string { return __DIR__ . '/../config/index_counts_seen'; }
+
+function indexRowsEstimate(PDO $db): int {
+    static $est = null;
+    if ($est === null) {
+        try {
+            $est = (int)$db->query("SELECT COALESCE(TABLE_ROWS, 0) FROM information_schema.TABLES
+                                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'index_hashes'")->fetchColumn();
+        } catch (\Throwable $e) {
+            $est = 0;
+        }
+    }
+    return $est;
+}
+
+function indexSharedCounts(PDO $db, string $key, callable $compute): array {
+    $seen = indexCountsSeenFile();
+    if (!is_file($seen) || time() - (int)@filemtime($seen) >= 30) @touch($seen);
+    $c = is_file(indexStatusCacheFile($key)) ? json_decode((string)@file_get_contents(indexStatusCacheFile($key)), true) : null;
+    $have = is_array($c) && isset($c['at'], $c['v']) && is_array($c['v']);
+    $stale = !$have || !empty($c['stale']) || time() - (int)$c['at'] >= IDX_STATUS_TTL;
+    if ($stale && indexRowsEstimate($db) < IDX_COUNTS_INLINE_ROWS) {
+        $v = $compute($db);
+        indexStatusCacheWrite($key, $v);
+        return [$v, false, time()];
+    }
+    if ($have) return [$c['v'], $stale, (int)$c['at']];
+    throw new RuntimeException('the index counts are not computed yet');
+}
+
+function indexSharedCount(PDO $db, string $key): ?int {
+    try {
+        $v = indexSharedCounts($db, 'counts', 'indexCountsCompute')[0];
+        return isset($v[$key]) ? (int)$v[$key] : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+function indexCountsTick(PDO $db): bool {
+    $seen = indexCountsSeenFile();
+    if (!is_file($seen) || time() - (int)@filemtime($seen) > IDX_COUNTS_SEEN_WINDOW) return false;
+    $ran = false;
+    foreach (['counts' => 'indexCountsCompute', 'flow' => 'indexFlowCompute'] as $key => $fn) {
+        $c = is_file(indexStatusCacheFile($key)) ? json_decode((string)@file_get_contents(indexStatusCacheFile($key)), true) : null;
+        if (is_array($c) && isset($c['at'], $c['v']) && empty($c['stale']) && time() - (int)$c['at'] < IDX_STATUS_TTL) continue;
+        try {
+            indexStatusCacheWrite($key, $fn($db));
+            $ran = true;
+        } catch (\Throwable $e) {
+            error_log('[index] the shared counts were not refreshed: ' . $e->getMessage());
+        }
+    }
+    return $ran;
 }
 
 function indexPollMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['index_poll_minutes'] ?? 30) ?: 30)); }
@@ -2155,13 +2221,19 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     }
     $minSeeders = (int)($q['min_seeders'] ?? 0);
     if ($minSeeders > 0) $where[] = "GREATEST(COALESCE(scrape_seeders, 0), last_seeders) >= " . $minSeeders;
+    $metaOn = in_array($metaFilter, ['none', 'pending', 'fetching', 'done', 'failed'], true);
+    $lifeOn = in_array($lifeFilter, ['protected', 'grace', 'promoted'], true);
+    $snapKey = null;
+    if ($search === '' && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !($metaOn && $lifeOn)) {
+        $snapKey = $metaOn ? 'meta_' . $metaFilter : ($lifeOn ? ['protected' => 'protected', 'grace' => 'in_grace', 'promoted' => 'promoted'][$lifeFilter] : 'total');
+    }
 
     $columns = "info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers, last_completed, peak_seeders,
                 grace_until, protected_until, promoted_at, meta_status, meta_error, total_size, files_count,
                 scrape_seeders, scrape_leechers, scrape_completed, scraped_at";
     $orderClause = implode(', ', $orderParts);
 
-    $runQuery = function (?array $extra) use ($db, $where, $params, $columns, $orderClause, $perPage, $offset): array {
+    $runQuery = function (?array $extra) use ($db, $where, $params, $columns, $orderClause, $perPage, $offset, $snapKey): array {
         $w = $where; $p = $params;
         if ($extra) { $w[] = $extra['sql']; $p = array_merge($p, $extra['params']); }
         $whereClause = $w ? 'WHERE ' . implode(' AND ', $w) : '';
@@ -2201,8 +2273,11 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
             $st->execute($p);
             return (int)$st->fetchColumn();
         };
-        if ($whereClause === '') {
-            $total = indexTotalCached($db);
+        $snap = $extra === null && $snapKey !== null ? indexSharedCount($db, $snapKey) : null;
+        if ($snap !== null) {
+            $total = $snap;
+        } elseif ($whereClause === '') {
+            $total = indexRowsEstimate($db) >= IDX_COUNTS_INLINE_ROWS ? indexRowsEstimate($db) : indexTotalCached($db);
         } elseif (stripos($whereClause, 'LIKE') === false && stripos($whereClause, 'MATCH') === false) {
             $ck = 'listcount_' . md5($whereClause . '|' . json_encode($p));
             $total = (int)(indexStatusCached($db, $ck, fn() => ['n' => $liveCount()], 20)['n'] ?? 0);
@@ -2961,9 +3036,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
  * computed, so in practice every other poll recomputed them: 7 s of the database per minute with the pool
  * warm, 12–14 s cold, measured on a catalogue of production's size, for as long as ANY Index page stood
  * open anywhere (the cache is one file for the site). These are numbers to look at — the comment above
- * says so — and everything that changes them a lot drops the cache on its way out: a poll, a prune, and
- * the operator's own actions on this page (indexStatusCacheDrop()). What is left to go stale for five
- * minutes is the drift the janitor causes between those, which nobody can see on a card.
+ * says so.
  */
 const IDX_STATUS_TTL = 300;
 
@@ -2982,41 +3055,52 @@ function indexFilesCountForStatus(PDO $db): array {
     return [$est, true];
 }
 
+function indexCountsCompute(PDO $db): array {
+    $c = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0,
+          'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0,
+          'files_approx' => false, 'expiring_24h' => 0];
+    try {
+        // ONE pass for the queue states, the rows in grace and the rows whose grace ends within a day
+        // (1.74.0, PERF-4). They were three: a GROUP BY and two full scans for the two grace numbers,
+        // ~4.4 s warm on production's size; the
+        // three answers come out of the same rows, so one scan gives all of them. The total is the sum
+        // of the groups — exact, and free once the groups are counted.
+        foreach ($db->query("SELECT meta_status, COUNT(*) AS c,
+                                    SUM(grace_until >= NOW()) AS in_grace,
+                                    SUM(grace_until < NOW() + INTERVAL 1 DAY) AS expiring
+                               FROM index_hashes GROUP BY meta_status") as $r) {
+            $c['total'] += (int)$r['c'];
+            $k = 'meta_' . $r['meta_status']; if (isset($c[$k])) $c[$k] = (int)$r['c'];
+            if ($r['meta_status'] !== 'done') {
+                $c['in_grace'] += (int)$r['in_grace'];
+                $c['expiring_24h'] += (int)$r['expiring'];
+            }
+        }
+        $c['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
+        $c['promoted'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE promoted_at IS NOT NULL")->fetchColumn();
+        [$c['files'], $c['files_approx']] = indexFilesCountForStatus($db);
+    } catch (\Throwable $e) {
+        // Never zeros for five minutes (1.74.0, QUAL-26): a count that failed — max_statement_time on a big
+        // index, a lock — was cached as an EMPTY index for the whole TTL. Thrown on, nothing is cached.
+        error_log('[index] the status counts failed: ' . $e->getMessage());
+        throw $e;
+    }
+    return $c;
+}
+
+function indexFlowCompute(PDO $db): array {
+    try {
+        return ['resolved_24h' => (int)$db->query(
+            "SELECT COUNT(*) FROM index_hashes
+              WHERE meta_status = 'done' AND meta_fetched_at > NOW() - INTERVAL 1 DAY")->fetchColumn()];
+    } catch (\Throwable $e) {
+        return ['resolved_24h' => 0];
+    }
+}
+
 /** Row counts + state for the admin status card / CLI. */
 function indexStatus(PDO $db, array $cfg): array {
-    $counts = indexStatusCached($db, 'counts', function () use ($db) {
-        $c = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0,
-              'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0,
-              'files_approx' => false, 'expiring_24h' => 0];
-        try {
-            // ONE pass for the queue states, the rows in grace and the rows whose grace ends within a day
-            // (1.74.0, PERF-4). They were three: a GROUP BY and two full scans for the two grace numbers
-            // (no index holds meta_status and grace_until together), ~4.4 s warm on production's size; the
-            // three answers come out of the same rows, so one scan gives all of them. The total is the sum
-            // of the groups — exact, and free once the groups are counted.
-            foreach ($db->query("SELECT meta_status, COUNT(*) AS c,
-                                        SUM(grace_until >= NOW()) AS in_grace,
-                                        SUM(grace_until < NOW() + INTERVAL 1 DAY) AS expiring
-                                   FROM index_hashes GROUP BY meta_status") as $r) {
-                $c['total'] += (int)$r['c'];
-                $k = 'meta_' . $r['meta_status']; if (isset($c[$k])) $c[$k] = (int)$r['c'];
-                if ($r['meta_status'] !== 'done') {
-                    $c['in_grace'] += (int)$r['in_grace'];
-                    $c['expiring_24h'] += (int)$r['expiring'];
-                }
-            }
-            $c['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
-            $c['promoted'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE promoted_at IS NOT NULL")->fetchColumn();
-            [$c['files'], $c['files_approx']] = indexFilesCountForStatus($db);
-        } catch (\Throwable $e) {
-            // Never zeros for five minutes (1.74.0, QUAL-26): a count that failed — max_statement_time on a big
-            // index, a lock — was cached as an EMPTY index for the whole TTL. Thrown on, nothing is cached: the card
-            // keeps its last good numbers and says they are stale (admin-index.js), api/admin/index_status.php says 503.
-            error_log('[index] the status counts failed: ' . $e->getMessage());
-            throw $e;
-        }
-        return $c;
-    }, IDX_STATUS_TTL);
+    [$counts, $countsStale, $countsAt] = indexSharedCounts($db, 'counts', 'indexCountsCompute');
     // WHY THE TABLE SHRINKS, answered on the page instead of left to be inferred.
     //
     // grace_until is set when a row is first inserted and is never extended: a hash that does not get
@@ -3026,15 +3110,11 @@ function indexStatus(PDO $db, array $cfg): array {
     // rates next to each other: what is about to expire, and what is actually being resolved.
     // What is about to expire came out of the counts' one pass above; what was resolved is a range on
     // idx_index_meta_done_fetched.
-    $resolved = indexStatusCached($db, 'flow', function () use ($db) {
-        try {
-            return ['resolved_24h' => (int)$db->query(
-                "SELECT COUNT(*) FROM index_hashes
-                  WHERE meta_status = 'done' AND meta_fetched_at > NOW() - INTERVAL 1 DAY")->fetchColumn()];
-        } catch (\Throwable $e) {
-            return ['resolved_24h' => 0];
-        }
-    }, IDX_STATUS_TTL);
+    try {
+        $resolved = indexSharedCounts($db, 'flow', 'indexFlowCompute')[0];
+    } catch (\Throwable $e) {
+        $resolved = ['resolved_24h' => 0];
+    }
     $flow = ['expiring_24h' => (int)($counts['expiring_24h'] ?? 0), 'resolved_24h' => (int)($resolved['resolved_24h'] ?? 0),
              'days_to_cover' => null];
     unset($counts['expiring_24h']);
@@ -3086,6 +3166,6 @@ function indexStatus(PDO $db, array $cfg): array {
         'enabled' => indexEnabled($cfg), 'source_url' => indexSourceUrl($cfg), 'poll_minutes' => indexPollMinutes($cfg),
         'min_seeders' => indexMinSeeders($cfg), 'max_rows' => indexMaxRows($cfg), 'grace_days' => indexGraceDays($cfg),
         'protect_days' => indexProtectDays($cfg), 'meta_daily_budget' => indexMetaDailyBudget($cfg), 'meta_auto_queue' => indexMetaAutoQueue($cfg), 'poll_budget' => indexPollBudget($cfg),
-        'counts' => $counts, 'state' => indexStateRead(),
+        'counts' => $counts, 'counts_stale' => $countsStale, 'counts_at' => $countsAt, 'state' => indexStateRead(),
     ];
 }

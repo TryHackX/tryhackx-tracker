@@ -53,7 +53,7 @@ check('… on a separate lock file', str_contains($fn, "@fopen(\$file . '.lock',
 $revoke = $src('api/v1/users_revoke.php');
 check('v1/users/revoke refuses a panel-carrying group', str_contains($revoke, 'userIsPanelPermission'));
 check('… and will not strip the admin group from the site owner', str_contains($revoke, 'userIsRootAdmin($u, $cfg)'));
-check('fetch_index counts come from the keyed cache', str_contains($src('api/admin/fetch_index.php'), "indexStatusCached(\$db, 'listcounts'"));
+check('fetch_index counts come from the shared copy of the Index counts', str_contains($src('api/admin/fetch_index.php'), "indexSharedCounts(\$db, 'counts'"));
 check('bulk scrape counts the remainder once, on the first call',
       str_contains($src('api/admin/index_scrape_bulk.php'), "if (\$scope !== 'page' && \$after === '')"));
 check('… and the client keeps the arithmetic', str_contains($src('assets/js/admin-index.js'), 'left = Math.max(0, left - (r.processed || 0))'));

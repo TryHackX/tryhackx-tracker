@@ -355,10 +355,12 @@ foreach ($raw as $rel => $src) {
 check('… and every error_log() line of the site starts with its [area]', array_values(array_unique($noPrefix)) === [], implode(', ', array_unique($noPrefix)));
 // The Index card's counts: a count that fails is thrown on and NOT cached as an empty index for five minutes.
 indexStatusCacheDrop();
+$before = is_file(indexStatusCacheFile('counts')) ? file_get_contents(indexStatusCacheFile('counts')) : null;
 $threw = false;
 try { indexStatus(new QeDeadPdo(), $cfg); } catch (\Throwable $e) { $threw = true; }
-check('a status count that fails is not an empty index: indexStatus() throws, nothing is cached, the log says why',
-      $threw && !is_file(indexStatusCacheFile('counts')) && str_contains($logged(), '[index] the status counts failed'));
+check('a status count that fails is not an empty index: indexStatus() throws, the shared copy is not overwritten, the log says why',
+      $threw && (is_file(indexStatusCacheFile('counts')) ? file_get_contents(indexStatusCacheFile('counts')) : null) === $before
+      && str_contains($logged(), '[index] the status counts failed'));
 indexStatusCacheDrop();
 // A timeline sample: the counts it could not read are a gap where the column may be empty, and a logged line.
 $sample = statsTimelineRowFromParsed(new QeDeadPdo(), $cfg, ['torrents' => 3, 'peers' => 2, 'seeds' => 1, 'connections' => []], time());

@@ -252,7 +252,7 @@ jsonResponse([
     'can_content_report'  => (bool)$reportFlags['can'],
     'content_reported'    => (bool)$reportFlags['reported'],
     'content_formats'   => richtextFormats($cfg),
-    'content_max'       => richtextMaxChars($cfg),
+    'content_max'       => richtextRecordLimits(['rt_record_limits' => forumDescLimits($db, $hash) ?? []] + $cfg)['chars'],
     'stats' => [
         'first_seen'  => $idx['first_seen'] ?? ($wl['created_at'] ?? null),
         'last_seen'   => $idx['last_seen'] ?? null,
