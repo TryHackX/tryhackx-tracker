@@ -645,6 +645,7 @@
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <?php /* The picture beside an author's name on a review card (1.63.0). */ ?>
     <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
+    <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-whitelist.js<?= assetVer('assets/js/admin-whitelist.js') ?>"></script>
 </body>
 </html>
