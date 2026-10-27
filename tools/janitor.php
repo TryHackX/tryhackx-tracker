@@ -53,6 +53,7 @@ require_once $root . '/includes/shout.php';
 require_once $root . '/includes/antispam.php';
 require_once $root . '/includes/retention.php';
 require_once $root . '/includes/images.php';
+require_once $root . '/includes/facts.php';
 
 /**
  * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
@@ -194,6 +195,11 @@ try {
     if (function_exists('imagesSweep')) {
         $imgGone = imagesSweep($db, $cfg);
         if ($imgGone > 0 && in_array('-v', $argv ?? [], true)) echo "[images] removed $imgGone unused pictures\n";
+    }
+    if (function_exists('factsTick') && time() - (int)($cfg['facts_ticked_at'] ?? 0) >= 600) {
+        $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('facts_ticked_at', ?)")->execute([(string)time()]);
+        $factsRead = factsTick($db);
+        if ($factsRead > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read $factsRead descriptions\n";
     }
     // The stability probe: start one that was asked for, and restore one whose process has died.
     // The reap is the important half — a tuner that is killed must not leave the machine on the limit

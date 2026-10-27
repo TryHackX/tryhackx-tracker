@@ -203,6 +203,7 @@ function imagesVisibilitySync(PDO $db, array $ids): array
 function imagesRefsTouch(PDO $db, ?array $cfg, string $src, string $key): void
 {
     if (!in_array($src, IMAGES_REF_SOURCES, true) || $key === '' || $key === '0') return;
+    if (function_exists('factsTouch')) factsTouch($db, $src, $key);
     try {
         $cfg = imagesRefsCfg($db, $cfg);
         $text = imagesRefsTextOf($db, $src, $key);
