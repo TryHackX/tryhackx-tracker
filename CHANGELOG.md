@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.81.0] — 2026-10-27
+
+Pictures follow the texts that show them: the site knows where each one is used, cleans up after texts that are gone, notices a partner's picture that changed behind the same address, and members get their own gallery. A topic hidden or deleted on the forum takes its description along (with homepage-blocks 2.12.0). Schema 100.
+
+- **Where every picture is used.** The site keeps a list of the texts that show each picture — descriptions, proposed
+  changes, comments and pages — kept up to date as they are written and rebuilt every hour. A picture is public as soon
+  as a published text shows it; one whose texts were all rejected or deleted is removed after a grace period, and an
+  upload nothing uses after Unused pictures removed after, hours. Before anything is deleted the list is counted, so a picture
+  in use is never taken for unused.
+- **A changed picture behind the same address.** A partner's picture copied here is checked again after 1, 7, 30 and
+  90 days, asking the partner only whether it changed, and at once when the forum sends a new version of the text. A
+  picture that changed becomes a new copy, the texts follow it and the old copy goes. The Images page can check every
+  copy now.
+- **A daily limit in megabytes.** MB uploaded per account in 24 hours (100 by default) caps what one member uploads,
+  next to the number of uploads.
+- **Your pictures, on the account page.** An Images tab lists every picture uploaded from the account, newest first, in
+  full rows, with filters for pictures in use, not used and waiting to be removed, how often each is used and where
+  (in a window), and a link to copy. Images tab and gallery, in the picture settings, switches it on and off.
+- **Deleting a picture you used.** A picture nothing uses is deleted at once. One in your own comments, your own
+  proposals or your own unpublished descriptions is taken out of them and deleted. One in a published description
+  leaves your gallery at once and waits: a proposed change that takes it out goes to the moderators, marked as a
+  picture's removal and crediting nobody; once it is applied the picture is deleted for good, and both you and the
+  description's author are told. Keep it withdraws the change.
+- **A gallery on the profile.** With a switch on the account page and the new right `images.public` (given to members),
+  others see your pictures that published texts already show — never their file names, never one waiting to be
+  removed.
+- **The panel.** Proposed changes play YouTube and draw labels as the Info panel does; the Images page fills whole rows
+  at any zoom without losing a picture between pages, and where a picture is used opens in a window.
+- **My pictures** in the editors shows the pictures you use most first, over a transparent background, with paging, a
+  quieter button and a marked drop area.
+- **Descriptions from the forum** (homepage-blocks 2.12.0):
+  - A topic guests can no longer see is withdrawn: its text is taken off where nobody changed it, a waiting proposal
+    from it is withdrawn, and a version changed here stays. It comes back when the topic can be seen again.
+  - A deleted topic, or hashes edited out of its first post, also free the hashes from the topic.
+  - A hash registered by a topic's first post belongs to that topic; another topic is answered `other_topic`. A hash
+    first seen in a reply still goes to the first topic that describes it.
+  - A row the forum registered before keys were recorded is taken by the first key that describes it.
+  - `registered_elsewhere` tells a hash registered here by the site or another key from one nobody registered.
+  - The forum chip is dated with the version shown, not with the newest one on the forum.
+  - The ping names `describe_max_hashes`, and every answer echoes the consent to copy pictures as `copy_images`.
+
 ## [1.80.1] — 2026-10-27
 
 A partner's picture bigger than PHP's upload limit is copied again.
