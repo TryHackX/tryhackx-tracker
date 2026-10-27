@@ -560,7 +560,8 @@ function factsChipsMax(array $cfg): int
 
 function factsRowChips(?array $desc, string $name, array $cfg, string $place = ''): ?array
 {
-    if ($place !== '' && ($cfg['facts_chips_' . $place] ?? '1') !== '1') return null;
+    $switch = ['search' => $cfg['facts_chips_search'] ?? '1', 'info' => $cfg['facts_chips_info'] ?? '1', 'panel' => $cfg['facts_chips_panel'] ?? '1'][$place] ?? '1';
+    if ($switch !== '1') return null;
     if ($desc !== null) return $desc;
     return factsMode($cfg) === 'desc_name' && $name !== '' ? factsNameChips($name) : null;
 }

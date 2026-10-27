@@ -325,7 +325,7 @@ if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behav
 foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts'] as $fk) {
     if (isset($data[$fk])) $data[$fk] = in_array($data[$fk], ['0', 0, false], true) ? '0' : '1';
 }
-if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min(20, (int)$data['facts_chips_max'] ?: 6));
+if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min((int)$data['facts_chips_max'] ?: 6, 20));
 if (isset($data['facts_source']) && !in_array($data['facts_source'], ['desc', 'desc_name'], true)) {
     $data['facts_source'] = 'desc';
 }

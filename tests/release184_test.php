@@ -61,7 +61,8 @@ check('ranges: units, open ends, a swapped pair, nonsense refused', factsRange('
       && factsRange('20..10', 'count') === [10, 20] && factsRange('abc', 'count') === null && factsRange('7..', 'imdb') === [7.0, null]);
 check('tags from the address: | is either, a comma is and; unknown ones dropped', factsTagsParam('q:1080p|q:2160p,a:atmos,x:nope') === [['q:1080p', 'q:2160p'], ['a:atmos']]);
 $cat = factsCatalog();
-check('the filter panel\'s catalogue has every group with its words', count($cat) > 35 && in_array(['id' => 'l:lektor_pl', 'g' => 'l', 'l' => 'PL voice-over'], $cat, true)
+check('the filter panel\'s catalogue has every group with its words', count($cat) > 35
+      && array_filter($cat, fn($c) => $c['id'] === 'l:lektor_pl' && $c['g'] === 'l' && $c['l'] === 'PL voice-over')
       && !array_filter($cat, fn($c) => $c['g'] === 't'));
 
 $h = fn(int $i): string => 'f184' . str_repeat('0', 35) . $i;
@@ -111,7 +112,7 @@ check('the search with the filters of the page: size, files, and the facts\' has
 $api = $src('api/index_search.php');
 check('the endpoint: facts on the rows for a reader of descriptions, filters parsed, a filter change counted on its own limit',
       str_contains($api, "factsChipsFor(\$db, array_column(\$res['rows'], 'info_hash'), \$signedIn)")
-      && str_contains($api, "\$refine ? 'idxfilter' : 'idxsearch'") && str_contains($api, "'only_hashes'       => \$onlyHashes,"));
+      && str_contains($api, "\$refine ? 'idxfilter' : 'idxsearch'") && str_contains($api, "\$flt = factsEngineFilters(\$db, \$cfg, factsRequest(\$_GET), \$canContent, \$signedIn);"));
 $app = $src('assets/js/app.js');
 check('the page: the filter bar keeps its state in the address, the chips filter, the count and Share sit on its right',
       str_contains($app, "moveRight: [\$id('search-total'), \$id('search-share')]") && str_contains($app, "if (filters) Object.assign(st, filters.params());")

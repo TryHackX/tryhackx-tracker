@@ -84,12 +84,14 @@ $db->prepare("INSERT INTO whitelist (info_hash, name, total_size, files_count, s
 
 $cfgName = ['facts_source' => 'desc_name', 'name_facts_cursor' => 'f18409' . str_repeat('f', 34)] + $cfg;
 $tick = factsNameTick($db, $cfgName, 5.0);
-$stored = $db->query("SELECT info_hash, tags, year FROM name_facts WHERE info_hash LIKE 'f18410%' ORDER BY info_hash")->fetchAll(PDO::FETCH_ASSOC);
+$stored = $db->query("SELECT info_hash, nf_kind, nf_res, nf_year, nf_bits FROM name_facts WHERE info_hash LIKE 'f18410%' ORDER BY info_hash")->fetchAll(PDO::FETCH_ASSOC);
 $byHash = array_column($stored, null, 'info_hash');
+$alpha = factsNameCodes(['q:1080p', 'v:h264', 's:webdl', 'l:audio_pl', 't:movie']);
 check('the background read: from the cursor to the end of the catalogue, then the whitelist, then "done"',
       $tick['done'] === true && $db->query("SELECT `value` FROM settings WHERE `key` = 'name_facts_cursor'")->fetchColumn() === 'done'
       && isset($byHash[$hh(1)], $byHash[$hh(2)], $byHash[$hh(4)]) && !isset($byHash[$hh(3)])
-      && $byHash[$hh(1)]['tags'] === ',q:1080p,v:h264,s:webdl,l:audio_pl,t:movie,' && (int)$byHash[$hh(1)]['year'] === 2019, json_encode($stored));
+      && (int)$byHash[$hh(1)]['nf_kind'] === 1 && (int)$byHash[$hh(1)]['nf_res'] === 3 && (int)$byHash[$hh(1)]['nf_year'] === 2019
+      && (int)$byHash[$hh(1)]['nf_bits'] === $alpha[2], json_encode($stored));
 check('… in the "descriptions only" mode it reads nothing', factsNameTick($db, ['facts_source' => 'desc'] + $cfg) === ['read' => 0, 'done' => true]);
 factsNameStore($db, [['info_hash' => $hh(1), 'name' => 'Zyxqor Alpha holiday']]);
 check('a name that lost its tokens loses its row', !$db->query("SELECT 1 FROM name_facts WHERE info_hash = '" . $hh(1) . "'")->fetchColumn());
@@ -102,25 +104,24 @@ indexCatalogUpsertRows($db, [array_combine(IDX_CATALOG_COLS, [$hh(2), 'Zyxqor Be
 $GLOBALS['cfg'] = $prevCfg;
 $idx = $src('includes/index.php');
 check('a hash leaving the catalogue leaves name_facts; one written to it with new metadata is read at once in that mode, not on a poll\'s numbers',
-      $gone && $db->query("SELECT tags FROM name_facts WHERE info_hash = '" . $hh(2) . "'")->fetchColumn() === ',q:2160p,v:h265,s:webdl,t:series,'
+      $gone && $db->query("SELECT CONCAT(nf_kind, '/', nf_res) FROM name_facts WHERE info_hash = '" . $hh(2) . "'")->fetchColumn() === '2/5'
       && str_contains($idx, 'if ($rows) $n = indexCatalogUpsertRows($db, $rows, true);') && str_contains($idx, 'if ($rows) indexCatalogUpsertRows($db, $rows);')
       && str_contains($idx, 'indexCatalogUpsertRows($db, $members, $filling)'));
 
-check('the name filter: one subquery, none when a filter only a description can answer is on',
-      factsNameClause(['tags' => [['q:1080p', 'q:2160p']], 'type' => 'movie'])
-          === ['info_hash IN (SELECT info_hash FROM name_facts WHERE (tags LIKE ? OR tags LIKE ?) AND tags LIKE ?)', ['%,q:1080p,%', '%,q:2160p,%', '%,t:movie,%']]
-      && factsNameClause(['tags' => [['q:1080p']], 'pics' => true]) === null && factsNameClause(['tags' => [['q:1080p']], 'imdb' => [7.0, null]]) === null
-      && factsNameClause(['tags' => []]) === null);
+check('the name filter: typed columns, none when a filter only a description can answer is on',
+      factsNamePredicate(['tags' => [['q:1080p', 'q:2160p']], 'type' => 'movie']) === ['nf.nf_res IN (?,?) AND nf.nf_kind = ?', [3, 5, 1]]
+      && factsNamePredicate(['tags' => [['q:1080p']], 'pics' => true]) === null && factsNamePredicate(['tags' => [['q:1080p']], 'imdb' => [7.0, null]]) === null
+      && factsNamePredicate(['tags' => []]) === null);
 
 $req = factsRequest(['tags' => 'q:1080p', 'size' => '5G..20G', 'filecount' => '..10', 'seeders' => '10..99']);
-[$fw, $fp] = factsListFilters($db, $cfgName, $req, 'SEEDS');
+[$fw, $fp] = factsListFilters($db, $cfgName, $req, 'SEEDS', 'whitelist');
 check('the panel\'s filters: the ranges (seeders only from below) and the facts as one condition',
       $fw[0] === 'total_size >= ?' && $fw[1] === 'total_size <= ?' && $fw[2] === 'files_count <= ?' && $fw[3] === 'SEEDS >= ?' && count($fw) === 5
-      && str_contains($fw[4], 'name_facts') && array_slice($fp, 0, 4) === [5 * 1024 ** 3, 20 * 1024 ** 3, 10, 10], json_encode([$fw, $fp]));
+      && str_contains($fw[4], 'info_hash IN') && array_slice($fp, 0, 4) === [5 * 1024 ** 3, 20 * 1024 ** 3, 10, 10], json_encode([$fw, $fp]));
 
 $list = function (array $get) use ($db, $cfgName): array {
-    [$w, $p] = factsListFilters($db, $cfgName, factsRequest($get), 'GREATEST(COALESCE(scrape_seeders, 0), last_seeders)');
-    $r = indexListSelect($db, $cfgName, ['search' => 'f18410', 'per_page' => 50, 'filter_where' => $w, 'filter_params' => $p]);
+    $flt = factsEngineFilters($db, $cfgName, factsRequest($get), true, true);
+    $r = $flt ? indexListByEngine($db, $cfgName, ['search' => 'f18410', 'per_page' => 50], $flt) : indexListSelect($db, $cfgName, ['search' => 'f18410', 'per_page' => 50]);
     $h = array_column($r['rows'], 'info_hash');
     sort($h);
     return $h;
@@ -129,24 +130,24 @@ check('the panel Index list: a tag, the kind, a year, size and seeders ranges',
       $list(['tags' => 'q:2160p']) === [$hh(2)] && $list(['type' => 'movie']) === [$hh(1)] && $list(['year' => '2019..2019']) === [$hh(1)]
       && $list(['size' => '50G..']) === [$hh(2)] && $list(['size' => '..20G']) === [$hh(1), $hh(3)] && $list(['seeders' => '10..']) === [$hh(1), $hh(2)]
       && $list([]) === [$hh(1), $hh(2), $hh(3)], json_encode([$list(['tags' => 'q:2160p']), $list(['type' => 'movie'])]));
-[$w, $p] = factsListFilters($db, $cfgName, factsRequest(['tags' => 'q:720p']), 'COALESCE(scrape_seeders, 0)');
+[$w, $p] = factsListFilters($db, $cfgName, factsRequest(['tags' => 'q:720p']), 'COALESCE(scrape_seeders, 0)', 'whitelist');
 $sql = "SELECT info_hash FROM whitelist WHERE info_hash LIKE 'f18410%' AND " . implode(' AND ', $w);
 $st = $db->prepare($sql);
 $st->execute($p);
 check('… and the panel Whitelist list', $st->fetchAll(PDO::FETCH_COLUMN) === [$hh(4)]);
 $pub = function (array $get) use ($db, $cfgName): array {
-    $f = factsRequest($get)['facts'];
-    $r = indexSearchCatalogue($db, $cfgName, ['search' => 'Zyxqor', 'include_whitelist' => true, 'catalog' => false, 'per_page' => 50, 'page' => 1,
-                                              'only_hashes' => factsFilterHashes($db, $f, true) ?? [], 'name_clause' => factsNameClause($f)]);
+    $r = indexSearchCatalogue($db, $cfgName, ['search' => 'Zyxqor', 'include_whitelist' => true, 'catalog' => false, 'per_page' => 50, 'page' => 1]
+                                              + factsEngineFilters($db, $cfgName, factsRequest($get), true, true));
     $h = array_values(array_filter(array_column($r['rows'], 'info_hash'), fn($x) => str_starts_with((string)$x, 'f18410')));
     sort($h);
     return $h;
 };
 check('the public search filters by name too, the whitelist\'s rows included', $pub(['tags' => 'q:720p|q:1080p']) === [$hh(1), $hh(4)]
       && $pub(['type' => 'series']) === [$hh(2)], json_encode($pub(['tags' => 'q:720p|q:1080p'])));
-$sql = "EXPLAIN SELECT COUNT(*) FROM index_hashes WHERE (info_hash IN ('" . $hh(1) . "') OR " . factsNameClause(['tags' => [['q:1080p']]])[0] . ")";
+$dense = factsNameFilter($db, ['tags' => [['q:1080p']]], 0);
+$sql = "EXPLAIN SELECT COUNT(*) FROM index_hashes WHERE (info_hash IN ('" . $hh(3) . "') OR " . str_replace('{T}', '`index_hashes`', (string)($dense['tpl'] ?? '1 = 0')) . ")";
 $st = $db->prepare($sql);
-$st->execute(['%,q:1080p,%']);
+$st->execute($dense['args'] ?? []);
 $perRowScan = array_filter($st->fetchAll(PDO::FETCH_ASSOC), fn($x) => $x['select_type'] === 'DEPENDENT SUBQUERY' && $x['type'] === 'ALL');
 check('… and the plan never scans name_facts once per row', !$perRowScan, json_encode($perRowScan));
 
@@ -160,9 +161,9 @@ $jan = $src('tools/janitor.php');
 check('the janitor reads names in the background and the whitelist\'s again every ten minutes',
       str_contains($jan, "factsNameTick(\$db, \$cfg)") && str_contains($jan, "time() - (int)(\$cfg['name_facts_wl_at'] ?? 0) >= 600"));
 check('the panel lists take the filters and the chips filter',
-      str_contains($src('api/admin/fetch_index.php'), "factsListFilters(\$db, \$cfg, factsRequest(\$_GET), 'GREATEST(COALESCE(scrape_seeders, 0), last_seeders)')")
-      && str_contains($src('api/admin/fetch_index.php'), "'filter_where' => \$filterWhere,")
-      && str_contains($src('api/admin/fetch_whitelist.php'), "factsListFilters(\$db, \$cfg, factsRequest(\$_GET), 'COALESCE(scrape_seeders, 0)')")
+      str_contains($src('api/admin/fetch_index.php'), "factsEngineFilters(\$db, \$cfg, factsRequest(\$_GET), true, true)")
+      && str_contains($src('api/admin/fetch_index.php'), "\$res = \$flt ? indexListByEngine(\$db, \$cfg, \$q, \$flt) : indexListSelect(\$db, \$cfg, \$q);")
+      && str_contains($src('api/admin/fetch_whitelist.php'), "factsListFilters(\$db, \$cfg, factsRequest(\$_GET), 'COALESCE(scrape_seeders, 0)', 'whitelist')")
       && str_contains($src('templates/admin/index_page.php'), 'id="idx-filters"') && str_contains($src('templates/admin/whitelist.php'), 'id="wl-filters"')
       && str_contains($src('assets/js/admin-index.js'), "window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null)")
       && str_contains($src('assets/js/admin-whitelist.js'), "window.FactChips.render(row.facts, state.wl.filters ? (id) => state.wl.filters.addTag(id) : null)")

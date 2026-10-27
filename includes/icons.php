@@ -340,6 +340,7 @@ function iconFaEntries(): array {
         'subscript'                  => ['subscript', 's'],
         'superscript'                => ['superscript', 's'],
         'table'                      => ['table', 's'],
+        'tags'                       => ['tags', 's'],
         'text-center'                => ['align-center', 's'],
         'text-left'                  => ['align-left', 's'],
         'text-right'                 => ['align-right', 's'],

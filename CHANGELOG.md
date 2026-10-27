@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.84.2] — 2026-10-27
+
+Fast filters over the torrent names, the bit rates in full, filters built from the data, and a settings section for the
+tags. Schema 106.
+
+- **Filtering by the names' tags is fast on the whole catalogue.** 1.84.1 asked the database with one subquery over
+  half a million names and it took 14.5 s for "1080p" (over 20 s in the panel), so the mode was switched back off. The
+  names' facts are now numbers (`name_facts`: kind, resolution, year, one bit per tag, with one covering key), and the
+  search asks in the way that fits the answer: up to 10 000 matches come back as a list of hashes, more than that are
+  checked row by row by the key in the order of the list. Measured on 850 000 rows of real names: 4–280 ms for every
+  filter, sort and page tried (1080p 56 ms, Lektor PL 147 ms, HEVC with years 277 ms).
+- **The panel's Index list with filters** runs through the search's engine and the catalogue — the size filter alone
+  took 17 s on 4.8 million rows, now a few milliseconds; the count stops at 1 000 ("1 000+"). A sort or a state filter
+  the catalogue has not got says so in a sentence.
+- **Bit rates in full, from MediaInfo** — the forum's lines and a raw MediaInfo block (General / Video / Audio, as in
+  "Dane techniczne") are both read: overall, video and the best audio track, each with its average, its maximum where
+  given and VBR / CBR; the audio track with its codec and channels (5.1, 7.1). A TrueHD track with an AC-3 core is read
+  by its first layer. Labelled chips: "Video 4.1 Mb/s (max 20 Mb/s) · VBR", "Audio TrueHD Atmos 7.1 …". A filter
+  "video bit rate from (Mb/s)". Every description is read again (parser version 2).
+- **Filters from the data:** each tag in the filter panel shows how many torrents have it, the most common first, and
+  a tag nobody has is left out; genres come from the descriptions; a tag search finds them by name or alias (h264,
+  x265, 4k, full hd, lektor). The counts are made by the janitor every ten minutes.
+- **Settings → Tags and filters:** where the chips show (search, Info, the panel's lists), how many tags before "+N",
+  the bit rate and rating chips, the counts in the filters — beside the source of the tags.
+
 ## [1.84.1] — 2026-10-27
 
 Tags from torrent names, for the whole catalogue, and the filters in the panel. Schema 105.
