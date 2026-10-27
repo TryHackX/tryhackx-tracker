@@ -84,6 +84,10 @@ $idx = $src('includes/index.php');
 check('the list asks the catalogue first and sorts its matches in the index', str_contains($idx, 'indexListByHashes($db, $where, $params, array_values(array_unique(array_merge($found[0], $fileHashes))),')
       && str_contains($idx, "'seeders' => 'eff_seeders', 'sseeders' => 'eff_seeders', 'leechers' => 'eff_leechers'"));
 check('… and does not run LIKE after a fulltext search that ran out of time', str_contains($idx, "if (indexIsStatementTimeout(\$e)) throw new IndexSearchTimeout(\$e->getMessage(), 0, \$e);\n            [\$total, \$rows] = \$runQuery(\$likeClause);"));
+check('over the cap, a sort or a filter the catalogue cannot serve is refused at once, not run for a minute and a half',
+      str_contains($idx, "} elseif (\$found !== null) {\n        throw new IndexSearchTooBroad(")
+      && str_contains($src('api/admin/fetch_index.php'), "'code' => 'too_broad'], 422);")
+      && str_contains(__('api.index.too_broad', ['n' => '10 000']), '10 000'));
 check('the panel answers a search that ran out of time with a sentence and 503, not a server error',
       str_contains($src('api/admin/fetch_index.php'), "jsonResponse(['success' => false, 'error' => __('api.search.timeout'), 'code' => 'search_timeout'], 503);"));
 

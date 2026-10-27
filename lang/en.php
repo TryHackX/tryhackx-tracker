@@ -1506,6 +1506,7 @@ return [
     'api.index.source_auto_forum' => 'Recorded by the forum that registered this torrent, not typed in by an uploader.',
     'api.index.source_auto_importer' => 'Recorded by the importer that registered this torrent, not typed in by an uploader.',
     'api.index.temp_file' => 'Cannot open temp file',
+    'api.index.too_broad' => 'Over :n names match, too many to sort by this column. Add a word, or sort by last seen, size, files, name, seeders or leechers without other filters.',
     'api.index.too_many_hashes' => 'Too many hashes (max 500)',
     'api.index.too_many_hashes_5000' => 'Too many hashes (max 5000)',
     'api.index.tracker_no_answer' => 'Tracker did not answer',

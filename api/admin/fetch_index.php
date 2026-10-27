@@ -16,6 +16,9 @@ try {
         'desc_flags'   => true,
     ]);
 } catch (\Throwable $e) {
+    if ($e instanceof IndexSearchTooBroad) {
+        jsonResponse(['success' => false, 'error' => __('api.index.too_broad', ['n' => langNumber(INDEX_LIST_CATALOG_CAP)]), 'code' => 'too_broad'], 422);
+    }
     if (!$e instanceof IndexSearchTimeout && !indexIsStatementTimeout($e)) throw $e;
     error_log('[admin] fetch_index: stopped for time: ' . mb_substr((string)($_GET['search'] ?? ''), 0, 80) . ' sort=' . (string)($_GET['sort'] ?? '') . ' — ' . $e->getMessage());
     header('Retry-After: 30');

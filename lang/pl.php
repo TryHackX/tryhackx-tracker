@@ -1506,6 +1506,7 @@ return [
     'api.index.source_auto_forum' => 'Zapisane przez forum, które zarejestrowało ten torrent, a nie wpisane przez uploadera.',
     'api.index.source_auto_importer' => 'Zapisane przez importer, który zarejestrował ten torrent, a nie wpisane przez uploadera.',
     'api.index.temp_file' => 'Nie można otworzyć pliku tymczasowego',
+    'api.index.too_broad' => 'Pasuje ponad :n nazw, za dużo, żeby sortować po tej kolumnie. Dodaj słowo albo sortuj po dacie, rozmiarze, plikach, nazwie, seedach lub leechach bez innych filtrów.',
     'api.index.too_many_hashes' => 'Za dużo hashy (maks. 500)',
     'api.index.too_many_hashes_5000' => 'Za dużo hashy (maks. 5000)',
     'api.index.tracker_no_answer' => 'Tracker nie odpowiedział',

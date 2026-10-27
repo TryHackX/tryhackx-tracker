@@ -147,3 +147,8 @@ add('a.index', {
     # details modal
     'modal_title': ('Index entry', 'Wpis indeksu'),
 })
+
+add('api.index', {
+    'too_broad': ('Over :n names match, too many to sort by this column. Add a word, or sort by last seen, size, files, name, seeders or leechers without other filters.',
+                  'Pasuje ponad :n nazw, za dużo, żeby sortować po tej kolumnie. Dodaj słowo albo sortuj po dacie, rozmiarze, plikach, nazwie, seedach lub leechach bez innych filtrów.'),
+})

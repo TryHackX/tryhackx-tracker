@@ -2367,6 +2367,8 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     } elseif ($found !== null && $plain && !$fileHashes && isset($catCols[$first[0] ?? ''])) {
         [$total, $capped] = [INDEX_LIST_CATALOG_CAP, true];
         $rows = indexListFromCatalog($db, $found[1], $catCols[$first[0]], strtolower($first[1] ?? 'asc') === 'desc', $perPage, $offset, $columns);
+    } elseif ($found !== null) {
+        throw new IndexSearchTooBroad('over ' . INDEX_LIST_CATALOG_CAP . ' matches');
     } elseif ($fulltextClause) {
         try { [$total, $rows] = $runQuery($fulltextClause); }
         catch (\Throwable $e) {
@@ -2441,6 +2443,8 @@ function indexSearchTooShort(string $search): bool {
 
 /** A search that ran out of the database's time (max_statement_time) — the endpoint answers it as such, not as a 500. */
 final class IndexSearchTimeout extends \RuntimeException {}
+
+final class IndexSearchTooBroad extends \RuntimeException {}
 
 /**
  * Did the database stop this statement for running too long? MariaDB 1969 (max_statement_time exceeded), MySQL 3024
