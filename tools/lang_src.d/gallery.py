@@ -88,7 +88,7 @@ add('api.content', {
 add('notify', {
     'images_removed': ('Your picture was taken out of ":name"', 'Twój obraz usunięto z opisu „:name”'),
     'images_removed_body': ('A moderator approved taking the picture you deleted out of this description. Once no description shows it, it is deleted for good.',
-                            'Moderator zatwierdził usunięcie skasowanego przez Ciebie obrazu z tego opisu. Gdy żaden opis go nie pokazuje, znika na dobre.'),
+                            'Moderator zatwierdził usunięcie Twojego obrazu z tego opisu. Gdy żaden opis go nie pokazuje, znika na dobre.'),
     'images_removed_from': ('A picture was taken out of your description of ":name"', 'Z Twojego opisu „:name” usunięto obraz'),
     'images_removed_from_body': ('At its owner\'s request, a moderator took a picture out of your description.',
                                  'Na prośbę właściciela moderator usunął obraz z Twojego opisu.'),

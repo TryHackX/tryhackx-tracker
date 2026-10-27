@@ -52,7 +52,7 @@ try {
     };
     $c0 = $row();
     check('a key that wants pictures but was never told yes: no_consent, and nothing is copied from it',
-          imagesClientState($c0) === ['images' => 'no_consent', 'image_domains' => ['pics.consent.test']]
+          imagesClientState($c0) === ['images' => 'no_consent', 'image_domains' => ['pics.consent.test'], 'copy_images' => false]
           && !in_array('pics.consent.test', imagesRemoteHosts($db, true), true), json_encode(imagesClientState($c0)));
     $c1 = imagesConsentNote($db, $c0, true);
     $r1 = $row();
@@ -66,8 +66,8 @@ try {
     $c2 = imagesConsentNote($db, $row(), false);
     check('the partner withdraws it: no longer copied from', (int)$row()['image_consent'] === 0 && imagesClientState($c2)['images'] === 'no_consent'
           && !in_array('pics.consent.test', imagesRemoteHosts($db, true), true));
-    check('a key with no image domains is off whatever the partner says',
-          imagesClientState(['image_domains' => '', 'image_consent' => 1]) === ['images' => 'off', 'image_domains' => []]);
+    check('a key with no image domains is off whatever the partner says, and its yes is still echoed',
+          imagesClientState(['image_domains' => '', 'image_consent' => 1]) === ['images' => 'off', 'image_domains' => [], 'copy_images' => true]);
     $db->exec("UPDATE api_clients SET image_consent = 1, enabled = 0 WHERE id = " . $kid);
     check('a disabled key is not copied from, consent or not', !in_array('pics.consent.test', imagesRemoteHosts($db, true), true));
     $db->exec("UPDATE api_clients SET enabled = 1 WHERE id = " . $kid);

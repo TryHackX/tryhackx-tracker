@@ -6334,7 +6334,7 @@ Można je ponownie pobrać z DHT albo zaimportować jeszcze raz, jeśli zachowas
     'notify.group_note' => 'Notatka: :note',
     'notify.group_revoked' => 'Odebrano Ci dostęp do grupy „:group”',
     'notify.images_removed' => 'Twój obraz usunięto z opisu „:name”',
-    'notify.images_removed_body' => 'Moderator zatwierdził usunięcie skasowanego przez Ciebie obrazu z tego opisu. Gdy żaden opis go nie pokazuje, znika na dobre.',
+    'notify.images_removed_body' => 'Moderator zatwierdził usunięcie Twojego obrazu z tego opisu. Gdy żaden opis go nie pokazuje, znika na dobre.',
     'notify.images_removed_from' => 'Z Twojego opisu „:name” usunięto obraz',
     'notify.images_removed_from_body' => 'Na prośbę właściciela moderator usunął obraz z Twojego opisu.',
     'notify.media_removed_avatar' => 'Moderator usunął Twoje zdjęcie profilowe',

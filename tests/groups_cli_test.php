@@ -166,8 +166,8 @@ check('… and the lines it printed name what it added and that it removed nothi
 check('a second reset: nothing to change — the consent it holds stays', $c === 0 && str_contains($o, 'admin: nothing to change')
       && in_array('favourites.public', $held('admin'), true), $o);
 [$c, $o] = cli(['apply', '--group=admin', '--mode=add', '--consent', '--dry-run']);
-check('--consent in a dry run: the four consent ids it lacks, nothing written',
-      $c === 0 && str_contains($o, 'admin: would add 4 (' . implode(' ', userPermissionsOrdered(array_diff($consent, ['favourites.public']))) . ')')
+check('--consent in a dry run: the five consent ids it lacks, nothing written',
+      $c === 0 && str_contains($o, 'admin: would add 5 (' . implode(' ', userPermissionsOrdered(array_diff($consent, ['favourites.public']))) . ')')
       && array_values(array_intersect($held('admin'), $consent)) === ['favourites.public'], $o);
 [$c, $o] = cli(['apply', '--group=admin', '--mode=add', '--consent']);
 $d = ($a = $audits()) ? json_decode((string)end($a)['detail'], true) : [];

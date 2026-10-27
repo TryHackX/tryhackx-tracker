@@ -40,7 +40,7 @@
 
     async function post(body) {
         try {
-            body.csrf_token = typeof window.csrfToken === 'function' ? window.csrfToken() : '';
+            body.csrf_token = window.csrfToken();
             var r = await fetch(API + 'user_images', {
                 method: 'POST', credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
