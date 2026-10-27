@@ -449,7 +449,7 @@
              ask four — you cannot see the answers together, and the guide link at the bottom only
              means anything if you can watch it change while you decide. */ ?>
     <div class="modal fade" id="clOptsModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-key text-warning"></i> <span id="cl-opts-title"></span></h5>
@@ -576,10 +576,10 @@
                         </div>
                         <div class="cl-hint"><?= __('a.wl.cl_docs_hint') ?></div>
                     </div>
-                    <div class="d-flex justify-content-end gap-2 mt-3">
-                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
-                        <button type="button" class="btn btn-primary btn-sm" id="cl-opts-save"><?= _h('a.wl.cl_save') ?></button>
-                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                    <button type="button" class="btn btn-primary btn-sm" id="cl-opts-save"><?= _h('a.wl.cl_save') ?></button>
                 </div>
             </div>
         </div>
@@ -654,6 +654,7 @@
     <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
     <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/magnetcard.js<?= assetVer('assets/js/magnetcard.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/filters.js<?= assetVer('assets/js/filters.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-whitelist.js<?= assetVer('assets/js/admin-whitelist.js') ?>"></script>
 </body>
 </html>

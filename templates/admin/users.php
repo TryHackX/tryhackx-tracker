@@ -254,7 +254,7 @@
 
     <!-- User edit modal -->
     <div class="modal fade" id="usEditModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content bg-dark">
 
 
@@ -263,6 +263,8 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="ue-grid">
+                    <div class="ue-col">
                     <div class="mb-2">
                         <label for="ue-status" class="form-label wl-label"><?= _h('a.users.status') ?></label>
                         <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ue-status">
@@ -316,6 +318,8 @@
                         </div>
                         <small class="text-muted"><?= _h('a.users.bio_note') ?></small>
                     </div>
+                    </div>
+                    <div class="ue-col ue-col-side">
                     <?php /* The warnings moderators gave this member (1.71.0, includes/reports.php): how many, and
                              the latest five — from the Reports page, silently or loudly chosen there. Read-only:
                              a warning is given where the report is. Shown for every account, "no warnings" too. */ ?>
@@ -360,11 +364,13 @@
                         <div class="small" id="ue-mod-msg" aria-live="polite"></div>
                         <small class="text-muted"><?= _h('a.users.mod_hint') ?></small>
                     </div>
-                    <div id="ue-alert"></div>
-                    <div class="d-flex justify-content-end gap-2 mt-3">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
-                        <button type="button" class="btn btn-sm btn-primary" id="ue-save"><i class="bi bi-check-lg"></i> <?= _h('common.save') ?></button>
                     </div>
+                    </div>
+                    <div id="ue-alert"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                    <button type="button" class="btn btn-sm btn-primary" id="ue-save"><i class="bi bi-check-lg"></i> <?= _h('common.save') ?></button>
                 </div>
             </div>
         </div>

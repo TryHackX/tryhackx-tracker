@@ -2337,6 +2337,13 @@ details[open] > summary > .disc-chev[class*=" fa-"] { --fa: "\f078"; --fa--fa: "
 .ue-warnings-list li.mod-revoked { text-decoration: line-through; color: #8b95a1; }
 .ue-mod-state { font-size: 0.85rem; margin-bottom: 0.4rem; }
 .ue-mod-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.4rem; }
+#usEditModal .ue-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 1.5rem; }
+#usEditModal .ue-col-side { border-left: 1px solid #2a2f37; padding-left: 1.5rem; }
+#usEditModal #ue-moderation { margin-top: 0.4rem; padding: 0.6rem 0.75rem; border: 1px solid #2a2f37; border-radius: 8px; background: rgba(255, 255, 255, 0.02); }
+@media (max-width: 991.98px) {
+    #usEditModal .ue-grid { grid-template-columns: minmax(0, 1fr); }
+    #usEditModal .ue-col-side { border-left: 0; padding-left: 0; margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid #2a2f37; }
+}
 .ue-mod-modes { display: flex; flex-wrap: wrap; gap: 0.9rem; align-items: center; margin: 0.4rem 0; }
 /* Wraps between its words like every badge cell's content (1.73.0): "blokada bez daty końca" was 120.3px in a 120px cell on a Polish page. */
 .us-until { display: block; font-size: 0.72rem; color: #e0b15a; }
@@ -3163,6 +3170,12 @@ td > .empty-state { padding: 1.2rem 0.5rem; }
    These are not decoration: each one is the sentence that says what the control above it will do to
    a partner's traffic, so they get a colour a person can actually read. */
 .cl-opts .cl-field { margin-bottom: 1.1rem; }
+#clOptsModal .cl-opts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 1.75rem; align-items: start; }
+#clOptsModal .cl-opts > .cl-can, #clOptsModal .cl-opts > .cl-note, #clOptsModal .cl-opts > .cl-field-last { grid-column: 1 / -1; }
+#clOptsModal #cl-opts-submit-block:not([hidden]), #clOptsModal #cl-opts-abuse-block:not([hidden]) { display: contents; }
+@media (max-width: 991.98px) {
+    #clOptsModal .cl-opts { grid-template-columns: minmax(0, 1fr); }
+}
 .cl-opts .cl-field-last { margin-bottom: 0.4rem; }
 .cl-opts .cl-label {
     display: block;
@@ -3700,3 +3713,4 @@ a.source-tab { text-decoration: none; }
     #img-f-q, .rq-toolbar .rq-search-wrap { width: auto; max-width: none; }
     #img-total, #img-q-total, .rq-toolbar #rq-total { margin-left: 0; }
 }
+.wl-name .fchips, .wl-name-cell .fchips { flex-wrap: nowrap; overflow: hidden; }
