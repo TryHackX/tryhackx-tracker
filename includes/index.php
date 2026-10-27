@@ -2523,9 +2523,9 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
      * be the first thing a visitor reads, but the torrent behind it is still a torrent and hiding it
      * would be using a judgement about words as a judgement about a swarm.
      */
-    $contentFilter = (string)($q['content'] ?? 'not_rejected');
-    if (!in_array($contentFilter, ['not_rejected', 'rejected', 'approved', 'approved_or_none', 'none', 'pending'], true)) {
-        $contentFilter = 'not_rejected';
+    $contentFilter = (string)($q['content'] ?? 'any');
+    if (!in_array($contentFilter, ['any', 'not_rejected', 'rejected', 'approved', 'approved_or_none', 'none', 'pending'], true)) {
+        $contentFilter = 'any';
     }
     $descOnly = !empty($q['desc_only']);
     $inDesc = !empty($q['search_desc']);
@@ -2778,6 +2778,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         if ($wl) {
             // Literal fragments chosen by a key; nothing from the request reaches the SQL.
             $contentSql = [
+                'any'              => '1 = 1',
                 'not_rejected'     => "content_status <> 'rejected'",
                 'rejected'         => "content_status = 'rejected'",
                 'approved'         => "content_status = 'approved'",

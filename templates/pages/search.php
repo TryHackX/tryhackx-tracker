@@ -85,6 +85,7 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
         if ($canWl && $wlSubmitOpen
             && (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1')): ?>
         <select id="search-content" title="<?= _h('search.content_title') ?>">
+            <option value="any"><?= _h('search.c_any') ?></option>
             <option value="not_rejected"><?= _h('search.c_not_rejected') ?></option>
             <option value="approved"><?= _h('search.c_approved') ?></option>
             <option value="approved_or_none"><?= _h('search.c_approved_or_none') ?></option>

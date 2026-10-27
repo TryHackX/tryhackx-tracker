@@ -23,7 +23,7 @@ if (count($topics) > FORUM_DESC_MAX_TOPICS) {
 
 $limit = forumDescLimit($cfg, $payload['max_chars'] ?? null);
 $results = [];
-$summary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['skipped', 'error']), 0);
+$summary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['declined', 'skipped', 'error']), 0);
 foreach ($topics as $i => $raw) {
     $topic = forumDescTopic($raw);
     $hashes = $topic['hashes'] ?? [];
@@ -44,7 +44,7 @@ foreach ($topics as $i => $raw) {
         }
         $results[] = ['topic' => $i, 'discussion_id' => $topic['discussion_id'], 'hash' => $h !== '' ? mb_substr($h, 0, 64) : null,
                       'status' => $r['status'], 'detail' => $r['detail']];
-        $summary[in_array($r['status'], FORUM_DESC_SKIPPED, true) ? 'skipped' : $r['status']]++;
+        $summary[in_array($r['status'], ['declined', 'removed'], true) ? 'declined' : (in_array($r['status'], FORUM_DESC_SKIPPED, true) ? 'skipped' : $r['status'])]++;
     }
 }
 

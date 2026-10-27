@@ -489,11 +489,11 @@ try {
           $f38['imported_at'] === $at1 && $f38['forum_at'] === $at2 && ($i38['shown_at'] ?? null) === $at1 && ($i38['at'] ?? null) === $at2,
           json_encode([$f38['imported_at'], $f38['forum_at'], $i38]));
 
-    $fakeSummary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['skipped', 'error']), 0);
-    check('every status the import and the withdrawal answer has a place in the summary', count($fakeSummary) === 13
+    $fakeSummary = array_fill_keys(array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['declined', 'skipped', 'error']), 0);
+    check('every status the import and the withdrawal answer has a place in the summary', count($fakeSummary) === 14
           && !array_diff(['created', 'queued', 'updated', 'replaced', 'proposed', 'kept', 'unchanged', 'too_long', 'invalid', 'withdrawn', 'released'], array_keys($fakeSummary))
           && FORUM_DESC_SKIPPED === ['not_registered', 'registered_elsewhere', 'banned', 'other_topic', 'removed', 'declined', 'stale']
-          && str_contains($src('api/v1/whitelist_describe.php'), "array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['skipped', 'error'])"));
+          && str_contains($src('api/v1/whitelist_describe.php'), "array_merge(FORUM_DESC_STATUSES, FORUM_DESC_HIDDEN, ['declined', 'skipped', 'error'])"));
     check('a topic that is not visible goes to the withdrawal, any other to the import',
           str_contains($src('api/v1/whitelist_describe.php'), "\$topic['visible'] ? forumDescImport(\$db, \$cfg, \$client, \$topic, \$h, \$limit, \$memo) : forumDescHide(\$db, \$client, \$topic, \$h)"));
     check('the ping names the most hashes a topic may carry — how the forum knows withdrawals are taken',

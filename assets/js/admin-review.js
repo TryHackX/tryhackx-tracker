@@ -294,6 +294,7 @@
         $('rq-selected').textContent = n ? t.key('js.review.selected', { n: num(n) }) : '';
         $('rq-approve-sel').disabled = !n || S.busy;
         $('rq-reject-sel').disabled = !n || S.busy;
+        $('rq-delete-sel').disabled = !n || S.busy;
         $('rq-clear-sel').hidden = !n;
         const more = $('rq-select-matching');
         more.hidden = S.busy || S.total <= S.rows.length || n >= Math.min(S.total, 2000);
@@ -318,7 +319,7 @@
         paintBulk();
     }
 
-    async function runBulk(action, note) {
+    async function runBulk(action, note, password) {
         const items = [...S.sel.values()];
         if (!items.length) return;
         S.busy = true;
@@ -327,7 +328,7 @@
         for (let i = 0; i < items.length; i += 100) {
             $('rq-progress').textContent = t.key('js.review.working', { done: num(i), n: num(items.length) });
             const chunk = items.slice(i, i + 100);
-            const j = await apiCall('admin/wl_content', 'POST', { op: 'bulk', action, note: note || '', items: chunk });
+            const j = await apiCall('admin/wl_content', 'POST', Object.assign({ op: 'bulk', action, note: note || '', items: chunk }, password ? { password } : {}));
             if (!j || !j.success) {
                 failed += chunk.length;
                 continue;
@@ -595,6 +596,13 @@
                 placeholder: t.key('js.wl.reject_why_placeholder'), maxlength: 255, okLabel: t.key('js.wl.reject') });
             if (note === null) return;
             runBulk('reject', note);
+        });
+        $('rq-delete-sel').addEventListener('click', async () => {
+            if (!await confirmAction(t.key('js.review.delete_title', { n: num(S.sel.size) }), t.key('js.review.delete_body'),
+                { okLabel: t.key('js.wl.delete'), danger: true })) return;
+            const pw = await promptPassword(t.key('js.review.delete_title', { n: num(S.sel.size) }), t.key('js.wl.confirm_admin_password'));
+            if (!pw) return;
+            runBulk('clear', '', pw);
         });
         document.querySelectorAll('#rq-subtabs .source-tab').forEach(b => b.addEventListener('click', () => showSub(b.dataset.sub)));
         $('rq-list').addEventListener('click', openPictures);

@@ -50,6 +50,7 @@ add('search', {
                       'Które opisy uwzględnić, według stanu moderacji. Domyślnie odrzucone są ukryte — '
                       'opis odrzucony przez moderatora nie powinien być pierwszą rzeczą, jaką czytasz, '
                       'ale torrent za nim to nadal torrent.'),
+    'c_any': ('Any description', 'Dowolny opis'),
     'c_not_rejected': ('Hide rejected', 'Ukryj odrzucone'),
     'c_approved':  ('Approved only', 'Tylko zatwierdzone'),
     'c_approved_or_none': ('Approved & unreviewed', 'Zatwierdzone i nierozpatrzone'),

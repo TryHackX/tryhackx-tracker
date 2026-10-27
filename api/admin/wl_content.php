@@ -252,7 +252,11 @@ if ($op === 'item') {
 
 if ($op === 'bulk') {
     $action = (string)($input['action'] ?? '');
-    if (!in_array($action, ['approve', 'reject'], true)) jsonResponse(['error' => __('api.content.unknown_op')], 400);
+    if (!in_array($action, ['approve', 'reject', 'clear'], true)) jsonResponse(['error' => __('api.content.unknown_op')], 400);
+    if ($action === 'clear') {
+        $viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
+        if ($viaUser <= 0 || !userIdHasPermission($db, $cfg, $viaUser, 'content.delete_any')) requireAdminReauth((string)($input['password'] ?? ''), $cfg);
+    }
     $items = is_array($input['items'] ?? null) ? array_slice($input['items'], 0, 200) : [];
     $note = (string)($input['note'] ?? '');
     $done = 0;
@@ -264,8 +268,9 @@ if ($op === 'bulk') {
         $id = is_array($it) ? (int)($it['id'] ?? 0) : 0;
         if ($id < 1 || !in_array($kind, ['wl', 'idx'], true) || isset($seen[$kind . $id])) { $failed++; continue; }
         $seen[$kind . $id] = true;
-        if (!$wlcShaOk(contentRowById($db, $kind, $id), $it['sha'] ?? null)) { $changed++; continue; }
-        $ok = $action === 'approve' ? contentApprove($db, $cfg, $kind, $id) : contentReject($db, $cfg, $kind, $id, $note);
+        if ($action !== 'clear' && !$wlcShaOk(contentRowById($db, $kind, $id), $it['sha'] ?? null)) { $changed++; continue; }
+        $ok = $action === 'approve' ? contentApprove($db, $cfg, $kind, $id)
+            : ($action === 'reject' ? contentReject($db, $cfg, $kind, $id, $note) : forumDescClearForResend($db, $cfg, $kind, $id));
         if ($ok) $done++; else $failed++;
     }
     auditNote(['action' => 'content.bulk_' . $action, 'detail' => ['done' => $done, 'failed' => $failed, 'changed' => $changed]]);

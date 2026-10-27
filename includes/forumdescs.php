@@ -58,6 +58,27 @@ function forumDescId($v): int {
     return is_int($v) && $v >= 1 && $v <= 4294967295 ? $v : 0;
 }
 
+function forumDescClearForResend(PDO $db, array $cfg, string $kind, int $id): bool
+{
+    $rec = contentRowById($db, $kind, $id);
+    if ($rec === null) return false;
+    $hash = strtolower((string)$rec['info_hash']);
+    $st = $db->prepare("SELECT DISTINCT image_id FROM image_refs WHERE src = ? AND src_key = ?");
+    $st->execute([$kind, (string)$id]);
+    $images = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    if (contentOccupied($rec)) contentDelete($db, $cfg, $rec + ['kind' => $kind], ['id' => 0], 'any', ['notify' => false]);
+    $db->prepare("DELETE FROM forum_descs WHERE info_hash = ?")->execute([$hash]);
+    $left = $db->prepare("SELECT 1 FROM image_refs WHERE image_id = ? LIMIT 1");
+    foreach ($images as $img) {
+        $row = function_exists('imagesRow') ? imagesRow($db, $img) : null;
+        if ($row === null || (string)$row['source'] !== 'copy') continue;
+        $left->execute([$img]);
+        if ($left->fetchColumn()) continue;
+        imagesDelete($db, $img);
+    }
+    return true;
+}
+
 function forumDescTopic($t): ?array {
     if (!is_array($t)) return null;
     $disc = forumDescId($t['discussion_id'] ?? null);
@@ -391,13 +412,14 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
     }
 
     if ($untouched && !($status === 'approved' && $mode === 'queue')) {
-        $review = $status === 'rejected' || ($status === 'pending' && $held);
-        $next = ($status === 'approved' || ($status === 'pending' && $mode === 'publish' && !$review)) ? 'approved' : 'pending';
+        $back = $status === 'rejected' && !empty($topic['restore']);
+        $review = ($status === 'rejected' && !$back) || ($status === 'pending' && $held);
+        $next = ($status === 'approved' || ($status === 'pending' && $mode === 'publish' && !$review) || ($back && $mode === 'publish')) ? 'approved' : 'pending';
         $s = $store(true);
         if ($status === 'approved') contentArchive($db, 'wl', (int)$w['id'], $hash, $w);
         forumDescWithdraw($db, $row['edit_id']);
         forumDescWrite($db, $w, $fmt, $s, $next, $acct, true);
-        return $done($status === 'rejected' ? 'queued' : 'updated', $imported($s, $review));
+        return $done($status === 'rejected' && $next !== 'approved' ? 'queued' : 'updated', $imported($s, $review));
     }
 
     $policy = $untouched ? 'proposal' : forumDescConflict($cfg);

@@ -100,6 +100,7 @@ $modWaiting = $modReview ? contentPendingCount($db) + (int)$db->query("SELECT CO
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="rq-select-matching" hidden></button>
                         <button type="button" class="btn btn-sm btn-outline-success" id="rq-approve-sel" disabled><i class="bi bi-check-lg"></i> <?= _h('js.review.approve_selected') ?></button>
                         <button type="button" class="btn btn-sm btn-outline-warning" id="rq-reject-sel" disabled><i class="bi bi-x-lg"></i> <?= _h('js.review.reject_selected') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="rq-delete-sel" disabled><i class="bi bi-trash"></i> <?= _h('js.review.delete_selected') ?></button>
                         <button type="button" class="btn btn-sm btn-link rq-clear-sel" id="rq-clear-sel" hidden><?= _h('js.review.clear_selection') ?></button>
                         <span id="rq-progress" class="text-muted wl-small" aria-live="polite"></span>
                     </div>
