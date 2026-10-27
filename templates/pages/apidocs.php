@@ -369,6 +369,7 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 
 <?= sanitize($exWithdraw) ?></code></pre>
 <p><?= __('apidocs.describe_audience') ?></p>
+<p><?= __('apidocs.describe_restore') ?></p>
 <p class="text-muted"><?= __('apidocs.describe_off_note') ?></p>
 <?php endif; ?>
 <?php endif; ?>

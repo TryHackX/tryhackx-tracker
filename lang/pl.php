@@ -2272,6 +2272,7 @@ return [
     'apidocs.describe_off_short' => 'wyłączone',
     'apidocs.describe_publish_short' => 'publikowane od razu',
     'apidocs.describe_queue_short' => 'do kolejki',
+    'apidocs.describe_restore' => '<code>"restore": true</code> przywraca tekst, który moderator tutaj odrzucił lub usunął, gdy ten sam tekst przychodzi ponownie: opublikowany, jeśli ten klucz publikuje, w przeciwnym razie do kolejki. Bez tego taki tekst dostaje odpowiedź <code>declined</code> albo <code>removed</code> i nic się nie zmienia.',
     'apidocs.describe_withdraw' => 'Temat, którego goście już nie widzą, wysyłasz z <code>"visible": false</code> i jego hashami, bez tekstu; dodaj <code>"gone": true</code>, gdy temat albo jego pierwszy post usunięto lub hashe zniknęły z posta. Tracker, który to przyjmuje, mówi o tym przez <code>describe_max_hashes</code> w pingu oraz liczniki <code>withdrawn</code> i <code>released</code> w podsumowaniu.',
     'apidocs.ds_banned' => 'Hash jest zablokowany na trackerze.',
     'apidocs.ds_created' => 'Opis został zapisany i opublikowany.',

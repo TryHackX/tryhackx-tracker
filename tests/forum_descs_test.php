@@ -262,6 +262,23 @@ try {
     $r = $imp($k1, $topic(7, 'Seventh, edited', [$H(7)]), $H(7));
     check('… an edited post does, and only into the queue', $r['status'] === 'queued' && $wl($H(7))['content_status'] === 'pending', json_encode($r));
 
+    $id47 = $reg(47, $k1);
+    $imp($k1, $topic(47, 'Seventeenth', [$H(47)]), $H(47));
+    contentReject($db, $cfgF, 'wl', $id47, 'no');
+    check('a text a moderator rejected is answered declined when the same text comes again, and stays rejected',
+          $imp($k1, $topic(47, 'Seventeenth', [$H(47)]), $H(47))['status'] === 'declined' && $wl($H(47))['content_status'] === 'rejected');
+    $r = $imp($k1, $topic(47, 'Seventeenth', [$H(47)], ['restore' => true]), $H(47));
+    check('… "restore": true brings it back, published because this key publishes',
+          $r['status'] === 'updated' && $wl($H(47))['content_status'] === 'approved' && forumDescFor($db, $H(47))['state'] === 'imported', json_encode($r));
+    $id48 = $reg(48, $k1);
+    $imp($k1, $topic(48, 'Eighteenth', [$H(48)]), $H(48));
+    contentClear($db, 'wl', $id48);
+    $setMode($k1, 'queue');
+    $r = $imp($k1, $topic(48, 'Eighteenth', [$H(48)], ['restore' => true]), $H(48));
+    check('… a deleted one comes back too, into the queue when the key queues',
+          $r['status'] === 'queued' && $wl($H(48))['content_status'] === 'pending' && ($wl($H(48))['description'] ?? '') !== '', json_encode($r));
+    $setMode($k1, 'publish');
+
     $setMode($k1, 'queue');
     $id8 = $reg(8, $k1);
     $imp($k1, $topic(8, 'Eighth', [$H(8)]), $H(8));

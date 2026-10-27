@@ -85,6 +85,7 @@ function forumDescTopic($t): ?array {
         'visible'       => ($t['visible'] ?? true) !== false,
         'gone'          => ($t['gone'] ?? false) === true,
         'audience'      => ($t['audience'] ?? 'guests') === 'members' ? 'members' : 'guests',
+        'restore'       => ($t['restore'] ?? false) === true,
     ];
 }
 
@@ -338,7 +339,8 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
         $db->prepare("UPDATE whitelist SET content_status = 'approved' WHERE id = ? AND content_status = 'pending'")->execute([(int)$w['id']]);
         if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'wl', (string)$w['id']);
     };
-    if (!$cleared && !$lost && $f !== null && $f['forum_sha'] !== null && hash_equals((string)$f['forum_sha'], (string)$row['forum_sha'])) {
+    $bringBack = !empty($topic['restore']) && ($removed || in_array((string)($f['state'] ?? ''), ['removed', 'declined'], true));
+    if (!$bringBack && !$cleared && !$lost && $f !== null && $f['forum_sha'] !== null && hash_equals((string)$f['forum_sha'], (string)$row['forum_sha'])) {
         if ($removed || $f['state'] === 'removed') return $done('removed', ['state' => 'removed']);
         if ($f['state'] === 'declined') return $done('declined');
         if ($f['state'] === 'imported' && $release) {
@@ -363,7 +365,7 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
             'imported_at' => $topic['edited_at'] ?? date('Y-m-d H:i:s')];
 
     if (!$occupied || !in_array($status, ['pending', 'approved', 'rejected'], true)) {
-        $review = $removed || $cleared || ($f !== null && $f['state'] === 'removed');
+        $review = empty($topic['restore']) && ($removed || $cleared || ($f !== null && $f['state'] === 'removed'));
         $pending = $mode === 'queue' || $review;
         $s = $store(true);
         forumDescWithdraw($db, $row['edit_id']);
@@ -375,7 +377,14 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
     if ((string)$w['description_format'] === $fmt && (string)$w['description'] === $view) {
         forumDescWithdraw($db, $row['edit_id']);
         if ($status === 'rejected') {
-            return $done('declined', ['import_sha' => forumDescSha($fmt, $view), 'state' => 'declined', 'note' => null, 'edit_id' => null]);
+            if (empty($topic['restore'])) {
+                return $done('declined', ['import_sha' => forumDescSha($fmt, $view), 'state' => 'declined', 'note' => null, 'edit_id' => null]);
+            }
+            $next = $mode === 'publish' ? 'approved' : 'pending';
+            $db->prepare("UPDATE whitelist SET content_status = ?, content_reviewed_at = NULL, content_rejected_note = NULL WHERE id = ?")
+               ->execute([$next, (int)$w['id']]);
+            if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'wl', (string)$w['id']);
+            return $done($next === 'approved' ? 'updated' : 'queued', $imported($view));
         }
         if ($release) $publish();
         return $done($release ? 'updated' : 'unchanged', $imported($view, $held));

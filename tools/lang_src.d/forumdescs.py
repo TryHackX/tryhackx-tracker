@@ -182,6 +182,13 @@ add('apidocs', {
         '<code>"gone": true</code>, gdy temat albo jego pierwszy post usunięto lub hashe zniknęły z posta. Tracker, który to '
         'przyjmuje, mówi o tym przez <code>describe_max_hashes</code> w pingu oraz liczniki <code>withdrawn</code> i '
         '<code>released</code> w podsumowaniu.'),
+    'describe_restore': (
+        '<code>"restore": true</code> brings back a text a moderator here turned down or deleted, when the same text is sent '
+        'again: published if this key publishes, otherwise into the queue. Without it such a text is answered '
+        '<code>declined</code> or <code>removed</code> and nothing changes.',
+        '<code>"restore": true</code> przywraca tekst, który moderator tutaj odrzucił lub usunął, gdy ten sam tekst przychodzi '
+        'ponownie: opublikowany, jeśli ten klucz publikuje, w przeciwnym razie do kolejki. Bez tego taki tekst dostaje odpowiedź '
+        '<code>declined</code> albo <code>removed</code> i nic się nie zmienia.'),
     'describe_audience': (
         '<code>"audience"</code> says who could read the topic on your side: <code>guests</code> (the default) or '
         '<code>members</code>. A description sent with <code>members</code> is shown here to signed-in people only.',

@@ -2272,6 +2272,7 @@ return [
     'apidocs.describe_off_short' => 'off',
     'apidocs.describe_publish_short' => 'published at once',
     'apidocs.describe_queue_short' => 'into the review queue',
+    'apidocs.describe_restore' => '<code>"restore": true</code> brings back a text a moderator here turned down or deleted, when the same text is sent again: published if this key publishes, otherwise into the queue. Without it such a text is answered <code>declined</code> or <code>removed</code> and nothing changes.',
     'apidocs.describe_withdraw' => 'A topic guests can no longer see is sent with <code>"visible": false</code> and its hashes, without its text; add <code>"gone": true</code> when the topic or its first post was deleted, or the hashes left the post. A tracker that takes these says so with <code>describe_max_hashes</code> in the ping and the <code>withdrawn</code> and <code>released</code> counts in the summary.',
     'apidocs.ds_banned' => 'The hash is banned on the tracker.',
     'apidocs.ds_created' => 'A description was written and published.',
