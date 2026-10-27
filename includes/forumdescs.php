@@ -139,12 +139,14 @@ function forumDescWrite(PDO $db, array $w, string $fmt, string $text, string $st
     $db->prepare("UPDATE whitelist SET description = ?, description_format = ?, content_status = ?, content_user_id = ?,
                          content_reviewed_at = NULL, content_rejected_note = NULL, content_credits = ? WHERE id = ?")
        ->execute([$text, $fmt, $status, $acct, $credits, (int)$w['id']]);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, null, 'wl', (string)$w['id']);
 }
 
 function forumDescWithdraw(PDO $db, ?int $editId): void {
     if ($editId === null || $editId < 1) return;
     $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW(), note = ? WHERE id = ? AND status = 'pending'")
        ->execute([FORUM_DESC_SUPERSEDED, $editId]);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, null, 'edit', (string)$editId);
 }
 
 function forumDescPropose(PDO $db, array $cfg, array $w, string $hash, string $fmt, string $text, ?int $acct, ?int $editId): int {
@@ -155,6 +157,7 @@ function forumDescPropose(PDO $db, array $cfg, array $w, string $hash, string $f
             $db->prepare("UPDATE wl_content_edits SET description = ?, description_format = ?, source_url = ?, kind = 'rewrite', user_id = ?
                            WHERE id = ?")
                ->execute([$text, $fmt, $w['source_url'], $acct, $editId]);
+            if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'edit', (string)$editId);
             return $editId;
         }
     }
@@ -162,7 +165,9 @@ function forumDescPropose(PDO $db, array $cfg, array $w, string $hash, string $f
                          kind, ip, user_id)
                   VALUES (?, NULL, ?, ?, ?, ?, 'rewrite', ?, ?)")
        ->execute([(int)$w['id'], $hash, $w['source_url'], $text, $fmt, mb_substr(getClientIp($cfg), 0, 45), $acct]);
-    return (int)$db->lastInsertId();
+    $id = (int)$db->lastInsertId();
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'edit', (string)$id);
+    return $id;
 }
 
 function forumDescImport(PDO $db, array $cfg, array $client, array $topic, string $hash, int $max, array &$memo = []): array {
@@ -252,8 +257,9 @@ function forumDescImportLocked(PDO $db, array $cfg, array $client, array $topic,
     }
     $held = ($f['note'] ?? null) === 'review';
     $release = $untouched && $status === 'pending' && $mode === 'publish' && !$held;
-    $publish = static function () use ($db, $w): void {
+    $publish = static function () use ($db, $cfg, $w): void {
         $db->prepare("UPDATE whitelist SET content_status = 'approved' WHERE id = ? AND content_status = 'pending'")->execute([(int)$w['id']]);
+        if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'wl', (string)$w['id']);
     };
     if (!$cleared && !$lost && $f !== null && $f['forum_sha'] !== null && hash_equals((string)$f['forum_sha'], (string)$row['forum_sha'])) {
         if ($removed || $f['state'] === 'removed') return $done('removed', ['state' => 'removed']);

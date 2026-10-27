@@ -218,12 +218,9 @@ check('a comment with a picture: saved, and drawn as a thumbnail that loads afte
 $served = imagesServe($db, (int)$row['id'], (int)$row['w'], (int)$row['h'], 'webp', false, null, false);
 check('… and the moment a visible comment shows the picture, it is public — the uploader\'s preview before that held nothing up',
       $served !== null && $served['public'] === true && imagesRow($db, (int)$row['id'])['public_at'] !== null
-      && str_contains($c, "if (\$imgRules !== null && \$status === 'visible') imagesPublishIn(\$db, \$cfg, \$clean);")
-      && str_contains($c, "if (\$imgRules !== null && \$row['status'] === 'visible') imagesPublishIn(\$db, \$cfg, \$clean);"));
+      && substr_count($c, "if (function_exists('imagesRefsTouch')) imagesRefsTouch(\$db, \$cfg, 'cm',") === 4);
 check('… a deleted comment no longer keeps it public or in use, a visible one does',
-      str_contains(implode(' ', imagesTextSources(true)), "FROM hash_comments WHERE body LIKE ? AND status = 'visible'")
-      && str_contains(implode(' ', imagesTextSources(false)), "FROM hash_comments WHERE body LIKE ? AND status <> 'deleted'")
-      && imagesReferenced($db, (int)$row['id'], false));
+      imagesRefState($db, 'cm', '0')['state'] === 'dead' && imagesReferenced($db, (int)$row['id'], false) && imagesReferenced($db, (int)$row['id'], true));
 $r = commentPostRequest($db, array_merge($cfgOn, ['comment_images_upload' => '0', 'comment_images_links' => '0']), $me,
                         ['csrf_token' => $T, 'hash' => CI_H, 'body' => "[img]$url" . "[/img]"], '127.0.0.61');
 check('both switches off: a picture is refused, said in words', $r['status'] === 400 && ($r['body']['error'] ?? '') === 'no_images', json_encode($r['body']));

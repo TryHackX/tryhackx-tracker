@@ -162,9 +162,10 @@ check('… the next pass downloads nothing that is not due', $calls === [], json
 $db->prepare("UPDATE image_remote SET tries = 4, next_at = NOW() WHERE url_sha = ?")->execute([hash('sha256', $U2)]);
 imagesRemoteTick($db, $cfgI, $io);
 check('… and the fifth failure is the last', ($rowOf($U2)['status'] ?? '') === 'failed' && (int)$rowOf($U2)['tries'] === 5);
-check('a failed copy can be tried again from the panel, or dropped; a finished one cannot be dropped',
+check('a failed copy can be tried again from the panel, or dropped for good — never queued again — and a finished one cannot be dropped',
       imagesRemoteRetry($db, hash('sha256', $U2)) && ($rowOf($U2)['status'] ?? '') === 'pending' && (int)$rowOf($U2)['tries'] === 0
-      && imagesRemoteForget($db, hash('sha256', $U2)) && $rowOf($U2) === [] && !imagesRemoteForget($db, hash('sha256', $U1)));
+      && imagesRemoteForget($db, hash('sha256', $U2)) && ($rowOf($U2)['status'] ?? '') === 'ignored' && imagesRemoteEnqueue($db, [$U2]) === 0
+      && !imagesRemoteForget($db, hash('sha256', $U1)) && imagesRemoteRetry($db, hash('sha256', $U2)) && ($rowOf($U2)['status'] ?? '') === 'pending');
 
 $U4 = 'https://forum.copy.test/assets/files/new.png';
 $settled = imagesRemoteSettle($db, $cfgI, "a [img]$U1" . "[/img] b [img]$U4" . "[/img]");
@@ -174,8 +175,8 @@ $U5 = 'https://forum.copy.test/assets/files/looked-at.png';
 $looked = imagesRemoteSettle($db, $cfgI, "a [img]$U1" . "[/img] c [img]$U5" . "[/img]", false);
 check('… a text only being compared shows the copies and queues nothing', $looked === "a [img]$own" . "[/img] c [img]$U5" . "[/img]"
       && $rowOf($U5) === [], $looked);
-check('the scan runs at most once in ten minutes unless the janitor is told otherwise',
-      imagesRemoteScan($db, array_merge($cfgI, ['images_remote_scan_at' => (string)time()]), ['copy.test']) === 0);
+check('the queue fills as texts are written and from every text once an hour, never from a ten-minute scan of them all',
+      !function_exists('imagesRemoteScan') && str_contains($src('includes/images.php'), 'imagesRefsRebuild($db, $cfg);'));
 $served = $img ? imagesServe($db, (int)$img['id'], 960, 640, 'webp', false, null, false) : null;
 check('a copy is served to anybody, cached for good', $served !== null && $served['public'] === true && $served['mime'] === 'image/webp');
 $cgi = dirname(PHP_BINARY) . DIRECTORY_SEPARATOR . (PHP_OS_FAMILY === 'Windows' ? 'php-cgi.exe' : 'php-cgi');
@@ -220,8 +221,11 @@ $used = imagesWhereUsed($db, (int)$img['id']);
 check('where a picture is used: the page and the comment that show it',
       count(array_filter($used, fn($u) => $u['kind'] === 'page' && $u['page'] === 'imgcopytest')) === 1
       && count(array_filter($used, fn($u) => $u['kind'] === 'comment' && $u['id'] === $cmId && $u['hash'] === $H)) === 1, json_encode($used));
-check('a copy deleted in the panel is never copied again', imagesPanelDelete($db, (int)$img['id']) && imagesRow($db, (int)$img['id']) === null
-      && ($rowOf($U1)['status'] ?? '') === 'failed' && $rowOf($U1)['error'] === 'removed');
+check('a copy deleted in the panel is never copied again, and the texts that showed it show the partner\'s address again',
+      imagesPanelDelete($db, (int)$img['id'], $cfgI) && imagesRow($db, (int)$img['id']) === null
+      && ($rowOf($U1)['status'] ?? '') === 'ignored' && $rowOf($U1)['error'] === 'removed'
+      && str_contains((string)$db->query("SELECT body FROM page_content WHERE page = 'imgcopytest' AND lang = 'en'")->fetchColumn(), $U1),
+      json_encode([$rowOf($U1), $db->query("SELECT body FROM page_content WHERE page = 'imgcopytest' AND lang = 'en'")->fetchColumn()]));
 
 $auth = $src('includes/auth.php');
 $nav = array_values(array_filter(adminNavItems(), fn($i) => $i['action'] === 'admin-images'));

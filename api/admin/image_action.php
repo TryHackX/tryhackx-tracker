@@ -8,7 +8,7 @@ if ($op === 'delete') {
     $row = imagesRow($db, $id);
     if ($row === null) jsonResponse(['error' => __('api.images.not_found'), 'code' => 'not_found'], 404);
     $used = count(imagesWhereUsed($db, $id));
-    if (!imagesPanelDelete($db, $id)) jsonResponse(['error' => __('api.images.not_found'), 'code' => 'not_found'], 404);
+    if (!imagesPanelDelete($db, $id, $cfg)) jsonResponse(['error' => __('api.images.not_found'), 'code' => 'not_found'], 404);
     auditNote(['action' => 'image.delete', 'target_type' => 'image', 'target_id' => (string)$id,
                'summary' => 'picture #' . $id . ' deleted' . ($used > 0 ? ', used in ' . $used . ' place(s)' : ''),
                'detail' => ['id' => $id, 'owner_id' => $row['user_id'] === null ? null : (int)$row['user_id'], 'source' => (string)$row['source'],

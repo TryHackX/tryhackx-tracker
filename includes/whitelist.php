@@ -834,6 +834,11 @@ function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): arra
         $st = $db->prepare("UPDATE whitelist SET banned = 1 WHERE banned = 0 AND info_hash IN ($ph)");
         $st->execute($chunk);
         $affected += $st->rowCount();
+        if ($st->rowCount() > 0 && function_exists('imagesRefsTouch')) {
+            $ids = $db->prepare("SELECT id FROM whitelist WHERE info_hash IN ($ph) AND description IS NOT NULL");
+            $ids->execute($chunk);
+            foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $wid) imagesRefsTouch($db, $cfg, 'wl', (string)$wid);
+        }
     }
     // A banned hash has no business in a moderation queue. Whatever a moderator was going to decide
     // about its description, the ban decided something larger — and leaving the item there means
@@ -894,6 +899,11 @@ function whitelistUnban(PDO $db, array $cfg, string $hash, bool $touchBlacklist 
     $db->prepare("DELETE FROM banned_hashes WHERE info_hash = ?")->execute([$hash]);
     $st = $db->prepare("UPDATE whitelist SET banned = 0 WHERE banned = 1 AND info_hash = ?");
     $st->execute([$hash]);
+    if ($st->rowCount() > 0 && function_exists('imagesRefsTouch')) {
+        $ids = $db->prepare("SELECT id FROM whitelist WHERE info_hash = ? AND description IS NOT NULL");
+        $ids->execute([$hash]);
+        foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $wid) imagesRefsTouch($db, $cfg, 'wl', (string)$wid);
+    }
     if ($st->rowCount() > 0 && trackerMode($cfg) === 'whitelist') {
         whitelistAppendHashes($db, $cfg, [$hash]);
         whitelistMarkDirty(false);

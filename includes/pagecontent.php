@@ -165,6 +165,7 @@ function pageContentSave(PDO $db, array $cfg, string $page, string $lang, string
     } catch (\Throwable $e) {
         return ['error' => __('api.pages.store_failed')];
     }
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'page', $page . "\t" . $lang);
     return ['ok' => true];
 }
 

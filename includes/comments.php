@@ -1511,7 +1511,7 @@ function commentPostRequest(PDO $db, array $cfg, ?array $me, array $input, strin
                   $guest ? mb_substr(function_exists('ipBucket') ? ipBucket($ip) : $ip, 0, 45) : null]);
     $id = (int)$db->lastInsertId();
     antispamRecord($db, $ticket);
-    if ($imgRules !== null && $status === 'visible') imagesPublishIn($db, $cfg, $clean);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'cm', (string)$id);
     $row = commentRow($db, $id);
     if ($row === null) return commentFail(500, 'failed');
     if ($status === 'visible') commentNotifyNew($db, $cfg, $row);
@@ -1589,7 +1589,7 @@ function commentEditRequest(PDO $db, array $cfg, ?array $me, array $input, strin
             return commentFail(404, 'not_found');
         }
         antispamRecord($db, $ticket);
-        if ($imgRules !== null && $row['status'] === 'visible') imagesPublishIn($db, $cfg, $clean);
+        if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'cm', (string)$row['id']);
         $hash = (string)$row['info_hash'];
         // What other people's notifications quote of it is the new words now (1.74.0, PRIV-1) — whoever edited it.
         commentNotifyFollow($db, $cfg, [$row], 'edited', $clean);
@@ -1750,6 +1750,7 @@ function commentDelete(PDO $db, array $cfg, ?array $me, array $row, string $reas
                          WHERE id = ? AND status <> 'deleted'");
     $st->execute([$uid > 0 ? $uid : null, $reason !== '' ? $reason : null, (int)$row['id']]);
     if ($st->rowCount() < 1) return ['ok' => false, 'error' => 'not_found', 'status' => 404];
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'cm', (string)$row['id']);
     // Nobody's notifications go on quoting it (1.74.0, PRIV-1) — the author's own deletion, a moderator's, a silent one.
     commentNotifyFollow($db, $cfg, [$row], 'deleted');
     if ($right['right'] === 'any') {
@@ -1810,6 +1811,7 @@ function commentApprove(PDO $db, array $cfg, ?array $me, array $row): array
     $st = $db->prepare("UPDATE hash_comments SET status = 'visible', approved_at = NOW(), approved_by = ? WHERE id = ? AND status = 'pending'");
     $st->execute([(int)$me['id'], (int)$row['id']]);
     if ($st->rowCount() < 1) return ['ok' => false, 'error' => 'not_pending', 'status' => 409];
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'cm', (string)$row['id']);
     if (function_exists('auditLog')) {
         auditLog($db, 'comment.approve', ['target_type' => 'comment', 'target_id' => (string)$row['id'],
             'summary' => (string)($me['username'] ?? '#' . $me['id']) . ' → let through comment #' . $row['id'] . ' by Guest #' . $row['guest_tag'],

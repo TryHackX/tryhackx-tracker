@@ -132,6 +132,8 @@ add('perm', {
                          'Wstawianie obrazów do komentarzy i wgrywanie ich tam, gdzie pozwalają ustawienia'),
     'info.resize':      ('Resize the Info panel (the size is kept in their browser)',
                          'Zmiana rozmiaru panelu Info (rozmiar zostaje w ich przeglądarce)'),
+    'images.public':    ('Let the pictures they uploaded be shown as a gallery on their public profile',
+                         'Pokazywanie wgranych przez nich obrazów jako galerii na ich publicznym profilu'),
     'comment.edit_own': ('Correct their own comments for a while (comment_edit_minutes)',
                          'Poprawianie własnych komentarzy przez pewien czas (comment_edit_minutes)'),
     'comment.delete_own': ('Delete their own comments for a while (comment_delete_own_minutes)',

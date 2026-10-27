@@ -134,13 +134,14 @@ check('the same file is stored once: the same person gets the same picture back,
       && (int)$blobs->fetchColumn() === 1 && ($sa['row']['name'] ?? '') === 'holiday.png', json_encode([$sa['row']['name'] ?? null]));
 $out = imagesRowOut($cfgI, $sa['row']);
 check('the answer a picture is given in: its address with its size in it, the full one, and nothing else',
-      array_keys($out) === ['id', 'url', 'full_url', 'w', 'h', 'full_w', 'full_h', 'bytes', 'name', 'created_at', 'used', 'animated']
+      array_keys($out) === ['id', 'url', 'full_url', 'w', 'h', 'full_w', 'full_h', 'bytes', 'name', 'created_at', 'used', 'animated', 'public', 'removal']
       && $out['url'] === 'https://img.test/i/' . $ia . '-960x480.webp' && $out['full_url'] === 'https://img.test/i/' . $ia . '-2048x1024.webp'
-      && $out['used'] === false && $out['animated'] === false, json_encode($out));
+      && $out['used'] === false && $out['animated'] === false && $out['public'] === false && $out['removal'] === false, json_encode($out));
 $list = imagesList($db, $cfgI, $A, 1);
 check('"My images": the newest first, with the limits the page shows',
       array_keys($list) === ['rows', 'total', 'page', 'per_page', 'limits'] && $list['total'] === 1 && ($list['rows'][0]['id'] ?? 0) === $ia
-      && array_keys($list['limits']) === ['max_bytes', 'max_edge', 'max_mpx', 'per_day', 'today', 'quota_bytes', 'used_bytes']
+      && array_keys($list['limits']) === ['max_bytes', 'max_edge', 'max_mpx', 'per_day', 'today', 'per_day_bytes', 'today_bytes', 'quota_bytes', 'used_bytes']
+      && $list['limits']['per_day_bytes'] === 100 * 1048576 && $list['limits']['today_bytes'] > 0
       && $list['limits']['today'] === 1 && $list['limits']['quota_bytes'] === 250 * 1048576 && $list['limits']['used_bytes'] > 0,
       json_encode([$list['total'], array_column($list['rows'], 'id'), array_column($list['rows'], 'name'), $ia, $list['limits']]));
 
@@ -170,39 +171,73 @@ check('only its own two sizes and its own type answer', imagesServe($db, $ia, 96
       && imagesServe($db, $ia, 960, 480, 'gif', false, $A, false) === null
       && strlen((string)(imagesServe($db, $ia, 2048, 1024, 'webp', false, $A, false)['data'] ?? '')) > strlen($own['data'])
       && (imagesServe($db, $ia, 960, 480, 'webp', true, $A, false)['data'] ?? '') === (imagesServe($db, $ia, 2048, 1024, 'webp', false, $A, false)['data'] ?? 'x'));
+imagesRefsRebuild($db, $cfgI);
 $db->prepare("UPDATE images SET checked_at = NULL, public_at = NULL WHERE id = ?")->execute([$ia]);
 $first = imagesServe($db, $ia, 960, 480, 'webp', false, null, false);
 $db->prepare("INSERT INTO page_content (page, lang, format, body, enabled) VALUES ('imgtest', 'en', 'bbcode', ?, 1)")
    ->execute(['[img]https://img.test/i/' . $ia . '-960x480.webp[/img]']);
 $second = imagesServe($db, $ia, 960, 480, 'webp', false, null, false);
-$db->prepare("UPDATE images SET checked_at = NOW() - INTERVAL 11 MINUTE WHERE id = ?")->execute([$ia]);
+imagesRefsTouch($db, $cfgI, 'page', "imgtest\ten");
 $third = imagesServe($db, $ia, 960, 480, 'webp', false, null, false);
-check('published once, a picture is everybody\'s: found when it is asked for, and asked for at most every ten minutes by strangers',
-      $first === null && $second === null && $third !== null && $third['public'] === true && imagesRow($db, $ia)['public_at'] !== null
+check('a picture is everybody\'s from the moment a published text that may show it is saved — here a page — and not before',
+      imagesRefsReady($db) && $first === null && $second === null && $third !== null && $third['public'] === true && imagesRow($db, $ia)['public_at'] !== null
       && imagesRowOut($cfgI, imagesRow($db, $ia))['used'] === true);
 check('a reference counts for "in use": a page, also a page that is not live yet', imagesReferenced($db, $ia, false) && imagesReferenced($db, $ia, true)
       && !imagesReferenced($db, $ib, false));
 $db->exec("UPDATE page_content SET enabled = 0 WHERE page = 'imgtest'");
 check('… and an unpublished page keeps a picture alive without making it public', imagesReferenced($db, $ia, false) && !imagesReferenced($db, $ia, true));
+imagesRefsTouch($db, $cfgI, 'page', "imgtest\ten");
+check('… and taking the page offline takes the picture off the public at once', imagesRow($db, $ia)['public_at'] === null
+      && imagesServe($db, $ia, 960, 480, 'webp', false, null, false) === null && imagesServe($db, $ia, 960, 480, 'webp', false, $A, false) !== null);
 $fresh = imagesStore($db, $cfgI, $A, $pic(300, 200), 'fresh.png');
 $if = (int)($fresh['row']['id'] ?? 0);
 $ownView = imagesServe($db, $if, 300, 200, 'webp', false, $A, false);
 $modView = imagesServe($db, $if, 300, 200, 'webp', false, null, true);
 $db->prepare("INSERT INTO page_content (page, lang, format, body, enabled) VALUES ('imgtest2', 'en', 'bbcode', ?, 1)")
    ->execute(['[img]https://img.test/i/' . $if . '-300x200.webp[/img]']);
+imagesRefsTouch($db, $cfgI, 'page', "imgtest2\ten");
 $stranger = imagesServe($db, $if, 300, 200, 'webp', false, null, false);
-check('the uploader\'s and the moderators\' own views never use up a stranger\'s check: published a minute later, it is everybody\'s at once',
+check('the uploader\'s and the moderators\' own views decide nothing: published a minute later, it is everybody\'s at once',
       $ownView !== null && $ownView['public'] === false && $modView !== null && $modView['public'] === false
       && $stranger !== null && $stranger['public'] === true && imagesRow($db, $if)['public_at'] !== null);
 $db->exec("DELETE FROM page_content WHERE page = 'imgtest2'");
 imagesDelete($db, $if);
+check('a deleted picture leaves no references behind', (int)$db->query("SELECT COUNT(*) FROM image_refs WHERE image_id = " . $if)->fetchColumn() === 0);
+
+$hc = $db->prepare("INSERT INTO hash_comments (info_hash, user_id, body, status) VALUES (?, ?, ?, 'visible')");
+$foreign = imagesStore($db, $cfgI, $A, $pic(310, 210), 'private-of-a.png');
+$ifo = (int)($foreign['row']['id'] ?? 0);
+$furl = 'https://img.test/i/' . $ifo . '-310x210.webp';
+$hc->execute([str_repeat('9', 40), $B, "Look: [img]$furl" . "[/img]"]);
+$cmB = (int)$db->lastInsertId();
+imagesRefsTouch($db, $cfgI, 'cm', (string)$cmB);
+check('somebody else\'s visible comment does not make a member\'s private picture public',
+      imagesServe($db, $ifo, 310, 210, 'webp', false, null, false) === null && imagesRow($db, $ifo)['public_at'] === null && imagesReferenced($db, $ifo, true));
+$hc->execute([str_repeat('9', 40), $A, "Mine: [img]$furl" . "[/img]"]);
+$cmA = (int)$db->lastInsertId();
+imagesRefsTouch($db, $cfgI, 'cm', (string)$cmA);
+check('… its owner\'s own visible comment does', imagesServe($db, $ifo, 310, 210, 'webp', false, null, false) !== null && imagesRow($db, $ifo)['public_at'] !== null);
+$db->prepare("UPDATE hash_comments SET status = 'deleted' WHERE id = ?")->execute([$cmA]);
+imagesRefsTouch($db, $cfgI, 'cm', (string)$cmA);
+check('… and its deletion takes the picture off the public again; the other comment still keeps it in use',
+      imagesRow($db, $ifo)['public_at'] === null && imagesServe($db, $ifo, 310, 210, 'webp', false, null, false) === null && imagesReferenced($db, $ifo, false));
+$db->prepare("UPDATE hash_comments SET status = 'deleted' WHERE id = ?")->execute([$cmB]);
+imagesRefsTouch($db, $cfgI, 'cm', (string)$cmB);
+check('a picture only dead texts still name is marked dead, not yet deleted', imagesRow($db, $ifo)['dead_since'] !== null && !imagesReferenced($db, $ifo, false));
+$db->prepare("UPDATE images SET dead_since = NOW() - INTERVAL 49 HOUR WHERE id = ?")->execute([$ifo]);
+$db->prepare("DELETE FROM hash_comments WHERE id IN (?, ?)")->execute([$cmA, $cmB]);
 
 $old = imagesStore($db, $cfgI, $B, $pic(320, 240), 'old.png');
 $io = (int)($old['row']['id'] ?? 0);
 $db->prepare("UPDATE images SET created_at = NOW() - INTERVAL 49 HOUR WHERE id IN (?, ?)")->execute([$io, $ia]);
+$db->prepare("INSERT INTO hash_comments (info_hash, user_id, body, status) VALUES (?, ?, ?, 'deleted')")->execute([str_repeat('9', 40), $A, "[img]$furl" . "[/img]"]);
+$cmDead = (int)$db->lastInsertId();
 $swept = imagesSweep($db, $cfgI, true);
 check('the sweep removes a picture nothing refers to once it is older than the setting, and keeps a used one',
       $swept >= 1 && imagesRow($db, $io) === null && imagesRow($db, $ia) !== null, (string)$swept);
+check('… and one that only dead texts have named for longer than the setting — a rejected description, a deleted comment',
+      imagesRow($db, $ifo) === null);
+$db->prepare("DELETE FROM hash_comments WHERE id = ?")->execute([$cmDead]);
 check('… and runs at most once an hour', imagesSweep($db, array_merge($cfgI, ['images_swept_at' => (string)time()])) === 0);
 check('… and forgets the uploads counted more than two days ago', $keptB > 0
       && (int)$db->query("SELECT COUNT(*) FROM image_uploads WHERE user_id = " . $B . " AND created_at < NOW() - INTERVAL 2 DAY")->fetchColumn() === 0);

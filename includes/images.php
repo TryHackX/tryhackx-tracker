@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/usermedia.php';
+require_once __DIR__ . '/imagerefs.php';
 
 const IMAGES_PAGE_EDGE = 960;
 const IMAGES_PER_PAGE = 40;
@@ -49,6 +50,11 @@ function imagesPerDay(array $cfg): int
 function imagesQuotaMb(array $cfg): int
 {
     return max(0, min(100000, (int)($cfg['images_quota_mb'] ?? 250)));
+}
+
+function imagesPerDayMb(array $cfg): int
+{
+    return max(0, min(100000, (int)($cfg['images_per_day_mb'] ?? 100)));
 }
 
 function imagesUnusedHours(array $cfg): int
@@ -210,20 +216,21 @@ function imagesRefusal(array $cfg, string $key, int $status, string $detail = ''
 {
     $codes = ['api.media.too_large' => 'too_big', 'api.media.too_many_px' => 'too_many_pixels',
               'api.media.too_big_to_process' => 'too_many_pixels', 'api.media.store_failed' => 'upload_failed',
-              'api.images.daily_limit' => 'daily_limit', 'api.images.quota' => 'quota', 'api.images.shape' => 'bad_shape'];
+              'api.images.daily_limit' => 'daily_limit', 'api.images.daily_mb' => 'daily_mb', 'api.images.quota' => 'quota',
+              'api.images.shape' => 'bad_shape'];
     $vars += ['kb' => (int)floor(imagesMaxBytes($cfg) / 1024), 'mp' => imagesMaxMpx($cfg), 'px' => $detail,
-              'kind' => strtoupper($detail), 'n' => imagesPerDay($cfg), 'max' => imagesQuotaMb($cfg)];
+              'kind' => strtoupper($detail), 'n' => imagesPerDay($cfg), 'max' => imagesQuotaMb($cfg), 'mb' => imagesPerDayMb($cfg)];
     return ['ok' => false, 'status' => $status, 'code' => $codes[$key] ?? 'bad_type', 'message' => __($key, $vars)];
 }
 
 function imagesUsage(PDO $db, int $userId): array
 {
-    $st = $db->prepare("SELECT COUNT(*) FROM image_uploads WHERE user_id = ? AND created_at > NOW() - INTERVAL 1 DAY");
+    $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM image_uploads WHERE user_id = ? AND created_at > NOW() - INTERVAL 1 DAY");
     $st->execute([$userId]);
-    $today = (int)$st->fetchColumn();
+    $t = $st->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'b' => 0];
     $st = $db->prepare("SELECT COALESCE(SUM(b.bytes), 0) FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha WHERE i.user_id = ?");
     $st->execute([$userId]);
-    return ['today' => $today, 'bytes' => (int)$st->fetchColumn()];
+    return ['today' => (int)$t['n'], 'today_bytes' => (int)$t['b'], 'bytes' => (int)$st->fetchColumn()];
 }
 
 function imagesCleanName(string $name): string
@@ -243,7 +250,7 @@ function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $n
 {
     $sha = hash('sha256', $bytes);
     $quota = imagesQuotaMb($cfg) * 1048576;
-    $usage = ['today' => 0, 'bytes' => 0];
+    $usage = ['today' => 0, 'today_bytes' => 0, 'bytes' => 0];
     $ratio = (float)($opts['max_ratio'] ?? 0);
     if ($userId !== null) {
         $st = $db->prepare("SELECT id FROM images WHERE user_id = ? AND blob_sha = ? LIMIT 1");
@@ -257,6 +264,9 @@ function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $n
         $usage = imagesUsage($db, $userId);
         if (imagesPerDay($cfg) > 0 && $usage['today'] >= imagesPerDay($cfg)) {
             return imagesRefusal($cfg, 'api.images.daily_limit', 429);
+        }
+        if (imagesPerDayMb($cfg) > 0 && $usage['today_bytes'] + strlen($bytes) > imagesPerDayMb($cfg) * 1048576) {
+            return imagesRefusal($cfg, 'api.images.daily_mb', 429);
         }
         if ($quota > 0 && $usage['bytes'] >= $quota) {
             return imagesRefusal($cfg, 'api.images.quota', 403, '', ['used' => (int)ceil($usage['bytes'] / 1048576)]);
@@ -307,13 +317,15 @@ function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $n
     $ins->bindValue(5, $sourceUrl === null ? null : mb_substr($sourceUrl, 0, 500), $sourceUrl === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $ins->execute();
     $newId = (int)$db->lastInsertId();
-    if ($userId !== null) $db->prepare("INSERT INTO image_uploads (user_id) VALUES (?)")->execute([$userId]);
+    if ($userId !== null) $db->prepare("INSERT INTO image_uploads (user_id, bytes) VALUES (?, ?)")->execute([$userId, strlen($bytes)]);
     return ['ok' => true, 'row' => imagesRow($db, $newId), 'existing' => false];
 }
 
 function imagesRow(PDO $db, int $id): ?array
 {
     $st = $db->prepare("SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at,
+                               i.removal_at, i.dead_since,
+                               (i.checked_at IS NOT NULL AND i.checked_at > NOW() - INTERVAL " . IMAGES_PUBLIC_RECHECK_MINUTES . " MINUTE) AS fresh,
                                b.mime, b.animated, b.w, b.h, b.full_w, b.full_h, b.bytes
                           FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha WHERE i.id = ?");
     $st->execute([$id]);
@@ -335,7 +347,8 @@ function imagesRowOut(array $cfg, array $r): array
         'full_url' => imagesUrl($cfg, $id, (int)$r['full_w'], (int)$r['full_h'], imagesExt($r)),
         'w' => (int)$r['w'], 'h' => (int)$r['h'], 'full_w' => (int)$r['full_w'], 'full_h' => (int)$r['full_h'],
         'bytes' => (int)$r['bytes'], 'name' => (string)$r['name'], 'created_at' => (string)$r['created_at'],
-        'used' => $r['public_at'] !== null, 'animated' => (bool)$r['animated'],
+        'used' => array_key_exists('used', $r) ? (bool)$r['used'] : $r['public_at'] !== null, 'animated' => (bool)$r['animated'],
+        'public' => $r['public_at'] !== null, 'removal' => ($r['removal_at'] ?? null) !== null,
     ];
 }
 
@@ -344,19 +357,21 @@ function imagesLimits(PDO $db, array $cfg, int $userId, ?int $maxBytes = null): 
     $u = imagesUsage($db, $userId);
     return ['max_bytes' => $maxBytes ?? imagesMaxBytes($cfg), 'max_edge' => imagesMaxEdge($cfg), 'max_mpx' => imagesMaxMpx($cfg),
             'per_day' => imagesPerDay($cfg), 'today' => $u['today'],
+            'per_day_bytes' => imagesPerDayMb($cfg) * 1048576, 'today_bytes' => $u['today_bytes'],
             'quota_bytes' => imagesQuotaMb($cfg) * 1048576, 'used_bytes' => $u['bytes']];
 }
 
 function imagesList(PDO $db, array $cfg, int $userId, int $page, ?int $maxBytes = null): array
 {
-    $st = $db->prepare("SELECT COUNT(*) FROM images WHERE user_id = ?");
+    $st = $db->prepare("SELECT COUNT(*) FROM images WHERE user_id = ? AND removal_at IS NULL");
     $st->execute([$userId]);
     $total = (int)$st->fetchColumn();
     $page = max(1, min($page, max(1, (int)ceil($total / IMAGES_PER_PAGE))));
-    $st = $db->prepare("SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at,
+    $st = $db->prepare("SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at, i.removal_at,
+                               EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id) AS used,
                                b.mime, b.animated, b.w, b.h, b.full_w, b.full_h, b.bytes
                           FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha
-                         WHERE i.user_id = ? ORDER BY i.id DESC LIMIT ? OFFSET ?");
+                         WHERE i.user_id = ? AND i.removal_at IS NULL ORDER BY i.id DESC LIMIT ? OFFSET ?");
     $st->bindValue(1, $userId, PDO::PARAM_INT);
     $st->bindValue(2, IMAGES_PER_PAGE, PDO::PARAM_INT);
     $st->bindValue(3, ($page - 1) * IMAGES_PER_PAGE, PDO::PARAM_INT);
@@ -365,55 +380,21 @@ function imagesList(PDO $db, array $cfg, int $userId, int $page, ?int $maxBytes 
     return ['rows' => $rows, 'total' => $total, 'page' => $page, 'per_page' => IMAGES_PER_PAGE, 'limits' => imagesLimits($db, $cfg, $userId, $maxBytes)];
 }
 
-function imagesTextSources(bool $publishedOnly): array
-{
-    return $publishedOnly
-        ? ["SELECT description FROM whitelist WHERE description LIKE ? AND content_status = 'approved' AND banned = 0",
-           "SELECT description FROM hash_content WHERE description LIKE ? AND content_status = 'approved'",
-           "SELECT body FROM page_content WHERE body LIKE ? AND enabled = 1",
-           "SELECT body FROM hash_comments WHERE body LIKE ? AND status = 'visible'"]
-        : ["SELECT description FROM whitelist WHERE description LIKE ?",
-           "SELECT description FROM hash_content WHERE description LIKE ?",
-           "SELECT description FROM wl_content_edits WHERE description LIKE ?",
-           "SELECT body FROM page_content WHERE body LIKE ?",
-           "SELECT body FROM hash_comments WHERE body LIKE ? AND status <> 'deleted'"];
-}
-
 function imagesReferenced(PDO $db, int $id, bool $publishedOnly): bool
 {
-    foreach (imagesTextSources($publishedOnly) as $sql) {
-        $st = $db->prepare($sql . ' LIMIT 1');
-        $st->execute(['%/i/' . $id . '-%']);
-        if ($st->fetchColumn() !== false) return true;
+    foreach (imagesRefsWhere($db, $id) as $r) {
+        $state = imagesRefState($db, (string)$r['src'], (string)$r['src_key'])['state'];
+        if ($publishedOnly ? $state === 'published' : $state !== 'dead') return true;
     }
     return false;
 }
 
-function imagesReferencedIds(PDO $db): array
-{
-    $ids = [];
-    foreach (imagesTextSources(false) as $sql) {
-        $st = $db->prepare($sql);
-        $st->execute(['%/i/%']);
-        while (($t = $st->fetchColumn()) !== false) {
-            if (preg_match_all('#/i/(\d+)-\d+x\d+\.(?:webp|gif)#', (string)$t, $m)) {
-                foreach ($m[1] as $i) $ids[(int)$i] = true;
-            }
-        }
-    }
-    return $ids;
-}
-
 function imagesIsPublic(PDO $db, array $row): bool
 {
-    if ($row['public_at'] !== null) return true;
-    $id = (int)$row['id'];
-    $st = $db->prepare("UPDATE images SET checked_at = NOW()
-                         WHERE id = ? AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL " . IMAGES_RECHECK_MINUTES . " MINUTE)");
-    $st->execute([$id]);
-    if ($st->rowCount() !== 1 || !imagesReferenced($db, $id, true)) return false;
-    $db->prepare("UPDATE images SET public_at = NOW() WHERE id = ? AND public_at IS NULL")->execute([$id]);
-    return true;
+    if ((string)($row['source'] ?? '') === 'copy') return true;
+    if (!imagesRefsReady($db)) return $row['public_at'] !== null;
+    if ($row['public_at'] !== null && !empty($row['fresh'])) return true;
+    return imagesVisibilitySync($db, [(int)$row['id']])['public'] > 0;
 }
 
 function imagesServe(PDO $db, int $id, int $w, int $h, string $ext, bool $wantFull, ?int $viewerId, bool $moderator): ?array
@@ -424,7 +405,7 @@ function imagesServe(PDO $db, int $id, int $w, int $h, string $ext, bool $wantFu
     $isFull = $w === (int)$row['full_w'] && $h === (int)$row['full_h'];
     if (!$isPage && !$isFull) return null;
     $owner = $viewerId !== null && $row['user_id'] !== null && $viewerId === (int)$row['user_id'];
-    $public = $row['public_at'] !== null || (!$owner && !$moderator && imagesIsPublic($db, $row));
+    $public = ($owner || $moderator) ? $row['public_at'] !== null : imagesIsPublic($db, $row);
     if (!$public && !$owner && !$moderator) return null;
     $variant = ($wantFull || !$isPage) ? 'full' : 'page';
     if ($variant === 'full') {
@@ -462,18 +443,6 @@ function imagesSend(array $img): void
     exit;
 }
 
-function imagesPublishIn(PDO $db, array $cfg, string $text): int
-{
-    $base = imagesBase($cfg);
-    if ($base === '' || !str_contains($text, '/i/')) return 0;
-    if (!preg_match_all('~' . preg_quote($base, '~') . 'i/(\d{1,10})-\d{1,5}x\d{1,5}\.(?:webp|gif)~i', $text, $m)) return 0;
-    $ids = array_values(array_unique(array_map('intval', $m[1])));
-    $in = implode(',', array_fill(0, count($ids), '?'));
-    $st = $db->prepare("UPDATE images SET public_at = NOW() WHERE public_at IS NULL AND id IN ($in)");
-    $st->execute($ids);
-    return $st->rowCount();
-}
-
 function imagesDelete(PDO $db, int $id): bool
 {
     $st = $db->prepare("SELECT blob_sha FROM images WHERE id = ?");
@@ -481,6 +450,8 @@ function imagesDelete(PDO $db, int $id): bool
     $sha = $st->fetchColumn();
     if ($sha === false) return false;
     $db->prepare("DELETE FROM images WHERE id = ?")->execute([$id]);
+    $db->prepare("DELETE FROM image_refs WHERE image_id = ?")->execute([$id]);
+    $db->prepare("DELETE FROM image_remote WHERE image_id = ? AND status = 'done'")->execute([$id]);
     $st = $db->prepare("SELECT COUNT(*) FROM images WHERE blob_sha = ?");
     $st->execute([$sha]);
     if ((int)$st->fetchColumn() === 0) $db->prepare("DELETE FROM image_blobs WHERE sha256 = ?")->execute([$sha]);
@@ -489,19 +460,27 @@ function imagesDelete(PDO $db, int $id): bool
 
 function imagesSweep(PDO $db, array $cfg, bool $force = false): int
 {
-    if (!$force && time() - (int)($cfg['images_swept_at'] ?? 0) < IMAGES_SWEEP_SECONDS) return 0;
+    if (!$force && imagesRefsReady($db, $cfg) && time() - (int)($cfg['images_swept_at'] ?? 0) < IMAGES_SWEEP_SECONDS) return 0;
     $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('images_swept_at', ?)")->execute([(string)time()]);
     $db->exec("DELETE FROM image_uploads WHERE created_at < NOW() - INTERVAL 2 DAY");
-    $st = $db->prepare("SELECT id FROM images WHERE created_at < NOW() - INTERVAL ? HOUR ORDER BY id");
-    $st->bindValue(1, imagesUnusedHours($cfg), PDO::PARAM_INT);
+    if (imagesBase($cfg) === '') return 0;
+    imagesRefsRebuild($db, $cfg);
+    $ids = array_map('intval', $db->query("SELECT DISTINCT image_id FROM image_refs")->fetchAll(PDO::FETCH_COLUMN));
+    foreach (array_chunk($ids, 500) as $chunk) imagesVisibilitySync($db, $chunk);
+    $db->exec("UPDATE images i SET public_at = NULL, dead_since = NULL WHERE i.source = 'upload' AND i.public_at IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id)");
+    $hours = imagesUnusedHours($cfg);
+    $st = $db->prepare("SELECT i.id FROM images i
+                         WHERE (i.created_at < NOW() - INTERVAL ? HOUR AND NOT EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id))
+                            OR (i.dead_since IS NOT NULL AND i.dead_since < NOW() - INTERVAL ? HOUR)
+                            OR (i.removal_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id))
+                         ORDER BY i.id LIMIT " . IMAGES_SWEEP_BATCH);
+    $st->bindValue(1, $hours, PDO::PARAM_INT);
+    $st->bindValue(2, $hours, PDO::PARAM_INT);
     $st->execute();
-    $old = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
-    if (!$old) return 0;
-    $used = imagesReferencedIds($db);
     $gone = 0;
-    foreach ($old as $id) {
-        if ($gone >= IMAGES_SWEEP_BATCH) break;
-        if (!isset($used[$id]) && imagesDelete($db, $id)) $gone++;
+    foreach (array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)) as $id) {
+        if (imagesDelete($db, $id)) $gone++;
     }
     return $gone;
 }
@@ -611,15 +590,15 @@ function imagesRewriteTargets(): array
 {
     return [
         ["SELECT id AS k, description AS t FROM whitelist WHERE description LIKE ?",
-         "UPDATE whitelist SET description = ? WHERE id = ? AND description = ?", 'whitelist'],
+         "UPDATE whitelist SET description = ? WHERE id = ? AND description = ?", 'wl'],
         ["SELECT id AS k, description AS t FROM hash_content WHERE description LIKE ?",
-         "UPDATE hash_content SET description = ? WHERE id = ? AND description = ?"],
+         "UPDATE hash_content SET description = ? WHERE id = ? AND description = ?", 'idx'],
         ["SELECT id AS k, description AS t FROM wl_content_edits WHERE description LIKE ?",
-         "UPDATE wl_content_edits SET description = ? WHERE id = ? AND description = ?"],
+         "UPDATE wl_content_edits SET description = ? WHERE id = ? AND description = ?", 'edit'],
         ["SELECT id AS k, body AS t FROM hash_comments WHERE body LIKE ?",
-         "UPDATE hash_comments SET body = ? WHERE id = ? AND body = ?"],
+         "UPDATE hash_comments SET body = ? WHERE id = ? AND body = ?", 'cm'],
         ["SELECT CONCAT(page, CHAR(9), lang) AS k, body AS t FROM page_content WHERE body LIKE ?",
-         "UPDATE page_content SET body = ? WHERE CONCAT(page, CHAR(9), lang) = ? AND body = ?"],
+         "UPDATE page_content SET body = ? WHERE CONCAT(page, CHAR(9), lang) = ? AND body = ?", 'page'],
     ];
 }
 
@@ -627,8 +606,7 @@ function imagesRewrite(PDO $db, string $from, string $to): int
 {
     if ($from === '' || $from === $to) return 0;
     $n = 0;
-    foreach (imagesRewriteTargets() as $target) {
-        [$sel, $sql] = $target;
+    foreach (imagesRewriteTargets() as [$sel, $sql, $src]) {
         try {
             $st = $db->prepare($sel);
             $st->execute(['%' . imagesLikeEscape($from) . '%']);
@@ -642,9 +620,9 @@ function imagesRewrite(PDO $db, string $from, string $to): int
                 $up->execute([$new, $r['k'], $old]);
                 $hit = $up->rowCount();
                 $n += $hit;
-                if ($hit > 0 && ($target[2] ?? '') === 'whitelist' && function_exists('forumDescRewritten')) {
-                    forumDescRewritten($db, (int)$r['k'], $old, $new);
-                }
+                if ($hit < 1) continue;
+                if ($src === 'wl' && function_exists('forumDescRewritten')) forumDescRewritten($db, (int)$r['k'], $old, $new);
+                imagesRefsTouch($db, null, $src, (string)$r['k']);
             }
         } catch (\Throwable $e) {
             continue;
@@ -695,32 +673,6 @@ function imagesRemoteSettle(PDO $db, array $cfg, string $text, bool $queue = tru
         return $text;
     }
     return $text;
-}
-
-function imagesRemoteScan(PDO $db, array $cfg, array $hosts, bool $force = false): int
-{
-    if (!$hosts || (!$force && time() - (int)($cfg['images_remote_scan_at'] ?? 0) < IMAGES_REMOTE_SCAN_SECONDS)) return 0;
-    $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('images_remote_scan_at', ?)")->execute([(string)time()]);
-    $base = imagesBase($cfg);
-    $found = [];
-    foreach (imagesRewriteTargets() as [$sel]) {
-        foreach ($hosts as $h) {
-            try {
-                $st = $db->prepare($sel);
-                $st->execute(['%' . imagesLikeEscape($h) . '/%']);
-                while (($r = $st->fetch(PDO::FETCH_ASSOC)) !== false) {
-                    foreach (imagesRemoteUrls((string)$r['t'], $hosts, $base) as $u) $found[$u] = true;
-                }
-            } catch (\Throwable $e) {
-                continue;
-            }
-        }
-    }
-    if (!$found) return 0;
-    $urls = array_keys($found);
-    $n = imagesRemoteEnqueue($db, $urls);
-    foreach (imagesRemoteDone($db, $cfg, $urls) as $from => $to) imagesRewrite($db, (string)$from, $to);
-    return $n;
 }
 
 function imagesPublicIp(string $ip): bool
@@ -831,7 +783,7 @@ function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tr
     $db->prepare("UPDATE images SET public_at = COALESCE(public_at, NOW()) WHERE id = ?")->execute([$id]);
     $db->prepare("UPDATE image_remote SET status = 'done', image_id = ?, error = '', done_at = NOW() WHERE url_sha = ?")->execute([$id, $sha]);
     $to = imagesUrl($cfg, $id, (int)$row['w'], (int)$row['h'], imagesExt($row));
-    return ['ok' => true, 'image' => $id, 'url' => $to, 'rewritten' => imagesRewrite($db, $url, $to)];
+    return ['ok' => true, 'image' => $id, 'url' => $to, 'rewritten' => imagesRemoteSettleRows($db, $cfg, [$sha])];
 }
 
 function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
@@ -850,7 +802,7 @@ function imagesRemoteTick(PDO $db, array $cfg, array $io = []): array
         return $out;
     }
     try {
-        $out['queued'] = imagesRemoteScan($db, $cfg, $hosts, !empty($io['force_scan']));
+        if (!empty($io['force_scan'])) $out['queued'] = imagesRefsRebuild($db, $cfg)['queued'];
         $start = microtime(true);
         $budget = (float)($io['budget'] ?? IMAGES_REMOTE_BUDGET);
         $where = [];
@@ -937,12 +889,9 @@ function imagesOwnCopiesRepair(PDO $db, array $cfg): array
                 $up->execute([$new, $r['k'], $old]);
                 if ($up->rowCount() < 1) continue;
                 $out['texts']++;
-                if (($t[2] ?? '') === 'whitelist' && function_exists('forumDescRewritten')) forumDescRewritten($db, (int)$r['k'], $old, $new);
+                if ($t[2] === 'wl' && function_exists('forumDescRewritten')) forumDescRewritten($db, (int)$r['k'], $old, $new);
+                imagesRefsTouch($db, $cfg, $t[2], (string)$r['k']);
             }
-        }
-        $used = imagesReferencedIds($db);
-        foreach (array_keys($target) as $id) {
-            if (!isset($used[$id]) && imagesDelete($db, $id)) $out['images']++;
         }
     }
     foreach (array_chunk($queued, 500) as $chunk) {
@@ -951,6 +900,9 @@ function imagesOwnCopiesRepair(PDO $db, array $cfg): array
         $st->execute($chunk);
         $out['queue'] += $st->rowCount();
     }
+    foreach (array_keys($target) as $id) {
+        if (!imagesReferenced($db, $id, false) && imagesDelete($db, $id)) $out['images']++;
+    }
     return $out;
 }
 
@@ -958,13 +910,13 @@ function imagesPanelSummary(PDO $db): array
 {
     $r = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM(public_at IS NOT NULL), 0) AS pub, COALESCE(SUM(source = 'copy'), 0) AS copies FROM images")->fetch(PDO::FETCH_ASSOC) ?: [];
     $bytes = (int)$db->query("SELECT COALESCE(SUM(bytes), 0) FROM image_blobs")->fetchColumn();
-    $queue = ['pending' => 0, 'failed' => 0, 'done' => 0];
+    $queue = ['pending' => 0, 'failed' => 0, 'done' => 0, 'ignored' => 0];
     try {
         foreach ($db->query("SELECT status, COUNT(*) AS n FROM image_remote GROUP BY status")->fetchAll(PDO::FETCH_ASSOC) as $x) {
             $queue[(string)$x['status']] = (int)$x['n'];
         }
     } catch (\Throwable $e) {
-        $queue = ['pending' => 0, 'failed' => 0, 'done' => 0];
+        $queue = ['pending' => 0, 'failed' => 0, 'done' => 0, 'ignored' => 0];
     }
     return ['images' => (int)($r['n'] ?? 0), 'public' => (int)($r['pub'] ?? 0), 'copies' => (int)($r['copies'] ?? 0),
             'bytes' => $bytes, 'queue' => $queue];
@@ -989,6 +941,8 @@ function imagesPanelList(PDO $db, array $cfg, array $q): array
     if ($state === 'public') $where[] = 'i.public_at IS NOT NULL';
     elseif ($state === 'private') $where[] = 'i.public_at IS NULL';
     elseif ($state === 'copied') $where[] = "i.source = 'copy'";
+    elseif ($state === 'unused') $where[] = 'NOT EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id)';
+    elseif ($state === 'removal') $where[] = 'i.removal_at IS NOT NULL';
     $find = trim(mb_substr((string)($q['q'] ?? ''), 0, 120));
     if ($find !== '') {
         if (preg_match('/^#?(\d{1,10})$/', $find, $m)) {
@@ -1007,7 +961,8 @@ function imagesPanelList(PDO $db, array $cfg, array $q): array
     $total = (int)$st->fetchColumn();
     $pages = max(1, (int)ceil($total / IMAGES_PANEL_PER_PAGE));
     $page = max(1, min((int)($q['page'] ?? 1), $pages));
-    $sql = "SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at,
+    $sql = "SELECT i.id, i.user_id, i.blob_sha, i.name, i.source, i.source_url, i.created_at, i.public_at, i.checked_at, i.removal_at,
+                   EXISTS (SELECT 1 FROM image_refs r WHERE r.image_id = i.id) AS used,
                    b.mime, b.animated, b.w, b.h, b.full_w, b.full_h, b.bytes, u.username
               FROM images i JOIN image_blobs b ON b.sha256 = i.blob_sha LEFT JOIN users u ON u.id = i.user_id" . $where . $orderBy . " LIMIT ? OFFSET ?";
     $st = $db->prepare($sql);
@@ -1023,50 +978,71 @@ function imagesPanelList(PDO $db, array $cfg, array $q): array
 function imagesWhereUsed(PDO $db, int $id): array
 {
     if ($id <= 0) return [];
-    $like = '%/i/' . $id . '-%';
     $out = [];
-    $ask = static function (string $sql) use ($db, $like): array {
+    foreach (imagesRefsWhere($db, $id) as $r) {
+        $src = (string)$r['src'];
+        $key = (string)$r['src_key'];
         try {
+            if ($src === 'page') {
+                [$page, $lang] = array_pad(explode("\t", $key, 2), 2, '');
+                $st = $db->prepare("SELECT enabled FROM page_content WHERE page = ? AND lang = ?");
+                $st->execute([$page, $lang]);
+                $en = $st->fetchColumn();
+                if ($en === false) continue;
+                $out[] = ['kind' => 'page', 'id' => 0, 'hash' => '', 'page' => $page, 'lang' => $lang, 'state' => (int)$en === 1 ? 'enabled' : 'disabled'];
+                continue;
+            }
+            $sql = match ($src) {
+                'wl'   => "SELECT info_hash, content_status AS state FROM whitelist WHERE id = ?",
+                'idx'  => "SELECT info_hash, content_status AS state FROM hash_content WHERE id = ?",
+                'edit' => "SELECT info_hash, status AS state FROM wl_content_edits WHERE id = ?",
+                default => "SELECT info_hash, status AS state FROM hash_comments WHERE id = ?",
+            };
             $st = $db->prepare($sql);
-            $st->execute([$like]);
-            return $st->fetchAll(PDO::FETCH_ASSOC);
+            $st->execute([(int)$key]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) continue;
+            $kind = match ($src) { 'wl', 'idx' => 'description', 'edit' => 'proposal', default => 'comment' };
+            $out[] = ['kind' => $kind, 'id' => (int)$key, 'hash' => (string)$row['info_hash'], 'state' => (string)$row['state']];
         } catch (\Throwable $e) {
-            return [];
+            continue;
         }
-    };
-    foreach ($ask("SELECT id, info_hash, content_status AS state FROM whitelist WHERE description LIKE ? LIMIT 50") as $r) {
-        $out[] = ['kind' => 'description', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
-    }
-    foreach ($ask("SELECT id, info_hash, content_status AS state FROM hash_content WHERE description LIKE ? LIMIT 50") as $r) {
-        $out[] = ['kind' => 'description', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
-    }
-    foreach ($ask("SELECT id, info_hash, status AS state FROM wl_content_edits WHERE description LIKE ? LIMIT 50") as $r) {
-        $out[] = ['kind' => 'proposal', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
-    }
-    foreach ($ask("SELECT id, info_hash, status AS state FROM hash_comments WHERE body LIKE ? LIMIT 50") as $r) {
-        $out[] = ['kind' => 'comment', 'id' => (int)$r['id'], 'hash' => (string)$r['info_hash'], 'state' => (string)$r['state']];
-    }
-    foreach ($ask("SELECT page, lang, enabled FROM page_content WHERE body LIKE ? LIMIT 50") as $r) {
-        $out[] = ['kind' => 'page', 'id' => 0, 'hash' => '', 'page' => (string)$r['page'], 'lang' => (string)$r['lang'],
-                  'state' => (int)$r['enabled'] === 1 ? 'enabled' : 'disabled'];
     }
     return array_slice($out, 0, IMAGES_USED_MAX);
 }
 
-function imagesPanelDelete(PDO $db, int $id): bool
+function imagesPanelDelete(PDO $db, int $id, ?array $cfg = null): bool
 {
-    if (!imagesDelete($db, $id)) return false;
+    $row = imagesRow($db, $id);
+    if ($row === null) return false;
     try {
-        $db->prepare("UPDATE image_remote SET status = 'failed', error = 'removed', image_id = NULL WHERE image_id = ?")->execute([$id]);
+        $cfg = imagesRefsCfg($db, $cfg);
+        $st = $db->prepare("SELECT url_sha, url FROM image_remote WHERE image_id = ?");
+        $st->execute([$id]);
+        $back = $st->fetchAll(PDO::FETCH_KEY_PAIR);
+        if ($back) {
+            $db->prepare("UPDATE image_remote SET status = 'ignored', error = 'removed', image_id = NULL WHERE image_id = ?")->execute([$id]);
+            $page = imagesUrl($cfg, $id, (int)$row['w'], (int)$row['h'], imagesExt($row));
+            $full = imagesUrl($cfg, $id, (int)$row['full_w'], (int)$row['full_h'], imagesExt($row));
+            $to = (string)reset($back);
+            foreach (imagesRefsWhere($db, $id) as $r) {
+                $text = imagesRefsTextOf($db, (string)$r['src'], (string)$r['src_key']);
+                if ($text === null) continue;
+                $new = imagesReplaceUrl(imagesReplaceUrl($text, $full . '?full=1', $to), $full, $to);
+                $new = imagesReplaceUrl($new, $page . '?full=1', $to);
+                $new = imagesReplaceUrl($new, $page, $to);
+                if ($new !== $text) imagesRefsWrite($db, (string)$r['src'], (string)$r['src_key'], $text, $new, $cfg);
+            }
+        }
     } catch (\Throwable $e) {
-        return true;
+        error_log('[images] write back before delete of ' . $id . ': ' . $e->getMessage());
     }
-    return true;
+    return imagesDelete($db, $id);
 }
 
 function imagesRemoteList(PDO $db, string $status, int $page): array
 {
-    $status = in_array($status, ['pending', 'failed', 'done'], true) ? $status : 'pending';
+    $status = in_array($status, ['pending', 'failed', 'done', 'ignored'], true) ? $status : 'pending';
     $st = $db->prepare("SELECT COUNT(*) FROM image_remote WHERE status = ?");
     $st->execute([$status]);
     $total = (int)$st->fetchColumn();
@@ -1088,14 +1064,14 @@ function imagesRemoteList(PDO $db, string $status, int $page): array
 
 function imagesRemoteRetry(PDO $db, string $sha): bool
 {
-    $st = $db->prepare("UPDATE image_remote SET status = 'pending', tries = 0, error = '', next_at = NOW() WHERE url_sha = ? AND status = 'failed'");
+    $st = $db->prepare("UPDATE image_remote SET status = 'pending', tries = 0, error = '', next_at = NOW() WHERE url_sha = ? AND status IN ('failed', 'ignored')");
     $st->execute([$sha]);
     return $st->rowCount() === 1;
 }
 
 function imagesRemoteForget(PDO $db, string $sha): bool
 {
-    $st = $db->prepare("DELETE FROM image_remote WHERE url_sha = ? AND status <> 'done'");
+    $st = $db->prepare("UPDATE image_remote SET status = 'ignored', error = 'removed', next_at = NOW() WHERE url_sha = ? AND status IN ('pending', 'failed')");
     $st->execute([$sha]);
     return $st->rowCount() === 1;
 }

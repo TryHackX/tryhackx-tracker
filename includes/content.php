@@ -517,6 +517,7 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
            ->execute([$rec['kind'] === 'wl' ? $rec['id'] : null, $rec['kind'] === 'idx' ? $rec['id'] : null, $hash,
                       $src !== '' ? $src : null, $desc !== '' ? $desc : null, $fmt, $editKind, $ip, $userId]);
+        if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'edit', (string)$db->lastInsertId());
         return ['ok' => true, 'saved' => false, 'pending' => false, 'proposed' => true, 'kind' => $rec['kind'], 'edit_kind' => $editKind];
     }
 
@@ -534,6 +535,7 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
                    WHERE id = ?")
        ->execute([$src !== '' ? $src : null, $desc !== '' ? $desc : null, $fmt, $status, $userId,
                   contentCreditsStart($userId), $rec['id']]);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, (string)$rec['kind'], (string)$rec['id']);
     return ['ok' => true, 'saved' => true, 'pending' => $status === 'pending', 'proposed' => false, 'kind' => $rec['kind']];
 }
 
@@ -567,6 +569,7 @@ function contentApprove(PDO $db, array $cfg, string $kind, int $id): bool {
     if ($kind === 'wl' && function_exists('forumDescDecided')) {
         forumDescDecided($db, (string)$row['info_hash'], (string)$row['description_format'], (string)($row['description'] ?? ''), true);
     }
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, $kind, (string)$id);
     $name = contentNameFor($db, (string)$row['info_hash']);
     contentNotify($db, $cfg, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
         'notify.content_published', 'notify.content_published_body', ['name' => $name, 'hash' => $row['info_hash']]);
@@ -584,6 +587,7 @@ function contentReject(PDO $db, array $cfg, string $kind, int $id, ?string $note
     if ($kind === 'wl' && function_exists('forumDescDecided')) {
         forumDescDecided($db, (string)$row['info_hash'], (string)$row['description_format'], (string)($row['description'] ?? ''), false);
     }
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, $kind, (string)$id);
     $name = contentNameFor($db, (string)$row['info_hash']);
     contentNotify($db, $cfg, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
         'notify.content_rejected', $note !== '' ? 'notify.content_rejected_body_note' : 'notify.content_rejected_body',
@@ -599,7 +603,9 @@ function contentClear(PDO $db, string $kind, int $id): bool {
                                content_credits = NULL
                          WHERE id = ?");
     $st->execute([$id]);
-    return $st->rowCount() > 0;
+    $done = $st->rowCount() > 0;
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, null, $kind, (string)$id);
+    return $done;
 }
 
 /**
@@ -654,7 +660,11 @@ function contentEditApply(PDO $db, array $cfg, array $e): bool {
     $proposer = $e['user_id'] !== null ? (int)$e['user_id'] : null;
     $previous = $cur['content_user_id'] !== null ? (int)$cur['content_user_id'] : null;
     $edit = $pv['kind'] === 'edit' && !$pv['as_rewrite'];
-    if ($edit) {
+    $removal = defined('IMAGES_REMOVAL_NOTE') && (string)($e['note'] ?? '') === IMAGES_REMOVAL_NOTE;
+    if ($removal) {
+        $chain = contentCreditsDecode($cur['content_credits'] ?? null, $previous);
+        $author = $previous;
+    } elseif ($edit) {
         $chain = contentCreditsAppend(contentCreditsDecode($cur['content_credits'] ?? null, $previous), $proposer, $pv['share'], time());
         $author = $previous;
     } else {
@@ -668,7 +678,18 @@ function contentEditApply(PDO $db, array $cfg, array $e): bool {
                   $author, contentCreditsEncode($chain), (int)$e['target_id']]);
     $db->prepare("UPDATE wl_content_edits SET status = 'applied', reviewed_at = NOW() WHERE id = ?")->execute([(int)$e['id']]);
     forumDescProposalDone($db, $e, true);
+    if (function_exists('imagesRefsTouch')) {
+        imagesRefsTouch($db, $cfg, $kind, (string)$e['target_id']);
+        imagesRefsTouch($db, $cfg, 'edit', (string)$e['id']);
+    }
     $name = contentNameFor($db, (string)$e['info_hash']);
+    if ($removal) {
+        contentNotify($db, $cfg, $proposer, 'notify.images_removed', 'notify.images_removed_body', ['name' => $name]);
+        if ($previous !== null && $previous !== $proposer) {
+            contentNotify($db, $cfg, $previous, 'notify.images_removed_from', 'notify.images_removed_from_body', ['name' => $name]);
+        }
+        return true;
+    }
     if ($edit) {
         contentNotify($db, $cfg, $proposer, 'notify.content_edit_applied', 'notify.content_edit_applied_body',
                       ['name' => $name, 'pct' => $pv['share']]);
@@ -693,6 +714,7 @@ function contentArchive(PDO $db, string $kind, int $id, string $hash, array $cur
        ->execute([$kind === 'wl' ? $id : null, $kind === 'idx' ? $id : null, $hash, $cur['source_url'], $cur['description'],
                   (string)$cur['description_format'], CONTENT_ARCHIVE_NOTE, $cur['content_user_id']]);
     contentArchivePrune($db, $kind, $id);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, null, 'edit', (string)$db->lastInsertId());
 }
 
 /**
@@ -722,6 +744,7 @@ function contentArchivePrune(PDO $db, string $kind, int $homeId): int {
 function contentEditReject(PDO $db, array $cfg, array $e): bool {
     $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW() WHERE id = ?")->execute([(int)$e['id']]);
     forumDescProposalDone($db, $e, false);
+    if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'edit', (string)$e['id']);
     $name = contentNameFor($db, (string)$e['info_hash']);
     $isEdit = ($e['edit_kind'] ?? 'rewrite') === 'edit';
     contentNotify($db, $cfg, $e['user_id'] !== null ? (int)$e['user_id'] : null,
@@ -781,6 +804,7 @@ function contentDelete(PDO $db, array $cfg, array $rec, array $me, string $right
         foreach ($waiting as $w) {
             $up->execute([CONTENT_WITHDRAWN_NOTE, (int)$w['id']]);
             $withdrawn += $up->rowCount();
+            if (function_exists('imagesRefsTouch')) imagesRefsTouch($db, $cfg, 'edit', (string)$w['id']);
             $pid = $w['user_id'] !== null ? (int)$w['user_id'] : 0;
             if ($pid > 0 && $pid !== $meId && !isset($told[$pid])) {
                 $told[$pid] = true;

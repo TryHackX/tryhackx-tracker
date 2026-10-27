@@ -6372,6 +6372,7 @@ Można je ponownie pobrać z DHT albo zaimportować jeszcze raz, jeśli zachowas
     'perm.favourites.view_others' => 'Podgląd profili i list ulubionych innych osób',
     'perm.friends.use' => 'Obserwowanie innych członków, przyjmowanie zaproszeń do znajomych i udostępnianie list znajomym',
     'perm.home.stats' => 'Podgląd widżetu statystyk na żywo na stronie głównej',
+    'perm.images.public' => 'Pokazywanie wgranych przez nich obrazów jako galerii na ich publicznym profilu',
     'perm.index.files' => 'Podgląd list plików w wynikach wyszukiwania w indeksie',
     'perm.index.files_all' => 'Wczytywanie całej listy plików w wynikach wyszukiwania w indeksie (nie tylko pierwszej strony)',
     'perm.index.magnet' => 'Podgląd info hashy i kopiowanie linków magnet w wynikach wyszukiwania w indeksie',
