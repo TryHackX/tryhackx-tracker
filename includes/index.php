@@ -2126,34 +2126,31 @@ function indexLikeEscape(string $s): string {
  */
 const INDEX_LIST_CATALOG_CAP = 10000;
 
-function indexListFromCatalog(PDO $db, string $search, string $col, bool $desc, int $perPage, int $offset, string $columns): ?array {
-    $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
-    $like = '%' . indexLikeEscape($search) . '%';
-    $dir = $desc ? 'DESC' : 'ASC';
-    $hashes = null;
-    $total = 0;
-    foreach ($ft !== '' ? [['MATCH(name) AGAINST(? IN BOOLEAN MODE)', $ft], ['name LIKE ?', $like]] : [['name LIKE ?', $like]] as [$where, $arg]) {
+function indexListCatalogHits(PDO $db, array $clauses, int $limit): ?array {
+    foreach ($clauses as [$where, $args]) {
         try {
-            $sql = "SELECT COUNT(*) FROM (SELECT 1 FROM index_catalog WHERE " . $where . " LIMIT " . (INDEX_LIST_CATALOG_CAP + 1) . ") x";
+            $sql = "SELECT info_hash FROM index_catalog WHERE " . $where . " LIMIT " . $limit;
             $st = $db->prepare($sql);
-            $st->execute([$arg]);
-            $total = (int)$st->fetchColumn();
-            $sql = "SELECT info_hash FROM index_catalog WHERE " . $where . " ORDER BY " . $col . " " . $dir . ", info_hash " . $dir . " LIMIT ? OFFSET ?";
-            $st = $db->prepare($sql);
-            $st->bindValue(1, $arg, PDO::PARAM_STR);
-            $st->bindValue(2, $perPage, PDO::PARAM_INT);
-            $st->bindValue(3, $offset, PDO::PARAM_INT);
-            $st->execute();
-            $hashes = $st->fetchAll(PDO::FETCH_COLUMN);
-            break;
+            $st->execute($args);
+            return [$st->fetchAll(PDO::FETCH_COLUMN), [$where, $args]];
         } catch (\Throwable $e) {
-            $hashes = null;
+            if (indexIsStatementTimeout($e)) throw new IndexSearchTimeout($e->getMessage(), 0, $e);
         }
     }
-    if ($hashes === null) return null;
-    $capped = $total > INDEX_LIST_CATALOG_CAP;
-    $total = min($total, INDEX_LIST_CATALOG_CAP);
-    if (!$hashes) return [$total, [], $capped];
+    return null;
+}
+
+function indexListFromCatalog(PDO $db, array $clause, string $col, bool $desc, int $perPage, int $offset, string $columns): array {
+    $dir = $desc ? 'DESC' : 'ASC';
+    $sql = "SELECT info_hash FROM index_catalog WHERE " . $clause[0] . " ORDER BY " . $col . " " . $dir . ", info_hash " . $dir . " LIMIT ? OFFSET ?";
+    $st = $db->prepare($sql);
+    $i = 1;
+    foreach ($clause[1] as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
+    $st->bindValue($i++, $perPage, PDO::PARAM_INT);
+    $st->bindValue($i, $offset, PDO::PARAM_INT);
+    $st->execute();
+    $hashes = $st->fetchAll(PDO::FETCH_COLUMN);
+    if (!$hashes) return [];
     $in = implode(',', array_fill(0, count($hashes), '?'));
     $sql = "SELECT " . $columns . " FROM index_hashes WHERE info_hash IN (" . $in . ")";
     $st = $db->prepare($sql);
@@ -2162,7 +2159,26 @@ function indexListFromCatalog(PDO $db, string $search, string $col, bool $desc, 
     foreach ($st->fetchAll() as $r) $byHash[$r['info_hash']] = $r;
     $rows = [];
     foreach ($hashes as $h) if (isset($byHash[$h])) $rows[] = $byHash[$h];
-    return [$total, $rows, $capped];
+    return $rows;
+}
+
+function indexListByHashes(PDO $db, array $where, array $params, array $hashes, string $columns, string $orderClause, int $perPage, int $offset): array {
+    if (!$hashes) return [0, []];
+    $w = $where;
+    $w[] = 'info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')';
+    $p = array_merge($params, array_values($hashes));
+    $whereClause = 'WHERE ' . implode(' AND ', $w);
+    $st = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
+    $st->execute($p);
+    $total = (int)$st->fetchColumn();
+    $limit = count($hashes);
+    $stmt = $db->prepare("SELECT * FROM (SELECT $columns FROM index_hashes $whereClause LIMIT $limit) lst ORDER BY $orderClause LIMIT ? OFFSET ?");
+    $i = 1;
+    foreach ($p as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
+    $stmt->bindValue($i++, $perPage, PDO::PARAM_INT);
+    $stmt->bindValue($i, $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    return [$total, $stmt->fetchAll()];
 }
 
 function indexListSelect(PDO $db, array $cfg, array $q): array {
@@ -2202,7 +2218,7 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
     $params = [];
     $search = trim((string)($q['search'] ?? ''));
     $searchFiles = !empty($q['search_files']) && $q['search_files'] !== '0';
-    $fulltextClause = null; $likeClause = null;
+    $fulltextClause = null; $likeClause = null; $fileHashes = []; $nameClauses = [];
     if ($search !== '') {
         if (indexIsHashPrefix($search)) {
             $where[] = "info_hash LIKE ?";
@@ -2210,6 +2226,10 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
         } else {
             $likeClause = ['sql' => "name LIKE ?", 'params' => ['%' . indexLikeEscape($search) . '%']];
             $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
+            $rw = $ft !== '' ? indexRankWords($search, ($cfg['search_count_common_words'] ?? '1') === '1') : ['c' => []];
+            $nameFt = $rw['c'] ? indexRankAllWords($rw) : ['MATCH(name) AGAINST(? IN BOOLEAN MODE)', [$ft]];
+            $nameClauses = $ft !== '' ? [['(' . $nameFt[0] . ')', $nameFt[1]], ['name LIKE ?', $likeClause['params']]]
+                                      : [['name LIKE ?', $likeClause['params']]];
             // Resolve the file half into a bounded list of hashes first, exactly as the public
             // catalogue search does, and for the same reason: `name … OR info_hash IN (SELECT …)`
             // cannot be served from indexes, so MariaDB scans index_hashes end to end. That is what
@@ -2240,10 +2260,10 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
                                            ['sql' => $inFiles, 'params' => $fileHashes]]];
             }
             if ($ft !== '') {
-                $fulltextClause = ['sql' => "MATCH(name) AGAINST(? IN BOOLEAN MODE)", 'params' => [$ft]];
+                $fulltextClause = ['sql' => '(' . $nameFt[0] . ')', 'params' => $nameFt[1]];
                 if ($inFiles) {
-                    $fulltextClause = ['sql' => "(MATCH(name) AGAINST(? IN BOOLEAN MODE) OR $inFiles)", 'params' => array_merge([$ft], $fileHashes),
-                                       'split' => [['sql' => 'MATCH(name) AGAINST(? IN BOOLEAN MODE)', 'params' => [$ft]],
+                    $fulltextClause = ['sql' => '((' . $nameFt[0] . ") OR $inFiles)", 'params' => array_merge($nameFt[1], $fileHashes),
+                                       'split' => [['sql' => '(' . $nameFt[0] . ')', 'params' => $nameFt[1]],
                                                    ['sql' => $inFiles, 'params' => $fileHashes]]];
                 }
             }
@@ -2336,15 +2356,23 @@ function indexListSelect(PDO $db, array $cfg, array $q): array {
 
     $total = 0; $rows = []; $capped = false;
     $first = explode(':', trim(explode(',', trim((string)($q['sort'] ?? 'last:desc')))[0]));
-    $catCols = ['last' => 'last_seen', 'size' => 'total_size', 'files' => 'files_count', 'name' => 'name'];
-    $cat = $search !== '' && !indexIsHashPrefix($search) && !$searchFiles && !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes'
-        && $minSeeders <= 0 && isset($catCols[$first[0] ?? '']) && indexCatalogReady($db)
-        ? indexListFromCatalog($db, $search, $catCols[$first[0]], strtolower($first[1] ?? 'asc') === 'desc', $perPage, $offset, $columns) : null;
-    if ($cat !== null) {
-        [$total, $rows, $capped] = $cat;
+    $catCols = ['last' => 'last_seen', 'size' => 'total_size', 'files' => 'files_count', 'name' => 'name',
+                'seeders' => 'eff_seeders', 'sseeders' => 'eff_seeders', 'leechers' => 'eff_leechers'];
+    $plain = !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0;
+    $found = $nameClauses && indexCatalogReady($db, array_key_exists('catalog', $q) ? (bool)$q['catalog'] : null)
+        ? indexListCatalogHits($db, $nameClauses, INDEX_LIST_CATALOG_CAP + 1) : null;
+    if ($found !== null && count($found[0]) <= INDEX_LIST_CATALOG_CAP) {
+        [$total, $rows] = indexListByHashes($db, $where, $params, array_values(array_unique(array_merge($found[0], $fileHashes))),
+                                            $columns, $orderClause, $perPage, $offset);
+    } elseif ($found !== null && $plain && !$fileHashes && isset($catCols[$first[0] ?? ''])) {
+        [$total, $capped] = [INDEX_LIST_CATALOG_CAP, true];
+        $rows = indexListFromCatalog($db, $found[1], $catCols[$first[0]], strtolower($first[1] ?? 'asc') === 'desc', $perPage, $offset, $columns);
     } elseif ($fulltextClause) {
         try { [$total, $rows] = $runQuery($fulltextClause); }
-        catch (\Throwable $e) { [$total, $rows] = $runQuery($likeClause); }
+        catch (\Throwable $e) {
+            if (indexIsStatementTimeout($e)) throw new IndexSearchTimeout($e->getMessage(), 0, $e);
+            [$total, $rows] = $runQuery($likeClause);
+        }
     } else {
         [$total, $rows] = $runQuery($likeClause);
     }

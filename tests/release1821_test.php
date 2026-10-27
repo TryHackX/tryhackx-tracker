@@ -60,7 +60,7 @@ check('… the review search has the panel\'s clear button, not the browser\'s',
       str_contains($src('templates/admin/moderation.php'), 'id="rq-search-clear"') && str_contains($src('assets/css/admin.css'), '::-webkit-search-cancel-button'));
 
 check('Index: a name search reads the narrow catalogue, counted up to a cap', function_exists('indexListFromCatalog') && INDEX_LIST_CATALOG_CAP === 10000
-      && str_contains($src('includes/index.php'), 'indexListFromCatalog($db, $search, $catCols[$first[0]]'));
+      && str_contains($src('includes/index.php'), 'indexListCatalogHits($db, $nameClauses, INDEX_LIST_CATALOG_CAP + 1)'));
 $db->exec("DELETE FROM index_catalog WHERE info_hash LIKE 'ce1821%'");
 $db->exec("DELETE FROM index_hashes WHERE info_hash LIKE 'ce1821%'");
 $ins = $db->prepare("INSERT INTO index_hashes (info_hash, name, first_seen, last_seen, meta_status) VALUES (?, ?, NOW(), NOW() - INTERVAL ? MINUTE, 'done')");
@@ -70,9 +70,10 @@ foreach ([1, 2, 3] as $i) {
     $ins->execute([$h, 'Zorblax release ' . $i, $i]);
     $cat->execute([$h, 'Zorblax release ' . $i, $i]);
 }
-$r = indexListFromCatalog($db, 'Zorblax', 'last_seen', true, 2, 0, 'info_hash, name');
-check('… the newest first, a page at a time, the total counted', is_array($r) && $r[0] === 3 && $r[2] === false
-      && array_column($r[1], 'name') === ['Zorblax release 1', 'Zorblax release 2'], json_encode($r));
+$hits = indexListCatalogHits($db, [['name LIKE ?', ['%Zorblax%']]], 10);
+$r = indexListFromCatalog($db, ['name LIKE ?', ['%Zorblax%']], 'last_seen', true, 2, 0, 'info_hash, name');
+check('… the newest first, a page at a time, the total counted', is_array($hits) && count($hits[0]) === 3
+      && array_column($r, 'name') === ['Zorblax release 1', 'Zorblax release 2'], json_encode([$hits, $r]));
 $db->exec("DELETE FROM index_catalog WHERE info_hash LIKE 'ce1821%'");
 $db->exec("DELETE FROM index_hashes WHERE info_hash LIKE 'ce1821%'");
 
