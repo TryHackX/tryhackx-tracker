@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.81.1] — 2026-10-27
+
+A description opened from the panel's Whitelist or Index page plays YouTube as the Info panel and the review queue do.
+
+- **YouTube in the panel's windows.** A whitelist entry and an index entry showed a description's videos as bare links;
+  they are now the same click-to-play player, behind the same YouTube setting.
+
 ## [1.81.0] — 2026-10-27
 
 Pictures follow the texts that show them: the site knows where each one is used, cleans up after texts that are gone, notices a partner's picture that changed behind the same address, and members get their own gallery. A topic hidden or deleted on the forum takes its description along (with homepage-blocks 2.12.0). Schema 100.
