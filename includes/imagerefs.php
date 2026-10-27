@@ -361,6 +361,17 @@ function imagesRemoteSettleRows(PDO $db, array $cfg, array $shas): int
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $map[(string)$r['url_sha']] = [(string)$r['url'], imagesUrl($cfg, (int)$r['id'], (int)$r['w'], (int)$r['h'], imagesExt($r))];
         }
+        try {
+            $st = $db->prepare("SELECT r.url_sha, r.url, x.image_id AS id, x.mime, x.w, x.h FROM image_remote r
+                                  JOIN image_removals x ON x.image_id = r.image_id
+                                 WHERE r.url_sha IN ($in) AND r.status = 'ignored' AND r.error = 'moderation'");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $map[(string)$r['url_sha']] = [(string)$r['url'], imagesUrl($cfg, (int)$r['id'], (int)$r['w'], (int)$r['h'], imagesRemovedExt($r))];
+            }
+        } catch (\Throwable $e) {
+            error_log('[images] removed copies not mapped: ' . $e->getMessage());
+        }
         if (!$map) continue;
         $in = implode(',', array_fill(0, count($map), '?'));
         $st = $db->prepare("SELECT src, src_key, url_sha FROM image_remote_refs WHERE url_sha IN ($in)");

@@ -219,7 +219,7 @@ function imagesRefusal(array $cfg, string $key, int $status, string $detail = ''
     $codes = ['api.media.too_large' => 'too_big', 'api.media.too_many_px' => 'too_many_pixels',
               'api.media.too_big_to_process' => 'too_many_pixels', 'api.media.store_failed' => 'upload_failed',
               'api.images.daily_limit' => 'daily_limit', 'api.images.daily_mb' => 'daily_mb', 'api.images.quota' => 'quota',
-              'api.images.shape' => 'bad_shape'];
+              'api.images.shape' => 'bad_shape', 'api.images.blocked' => 'blocked'];
     $vars += ['kb' => (int)floor(imagesMaxBytes($cfg) / 1024), 'mp' => imagesMaxMpx($cfg), 'px' => $detail,
               'kind' => strtoupper($detail), 'n' => imagesPerDay($cfg), 'max' => imagesQuotaMb($cfg), 'mb' => imagesPerDayMb($cfg)];
     return ['ok' => false, 'status' => $status, 'code' => $codes[$key] ?? 'bad_type', 'message' => __($key, $vars)];
@@ -251,6 +251,11 @@ function imagesShapeOk(int $w, int $h, float $maxRatio): bool
 function imagesStore(PDO $db, array $cfg, ?int $userId, string $bytes, string $name, string $source = 'upload', ?string $sourceUrl = null, array $opts = []): array
 {
     $sha = hash('sha256', $bytes);
+    $blocked = imagesBlockedSha($db, $sha);
+    if ($blocked !== null) {
+        if ($source === 'copy') return ['ok' => false, 'code' => 'blocked', 'removal' => (int)$blocked['image_id']];
+        return imagesRefusal($cfg, 'api.images.blocked', 403);
+    }
     $quota = imagesQuotaMb($cfg) * 1048576;
     $usage = ['today' => 0, 'today_bytes' => 0, 'bytes' => 0];
     $ratio = (float)($opts['max_ratio'] ?? 0);
@@ -655,10 +660,21 @@ function imagesRemoteDone(PDO $db, array $cfg, array $urls): array
     $st = $db->prepare("SELECT i.id, b.mime, b.w, b.h FROM image_remote r
                           JOIN images i ON i.id = r.image_id JOIN image_blobs b ON b.sha256 = i.blob_sha
                          WHERE r.url_sha = ? AND r.status = 'done'");
+    $gone = null;
+    try {
+        $gone = $db->prepare("SELECT x.image_id AS id, x.mime, x.w, x.h, 1 AS removed FROM image_remote r JOIN image_removals x ON x.image_id = r.image_id
+                               WHERE r.url_sha = ? AND r.status = 'ignored' AND r.error = 'moderation'");
+    } catch (\Throwable $e) {
+        $gone = null;
+    }
     foreach ($urls as $u) {
         $st->execute([hash('sha256', (string)$u)]);
         $r = $st->fetch(PDO::FETCH_ASSOC);
-        if ($r) $out[(string)$u] = imagesUrl($cfg, (int)$r['id'], (int)$r['w'], (int)$r['h'], imagesExt($r));
+        if (!$r && $gone !== null) {
+            $gone->execute([hash('sha256', (string)$u)]);
+            $r = $gone->fetch(PDO::FETCH_ASSOC);
+        }
+        if ($r) $out[(string)$u] = imagesUrl($cfg, (int)$r['id'], (int)$r['w'], (int)$r['h'], !empty($r['removed']) ? imagesRemovedExt($r) : imagesExt($r));
     }
     return $out;
 }
@@ -776,6 +792,11 @@ function imagesRemoteCopy(PDO $db, array $cfg, string $sha, string $url, int $tr
     if (!empty($f['ok'])) {
         $name = basename((string)parse_url($url, PHP_URL_PATH));
         $stored = imagesStore($db, $cfg, null, (string)$f['bytes'], $name !== '' ? $name : 'image', 'copy', $url);
+        if (empty($stored['ok']) && ($stored['code'] ?? '') === 'blocked') {
+            $db->prepare("UPDATE image_remote SET status = 'ignored', error = 'moderation', image_id = ?, done_at = NOW() WHERE url_sha = ?")
+               ->execute([(int)$stored['removal'], $sha]);
+            return ['ok' => false, 'error' => 'blocked', 'final' => true, 'rewritten' => imagesRemoteSettleRows($db, $cfg, [$sha])];
+        }
         if (empty($stored['ok'])) $f = ['ok' => false, 'error' => (string)($stored['code'] ?? 'bad_type')];
     }
     if (empty($f['ok'])) {
@@ -1159,6 +1180,98 @@ function imagesPanelDelete(PDO $db, int $id, ?array $cfg = null): bool
         error_log('[images] write back before delete of ' . $id . ': ' . $e->getMessage());
     }
     return imagesDelete($db, $id);
+}
+
+function imagesRemoval(PDO $db, int $id): ?array
+{
+    try {
+        $st = $db->prepare("SELECT * FROM image_removals WHERE image_id = ?");
+        $st->execute([$id]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        return $r ?: null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+function imagesBlockedSha(PDO $db, string $sha): ?array
+{
+    try {
+        $st = $db->prepare("SELECT * FROM image_removals WHERE blob_sha = ? AND blocked = 1 ORDER BY image_id LIMIT 1");
+        $st->execute([$sha]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        return $r ?: null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+function imagesRemovedExt(array $r): string
+{
+    return ($r['mime'] ?? '') === 'image/gif' ? 'webp' : 'gif';
+}
+
+function imagesModerationRemove(PDO $db, array $cfg, int $id, bool $block, string $by): array
+{
+    $row = imagesRow($db, $id);
+    if ($row === null) return ['ok' => false, 'error' => 'gone'];
+    $ids = [$id];
+    if ($block) {
+        $st = $db->prepare("SELECT id FROM images WHERE blob_sha = ? AND id <> ? ORDER BY id");
+        $st->execute([(string)$row['blob_sha'], $id]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $other) $ids[] = (int)$other;
+    }
+    $ins = $db->prepare("INSERT INTO image_removals (image_id, blob_sha, user_id, source, name, mime, w, h, full_w, full_h, blocked, removed_by)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE blocked = GREATEST(blocked, VALUES(blocked)), removed_by = VALUES(removed_by), removed_at = NOW()");
+    $done = [];
+    foreach ($ids as $one) {
+        $r = $one === $id ? $row : imagesRow($db, $one);
+        if ($r === null) continue;
+        $ins->execute([$one, (string)$r['blob_sha'], $r['user_id'] !== null ? (int)$r['user_id'] : null, (string)$r['source'] === 'copy' ? 'copy' : 'upload',
+                       (string)$r['name'], (string)$r['mime'], (int)$r['w'], (int)$r['h'], (int)$r['full_w'], (int)$r['full_h'], $block ? 1 : 0, mb_substr($by, 0, 64)]);
+        $db->prepare("UPDATE image_remote SET status = 'ignored', error = 'moderation' WHERE image_id = ?")->execute([$one]);
+        $map = [];
+        foreach ([['w', 'h'], ['full_w', 'full_h']] as [$a, $b]) {
+            $from = imagesUrl($cfg, $one, (int)$r[$a], (int)$r[$b], imagesExt($r));
+            $to = imagesUrl($cfg, $one, (int)$r[$a], (int)$r[$b], imagesRemovedExt($r));
+            $map[$from . '?full=1'] = $to . '?full=1';
+            $map[$from] = $to;
+        }
+        $refs = $db->prepare("SELECT src, src_key FROM image_refs WHERE image_id = ?");
+        $refs->execute([$one]);
+        foreach ($refs->fetchAll(PDO::FETCH_ASSOC) as $ref) {
+            $text = imagesRefsTextOf($db, (string)$ref['src'], (string)$ref['src_key']);
+            if ($text === null) continue;
+            $next = $text;
+            foreach ($map as $from => $to) $next = imagesReplaceUrl($next, $from, $to);
+            if ($next !== $text) imagesRefsWrite($db, (string)$ref['src'], (string)$ref['src_key'], $text, $next, $cfg);
+        }
+        imagesDelete($db, $one);
+        $done[] = $one;
+    }
+    return ['ok' => true, 'removed' => $done, 'blocked' => $block];
+}
+
+function imagesRemovedSvg(int $w, int $h, string $text): string
+{
+    $w = max(16, min(8192, $w));
+    $h = max(16, min(8192, $h));
+    $size = (int)max(9, min(32, $h / 8, $w / max(8, mb_strlen($text, 'UTF-8') * 0.6)));
+    $text = htmlspecialchars($text, ENT_QUOTES | ENT_XML1 | ENT_SUBSTITUTE, 'UTF-8');
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' . $w . '" height="' . $h . '" viewBox="0 0 ' . $w . ' ' . $h . '">'
+         . '<rect width="' . $w . '" height="' . $h . '" fill="#24282e"/>'
+         . '<text x="50%" y="50%" fill="#9aa3ad" font-family="system-ui, sans-serif" font-size="' . $size . '" text-anchor="middle" dominant-baseline="middle">' . $text . '</text>'
+         . '</svg>';
+}
+
+function imagesServeRemoved(PDO $db, int $id, int $w, int $h, string $ext, string $text): ?array
+{
+    $r = imagesRemoval($db, $id);
+    if ($r === null || !in_array($ext, ['webp', 'gif'], true)) return null;
+    if (!($w === (int)$r['w'] && $h === (int)$r['h']) && !($w === (int)$r['full_w'] && $h === (int)$r['full_h'])) return null;
+    return ['data' => imagesRemovedSvg($w, $h, $text), 'mime' => 'image/svg+xml', 'public' => false,
+            'etag' => '"removed-' . $id . '-' . $w . 'x' . $h . '"', 'name' => 'image-' . $id . '.svg'];
 }
 
 function imagesRemoteList(PDO $db, string $status, int $page): array
