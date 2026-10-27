@@ -1312,7 +1312,7 @@ check('… and there is ONE of it: the shoutbox, the emote cards and the inbox a
       && str_contains($peopleJs, 'window.askInPlace'));
 check('the lightbox\'s controls are inside the picture, revealed on hover, and always on without one',
       !str_contains($boxJs, 'shout-lb-bar') && !str_contains($css, '.shout-lb-bar')
-      && str_contains($lbJs, "el('div', { className: 'shout-lb-frame' }, [img, shut, orig, prev, next])")
+      && str_contains($lbJs, "el('div', { className: 'shout-lb-frame' }, [img, shut, flag, orig, prev, next])")
       && str_contains($css, '.shout-lb-frame:focus-within .shout-lb-orig, .shout-lb-frame:focus-within .shout-lb-close')
       && str_contains($css, "@media (hover: none) {\n    .shout-lb-orig, .shout-lb-close, .shout-lb-prev, .shout-lb-next { opacity: 1; pointer-events: auto; }"));
 check('every overlay closes on the backdrop only when the press STARTED there',

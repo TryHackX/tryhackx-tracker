@@ -8,7 +8,7 @@
  * ── where they are kept ─────────────────────────────────────────────────────────────────────────
  * `content_reports`, beside `message_reports` and not instead of it (see the schema's note): a message report
  * is a privacy rule — the reported line and the one before it, nothing else — and these are public words.
- * ONE table for the three kinds, keyed by the TARGET (kind, target_id, info_hash): a comment's or a shout's id,
+ * ONE table for the kinds, keyed by the TARGET (kind, target_id, info_hash): a comment's or a shout's id,
  * and the torrent a comment or a description belongs to. The words are kept AS REPORTED (`snapshot`): a shout
  * is pruned by retention, a comment can be corrected, a description replaced — the moderator reads what the
  * reporter read beside what is there now. One OPEN report per member per target is the database's rule
@@ -51,7 +51,7 @@ require_once __DIR__ . '/antispam.php';
 // (1.75.0). It lives in its own file; this one is where the report cards call it from.
 require_once __DIR__ . '/moderation.php';
 
-const CONTENT_REPORT_KINDS         = ['comment', 'description', 'shout'];
+const CONTENT_REPORT_KINDS         = ['comment', 'description', 'shout', 'image'];
 const CONTENT_REPORT_REASON_MAX    = 300;     // a member's reason
 const CONTENT_REPORT_TEXT_MAX      = 500;     // a moderator's note, answer and reason (the columns' width)
 const CONTENT_REPORT_RATE_PER_HOUR = 20;      // reports an account may file in an hour (contentReportFloodCheck())
@@ -68,13 +68,14 @@ function contentReportKindOn(array $cfg, string $kind): bool
     if ($kind === 'comment') return function_exists('commentsEnabled') && commentsEnabled($cfg);
     if ($kind === 'description') return function_exists('contentEnabled') && contentEnabled($cfg);
     if ($kind === 'shout') return function_exists('shoutEnabled') && shoutEnabled($cfg);
+    if ($kind === 'image') return function_exists('imagesRow');
     return false;
 }
 
 /** The panel permission of one kind's queue: panel.reports.comments.view, …descriptions.handle, … */
 function contentReportPerm(string $kind, string $what): string
 {
-    $plural = ['comment' => 'comments', 'description' => 'descriptions', 'shout' => 'shouts'][$kind] ?? 'none';
+    $plural = ['comment' => 'comments', 'description' => 'descriptions', 'shout' => 'shouts', 'image' => 'images'][$kind] ?? 'none';
     return 'panel.reports.' . $plural . '.' . ($what === 'handle' ? 'handle' : 'view');
 }
 
@@ -235,7 +236,32 @@ function contentReportTargetFor(PDO $db, array $cfg, ?array $me, string $kind, i
                 'author_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
                 'text' => (string)$row['body'], 'format' => (string)$row['body_format']];
     }
+    if ($kind === 'image') {
+        if ($id <= 0 || !function_exists('imagesRow')) return null;
+        $row = imagesRow($db, $id);
+        if ($row === null || !imagesIsPublic($db, $row)) return null;
+        return ['kind' => 'image', 'target_id' => (int)$row['id'], 'info_hash' => '',
+                'author_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
+                'text' => contentReportImageLine($cfg, $row), 'format' => 'plain'];
+    }
     return null;
+}
+
+function contentReportImageLine(array $cfg, array $row): string
+{
+    $line = trim((string)$row['name']) !== '' ? (string)$row['name'] : '#' . (int)$row['id'];
+    $line .= ' — ' . (int)$row['full_w'] . '×' . (int)$row['full_h'] . ', ' . max(1, (int)round((int)$row['bytes'] / 1024)) . ' KB';
+    $line .= ' — ' . imagesUrl($cfg, (int)$row['id'], (int)$row['full_w'], (int)$row['full_h'], imagesExt($row));
+    if ((string)$row['source'] === 'copy' && (string)($row['source_url'] ?? '') !== '') $line .= ' — ' . (string)$row['source_url'];
+    return $line;
+}
+
+function contentReportImageHtml(array $now): string
+{
+    $e = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    return '<a class="crep-img-link" href="' . $e((string)($now['full'] ?? '')) . '" target="_blank" rel="noopener">'
+         . '<img class="crep-img" loading="lazy" referrerpolicy="no-referrer" alt="" src="' . $e((string)($now['thumb'] ?? '')) . '"></a>'
+         . '<div class="crep-img-line">' . $e((string)($now['text'] ?? '')) . '</div>';
 }
 
 /** Has this member an OPEN report on this target? */
@@ -345,7 +371,7 @@ function contentReportRequest(PDO $db, array $cfg, ?array $me, array $input, str
     $hash = is_string($input['hash'] ?? null) ? strtolower(trim((string)$input['hash'])) : '';
     $t = contentReportTargetFor($db, $cfg, $me, $kind, $id, $hash);
     if ($t === null) return contentReportFail(404, 'not_found');
-    if ($t['author_id'] !== null && (int)$t['author_id'] === $uid) return contentReportFail(400, 'own');
+    if ($t['author_id'] !== null && (int)$t['author_id'] === $uid) return contentReportFail(400, $kind === 'image' ? 'own_image' : 'own');
     if (contentReportOpenBy($db, $kind, (int)$t['target_id'], (string)$t['info_hash'], $uid)) {
         return ['status' => 200, 'body' => ['success' => true, 'reported' => true, 'already' => true, 'message' => __('api.creport.already')]];
     }
@@ -381,7 +407,7 @@ function contentReportRequest(PDO $db, array $cfg, ?array $me, array $input, str
     antispamRecord($db, $ticket);
     if (function_exists('auditLog')) {
         auditLog($db, 'creport.file', ['target_type' => $kind, 'target_id' => $kind === 'description' ? $t['info_hash'] : (string)$t['target_id'],
-            'summary' => (string)($me['username'] ?? '#' . $uid) . ' → reported a ' . $kind . ($kind === 'shout' ? ' #' . $t['target_id'] : ' on ' . substr((string)$t['info_hash'], 0, 12)),
+            'summary' => (string)($me['username'] ?? '#' . $uid) . ' → reported a ' . $kind . (in_array($kind, ['shout', 'image'], true) ? ' #' . $t['target_id'] : ' on ' . substr((string)$t['info_hash'], 0, 12)),
             'detail' => ['report' => $rid, 'kind' => $kind, 'target' => (int)$t['target_id'], 'hash' => (string)$t['info_hash'],
                          'author_id' => $t['author_id']]]);
     }
@@ -558,7 +584,7 @@ function contentReportOpenCounts(PDO $db, array $kinds): array
  */
 function panelReportsWaiting(PDO $db, array $cfg): array
 {
-    $parts = ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 0, 'description' => 0, 'shout' => 0];
+    $parts = ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 0, 'description' => 0, 'shout' => 0, 'image' => 0];
     $count = static function (string $sql) use ($db): int {
         try { return (int)$db->query($sql)->fetchColumn(); } catch (\Throwable $e) { return 0; }
     };
@@ -605,6 +631,22 @@ function contentReportLike(string $s, bool $prefixOnly = false): string
 function contentReportCurrent(PDO $db, array $cfg, string $kind, int $targetId, string $hash): array
 {
     $gone = ['exists' => false, 'state' => 'gone', 'text' => '', 'format' => 'plain', 'author_id' => null, 'author' => '', 'name' => ''];
+    if ($kind === 'image') {
+        $row = function_exists('imagesRow') ? imagesRow($db, $targetId) : null;
+        if ($row === null) {
+            $rm = function_exists('imagesRemoval') ? imagesRemoval($db, $targetId) : null;
+            if ($rm === null) return $gone;
+            return ['state' => 'deleted', 'author_id' => $rm['user_id'] !== null ? (int)$rm['user_id'] : null, 'name' => (string)$rm['name'],
+                    'copy' => (string)$rm['source'] === 'copy', 'blocked' => (int)$rm['blocked'] === 1] + $gone;
+        }
+        $u = $row['user_id'] !== null ? userFindById($db, (int)$row['user_id']) : null;
+        return ['exists' => true, 'state' => 'visible', 'text' => contentReportImageLine($cfg, $row), 'format' => 'plain',
+                'author_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null, 'author' => $u ? (string)$u['username'] : '',
+                'name' => (string)$row['name'], 'copy' => (string)$row['source'] === 'copy', 'blocked' => false,
+                'thumb' => imagesUrl($cfg, (int)$row['id'], (int)$row['w'], (int)$row['h'], imagesExt($row)),
+                'full' => imagesUrl($cfg, (int)$row['id'], (int)$row['full_w'], (int)$row['full_h'], imagesExt($row)),
+                'places' => function_exists('imagesWhereUsed') ? imagesWhereUsed($db, (int)$row['id']) : []];
+    }
     if ($kind === 'comment') {
         $row = function_exists('commentRow') ? commentRow($db, $targetId) : null;
         $name = ($hash !== '' && function_exists('commentTorrentName')) ? commentTorrentName($db, $hash) : '';
@@ -770,7 +812,8 @@ function contentReportList(PDO $db, array $cfg, string $kind, array $f, int $pag
             'kind' => $kind, 'target_id' => $tid, 'hash' => $hash, 'name' => (string)($now['name'] ?? ''),
             'where' => contentReportWhere($cfg, $kind, $tid, $hash),
             'state' => (string)$now['state'], 'exists' => (bool)$now['exists'],
-            'html' => $now['exists'] ? contentReportRender($db, $cfg, $kind, (string)$now['text'], (string)$now['format'], $authorId) : '',
+            'html' => $now['exists'] ? ($kind === 'image' ? contentReportImageHtml($now) : contentReportRender($db, $cfg, $kind, (string)$now['text'], (string)$now['format'], $authorId)) : '',
+            'copy' => !empty($now['copy']), 'blocked' => !empty($now['blocked']), 'places' => $now['places'] ?? [],
             // what the moderator is looking at, for Remove to check nothing changed under them
             'sha' => $now['exists'] ? sha1((string)$now['text']) : '',
             // the words as the newest report found them, when they are not what is there now (changed, or gone)
@@ -890,8 +933,8 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
     $mode = ($input['mode'] ?? 'silent') === 'loud' ? 'loud' : 'silent';
     if ($action === 'warn') $mode = 'loud';
     $targetId = $kind === 'description' ? 0 : max(0, (int)($input['target_id'] ?? 0));
-    $hash = $kind === 'shout' ? '' : strtolower(trim((string)($input['hash'] ?? '')));
-    if ($kind !== 'shout' && !preg_match('/^[0-9a-f]{40}$/', $hash)) return contentReportPanelFail(400, 'not_found');
+    $hash = in_array($kind, ['shout', 'image'], true) ? '' : strtolower(trim((string)($input['hash'] ?? '')));
+    if (!in_array($kind, ['shout', 'image'], true) && !preg_match('/^[0-9a-f]{40}$/', $hash)) return contentReportPanelFail(400, 'not_found');
     $note = contentReportClean($input['note'] ?? '', CONTENT_REPORT_TEXT_MAX);
     // The answer to the reporters and the reason for the author are texts with LINES and a format (1.75.0): kept raw, judged
     // by reportTextValidate() — one character past the limit is read in so that "too long" is said, not cut off silently.
@@ -934,7 +977,7 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
                'reply' => reportTextAudit($reply), 'reply_format' => $reply !== '' ? $replyFormat : null,
                'reason' => reportTextAudit($reason), 'reason_format' => $reason !== '' ? $reasonFormat : null];
     $out = ['success' => true, 'action' => $action, 'mode' => $mode];
-    $what = $kind . ($kind === 'shout' ? ' #' . $targetId : ' on ' . ($name !== '' ? $name : substr($hash, 0, 12)));
+    $what = $kind . (in_array($kind, ['shout', 'image'], true) ? ' #' . $targetId : ' on ' . ($name !== '' ? $name : substr($hash, 0, 12)));
 
     if ($action === 'close' || $action === 'reopen') {
         if ($action === 'close') {
@@ -970,6 +1013,13 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
             $rec = contentRecordFor($db, $hash);
             if ($rec === null || !contentOccupied($rec)) return contentReportPanelFail(409, 'gone');
             contentDelete($db, $cfg, $rec, $me, 'any', ['notify' => false]);
+        } elseif ($kind === 'image') {
+            $r = imagesModerationRemove($db, $cfg, $targetId, !empty($input['block']), $by);
+            if (empty($r['ok'])) return contentReportPanelFail(409, 'gone');
+            $out['removed_images'] = count($r['removed']);
+            $out['blocked'] = (bool)$r['blocked'];
+            $detail['images'] = $r['removed'];
+            $detail['blocked'] = (bool)$r['blocked'];
         } else {
             $r = shoutDelete($db, $cfg, $me, $targetId, ['authority' => 'panel']);
             if (empty($r['ok'])) return contentReportPanelFail($r['error'] === 'not_found' ? 409 : 403, $r['error'] === 'not_found' ? 'gone' : (string)$r['error']);

@@ -910,6 +910,11 @@
 .crep-report .msgrep-reason { margin: 0.1rem 0 0.1rem; overflow-wrap: anywhere; }
 .crep-mode-hint { flex: 1 1 100%; font-size: 0.75rem; }
 .crep-body img { max-width: 100%; height: auto; }
+.crep-body .crep-img { display: block; max-height: 260px; width: auto; border-radius: 4px; }
+.crep-img-line { margin-top: 0.35rem; font-size: 0.8rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.crep-places { margin: 0.35rem 0 0.2rem; font-size: 0.8rem; }
+.crep-place + .crep-place::before { content: '· '; }
+.crep-block-opt { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-muted); }
 /* A member's warnings in Users (1.71.0): the count beside the status, the latest ones in the edit window. */
 .us-warned { margin-left: 0.35rem; font-size: 0.8rem; color: #e0b15a; white-space: nowrap; }
 .ue-warnings-list { margin: 0.2rem 0 0.2rem; padding-left: 1.1rem; color: #c9a45c; }

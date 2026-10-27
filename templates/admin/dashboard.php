@@ -39,7 +39,8 @@
         // Each kind's own glyph, as Settings draws it: the comments' bubble, a description's card, the room's.
         $crTabs = ['comment' => ['comments', 'bi-chat-left-text', 'a.reports.tab_comments'],
                    'description' => ['descriptions', 'bi-card-text', 'a.reports.tab_descriptions'],
-                   'shout' => ['shouts', 'bi-chat-left-dots', 'a.reports.tab_shouts']];
+                   'shout' => ['shouts', 'bi-chat-left-dots', 'a.reports.tab_shouts'],
+                   'image' => ['images', 'bi-image', 'a.reports.tab_images']];
         ?>
         <!-- Source Tabs -->
         <div class="source-tabs">

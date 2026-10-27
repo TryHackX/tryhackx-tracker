@@ -4631,6 +4631,27 @@ code.apidocs-v { background: none; padding: 0; color: var(--link); }
 @media (hover: none) {
     .shout-lb-orig, .shout-lb-close, .shout-lb-prev, .shout-lb-next { opacity: 1; pointer-events: auto; }
 }
+.shout-lb-report {
+    position: absolute; top: 0.15rem; left: 0.15rem; opacity: 0; pointer-events: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.75rem; height: 2.75rem; padding: 0; color: #fff; line-height: 1;
+    background: none; border: 0; border-radius: 6px; font: inherit; font-size: 1.1rem; cursor: pointer;
+    transition: opacity 0.15s, color 0.15s;
+}
+.shout-lb-report[hidden] { display: none; }
+.shout-lb-report .bi { display: inline-block; line-height: 1; text-shadow: 0 0 2px rgba(0, 0, 0, 0.95), 0 1px 5px rgba(0, 0, 0, 0.75); }
+.shout-lb-report:hover, .shout-lb-report.is-reported { color: var(--warning); }
+.shout-lb-report:focus { outline: none; }
+.shout-lb-report:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.shout-lb-frame:hover .shout-lb-report, .shout-lb-frame:focus-within .shout-lb-report { opacity: 1; pointer-events: auto; }
+.shout-lb-frame > .report-box {
+    position: absolute; left: 50%; bottom: 3.2rem; transform: translateX(-50%); z-index: 2;
+    width: min(26rem, calc(100vw - 2rem)); margin: 0; line-height: 1.4;
+    background: var(--bg-card); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+@media (hover: none) {
+    .shout-lb-report { opacity: 1; pointer-events: auto; }
+}
 .rt-body .rt-img { cursor: zoom-in; }
 .rt-body a .rt-img { cursor: pointer; }
 

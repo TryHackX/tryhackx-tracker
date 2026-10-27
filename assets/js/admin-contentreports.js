@@ -131,10 +131,32 @@
     }
 
     function stateWord(g) {
+        if (g.kind === 'image' && !g.exists && g.state === 'deleted') return t.key(g.blocked ? 'js.creport.state_image_blocked' : 'js.creport.state_image_removed');
         if (!g.exists) return t.key(g.state === 'none' ? 'js.creport.state_none' : g.state === 'deleted' ? 'js.creport.state_deleted' : 'js.creport.state_gone');
         if (g.kind === 'comment' && g.state === 'pending') return t.key('js.creport.state_pending');
         if (g.kind === 'description' && g.state !== 'approved') return t.key('js.creport.state_unpublished');
         return '';
+    }
+
+    function places(c, list) {
+        var line = el('div', 'crep-places text-muted');
+        if (!list.length) { line.appendChild(el('span', null, t.key('js.creport.not_used'))); c.appendChild(line); return; }
+        line.appendChild(el('span', null, t.key('js.creport.used_in')));
+        list.forEach(function (p) {
+            line.append(' ');
+            var label = p.kind === 'page' ? t.key('js.creport.place_page', { name: p.page || '' }) : t.key('js.creport.place_' + p.kind);
+            if (p.hash) {
+                var a = el('a', 'crep-place', label);
+                a.href = '?action=search&hash=' + encodeURIComponent(p.hash);
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.title = p.hash;
+                line.appendChild(a);
+            } else {
+                line.appendChild(el('span', 'crep-place', label));
+            }
+        });
+        c.appendChild(line);
     }
 
     function card(g) {
@@ -146,7 +168,7 @@
         head.appendChild(el('span', 'badge-table crep-kind', t.key('js.creport.kind_' + g.kind)));
         var person = g.author ? { name: g.author, avatar: g.author_avatar } : null;
         var nobody = g.guest_tag ? t.key('js.creport.guest', { tag: g.guest_tag }) : t.key(g.author_state === null && !g.author ? 'js.creport.no_author' : 'js.creport.nobody');
-        head.appendChild(phrase('span', 'msgrep-who', 'js.creport.head_' + g.kind, person || { name: nobody, avatar: '' },
+        head.appendChild(phrase('span', 'msgrep-who', g.kind === 'image' && g.copy ? 'js.creport.head_image_copy' : 'js.creport.head_' + g.kind, person || { name: nobody, avatar: '' },
                                 { name: g.name || (g.hash ? g.hash.slice(0, 12) + '…' : '') }));
         if (g.where) {
             var a = el('a', 'crep-where', t.key('js.creport.open_site'));
@@ -173,6 +195,7 @@
             box.appendChild(el('div', 'msgrep-gone text-muted', sw || t.key('js.creport.state_gone')));
         }
         c.appendChild(box);
+        if (g.kind === 'image' && g.exists) places(c, g.places || []);
         // …and as they were reported, when that is not what is there now.
         if (g.reported_html) {
             var was = el('div', 'msgrep-msg msgrep-ctx crep-was');
@@ -284,6 +307,7 @@
                 note: note.value.trim(),
                 reply: reply.getValue().trim(), reply_format: reply.getFormat(),
                 seen: action === 'remove' ? (g.sha || '') : '',
+                block: action === 'remove' && blockBox && blockBox.checked ? 1 : 0,
             });
             btn.disabled = false;
             if (r && r.success) {
@@ -322,10 +346,20 @@
             });
         };
 
+        var blockBox = null;
         var btns = el('div', 'msgrep-acts crep-btns');
         btns.appendChild(button(g.open ? t.key('js.msgrep.close') : t.key('js.msgrep.reopen'), 'btn-outline-secondary crep-close',
                                 function (b) { run(g.open ? 'close' : 'reopen', 0, b); }));
-        if (g.exists) btns.appendChild(confirmThen(t.key('js.creport.remove_q'), t.key('js.creport.remove'), 'btn-outline-danger crep-remove',
+        if (g.exists && g.kind === 'image') {
+            btns.appendChild(confirmThen(t.key('js.creport.remove_image_q'), t.key('js.creport.remove_image'), 'btn-outline-danger crep-remove',
+                                         function (b) { run('remove', 0, b); }));
+            var bl = el('label', 'crep-block-opt');
+            blockBox = document.createElement('input');
+            blockBox.type = 'checkbox';
+            bl.appendChild(blockBox);
+            bl.append(' ', t.key('js.creport.block_image'));
+            btns.appendChild(bl);
+        } else if (g.exists) btns.appendChild(confirmThen(t.key('js.creport.remove_q'), t.key('js.creport.remove'), 'btn-outline-danger crep-remove',
                                                    function (b) { run('remove', 0, b); }));
         if (account) btns.appendChild(confirmThen(t.key('js.creport.warn_q', { user: g.author }), t.key('js.creport.warn'), 'btn-outline-warning crep-warn',
                                                   function (b) { run('warn', 0, b); }));

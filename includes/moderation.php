@@ -206,7 +206,7 @@ function userModerate(PDO $db, array $cfg, array $req): array
     $days = max(0, min(MODERATION_MAX_DAYS, (int)($req['days'] ?? 0)));
 
     $src = is_array($req['src'] ?? null) ? $req['src'] : [];
-    $kind = in_array($src['kind'] ?? '', ['comment', 'description', 'shout', 'message', 'manual'], true) ? (string)$src['kind'] : 'manual';
+    $kind = in_array($src['kind'] ?? '', ['comment', 'description', 'shout', 'image', 'message', 'manual'], true) ? (string)$src['kind'] : 'manual';
     $hash = preg_match('/^[0-9a-f]{40}$/', (string)($src['hash'] ?? '')) ? (string)$src['hash'] : '';
     $srcId = max(0, (int)($src['id'] ?? 0));
     $name = (string)($src['name'] ?? '');
@@ -560,7 +560,7 @@ function moderationNoticeWarning(PDO $db, array $cfg, array $user, array $w): vo
             $title = langFor($lang, $action === 'mute' ? 'notify.warn_muted' : 'notify.warn_banned', ['date' => $date]);
         }
     } else {
-        $what = in_array($kind, ['comment', 'description', 'shout', 'message', 'manual'], true) ? $kind : 'manual';
+        $what = in_array($kind, ['comment', 'description', 'shout', 'image', 'message', 'manual'], true) ? $kind : 'manual';
         if ($action === 'remove' && $what === 'manual') $what = 'message';   // (no words were removed by hand: never reached)
         $title = langFor($lang, ($action === 'remove' ? 'notify.warn_removed_' : 'notify.warn_about_') . $what, ['name' => (string)$w['name']]);
     }

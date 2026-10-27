@@ -156,7 +156,7 @@ check('the schema is at 84 or later, and its line says what 84 is', TRACKER_SCHE
 $create = ['content_reports' => '', 'user_warnings' => ''];
 foreach (trackerSchemaStatements() as $sql) foreach ($create as $t => $_) if (str_contains($sql, "CREATE TABLE IF NOT EXISTS `$t`")) $create[$t] = $sql;
 check('a fresh install creates content_reports: kind, target, torrent, author, reporter, the words as reported, open_slot and its key',
-      str_contains($create['content_reports'], "`kind` ENUM('comment','description','shout') NOT NULL")
+      str_contains($create['content_reports'], "`kind` ENUM('comment','description','shout','image') NOT NULL")
       && str_contains($create['content_reports'], '`snapshot` TEXT NOT NULL') && str_contains($create['content_reports'], '`open_slot` TINYINT UNSIGNED DEFAULT 1')
       && str_contains($create['content_reports'], 'UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`)')
       && str_contains($create['content_reports'], 'KEY `idx_crep_queue` (`kind`, `status`, `created_at`)'));
@@ -362,11 +362,11 @@ check('the Info panel\'s answer carries the description\'s two flags', str_conta
 /* ══ 4. the queue ═════════════════════════════════════════════════════════ */
 $asOwner();
 $kinds = contentReportPanelKinds($db, $cfgOn);
-check('the owner\'s session sees and works all three kinds', array_keys($kinds) === ['comment', 'description', 'shout'] && !array_filter($kinds, fn($k) => !$k['handle'] || !$k['on']));
+check('the owner\'s session sees and works all four kinds', array_keys($kinds) === ['comment', 'description', 'shout', 'image'] && !array_filter($kinds, fn($k) => !$k['handle'] || !$k['on']));
 $asPanelUser($modId);
 $kinds = contentReportPanelKinds($db, $cfgOn);
-check('a moderator sees and works the three kinds — and not the message queue',
-      count($kinds) === 3 && !array_filter($kinds, fn($k) => !$k['handle']) && !panelCan($db, $cfgOn, 'panel.messages.view'));
+check('a moderator sees and works the four kinds — and not the message queue',
+      count($kinds) === 4 && !array_filter($kinds, fn($k) => !$k['handle']) && !panelCan($db, $cfgOn, 'panel.messages.view'));
 $db->prepare("INSERT INTO user_groups (slug, name, description, priority, is_default, is_system, permissions) VALUES ('crtest_readonly', 'crtest read only', 'content_reports_test', 3, 0, 0, ?)")
    ->execute([json_encode(['panel.access' => true, 'panel.reports.comments.view' => true])]);
 $roGid = (int)$db->lastInsertId();
@@ -381,7 +381,7 @@ check('… and acting there is refused: 403 no_permission', $r['status'] === 403
 // The header's one Reports number (1.74.3, panelReportsWaiting()): the tabs' own numbers added, each only where the session sees that tab.
 $w = panelReportsWaiting($db, $cfgOn);
 check('the header\'s Reports number, for the comments-only session: the comments\' open targets and nothing of the torrent, message or other queues',
-      $w['parts'] === ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 3, 'description' => 0, 'shout' => 0] && $w['total'] === 3, json_encode($w));
+      $w['parts'] === ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 3, 'description' => 0, 'shout' => 0, 'image' => 0] && $w['total'] === 3, json_encode($w));
 $asNobody();
 check('no panel session: no tab at all, and the page closed', contentReportPanelKinds($db, $cfgOn) === [] && !adminPageAllowed($db, $cfgOn, 'admin'));
 check('… and nothing waits for it either (the header number is 0)', panelReportsWaiting($db, $cfgOn)['total'] === 0);

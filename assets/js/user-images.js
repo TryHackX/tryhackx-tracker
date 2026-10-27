@@ -160,7 +160,7 @@
 
         function lightbox(r) {
             if (!window.SiteLightbox) { window.open(r.full_url, '_blank', 'noopener'); return; }
-            var list = S.rows.map(function (x) { return { src: x.full_url, href: x.full_url, alt: x.name || '' }; });
+            var list = S.rows.map(function (x) { return { src: x.full_url, href: x.full_url, alt: x.name || '', report: false }; });
             window.SiteLightbox.get().show(list, Math.max(0, S.rows.indexOf(r)), null);
         }
 

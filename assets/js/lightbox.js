@@ -18,6 +18,17 @@
     }
 
     var lb = null;
+    function canReport() {
+        return typeof APP_REPORT_IMAGES !== 'undefined' && APP_REPORT_IMAGES === true && !!window.Reports;
+    }
+    function ownImage(src) {
+        try {
+            var u = new URL(String(src || ''), location.href);
+            if (u.origin !== location.origin) return 0;
+            var m = /\/i\/(\d+)-\d+x\d+\.(?:webp|gif)$/.exec(u.pathname);
+            return m ? Number(m[1]) : 0;
+        } catch (e) { return 0; }
+    }
     function build() {
         var img = el('img', { className: 'shout-lb-img', alt: '', referrerpolicy: 'no-referrer' });
         var orig = el('a', { className: 'shout-lb-orig', target: '_blank', rel: 'noopener noreferrer' }, [
@@ -33,13 +44,29 @@
         var next = el('button', { type: 'button', className: 'shout-lb-next', title: t.key('js.shout.lb_next'),
                                   'aria-label': t.key('js.shout.lb_next') },
                       el('i', { className: 'bi bi-chevron-right', 'aria-hidden': 'true' }));
+        var flag = el('button', { type: 'button', className: 'shout-lb-report', hidden: true },
+                      el('i', { className: 'bi bi-flag', 'aria-hidden': 'true' }));
+        var frame = el('div', { className: 'shout-lb-frame' }, [img, shut, flag, orig, prev, next]);
         var root = el('div', { className: 'shout-lightbox', hidden: true, role: 'dialog', 'aria-modal': 'true',
-                               'aria-label': t.key('js.shout.lb_label') }, [
-            el('div', { className: 'shout-lb-frame' }, [img, shut, orig, prev, next]),
-        ]);
+                               'aria-label': t.key('js.shout.lb_label') }, [frame]);
         var from = null;
         var items = [];
         var at = 0;
+        var reported = {};
+        function dropBox() {
+            var box = frame.querySelector(':scope > .report-box');
+            if (box) box.remove();
+        }
+        function flagState(id) {
+            var on = !!reported[id];
+            var label = t.key(on ? 'js.report.reported_tip' : 'js.report.tip_image');
+            flag.dataset.id = id ? String(id) : '';
+            flag.classList.toggle('is-reported', on);
+            flag.setAttribute('title', label);
+            flag.setAttribute('aria-label', label);
+            flag.setAttribute('aria-pressed', on ? 'true' : 'false');
+            flag.querySelector('i').className = 'bi ' + (on ? 'bi-flag-fill' : 'bi-flag');
+        }
         function show(i) {
             at = (i + items.length) % items.length;
             var it = items[at];
@@ -47,9 +74,14 @@
             img.src = it.src;
             orig.href = it.href || it.src;
             prev.hidden = next.hidden = items.length < 2;
+            dropBox();
+            var id = canReport() && it.report !== false ? ownImage(it.src) : 0;
+            flag.hidden = !id;
+            flagState(id);
         }
         function close() {
             if (root.hidden) return;
+            dropBox();
             root.hidden = true;
             img.removeAttribute('src');
             document.removeEventListener('keydown', onKey, true);
@@ -59,6 +91,8 @@
         }
         function onKey(e) {
             if (root.hidden) return;
+            var a = document.activeElement;
+            if (a && a.closest && a.closest('.report-box')) return;
             if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); return; }
             if (items.length > 1 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
                 e.preventDefault();
@@ -67,6 +101,7 @@
             }
             if (e.key !== 'Tab') return;
             var stops = items.length > 1 ? [prev, orig, next, shut] : [orig, shut];
+            if (!flag.hidden) stops.unshift(flag);
             var i = stops.indexOf(document.activeElement);
             e.preventDefault();
             stops[(i + (e.shiftKey ? stops.length - 1 : 1) + stops.length) % stops.length].focus();
@@ -78,6 +113,14 @@
             if (onBackdrop(e.target) && lbFromBackdrop) close();
         });
         shut.addEventListener('click', close);
+        flag.addEventListener('click', function () {
+            var id = Number(flag.dataset.id || 0);
+            if (!id || !window.Reports || reported[id] || frame.querySelector(':scope > .report-box')) return;
+            window.Reports.open(flag, frame, { kind: 'image', id: id }, function () {
+                reported[id] = true;
+                if (Number(flag.dataset.id || 0) === id) flagState(id);
+            });
+        });
         prev.addEventListener('click', function () { show(at - 1); });
         next.addEventListener('click', function () { show(at + 1); });
         document.body.appendChild(root);

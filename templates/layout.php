@@ -17,9 +17,10 @@ $navUser = usersEnabled($cfg) ? currentUser($db) : null;
 // the CAPTCHA's own box, which the other pages load for their forms.
 $commentsHere = in_array($action, ['search', 'u', 'account'], true) && function_exists('commentsEnabled') && commentsEnabled($cfg);
 // Reporting a comment, a description or a shout (1.71.0, includes/reports.php): the flag's box, for a reader whose
-// account may report while any of the three is on. The rows it serves say themselves whether a flag is drawn.
+// account may report while any kind is on. The rows it serves say themselves whether a flag is drawn.
 $reportsHere = $navUser !== null && function_exists('contentReportMayReport') && contentReportMayReport($db, $cfg, $navUser)
-    && (contentReportKindOn($cfg, 'comment') || contentReportKindOn($cfg, 'description') || contentReportKindOn($cfg, 'shout'));
+    && (contentReportKindOn($cfg, 'comment') || contentReportKindOn($cfg, 'description') || contentReportKindOn($cfg, 'shout')
+        || contentReportKindOn($cfg, 'image'));
 // A GUEST who may comment solves a CAPTCHA every time (the anti-spam layer's guest rule, includes/antispam.php), so
 // the box and its script are on the page from the start. A member meets one only at the top of a ladder, rarely:
 // the box is then drawn on demand from the server's answer (assets/js/captcha.js), and nobody else's page loads a
@@ -123,6 +124,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
         ? ['avatars' => userAvatarsEnabled($cfg),
            'def' => userAvatarDefaultMode($cfg) === 'image' ? substr(strtolower((string)$cfg['avatar_default_sha']), 0, 16) : '']
         : ['avatars' => false, 'def' => '']) ?>;
+    const APP_REPORT_IMAGES = <?= json_encode($reportsHere && contentReportKindOn($cfg, 'image')) ?>;
     <?php if (($cfg['contact_obfuscate'] ?? '0') === '1' && !empty($cfg['site_email'])): ?>
     const OBF_EMAIL = <?= obfuscateEmail($cfg['site_email']) ?>;
     <?php endif; ?>
