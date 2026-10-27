@@ -32,7 +32,7 @@ try {
     $cols = array_column($db->query("SHOW COLUMNS FROM api_clients")->fetchAll(PDO::FETCH_ASSOC), 'Default', 'Field');
     check('a key has image_consent, unset until the partner says', array_key_exists('image_consent', $cols) && $cols['image_consent'] === null
           && array_key_exists('image_consent_at', $cols), json_encode([$cols['image_consent'] ?? 'missing']));
-    check('the schema is 98, and the columns are in it twice (fresh install and upgrade)', TRACKER_SCHEMA_VERSION === 98
+    check('the schema is 98, and the columns are in it twice (fresh install and upgrade)', TRACKER_SCHEMA_VERSION >= 98
           && (int)($cfg['schema_version'] ?? 0) >= 98 && substr_count($src('includes/schema.php'), 'image_consent') >= 4);
     check('the key\'s pictures and consent come with the key at authentication',
           str_contains($src('includes/api_auth.php'), 'describe_mode, describe_accounts, image_domains, image_consent'));

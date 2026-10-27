@@ -34,6 +34,11 @@ $navExtra = $navExtra ?? null;   // an optional block rendered first, inside the
             $navBadge = ' <span id="nav-reports-badge" class="appeals-count-badge' . ($wait['total'] > 0 ? '' : ' d-hidden') . '" data-parts="'
                       . sanitize((string)json_encode($wait['parts'])) . '">' . ($wait['total'] > 0 ? (int)$wait['total'] : '') . '</span>';
         }
+        if ($item['action'] === 'admin-moderation' && panelCan($db, $cfg, 'panel.whitelist.content')) {
+            require_once __DIR__ . '/../../includes/content.php';
+            $modNav = contentPendingCount($db) + (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn();
+            $navBadge = ' <span id="nav-review-badge" class="appeals-count-badge' . ($modNav > 0 ? '' : ' d-hidden') . '">' . ($modNav > 0 ? (int)$modNav : '') . '</span>';
+        }
         ?>
         <a href="<?= $baseUrl ?>?action=<?= $item['action'] ?>"
            class="btn btn-sm btn-outline-info<?= $isHere ? ' active' : '' ?>"

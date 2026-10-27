@@ -59,7 +59,7 @@ function forumDescTopic($t): ?array {
     if ($disc < 1 || $post < 1) return null;
     $author = is_array($t['author'] ?? null) ? $t['author'] : [];
     $extId = isset($author['id']) && (is_string($author['id']) || is_int($author['id'])) ? mb_substr(trim((string)$author['id']), 0, 191) : '';
-    $content = is_string($t['content'] ?? null) ? str_replace(["\r\n", "\r"], "\n", $t['content']) : null;
+    $content = is_string($t['content'] ?? null) ? (string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', str_replace(["\r\n", "\r"], "\n", $t['content'])) : null;
     $hashes = [];
     foreach (is_array($t['hashes'] ?? null) ? $t['hashes'] : [] as $h) {
         $h = is_string($h) ? strtolower(trim($h)) : '';
@@ -276,6 +276,16 @@ function forumDescProposalDone(PDO $db, array $e, bool $applied): void {
         return;
     }
     $db->prepare("UPDATE forum_descs SET state = 'declined', edit_id = NULL WHERE edit_id = ?")->execute([(int)$e['id']]);
+}
+
+function forumDescDecided(PDO $db, string $hash, string $format, string $text, bool $approved): void {
+    if ($approved) {
+        $db->prepare("UPDATE forum_descs SET state = 'imported' WHERE info_hash = ? AND state = 'declined' AND import_sha = ?")
+           ->execute([strtolower($hash), forumDescSha($format, $text)]);
+        return;
+    }
+    $db->prepare("UPDATE forum_descs SET state = 'declined' WHERE info_hash = ? AND state = 'imported' AND import_sha = ?")
+       ->execute([strtolower($hash), forumDescSha($format, $text)]);
 }
 
 function forumDescRewritten(PDO $db, int $whitelistId, string $old, string $new): void {

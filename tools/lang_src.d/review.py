@@ -1,0 +1,93 @@
+S = {}
+
+
+def add(prefix, pairs):
+    for k, v in pairs.items():
+        key = prefix + '.' + k if prefix else k
+        assert key not in S, 'duplicate key ' + key
+        assert isinstance(v, tuple) and len(v) == 2, key
+        S[key] = v
+
+
+add('api.content', {
+    'changed': ('This text changed after it was opened. Look at it again.',
+                'Ten tekst zmienił się, odkąd go otwarto. Przejrzyj go jeszcze raz.'),
+})
+
+add('a.moderation', {
+    'tab_review': ('To review', 'Do przejrzenia'),
+    'rv_descs': ('Descriptions', 'Opisy'),
+    'rv_edits': ('Proposed changes', 'Propozycje zmian'),
+    'rv_search_ph': ('Name, hash or a word from the text', 'Nazwa, hash lub słowo z tekstu'),
+    'rv_author_ph': ('Author', 'Autor'),
+    'rv_status': ('State', 'Stan'),
+    'rv_status_pending': ('Waiting', 'Czekające'),
+    'rv_status_approved': ('Published', 'Opublikowane'),
+    'rv_status_rejected': ('Rejected', 'Odrzucone'),
+    'rv_status_all': ('Every state', 'Każdy stan'),
+    'rv_status_forum': ('Forum: needs a look', 'Forum: wymaga uwagi'),
+    'rv_source': ('Source', 'Źródło'),
+    'rv_source_all': ('Every source', 'Każde źródło'),
+    'rv_source_forum': ('From the forum', 'Z forum'),
+    'rv_source_site': ('Written here', 'Napisane tutaj'),
+    'rv_format': ('Format', 'Format'),
+    'rv_format_all': ('Every format', 'Każdy format'),
+    'rv_sort': ('Order', 'Kolejność'),
+    'rv_sort_oldest': ('Oldest first', 'Najstarsze najpierw'),
+    'rv_sort_newest': ('Newest first', 'Najnowsze najpierw'),
+    'rv_sort_long': ('Longest first', 'Najdłuższe najpierw'),
+    'rv_sort_short': ('Shortest first', 'Najkrótsze najpierw'),
+    'rv_sort_score': ('Worst rated first', 'Najgorzej oceniane najpierw'),
+    'rv_per': (':n a page', ':n na stronę'),
+    'rv_select_page': ('Select this page', 'Zaznacz tę stronę'),
+    'rv_explain': ('Each row says what was sent, by whom and when. Open a row to read the whole text as a visitor would see it.',
+                   'Każdy wiersz mówi, co przysłano, kto i kiedy. Rozwiń wiersz, aby przeczytać cały tekst tak, jak zobaczy go odwiedzający.'),
+    'pn_title': ('Act on the author', 'Działanie wobec autora'),
+    'pn_action': ('What', 'Co'),
+    'pn_warn': ('A warning', 'Ostrzeżenie'),
+    'pn_mute': ('Silence', 'Wyciszenie'),
+    'pn_ban': ('Ban', 'Ban'),
+    'pn_days': ('For how many days', 'Na ile dni'),
+    'pn_days_hint': ('0 = until somebody lifts it.', '0 = dopóki ktoś nie zdejmie.'),
+    'pn_tell': ('Tell the member, with the reason', 'Powiadom osobę, z podaniem powodu'),
+    'pn_reason': ('Reason', 'Powód'),
+    'pn_reject': ('Also reject this description', 'Odrzuć też ten opis'),
+    'pn_go': ('Apply', 'Zastosuj'),
+})
+
+add('js.review', {
+    'selected': ('Selected: :n', 'Zaznaczone: :n'),
+    'select_matching': ('Select all :n that match', 'Zaznacz wszystkie pasujące (:n)'),
+    'clear_selection': ('Clear the selection', 'Wyczyść zaznaczenie'),
+    'approve_selected': ('Publish the selected', 'Opublikuj zaznaczone'),
+    'reject_selected': ('Reject the selected', 'Odrzuć zaznaczone'),
+    'approve_title': ('Publish :n descriptions?', 'Opublikować opisy (:n)?'),
+    'approve_body': ('Each one is published exactly as you were shown it. A text that changed since you opened the list is left alone.',
+                     'Każdy zostanie opublikowany dokładnie w takiej wersji, jaką widzisz. Tekst, który zmienił się od otwarcia listy, zostanie pominięty.'),
+    'reject_title': ('Reject :n descriptions', 'Odrzuć opisy (:n)'),
+    'working': ('Working: :done of :n', 'Trwa: :done z :n'),
+    'done_ok': ('Done: :n.', 'Zrobione: :n.'),
+    'done_changed': (':n changed since you opened them and were left alone.', 'Zmienione od otwarcia i pominięte: :n.'),
+    'done_failed': (':n could not be decided.', 'Nie udało się rozstrzygnąć: :n.'),
+    'changed': ('This text changed since you opened it. The list was refreshed: look at it again.',
+                'Ten tekst zmienił się, odkąd go otwarto. Lista została odświeżona: przejrzyj go jeszcze raz.'),
+    'written_here': ('written here', 'napisany tutaj'),
+    'author_only': ('Show only this author', 'Pokaż tylko tego autora'),
+    'forum_author': (':user on the forum', ':user na forum'),
+    'chars': ('Characters', 'Znaki'),
+    'pics': ('Pictures', 'Obrazy'),
+    'vids': ('YouTube videos', 'Filmy YouTube'),
+    'sent': ('Registered', 'Zarejestrowano'),
+    'open_text': ('Show the text', 'Pokaż tekst'),
+    'hide_text': ('Hide the text', 'Zwiń tekst'),
+    'open_site': ('Open its Info panel', 'Otwórz jego panel Info'),
+    'warn': ('Warn', 'Ostrzeż'),
+    'mute': ('Silence', 'Wycisz'),
+    'ban': ('Ban', 'Zbanuj'),
+    'no_account': ('The author has no account here; act on the forum.', 'Autor nie ma tu konta; zareaguj na forum.'),
+    'acted_warn': ('The author was warned.', 'Autor dostał ostrzeżenie.'),
+    'acted_mute': ('The author is silenced.', 'Autor jest wyciszony.'),
+    'acted_ban': ('The author is banned.', 'Autor jest zbanowany.'),
+    'reason_needed': ('Write the reason: the member is told it.', 'Wpisz powód: osoba go zobaczy.'),
+    'empty_forum': ('Nothing from the forum needs a look.', 'Nic z forum nie wymaga uwagi.'),
+})

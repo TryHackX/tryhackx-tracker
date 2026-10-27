@@ -55,7 +55,8 @@ function adminNavItems(): array {
         ['action' => 'admin-users',     'label' => 'Users',     'icon' => 'bi-people',      'anchor' => '#section-users',    'perm' => 'panel.users.view'],
         // Who is silenced or banned, every warning, the automatic penalties (1.75.0, includes/moderation.php). Settings has
         // no section of its own for it: the one switch is on the page, and the owner's copy is in Settings → User accounts.
-        ['action' => 'admin-moderation', 'label' => 'Moderation', 'icon' => 'bi-shield-exclamation', 'anchor' => '#section-users', 'perm' => 'panel.moderation.view'],
+        ['action' => 'admin-moderation', 'label' => 'Moderation', 'icon' => 'bi-shield-exclamation', 'anchor' => '#section-users', 'perm' => 'panel.moderation.view',
+         'any' => ['panel.whitelist.content']],
         ['action' => 'admin-images',    'label' => 'Images',    'icon' => 'bi-image',       'anchor' => '#section-images',   'perm' => 'panel.images.view'],
         ['action' => 'admin-backups',   'label' => 'Backups',   'icon' => 'bi-archive',     'anchor' => '#section-backups',  'perm' => 'panel.backups.view'],
         ['action' => 'admin-audit',     'label' => 'Log',       'icon' => 'bi-journal-text','anchor' => '',                  'perm' => 'panel.audit.view'],

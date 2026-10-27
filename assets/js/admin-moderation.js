@@ -389,7 +389,8 @@
         S.view = view;
         say('');
         document.querySelectorAll('#mod-tabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-        ['restricted', 'warnings', 'auto'].forEach(v => $('mod-view-' + v).classList.toggle('d-hidden', v !== view));
+        ['review', 'restricted', 'warnings', 'auto'].forEach(v => { const pane = $('mod-view-' + v); if (pane) pane.classList.toggle('d-hidden', v !== view); });
+        if (view === 'review' && window.ModReview) window.ModReview.show();
         if (view === 'restricted') loadRestricted();
         if (view === 'warnings') { S.warn.next = null; loadWarnings(false); }
         if (view === 'auto') { S.auto.next = null; loadAuto(false); }
@@ -419,6 +420,9 @@
         $('mod-auto-on').addEventListener('change', () => { S.enabled = $('mod-auto-on').checked; paintAutoState(); });
         const logout = $('btn-logout');
         if (logout) logout.addEventListener('click', async () => { try { await apiCall('admin/logout', 'POST', {}); } catch (e) {} location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
-        switchView('restricted');
+        const views = ['review', 'restricted', 'warnings', 'auto']
+            .filter(v => (v === 'review' ? document.body.dataset.mayReview : document.body.dataset.mayView) === '1');
+        const want = location.hash.slice(1);
+        switchView(views.includes(want) ? want : (views[0] || 'restricted'));
     });
 })();

@@ -500,6 +500,7 @@ function richtextEmoji(): array {
  */
 function richtextRender(?string $text, string $format, array $cfg, bool $signedIn = false, int $depth = 0): string {
     $text = (string)$text;
+    if ($depth === 0) $text = (string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
     if (trim($text) === '') return '';
 
     // ── [hide] comes out FIRST, on the raw text, before any other rule exists ──
@@ -552,8 +553,8 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         return "\x00CODE" . (count($stash) - 1) . "\x00";
     };
     if ($format === 'bbcode') {
-        $s = preg_replace_callback('/\[code\](.*?)\[\/code\]/is',
-            fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $s);
+        $s = richtextUpToLast($s, '[/code]', fn($h) => preg_replace_callback('/\[code\](.*?)\[\/code\]/is',
+            fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $h) ?? $h);
     } elseif ($format === 'flarum') {
         $s = richtextFlarumCode($s, $keep);
     } else {
@@ -635,8 +636,11 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         $s = preg_replace('/==(.+?)==/s', '<mark class="rt-mark">$1</mark>', $s);
         $s = preg_replace('/(?<!~)~([^~\s][^~\n]*)~(?!~)/', '<sub>$1</sub>', $s);
         $s = preg_replace('/\^([^\^\s][^\^\n]*)\^/', '<sup>$1</sup>', $s);
-        $s = preg_replace('/\|\|(.+?)\|\|/s',
-            '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s);
+        $spoilers = 0;
+        $s = preg_replace_callback('/\|\|(.+?)\|\|/s', function ($m) use (&$spoilers) {
+            if (++$spoilers > RICHTEXT_SPOILERS_MAX) return $m[0];
+            return '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">' . $m[1] . '</div></details>';
+        }, $s) ?? $s;
         $s = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function ($m) {
             $u = richtextSafeUrl(html_entity_decode($m[2], ENT_QUOTES, 'UTF-8'));
             if ($u === null) return '';
@@ -647,9 +651,7 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
             // early and left the rest of the attribute loose in the document — the linkifier then
             // built an <a> inside what had been the src. An attribute is text, so it is treated as
             // text: tags stripped, entities decoded once, then escaped for an attribute.
-            $alt = htmlspecialchars(
-                html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8'),
-                ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $alt = richtextAlt($m[1]);
             return '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="' . $alt
                  . '" src="' . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
         }, $s);
@@ -764,8 +766,10 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         $a = richtextLinkAttrs(html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'), $cfg);
         return $a === '' ? $m[1] : '<a' . $a . '>' . $m[1] . '</a>';
     }, $s);
-    foreach ($anchors as $i => $html) {
-        $s = str_replace("\x00LINK" . $i . "\x00", $html, $s);
+    if ($anchors) {
+        $map = [];
+        foreach ($anchors as $i => $html) $map["\x00LINK" . $i . "\x00"] = $html;
+        $s = strtr($s, $map);
     }
     if ($format === 'flarum') $s = richtextFlarumGaps($s, $stash);
 
@@ -785,14 +789,18 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
     $s = emojiFaRenderHtml($s, $cfg);
 
     // Put the stashed blocks back BEFORE paragraphs are decided, so the pass below sees real tags.
-    foreach ($stash as $i => $html) {
-        $s = str_replace("\x00CODE" . $i . "\x00", $html, $s);
+    if ($stash) {
+        $map = [];
+        foreach ($stash as $i => $html) $map["\x00CODE" . $i . "\x00"] = $html;
+        $s = strtr($s, $map);
     }
     // REVERSE order. Extraction is innermost-first, so block 0 is nested inside block 1; restoring
     // forwards replaces 0 before 1 has put its placeholder back into the string, and the inner block
     // then stays a placeholder in the output.
-    foreach (array_reverse($hidden, true) as $i => $html) {
-        $s = str_replace("\x01HIDE" . $i . "\x01", $html, $s);
+    if ($hidden) {
+        $map = [];
+        foreach ($hidden as $i => $html) $map["\x01HIDE" . $i . "\x01"] = $html;
+        for ($pass = 0; $pass < 8 && str_contains($s, "\x01HIDE"); $pass++) $s = strtr($s, $map);
     }
 
     return richtextOwnImages(richtextParagraphs($s), $cfg);
@@ -841,13 +849,13 @@ function richtextBbcodeRules(string $s, array $cfg): string {
     // returned NULL, which the next pattern turned into "" and the whole description vanished.
     // Anchoring the title to "no ] inside" leaves one position per opener. The `?? $s` is the
     // belt to that brace: if the engine ever gives up again, the text stays as it was.
-    $s = preg_replace_callback('/\[quote=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\](.*?)\[\/quote\]/is',
-        fn($m) => '<blockquote class="rt-quote"><cite class="rt-cite">' . trim($m[1]) . '</cite>' . $m[2] . '</blockquote>', $s) ?? $s;
-    $s = preg_replace('/\[quote\](.*?)\[\/quote\]/is', '<blockquote class="rt-quote">$1</blockquote>', $s) ?? $s;
+    $s = richtextUpToLast($s, '[/quote]', fn($h) => preg_replace_callback('/\[quote=(?:&quot;|&#039;)?([^\]\n]{1,64}?)(?:&quot;|&#039;)?\](.*?)\[\/quote\]/is',
+        fn($m) => '<blockquote class="rt-quote"><cite class="rt-cite">' . trim($m[1]) . '</cite>' . $m[2] . '</blockquote>', $h) ?? $h);
+    $s = richtextUpToLast($s, '[/quote]', fn($h) => preg_replace('/\[quote\](.*?)\[\/quote\]/is', '<blockquote class="rt-quote">$1</blockquote>', $h) ?? $h);
 
     // ── spoilers ──
-    $s = preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
-        fn($m) => '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $s) ?? $s;
+    $s = richtextUpToLast($s, '[/spoiler]', fn($h) => preg_replace_callback('/\[spoiler=(?:&quot;|&#039;)?([^\]\n]{1,80}?)(?:&quot;|&#039;)?\](.*?)\[\/spoiler\]/is',
+        fn($m) => '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>' . trim($m[1]) . '</summary><div class="rt-spoiler-body">' . $m[2] . '</div></details>', $h) ?? $h);
     $s = preg_replace('/\[spoiler\](.*?)\[\/spoiler\]/is',
         '<details class="rt-spoiler"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i>Spoiler</summary><div class="rt-spoiler-body">$1</div></details>', $s) ?? $s;
 
@@ -955,6 +963,7 @@ function richtextLabelRow(string $html): string {
 }
 
 const RICHTEXT_IMG_MAX_H = 520;
+const RICHTEXT_SPOILERS_MAX = 500;
 
 function richtextOwnImages(string $html, array $cfg): string {
     $base = rtrim(trim((string)($cfg['site_url'] ?? '')), '/');
@@ -974,11 +983,23 @@ function richtextOwnImages(string $html, array $cfg): string {
         $html) ?? $html;
 }
 
+function richtextAlt(string $raw): string {
+    $raw = (string)preg_replace('/[\x00-\x06][A-Z]*\d+[\x00-\x06]/', '', $raw);
+    $raw = (string)preg_replace('/[\x00-\x1F\x7F]/', '', html_entity_decode(strip_tags($raw), ENT_QUOTES, 'UTF-8'));
+    return htmlspecialchars($raw, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function richtextUpToLast(string $s, string $close, callable $fn): string {
+    $at = strripos($s, $close);
+    if ($at === false) return $s;
+    $cut = $at + strlen($close);
+    return $fn(substr($s, 0, $cut)) . substr($s, $cut);
+}
+
 function richtextImgTag(string $url, string $alt = ''): string {
     $u = richtextSafeUrl(html_entity_decode($url, ENT_QUOTES, 'UTF-8'));
     if ($u === null) return '';
-    $alt = (string)preg_replace('/[\x03\x05\x06]\d+[\x03\x05\x06]/', '', $alt);
-    $alt = htmlspecialchars(html_entity_decode(strip_tags($alt), ENT_QUOTES, 'UTF-8'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    $alt = richtextAlt($alt);
     return '<img class="rt-img" loading="lazy" referrerpolicy="no-referrer" alt="' . $alt . '" src="'
          . htmlspecialchars($u, ENT_QUOTES, 'UTF-8') . '">';
 }
@@ -993,11 +1014,49 @@ function richtextFlarumAttrs(string $raw): array {
     return $out;
 }
 
+function richtextFences(string $s, callable $keep): string {
+    if (!preg_match('/^[ \t]{0,3}(?:`{3}|~{3})/m', $s)) return $s;
+    $lines = explode("\n", $s);
+    $closers = [];
+    foreach ($lines as $i => $line) {
+        if (preg_match('/^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/', $line, $m)) $closers[$m[1]][] = $i;
+    }
+    if (!$closers) return $s;
+    $tildes = array_values(array_filter(array_keys($closers), fn($r) => $r[0] === '~'));
+    usort($tildes, fn($a, $b) => strlen($b) <=> strlen($a));
+    $next = [];
+    $out = [];
+    $n = count($lines);
+    for ($i = 0; $i < $n; $i++) {
+        $line = $lines[$i];
+        $j = null;
+        if (preg_match('/^[ \t]{0,3}(`{3,}|~{3,})[^`]*$/', $line, $m)) {
+            $runs = $m[1][0] === '~' ? array_filter($tildes, fn($r) => strlen($r) <= strlen($m[1])) : (isset($closers[$m[1]]) ? [$m[1]] : []);
+            foreach ($runs as $run) {
+                $list = $closers[$run];
+                $k = $next[$run] ?? 0;
+                while ($k < count($list) && $list[$k] < $i + 2) $k++;
+                $next[$run] = $k;
+                if ($k < count($list)) {
+                    $j = $list[$k];
+                    break;
+                }
+            }
+        }
+        if ($j !== null) {
+            $out[] = $keep('<pre class="rt-code"><code>' . implode("\n", array_slice($lines, $i + 1, $j - $i - 1)) . '</code></pre>');
+            $i = $j;
+            continue;
+        }
+        $out[] = $line;
+    }
+    return implode("\n", $out);
+}
+
 function richtextFlarumCode(string $s, callable $keep): string {
-    $s = preg_replace_callback('/\[code(?:=[^\]\n]{0,32})?\](.*?)\[\/code\]/is',
-        fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $s) ?? $s;
-    $s = preg_replace_callback('/^[ \t]{0,3}(`{3,}|~{3,})[^\n`]*\n([\s\S]*?)\n[ \t]{0,3}\1[ \t]*$/m',
-        fn($m) => $keep('<pre class="rt-code"><code>' . $m[2] . '</code></pre>'), $s) ?? $s;
+    $s = richtextUpToLast($s, '[/code]', fn($h) => preg_replace_callback('/\[code(?:=[^\]\n]{0,32})?\](.*?)\[\/code\]/is',
+        fn($m) => $keep('<pre class="rt-code"><code>' . trim($m[1], "\n") . '</code></pre>'), $h) ?? $h);
+    $s = richtextFences($s, $keep);
     return preg_replace_callback('/(?<!`)(`+)(?!`)([^\n]+?)(?<!`)\1(?!`)/',
         fn($m) => $keep('<code class="rt-inline">' . trim($m[2]) . '</code>'), $s) ?? $s;
 }
@@ -1008,8 +1067,8 @@ function richtextFlarumRules(string $s, array $cfg): string {
         $esc[] = $m[1];
         return "\x03" . (count($esc) - 1) . "\x03";
     }, $s) ?? $s;
-    $s = preg_replace('/(?:^|\n)[ \t]*\[magnet\][\s\S]*?\[\/magnet\][ \t]*(?=\n|$)/i', '', $s) ?? $s;
-    $s = preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/i', '', $s) ?? $s;
+    $s = richtextUpToLast($s, '[/magnet]', fn($h) => preg_replace('/(?:^|\n)[ \t]*\[magnet\][\s\S]*?\[\/magnet\][ \t]*(?=\n|$)/i', '', $h) ?? $h);
+    $s = richtextUpToLast($s, '[/magnet]', fn($h) => preg_replace('/\[magnet\][\s\S]*?\[\/magnet\]/i', '', $h) ?? $h);
     $s = preg_replace('/@&quot;((?:(?!&quot;)[^\n]){1,64})&quot;#[pug]\d+/', '@$1', $s) ?? $s;
     $s = preg_replace_callback('/\[upl-image-preview\b([^\]]*)\]/i', function ($m) {
         $a = richtextFlarumAttrs($m[1]);
@@ -1044,7 +1103,9 @@ function richtextLitedownRules(string $s, array $cfg): string {
         return "\x05" . (count($held) - 1) . "\x05";
     };
     $s = preg_replace_callback('/<[^<>]*>/', fn($m) => $hold($m[0]), $s) ?? $s;
-    $s = preg_replace_callback('/&gt;!(?=\S)([^\n]*?\S)!&lt;|\|\|(?=\S)([^\n]*?\S)\|\|/', function ($m) use ($hold) {
+    $spoilers = 0;
+    $s = preg_replace_callback('/&gt;!(?=\S)([^\n]*?\S)!&lt;|\|\|(?=\S)([^\n]*?\S)\|\|/', function ($m) use ($hold, &$spoilers) {
+        if (++$spoilers > RICHTEXT_SPOILERS_MAX) return $m[0];
         return $hold('<span class="rt-ispoiler" tabindex="0">') . (($m[1] ?? '') !== '' ? $m[1] : ($m[2] ?? '')) . $hold('</span>');
     }, $s) ?? $s;
 

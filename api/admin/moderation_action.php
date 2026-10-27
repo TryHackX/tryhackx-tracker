@@ -32,9 +32,12 @@ $flag = static fn($v): bool => $v === true || $v === 1 || $v === '1' || $v === '
 if ($op === 'apply') {
     $action = (string)($input['action'] ?? '');
     if (!in_array($action, ['warn', 'mute', 'ban'], true)) jsonResponse(['success' => false, 'error' => 'unknown_action'], 400);
+    $src = is_array($input['src'] ?? null) && in_array($input['src']['kind'] ?? '', ['description', 'comment', 'shout'], true)
+        ? ['kind' => (string)$input['src']['kind'], 'id' => (int)($input['src']['id'] ?? 0), 'hash' => (string)($input['src']['hash'] ?? '')]
+        : ['kind' => 'manual'];
     $m = userModerate($db, $cfg, ['user_id' => (int)($input['user_id'] ?? 0), 'action' => $action, 'days' => (int)($input['days'] ?? 0),
                                   'loud' => $action === 'warn' || $flag($input['loud'] ?? false), 'reason' => $input['reason'] ?? '',
-                                  'reason_format' => $input['reason_format'] ?? 'plain', 'src' => ['kind' => 'manual']]);
+                                  'reason_format' => $input['reason_format'] ?? 'plain', 'src' => $src]);
     if (empty($m['ok'])) $refuse($m);
     auditSuppress();
     jsonResponse(['success' => true, 'op' => 'apply', 'action' => $action, 'warning' => $m['warning'], 'count' => $m['count'],

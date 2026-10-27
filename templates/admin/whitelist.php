@@ -51,52 +51,11 @@
             <button class="source-tab" data-view="banned"><i class="bi bi-slash-circle"></i> <?= _h('a.wl.tab_banned') ?> <span id="tab-badge-banned" class="wl-tab-count"></span></button>
             <button class="source-tab" data-view="clients"><i class="bi bi-key"></i> <?= _h('a.wl.tab_clients') ?></button>
             <button class="source-tab" data-view="bans"><i class="bi bi-shield-x"></i> <?= _h('a.wl.tab_bans') ?></button>
-            <button class="source-tab" data-view="review"><i class="bi bi-eye"></i> <?= _h('a.wl.tab_review') ?> <span id="tab-badge-review" class="wl-tab-count"></span></button>
-        </div>
-
-        <!-- ===== Review queue: source links and descriptions waiting to be published ===== -->
-        <div class="wl-view d-hidden" id="view-review">
-            <div class="rv-subtabs" id="rv-subtabs">
-                <button type="button" class="source-tab active" data-sub="queue"><i class="bi bi-inbox"></i> <?= _h('a.wl.rv_submissions') ?> <span id="rv-sub-count" class="wl-tab-count"></span></button>
-                <button type="button" class="source-tab" data-sub="edits"><i class="bi bi-pencil-square"></i> <?= _h('a.wl.rv_rewrites') ?> <span id="rv-edits-count" class="wl-tab-count"></span></button>
-            </div>
-
-            <div id="rv-pane-queue">
-                <div class="admin-toolbar-card">
-                    <div class="toolbar-row">
-                        <div class="toolbar-search">
-                            <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
-                            <div class="search-input-wrap">
-                                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="rv-search" placeholder="<?= _h('a.wl.rv_search_ph') ?>">
-                                <button type="button" class="search-clear-btn" id="rv-search-clear" title="<?= _h('a.wl.clear_search') ?>"><i class="bi bi-x-lg"></i></button>
-                            </div>
-                            <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="rv-status" title="<?= _h('a.wl.rv_status_title') ?>">
-                                <option value="pending"><?= _h('a.wl.rv_st_pending') ?></option>
-                                <option value="approved"><?= _h('a.wl.rv_st_approved') ?></option>
-                                <option value="rejected"><?= _h('a.wl.rv_st_rejected') ?></option>
-                                <option value="all"><?= _h('a.wl.rv_st_all') ?></option>
-                                <option value="forum"><?= _h('a.wl.rv_st_forum') ?></option>
-                            </select>
-                        </div>
-                        <div class="toolbar-right"><span id="rv-total" class="text-muted wl-total"></span></div>
-                    </div>
-                    <div class="rv-explain wl-small text-muted"><?= __('a.wl.rv_explain') ?></div>
-                </div>
-                <div id="rv-list"></div>
-                <div class="admin-pagination" id="rv-pagination"></div>
-            </div>
-
-            <div id="rv-pane-edits" class="d-hidden">
-                <div class="rv-pane-intro">
-                    <div class="rv-pane-intro-icon"><i class="bi bi-pencil-square"></i></div>
-                    <div class="rv-pane-intro-text">
-                        <strong><?= _h('a.wl.rv_edits_head') ?></strong>
-                        <span><?= __('a.wl.rv_edits_note') ?></span>
-                    </div>
-                    <span id="rv-edits-total" class="rv-pane-intro-count"></span>
-                </div>
-                <div id="rv-edits-list"></div>
-            </div>
+<?php if (panelCan($db, $cfg, 'panel.whitelist.content')):
+    require_once __DIR__ . '/../../includes/content.php';
+    $wlWaiting = contentPendingCount($db) + (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn(); ?>
+            <a class="source-tab" href="<?= $baseUrl ?>?action=admin-moderation#review"><i class="bi bi-eye"></i> <?= _h('a.wl.tab_review') ?> <span id="tab-badge-review" class="wl-tab-count"><?= $wlWaiting > 0 ? (int)$wlWaiting : '' ?></span> <i class="bi bi-box-arrow-up-right wl-tab-ext" aria-hidden="true"></i></a>
+<?php endif; ?>
         </div>
 
         <!-- ===== Whitelist view ===== -->

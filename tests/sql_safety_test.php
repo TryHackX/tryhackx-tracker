@@ -161,7 +161,6 @@ $REVIEWED = [
     // Integers by the time they arrive. LIMIT/OFFSET cannot be bound in every driver mode.
     'includes/index.php:$remaining'            => 'cast with (int) at the concatenation',
     'includes/index.php:$cfg'                  => 'not in the SQL: the argument to indexProtectDays(), which returns an int',
-    'api/admin/wl_content.php:$off'            => 'computed from (int)$page, never from input directly',
 
     // A query that is itself a literal, passed by reference.
     'includes/index.php:$a'                    => '$a[2] is a literal SQL string from the $arms array above it',
@@ -225,8 +224,8 @@ $REVIEWED = [
     // plus, when there is a search, four LIKE placeholders — and every value is bound. The search
     // text itself never enters the string: it goes through the LIKE escape and then into the
     // bound-argument list.
-    'api/admin/wl_content.php:$whereW'         => 'literal conditions with ? placeholders for the whitelist branch; values bound',
-    'api/admin/wl_content.php:$whereC'         => 'literal conditions with ? placeholders for the hash_content branch; values bound',
+    'api/admin/wl_content.php:$f'              => "the queue's FROM … WHERE for each branch and its ORDER BY, built in the same file from literal conditions with ? placeholders and a closed map of sorts; values bound",
+    'api/admin/wl_content.php:$wlcCount'       => 'a closure of the same file returning literal length and count expressions for a column it is passed as a literal (w.description / c.description)',
 
     // The installer, reviewed with the same care and holding up: the identifier is validated
     // before it is used, and the one value interpolated goes through PDO::quote().

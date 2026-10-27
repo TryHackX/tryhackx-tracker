@@ -433,7 +433,7 @@ function contentAttach(PDO $db, array $cfg, string $hash, array $in, ?array $use
     $hash = strtolower($hash);
     $descOn = ($cfg['wl_allow_description'] ?? '0') === '1';
     $srcOn  = ($cfg['wl_allow_source_url'] ?? '0') === '1';
-    $desc = $descOn ? trim((string)($in['description'] ?? '')) : '';
+    $desc = $descOn ? trim((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', (string)($in['description'] ?? ''))) : '';
     $src  = $srcOn ? trim((string)($in['source_url'] ?? '')) : '';
     // Normalised whatever else arrives: both homes store it in an ENUM, so a
     // format nobody asked for is a write that either fails or lands as ''. It used to be checked only
@@ -564,6 +564,9 @@ function contentApprove(PDO $db, array $cfg, string $kind, int $id): bool {
     $table = contentTableFor($kind);
     $db->prepare("UPDATE `$table` SET content_status = 'approved', content_reviewed_at = NOW(),
                          content_rejected_note = NULL WHERE id = ?")->execute([$id]);
+    if ($kind === 'wl' && function_exists('forumDescDecided')) {
+        forumDescDecided($db, (string)$row['info_hash'], (string)$row['description_format'], (string)($row['description'] ?? ''), true);
+    }
     $name = contentNameFor($db, (string)$row['info_hash']);
     contentNotify($db, $cfg, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
         'notify.content_published', 'notify.content_published_body', ['name' => $name, 'hash' => $row['info_hash']]);
@@ -578,6 +581,9 @@ function contentReject(PDO $db, array $cfg, string $kind, int $id, ?string $note
     // Kept, not deleted. If the same submitter argues, the text they actually sent is still here.
     $db->prepare("UPDATE `$table` SET content_status = 'rejected', content_reviewed_at = NOW(),
                          content_rejected_note = ? WHERE id = ?")->execute([$note !== '' ? $note : null, $id]);
+    if ($kind === 'wl' && function_exists('forumDescDecided')) {
+        forumDescDecided($db, (string)$row['info_hash'], (string)$row['description_format'], (string)($row['description'] ?? ''), false);
+    }
     $name = contentNameFor($db, (string)$row['info_hash']);
     contentNotify($db, $cfg, $row['content_user_id'] !== null ? (int)$row['content_user_id'] : null,
         'notify.content_rejected', $note !== '' ? 'notify.content_rejected_body_note' : 'notify.content_rejected_body',

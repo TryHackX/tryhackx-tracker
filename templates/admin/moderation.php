@@ -11,8 +11,15 @@
     <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
     <?= langJsBridge($baseUrl) ?>
 </head>
+<?php
+require_once __DIR__ . '/../../includes/content.php';
+$modView = panelCan($db, $cfg, 'panel.moderation.view');
+$modReview = panelCan($db, $cfg, 'panel.whitelist.content');
+$modWaiting = $modReview ? contentPendingCount($db) + (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn() : 0;
+?>
 <body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>"
-      data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>" data-users-url="<?= sanitize($baseUrl . '?action=admin-users') ?>">
+      data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>" data-users-url="<?= sanitize($baseUrl . '?action=admin-users') ?>"
+      data-may-view="<?= $modView ? '1' : '0' ?>" data-may-review="<?= $modReview ? '1' : '0' ?>" data-search-url="<?= sanitize($baseUrl . '?action=search&hash=') ?>">
     <div class="admin-container admin-wide wl-page" role="main">
         <div class="admin-header">
             <h1 class="admin-title"><i class="bi bi-shield-exclamation"></i> <?= _h('a.moderation.title') ?> <span class="idx-subtitle"><?= _h('a.moderation.subtitle') ?></span></h1>
@@ -22,14 +29,84 @@
         <?php /* Three views of one thing — what has been done to members and what can still be undone. The tab bar is this page's own
                  (assets/js/admin-moderation.js); the badge on the first carries the number of members restricted right now. */ ?>
         <div class="source-tabs" id="mod-tabs">
-            <button type="button" class="source-tab active" data-view="restricted"><i class="bi bi-person-lock"></i> <?= _h('a.moderation.tab_restricted') ?> <span id="mod-restricted-badge" class="appeals-count-badge d-hidden"></span></button>
+<?php if ($modReview): ?>
+            <button type="button" class="source-tab" data-view="review"><i class="bi bi-inbox"></i> <?= _h('a.moderation.tab_review') ?> <span id="mod-review-badge" class="wl-tab-count"><?= $modWaiting > 0 ? (int)$modWaiting : '' ?></span></button>
+<?php endif; ?>
+<?php if ($modView): ?>
+            <button type="button" class="source-tab" data-view="restricted"><i class="bi bi-person-lock"></i> <?= _h('a.moderation.tab_restricted') ?> <span id="mod-restricted-badge" class="appeals-count-badge d-hidden"></span></button>
             <button type="button" class="source-tab" data-view="warnings"><i class="bi bi-exclamation-triangle"></i> <?= _h('a.moderation.tab_warnings') ?></button>
             <button type="button" class="source-tab" data-view="auto"><i class="bi bi-robot"></i> <?= _h('a.moderation.tab_auto') ?></button>
+<?php endif; ?>
         </div>
         <div id="mod-said" class="crep-said" aria-live="polite"></div>
 
+<?php if ($modReview): ?>
+        <div class="wl-view d-hidden" id="mod-view-review">
+            <div class="source-tabs rq-subtabs" id="rq-subtabs">
+                <button type="button" class="source-tab active" data-sub="queue"><i class="bi bi-file-earmark-text"></i> <?= _h('a.moderation.rv_descs') ?> <span id="rq-q-count" class="wl-tab-count"></span></button>
+                <button type="button" class="source-tab" data-sub="edits"><i class="bi bi-pencil-square"></i> <?= _h('a.moderation.rv_edits') ?> <span id="rq-e-count" class="wl-tab-count"></span></button>
+            </div>
+            <div id="rq-pane-queue">
+                <div class="admin-toolbar-card rq-toolbar">
+                    <div class="toolbar-row rq-filters">
+                        <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary rq-search" id="rq-search" maxlength="200" placeholder="<?= _h('a.moderation.rv_search_ph') ?>" aria-label="<?= _h('a.moderation.rv_search_ph') ?>">
+                        <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary rq-author" id="rq-author" maxlength="64" placeholder="<?= _h('a.moderation.rv_author_ph') ?>" aria-label="<?= _h('a.moderation.rv_author_ph') ?>">
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="rq-status" aria-label="<?= _h('a.moderation.rv_status') ?>">
+                            <option value="pending"><?= _h('a.moderation.rv_status_pending') ?></option>
+                            <option value="approved"><?= _h('a.moderation.rv_status_approved') ?></option>
+                            <option value="rejected"><?= _h('a.moderation.rv_status_rejected') ?></option>
+                            <option value="all"><?= _h('a.moderation.rv_status_all') ?></option>
+                            <option value="forum"><?= _h('a.moderation.rv_status_forum') ?></option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="rq-source" aria-label="<?= _h('a.moderation.rv_source') ?>">
+                            <option value=""><?= _h('a.moderation.rv_source_all') ?></option>
+                            <option value="forum"><?= _h('a.moderation.rv_source_forum') ?></option>
+                            <option value="site"><?= _h('a.moderation.rv_source_site') ?></option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="rq-format" aria-label="<?= _h('a.moderation.rv_format') ?>">
+                            <option value=""><?= _h('a.moderation.rv_format_all') ?></option>
+                            <option value="bbcode">BBCode</option>
+                            <option value="markdown">Markdown</option>
+                            <option value="flarum">Flarum</option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="rq-sort" aria-label="<?= _h('a.moderation.rv_sort') ?>">
+                            <option value="oldest"><?= _h('a.moderation.rv_sort_oldest') ?></option>
+                            <option value="newest"><?= _h('a.moderation.rv_sort_newest') ?></option>
+                            <option value="long"><?= _h('a.moderation.rv_sort_long') ?></option>
+                            <option value="short"><?= _h('a.moderation.rv_sort_short') ?></option>
+                            <option value="score"><?= _h('a.moderation.rv_sort_score') ?></option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="rq-per" aria-label="<?= _h('a.moderation.rv_per', ['n' => 25]) ?>">
+                            <option value="25"><?= _h('a.moderation.rv_per', ['n' => 25]) ?></option>
+                            <option value="50"><?= _h('a.moderation.rv_per', ['n' => 50]) ?></option>
+                            <option value="100"><?= _h('a.moderation.rv_per', ['n' => 100]) ?></option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="rq-clear"><i class="bi bi-x-lg"></i> <?= _h('a.creport.clear') ?></button>
+                        <span id="rq-total" class="text-muted wl-total"></span>
+                    </div>
+                    <div class="toolbar-row rq-bulk" id="rq-bulk">
+                        <label class="search-check rq-page-all"><input type="checkbox" id="rq-page-all"><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.moderation.rv_select_page') ?></label>
+                        <span id="rq-selected" class="rq-selected"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="rq-select-matching" hidden></button>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="rq-approve-sel" disabled><i class="bi bi-check-lg"></i> <?= _h('js.review.approve_selected') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-warning" id="rq-reject-sel" disabled><i class="bi bi-x-lg"></i> <?= _h('js.review.reject_selected') ?></button>
+                        <button type="button" class="btn btn-sm btn-link rq-clear-sel" id="rq-clear-sel" hidden><?= _h('js.review.clear_selection') ?></button>
+                        <span id="rq-progress" class="text-muted wl-small" aria-live="polite"></span>
+                    </div>
+                </div>
+                <p class="settings-hint rq-explain"><?= _h('a.moderation.rv_explain') ?></p>
+                <div id="rq-list" class="rq-list"></div>
+                <div class="admin-pagination" id="rq-pagination"></div>
+            </div>
+            <div id="rq-pane-edits" class="d-hidden">
+                <p class="text-muted wl-small" id="rq-edits-total"></p>
+                <div id="rq-edits-list"></div>
+            </div>
+        </div>
+<?php endif; ?>
+
         <!-- Restricted now -->
-        <div class="wl-view" id="mod-view-restricted">
+        <div class="wl-view d-hidden" id="mod-view-restricted">
             <p class="idx-note"><?= _h('a.moderation.restricted_note') ?></p>
             <div id="mod-restricted-list"></div>
         </div>
@@ -154,6 +231,41 @@
         </div>
     </div>
 
+<?php if ($modReview): ?>
+    <div class="modal fade" id="rqPunishModal" tabindex="-1" aria-labelledby="rq-pn-title">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-person-exclamation"></i> <span id="rq-pn-title"><?= _h('a.moderation.pn_title') ?></span> <span id="rq-pn-name" class="text-info"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label wl-label" for="rq-pn-action"><?= _h('a.moderation.pn_action') ?></label>
+                    <select id="rq-pn-action" class="form-select form-select-sm bg-dark text-light border-secondary w-auto">
+                        <option value="warn"><?= _h('a.moderation.pn_warn') ?></option>
+                        <option value="mute"><?= _h('a.moderation.pn_mute') ?></option>
+                        <option value="ban"><?= _h('a.moderation.pn_ban') ?></option>
+                    </select>
+                    <div id="rq-pn-days-wrap" class="mt-2">
+                        <label class="form-label wl-label" for="rq-pn-days"><?= _h('a.moderation.pn_days') ?></label>
+                        <input id="rq-pn-days" type="number" min="0" max="3650" value="7" class="form-control form-control-sm bg-dark text-light border-secondary w-auto">
+                        <small class="settings-hint"><?= _h('a.moderation.pn_days_hint') ?></small>
+                    </div>
+                    <label class="search-check mt-2" id="rq-pn-tell-wrap"><input type="checkbox" id="rq-pn-tell" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.moderation.pn_tell') ?></label>
+                    <label class="form-label wl-label mt-2"><?= _h('a.moderation.pn_reason') ?></label>
+                    <div id="rq-pn-rich"></div>
+                    <label class="search-check mt-2" id="rq-pn-reject-wrap"><input type="checkbox" id="rq-pn-reject" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.moderation.pn_reject') ?></label>
+                    <div id="rq-pn-alert"></div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                        <button type="button" class="btn btn-sm btn-danger" id="rq-pn-go"><i class="bi bi-check-lg"></i> <?= _h('a.moderation.pn_go') ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
 
     <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
@@ -163,6 +275,10 @@
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <?php /* The picture beside every member's name (1.63.0), the same file the public pages draw with. */ ?>
     <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
+<?php if ($modReview): ?>
+    <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-review.js<?= assetVer('assets/js/admin-review.js') ?>"></script>
+<?php endif; ?>
     <script src="<?= $baseUrl ?>assets/js/admin-moderation.js<?= assetVer('assets/js/admin-moderation.js') ?>"></script>
 </body>
 </html>
