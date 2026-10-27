@@ -1415,6 +1415,19 @@
                         </select>
                         <small class="settings-hint"><?= __('settings.users_share_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="info_resize">
+                        <label for="set-info_resize" class="form-label"><?= _h('settings.info_resize') ?></label>
+                        <select id="set-info_resize" class="form-select bg-dark text-light border-secondary" name="info_resize">
+                            <option value="1" <?= ($cfg['info_resize'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['info_resize'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.info_resize_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="info_desc_fold">
+                        <label for="set-info_desc_fold" class="form-label"><?= _h('settings.info_desc_fold') ?></label>
+                        <input id="set-info_desc_fold" type="number" class="form-control bg-dark text-light border-secondary" name="info_desc_fold" value="<?= sanitize($cfg['info_desc_fold'] ?? '640') ?>" min="0" max="5000" step="20">
+                        <small class="settings-hint"><?= _h('settings.info_desc_fold_hint') ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label for="set-index_search_include_whitelist" class="form-label"><?= _h('settings.users_search_whitelist') ?></label>
                         <select id="set-index_search_include_whitelist" class="form-select bg-dark text-light border-secondary" name="index_search_include_whitelist">

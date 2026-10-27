@@ -1920,6 +1920,7 @@ footer p { margin: 0.25rem 0; }
    buttons; at 72em the actions column could not hold them and the third button hung 22 px outside
    the cell (measured, not guessed). Prose stays narrow elsewhere — this page is a table. */
 body.page-search .container { max-width: 86em; }
+body.page-account .container, body.page-u .container { max-width: 80em; }
 .search-panel { margin: 1rem 0 0; }
 /* toolbar sits ON the table (same pattern as the admin panels): joined card above the rows */
 .search-toolbar {
@@ -2111,6 +2112,32 @@ button.search-files-chip:hover { border-color: var(--accent); color: var(--accen
 .info-box .files-head { column-gap: 0.4rem; }
 .info-box .files-head h3 { margin-right: 0.6rem; }
 .info-box .files-body { padding: 1rem 1.1rem 1.1rem; }
+.info-box { position: relative; }
+.info-box.info-sized { max-width: none; width: var(--info-w); }
+.info-box.info-sized-h { max-height: none; height: var(--info-h); }
+.info-grip { position: absolute; z-index: 5; touch-action: none; }
+.info-grip-e, .info-grip-w { top: 1rem; bottom: 1rem; width: 10px; cursor: ew-resize; }
+.info-grip-e { right: -6px; }
+.info-grip-w { left: -6px; }
+.info-grip-s { left: 1rem; right: 1rem; bottom: -6px; height: 10px; cursor: ns-resize; }
+.info-grip-se, .info-grip-sw { bottom: -6px; width: 18px; height: 18px; }
+.info-grip-se { right: -6px; cursor: nwse-resize; }
+.info-grip-sw { left: -6px; cursor: nesw-resize; }
+.info-grip-se::after { content: ""; position: absolute; right: 9px; bottom: 9px; width: 7px; height: 7px; pointer-events: none;
+                       border-right: 2px solid rgba(255,255,255,0.3); border-bottom: 2px solid rgba(255,255,255,0.3); border-radius: 0 0 2px 0; }
+.info-box.info-resizing { user-select: none; }
+.info-box.info-resizing .files-body { pointer-events: none; }
+.info-desc.info-desc-long:not(.info-desc-open) > .rt-body { max-height: var(--fold); overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
+            mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent); }
+.info-desc-toggle { display: none; }
+.info-desc.info-desc-long > .info-desc-toggle { display: flex; align-items: center; gap: 0.4rem; width: fit-content; margin: 0.7rem auto 0; }
+.info-desc.info-desc-long.info-desc-open > .info-desc-toggle { position: sticky; bottom: 0.6rem; z-index: 2; background: var(--bg-card); box-shadow: 0 6px 18px rgba(0,0,0,0.65); }
+@media (max-width: 767.98px) {
+    .info-grip, .info-size-reset { display: none !important; }
+    .info-box.info-sized { width: 100%; }
+    .info-box.info-sized-h { height: auto; max-height: 80vh; }
+}
 .files-close { background: transparent; border: 0; color: var(--text-muted); font-size: 1.4rem; line-height: 1; cursor: pointer; padding: 0 0.25rem; }
 .files-close:hover { color: var(--error); }
 /* The icon fills its em where the old multiplication sign was half of it (1.68.0). */

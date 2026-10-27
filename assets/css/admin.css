@@ -1318,6 +1318,7 @@ input[type="number"] {
 .wl-warn-hint { color: #b0b8c4; font-size: 0.8rem; padding-left: 1.4rem !important; }
 .wl-tab-count { display: inline-block; min-width: 1.4em; padding: 0 0.4em; margin-left: 0.3rem; border-radius: 10px; background: #2a2a3a; color: #bbb; font-size: 0.7rem; line-height: 1.5; }
 .wl-tab-count:empty { display: none; }
+.source-tab > .wl-tab-count { margin-left: 0; }
 .wl-view { animation: wlFade 0.15s ease-in; }
 @keyframes wlFade { from { opacity: 0; } to { opacity: 1; } }
 .wl-check { color: #bbb; font-size: 0.82rem; }
@@ -1568,6 +1569,16 @@ input[type="number"] {
    columns had 104 each and cut it; the API clients' SCOPE is a column of its own (.wl-c-scope, below) 24px wider
    than the 84 it borrowed from Enabled, and the label keeps its 114. */
 .wl-page #ab-table { min-width: 1284px; }
+.wl-page .wl-table td.wl-cl-label { font-weight: 600; white-space: normal; overflow-wrap: anywhere; }
+.wl-page #cl-table tr.wl-cl-has-sub > td { border-bottom-width: 0; }
+.wl-page #cl-table tr.wl-cl-sub > td { padding-top: 0; white-space: normal; overflow: visible; }
+.wl-page #cl-table tr.wl-cl-sub:hover > * { --bs-table-bg-state: transparent; }
+.wl-cl-feats { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.wl-cl-chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.05rem 0.5rem; border: 1px solid rgba(255,255,255,0.14);
+              border-radius: 999px; background: rgba(255,255,255,0.05); color: #c3cad5; font-size: 0.72rem; line-height: 1.55; white-space: nowrap; }
+.wl-cl-chip > .bi { font-size: 0.8em; opacity: 0.85; }
+.wl-cl-chip-ok { border-color: rgba(76,175,80,0.55); color: #81c784; background: rgba(76,175,80,0.1); }
+.wl-cl-chip-warn { border-color: rgba(255,183,77,0.55); color: #ffb74d; background: rgba(255,152,0,0.1); }
 .wl-page #cl-table { min-width: 1184px; }   /* 1120 until its actions column grew by 36 (1.68.1), 1160 until 1.73.0 */
 /* 936, not 900 (1.73.0): the source column grew 36px (.wl-c-source, below) and the name and the reason keep their 132. */
 .wl-page #bn-table { min-width: 936px; }

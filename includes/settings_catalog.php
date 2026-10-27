@@ -502,6 +502,8 @@ function settingsCatalogKeywords(): array {
         'images_quota_mb'           => 'pictures images quota space account storage obrazy miejsce limit konto',
         'images_unused_hours'       => 'pictures images unused cleanup delete janitor obrazy nieuzywane sprzatanie usuwanie',
         'comment_images_upload'     => 'comments pictures images upload paste drop komentarze obrazy wgrywanie wklejanie',
+        'info_resize'               => 'info panel window resize size width height drag remember reset default okno panelu rozmiar szerokosc wysokosc przeciaganie zapamietanie domyslny',
+        'info_desc_fold'            => 'info panel description fold collapse long height show whole opis panel info zwijanie zwiniety dlugi wysokosc pokaz caly',
         'comment_images_links'      => 'comments pictures images links address copy komentarze obrazy linki adresy kopiowanie',
         'comment_images_max'        => 'comments pictures images how many per comment limit komentarze obrazy ile limit',
         'comment_image_max_mb'      => 'comments pictures images file size megabytes komentarze obrazy rozmiar pliku',

@@ -1508,36 +1508,27 @@
         if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-muted py-4', text: t.key('js.wl.no_api_clients') })));
         r.clients.forEach(c => {
             const tr = el('tr');
-            tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
-            const scopeTd = el('td', { className: 'col-badge' }, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : ''));
             // "held for review" reads the setting that belongs to the scope: on a whitelist key that
             // is auto_approve, on an abuse key it is abuse_auto_block — and on an abuse key the
-            // ALARMING state is the other one, so that is the badge that gets the warning colour.
-            if ((c.scope === 'whitelist' || c.scope === 'all') && c.auto_approve === false) {
-                scopeTd.appendChild(document.createTextNode(' '));
-                scopeTd.appendChild(badge(t.key('js.wl.cl_approve_rev'), 'wl-b-pending'));
-            }
-            if ((c.scope === 'abuse' || c.scope === 'all') && c.abuse_auto_block === true) {
-                scopeTd.appendChild(document.createTextNode(' '));
-                scopeTd.appendChild(badge(t.key('js.wl.cl_abuse_auto_badge'), 'wl-b-warn'));
-            }
-            if (c.required_fields && c.required_fields.length) {
-                scopeTd.appendChild(document.createTextNode(' '));
-                scopeTd.appendChild(el('span', { className: 'text-muted wl-small', text: c.required_fields.join(', ') }));
+            // ALARMING state is the other one, so that is the one that gets the warning colour.
+            const chip = (icon, text, tone, title) => el('span', { className: 'wl-cl-chip' + (tone ? ' wl-cl-chip-' + tone : ''), title: title || null },
+                [el('i', { className: 'bi ' + icon, 'aria-hidden': 'true' }), text]);
+            const feats = [];
+            if ((c.scope === 'whitelist' || c.scope === 'all') && c.auto_approve === false) feats.push(chip('bi-hourglass-split', t.key('js.wl.cl_approve_rev'), 'warn'));
+            if ((c.scope === 'abuse' || c.scope === 'all') && c.abuse_auto_block === true) feats.push(chip('bi-shield-exclamation', t.key('js.wl.cl_abuse_auto_badge'), 'warn'));
+            if (c.required_fields && c.required_fields.length) feats.push(chip('bi-asterisk', c.required_fields.join(', ')));
+            if ((c.scope === 'whitelist' || c.scope === 'all') && (c.describe_mode === 'queue' || c.describe_mode === 'publish')) {
+                feats.push(chip('bi-file-earmark-text', t.key(c.describe_mode === 'publish' ? 'js.wl.cl_describe_badge_publish' : 'js.wl.cl_describe_badge_queue')));
             }
             if (c.image_domains && c.image_domains.length) {
-                scopeTd.appendChild(document.createTextNode(' '));
-                scopeTd.appendChild(el('span', { className: 'text-muted wl-small', title: c.image_domains.join(', '),
-                    text: t.key('js.wl.cl_imgdomains_badge', { list: c.image_domains.join(', ') }) }));
-                scopeTd.appendChild(document.createTextNode(' '));
-                scopeTd.appendChild(badge(t.key(c.image_consent === true ? 'js.wl.cl_consent_yes'
-                    : (c.image_consent === false ? 'js.wl.cl_consent_no' : 'js.wl.cl_consent_none')), c.image_consent === true ? 'wl-b-ok' : 'wl-b-warn'));
+                feats.push(chip('bi-images', t.key('js.wl.cl_imgdomains_badge', { list: c.image_domains.join(', ') }), '', c.image_domains.join(', ')));
+                feats.push(chip(c.image_consent === true ? 'bi-check-circle' : 'bi-exclamation-circle',
+                    t.key(c.image_consent === true ? 'js.wl.cl_consent_yes' : (c.image_consent === false ? 'js.wl.cl_consent_no' : 'js.wl.cl_consent_none')),
+                    c.image_consent === true ? 'ok' : 'warn'));
             }
-            if ((c.scope === 'whitelist' || c.scope === 'all') && (c.describe_mode === 'queue' || c.describe_mode === 'publish')) {
-                scopeTd.appendChild(document.createTextNode(' '));
-                scopeTd.appendChild(badge(t.key(c.describe_mode === 'publish' ? 'js.wl.cl_describe_badge_publish' : 'js.wl.cl_describe_badge_queue'), ''));
-            }
-            tr.appendChild(scopeTd);
+            if (feats.length) tr.className = 'wl-cl-has-sub';
+            tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
+            tr.appendChild(el('td', { className: 'col-badge' }, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : '')));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
             tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
             const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? t.key('js.wl.enabled_click_disable') : t.key('js.wl.disabled_click_enable') });
@@ -1577,6 +1568,7 @@
             }));
             tr.appendChild(act);
             body.appendChild(tr);
+            if (feats.length) body.appendChild(el('tr', { className: 'wl-cl-sub' }, el('td', { colspan: 10 }, el('div', { className: 'wl-cl-feats' }, feats))));
         });
     }
 

@@ -47,7 +47,7 @@
             </div>
             <div class="msgrep-note settings-hint crep-note"><?= _h('a.img.note') ?></div>
             <div id="img-grid" class="img-grid"></div>
-            <div id="img-pagination"></div>
+            <div class="admin-pagination" id="img-pagination"></div>
         </div>
 
         <div class="wl-view d-hidden" id="img-view-queue">
@@ -75,7 +75,7 @@
                     <tbody id="img-q-body"></tbody>
                 </table>
             </div>
-            <div id="img-q-pagination"></div>
+            <div class="admin-pagination" id="img-q-pagination"></div>
         </div>
     </div>
 

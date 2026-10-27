@@ -130,6 +130,8 @@ add('perm', {
                          'Odpowiadanie na komentarz (tak głęboko, jak pozwala wątek — comments_reply_depth)'),
     'comment.images':   ('Put pictures into their comments, and upload them where Settings allows it',
                          'Wstawianie obrazów do komentarzy i wgrywanie ich tam, gdzie pozwalają ustawienia'),
+    'info.resize':      ('Resize the Info panel (the size is kept in their browser)',
+                         'Zmiana rozmiaru panelu Info (rozmiar zostaje w ich przeglądarce)'),
     'comment.edit_own': ('Correct their own comments for a while (comment_edit_minutes)',
                          'Poprawianie własnych komentarzy przez pewien czas (comment_edit_minutes)'),
     'comment.delete_own': ('Delete their own comments for a while (comment_delete_own_minutes)',

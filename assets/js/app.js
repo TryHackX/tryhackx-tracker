@@ -3442,6 +3442,106 @@ window.siteToast = siteToast;
     // Esc closes the panel only while it is the top layer (escLayer(), 1.70.0): "Who has this", the list
     // picker, an emoji picker or the "you are leaving" dialog over it take their Esc first.
     let infoLayer = null;
+    let infoDescFold = 0;
+
+    function foldDescription(d) {
+        const wrap = document.createElement('div');
+        wrap.className = 'info-desc info-section';
+        d.classList.remove('info-section');
+        wrap.style.setProperty('--fold', infoDescFold + 'px');
+        wrap.appendChild(d);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary btn-small info-desc-toggle';
+        const show = (open) => {
+            wrap.classList.toggle('info-desc-open', open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            btn.replaceChildren(iconEl('bi ' + (open ? 'bi-chevron-up' : 'bi-chevron-down')), t.child(t.key(open ? 'js.app.desc_fold' : 'js.app.desc_unfold')));
+        };
+        btn.addEventListener('click', () => {
+            const open = !wrap.classList.contains('info-desc-open');
+            show(open);
+            if (!open) wrap.scrollIntoView({ block: 'start' });
+        });
+        const measure = () => wrap.classList.toggle('info-desc-long', d.scrollHeight > infoDescFold + 96);
+        d.addEventListener('load', measure, true);
+        requestAnimationFrame(measure);
+        show(false);
+        wrap.appendChild(btn);
+        return wrap;
+    }
+
+    function initInfoResize(box) {
+        const key = 'thx-info-size';
+        const head = box.querySelector('.files-head');
+        const reset = iconButton('button', 'info-size-reset', 'bi-arrows-angle-contract', t.key('js.app.info_size_reset'), t.key('js.app.info_size_reset_tip'));
+        head.insertBefore(reset, head.querySelector('#info-share') || head.querySelector('#info-close'));
+        const stored = () => {
+            try {
+                const v = JSON.parse(localStorage.getItem(key) || 'null');
+                return v && v.w > 0 ? { w: Number(v.w), h: Number(v.h) || 0 } : null;
+            } catch (e) {
+                return null;
+            }
+        };
+        const fit = (v) => ({
+            w: Math.round(Math.min(Math.max(v.w, 420), window.innerWidth - 24)),
+            h: v.h ? Math.round(Math.min(Math.max(v.h, 280), window.innerHeight - 96)) : 0,
+        });
+        const apply = (v) => {
+            const f = v ? fit(v) : null;
+            box.classList.toggle('info-sized', !!f);
+            box.classList.toggle('info-sized-h', !!(f && f.h));
+            if (f) box.style.setProperty('--info-w', f.w + 'px'); else box.style.removeProperty('--info-w');
+            if (f && f.h) box.style.setProperty('--info-h', f.h + 'px'); else box.style.removeProperty('--info-h');
+            reset.hidden = !f;
+        };
+        const keep = (v) => {
+            try {
+                if (v) localStorage.setItem(key, JSON.stringify(v)); else localStorage.removeItem(key);
+            } catch (e) {
+                return;
+            }
+        };
+        const clear = () => { keep(null); apply(null); };
+        reset.addEventListener('click', clear);
+        ['e', 'w', 's', 'se', 'sw'].forEach(dir => {
+            const grip = document.createElement('span');
+            grip.className = 'info-grip info-grip-' + dir;
+            grip.setAttribute('aria-hidden', 'true');
+            grip.addEventListener('dblclick', clear);
+            grip.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                const r = box.getBoundingClientRect();
+                const x0 = e.clientX, y0 = e.clientY;
+                const before = stored();
+                let last = null;
+                grip.setPointerCapture(e.pointerId);
+                box.classList.add('info-resizing');
+                const move = (ev) => {
+                    const dx = ev.clientX - x0;
+                    const w = dir.includes('e') ? r.width + 2 * dx : (dir.includes('w') ? r.width - 2 * dx : r.width);
+                    const h = dir.includes('s') ? r.height + ev.clientY - y0 : (before ? before.h : 0);
+                    last = fit({ w, h });
+                    apply(last);
+                };
+                const up = () => {
+                    grip.removeEventListener('pointermove', move);
+                    grip.removeEventListener('pointerup', up);
+                    grip.removeEventListener('pointercancel', up);
+                    box.classList.remove('info-resizing');
+                    if (last) keep(last);
+                };
+                grip.addEventListener('pointermove', move);
+                grip.addEventListener('pointerup', up);
+                grip.addEventListener('pointercancel', up);
+            });
+            box.appendChild(grip);
+        });
+        apply(stored());
+        window.addEventListener('resize', () => apply(stored()));
+    }
 
     function closeInfo() {
         if (!infoOverlay) return;
@@ -3865,7 +3965,7 @@ window.siteToast = siteToast;
             // Built on the server by includes/richtext.php out of fully escaped input with a
             // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
             d.innerHTML = json.description_html;
-            body.appendChild(d);
+            body.appendChild(infoDescFold > 0 ? foldDescription(d) : d);
         } else if (!json.source_url && !json.content_hidden && !(json.content_forum && json.content_forum.state === 'too_long')) {
             const none = document.createElement('p');
             none.className = 'text-muted info-section';
@@ -4630,8 +4730,11 @@ window.siteToast = siteToast;
         // "Who has this" (1.70.0): drawn when ANY of its sections — favourites, likes / ratings, lists — is
         // open to this reader (templates/partials/info_overlay.php asks includes/who.php).
         infoCanFavWho = d.favWho === '1';
+        infoDescFold = Math.max(0, parseInt(d.fold || '0', 10) || 0);
         infoLayer = escLayer(infoOverlay, closeInfo);
         closeOnBackdrop(infoOverlay, closeInfo);
+        const infoBox = infoOverlay.querySelector('.info-box');
+        if (d.resize === '1' && infoBox) initInfoResize(infoBox);
         const ic = $id('info-close');
         if (ic) ic.addEventListener('click', closeInfo);
         const shareOneBtn = $id('info-share');

@@ -35,7 +35,9 @@ $ioLists  = listsContext($db, $cfg, $ioViewer);
      data-can-files="<?= userCan($db, $cfg, 'index.files') ? '1' : '0' ?>"
      data-fav="<?= !empty($ioFav['may_use']) ? '1' : '0' ?>"
      data-fav-who="<?= $ioWho ? '1' : '0' ?>"
-     data-lists="<?= !empty($ioLists['may_use']) ? '1' : '0' ?>">
+     data-lists="<?= !empty($ioLists['may_use']) ? '1' : '0' ?>"
+     data-resize="<?= ($cfg['info_resize'] ?? '1') === '1' && userCan($db, $cfg, 'info.resize') ? '1' : '0' ?>"
+     data-fold="<?= max(0, min(5000, (int)($cfg['info_desc_fold'] ?? 640))) ?>">
     <div class="files-box info-box" role="dialog" aria-modal="true" aria-labelledby="info-title">
         <div class="files-head">
             <h3 id="info-title"><?= _h('search.details') ?></h3>

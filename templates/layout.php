@@ -87,7 +87,7 @@ $mediaEditor = $action === 'account' && function_exists('userAvatarsEnabled') &&
     <?= captchaHeadTags($cfg) ?>
     <?php endif; ?>
 </head>
-<body<?= in_array($action, ['transparency', 'stats', 'search'], true) ? ' class="page-' . $action . '"' : '' ?>>
+<body<?= in_array($action, ['transparency', 'stats', 'search', 'account', 'u'], true) ? ' class="page-' . $action . '"' : '' ?>>
     <?php /* The first stop of the Tab key (1.74.0): past the menu, to the page's own content — out of sight until the
              keyboard reaches it (style.css .skip-link). The content takes the focus it leads to (tabindex -1). */ ?>
     <a class="skip-link" href="#main-content"><?= _h('common.skip_to_content') ?></a>

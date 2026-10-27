@@ -16,6 +16,7 @@
 .info-box { max-width: 46rem; }
 .info-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
 .info-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.info-section.rt-collapse, .info-section.rt-collapse:first-child { padding-top: 0; border-top: 1px solid rgba(255,255,255,0.12); }
 .info-sub { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.55; margin-bottom: 0.4rem; }
 
 /* The swarm strip. These are the numbers the panel exists for, so they are the biggest thing in it
@@ -146,5 +147,4 @@ a.info-chip-forum:hover { border-color: var(--accent); opacity: 1; }
 .rt-yt-play:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .rt-yt-cap { position: absolute; left: 0.5rem; bottom: 0.4rem; color: #cfd6e4; font-size: 0.8rem; text-shadow: 0 1px 2px #000; }
 .rt-yt-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-.rt-yt-open { display: inline-block; margin-top: 0.25rem; font-size: 0.8rem; }
 .rt-yt-wrap + br { display: none; }

@@ -75,6 +75,7 @@ function userPermissionList(bool $english = false): array {
         // WHO may page at all and is checked before any of those numbers. Both halves are tests on
         // the ?offset= of api/index_files.php — which is why that endpoint has no keyset cursor.
         'index.files_all' => 'Load the whole file list in index search results (beyond the first page)',
+        'info.resize'    => 'Resize the Info panel (the size is kept in their browser)',
         'index.magnet'   => 'See info hashes / copy magnet links in index search results',
         'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
         'whitelist.add'  => 'Register hashes on the whitelist (used when registration is set to "registered users")',
@@ -393,7 +394,7 @@ function userGroupPresets(): array {
             // The shipped default matrix for a signed-in account, and the same list the v71 migration
             // writes — `profile.cover` and `shout.upload_emote` are deliberately NOT here; they are
             // the premium extras below.
-            'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'whitelist.view', 'whitelist.add',
+            'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'info.resize', 'whitelist.view', 'whitelist.add',
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',

@@ -24,7 +24,6 @@ add('settings', {
 
 add('js.video', {
     'play': ('Play the video', 'Odtwórz film'),
-    'open': ('Open on YouTube', 'Otwórz na YouTube'),
     'title': ('YouTube video', 'Film z YouTube'),
 })
 

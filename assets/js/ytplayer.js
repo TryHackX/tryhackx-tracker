@@ -47,12 +47,8 @@
             el('button', { type: 'button', className: 'rt-yt-play', title: t.key('js.video.play'), 'aria-label': t.key('js.video.play') },
                el('i', { className: 'bi bi-play-fill', 'aria-hidden': 'true' })),
         ]);
-        var open = el('a', { className: 'rt-yt-open', href: a.getAttribute('href'), target: '_blank',
-                             rel: 'nofollow noopener noreferrer ugc', 'data-external': a.getAttribute('data-external') }, [
-            el('i', { className: 'bi bi-box-arrow-up-right', 'aria-hidden': 'true' }), ' ', t.key('js.video.open'),
-        ]);
         box.addEventListener('click', function () { play(box, id, start); });
-        a.replaceWith(el('span', { className: 'rt-yt-wrap' }, [box, open]));
+        a.replaceWith(el('span', { className: 'rt-yt-wrap' }, box));
     }
 
     function scan(root) {
