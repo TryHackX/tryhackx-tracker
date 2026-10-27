@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.82.0] — 2026-10-27
+
+Magnet links become cards in descriptions, comments and the shoutbox, the editor gains two menus, Moderation lists the published descriptions, the search finds torrents that have a description, votes keep their scale, and the Index page stops counting its table on every look. Schema 101; with homepage-blocks 2.12.1.
+
+- **[magnet] cards.** `[magnet]magnet:?…[/magnet]` and `[magnet=Name]…[/magnet]` in descriptions (BBCode, Markdown and the
+  forum's format, which no longer cuts it out), in comments and in the shoutbox, where the card is one line. It shows the
+  name (from `dn=` or the label), the size, the start of the hash, a link that opens the torrent client, Copy, and — when
+  this tracker has the torrent — its seeders, leechers and completed downloads and a Details button. A reader without
+  `index.magnet` sees the name and the size only: the link and the hash are not in the page. The magnet of a description's
+  own torrent is left out. A card is one link in every limit, a guest's comment may not carry one, an excerpt says
+  [magnet] and a mail shows the name only. Only a real info hash is accepted (40 hex or 32 base32), and trackers only
+  over http, https and udp.
+- **Two menus in the editor.** Insert (a magnet, a YouTube video, a part for signed-in members) and Paragraph (three
+  headings, left, right, a quote with its author, lists a, b, c and i, ii, iii) on the description, message and list
+  editors, offering only what the chosen format can write. The shoutbox and comments have a magnet button.
+- **The renderer.** Markdown draws `---`, `***` and `___` as a line. The forum's format reads pipe tables, so every tag of
+  the forum's extensions now renders. Vimeo, Twitch and SoundCloud addresses are named links with their mark. A bare
+  https address of an .mp4, .webm or .ogv file can be a player that loads when clicked — Video files, in the formatting
+  settings, off by default; switched on, pages may play media from https addresses.
+- **Published descriptions in Moderation.** To review has a Published view, newest first, sortable by rating and by
+  pictures. A moderator with `content.delete_any` deletes a description there without the owner's password.
+- **Has a description.** The public search and the panel's Index and Whitelist filter the torrents that have a published
+  description and mark each with icons for words, pictures and video. The search can look inside descriptions too. Both
+  only for readers who may read descriptions.
+- **Votes keep their scale.** Every vote remembers whether it was a thumb or a star, so switching the rating mode counts
+  only the votes of the new scale and switching back brings the old counts back. In star mode the panel shows stars and
+  their average, and the queue sorts around the right middle in both scales.
+- **Long descriptions from a cache.** A description over 20 000 characters is drawn once for each kind of reader (signed
+  in or not, with or without magnets, language) and kept compressed. The janitor drops what nobody read for two weeks.
+- **The Index page's counts.** One shared copy of all of them, refreshed by the janitor while somebody is looking and
+  the copy is over five minutes old. The page and its list read the copy and never count the 4.75-million-row table
+  themselves. The janitor adds a key on `meta_status` and `grace_until` that makes the count much cheaper.
+- **Descriptions from the forum** (homepage-blocks 2.12.1):
+  - A description imported from the forum keeps the forum's size: an edit or a proposed change of it is measured
+    against the larger of the site's limits and the record's own characters, pictures and links, up to a million
+    characters.
+  - The forum can send the topics its members can see. Such a description is shown here to signed-in people only
+    (`"audience": "members"`).
+
 ## [1.81.1] — 2026-10-27
 
 A description opened from the panel's Whitelist or Index page plays YouTube as the Info panel and the review queue do.
