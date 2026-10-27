@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.82.2] — 2026-10-27
+
+The panel's Index search, after the owner's "dr house": every word counts, every sort is quick, and a search that runs out of time says so. No schema change.
+
+- **Every word.** A name search of several words finds the names that have all of them, as the top group of the public
+  search does: the longer words through the fulltext index, the short and common ones ("dr", "the") as whole words.
+  "dr house" was 19 894 rows of anything with a word starting "dr" or "house"; it is now the 33 Dr House ones.
+- **Every sort.** The matches come from the narrow catalogue first and are then sorted by the column asked for —
+  seeders, first seen, peak, anything — with the page's filters, instead of a sort over the whole index (up to 110 s on
+  production). Over 10 000 matches a sort the catalogue holds still answers, counted as "10 000+": date, size, files,
+  name, and seeders or leechers as the public search counts them.
+- **Out of time.** A search the database stops (20 s) answers with a sentence and 503, as the public search does,
+  instead of a server error, and the slower LIKE is not run after a fulltext search that ran out of time.
+
 ## [1.82.1] — 2026-10-27
 
 The owner's notes on 1.82.0: magnet cards count clicks and refresh, the editor's menus sit right, the panel's windows resize, the panel's Index searches names quickly, and the forum can bring back a text the tracker turned down. Schema 102; with homepage-blocks 2.12.2.
