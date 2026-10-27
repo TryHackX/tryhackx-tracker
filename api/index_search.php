@@ -88,6 +88,7 @@ try {
         'content'           => (string)($_GET['content'] ?? 'not_rejected'),
         'desc_only'         => $canContent && ($_GET['desc'] ?? '') === '1',
         'search_desc'       => $canContent && ($_GET['in_desc'] ?? '') === '1',
+        'desc_guest'        => !richtextViewerSignedIn($db),
         'desc_flags'        => $canContent,
         // A reader who is not shown hashes does not search by one either (1.69.0): see indexSearchCatalogue().
         'hash_search'       => $canMagnet,

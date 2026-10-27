@@ -1667,6 +1667,7 @@ function trackerSchemaStatements(): array {
             `forum_chars` INT UNSIGNED NOT NULL DEFAULT 0,
             `forum_images` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
             `forum_links` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `audience` ENUM('guests','members') NOT NULL DEFAULT 'guests',
             `import_sha` CHAR(64) DEFAULT NULL,
             `state` VARCHAR(16) NOT NULL DEFAULT 'imported',
             `note` VARCHAR(255) DEFAULT NULL,
@@ -2824,6 +2825,9 @@ function trackerSchemaGuardedStatements(PDO $db): array {
     if (schemaTableExists($db, 'forum_descs') && !schemaColumnExists($db, 'forum_descs', 'forum_images')) {
         $out[] = "ALTER TABLE `forum_descs` ADD COLUMN `forum_images` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `forum_chars`, "
                . "ADD COLUMN `forum_links` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `forum_images`";
+    }
+    if (schemaTableExists($db, 'forum_descs') && !schemaColumnExists($db, 'forum_descs', 'audience')) {
+        $out[] = "ALTER TABLE `forum_descs` ADD COLUMN `audience` ENUM('guests','members') NOT NULL DEFAULT 'guests' AFTER `forum_links`";
     }
     return $out;
 }

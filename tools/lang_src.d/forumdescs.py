@@ -182,6 +182,11 @@ add('apidocs', {
         '<code>"gone": true</code>, gdy temat albo jego pierwszy post usunięto lub hashe zniknęły z posta. Tracker, który to '
         'przyjmuje, mówi o tym przez <code>describe_max_hashes</code> w pingu oraz liczniki <code>withdrawn</code> i '
         '<code>released</code> w podsumowaniu.'),
+    'describe_audience': (
+        '<code>"audience"</code> says who could read the topic on your side: <code>guests</code> (the default) or '
+        '<code>members</code>. A description sent with <code>members</code> is shown here to signed-in people only.',
+        '<code>"audience"</code> mówi, kto mógł przeczytać temat po Twojej stronie: <code>guests</code> (domyślnie) albo '
+        '<code>members</code>. Opis wysłany z <code>members</code> jest tu pokazywany tylko zalogowanym.'),
     'ds_removed': ('The description was deleted here; the same text is not brought back.', 'Opis usunięto tutaj; ten sam tekst nie wraca.'),
     'ds_declined': ('A moderator turned this version down.', 'Moderator odrzucił tę wersję.'),
 })

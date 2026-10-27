@@ -143,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // a whitelist row's words are that row's: invisible to a reader who may not see the row itself.
 // Reading them at all is content.view (1.53.0); a reader without it is told that there ARE words,
 // so the empty space under the name does not read as "nobody has written anything".
-$canContent = userCan($db, $cfg, 'content.view');
+$canContent = userCan($db, $cfg, 'content.view') && (richtextViewerSignedIn($db) || !forumDescMembersOnly($db, $hash));
 $content = richtextContentFor($db, $cfg, $hash);
 if (($content['kind'] ?? null) === 'wl' && !$wl) {
     $content = ['source_url' => null, 'source_trusted' => false, 'description_html' => '', 'content_status' => 'none',

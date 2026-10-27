@@ -124,7 +124,7 @@ $exDescribe = json_encode(['topics' => [[
     'discussion_id' => 160, 'post_id' => 162, 'url' => 'https://partner.example.org/d/160-example-release',
     'author' => ['id' => '7', 'name' => 'kasia'], 'edited_at' => '2026-10-20T10:11:12+00:00',
     'format' => 'flarum', 'content' => $exDescText, 'chars' => mb_strlen($exDescText),
-    'hashes' => ['0123456789abcdef0123456789abcdef01234567'],
+    'hashes' => ['0123456789abcdef0123456789abcdef01234567'], 'audience' => 'guests',
 ]], 'max_chars' => 500000], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 $exDescribeReply = json_encode([
     'ok' => true, 'mode' => $docDescribe,
@@ -368,6 +368,7 @@ POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
 <pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/describe') ?>
 
 <?= sanitize($exWithdraw) ?></code></pre>
+<p><?= __('apidocs.describe_audience') ?></p>
 <p class="text-muted"><?= __('apidocs.describe_off_note') ?></p>
 <?php endif; ?>
 <?php endif; ?>

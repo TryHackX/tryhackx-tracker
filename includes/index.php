@@ -2651,7 +2651,10 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $lim = INDEX_FILE_MATCH_CAP;
         try {
             if ($withWl) {
-                $st = $db->prepare("SELECT id FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description LIKE ? LIMIT $lim");
+                $sql = "SELECT id FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description LIKE ?"
+                     . (!empty($q['desc_guest']) ? " AND NOT EXISTS (SELECT 1 FROM forum_descs f WHERE f.info_hash = whitelist.info_hash AND f.audience = 'members' AND f.import_sha IS NOT NULL)" : '')
+                     . " LIMIT $lim";
+                $st = $db->prepare($sql);
                 $st->execute([$like]);
                 $fileIds = array_values(array_unique(array_merge($fileIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)))));
             }
