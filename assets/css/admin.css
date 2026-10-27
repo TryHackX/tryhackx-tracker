@@ -3754,5 +3754,9 @@ a.source-tab { text-decoration: none; }
 .admin-body .sf-tag { font-size: 0.76rem; }
 .admin-body .sf-check { margin-top: 0.45rem; font-size: 0.82rem; }
 .admin-body .sf-tagsearch { max-width: 22rem; padding-top: 0.6rem; }
+.tags-name { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; }
+.tags-swatch { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 50%; border: 1px solid #555; background: transparent; }
+.tags-edit { display: flex; flex-direction: column; gap: 0.35rem; max-width: 26rem; }
+.tags-edit-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .admin-body .sf-n { margin-left: 0.3rem; opacity: 0.65; font-size: 0.68rem; }
 .admin-body .sf-tag[hidden], .admin-body .sf-tags[hidden], .admin-body .sf-group[hidden], .admin-body .sf-range[hidden], .admin-body .sf-check[hidden] { display: none; }

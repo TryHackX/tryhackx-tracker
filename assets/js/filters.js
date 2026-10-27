@@ -11,7 +11,7 @@
         { key: 'filmweb', label: 'filmweb', group: 'ratings', facts: true, desc: true, minOnly: true, rating: true },
         { key: 'vbitrate', label: 'vbitrate', group: 'quality', facts: true, desc: true, minOnly: true, mbps: true },
     ];
-    const GROUPS = [['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language'], ['g', 'genre']];
+    const GROUPS = [['x', 'tags'], ['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language'], ['g', 'genre']];
     const PARAMS = ['type', 'tags', 'pics'].concat(RANGES.map(r => r.key));
     const OPEN_KEY = 'thx-search-filters-open';
 
@@ -112,10 +112,15 @@
             tagNone = el('div', 'sf-hint text-muted', t.key('js.filters.tag_none'));
             tagNone.hidden = true;
             box.append(lab, tagSearch, tagNone);
+            if (!panelUi) {
+                const all = el('a', 'sf-alltags', t.key('js.filters.all_tags'));
+                all.href = '?action=tags';
+                box.appendChild(all);
+            }
             inner.insertBefore(box, grid);
             tagSearch.addEventListener('input', () => showTags());
         }
-        (facts ? ['release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'description'] : ['release', 'popularity']).forEach(section);
+        (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'description'] : ['release', 'popularity']).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
             if ((r.facts && !facts) || (r.desc && !desc)) return;
@@ -174,6 +179,7 @@
                     const b = el('button', 'fchip fchip-' + g + ' sf-tag', c.l);
                     b.type = 'button';
                     b.setAttribute('aria-pressed', 'false');
+                    if (c.c) b.style.setProperty('--fc', c.c);
                     b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
                     if (typeof c.n === 'number') {
                         b.dataset.n = String(c.n);
@@ -322,7 +328,7 @@
                 S.sel.clear();
                 String(p.get('tags') || '').split(',').forEach(set => set.split('|').forEach(id => {
                     id = id.trim();
-                    if (/^[qvhaslt]:[a-z0-9_]{1,20}$/.test(id) || /^g:[a-z0-9-]{2,40}$/.test(id)) S.sel.add(id);
+                    if (/^[qvhaslt]:[a-z0-9_]{1,20}$/.test(id) || /^g:[a-z0-9-]{2,40}$/.test(id) || /^x:[a-z0-9-]{1,64}$/.test(id)) S.sel.add(id);
                 }));
                 Object.keys(inputs).forEach(k => {
                     const raw = p.get(k);
@@ -355,19 +361,31 @@
         return t.key(withMax ? (mode ? 'js.filters.chip_rate_max_mode' : 'js.filters.chip_rate_max') : (mode ? 'js.filters.chip_rate_mode' : 'js.filters.chip_rate'), p);
     }
     window.FactChips = {
-        render(f, onPick) {
-            if (!f || (!f.tags && !f.year && !f.rates && !f.imdb && !f.filmweb)) return null;
+        render(f, onPick, opts) {
+            const o = opts || {};
+            if (!f || (!f.tags && !f.year && !f.rates && !f.imdb && !f.filmweb)) return o.always ? el('div', 'fchips') : null;
             const box = el('div', 'fchips');
             const tags = Array.isArray(f.tags) ? f.tags : [];
-            const lim = f.max > 0 ? f.max : 6;
+            const lim = o.all ? tags.length : (f.max > 0 ? f.max : 6);
             const shown = tags.slice(0, lim);
             const rest = tags.slice(lim);
             const add = (tg) => {
-                const b = el(onPick ? 'button' : 'span', 'fchip fchip-' + tg.g, tg.l);
+                const b = el(onPick ? 'button' : 'span', 'fchip fchip-' + tg.g + (tg.p ? ' fchip-pending' : ''), tg.l);
+                if (tg.c) b.style.setProperty('--fc', tg.c);
+                if (tg.p) b.title = t.key('js.tags.pending_title');
                 if (onPick) {
                     b.type = 'button';
                     b.title = t.key('js.filters.add', { name: tg.l });
                     b.addEventListener('click', (e) => { e.stopPropagation(); onPick(tg.id); });
+                }
+                if (typeof o.remove === 'function' && o.remove(tg)) {
+                    const x = el('button', 'fchip-del');
+                    x.type = 'button';
+                    x.title = t.key('js.tags.remove', { name: tg.l });
+                    x.setAttribute('aria-label', t.key('js.tags.remove', { name: tg.l }));
+                    x.appendChild(icon('bi-x'));
+                    x.addEventListener('click', (e) => { e.stopPropagation(); o.onRemove(tg); });
+                    b.appendChild(x);
                 }
                 box.appendChild(b);
             };
@@ -389,4 +407,138 @@
             return box;
         },
     };
+
+    function apiBase() { return (typeof APP_API === 'string') ? APP_API : 'api.php?endpoint='; }
+    function csrf() { return window.csrfToken(); }
+    async function postJ(endpoint, body) {
+        try {
+            const res = await fetch(apiBase() + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify(Object.assign({ csrf_token: csrf() }, body)) });
+            return await res.json();
+        } catch (e) { return null; }
+    }
+    async function getJ(endpoint) {
+        try { return await (await fetch(apiBase() + endpoint, { headers: { 'Accept': 'application/json' } })).json(); } catch (e) { return null; }
+    }
+
+    window.TagEditor = {
+        mount(host, json, onPick) {
+            let facts = json.facts || null;
+            const edit = json.tag_edit || null;
+            let editing = false;
+            const say = el('div', 'tag-edit-say text-muted');
+            say.setAttribute('aria-live', 'polite');
+            const addTag = async (body) => {
+                const r = await postJ('tag_add', Object.assign({ hash: json.info_hash }, body));
+                say.textContent = (r && r.message) || t.key('js.tags.failed');
+                if (r && r.success) {
+                    facts = r.facts || null;
+                    draw();
+                    const i = host.querySelector('.tag-edit-input');
+                    if (i) i.focus();
+                }
+            };
+            const removeTag = async (tg) => {
+                const r = await postJ('tag_remove', { hash: json.info_hash, tag: tg.id });
+                say.textContent = (r && r.message) || t.key('js.tags.failed');
+                if (r && r.success) { facts = r.facts || null; draw(); }
+            };
+            const picker = () => {
+                const wrap = el('div', 'tag-edit-picker');
+                const input = el('input', 'profile-search tag-edit-input');
+                input.type = 'text';
+                input.maxLength = 40;
+                input.autocomplete = 'off';
+                input.placeholder = t.key(edit.create ? 'js.tags.add_or_create_ph' : 'js.tags.add_ph');
+                input.setAttribute('aria-label', t.key('js.tags.add_label'));
+                const list = el('div', 'tag-edit-sugg');
+                let timer = 0;
+                let items = [];
+                const show = () => {
+                    list.textContent = '';
+                    const q = input.value.trim();
+                    items.forEach(it => {
+                        const b = el('button', 'fchip fchip-' + it.g + ' tag-edit-opt', it.l);
+                        b.type = 'button';
+                        if (it.c) b.style.setProperty('--fc', it.c);
+                        b.addEventListener('click', () => addTag({ tag: it.id }));
+                        list.appendChild(b);
+                    });
+                    if (edit.create && q && !items.some(it => it.l.toLowerCase() === q.toLowerCase())) {
+                        const c = el('button', 'btn btn-secondary btn-small tag-edit-new');
+                        c.type = 'button';
+                        c.append(icon('bi-plus-lg'), ' ', t.key('js.tags.create', { name: q }));
+                        c.addEventListener('click', () => addTag({ name: q }));
+                        list.appendChild(c);
+                    }
+                };
+                input.addEventListener('input', () => {
+                    clearTimeout(timer);
+                    const q = input.value.trim();
+                    if (!q) { items = []; show(); return; }
+                    timer = setTimeout(async () => {
+                        const r = await getJ('tags_search&q=' + encodeURIComponent(q));
+                        items = (r && r.tags) || [];
+                        show();
+                    }, 250);
+                });
+                input.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    const q = input.value.trim();
+                    if (!q) return;
+                    const exact = items.find(it => it.l.toLowerCase() === q.toLowerCase());
+                    if (exact) addTag({ tag: exact.id });
+                    else if (edit.create) addTag({ name: q });
+                    else if (items[0]) addTag({ tag: items[0].id });
+                });
+                wrap.append(input, list);
+                return wrap;
+            };
+            const draw = () => {
+                host.textContent = '';
+                const chips = window.FactChips.render(facts, editing ? null : onPick,
+                    editing ? { all: true, always: true, remove: (tg) => edit.moderate || !!tg.m, onRemove: removeTag } : null);
+                if (chips) host.appendChild(chips);
+                if (!edit) return;
+                const bar = el('div', 'tag-edit-bar');
+                const toggle = el('button', 'btn btn-secondary btn-small tag-edit-toggle');
+                toggle.type = 'button';
+                toggle.setAttribute('aria-expanded', editing ? 'true' : 'false');
+                toggle.append(icon(editing ? 'bi-check2' : 'bi-tags'), ' ', t.key(editing ? 'js.tags.done_editing' : 'js.tags.edit_tags'));
+                toggle.addEventListener('click', () => {
+                    editing = !editing;
+                    say.textContent = '';
+                    draw();
+                    const i = host.querySelector('.tag-edit-input');
+                    if (editing && i) i.focus();
+                });
+                bar.appendChild(toggle);
+                if (editing && edit.add) bar.appendChild(picker());
+                host.append(bar, say);
+            };
+            draw();
+        },
+    };
+
+    function tagsPage() {
+        const q = document.getElementById('tags-page-q');
+        if (!q) return;
+        const none = document.getElementById('tags-page-none');
+        q.addEventListener('input', () => {
+            const s = q.value.trim().toLowerCase();
+            let any = false;
+            document.querySelectorAll('.tags-group').forEach(g => {
+                let seen = false;
+                g.querySelectorAll('.tags-list a').forEach(a => {
+                    a.hidden = s !== '' && !a.dataset.s.includes(s);
+                    if (!a.hidden) seen = true;
+                });
+                g.hidden = !seen;
+                if (seen) any = true;
+            });
+            if (none) none.hidden = any;
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tagsPage); else tagsPage();
 })();

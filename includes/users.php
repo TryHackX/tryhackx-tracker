@@ -214,6 +214,9 @@ function userPermissionList(bool $english = false): array {
         // messages: "may this account put somebody's public words in front of a moderator". A member's; an
         // account only (a report is answered to its reporter); NO with accounts off (userLegacyDefault()).
         'content.report'     => 'Report a comment, a description or a shout to the moderators',
+        'tags.add'           => 'Add tags to a torrent, and take back the ones they added',
+        'tags.create'        => 'Create a new tag (a moderator approves it unless Settings says otherwise)',
+        'tags.moderate'      => 'Remove anybody\'s tag or a wrong automatic one, and approve or reject new tags',
 
         // ── the admin panel ──
         //
@@ -274,6 +277,8 @@ function userPermissionList(bool $english = false): array {
         'panel.moderation.rules'  => 'PANEL — edit the automatic penalties (the ladder of warnings → silence or ban) and switch them on',
         'panel.images.view'       => 'PANEL — see the Images page: every picture, who added it and where it is used',
         'panel.images.manage'     => 'PANEL — delete any picture, and retry or drop the copies waiting in the queue',
+        'panel.tags.view'         => 'PANEL — see the Tags page and approve or reject new tags',
+        'panel.tags.manage'       => 'PANEL — rename, recolour, hide, merge and delete tags',
         // Look, but not touch. EVERY operation in api/admin/backup_action.php demands the admin
         // password, and adminReauth() checks it against the OWNER's hash — which a moderator does
         // not have and must not be given. So there is no "run a backup" permission: one would be a
@@ -361,7 +366,8 @@ function userGroupPresets(): array {
                         // v94 (1.75.0): the Moderation page — read it and act on it (lift, revoke, warn by hand); the
                         // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
                         'panel.moderation.view', 'panel.moderation.handle',
-                        'panel.images.view', 'panel.images.manage'],
+                        'panel.images.view', 'panel.images.manage',
+                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -412,7 +418,7 @@ function userGroupPresets(): array {
                         'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
                         'comment.images',
                         // v84: report a comment, a description or a shout to the moderators.
-                        'content.report'],
+                        'content.report', 'tags.add', 'tags.create'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -656,7 +662,7 @@ function userLegacyDefault(string $perm): bool {
     if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
         || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')
         || str_starts_with($perm, 'shout.') || str_starts_with($perm, 'profile.')
-        || str_starts_with($perm, 'comment.')) return false;
+        || str_starts_with($perm, 'comment.') || str_starts_with($perm, 'tags.')) return false;
     return !str_starts_with($perm, 'index.');
 }
 

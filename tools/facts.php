@@ -3,7 +3,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 $root = dirname(__DIR__);
 foreach (['config/app.php', 'config/database.php', 'includes/settings.php', 'includes/functions.php', 'includes/schema.php',
           'includes/whitelist.php', 'includes/index.php', 'includes/richtext.php', 'includes/content.php', 'includes/users.php',
-          'includes/lang.php', 'includes/facts.php'] as $f) require_once $root . '/' . $f;
+          'includes/lang.php', 'includes/facts.php', 'includes/tags.php'] as $f) require_once $root . '/' . $f;
 
 $db = getDb();
 $cfg = getSettings($db);

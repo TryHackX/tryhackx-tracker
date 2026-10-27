@@ -205,6 +205,10 @@ if ($forumDesc !== null && $forumDesc['author'] !== null && (!$credits || $credi
                              'avatar' => '', 'profile' => false, 'you' => false]);
 }
 
+$tagModerate = $me && userCan($db, $cfg, 'tags.moderate');
+$tagEdit = ($me && tagsEnabled($cfg) && tagsReady($db) && ($tagModerate || userCan($db, $cfg, 'tags.add')))
+    ? ['add' => userCan($db, $cfg, 'tags.add') || $tagModerate, 'create' => userCan($db, $cfg, 'tags.create'), 'moderate' => $tagModerate] : null;
+
 jsonResponse([
     'success'   => true,
     'info_hash' => $hash,
@@ -226,9 +230,11 @@ jsonResponse([
         ? ((($wl['source'] ?? '') === 'forum') ? __('api.index.source_auto_forum') : __('api.index.source_auto_importer'))
         : null,
     'description_html' => $descHtml,
-    'facts'            => function_exists('factsRowChips')
-                          ? factsRowChips(($canContent && $hasWords) ? (factsChipsFor($db, [$hash], richtextViewerSignedIn($db))[strtolower($hash)] ?? null) : null,
-                                          (string)($idx['name'] ?? ($wl['name'] ?? '')), $cfg, 'info') : null,
+    'facts'            => factsChipsOn($cfg, 'info')
+                          ? tagsMergeChips(factsRowChips(($canContent && $hasWords) ? (factsChipsFor($db, [$hash], richtextViewerSignedIn($db))[strtolower($hash)] ?? null) : null,
+                                                         (string)($idx['name'] ?? ($wl['name'] ?? '')), $cfg, 'info'),
+                                           tagsForHashes($db, [$hash], $me ? (int)$me['id'] : null, $tagModerate)[strtolower($hash)] ?? null, $cfg) : null,
+    'tag_edit'         => $tagEdit,
     // 1.53.0: who wrote it, whether the reader is being kept from it, what they may do, and what became
     // of their own words. The editor's limits ride along so the panel does not have to ask again.
     'content_author'    => $canContent ? ($content['author'] ?? null) : null,

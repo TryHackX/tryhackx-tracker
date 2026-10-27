@@ -2582,7 +2582,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             'files_min' => $num($q['files_min'] ?? null), 'files_max' => $num($q['files_max'] ?? null),
             'seeders_min' => $num($q['seeders_min'] ?? null),
             'hashes' => isset($q['only_hashes']) && is_array($q['only_hashes']) ? array_values(array_map('strval', $q['only_hashes'])) : null,
-            'names' => isset($q['name_clause']) && is_array($q['name_clause']) ? $q['name_clause'] : null];
+            'names' => isset($q['name_clause']) && is_array($q['name_clause']) ? $q['name_clause'] : null,
+            'conds' => isset($q['facts_conds']) && is_array($q['facts_conds']) && $q['facts_conds'] ? $q['facts_conds'] : null];
     $filtered = count(array_filter($flt, fn($v) => $v !== null)) > 0;
 
     // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
@@ -2877,6 +2878,18 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             if ($flt['names'] !== null) {
                 $parts[] = str_replace('{T}', '`' . $tbl . '`', $flt['names'][0]);
                 foreach ($flt['names'][1] as $p) $params[] = $p;
+            }
+            $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
+        }
+        foreach ($flt['conds'] ?? [] as [$cHashes, $cTpl, $cArgs]) {
+            $parts = [];
+            if ($cHashes) {
+                $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($cHashes), '?')) . ')';
+                foreach ($cHashes as $p) $params[] = $p;
+            }
+            if ($cTpl !== null) {
+                $parts[] = str_replace('{T}', '`' . $tbl . '`', $cTpl);
+                foreach ($cArgs as $p) $params[] = $p;
             }
             $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
         }

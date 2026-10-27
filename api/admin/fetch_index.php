@@ -43,8 +43,10 @@ try {
 }
 
 $factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), true) : [];
+$tagMap = factsChipsOn($cfg, 'panel') ? tagsForHashes($db, array_column($res['rows'], 'info_hash'), null, true) : [];
 foreach ($res['rows'] as &$row) {
-    $chips = factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg, 'panel');
+    $chips = tagsMergeChips(factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg, 'panel'),
+                            $tagMap[strtolower((string)$row['info_hash'])] ?? null, $cfg);
     if ($chips !== null) $row['facts'] = $chips;
 }
 unset($row);

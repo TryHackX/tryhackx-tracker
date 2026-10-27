@@ -169,6 +169,7 @@ function iconFaEntries(): array {
         'book'                       => ['book-open', 's'],
         'bootstrap-reboot'           => ['power-off', 's', 'approx' => 1],   // ~ Bootstrap's own "reboot" mark: the power symbol says restart (Pro has no power-and-arrow either; its circular arrows are the site's refresh)
         'box-arrow-in-down'          => ['file-import', 's'],
+        'box-arrow-in-right'         => ['right-to-bracket', 's'],
         'box-arrow-right'            => ['right-from-bracket', 's'],
         'box-arrow-up-right'         => ['arrow-up-right-from-square', 's'],
         'bug'                        => ['bug', 's'],

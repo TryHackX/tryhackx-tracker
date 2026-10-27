@@ -1508,6 +1508,37 @@
                         </select>
                         <small class="settings-hint"><?= _h('settings.facts_chips_ratings_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="tags_enabled">
+                        <label for="set-tags_enabled" class="form-label"><?= _h('settings.tags_enabled') ?></label>
+                        <select id="set-tags_enabled" class="form-select bg-dark text-light border-secondary" name="tags_enabled">
+                            <option value="1" <?= ($cfg['tags_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['tags_enabled'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tags_enabled_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tags_review">
+                        <label for="set-tags_review" class="form-label"><?= _h('settings.tags_review') ?></label>
+                        <select id="set-tags_review" class="form-select bg-dark text-light border-secondary" name="tags_review">
+                            <option value="approve" <?= ($cfg['tags_review'] ?? 'approve') !== 'open' ? 'selected' : '' ?>><?= _h('settings.tags_review_approve') ?></option>
+                            <option value="open" <?= ($cfg['tags_review'] ?? 'approve') === 'open' ? 'selected' : '' ?>><?= _h('settings.tags_review_open') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tags_review_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tags_max_per_torrent">
+                        <label for="set-tags_max_per_torrent" class="form-label"><?= _h('settings.tags_max_per_torrent') ?></label>
+                        <input type="number" min="1" max="100" step="1" id="set-tags_max_per_torrent" class="form-control bg-dark text-light border-secondary" name="tags_max_per_torrent" value="<?= (int)($cfg['tags_max_per_torrent'] ?? 40) ?>">
+                        <small class="settings-hint"><?= _h('settings.tags_max_per_torrent_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tags_name_max">
+                        <label for="set-tags_name_max" class="form-label"><?= _h('settings.tags_name_max') ?></label>
+                        <input type="number" min="2" max="40" step="1" id="set-tags_name_max" class="form-control bg-dark text-light border-secondary" name="tags_name_max" value="<?= (int)($cfg['tags_name_max'] ?? 32) ?>">
+                        <small class="settings-hint"><?= _h('settings.tags_name_max_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="tags_create_per_day">
+                        <label for="set-tags_create_per_day" class="form-label"><?= _h('settings.tags_create_per_day') ?></label>
+                        <input type="number" min="0" max="500" step="1" id="set-tags_create_per_day" class="form-control bg-dark text-light border-secondary" name="tags_create_per_day" value="<?= (int)($cfg['tags_create_per_day'] ?? 20) ?>">
+                        <small class="settings-hint"><?= _h('settings.tags_create_per_day_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="facts_filter_counts">
                         <label for="set-facts_filter_counts" class="form-label"><?= _h('settings.facts_filter_counts') ?></label>
                         <select id="set-facts_filter_counts" class="form-select bg-dark text-light border-secondary" name="facts_filter_counts">

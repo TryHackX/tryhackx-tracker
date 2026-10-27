@@ -33,6 +33,7 @@ require_once __DIR__ . '/includes/shout.php';
 require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/images.php';
 require_once __DIR__ . '/includes/facts.php';
+require_once __DIR__ . '/includes/tags.php';
 // The description on a profile (v74): its own small renderer and the rules it is saved by.
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile and the account page (v75): the one gate both ask.
@@ -251,6 +252,8 @@ if (in_array($action, $adminPanelActions, true) || $action === $adminLoginAction
             include __DIR__ . '/templates/admin/moderation.php';
         } elseif ($action === 'admin-images') {
             include __DIR__ . '/templates/admin/images.php';
+        } elseif ($action === 'admin-tags') {
+            include __DIR__ . '/templates/admin/tags.php';
         } elseif ($action === 'admin-audit') {
             include __DIR__ . '/templates/admin/audit.php';
         } elseif ($action === 'admin-backups') {

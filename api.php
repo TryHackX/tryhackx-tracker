@@ -41,6 +41,7 @@ require_once __DIR__ . '/includes/shout.php';
 require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/images.php';
 require_once __DIR__ . '/includes/facts.php';
+require_once __DIR__ . '/includes/tags.php';
 // The description on a profile (v74): its renderer, its rules and the save the endpoint runs.
 require_once __DIR__ . '/includes/profilebio.php';
 // A member's likes or ratings on the profile (v75): the gate, the parameters and the one query.
@@ -179,6 +180,8 @@ $apiRoutes = [
     'admin/moderation_action'     => 'api/admin/moderation_action.php',
     'admin/moderation_rules'      => 'api/admin/moderation_rules.php',
     'admin/images'                => 'api/admin/images.php',
+    'admin/tags'                  => 'api/admin/tags.php',
+    'admin/tag_action'            => 'api/admin/tag_action.php',
     'admin/image_action'          => 'api/admin/image_action.php',
     'admin/change_status'   => 'api/admin/change_status.php',
     'admin/block_hash'      => 'api/admin/block_hash.php',
@@ -373,6 +376,9 @@ $apiRoutes = [
     'comment_prefs'              => 'api/comment_prefs.php',
     // A member reports a comment, a description or a shout (1.71.0, includes/reports.php).
     'content_report'             => 'api/content_report.php',
+    'tags_search'                => 'api/tags_search.php',
+    'tag_add'                    => 'api/tag_add.php',
+    'tag_remove'                 => 'api/tag_remove.php',
     // ── People reaching each other (includes/people.php) ──
     'user_people'                => 'api/user_people.php',
     'user_messages'              => 'api/user_messages.php',
@@ -487,6 +493,8 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/moderation_action'     => 'panel.moderation.handle',
         'admin/moderation_rules'      => 'panel.moderation.rules',
         'admin/images'                => 'panel.images.view',
+        'admin/tags'                  => 'panel.tags.view',
+        'admin/tag_action'            => 'panel.tags.view',
         'admin/image_action'          => 'panel.images.manage',
         'admin/fetch_appeals'      => 'panel.reports.view',
         'admin/change_status'      => 'panel.reports.status',

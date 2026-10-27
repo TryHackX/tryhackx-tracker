@@ -54,6 +54,7 @@ require_once $root . '/includes/antispam.php';
 require_once $root . '/includes/retention.php';
 require_once $root . '/includes/images.php';
 require_once $root . '/includes/facts.php';
+require_once $root . '/includes/tags.php';
 
 /**
  * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
@@ -209,6 +210,7 @@ try {
         $factsRead = factsTick($db);
         if ($factsRead > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read $factsRead descriptions\n";
         factsCountsTick($db, $cfg);
+        tagsUsesTick($db);
     }
     // The stability probe: start one that was asked for, and restore one whose process has died.
     // The reap is the important half — a tuner that is killed must not leave the machine on the limit

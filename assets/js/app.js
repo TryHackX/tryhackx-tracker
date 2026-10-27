@@ -3958,9 +3958,17 @@ window.siteToast = siteToast;
             body.appendChild(row);
         }
 
-        if (json.facts && window.FactChips) {
-            const chips = window.FactChips.render(json.facts, typeof window.SearchFiltersPick === 'function' ? window.SearchFiltersPick : null);
-            if (chips) { chips.classList.add('info-section', 'info-facts'); body.appendChild(chips); }
+        if ((json.facts || json.tag_edit) && window.FactChips) {
+            const pick = typeof window.SearchFiltersPick === 'function' ? window.SearchFiltersPick : null;
+            if (json.tag_edit && window.TagEditor) {
+                const tagBox = document.createElement('div');
+                tagBox.className = 'info-section info-facts info-tags';
+                body.appendChild(tagBox);
+                window.TagEditor.mount(tagBox, json, pick);
+            } else {
+                const chips = window.FactChips.render(json.facts, pick);
+                if (chips) { chips.classList.add('info-section', 'info-facts'); body.appendChild(chips); }
+            }
         }
         // 2. what it is
         if (json.description_html) {

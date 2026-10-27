@@ -40,6 +40,7 @@ $allowed = [
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
     'search_share_enabled', 'search_count_common_words', 'facts_source',
     'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
+    'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
@@ -326,6 +327,11 @@ foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_
     if (isset($data[$fk])) $data[$fk] = in_array($data[$fk], ['0', 0, false], true) ? '0' : '1';
 }
 if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min((int)$data['facts_chips_max'] ?: 6, 20));
+if (isset($data['tags_enabled'])) $data['tags_enabled'] = in_array($data['tags_enabled'], ['0', 0, false], true) ? '0' : '1';
+if (isset($data['tags_review'])) $data['tags_review'] = $data['tags_review'] === 'open' ? 'open' : 'approve';
+if (isset($data['tags_max_per_torrent'])) $data['tags_max_per_torrent'] = (string)max(1, min((int)$data['tags_max_per_torrent'] ?: 40, 100));
+if (isset($data['tags_name_max'])) $data['tags_name_max'] = (string)max(2, min((int)$data['tags_name_max'] ?: 32, 40));
+if (isset($data['tags_create_per_day'])) $data['tags_create_per_day'] = (string)max(0, min((int)$data['tags_create_per_day'], 500));
 if (isset($data['facts_source']) && !in_array($data['facts_source'], ['desc', 'desc_name'], true)) {
     $data['facts_source'] = 'desc';
 }

@@ -47,6 +47,7 @@ function factsTagLabel(string $id, array $genres = []): string
 function factsTagValid(string $id): bool
 {
     if (isset(FACTS_LABELS[$id]) || in_array($id, FACTS_WORDS, true)) return true;
+    if (preg_match('/^x:[a-z0-9-]{1,64}$/', $id)) return true;
     return preg_match('/^g:[a-z0-9-]{2,40}$/', $id) === 1;
 }
 
@@ -558,10 +559,14 @@ function factsChipsMax(array $cfg): int
     return max(1, min(20, (int)($cfg['facts_chips_max'] ?? 6) ?: 6));
 }
 
+function factsChipsOn(array $cfg, string $place): bool
+{
+    return (['search' => $cfg['facts_chips_search'] ?? '1', 'info' => $cfg['facts_chips_info'] ?? '1', 'panel' => $cfg['facts_chips_panel'] ?? '1'][$place] ?? '1') === '1';
+}
+
 function factsRowChips(?array $desc, string $name, array $cfg, string $place = ''): ?array
 {
-    $switch = ['search' => $cfg['facts_chips_search'] ?? '1', 'info' => $cfg['facts_chips_info'] ?? '1', 'panel' => $cfg['facts_chips_panel'] ?? '1'][$place] ?? '1';
-    if ($switch !== '1') return null;
+    if (!factsChipsOn($cfg, $place)) return null;
     if ($desc !== null) return $desc;
     return factsMode($cfg) === 'desc_name' && $name !== '' ? factsNameChips($name) : null;
 }
@@ -594,10 +599,12 @@ function factsNameStore(PDO $db, array $rows): int
     if (!$rows || !factsNameReady($db)) return 0;
     $up = [];
     $gone = [];
+    $blocks = function_exists('tagsBlocked') ? tagsBlocked($db, array_map(fn($r) => (string)($r['info_hash'] ?? ''), $rows)) : [];
     foreach ($rows as $r) {
         $hash = strtolower((string)($r['info_hash'] ?? ''));
         if (!preg_match('/^[0-9a-f]{40}$/', $hash)) continue;
         $f = factsFromName((string)($r['name'] ?? ''));
+        if (isset($blocks[$hash])) $f['tags'] = array_values(array_diff($f['tags'], $blocks[$hash]));
         if (!$f['tags']) { $gone[] = $hash; continue; }
         [$kind, $res, $bits] = factsNameCodes($f['tags']);
         $up[] = [$hash, $kind, $res, (int)($f['year'] ?? 0), $bits];
@@ -703,15 +710,37 @@ function factsRequest(array $get): array
     ];
 }
 
+function factsFilterConds(PDO $db, array $cfg, array $f, bool $canContent, bool $signedIn): array
+{
+    $dims = [];
+    foreach ($f['tags'] ?? [] as $set) $dims[] = [['tags' => [$set]], $set];
+    if (in_array($f['type'] ?? '', ['movie', 'series'], true)) $dims[] = [['type' => $f['type']], ['t:' . $f['type']]];
+    if (is_array($f['year'] ?? null)) $dims[] = [['year' => $f['year']], []];
+    $descOnly = array_filter(['pics' => !empty($f['pics']) ? true : null, 'imdb' => $f['imdb'] ?? null, 'filmweb' => $f['filmweb'] ?? null,
+                              'vbitrate' => $f['vbitrate'] ?? null], fn($v) => $v !== null);
+    if ($descOnly) $dims[] = [$descOnly, []];
+    $byName = factsMode($cfg) === 'desc_name';
+    $conds = [];
+    foreach ($dims as [$d, $ids]) {
+        $hashes = $canContent ? (factsFilterHashes($db, $d, $signedIn) ?? []) : [];
+        $tpl = null;
+        $args = [];
+        if ($byName && ($nf = factsNameFilter($db, $d)) !== null) {
+            if (isset($nf['hashes'])) $hashes = array_merge($hashes, $nf['hashes']);
+            else { $tpl = $nf['tpl']; $args = $nf['args']; }
+        }
+        if ($ids && function_exists('tagsFilterExplicit') && ($ex = tagsFilterExplicit($db, $ids)) !== null) {
+            if (isset($ex['hashes'])) $hashes = array_merge($hashes, $ex['hashes']);
+            else { $tpl = $tpl === null ? $ex['tpl'] : '(' . $tpl . ' OR ' . $ex['tpl'] . ')'; $args = array_merge($args, $ex['args']); }
+        }
+        $conds[] = [array_values(array_unique(array_map('strtolower', $hashes))), $tpl, $args];
+    }
+    return $conds;
+}
+
 function factsEngineFilters(PDO $db, array $cfg, array $req, bool $canContent, bool $signedIn): array
 {
-    $only = $canContent ? factsFilterHashes($db, $req['facts'] ?? [], $signedIn) : null;
-    $names = factsMode($cfg) === 'desc_name' ? factsNameFilter($db, $req['facts'] ?? []) : null;
-    $clause = null;
-    if ($names !== null) {
-        if (isset($names['hashes'])) $only = array_values(array_unique(array_merge($only ?? [], $names['hashes'])));
-        else { $only = $only ?? []; $clause = [$names['tpl'], $names['args']]; }
-    }
+    $conds = factsFilterConds($db, $cfg, $req['facts'] ?? [], $canContent, $signedIn);
     $size = $req['size'] ?? null;
     $files = $req['files'] ?? null;
     $seeders = $req['seeders'] ?? null;
@@ -721,8 +750,7 @@ function factsEngineFilters(PDO $db, array $cfg, array $req, bool $canContent, b
         'files_min' => $files !== null && $files[0] !== null ? (int)$files[0] : null,
         'files_max' => $files !== null && $files[1] !== null ? (int)$files[1] : null,
         'seeders_min' => $seeders !== null && $seeders[0] !== null ? (int)$seeders[0] : null,
-        'only_hashes' => $only,
-        'name_clause' => $clause,
+        'facts_conds' => $conds ?: null,
     ], fn($v) => $v !== null);
 }
 
@@ -735,22 +763,41 @@ function factsListFilters(PDO $db, array $cfg, array $req, string $seeders, stri
         if ($r[0] !== null) { $where[] = $col . ' >= ?'; $params[] = $r[0]; }
         if ($upper && $r[1] !== null) { $where[] = $col . ' <= ?'; $params[] = $r[1]; }
     }
-    $hashes = factsFilterHashes($db, $req['facts'] ?? [], true);
-    $names = factsMode($cfg) === 'desc_name' ? factsNameFilter($db, $req['facts'] ?? []) : null;
-    if ($hashes !== null || $names !== null) {
-        $list = array_values(array_unique(array_merge($hashes ?? [], $names['hashes'] ?? [])));
+    foreach (factsFilterConds($db, $cfg, $req['facts'] ?? [], true, true) as [$list, $tpl, $args]) {
         $parts = [];
         if ($list) {
             $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($list), '?')) . ')';
             foreach ($list as $h) $params[] = $h;
         }
-        if (isset($names['tpl'])) {
-            $parts[] = str_replace('{T}', '`' . $table . '`', $names['tpl']);
-            foreach ($names['args'] as $v) $params[] = $v;
+        if ($tpl !== null) {
+            $parts[] = str_replace('{T}', '`' . $table . '`', $tpl);
+            foreach ($args as $v) $params[] = $v;
         }
         $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
     }
     return [$where, $params];
+}
+
+function factsRefresh(PDO $db, string $hash): void
+{
+    $hash = strtolower($hash);
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return;
+    try {
+        if (factsMode($GLOBALS['cfg'] ?? []) === 'desc_name') {
+            $st = $db->prepare("SELECT name FROM index_catalog WHERE info_hash = ? UNION ALL SELECT name FROM whitelist WHERE info_hash = ? AND banned = 0 LIMIT 1");
+            $st->execute([$hash, $hash]);
+            $name = $st->fetchColumn();
+            if ($name !== false) factsNameStore($db, [['info_hash' => $hash, 'name' => (string)$name]]);
+        }
+        $st = $db->prepare("SELECT id FROM whitelist WHERE info_hash = ? AND description IS NOT NULL AND description <> '' LIMIT 1");
+        $st->execute([$hash]);
+        if (($id = $st->fetchColumn()) !== false) factsTouch($db, 'wl', (string)$id);
+        $st = $db->prepare("SELECT id FROM hash_content WHERE info_hash = ? AND description IS NOT NULL AND description <> '' LIMIT 1");
+        $st->execute([$hash]);
+        if (($id = $st->fetchColumn()) !== false) factsTouch($db, 'idx', (string)$id);
+    } catch (\Throwable $e) {
+        error_log('[facts] refresh ' . $hash . ': ' . $e->getMessage());
+    }
 }
 
 function factsCounts(PDO $db, array $cfg): array
@@ -813,6 +860,7 @@ function factsTableReady(PDO $db): bool
 function factsStore(PDO $db, string $hash, string $src, string $text, string $title): array
 {
     $f = factsFromDescription($text, $title);
+    if (function_exists('tagsBlocked') && ($blocked = tagsBlocked($db, [$hash])[strtolower($hash)] ?? [])) $f['tags'] = array_values(array_diff($f['tags'], $blocked));
     $genres = implode('|', array_map(fn($k, $v) => $k . '=' . str_replace(['|', '='], ' ', $v), array_keys($f['genres']), $f['genres']));
     $st = $db->prepare("INSERT INTO desc_facts (info_hash, src, ver, text_sha, res, vbitrate, year_from, year_to, seasons, episodes, duration_min, imdb, filmweb, pics, tags, genres,
                                                 vbitrate_max, vmode, obitrate, obitrate_max, omode, abitrate, abitrate_max, amode, acodec, achannels, updated_at)
@@ -971,7 +1019,7 @@ function factsTagsParam($raw): array
     return $out;
 }
 
-function factsCatalog(array $cfg = []): array
+function factsCatalog(array $cfg = [], ?PDO $db = null): array
 {
     $counts = json_decode((string)($cfg['facts_counts'] ?? ''), true);
     $n = ($cfg['facts_filter_counts'] ?? '1') === '1' && is_array($counts['n'] ?? null) ? $counts['n'] : null;
@@ -990,6 +1038,12 @@ function factsCatalog(array $cfg = []): array
     }
     $order = array_flip(FACTS_GROUPS);
     usort($out, fn($a, $b) => [$order[$a['g']] ?? 99, -($a['n'] ?? 0)] <=> [$order[$b['g']] ?? 99, -($b['n'] ?? 0)]);
+    if ($db !== null && function_exists('tagsCatalog') && tagsEnabled($cfg)) {
+        foreach (tagsCatalog($db) as $c) {
+            if ($n === null) unset($c['n']);
+            $out[] = $c;
+        }
+    }
     return $out;
 }
 

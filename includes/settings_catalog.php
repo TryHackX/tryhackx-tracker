@@ -304,6 +304,11 @@ function settingsCatalogKeywords(): array {
         'facts_chips_rates'         => 'bitrate bit rate overall video audio average maximum vbr cbr chips',
         'facts_chips_ratings'       => 'imdb filmweb ratings chips oceny',
         'facts_filter_counts'       => 'filter counts numbers tags how many torrents liczniki filtry',
+        'tags_enabled'              => 'tags manual people members add create moderate tagi reczne',
+        'tags_review'               => 'tags new approval queue moderator review pending zatwierdzanie',
+        'tags_max_per_torrent'      => 'tags per torrent limit maximum many tagi limit',
+        'tags_name_max'             => 'tag name length characters long nazwa dlugosc',
+        'tags_create_per_day'       => 'tags create per day limit member spam nowe tagi dziennie',
         // #section-user2fa
         'user_2fa_enabled'          => 'two factor authentication 2fa members accounts totp authenticator app',
         'user_2fa_required'         => 'two factor required force 2fa panel access moderators admins',
