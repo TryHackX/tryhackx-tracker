@@ -208,6 +208,15 @@ if ($forumDesc !== null && $forumDesc['author'] !== null && (!$credits || $credi
 $tagModerate = $me && userCan($db, $cfg, 'tags.moderate');
 $tagEdit = ($me && tagsEnabled($cfg) && tagsReady($db) && ($tagModerate || userCan($db, $cfg, 'tags.add')))
     ? ['add' => userCan($db, $cfg, 'tags.add') || $tagModerate, 'create' => userCan($db, $cfg, 'tags.create'), 'moderate' => $tagModerate] : null;
+$infoName = (string)($idx['name'] ?? ($wl['name'] ?? ''));
+$infoFacts = factsChipsOn($cfg, 'info')
+    ? tagsMergeChips(factsRowChips(($canContent && $hasWords) ? (factsChipsFor($db, [$hash], richtextViewerSignedIn($db))[strtolower($hash)] ?? null) : null, $infoName, $cfg, 'info'),
+                     tagsForHashes($db, [$hash], $me ? (int)$me['id'] : null, $tagModerate)[strtolower($hash)] ?? null, $cfg) : null;
+if ($tagEdit !== null && $tagEdit['add']) {
+    $tagEdit['suggest'] = tagsSuggest($db, $hash, $infoName,
+        ($canContent && $hasWords) ? html_entity_decode(strip_tags(str_replace('<', ' <', $descHtml)), ENT_QUOTES | ENT_HTML5, 'UTF-8') : '',
+        array_column($infoFacts['tags'] ?? [], 'id'));
+}
 
 jsonResponse([
     'success'   => true,
@@ -230,10 +239,7 @@ jsonResponse([
         ? ((($wl['source'] ?? '') === 'forum') ? __('api.index.source_auto_forum') : __('api.index.source_auto_importer'))
         : null,
     'description_html' => $descHtml,
-    'facts'            => factsChipsOn($cfg, 'info')
-                          ? tagsMergeChips(factsRowChips(($canContent && $hasWords) ? (factsChipsFor($db, [$hash], richtextViewerSignedIn($db))[strtolower($hash)] ?? null) : null,
-                                                         (string)($idx['name'] ?? ($wl['name'] ?? '')), $cfg, 'info'),
-                                           tagsForHashes($db, [$hash], $me ? (int)$me['id'] : null, $tagModerate)[strtolower($hash)] ?? null, $cfg) : null,
+    'facts'            => $infoFacts,
     'tag_edit'         => $tagEdit,
     // 1.53.0: who wrote it, whether the reader is being kept from it, what they may do, and what became
     // of their own words. The editor's limits ride along so the panel does not have to ask again.

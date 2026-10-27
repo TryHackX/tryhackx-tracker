@@ -80,7 +80,7 @@ check('a wrong automatic tag: a member may not remove it, a moderator blocks it 
 $merged = tagsMergeChips(factsNameChips('Zyxtg Two 2021 720p CAM x264'), tagsForHashes($db, [$hh(2)], null, false)[$hh(2)] ?? null, $cfgT);
 check('… and from the chips; a member cannot put it back, a moderator can (which lifts the block)',
       !in_array('s:cam', array_column($merged['tags'] ?? [], 'id'), true) && $add(2, 's:cam', 9001) === ['ok' => false, 'error' => 'blocked']
-      && $add(2, 's:cam', 9002, true) === ['ok' => true, 'unblocked' => true] && !(tagsBlocked($db, [$hh(2)])[$hh(2)] ?? []));
+      && $add(2, 's:cam', 9002, true) === ['ok' => true, 'unblocked' => true, 'pending' => false] && !(tagsBlocked($db, [$hh(2)])[$hh(2)] ?? []));
 
 $db->exec("UPDATE tags SET status = 'approved' WHERE slug = 'zyx-space-opera'");
 $hits = function (array $get) use ($db, $cfgT): array {

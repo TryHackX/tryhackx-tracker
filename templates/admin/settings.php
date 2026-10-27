@@ -1539,6 +1539,14 @@
                         <input type="number" min="0" max="500" step="1" id="set-tags_create_per_day" class="form-control bg-dark text-light border-secondary" name="tags_create_per_day" value="<?= (int)($cfg['tags_create_per_day'] ?? 20) ?>">
                         <small class="settings-hint"><?= _h('settings.tags_create_per_day_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="tags_add_review">
+                        <label for="set-tags_add_review" class="form-label"><?= _h('settings.tags_add_review') ?></label>
+                        <select id="set-tags_add_review" class="form-select bg-dark text-light border-secondary" name="tags_add_review">
+                            <option value="open" <?= ($cfg['tags_add_review'] ?? 'open') !== 'approve' ? 'selected' : '' ?>><?= _h('settings.tags_add_review_open') ?></option>
+                            <option value="approve" <?= ($cfg['tags_add_review'] ?? 'open') === 'approve' ? 'selected' : '' ?>><?= _h('settings.tags_add_review_approve') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tags_add_review_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="tags_forum">
                         <label for="set-tags_forum" class="form-label"><?= _h('settings.tags_forum') ?></label>
                         <select id="set-tags_forum" class="form-select bg-dark text-light border-secondary" name="tags_forum">

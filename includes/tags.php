@@ -6,6 +6,38 @@ const TAG_ORIGIN_FORUM = 4;
 const TAGS_LIST_CAP = 10000;
 const TAGS_FORUM_MAX = 30;
 const TAGS_FORUM_GENRES = ['animowane' => 'animacja', 'animowany' => 'animacja', 'fantastyka-naukowa' => 'sci-fi', 'dreszczowce' => 'thriller'];
+const TAGS_BASE = [
+    'extended'         => ['Extended', '#ffd54f', 'extended|extended cut|extended edition|wersja rozszerzona'],
+    'director-s-cut'   => ["Director's Cut", '#ffd54f', "director's cut|directors cut|director cut|wersja reżyserska"],
+    'uncut'            => ['Uncut', '#ffd54f', 'uncut|unrated|bez cięć|wersja nieocenzurowana'],
+    'remaster'         => ['Remaster', '#ffd54f', 'remaster|remastered|zremasterowana|zremasterowany'],
+    'imax'             => ['IMAX', '#ffd54f', 'imax'],
+    'wersja-kinowa'    => ['Wersja kinowa', '#ffd54f', 'theatrical cut|theatrical|wersja kinowa'],
+    'kolekcja'         => ['Kolekcja', '#ffd54f', 'collection|kolekcja|box set|boxset|trylogia|trilogy|quadrilogy|duology|dylogia'],
+    'komplet-sezonow'  => ['Komplet sezonów', '#ffd54f', 'complete series|all seasons|komplet sezonów|wszystkie sezony'],
+    '3d'               => ['3D', '#90caf9', '3d|h-sbs|hsbs|half-sbs|half sbs|half-ou|anaglyph|anaglif'],
+    'upscale-ai'       => ['Upscale AI', '#90caf9', 'upscale|upscaled|ai upscale|upscaling'],
+    'czarno-bialy'     => ['Czarno-biały', '#90caf9', 'black and white|black & white|czarno-biały'],
+    'koloryzacja'      => ['Koloryzacja', '#90caf9', 'colorized|colourized|koloryzowana|koloryzowany|koloryzacja'],
+    'lektor-ivo'       => ['Lektor IVO', '#80deea', 'ivo|ivona|lektor ivo|lektor ivona'],
+    'lektor-ai'        => ['Lektor AI', '#80deea', 'lektor ai|ai lektor|lektor syntetyczny|lektor maszynowy'],
+    'dubbing-ai'       => ['Dubbing AI', '#80deea', 'dubbing ai|ai dubbing|dubbing syntetyczny'],
+    'lektor-amatorski' => ['Lektor amatorski', '#80deea', 'lektor amatorski|lektor ama|amatorski lektor'],
+    'napisy-wtopione'  => ['Napisy wtopione', '#80deea', 'hardsub|hardsubs|hardcoded subs|napisy wtopione|wtopione napisy'],
+    'napisy-sdh'       => ['Napisy SDH', '#80deea', 'sdh|dla niesłyszących'],
+    'audiodeskrypcja'  => ['Audiodeskrypcja', '#80deea', 'audiodeskrypcja|audio description|audiodescription'],
+    'polska-produkcja' => ['Polska produkcja', '#c5e1a5', 'polska produkcja|produkcja polska|produkcja: polska|kraj: polska|kraj produkcji: polska'],
+    'klasyka'          => ['Klasyka', '#c5e1a5', 'klasyka|klasyka kina|classic'],
+    'koncert'          => ['Koncert', '#c5e1a5', 'koncert|concert|live at|live in'],
+    'kabaret'          => ['Kabaret', '#c5e1a5', 'kabaret|kabareton'],
+    'stand-up'         => ['Stand-up', '#c5e1a5', 'stand-up|standup|stand up comedy'],
+    'sport'            => ['Sport', '#c5e1a5', 'ufc|formula 1|formuła 1|wrc|nba|nfl|nhl|mecz|liga mistrzów|champions league'],
+    'gra'              => ['Gra', '#b0bec5', 'repack|fitgirl|dodi|elamigos|gog|pc game|gra pc'],
+    'program'          => ['Program', '#b0bec5', 'software|portable|oprogramowanie'],
+    'muzyka'           => ['Muzyka', '#b0bec5', 'discography|dyskografia|album|soundtrack|ost'],
+    'audiobook'        => ['Audiobook', '#b0bec5', 'audiobook|audiobooki|słuchowisko'],
+    'e-book'           => ['E-book', '#b0bec5', 'ebook|e-book|epub|mobi|azw3'],
+];
 
 function tagsEnabled(array $cfg): bool
 {
@@ -133,7 +165,7 @@ function tagsBlocked(PDO $db, array $hashes): array
     return $out;
 }
 
-function tagsAttach(PDO $db, array $cfg, string $hash, string $id, ?int $userId, int $origin, bool $moderate): array
+function tagsAttach(PDO $db, array $cfg, string $hash, string $id, ?int $userId, int $origin, bool $moderate, bool $pending = false): array
 {
     $hash = strtolower($hash);
     if (!preg_match('/^[0-9a-f]{40}$/', $hash) || !tagsReady($db)) return ['ok' => false, 'error' => 'invalid'];
@@ -150,10 +182,18 @@ function tagsAttach(PDO $db, array $cfg, string $hash, string $id, ?int $userId,
     $have = $db->prepare("SELECT 1 FROM hash_tags WHERE info_hash = ? AND tag = ?");
     $have->execute([$hash, $id]);
     if (!$have->fetchColumn() && (int)$st->fetchColumn() >= tagsLimit($cfg, 'tags_max_per_torrent', 40, 1, 100)) return ['ok' => false, 'error' => 'too_many'];
-    $db->prepare("INSERT INTO hash_tags (info_hash, tag, origin, added_by, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())
-                  ON DUPLICATE KEY UPDATE origin = origin | VALUES(origin), added_by = COALESCE(added_by, VALUES(added_by))")
-       ->execute([$hash, $id, $origin, $userId]);
-    return ['ok' => true, 'unblocked' => $blocked];
+    if (!tagsPendingCol($db)) {
+        $db->prepare("INSERT INTO hash_tags (info_hash, tag, origin, added_by, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())
+                      ON DUPLICATE KEY UPDATE origin = origin | VALUES(origin), added_by = COALESCE(added_by, VALUES(added_by))")
+           ->execute([$hash, $id, $origin, $userId]);
+        return ['ok' => true, 'unblocked' => $blocked, 'pending' => false];
+    }
+    $db->prepare("INSERT INTO hash_tags (info_hash, tag, origin, added_by, created_at, pending) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), ?)
+                  ON DUPLICATE KEY UPDATE origin = origin | VALUES(origin), added_by = COALESCE(added_by, VALUES(added_by)), pending = LEAST(pending, VALUES(pending))")
+       ->execute([$hash, $id, $origin, $userId, $pending ? 1 : 0]);
+    $st = $db->prepare("SELECT pending FROM hash_tags WHERE info_hash = ? AND tag = ?");
+    $st->execute([$hash, $id]);
+    return ['ok' => true, 'unblocked' => $blocked, 'pending' => (int)$st->fetchColumn() === 1];
 }
 
 function tagsUnblock(PDO $db, string $hash, string $id): void
@@ -191,15 +231,17 @@ function tagsForHashes(PDO $db, array $hashes, ?int $viewerId, bool $moderate): 
     if (!$hashes || !tagsReady($db)) return [];
     $out = [];
     $genres = null;
+    $sel = tagsPendingCol($db) ? 'ht.pending' : '0 AS pending';
     foreach (array_chunk($hashes, 500) as $chunk) {
         $in = implode(',', array_fill(0, count($chunk), '?'));
-        $st = $db->prepare("SELECT ht.info_hash, ht.tag, ht.origin, ht.added_by, t.name, t.color, t.status, t.hidden
+        $st = $db->prepare("SELECT ht.info_hash, ht.tag, ht.origin, ht.added_by, $sel, t.name, t.color, t.status, t.hidden
                               FROM hash_tags ht LEFT JOIN tags t ON ht.tag LIKE 'x:%' AND t.slug = SUBSTRING(ht.tag, 3)
                              WHERE ht.info_hash IN ($in) ORDER BY ht.created_at, ht.tag");
         $st->execute($chunk);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $id = (string)$r['tag'];
             $mine = $viewerId !== null && (int)$r['added_by'] === $viewerId;
+            if ((int)$r['pending'] === 1 && !$mine && !$moderate) continue;
             if (tagsIsExplicit($id)) {
                 if ($r['status'] === null || $r['status'] === 'rejected' || (int)$r['hidden'] === 1) continue;
                 if ($r['status'] === 'pending' && !$mine && !$moderate) continue;
@@ -212,6 +254,7 @@ function tagsForHashes(PDO $db, array $hashes, ?int $viewerId, bool $moderate): 
                 continue;
             }
             if ($mine) $chip['m'] = 1;
+            if ((int)$r['pending'] === 1) $chip['p'] = 1;
             $out[strtolower((string)$r['info_hash'])]['add'][] = $chip;
         }
     }
@@ -259,12 +302,14 @@ function tagsFilterExplicit(PDO $db, array $ids, int $cap = TAGS_LIST_CAP): ?arr
     }
     if (!$ok) return ['hashes' => []];
     $in = implode(',', array_fill(0, count($ok), '?'));
-    $sql = "SELECT DISTINCT info_hash FROM hash_tags WHERE tag IN ($in) LIMIT " . ($cap + 1);
+    $live = tagsPendingCol($db);
+    $clause = $live ? ' AND pending = 0' : '';
+    $sql = "SELECT DISTINCT info_hash FROM hash_tags WHERE tag IN ($in)$clause LIMIT " . ($cap + 1);
     $st = $db->prepare($sql);
     $st->execute($ok);
     $hashes = array_map('strtolower', $st->fetchAll(PDO::FETCH_COLUMN));
     if (count($hashes) <= $cap) return ['hashes' => $hashes];
-    return ['tpl' => "(SELECT 1 FROM hash_tags ht WHERE ht.info_hash = {T}.info_hash AND ht.tag IN ($in) LIMIT 1) IS NOT NULL", 'args' => $ok];
+    return ['tpl' => "(SELECT 1 FROM hash_tags ht WHERE ht.info_hash = {T}.info_hash AND ht.tag IN ($in)" . ($live ? ' AND ht.pending = 0' : '') . " LIMIT 1) IS NOT NULL", 'args' => $ok];
 }
 
 function tagsCatalog(PDO $db, int $limit = 300): array
@@ -302,6 +347,15 @@ function tagsSearch(PDO $db, array $cfg, string $q, int $limit = 12): array
         $out[] = $c;
         if (count($out) >= $limit) break;
     }
+    foreach (TAGS_BASE as $slug => [, , $aliases]) {
+        if (count($out) >= $limit) break;
+        if (!str_contains(mb_strtolower($aliases), $q) || in_array('x:' . $slug, array_column($out, 'id'), true)) continue;
+        $row = tagsRow($db, 'x:' . $slug);
+        if (!$row || $row['status'] !== 'approved' || (int)$row['hidden'] === 1) continue;
+        $c = ['id' => 'x:' . $slug, 'g' => 'x', 'l' => (string)$row['name']];
+        if ($row['color']) $c['c'] = (string)$row['color'];
+        $out[] = $c;
+    }
     return $out;
 }
 
@@ -326,8 +380,11 @@ function tagsUsesTick(PDO $db): void
     }
     $db->exec("DELETE ht FROM hash_tags ht LEFT JOIN index_hashes h ON h.info_hash = ht.info_hash LEFT JOIN whitelist w ON w.info_hash = ht.info_hash
                WHERE h.info_hash IS NULL AND w.info_hash IS NULL");
-    $db->exec("UPDATE tags t LEFT JOIN (SELECT SUBSTRING(tag, 3) AS slug, COUNT(*) AS n FROM hash_tags WHERE tag LIKE 'x:%' GROUP BY tag) c ON c.slug = t.slug
+    $clause = tagsPendingCol($db) ? ' AND pending = 0' : '';
+    $db->exec("UPDATE tags t LEFT JOIN (SELECT SUBSTRING(tag, 3) AS slug, COUNT(*) AS n FROM hash_tags WHERE tag LIKE 'x:%'$clause GROUP BY tag) c ON c.slug = t.slug
                SET t.uses = COALESCE(c.n, 0)");
+    if (tagsLogReady($db)) $db->exec("DELETE FROM hash_tag_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL 90 DAY");
+    if (function_exists('schemaOnce') && schemaOnce($db, 'v109_base_tags')) tagsSeedBase($db);
 }
 
 function tagsAdminList(PDO $db, array $q): array
@@ -610,8 +667,9 @@ function tagsForumReconcile(PDO $db, array $cfg, ?string $hash = null, int $limi
                            AND (m.target NOT LIKE 'x:%' OR (t.id IS NOT NULL AND t.status <> 'rejected' AND t.hidden = 0)) $where
                          LIMIT $limit");
     $st->execute($args);
+    $clause = tagsPendingCol($db) ? ', pending = 0' : '';
     $put = $db->prepare("INSERT INTO hash_tags (info_hash, tag, origin, added_by, created_at) VALUES (?, ?, 4, NULL, UTC_TIMESTAMP())
-                         ON DUPLICATE KEY UPDATE origin = origin | 4");
+                         ON DUPLICATE KEY UPDATE origin = origin | 4$clause");
     foreach ($st->fetchAll(PDO::FETCH_NUM) as [$h, $tag]) {
         if (!factsTagValid((string)$tag)) continue;
         $put->execute([$h, $tag]);
@@ -721,4 +779,157 @@ function tagsForumDecide(PDO $db, array $cfg, string $op, array $input): array
     $done = tagsForumReconcile($db, $cfg, null, 50000);
     tagsUsesTick($db);
     return ['ok' => true, 'n' => $n] + $done;
+}
+
+function tagsPendingCol(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready) return true;
+    try {
+        $ready = (bool)$db->query("SHOW COLUMNS FROM hash_tags LIKE 'pending'")->fetchColumn();
+    } catch (\Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+function tagsLogReady(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready) return true;
+    try {
+        $ready = (bool)$db->query("SHOW TABLES LIKE 'hash_tag_log'")->fetchColumn();
+    } catch (\Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+function tagsLog(PDO $db, string $hash, string $tag, string $action, ?int $userId): void
+{
+    if (!tagsLogReady($db) || !in_array($action, ['add', 'remove', 'approve', 'reject', 'block'], true)) return;
+    $db->prepare("INSERT INTO hash_tag_log (info_hash, tag, action, user_id, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())")
+       ->execute([strtolower($hash), $tag, $action, $userId]);
+}
+
+function tagsSeedBase(PDO $db): int
+{
+    if (!tagsReady($db)) return 0;
+    $st = $db->prepare("INSERT IGNORE INTO tags (slug, name, color, status, origin, created_by, created_at) VALUES (?, ?, ?, 'approved', 'moderator', NULL, UTC_TIMESTAMP())");
+    $n = 0;
+    foreach (TAGS_BASE as $slug => [$name, $color]) {
+        $st->execute([$slug, $name, $color]);
+        $n += $st->rowCount();
+    }
+    return $n;
+}
+
+function tagsNorm(string $s): string
+{
+    $s = strtr(mb_strtolower($s), ['ą' => 'a', 'ć' => 'c', 'ę' => 'e', 'ł' => 'l', 'ń' => 'n', 'ó' => 'o', 'ś' => 's', 'ź' => 'z', 'ż' => 'z', "'" => '', '’' => '', '`' => '']);
+    return ' ' . trim((string)preg_replace('/[^a-z0-9&+]+/', ' ', $s)) . ' ';
+}
+
+function tagsSuggest(PDO $db, string $hash, string $name, string $text, array $have, int $limit = 8): array
+{
+    if (!tagsReady($db)) return [];
+    $inName = tagsNorm($name);
+    $inText = $text !== '' ? tagsNorm(mb_substr($text, 0, 20000)) : '';
+    $skip = array_flip(array_merge($have, tagsBlocked($db, [$hash])[strtolower($hash)] ?? []));
+    $first = [];
+    $later = [];
+    foreach ($db->query("SELECT slug, name, color FROM tags WHERE status = 'approved' AND hidden = 0 ORDER BY uses DESC, name LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $id = 'x:' . $r['slug'];
+        if (isset($skip[$id])) continue;
+        foreach (explode('|', (TAGS_BASE[$r['slug']][2] ?? '') . '|' . $r['name']) as $w) {
+            $needle = tagsNorm($w);
+            $len = strlen(trim($needle));
+            if ($len < 2) continue;
+            $at = str_contains($inName, $needle) ? 1 : ($len >= 3 && $inText !== '' && str_contains($inText, $needle) ? 2 : 0);
+            if ($at === 0) continue;
+            $chip = ['id' => $id, 'g' => 'x', 'l' => (string)$r['name'], 'w' => trim($w)];
+            if ($r['color']) $chip['c'] = (string)$r['color'];
+            if ($at === 1) $first[] = $chip;
+            else $later[] = $chip;
+            break;
+        }
+    }
+    return array_slice(array_merge($first, $later), 0, $limit);
+}
+
+function tagsChangeChip(string $id, ?string $name, ?string $color, array $genres): array
+{
+    if (tagsIsExplicit($id)) {
+        $chip = ['id' => $id, 'g' => 'x', 'l' => $name !== null && $name !== '' ? $name : substr($id, 2)];
+        if ($color) $chip['c'] = $color;
+        return $chip;
+    }
+    return ['id' => $id, 'g' => substr($id, 0, 1), 'l' => str_starts_with($id, 'g:') ? tagsGenreLabel($id, $genres) : factsTagLabel($id)];
+}
+
+function tagsChangesAdmin(PDO $db, array $cfg): array
+{
+    $out = ['review' => ($cfg['tags_add_review'] ?? 'open') === 'approve' ? 'approve' : 'open', 'n_pending' => 0, 'pending' => [], 'recent' => []];
+    if (!tagsReady($db)) return $out;
+    $genres = tagsGenreLabels($db);
+    if (tagsPendingCol($db)) {
+        $out['n_pending'] = (int)$db->query("SELECT COUNT(*) FROM hash_tags WHERE pending = 1")->fetchColumn();
+        $st = $db->query("SELECT ht.info_hash, ht.tag, ht.created_at, u.username, t.name AS tname, t.color,
+                                 COALESCE((SELECT w.name FROM whitelist w WHERE w.info_hash = ht.info_hash LIMIT 1),
+                                          (SELECT h.name FROM index_hashes h WHERE h.info_hash = ht.info_hash LIMIT 1)) AS torrent
+                            FROM hash_tags ht LEFT JOIN users u ON u.id = ht.added_by
+                            LEFT JOIN tags t ON ht.tag LIKE 'x:%' AND t.slug = SUBSTRING(ht.tag, 3)
+                           WHERE ht.pending = 1 ORDER BY ht.created_at LIMIT 300");
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out['pending'][] = ['hash' => strtolower((string)$r['info_hash']), 'tag' => (string)$r['tag'], 'who' => $r['username'], 'at' => $r['created_at'],
+                                 'torrent' => $r['torrent'], 'chip' => tagsChangeChip((string)$r['tag'], $r['tname'], $r['color'], $genres)];
+        }
+    }
+    if (tagsLogReady($db)) {
+        $sel = tagsPendingCol($db) ? 'x.pending' : '0';
+        $st = $db->query("SELECT l.id, l.info_hash, l.tag, l.action, l.created_at, u.username, t.name AS tname, t.color,
+                                 (SELECT $sel FROM hash_tags x WHERE x.info_hash = l.info_hash AND x.tag = l.tag) AS still,
+                                 COALESCE((SELECT w.name FROM whitelist w WHERE w.info_hash = l.info_hash LIMIT 1),
+                                          (SELECT h.name FROM index_hashes h WHERE h.info_hash = l.info_hash LIMIT 1)) AS torrent
+                            FROM hash_tag_log l LEFT JOIN users u ON u.id = l.user_id
+                            LEFT JOIN tags t ON l.tag LIKE 'x:%' AND t.slug = SUBSTRING(l.tag, 3)
+                           ORDER BY l.id DESC LIMIT 150");
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out['recent'][] = ['id' => (int)$r['id'], 'hash' => strtolower((string)$r['info_hash']), 'tag' => (string)$r['tag'], 'action' => (string)$r['action'],
+                                'who' => $r['username'], 'at' => $r['created_at'], 'torrent' => $r['torrent'], 'still' => $r['still'] === null ? null : (int)$r['still'],
+                                'chip' => tagsChangeChip((string)$r['tag'], $r['tname'], $r['color'], $genres)];
+        }
+    }
+    return $out;
+}
+
+function tagsChangesAction(PDO $db, string $op, array $items, ?int $actor, bool $all = false): array
+{
+    if (!tagsReady($db) || !tagsPendingCol($db)) return ['ok' => false, 'error' => 'unavailable'];
+    if ($all && $op === 'change_approve') {
+        $items = $db->query("SELECT info_hash AS hash, tag FROM hash_tags WHERE pending = 1 ORDER BY created_at LIMIT 500")->fetchAll(PDO::FETCH_ASSOC);
+    }
+    $approve = $db->prepare("UPDATE hash_tags SET pending = 0 WHERE info_hash = ? AND tag = ? AND pending = 1");
+    $reject = $db->prepare("DELETE FROM hash_tags WHERE info_hash = ? AND tag = ? AND pending = 1");
+    $n = 0;
+    foreach (array_slice($items, 0, 500) as $it) {
+        if (!is_array($it)) continue;
+        $h = strtolower(is_string($it['hash'] ?? null) ? $it['hash'] : '');
+        $tag = is_string($it['tag'] ?? null) ? $it['tag'] : '';
+        if (!preg_match('/^[0-9a-f]{40}$/', $h) || !factsTagValid($tag)) continue;
+        if ($op === 'change_approve' || $op === 'change_reject') {
+            $q = $op === 'change_approve' ? $approve : $reject;
+            $q->execute([$h, $tag]);
+            if ($q->rowCount() < 1) continue;
+            tagsLog($db, $h, $tag, $op === 'change_approve' ? 'approve' : 'reject', $actor);
+            $n++;
+        } elseif ($op === 'change_remove') {
+            $r = tagsDetach($db, $h, $tag, $actor, true);
+            if (empty($r['ok'])) continue;
+            tagsLog($db, $h, $tag, $r['removed'] === 'blocked' ? 'block' : 'remove', $actor);
+            $n++;
+        }
+    }
+    if ($n) tagsUsesTick($db);
+    return ['ok' => true, 'n' => $n];
 }

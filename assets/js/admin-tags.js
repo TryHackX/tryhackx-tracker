@@ -221,6 +221,73 @@
         });
     }
 
+    const CH = { view: 'waiting', pending: [], recent: [], n: 0, review: 'open' };
+    const CACT = { add: 'js.tags.c_add', remove: 'js.tags.c_remove', approve: 'js.tags.c_approve', reject: 'js.tags.c_reject', block: 'js.tags.c_block' };
+
+    async function loadChanges() {
+        const r = await apiCall('admin/tag_changes');
+        if (!r || r.error) return;
+        CH.pending = r.pending || [];
+        CH.recent = r.recent || [];
+        CH.n = r.n_pending || 0;
+        CH.review = r.review || 'open';
+        renderChanges();
+    }
+
+    async function changeAct(op, items, all) {
+        const r = await apiCall('admin/tag_action', 'POST', { op: op, items: items, all: !!all });
+        if (!r || !r.success) { showToast((r && (r.message || r.error)) || t.key('js.tags.failed'), 'error'); return; }
+        showToast(t.key('js.tags.f_done', { n: t.num(r.n || 0) }), 'success');
+        loadChanges();
+        load();
+    }
+
+    function renderChanges() {
+        const box = $('tags-changes-body');
+        if (!box) return;
+        box.textContent = '';
+        const tabs = el('div', { className: 'tags-c-tabs' }, [
+            btnText(CH.view === 'waiting' ? 'btn-info' : 'btn-outline-secondary', t.key('js.tags.c_waiting', { n: t.num(CH.n) }), () => { CH.view = 'waiting'; renderChanges(); }),
+            btnText(CH.view === 'recent' ? 'btn-info' : 'btn-outline-secondary', t.key('js.tags.c_recent'), () => { CH.view = 'recent'; renderChanges(); }),
+        ]);
+        if (CH.view === 'waiting' && CH.n) tabs.appendChild(btnText('btn-outline-success', t.key('js.tags.c_approve_all'), () => changeAct('change_approve', [], true)));
+        tabs.appendChild(el('span', { className: 'wl-small text-muted', text: t.key(CH.review === 'approve' ? 'js.tags.c_mode_approve' : 'js.tags.c_mode_open') }));
+        box.appendChild(tabs);
+        const waiting = CH.view === 'waiting';
+        const rows = waiting ? CH.pending : CH.recent;
+        if (!rows.length) {
+            box.appendChild(el('div', { className: 'wl-small text-muted py-2', text: t.key(waiting ? 'js.tags.c_none_waiting' : 'js.tags.c_none') }));
+            return;
+        }
+        const tb = el('tbody', {});
+        rows.forEach(row => {
+            const item = [{ hash: row.hash, tag: row.tag }];
+            const acts = el('td', { className: 'th-actions' });
+            if (waiting) {
+                acts.appendChild(btn('bi-check-lg', 'btn-outline-success', t.key('js.tags.approve'), () => changeAct('change_approve', item)));
+                acts.appendChild(btn('bi-x-lg', 'btn-outline-warning', t.key('js.tags.reject'), () => changeAct('change_reject', item)));
+            } else if (row.action === 'add' || row.action === 'approve') {
+                if (row.still === null || row.still === undefined) acts.appendChild(el('span', { className: 'wl-small text-muted', text: t.key('js.tags.c_gone') }));
+                else acts.appendChild(btn('bi-x-lg', 'btn-outline-warning', t.key('js.tags.c_take_off'), () => changeAct('change_remove', item)));
+            }
+            const c = row.chip || {};
+            const cells = [
+                el('td', { className: 'wl-small', text: fmtDate(row.at) }),
+                el('td', { className: 'wl-small', text: row.who || t.key('js.tags.c_panel') }),
+            ];
+            if (!waiting) cells.push(el('td', { className: 'col-badge' }, el('span', { className: 'wl-badge ' + (row.action === 'add' || row.action === 'approve' ? 'wl-b-ok' : 'wl-b-muted') }, t.key(CACT[row.action] || 'js.tags.c_add'))));
+            cells.push(el('td', {}, chip(c.l || row.tag, c.g || 'x', c.c || null, waiting ? ' fchip-pending' : '')),
+                el('td', { className: 'tags-c-name' }, el('a', { href: SITE + '?action=search&hash=' + encodeURIComponent(row.hash), target: '_blank', rel: 'noopener' }, row.torrent || row.hash)),
+                acts);
+            tb.appendChild(el('tr', {}, cells));
+        });
+        const head = [el('th', { className: 'tags-c-when', text: t.key('js.tags.c_when') }), el('th', { className: 'tags-c-who', text: t.key('js.tags.c_who') })];
+        if (!waiting) head.push(el('th', { className: 'col-badge', text: t.key('js.tags.c_what') }));
+        head.push(el('th', { className: 'tags-c-tag', text: t.key('js.tags.c_tag') }), el('th', { text: t.key('js.tags.c_torrent') }),
+            el('th', { className: 'th-actions', text: t.key('js.tags.f_col_actions') }));
+        box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover wl-table dash-table tags-c-table' }, [el('thead', {}, el('tr', {}, head)), tb])));
+    }
+
     function init() {
         const q = $('tags-f-q');
         q.addEventListener('input', debounce(() => { S.q = q.value.trim(); S.page = 1; load(); }, DEBOUNCE.search));
@@ -228,6 +295,7 @@
         $('tags-f-sort').addEventListener('change', (e) => { S.sort = e.target.value; S.page = 1; load(); });
         if (new URLSearchParams(location.search).get('status') === 'pending') { S.status = 'pending'; $('tags-f-status').value = 'pending'; }
         load();
+        loadChanges();
         loadForum();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

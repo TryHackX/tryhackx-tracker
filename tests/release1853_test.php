@@ -226,7 +226,7 @@ check('the Tags page draws chips that open the search, and a forum tag beside th
       && str_contains($src('assets/css/detail-panel.css'), '.fchip-x { --fc: #8fa3bf; color: color-mix(in srgb, var(--fc) 55%, #fff); }')
       && str_contains($src('assets/js/filters.js'), 'if (editing && edit.add) bar.append(picker(), toggle);')
       && str_contains($src('assets/css/detail-panel.css'), '.tag-edit-bar .tag-edit-toggle { flex: 0 0 auto; display: inline-flex;'));
-check('version and changelog', TRACKER_VERSION === '1.85.6' && str_contains($src('CHANGELOG.md'), '## [1.85.6]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
+check('version and changelog', version_compare(TRACKER_VERSION, '1.85.6', '>=') && str_contains($src('CHANGELOG.md'), '## [1.85.6]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

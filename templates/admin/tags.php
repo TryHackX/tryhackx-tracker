@@ -55,6 +55,12 @@
         </div>
         <div class="admin-pagination" id="tags-pagination"></div>
 
+        <div class="admin-toolbar-card mt-4" id="tags-changes">
+            <h2 class="tags-f-title"><i class="bi bi-clock-history"></i> <?= _h('a.tags.changes_title') ?></h2>
+            <small class="settings-hint d-block mb-2"><?= _h('a.tags.changes_intro') ?></small>
+            <div id="tags-changes-body"></div>
+        </div>
+
         <div class="admin-toolbar-card mt-4" id="tags-forum">
             <h2 class="tags-f-title"><i class="bi bi-chat-square-text"></i> <?= _h('a.tags.forum_title') ?></h2>
             <small class="settings-hint d-block mb-2"><?= _h('a.tags.forum_intro') ?></small>

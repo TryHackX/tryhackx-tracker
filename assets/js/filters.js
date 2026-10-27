@@ -493,6 +493,21 @@
                     else if (items[0]) addTag({ tag: items[0].id });
                 });
                 wrap.append(input, list);
+                const have = new Set(((facts && facts.tags) || []).map(x => x.id));
+                const hints = (edit.suggest || []).filter(s => !have.has(s.id));
+                if (hints.length) {
+                    const row = el('div', 'tag-edit-hints');
+                    row.appendChild(el('span', 'tag-edit-hints-l', t.key('js.tags.suggested')));
+                    hints.forEach(s => {
+                        const b = el('button', 'fchip fchip-' + s.g + ' tag-edit-opt', s.l);
+                        b.type = 'button';
+                        b.title = t.key('js.tags.suggested_why', { word: s.w });
+                        if (s.c) b.style.setProperty('--fc', s.c);
+                        b.addEventListener('click', () => addTag({ tag: s.id }));
+                        row.appendChild(b);
+                    });
+                    wrap.appendChild(row);
+                }
                 return wrap;
             };
             const draw = () => {

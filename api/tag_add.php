@@ -23,13 +23,16 @@ if ($id === '') {
     if (empty($created['ok'])) jsonResponse(['error' => $created['error'], 'message' => tagsMessage((string)$created['error'])], 400);
     $id = (string)$created['id'];
 }
-$r = tagsAttach($db, $cfg, $hash, $id, (int)$me['id'], $moderate ? TAG_ORIGIN_MODERATOR : TAG_ORIGIN_MEMBER, $moderate);
+$r = tagsAttach($db, $cfg, $hash, $id, (int)$me['id'], $moderate ? TAG_ORIGIN_MODERATOR : TAG_ORIGIN_MEMBER, $moderate,
+               !$moderate && ($cfg['tags_add_review'] ?? 'open') === 'approve');
 if (empty($r['ok'])) jsonResponse(['error' => $r['error'], 'message' => tagsMessage((string)$r['error'])], 400);
+tagsLog($db, $hash, $id, 'add', (int)$me['id']);
 if (!empty($r['unblocked'])) {
     auditLog($db, 'tags.unblock', ['target_type' => 'torrent', 'target_id' => $hash, 'summary' => (string)($me['username'] ?? '#' . (int)$me['id']) . ' → ' . $id]);
 }
 $pending = ($created['status'] ?? '') === 'pending';
+$waits = !$pending && !empty($r['pending']);
 $canContent = userCan($db, $cfg, 'content.view') && (richtextViewerSignedIn($db) || !(function_exists('forumDescMembersOnly') && forumDescMembersOnly($db, $hash)));
-jsonResponse(['success' => true, 'tag' => $id, 'pending' => $pending,
-              'message' => __($pending ? 'api.tags.pending' : 'api.tags.added'),
+jsonResponse(['success' => true, 'tag' => $id, 'pending' => $pending || $waits,
+              'message' => __($pending ? 'api.tags.pending' : ($waits ? 'api.tags.add_pending' : 'api.tags.added')),
               'facts' => tagsHashChips($db, $cfg, $hash, (int)$me['id'], $moderate, true, $canContent)]);

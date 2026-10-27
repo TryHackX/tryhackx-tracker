@@ -3772,5 +3772,13 @@ a.tags-chip:hover, a.tags-chip:focus-visible { background: color-mix(in srgb, va
 .tags-f-to-cell .tags-f-chip, .tags-f-to-cell .tags-chip { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; }
 .tags-f-to-cell .tags-f-target { flex: 1 1 auto; min-width: 0; width: auto; }
 .tags-f-ignored td:not(.th-actions) { opacity: 0.5; }
+.tags-c-tabs { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.admin-wide .tags-c-table { min-width: 760px; }
+.tags-c-table .tags-c-when { width: 150px; }
+.tags-c-table .tags-c-who { width: 140px; }
+.tags-c-table .col-badge { width: 140px; }
+.tags-c-table .tags-c-tag { width: 210px; }
+.admin-wide .tags-c-table .th-actions { width: 104px; }
+.tags-c-name a { color: inherit; }
 .admin-body .sf-n { margin-left: 0.3rem; opacity: 0.65; font-size: 0.68rem; }
 .admin-body .sf-tag[hidden], .admin-body .sf-tags[hidden], .admin-body .sf-group[hidden], .admin-body .sf-range[hidden], .admin-body .sf-check[hidden] { display: none; }

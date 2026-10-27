@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.85.7] — 2026-10-27
+
+- **Base tags.** Thirty ready tags in colours by kind: editions (Extended, Director's Cut, Uncut, Remaster, IMAX,
+  Wersja kinowa, Kolekcja, Komplet sezonów), picture (3D, Upscale AI, Czarno-biały, Koloryzacja), voice and subtitles
+  (Lektor IVO, Lektor AI, Dubbing AI, Lektor amatorski, Napisy wtopione, Napisy SDH, Audiodeskrypcja), other (Polska
+  produkcja, Klasyka, Koncert, Kabaret, Stand-up, Sport) and kinds of file (Gra, Program, Muzyka, Audiobook, E-book).
+  Each knows its words: "hardsub" finds Napisy wtopione, "IMAX" IMAX.
+- **Suggestions.** Info → Edit tags offers, under the field, the tags whose names or words are in the torrent's name
+  or description — one click adds one.
+- **Tag changes on torrents.** A new setting, "A tag a member adds to a torrent": shows at once (as before) or waits
+  for a moderator — until then only its author and the moderators see it, dashed, and no filter finds it. Panel →
+  Tags → "Tag changes on torrents" lists what waits (approve, reject, everything at once) and the recent additions
+  and removals — who, what, when — with a button to take a tag off. Kept 90 days.
+- A deleted account is no longer named in the tag log or on the tags it added.
+- Schema 109: `hash_tags.pending`, `hash_tag_log`.
+
 ## [1.85.6] — 2026-10-27
 
 - **The Tags page looks like the site.** Each tag is the chip people see, in its own colour, and opens the search with

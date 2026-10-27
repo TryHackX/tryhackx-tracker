@@ -208,3 +208,48 @@ add('js.tags', {
     'open_search': ('Open the search with this tag', 'Otwórz wyszukiwarkę z tym tagiem'),
     'f_new_title': ('A new tag, made when this match is approved', 'Nowy tag — powstanie przy zatwierdzeniu'),
 })
+
+add('settings', {
+    'tags_add_review': ('A tag a member adds to a torrent', 'Tag dodany do torrentu przez członka'),
+    'tags_add_review_open': ('shows at once', 'widać od razu'),
+    'tags_add_review_approve': ('waits for a moderator', 'czeka na moderatora'),
+    'tags_add_review_hint': ("A moderator's never waits. Every change is listed on the Tags page either way.",
+                             'Dodane przez moderatora nigdy nie czekają. Każda zmiana i tak jest na liście na stronie Tagi.'),
+})
+
+add('a.tags', {
+    'changes_title': ('Tag changes on torrents', 'Zmiany tagów na torrentach'),
+    'changes_intro': ('Who added or took off which tag, newest first. A member can take off only what they added; a moderator anything, '
+                      'and an automatic or forum tag a moderator takes off stays off.',
+                      'Kto dodał lub zdjął jaki tag, od najnowszych. Członek może zdjąć tylko to, co sam dodał; moderator wszystko, '
+                      'a tag automatyczny lub z forum zdjęty przez moderatora nie wraca.'),
+})
+
+add('js.tags', {
+    'c_waiting': ('Waiting (:n)', 'Czekające (:n)'),
+    'c_recent': ('Recent changes', 'Ostatnie zmiany'),
+    'c_approve_all': ('Approve everything waiting', 'Zatwierdź wszystkie czekające'),
+    'c_mode_open': ("A member's tag shows at once (Settings → Tags and filters).", 'Tag od członka widać od razu (Ustawienia → Tagi i filtry).'),
+    'c_mode_approve': ("A member's tag waits here for approval (Settings → Tags and filters).", 'Tag od członka czeka tu na zatwierdzenie (Ustawienia → Tagi i filtry).'),
+    'c_none_waiting': ('Nothing waits.', 'Nic nie czeka.'),
+    'c_none': ('No changes yet.', 'Na razie brak zmian.'),
+    'c_when': ('When', 'Kiedy'),
+    'c_who': ('Who', 'Kto'),
+    'c_what': ('What', 'Co'),
+    'c_tag': ('Tag', 'Tag'),
+    'c_torrent': ('Torrent', 'Torrent'),
+    'c_add': ('added', 'dodanie'),
+    'c_remove': ('taken off', 'zdjęcie'),
+    'c_approve': ('approved', 'zatwierdzenie'),
+    'c_reject': ('rejected', 'odrzucenie'),
+    'c_block': ('taken off for good', 'zdjęcie na stałe'),
+    'c_take_off': ('Take this tag off the torrent', 'Zdejmij ten tag z torrentu'),
+    'c_gone': ('no longer on it', 'już go nie ma'),
+    'c_panel': ('the panel', 'panel'),
+    'suggested': ('Suggested:', 'Podpowiedzi:'),
+    'suggested_why': ('Found in the name or description: ":word"', 'Znalezione w nazwie lub opisie: „:word”'),
+})
+
+add('api.tags', {
+    'add_pending': ('Added — others see it once a moderator approves.', 'Dodano — inni zobaczą go po zatwierdzeniu przez moderatora.'),
+})

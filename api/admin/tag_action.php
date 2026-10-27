@@ -3,8 +3,16 @@ requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
 $forumOps = ['forum_approve', 'forum_ignore', 'forum_target', 'forum_import', 'forum_all'];
-if (!in_array($op, ['approve', 'reject', 'save', 'hide', 'unhide', 'delete', 'merge'], true) && !in_array($op, $forumOps, true)) jsonResponse(['error' => 'invalid'], 400);
+$changeOps = ['change_approve', 'change_reject', 'change_remove'];
+if (!in_array($op, array_merge(['approve', 'reject', 'save', 'hide', 'unhide', 'delete', 'merge'], $forumOps, $changeOps), true)) jsonResponse(['error' => 'invalid'], 400);
 $manage = panelCan($db, $cfg, 'panel.tags.manage');
+if (in_array($op, $changeOps, true)) {
+    $r = tagsChangesAction($db, $op, (array)($input['items'] ?? []), null, !empty($input['all']));
+    if (empty($r['ok'])) jsonResponse(['success' => false, 'error' => $r['error'], 'message' => tagsMessage((string)$r['error'])], 400);
+    auditLog($db, 'tags.' . $op, ['target_type' => 'torrent', 'target_id' => !empty($input['all']) ? 'all' : (string)(((array)($input['items'] ?? []))[0]['hash'] ?? ''),
+        'summary' => $op . ' ' . (int)$r['n']]);
+    jsonResponse(['success' => true, 'n' => (int)$r['n']]);
+}
 if (in_array($op, $forumOps, true)) {
     if (!$manage) jsonResponse(['success' => false, 'error' => 'forbidden', 'message' => tagsMessage('forbidden')], 403);
     $r = tagsForumDecide($db, $cfg, $op, $input);

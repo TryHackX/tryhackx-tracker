@@ -1297,6 +1297,8 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $del("DELETE FROM shout_mentions WHERE user_id = ?", [$userId], 'mentions');
     $del("DELETE FROM shouts WHERE user_id = ?", [$userId], 'shouts');
     $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
+    $del("UPDATE hash_tag_log SET user_id = NULL WHERE user_id = ?", [$userId], 'tag log');
+    $del("UPDATE hash_tags SET added_by = NULL WHERE added_by = ?", [$userId], 'tags added');
     // …and what it SENT that sits in other people's notifications (1.74.0, PRIV-1): a friend request or its acceptance
     // names the account and nothing else, so it goes with it (v93 `sender_id`). What its comments said is emptied below,
     // with the comments (commentForgetAccount()).
