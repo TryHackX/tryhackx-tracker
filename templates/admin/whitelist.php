@@ -51,6 +51,7 @@
             <button class="source-tab" data-view="banned"><i class="bi bi-slash-circle"></i> <?= _h('a.wl.tab_banned') ?> <span id="tab-badge-banned" class="wl-tab-count"></span></button>
             <button class="source-tab" data-view="clients"><i class="bi bi-key"></i> <?= _h('a.wl.tab_clients') ?></button>
             <button class="source-tab" data-view="bans"><i class="bi bi-shield-x"></i> <?= _h('a.wl.tab_bans') ?></button>
+            <button class="source-tab" data-view="requests"><i class="bi bi-inbox"></i> <?= _h('a.wl.tab_requests') ?> <span id="tab-badge-requests" class="wl-tab-count"></span></button>
 <?php if (panelCan($db, $cfg, 'panel.whitelist.content')):
     require_once __DIR__ . '/../../includes/content.php';
     $wlWaiting = contentPendingCount($db) + (int)$db->query("SELECT COUNT(*) FROM wl_content_edits WHERE status = 'pending'")->fetchColumn(); ?>
@@ -174,7 +175,7 @@
                         <button class="btn btn-sm btn-primary" id="btn-wl-add"><i class="bi bi-plus-lg"></i> <?= _h('a.wl.add_hashes') ?></button>
                     </div>
                 </div>
-                <div class="sf-host" id="wl-filters" data-facts="1" data-desc="1" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog($cfg) : [])) ?>"></div>
+                <div class="sf-host" id="wl-filters" data-facts="1" data-desc="1" data-popular="<?= function_exists('tagsPopularMax') ? tagsPopularMax($cfg) : 0 ?>" data-kinds="<?= sanitize(json_encode(function_exists('factsKinds') ? factsKinds($cfg) : [])) ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog($cfg, $db) : [])) ?>"></div>
                 <div class="wl-chips d-hidden" id="wl-chips"></div>
             </div>
 
@@ -213,6 +214,22 @@
                 </table>
             </div>
             <div class="admin-pagination" id="wl-pagination"></div>
+        </div>
+
+        <div class="wl-view d-hidden" id="view-requests">
+            <div class="admin-toolbar-card">
+                <div class="toolbar-row">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="<?= _h('a.wl.rq_filter') ?>" id="wr-status">
+                        <button type="button" class="btn btn-outline-secondary active" data-status="open"><?= _h('a.wl.rq_open') ?></button>
+                        <button type="button" class="btn btn-outline-secondary" data-status="approved"><?= _h('a.wl.rq_approved') ?></button>
+                        <button type="button" class="btn btn-outline-secondary" data-status="rejected"><?= _h('a.wl.rq_rejected') ?></button>
+                    </div>
+                    <span class="text-muted wl-total" id="wr-total"></span>
+                </div>
+                <small class="settings-hint d-block mt-2"><?= _h('a.wl.rq_intro') ?></small>
+            </div>
+            <div id="wr-body"></div>
+            <div class="admin-pagination" id="wr-pagination"></div>
         </div>
 
         <!-- ===== Banned hashes view ===== -->

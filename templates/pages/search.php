@@ -125,7 +125,7 @@ $repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults(
     <?php $sFacts = $canDesc || (function_exists('factsMode') && factsMode($cfg) === 'desc_name'); ?>
     <?php $sMe = usersEnabled($cfg) ? currentUser($db) : null;
     $sFavs = ($sMe && $sFacts && function_exists('tagsFavList') && userCan($db, $cfg, 'tags.favourite')) ? tagsFavChips($db, tagsFavList($db, (int)$sMe['id'])) : []; ?>
-    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-rep="<?= (function_exists('repEnabled') && repEnabled($cfg)) ? '1' : '0' ?>" data-favs="<?= sanitize(json_encode($sFavs)) ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog($cfg) : [])) ?>"></div>
+    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-rep="<?= (function_exists('repEnabled') && repEnabled($cfg)) ? '1' : '0' ?>" data-wl="<?= $canWl ? '1' : '0' ?>" data-favs="<?= sanitize(json_encode($sFavs)) ?>" data-popular="<?= function_exists('tagsPopularMax') ? tagsPopularMax($cfg) : 0 ?>" data-kinds="<?= sanitize(json_encode(function_exists('factsKinds') ? factsKinds($cfg) : [])) ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog($cfg, $db) : [])) ?>"></div>
 </form>
 <div id="search-alert" class="alert"></div>
 <div class="transparency-table-wrap">

@@ -24,7 +24,7 @@
     };
     const DEFAULTS = { status: 'pending', source: '', format: '', author: '', search: '', sort: 'oldest', per: 25 };
     const S = {
-        f: Object.assign({}, DEFAULTS), page: 1, rows: [], total: 0, pages: 1, mayPunish: false, sub: 'queue',
+        f: Object.assign({}, DEFAULTS), page: 1, rows: [], total: 0, pages: 1, mayPunish: false, sub: 'queue', pub: false, seq: 0, eseq: 0,
         sel: new Map(), open: new Set(), html: new Map(), busy: false,
     };
     const keyOf = (r) => r.kind + ':' + r.id;
@@ -68,10 +68,12 @@
     }
 
     async function load() {
+        const seq = ++S.seq;
         const list = $('rq-list');
         list.classList.add('rq-loading');
         if (!S.rows.length) list.replaceChildren(el('div', { className: 'wl-status-loading', text: t.key('js.common.loading') }));
         const r = await apiCall('admin/wl_content', 'POST', Object.assign({ op: 'list', page: S.page }, S.f));
+        if (seq !== S.seq) return;
         list.classList.remove('rq-loading');
         if (!r || !r.success) {
             list.replaceChildren(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || t.key('js.wl.review_load_failed') }));
@@ -437,9 +439,11 @@
     }
 
     async function loadEdits() {
+        const seq = ++S.eseq;
         const box = $('rq-edits-list');
         box.replaceChildren(el('div', { className: 'wl-status-loading', text: t.key('js.common.loading') }));
         const r = await apiCall('admin/wl_content', 'POST', { op: 'edits' });
+        if (seq !== S.eseq) return;
         box.textContent = '';
         if (!r || !r.success) {
             box.appendChild(el('div', { className: 'nl-note nl-note-bad', text: (r && r.error) || t.key('js.wl.edits_load_failed') }));
@@ -528,8 +532,9 @@
 
     function showSub(sub) {
         const pane = sub === 'edits' ? 'edits' : 'queue';
-        if (sub === 'published' || (S.sub === 'published' && sub === 'queue')) {
+        if (pane === 'queue' && (sub === 'published') !== S.pub) {
             const published = sub === 'published';
+            S.pub = published;
             S.f.status = published ? 'approved' : DEFAULTS.status;
             S.f.sort = published ? 'newest' : DEFAULTS.sort;
             $('rq-status').value = S.f.status;

@@ -42,6 +42,7 @@ require_once __DIR__ . '/includes/usermedia.php';
 require_once __DIR__ . '/includes/images.php';
 require_once __DIR__ . '/includes/facts.php';
 require_once __DIR__ . '/includes/tags.php';
+require_once __DIR__ . '/includes/wlrequests.php';
 require_once __DIR__ . '/includes/thumbs.php';
 // The description on a profile (v74): its renderer, its rules and the save the endpoint runs.
 require_once __DIR__ . '/includes/profilebio.php';
@@ -185,6 +186,7 @@ $apiRoutes = [
     'admin/tag_action'            => 'api/admin/tag_action.php',
     'admin/tag_forum'             => 'api/admin/tag_forum.php',
     'admin/tag_changes'           => 'api/admin/tag_changes.php',
+    'admin/tag_cats'              => 'api/admin/tag_cats.php',
     'tag_fav'                     => 'api/tag_fav.php',
     'admin/image_action'          => 'api/admin/image_action.php',
     'admin/change_status'   => 'api/admin/change_status.php',
@@ -274,6 +276,10 @@ $apiRoutes = [
     'admin/index_scrape_bulk'    => 'api/admin/index_scrape_bulk.php',
     'admin/index_status'         => 'api/admin/index_status.php',
     'admin/index_polls'          => 'api/admin/index_polls.php',
+    'admin/index_blocked'        => 'api/admin/index_blocked.php',
+    'admin/index_blocked_act'    => 'api/admin/index_blocked_act.php',
+    'admin/wl_requests'          => 'api/admin/wl_requests.php',
+    'admin/wl_request_act'       => 'api/admin/wl_request_act.php',
     'admin/page_content'         => 'api/admin/page_content.php',
     'admin/home_layout'          => 'api/admin/home_layout.php',
     'admin/languages'            => 'api/admin/languages.php',
@@ -383,6 +389,8 @@ $apiRoutes = [
     'tags_search'                => 'api/tags_search.php',
     'tag_add'                    => 'api/tag_add.php',
     'tag_remove'                 => 'api/tag_remove.php',
+    'tag_cat_suggest'            => 'api/tag_cat_suggest.php',
+    'wl_request'                 => 'api/wl_request.php',
     // ── People reaching each other (includes/people.php) ──
     'user_people'                => 'api/user_people.php',
     'user_messages'              => 'api/user_messages.php',
@@ -500,6 +508,7 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/tags'                  => 'panel.tags.view',
         'admin/tag_action'            => 'panel.tags.view',
         'admin/tag_forum'             => 'panel.tags.view',
+        'admin/tag_cats'              => 'panel.tags.view',
         'admin/tag_changes'           => 'panel.tags.view',
         'admin/image_action'          => 'panel.images.manage',
         'admin/fetch_appeals'      => 'panel.reports.view',
@@ -525,6 +534,10 @@ function adminEndpointPermission(string $endpoint): ?string {
         'admin/index_polls'        => 'panel.whitelist.view',
         'admin/fetch_index'        => 'panel.whitelist.view',
         'admin/index_item'         => 'panel.whitelist.view',
+        'admin/index_blocked'      => 'panel.whitelist.view',
+        'admin/index_blocked_act'  => 'panel.whitelist.ban',
+        'admin/wl_requests'        => 'panel.whitelist.view',
+        'admin/wl_request_act'     => 'panel.whitelist.add',
         'admin/fetch_banned'       => 'panel.whitelist.view',
         'admin/whitelist_add'      => 'panel.whitelist.add',
         'admin/whitelist_delete'   => 'panel.whitelist.delete',

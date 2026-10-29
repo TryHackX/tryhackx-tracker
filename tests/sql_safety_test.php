@@ -142,6 +142,12 @@ $REVIEWED = [
     // they are interpolated; both come from (int) casts clamped to a range in the lines above.
     'includes/audit.php:$off'                  => 'int, computed from a clamped page and per_page',
     'includes/index.php:$conds'                => 'literal conditions, values bound',
+    'includes/index.php:$hashes'               => 'only its count reaches the query: one ? per hash (array_fill), the hashes are bound',
+    'includes/tags.php:$db'                    => 'tagsCatReady($db) only picks one of two literal queries',
+    'includes/tags.php:$catCol'                => 'one of two literal column expressions, picked by a bool',
+    'includes/tags.php:$all'                   => 'a bool that adds a literal WHERE fragment or nothing',
+    'includes/wlrequests.php:$order'           => 'one of two literal ORDER BY clauses, picked by the checked status',
+    'includes/wlrequests.php:$ids'             => 'only its count reaches the query: one ? per id (array_fill), the ids are bound',
     'includes/index.php:$scope'                => 'literal, chosen from a fixed set',
     'includes/whitelist.php:$rows'             => 'a run of (?, ?, ?, ?) placeholder groups, one per hash in the chunk — no value is interpolated',
     'includes/whitelist.php:$cond'             => 'one of two literal conditions, picked by a bool',

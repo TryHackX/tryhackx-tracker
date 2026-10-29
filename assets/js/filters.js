@@ -18,8 +18,10 @@
         { key: 'steam', label: 'steam', group: 'ratings', rep: true, minOnly: true, pct: true },
         { key: 'seen', label: 'seen', group: 'dates', date: true },
     ];
+    const KINDS = ['movie', 'series', 'game', 'music', 'software', 'book', 'audiobook', 'adult'];
+    const KIND_KEY = { movie: 'js.filters.movies', series: 'js.filters.series' };
     const GROUPS = [['x', 'tags'], ['q', 'quality'], ['v', 'quality'], ['h', 'quality'], ['a', 'quality'], ['s', 'quality'], ['l', 'language'], ['g', 'genre']];
-    const PARAMS = ['type', 'tags', 'notags', 'pics'].concat(RANGES.map(r => r.key));
+    const PARAMS = ['type', 'tags', 'notags', 'pics', 'wl'].concat(RANGES.map(r => r.key));
     const TAG_ID = (id) => /^[qvhaslt]:[a-z0-9_]{1,20}$/.test(id) || /^g:[a-z0-9-]{2,40}$/.test(id) || /^x:[a-z0-9-]{1,64}$/.test(id);
     const OPEN_KEY = 'thx-search-filters-open';
     const TAG_PAGE = 18;
@@ -64,7 +66,7 @@
         const panelUi = opts.ui === 'panel';
         const openKey = panelUi ? OPEN_KEY + '-' + (host.id || 'panel') : OPEN_KEY;
         const btnCls = panelUi ? 'btn btn-sm btn-outline-secondary' : 'btn btn-secondary btn-small';
-        const S = { type: '', pics: false, sel: new Set(), not: new Set(), ranges: {}, open: store(openKey, true) };
+        const S = { type: '', pics: false, wl: false, sel: new Set(), not: new Set(), ranges: {}, open: store(openKey, true) };
         const catalog = Array.isArray(opts.catalog) ? opts.catalog : [];
         const favs = Array.isArray(opts.favs) ? opts.favs : [];
         const labelOf = new Map(catalog.map(c => [c.id, c.l]));
@@ -72,6 +74,7 @@
         const facts = !!opts.facts;
         const desc = !!opts.desc;
         const rep = !!opts.rep;
+        const wlOpt = !!opts.wl;
         let timer = 0;
 
         const bar = el('div', 'sf-bar');
@@ -82,7 +85,10 @@
         const seg = el('div', 'sf-type');
         seg.setAttribute('role', 'group');
         seg.setAttribute('aria-label', t.key('js.filters.type'));
-        const segBtns = [['', 'js.filters.all'], ['movie', 'js.filters.movies'], ['series', 'js.filters.series']].map(([v, key]) => {
+        let kinds = [];
+        try { kinds = JSON.parse(host.dataset.kinds || '[]').filter(k => KINDS.includes(k)); } catch (e) { kinds = []; }
+        if (!kinds.length) kinds = ['movie', 'series'];
+        const segBtns = [['', 'js.filters.all']].concat(kinds.map(k => [k, KIND_KEY[k] || 'js.filters.kind_' + k])).map(([v, key]) => {
             const b = el('button', 'sf-type-btn', t.key(key));
             b.type = 'button';
             b.dataset.v = v;
@@ -136,7 +142,7 @@
             inner.insertBefore(box, grid);
             tagSearch.addEventListener('input', () => flip(() => showTags()));
         }
-        (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'dates', 'description'] : ['release', 'ratings', 'popularity', 'dates']).forEach(section);
+        (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'dates', 'description'] : ['release', 'ratings', 'popularity', 'dates']).concat(wlOpt ? ['whitelist'] : []).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
             if ((r.facts && !facts) || (r.desc && !desc) || (r.rep && !rep)) return;
@@ -206,39 +212,56 @@
             wrap.appendChild(list);
             section('tags').appendChild(wrap);
         }
+        const popBtns = new Map();
+        const block = (label, tags, sec, into) => {
+            const wrap = el('div', 'sf-tags');
+            wrap.appendChild(el('div', 'sf-label', label));
+            const list = el('div', 'sf-tag-list');
+            tags.forEach(c => {
+                const b = el('button', 'fchip fchip-' + c.g + ' sf-tag', c.l);
+                b.type = 'button';
+                b.setAttribute('aria-pressed', 'false');
+                if (c.c) b.style.setProperty('--fc', c.c);
+                b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
+                b.dataset.id = c.id;
+                if (typeof c.n === 'number') {
+                    b.dataset.n = String(c.n);
+                    b.appendChild(el('span', 'sf-n', t.num(c.n)));
+                    b.title = t.key('js.filters.count', { n: t.num(c.n) });
+                }
+                b.addEventListener('click', () => { toggle(c.id); changed(true); });
+                list.appendChild(b);
+                into.set(c.id, b);
+            });
+            wrap.appendChild(list);
+            if (tags.length > TAG_PAGE) {
+                wrap.dataset.lim = String(TAG_PAGE);
+                const moreTagsBtn = el('button', 'sf-more-tags');
+                moreTagsBtn.type = 'button';
+                moreTagsBtn.addEventListener('click', () => moreTags(wrap));
+                wrap.appendChild(moreTagsBtn);
+            }
+            section(sec).appendChild(wrap);
+            return wrap;
+        };
         if (facts) {
+            const popMax = Number(host.dataset.popular) || 0;
+            const pop = popMax > 0 ? catalog.filter(c => typeof c.n === 'number' && c.n > 0 && c.g !== 't' && (c.g !== 'g' || desc)).sort((a, b) => b.n - a.n).slice(0, popMax) : [];
+            if (pop.length) block(t.key('js.filters.t_popular'), pop, 'tags', popBtns).classList.add('sf-popular');
             GROUPS.forEach(([g, sec]) => {
                 if (g === 'g' && !desc) return;
-                const tags = catalog.filter(c => c.g === g);
-                if (!tags.length) return;
-                const wrap = el('div', 'sf-tags');
-                wrap.appendChild(el('div', 'sf-label', t.key('js.filters.t_' + g)));
-                const list = el('div', 'sf-tag-list');
-                tags.forEach(c => {
-                    const b = el('button', 'fchip fchip-' + g + ' sf-tag', c.l);
-                    b.type = 'button';
-                    b.setAttribute('aria-pressed', 'false');
-                    if (c.c) b.style.setProperty('--fc', c.c);
-                    b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
-                    b.dataset.id = c.id;
-                    if (typeof c.n === 'number') {
-                        b.dataset.n = String(c.n);
-                        b.appendChild(el('span', 'sf-n', t.num(c.n)));
-                        b.title = t.key('js.filters.count', { n: t.num(c.n) });
-                    }
-                    b.addEventListener('click', () => { toggle(c.id); changed(true); });
-                    list.appendChild(b);
-                    tagBtns.set(c.id, b);
-                });
-                wrap.appendChild(list);
-                if (tags.length > TAG_PAGE) {
-                    wrap.dataset.lim = String(TAG_PAGE);
-                    const moreTagsBtn = el('button', 'sf-more-tags');
-                    moreTagsBtn.type = 'button';
-                    moreTagsBtn.addEventListener('click', () => moreTags(wrap));
-                    wrap.appendChild(moreTagsBtn);
+                if (g !== 'x') {
+                    const tags = catalog.filter(c => c.g === g || c.kg === g);
+                    if (tags.length) block(t.key('js.filters.t_' + g), tags, sec, tagBtns);
+                    return;
                 }
-                section(sec).appendChild(wrap);
+                const own = new Map();
+                catalog.filter(c => c.g === 'x' && (!c.kg || (c.kg === 'g' && !desc))).forEach(c => {
+                    const k = c.k || '';
+                    if (!own.has(k)) own.set(k, { o: k ? (c.ko || 0) : 200000, label: k ? c.kl : t.key('js.filters.t_x'), tags: [] });
+                    own.get(k).tags.push(c);
+                });
+                [...own.values()].sort((a, b) => a.o - b.o).forEach(x => block(x.label, x.tags, sec, tagBtns));
             });
         }
         if (facts && desc) {
@@ -254,6 +277,20 @@
             }
             section('description').appendChild(pics);
             S.picsInput = pin;
+        }
+        if (wlOpt) {
+            const wlBox = el('label', panelUi ? 'form-check sf-check' : 'search-check sf-check');
+            const win = el('input', panelUi ? 'form-check-input' : null);
+            win.type = 'checkbox';
+            win.addEventListener('change', () => { S.wl = win.checked; changed(true); });
+            if (panelUi) {
+                wlBox.append(win, el('span', 'form-check-label', t.key('js.filters.wl_only')));
+            } else {
+                wlBox.append(win, el('span', 'search-check-box'), ' ', t.key('js.filters.wl_only'));
+                wlBox.querySelector('.search-check-box').setAttribute('aria-hidden', 'true');
+            }
+            section('whitelist').append(wlBox, el('div', 'sf-hint text-muted', t.key('js.filters.wl_only_hint')));
+            S.wlInput = win;
         }
 
         Object.keys(sections).forEach(k => { if (sections[k].children.length <= 1) sections[k].remove(); });
@@ -285,6 +322,7 @@
                 b.hidden = !on && (!hit || b.dataset.n === '0');
                 if (!b.hidden && hit) any = true;
             });
+            popBtns.forEach(b => { b.hidden = q !== ''; });
             grid.querySelectorAll('.sf-tags').forEach(w => {
                 const moreBtn = w.querySelector(':scope > .sf-more-tags');
                 if (moreBtn) {
@@ -367,12 +405,13 @@
             return out;
         }
         function count() {
-            return Object.keys(readRanges()).length + S.sel.size + S.not.size + (S.pics ? 1 : 0);
+            return Object.keys(readRanges()).length + S.sel.size + S.not.size + (S.pics ? 1 : 0) + (S.wl ? 1 : 0);
         }
         function params() {
             const p = {};
             if (S.type) p.type = S.type;
             if (S.pics) p.pics = '1';
+            if (S.wl) p.wl = '1';
             const byGroup = {};
             [...S.sel].forEach(id => {
                 const g = id.charAt(0);
@@ -418,7 +457,9 @@
             };
             tagBtns.forEach(paintTag);
             favBtns.forEach(paintTag);
+            popBtns.forEach(paintTag);
             if (S.picsInput) S.picsInput.checked = S.pics;
+            if (S.wlInput) S.wlInput.checked = S.wl;
             clear.hidden = !(n || S.type);
             active.textContent = '';
             [...S.sel].forEach(id => active.appendChild(chip(labelOf.get(id) || id, () => S.sel.delete(id))));
@@ -430,6 +471,7 @@
                 active.appendChild(chip(label, () => { inputs[k].min.value = ''; if (inputs[k].max) inputs[k].max.value = ''; }));
             });
             if (S.pics) active.appendChild(chip(t.key('js.filters.pics'), () => { S.pics = false; }));
+            if (S.wl) active.appendChild(chip(t.key('js.filters.wl_only'), () => { S.wl = false; }));
             showTags();
         }
         function changed(now) {
@@ -437,11 +479,23 @@
             if (typeof opts.onChange === 'function') opts.onChange();
         }
         clear.addEventListener('click', () => {
-            S.type = ''; S.pics = false; S.sel.clear(); S.not.clear();
+            S.type = ''; S.pics = false; S.wl = false; S.sel.clear(); S.not.clear();
             Object.keys(inputs).forEach(k => { inputs[k].min.value = ''; if (inputs[k].max) inputs[k].max.value = ''; inputs[k].min.classList.remove('sf-bad'); if (inputs[k].max) inputs[k].max.classList.remove('sf-bad'); });
             changed(true);
         });
-        more.addEventListener('click', () => { S.open = !S.open; store(openKey, false, S.open); paint(); });
+        let slid = null;
+        more.addEventListener('click', () => {
+            const from = panel.getBoundingClientRect().height;
+            if (slid) slid.cancel();
+            S.open = !S.open;
+            store(openKey, false, S.open);
+            paint();
+            if (still() || typeof panel.animate !== 'function') return;
+            panel.classList.add('sf-moving');
+            const a = panel.animate([{ height: from + 'px' }, { height: (S.open ? inner.scrollHeight : 0) + 'px' }], { duration: 200, easing: 'ease' });
+            slid = a;
+            a.onfinish = a.oncancel = () => { if (slid !== a) return; slid = null; panel.classList.remove('sf-moving'); };
+        });
         paint();
 
         return {
@@ -455,8 +509,9 @@
                 return true;
             },
             fromParams(p) {
-                S.type = ['movie', 'series'].includes(p.get('type')) ? p.get('type') : '';
+                S.type = kinds.includes(p.get('type')) ? p.get('type') : '';
                 S.pics = p.get('pics') === '1';
+                S.wl = wlOpt && p.get('wl') === '1';
                 S.sel.clear();
                 S.not.clear();
                 String(p.get('tags') || '').split(',').forEach(set => set.split('|').forEach(id => {
@@ -841,11 +896,14 @@
             const r = await postJ('tag_fav', { tag: b.dataset.id, on: on });
             b.disabled = false;
             if (!r || !r.success) { b.title = (r && r.message) || t.key('js.tags.failed'); return; }
-            b.setAttribute('aria-pressed', r.on ? 'true' : 'false');
-            b.title = t.key(r.on ? 'js.tags.fav_off' : 'js.tags.fav_on');
-            b.setAttribute('aria-label', b.title);
-            const i = b.querySelector('i');
-            if (i) i.className = 'bi ' + (r.on ? 'bi-star-fill' : 'bi-star');
+            document.querySelectorAll('.tag-fav').forEach(x => {
+                if (x.dataset.id !== b.dataset.id) return;
+                x.setAttribute('aria-pressed', r.on ? 'true' : 'false');
+                x.title = t.key(r.on ? 'js.tags.fav_off' : 'js.tags.fav_on');
+                x.setAttribute('aria-label', x.title);
+                const i = x.querySelector('i');
+                if (i) i.className = 'bi ' + (r.on ? 'bi-star-fill' : 'bi-star');
+            });
             if (!mine) return;
             const have = [...mine.querySelectorAll('a[data-id]')].find(a => a.dataset.id === b.dataset.id);
             const chip = b.parentElement ? b.parentElement.querySelector('a') : null;
@@ -860,16 +918,64 @@
             }
             if (mineEmpty) mineEmpty.hidden = !!mine.querySelector('a');
         }));
+        const catData = document.getElementById('tags-cat-data');
+        let cats = [];
+        try { cats = JSON.parse(catData ? catData.dataset.cats || '[]' : '[]'); } catch (e) { cats = []; }
+        document.querySelectorAll('.tag-cat').forEach(b => b.addEventListener('click', () => {
+            const d = el('dialog', 'rep-dialog tags-cat-dialog');
+            const head = el('div', 'rep-dialog-head', t.key('js.tags.cat_title', { name: b.dataset.name || b.dataset.id }));
+            const sel = el('select', 'profile-search tags-cat-sel');
+            sel.setAttribute('aria-label', t.key('js.tags.cat_pick'));
+            sel.appendChild(new Option(t.key('js.tags.cat_pick'), ''));
+            cats.forEach(c => {
+                const o = new Option(c.l, c.k);
+                o.disabled = c.k === b.dataset.k;
+                sel.appendChild(o);
+            });
+            const now = cats.find(c => c.k === b.dataset.k);
+            sel.appendChild(new Option(t.key('js.tags.cat_new'), '~new'));
+            const input = el('input', 'profile-search tags-cat-new');
+            input.maxLength = 40;
+            input.placeholder = t.key('js.tags.cat_new_ph');
+            input.setAttribute('aria-label', t.key('js.tags.cat_new_ph'));
+            input.hidden = true;
+            sel.addEventListener('change', () => { input.hidden = sel.value !== '~new'; if (!input.hidden) input.focus(); });
+            const say = el('div', 'tag-edit-say');
+            const send = el('button', 'btn btn-small', t.key('js.tags.cat_send'));
+            const cancel = el('button', 'btn btn-secondary btn-small', t.key('js.tags.cancel'));
+            send.type = 'button';
+            cancel.type = 'button';
+            cancel.addEventListener('click', () => d.close());
+            send.addEventListener('click', async () => {
+                const k = sel.value;
+                if (!k || (k === '~new' && !input.value.trim())) { say.textContent = t.key('js.tags.cat_need'); return; }
+                send.disabled = true;
+                const r = await postJ('tag_cat_suggest', { tag: b.dataset.id, category: k === '~new' ? '' : k, name: k === '~new' ? input.value.trim() : '' });
+                send.disabled = false;
+                say.textContent = (r && (r.message || r.error)) || t.key('js.tags.failed');
+                if (r && r.success) setTimeout(() => d.close(), 1400);
+            });
+            const acts = el('div', 'tags-cat-acts');
+            acts.append(send, cancel);
+            d.append(head, el('p', 'text-muted tags-cat-hint', t.key('js.tags.cat_hint')));
+            if (now) d.appendChild(el('p', 'text-muted tags-cat-hint', t.key('js.tags.cat_now', { name: now.l })));
+            d.append(sel, input, say, acts);
+            d.addEventListener('close', () => d.remove());
+            document.body.appendChild(d);
+            d.showModal();
+            sel.focus();
+        }));
         const none = document.getElementById('tags-page-none');
         document.querySelectorAll('.tags-group:not(.tags-mine)').forEach(g => {
-            if (g.querySelectorAll('.tags-list a').length <= PAGE) return;
-            g.dataset.shown = String(PAGE);
+            const per = Number(g.dataset.page) || PAGE;
+            if (g.querySelectorAll('.tags-list a').length <= per) return;
+            g.dataset.shown = String(per);
             const more = document.createElement('button');
             more.type = 'button';
             more.className = 'btn btn-secondary btn-small tags-more';
             more.addEventListener('click', () => {
                 const rest = Number(g.dataset.rest) || 0;
-                g.dataset.shown = String(rest > 0 ? Number(g.dataset.shown) + PAGE : PAGE);
+                g.dataset.shown = String(rest > 0 ? Number(g.dataset.shown) + per : per);
                 apply(true);
                 if (!rest) g.scrollIntoView({ block: 'nearest' });
             });
@@ -885,7 +991,7 @@
                 g.querySelectorAll('.tags-list a').forEach(a => {
                     const unit = a.closest('.tag-pair') || a;
                     const was = unit.hidden;
-                    let hide = s !== '' && !a.dataset.s.includes(s);
+                    let hide = s !== '' && (g.dataset.g === 'popular' || !a.dataset.s.includes(s));
                     if (!hide && s === '' && lim) {
                         k += 1;
                         hide = k > lim;

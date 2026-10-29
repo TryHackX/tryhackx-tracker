@@ -27,6 +27,7 @@ $r = tagsAttach($db, $cfg, $hash, $id, (int)$me['id'], $moderate ? TAG_ORIGIN_MO
                !$moderate && ($cfg['tags_add_review'] ?? 'open') === 'approve');
 if (empty($r['ok'])) jsonResponse(['error' => $r['error'], 'message' => tagsMessage((string)$r['error'])], 400);
 tagsLog($db, $hash, $id, 'add', (int)$me['id']);
+tagsCount($db, $id);
 if (!empty($r['unblocked'])) {
     auditLog($db, 'tags.unblock', ['target_type' => 'torrent', 'target_id' => $hash, 'summary' => (string)($me['username'] ?? '#' . (int)$me['id']) . ' → ' . $id]);
 }

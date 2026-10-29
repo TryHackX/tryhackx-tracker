@@ -52,10 +52,10 @@ try {
           && str_contains($p['uri'], 'tr=udp%3A%2F%2Ftracker.example.org') && !str_contains($p['uri'], 'javascript'), json_encode($p));
     check('magnet: a base32 hash is turned into hex', (richtextMagnetParse('magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVSYVK3PPMRUNXXX')['hash'] ?? '') !== ''
           && strlen(richtextMagnetParse('magnet:?xt=urn:btih:AERUKZ4JVPG66AJDIVSYVK3PPMRUNXXX')['hash']) === 40);
-    check('magnet: no btih, a short hash, a hash with a newline after it, and a 4001-character link are no magnet',
+    check('magnet: no btih, a short hash, a hash with a newline after it, and a 12 001-character link are no magnet',
           richtextMagnetParse('magnet:?dn=x') === null && richtextMagnetParse('magnet:?xt=urn:btih:abc') === null
           && richtextMagnetParse('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567%0A') === null
-          && richtextMagnetParse('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=' . str_repeat('a', 4000)) === null);
+          && richtextMagnetParse('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=' . str_repeat('a', 12000)) === null);
     $can = richtextRender("[magnet]{$mag}[/magnet]", 'bbcode', ['rt_magnet_uri' => '1'] + $base, true);
     check('magnet: a permitted reader gets the card — the name from dn, the size, one link to open, a copy button, the hash for the swarm numbers',
           str_contains($can, 'class="rt-magnet"') && str_contains($can, '>Big Buck Bunny 2008<') && str_contains($can, '1.27 GiB')

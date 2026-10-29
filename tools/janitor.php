@@ -55,6 +55,7 @@ require_once $root . '/includes/retention.php';
 require_once $root . '/includes/images.php';
 require_once $root . '/includes/facts.php';
 require_once $root . '/includes/tags.php';
+require_once $root . '/includes/wlrequests.php';
 require_once $root . '/includes/thumbs.php';
 
 /**
@@ -213,6 +214,7 @@ try {
         factsCountsTick($db, $cfg);
         tagsUsesTick($db);
         tagsForumReconcile($db, $cfg);
+        wlReqTick($db);
     }
     if (function_exists('thumbsTick')) {
         $thumbsRun = thumbsTick($db, $cfg);

@@ -104,7 +104,7 @@ function tagsMessage(string $code): string
     $words = ['name' => __('api.tags.name'), 'rejected' => __('api.tags.rejected'), 'limit' => __('api.tags.limit'),
               'unavailable' => __('api.tags.unavailable'), 'unknown' => __('api.tags.unknown'), 'blocked' => __('api.tags.blocked'),
               'too_many' => __('api.tags.too_many'), 'forbidden' => __('api.tags.forbidden'), 'not_found' => __('api.tags.not_found'),
-              'target' => __('api.tags.target'), 'fav_limit' => __('api.tags.fav_limit')];
+              'target' => __('api.tags.target'), 'fav_limit' => __('api.tags.fav_limit'), 'exists' => __('api.tags.cat_exists')];
     return $words[$code] ?? __('api.tags.invalid');
 }
 
@@ -232,6 +232,13 @@ function tagsDetach(PDO $db, string $hash, string $id, ?int $userId, bool $moder
     return ['ok' => true, 'removed' => 'blocked'];
 }
 
+function tagsCount(PDO $db, string $id): void
+{
+    if (!tagsIsExplicit($id) || !tagsReady($db)) return;
+    $clause = tagsPendingCol($db) ? ' AND pending = 0' : '';
+    $db->prepare("UPDATE tags SET uses = (SELECT COUNT(*) FROM hash_tags WHERE tag = ?$clause) WHERE slug = ?")->execute([$id, substr($id, 2)]);
+}
+
 function tagsForHashes(PDO $db, array $hashes, ?int $viewerId, bool $moderate): array
 {
     $hashes = array_values(array_unique(array_filter(array_map('strtolower', array_map('strval', $hashes)), fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
@@ -323,11 +330,25 @@ function tagsCatalog(PDO $db, int $limit = 300): array
 {
     if (!tagsReady($db)) return [];
     $limit = max(1, (int)$limit);
-    $st = $db->query("SELECT slug, name, color, uses FROM tags WHERE status = 'approved' AND hidden = 0 AND uses > 0 ORDER BY uses DESC, name LIMIT $limit");
+    $st = $db->query(tagsCatReady($db)
+        ? "SELECT t.slug, t.name, t.color, t.uses, t.origin, c.slug AS k, c.name AS kn, c.grp AS kg, c.sort AS ko, c.origin AS kor
+             FROM tags t LEFT JOIN tag_categories c ON c.id = t.category_id AND c.status = 'approved'
+            WHERE t.status = 'approved' AND t.hidden = 0 AND t.uses > 0 ORDER BY t.uses DESC, t.name LIMIT $limit"
+        : "SELECT slug, name, color, uses, origin FROM tags WHERE status = 'approved' AND hidden = 0 AND uses > 0 ORDER BY uses DESC, name LIMIT $limit");
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $c = ['id' => 'x:' . $r['slug'], 'g' => 'x', 'l' => (string)$r['name'], 'a' => str_replace('-', ' ', (string)$r['slug']), 'n' => (int)$r['uses']];
         if ($r['color']) $c['c'] = (string)$r['color'];
+        if (!empty($r['k'])) {
+            $c['k'] = (string)$r['k'];
+            $c['kl'] = tagsCatLabel(['slug' => $r['k'], 'name' => $r['kn'], 'grp' => $r['kg'], 'origin' => $r['kor']]);
+            $c['ko'] = (int)$r['ko'];
+            if (!empty($r['kg'])) $c['kg'] = (string)$r['kg'];
+        } elseif ($r['origin'] === 'forum') {
+            $c['k'] = '~forum';
+            $c['kl'] = __('tags.cat_forum');
+            $c['ko'] = 100000;
+        }
         $out[] = $c;
     }
     return $out;
@@ -339,7 +360,7 @@ function tagsSearch(PDO $db, array $cfg, string $q, int $limit = 12): array
     if ($q === '') return [];
     $out = [];
     foreach (factsCatalog($cfg) as $c) {
-        if ($c['g'] === 'x') continue;
+        if ($c['g'] === 'x' || $c['g'] === 't') continue;
         if (str_contains(mb_strtolower($c['l']), $q) || str_contains((string)($c['a'] ?? ''), $q)) $out[] = ['id' => $c['id'], 'g' => $c['g'], 'l' => $c['l']];
         if (count($out) >= $limit) return $out;
     }
@@ -403,8 +424,13 @@ function tagsAdminList(PDO $db, array $q): array
     $status = (string)($q['status'] ?? '');
     if (in_array($status, ['approved', 'pending', 'rejected'], true)) { $where[] = 't.status = ?'; $params[] = $status; }
     if ($status === 'hidden') $where[] = 't.hidden = 1';
+    if ($status === 'unused') $where[] = 't.uses = 0';
     $search = trim((string)($q['q'] ?? ''));
     if ($search !== '') { $where[] = '(t.name LIKE ? OR t.slug LIKE ?)'; $like = '%' . addcslashes($search, '%_\\') . '%'; $params[] = $like; $params[] = $like; }
+    $cats = tagsCatReady($db);
+    $cat = (string)($q['cat'] ?? '');
+    if ($cats && $cat === 'none') $where[] = 't.category_id IS NULL';
+    elseif ($cats && ctype_digit($cat)) { $where[] = 't.category_id = ?'; $params[] = (int)$cat; }
     $whereClause = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $orderClause = ['uses' => 't.uses DESC, t.name', 'name' => 't.name', 'new' => 't.created_at DESC, t.id DESC'][(string)($q['sort'] ?? 'uses')] ?? 't.uses DESC, t.name';
     $perPage = max(10, min(200, (int)($q['per_page'] ?? 50)));
@@ -414,11 +440,15 @@ function tagsAdminList(PDO $db, array $q): array
     $total = (int)$st->fetchColumn();
     $limit = (int)$perPage;
     $offset = ($page - 1) * $perPage;
-    $st = $db->prepare("SELECT t.id, t.slug, t.name, t.color, t.description, t.status, t.hidden, t.origin, t.uses, t.created_at, u.username AS created_by_name
+    $catCol = $cats ? 't.category_id' : 'NULL AS category_id';
+    $st = $db->prepare("SELECT t.id, t.slug, t.name, t.color, t.description, t.status, t.hidden, t.origin, t.uses, t.created_at, $catCol, u.username AS created_by_name
                           FROM tags t LEFT JOIN users u ON u.id = t.created_by $whereClause ORDER BY $orderClause LIMIT $limit OFFSET $offset");
     $st->execute($params);
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as &$r) { $r['id'] = (int)$r['id']; $r['hidden'] = (int)$r['hidden']; $r['uses'] = (int)$r['uses']; $r['tag'] = 'x:' . $r['slug']; }
+    foreach ($rows as &$r) {
+        $r['id'] = (int)$r['id']; $r['hidden'] = (int)$r['hidden']; $r['uses'] = (int)$r['uses']; $r['tag'] = 'x:' . $r['slug'];
+        $r['category_id'] = $r['category_id'] !== null ? (int)$r['category_id'] : null;
+    }
     unset($r);
     $pending = (int)$db->query("SELECT COUNT(*) FROM tags WHERE status = 'pending'")->fetchColumn();
     return ['rows' => $rows, 'total' => $total, 'pending' => $pending, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage))];
@@ -453,6 +483,7 @@ function tagsAdminAction(PDO $db, array $cfg, string $op, array $in, bool $manag
         $desc = trim(mb_substr((string)($in['description'] ?? ''), 0, 200));
         $db->prepare("UPDATE tags SET name = ?, color = ?, description = ? WHERE id = ?")
            ->execute([$name, tagsColor($in['color'] ?? null), $desc !== '' ? $desc : null, $ids[0]]);
+        if (array_key_exists('category', $in) && tagsCatReady($db)) tagsCatAction($db, 'cat_assign', ['ids' => [$ids[0]], 'category' => (int)$in['category']], null);
         return ['ok' => true, 'n' => 1];
     }
     if ($op === 'delete' || $op === 'merge') {
@@ -541,8 +572,14 @@ function tagsGenreLabel(string $id, array $genres): string
     return mb_strtoupper(mb_substr($s, 0, 1)) . mb_substr($s, 1);
 }
 
+const TAGS_FORUM_LANGS = ['pl' => 'l:audio_pl', 'polski' => 'l:audio_pl', 'polish' => 'l:audio_pl', 'polska' => 'l:audio_pl',
+                          'en' => 'l:audio_en', 'eng' => 'l:audio_en', 'angielski' => 'l:audio_en', 'english' => 'l:audio_en'];
+
 function tagsForumAuto(PDO $db, string $name, string $slug): ?string
 {
+    foreach ([tagsSlug($name), tagsSlug($slug)] as $s) {
+        if (isset(TAGS_FORUM_LANGS[$s])) return TAGS_FORUM_LANGS[$s];
+    }
     $parts = array_values(array_filter(array_map('trim', preg_split('~[/()|,+]~u', $name) ?: []), fn($p) => $p !== ''));
     foreach (array_merge([$name, $slug], $parts) as $c) {
         if (($id = tagsAutoMatch($c)) !== null) return $id;
@@ -1010,4 +1047,240 @@ function tagsFavSet(PDO $db, int $userId, string $id, bool $on): array
     if ((int)$st->fetchColumn() >= TAGS_FAV_MAX) return ['ok' => false, 'error' => 'fav_limit'];
     $db->prepare("INSERT IGNORE INTO tag_favourites (user_id, tag, created_at) VALUES (?, ?, UTC_TIMESTAMP())")->execute([$userId, $id]);
     return ['ok' => true, 'on' => true];
+}
+
+const TAGS_CAT_SYSTEM = ['q' => 'resolution', 'v' => 'video', 'h' => 'hdr', 'a' => 'audio', 's' => 'source', 'l' => 'language', 'g' => 'genre'];
+const TAGS_CAT_START = [
+    'release'  => ['extended', 'director-s-cut', 'uncut', 'remaster', 'imax', 'wersja-kinowa', 'kolekcja', 'komplet-sezonow'],
+    'picture'  => ['3d', 'upscale-ai', 'czarno-bialy', 'koloryzacja'],
+    'kind'     => ['gra', 'program', 'muzyka', 'audiobook', 'e-book'],
+    'platform' => ['netflix', 'amazon-prime', 'disney', 'hbo-max', 'apple-tv', 'skyshowtime', 'canal'],
+    'other'    => ['polska-produkcja', 'klasyka', 'koncert', 'kabaret', 'stand-up', 'sport'],
+    'language' => ['lektor-ivo', 'lektor-ai', 'dubbing-ai', 'lektor-amatorski', 'napisy-wtopione', 'napisy-sdh', 'audiodeskrypcja'],
+];
+const TAGS_CAT_MAX = 60;
+
+function tagsCatReady(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready) return true;
+    try {
+        $ready = (bool)$db->query("SHOW TABLES LIKE 'tag_cat_suggestions'")->fetchColumn()
+              && (bool)$db->query("SHOW COLUMNS FROM tags LIKE 'category_id'")->fetchColumn();
+    } catch (\Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+function tagsCatSeed(PDO $db): int
+{
+    if (!tagsCatReady($db)) return 0;
+    $ins = $db->prepare("INSERT IGNORE INTO tag_categories (slug, name, grp, sort, status, origin, created_at) VALUES (?, ?, ?, ?, 'approved', 'system', UTC_TIMESTAMP())");
+    $sort = 0;
+    foreach (TAGS_CAT_SYSTEM as $g => $slug) $ins->execute([$slug, $slug, $g, $sort += 10]);
+    foreach (array_keys(TAGS_CAT_START) as $slug) {
+        if (!in_array($slug, TAGS_CAT_SYSTEM, true)) $ins->execute([$slug, $slug, null, $sort += 10]);
+    }
+    $set = $db->prepare("UPDATE tags t JOIN tag_categories c ON c.slug = ? SET t.category_id = c.id WHERE t.slug = ? AND t.category_id IS NULL");
+    $n = 0;
+    foreach (TAGS_CAT_START as $cat => $slugs) {
+        foreach ($slugs as $s) {
+            $set->execute([$cat, $s]);
+            $n += $set->rowCount();
+        }
+    }
+    return $n;
+}
+
+function tagsCatLabel(array $c): string
+{
+    if (($c['origin'] ?? '') === 'system') {
+        if (!empty($c['grp'])) return __('js.filters.t_' . $c['grp']);
+        if (isset(TAGS_CAT_START[$c['slug'] ?? ''])) return __('tags.cat_' . $c['slug']);
+    }
+    return (string)($c['name'] ?? '');
+}
+
+function tagsCatList(PDO $db, bool $all = false): array
+{
+    if (!tagsCatReady($db)) return [];
+    $rows = $db->query("SELECT c.id, c.slug, c.name, c.color, c.sort, c.grp, c.status, c.origin, c.created_at, u.username AS created_by_name,
+                               (SELECT COUNT(*) FROM tags t WHERE t.category_id = c.id) AS n
+                          FROM tag_categories c LEFT JOIN users u ON u.id = c.created_by"
+                       . ($all ? '' : " WHERE c.status = 'approved'") . " ORDER BY c.sort, c.id")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$r) {
+        $r['id'] = (int)$r['id'];
+        $r['sort'] = (int)$r['sort'];
+        $r['n'] = (int)$r['n'];
+        $r['l'] = tagsCatLabel($r);
+    }
+    unset($r);
+    return $rows;
+}
+
+function tagsCatOpen(PDO $db): int
+{
+    if (!tagsCatReady($db)) return 0;
+    return (int)$db->query("SELECT COUNT(*) FROM tag_cat_suggestions WHERE status = 'open'")->fetchColumn();
+}
+
+function tagsCatAdmin(PDO $db): array
+{
+    if (!tagsCatReady($db)) return ['cats' => [], 'suggestions' => []];
+    $cats = tagsCatList($db, true);
+    $byId = array_column($cats, null, 'id');
+    $rows = $db->query("SELECT s.id, s.tag_slug, s.category_id, s.new_name, s.created_at, u.username, t.name AS tag_name, t.color AS tag_color, t.category_id AS tag_cat
+                          FROM tag_cat_suggestions s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN tags t ON t.slug = s.tag_slug
+                         WHERE s.status = 'open' ORDER BY s.created_at LIMIT 300")->fetchAll(PDO::FETCH_ASSOC);
+    $out = [];
+    foreach ($rows as $r) {
+        $cat = $r['category_id'] !== null ? ($byId[(int)$r['category_id']] ?? null) : null;
+        $now = $r['tag_cat'] !== null ? ($byId[(int)$r['tag_cat']] ?? null) : null;
+        $out[] = ['id' => (int)$r['id'], 'tag' => 'x:' . $r['tag_slug'], 'tag_name' => (string)($r['tag_name'] ?? $r['tag_slug']), 'tag_color' => $r['tag_color'],
+                  'cat' => $cat ? $cat['l'] : null, 'new' => $r['new_name'], 'now' => $now ? $now['l'] : null,
+                  'who' => $r['username'], 'at' => $r['created_at']];
+    }
+    return ['cats' => $cats, 'suggestions' => $out];
+}
+
+function tagsCatCreate(PDO $db, string $name, ?string $color, string $origin, ?int $userId, string $status = 'approved'): array
+{
+    $clean = tagsName($name, 40);
+    if ($clean === null) return ['ok' => false, 'error' => 'name'];
+    $slug = tagsSlug($clean);
+    $st = $db->prepare("SELECT id, status FROM tag_categories WHERE slug = ?");
+    $st->execute([$slug]);
+    $have = $st->fetch(PDO::FETCH_ASSOC);
+    if ($have) return ['ok' => true, 'id' => (int)$have['id'], 'exists' => true];
+    if ((int)$db->query("SELECT COUNT(*) FROM tag_categories")->fetchColumn() >= TAGS_CAT_MAX) return ['ok' => false, 'error' => 'limit'];
+    $sort = (int)$db->query("SELECT COALESCE(MAX(sort), 0) FROM tag_categories")->fetchColumn() + 10;
+    $db->prepare("INSERT INTO tag_categories (slug, name, color, sort, status, origin, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())")
+       ->execute([$slug, $clean, tagsColor($color), $sort, $status, $origin, $userId]);
+    return ['ok' => true, 'id' => (int)$db->lastInsertId()];
+}
+
+function tagsCatAction(PDO $db, string $op, array $in, ?int $actor): array
+{
+    if (!tagsCatReady($db)) return ['ok' => false, 'error' => 'unavailable'];
+    if ($op === 'cat_add') {
+        $r = tagsCatCreate($db, (string)($in['name'] ?? ''), is_string($in['color'] ?? null) ? $in['color'] : null, 'moderator', $actor);
+        if (!empty($r['exists'])) return ['ok' => false, 'error' => 'exists'];
+        return empty($r['ok']) ? $r : ['ok' => true, 'n' => 1, 'id' => $r['id']];
+    }
+    if ($op === 'cat_assign') {
+        $ids = array_values(array_filter(array_map('intval', (array)($in['ids'] ?? [])), fn($v) => $v > 0));
+        if (!$ids || count($ids) > 500) return ['ok' => false, 'error' => 'invalid'];
+        $cat = (int)($in['category'] ?? 0);
+        if ($cat > 0) {
+            $st = $db->prepare("SELECT 1 FROM tag_categories WHERE id = ?");
+            $st->execute([$cat]);
+            if (!$st->fetchColumn()) return ['ok' => false, 'error' => 'target'];
+        }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $db->prepare("UPDATE tags SET category_id = ? WHERE id IN ($ph)")->execute(array_merge([$cat > 0 ? $cat : null], $ids));
+        return ['ok' => true, 'n' => count($ids)];
+    }
+    if ($op === 'sugg_accept' || $op === 'sugg_reject') {
+        $st = $db->prepare("SELECT * FROM tag_cat_suggestions WHERE id = ? AND status = 'open'");
+        $st->execute([(int)($in['id'] ?? 0)]);
+        $s = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$s) return ['ok' => false, 'error' => 'not_found'];
+        if ($op === 'sugg_accept') {
+            $cat = $s['category_id'] !== null ? (int)$s['category_id'] : 0;
+            if ($cat === 0) {
+                $r = tagsCatCreate($db, (string)$s['new_name'], null, 'member', (int)$s['user_id']);
+                if (empty($r['ok'])) return $r;
+                $cat = (int)$r['id'];
+                $db->prepare("UPDATE tag_categories SET status = 'approved' WHERE id = ?")->execute([$cat]);
+            }
+            $db->prepare("UPDATE tags SET category_id = ? WHERE slug = ?")->execute([$cat, $s['tag_slug']]);
+        }
+        $db->prepare("UPDATE tag_cat_suggestions SET status = ?, decided_by = ?, decided_at = UTC_TIMESTAMP() WHERE id = ?")
+           ->execute([$op === 'sugg_accept' ? 'accepted' : 'rejected', $actor, (int)$s['id']]);
+        return ['ok' => true, 'n' => 1];
+    }
+    $st = $db->prepare("SELECT * FROM tag_categories WHERE id = ?");
+    $st->execute([(int)($in['id'] ?? 0)]);
+    $c = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$c) return ['ok' => false, 'error' => 'not_found'];
+    if ($op === 'cat_save') {
+        $color = tagsColor(is_string($in['color'] ?? null) ? $in['color'] : null);
+        if (!empty($c['grp'])) {
+            $db->prepare("UPDATE tag_categories SET color = ? WHERE id = ?")->execute([$color, (int)$c['id']]);
+            return ['ok' => true, 'n' => 1];
+        }
+        $name = tagsName((string)($in['name'] ?? ''), 40);
+        if ($name === null) return ['ok' => false, 'error' => 'name'];
+        $same = $c['origin'] === 'system' && $name === tagsCatLabel($c);
+        $db->prepare("UPDATE tag_categories SET name = ?, color = ?, origin = ?, status = 'approved' WHERE id = ?")
+           ->execute([$same ? $c['name'] : $name, $color, $same ? 'system' : ($c['origin'] === 'system' ? 'moderator' : $c['origin']), (int)$c['id']]);
+        return ['ok' => true, 'n' => 1];
+    }
+    if ($op === 'cat_move') {
+        $dir = (int)($in['dir'] ?? 0) < 0 ? -1 : 1;
+        $all = $db->query("SELECT id, sort FROM tag_categories ORDER BY sort, id")->fetchAll(PDO::FETCH_ASSOC);
+        $ids = array_map(fn($r) => (int)$r['id'], $all);
+        $at = array_search((int)$c['id'], $ids, true);
+        $to = $at + $dir;
+        if ($at === false || $to < 0 || $to >= count($ids)) return ['ok' => true, 'n' => 0];
+        [$ids[$at], $ids[$to]] = [$ids[$to], $ids[$at]];
+        $up = $db->prepare("UPDATE tag_categories SET sort = ? WHERE id = ?");
+        foreach ($ids as $k => $id) $up->execute([($k + 1) * 10, $id]);
+        return ['ok' => true, 'n' => 1];
+    }
+    if ($op === 'cat_delete') {
+        if (!empty($c['grp'])) return ['ok' => false, 'error' => 'forbidden'];
+        $db->prepare("UPDATE tags SET category_id = NULL WHERE category_id = ?")->execute([(int)$c['id']]);
+        $db->prepare("DELETE FROM tag_cat_suggestions WHERE category_id = ? AND status = 'open'")->execute([(int)$c['id']]);
+        $db->prepare("DELETE FROM tag_categories WHERE id = ?")->execute([(int)$c['id']]);
+        return ['ok' => true, 'n' => 1];
+    }
+    return ['ok' => false, 'error' => 'invalid'];
+}
+
+function tagsCatSuggest(PDO $db, string $tagId, string $catSlug, string $newName, int $userId, bool $direct): array
+{
+    if (!tagsCatReady($db)) return ['ok' => false, 'error' => 'unavailable'];
+    $row = tagsRow($db, $tagId);
+    if (!$row || $row['status'] !== 'approved' || (int)$row['hidden'] === 1) return ['ok' => false, 'error' => 'unknown'];
+    $cat = null;
+    if ($catSlug !== '') {
+        $st = $db->prepare("SELECT id FROM tag_categories WHERE slug = ? AND status = 'approved'");
+        $st->execute([$catSlug]);
+        $cat = $st->fetchColumn();
+        if ($cat === false) return ['ok' => false, 'error' => 'target'];
+        $cat = (int)$cat;
+        if ($row['category_id'] !== null && (int)$row['category_id'] === $cat) return ['ok' => true, 'same' => true];
+    } else {
+        $newName = (string)tagsName($newName, 40);
+        if ($newName === '') return ['ok' => false, 'error' => 'name'];
+        $st = $db->prepare("SELECT id FROM tag_categories WHERE slug = ? AND status = 'approved'");
+        $st->execute([tagsSlug($newName)]);
+        $have = $st->fetchColumn();
+        if ($have !== false) $cat = (int)$have;
+    }
+    if ($direct) {
+        if ($cat === null) {
+            $r = tagsCatCreate($db, $newName, null, 'moderator', $userId);
+            if (empty($r['ok'])) return $r;
+            $cat = (int)$r['id'];
+        }
+        $db->prepare("UPDATE tags SET category_id = ? WHERE id = ?")->execute([$cat, (int)$row['id']]);
+        $db->prepare("UPDATE tag_cat_suggestions SET status = 'accepted', decided_by = ?, decided_at = UTC_TIMESTAMP() WHERE tag_slug = ? AND status = 'open' AND category_id <=> ?")
+           ->execute([$userId, $row['slug'], $cat]);
+        return ['ok' => true, 'direct' => true];
+    }
+    $st = $db->prepare("SELECT COUNT(*) FROM tag_cat_suggestions WHERE user_id = ? AND created_at >= UTC_TIMESTAMP() - INTERVAL 1 DAY");
+    $st->execute([$userId]);
+    if ((int)$st->fetchColumn() >= 30) return ['ok' => false, 'error' => 'limit'];
+    $db->prepare("DELETE FROM tag_cat_suggestions WHERE tag_slug = ? AND user_id = ? AND status = 'open'")->execute([$row['slug'], $userId]);
+    $db->prepare("INSERT INTO tag_cat_suggestions (tag_slug, category_id, new_name, user_id, created_at, status) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), 'open')")
+       ->execute([$row['slug'], $cat, $cat === null ? $newName : null, $userId]);
+    return ['ok' => true, 'direct' => false];
+}
+
+function tagsPopularMax(array $cfg): int
+{
+    return tagsLimit($cfg, 'tags_popular_max', 100, 0, 500);
 }

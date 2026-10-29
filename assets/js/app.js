@@ -1992,6 +1992,74 @@ const getJson = async (endpoint) => {
     catch { return null; }
 };
 
+function wlRequestControl(st, hash, chips) {
+    const box = document.createElement('span');
+    box.className = 'info-wlreq';
+    chips.appendChild(box);
+    let form = null;
+    const paint = (s) => {
+        box.textContent = '';
+        if (form) { form.remove(); form = null; }
+        if (s.state === 'rejected' || (s.state === 'open' && s.mine)) {
+            const chip = document.createElement('span');
+            chip.className = 'info-chip' + (s.state === 'open' ? ' info-chip-wait' : '');
+            chip.textContent = s.state === 'open' ? t.plural(s.n, 'js.app.wlreq_waiting') : t.key('js.app.wlreq_again', { date: s.again_time || s.again || '' });
+            chip.title = t.key(s.state === 'open' ? 'js.app.wlreq_waiting_title' : 'js.app.wlreq_again_title');
+            box.appendChild(chip);
+            return;
+        }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary btn-small info-wlreq-btn';
+        btn.textContent = s.state === 'open' ? t.key('js.app.wlreq_support', { n: t.num(s.n) }) : t.key('js.app.wlreq_ask');
+        btn.title = t.key('js.app.wlreq_title');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.addEventListener('click', () => {
+            if (form) { form.remove(); form = null; btn.setAttribute('aria-expanded', 'false'); return; }
+            form = document.createElement('div');
+            form.className = 'info-wlreq-form';
+            let note = null;
+            if (s.note) {
+                note = document.createElement('textarea');
+                note.className = 'profile-search';
+                note.rows = 2;
+                note.maxLength = 300;
+                note.placeholder = t.key('js.app.wlreq_note_ph');
+                note.setAttribute('aria-label', t.key('js.app.wlreq_note_ph'));
+                form.appendChild(note);
+            }
+            const acts = document.createElement('div');
+            acts.className = 'info-wlreq-acts';
+            const send = document.createElement('button');
+            send.type = 'button';
+            send.className = 'btn btn-small';
+            send.textContent = t.key(s.state === 'open' ? 'js.app.wlreq_send_support' : 'js.app.wlreq_send');
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'btn btn-secondary btn-small';
+            cancel.textContent = t.key('js.app.wlreq_cancel');
+            const say = document.createElement('span');
+            say.className = 'info-wlreq-say';
+            say.setAttribute('role', 'status');
+            cancel.addEventListener('click', () => { form.remove(); form = null; btn.setAttribute('aria-expanded', 'false'); btn.focus(); });
+            send.addEventListener('click', async () => {
+                send.disabled = true;
+                const r = await postJson('wl_request', { hash: hash, note: note ? note.value : '', csrf_token: csrfToken(send) });
+                send.disabled = false;
+                if (r && r.success && r.state) { paint(r.state); return; }
+                say.textContent = (r && (r.error || r.message)) || t.key('js.app.no_answer');
+            });
+            acts.append(send, cancel, say);
+            form.appendChild(acts);
+            chips.after(form);
+            btn.setAttribute('aria-expanded', 'true');
+            (note || send).focus();
+        });
+        box.appendChild(btn);
+    };
+    paint(st);
+}
+
 /**
  * Close on the backdrop — but only when the press STARTED on the backdrop (1.64.0).
  *
@@ -4011,7 +4079,8 @@ window.siteToast = siteToast;
             });
             chips.appendChild(btn);
         }
-        if (chips.children.length) body.appendChild(chips);
+        if (chips.children.length || json.wl_request) body.appendChild(chips);
+        if (json.wl_request) wlRequestControl(json.wl_request, hash, chips);
 
         // 3. where it came from
         if (json.source_url) {
@@ -5007,7 +5076,7 @@ window.siteToast = siteToast;
             try { catalog = JSON.parse(filtersHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
             let favs = [];
             try { favs = JSON.parse(filtersHost.dataset.favs || '[]'); } catch (e) { favs = []; }
-            filters = window.SearchFilters.mount(filtersHost, { catalog, favs, rep: filtersHost.dataset.rep === '1', facts: filtersHost.dataset.facts === '1', desc: filtersHost.dataset.desc === '1',
+            filters = window.SearchFilters.mount(filtersHost, { catalog, favs, rep: filtersHost.dataset.rep === '1', facts: filtersHost.dataset.facts === '1', desc: filtersHost.dataset.desc === '1', wl: filtersHost.dataset.wl === '1',
                 moveRight: [$id('search-total'), $id('search-share')], onChange: () => run(1, 'push') });
             window.SearchFiltersPick = (id) => { if (infoHash) closeInfo(); filters.addTag(id); };
         }

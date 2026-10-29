@@ -1602,6 +1602,11 @@
                         <input type="number" min="0" max="500" step="1" id="set-tags_create_per_day" class="form-control bg-dark text-light border-secondary" name="tags_create_per_day" value="<?= (int)($cfg['tags_create_per_day'] ?? 20) ?>">
                         <small class="settings-hint"><?= _h('settings.tags_create_per_day_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="tags_popular_max">
+                        <label for="set-tags_popular_max" class="form-label"><?= _h('settings.tags_popular_max') ?></label>
+                        <input type="number" min="0" max="500" step="1" id="set-tags_popular_max" class="form-control bg-dark text-light border-secondary" name="tags_popular_max" value="<?= (int)($cfg['tags_popular_max'] ?? 100) ?>">
+                        <small class="settings-hint"><?= _h('settings.tags_popular_max_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="tags_add_review">
                         <label for="set-tags_add_review" class="form-label"><?= _h('settings.tags_add_review') ?></label>
                         <select id="set-tags_add_review" class="form-select bg-dark text-light border-secondary" name="tags_add_review">
@@ -2304,6 +2309,37 @@
             </div>
 
             <!-- Keeping the list honest over time (includes/wlmaint.php) -->
+            <div class="settings-section" id="section-wlreq" data-group="tracker" data-title="<?= _h('settings.wlreq_title') ?>">
+                <h5><?= _h('settings.wlreq_title') ?></h5>
+                <p class="settings-hint mb-3"><?= _h('settings.wlreq_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="wl_req_enabled">
+                        <label for="set-wl_req_enabled" class="form-label"><?= _h('settings.wlreq_enabled') ?></label>
+                        <select id="set-wl_req_enabled" class="form-select bg-dark text-light border-secondary" name="wl_req_enabled">
+                            <option value="1" <?= ($cfg['wl_req_enabled'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.index_yes') ?></option>
+                            <option value="0" <?= ($cfg['wl_req_enabled'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.index_block_off') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_req_days">
+                        <label for="set-wl_req_days" class="form-label"><?= _h('settings.wlreq_days') ?></label>
+                        <input id="set-wl_req_days" type="number" class="form-control bg-dark text-light border-secondary" name="wl_req_days" value="<?= (int)($cfg['wl_req_days'] ?? 7) ?>" min="0" max="365">
+                        <small class="settings-hint"><?= _h('settings.wlreq_days_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_req_per_day">
+                        <label for="set-wl_req_per_day" class="form-label"><?= _h('settings.wlreq_per_day') ?></label>
+                        <input id="set-wl_req_per_day" type="number" class="form-control bg-dark text-light border-secondary" name="wl_req_per_day" value="<?= (int)($cfg['wl_req_per_day'] ?? 5) ?>" min="1" max="100">
+                        <small class="settings-hint"><?= _h('settings.wlreq_per_day_hint') ?></small>
+                    </div>
+                    <div class="col-md-3" data-setting="wl_req_note">
+                        <label for="set-wl_req_note" class="form-label"><?= _h('settings.wlreq_note') ?></label>
+                        <select id="set-wl_req_note" class="form-select bg-dark text-light border-secondary" name="wl_req_note">
+                            <option value="1" <?= ($cfg['wl_req_note'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.index_yes') ?></option>
+                            <option value="0" <?= ($cfg['wl_req_note'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.index_block_off') ?></option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             <div class="settings-section" id="section-wlupkeep" data-group="tracker" data-title="<?= _h('settings.wlupkeep_title') ?>">
                 <h5><?= _h('settings.wlupkeep_title') ?></h5>
                 <p class="settings-hint mb-2"><?= _h('settings.wlupkeep_subtitle') ?></p>
@@ -4100,7 +4136,7 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                     </div>
                     <div class="col-md-3">
                         <label for="set-index_max_rows" class="form-label"><?= _h('settings.index_max_rows') ?></label>
-                        <input id="set-index_max_rows" type="number" class="form-control bg-dark text-light border-secondary" name="index_max_rows" value="<?= sanitize($cfg['index_max_rows'] ?? '200000') ?>" min="1000" max="5000000">
+                        <input id="set-index_max_rows" type="number" class="form-control bg-dark text-light border-secondary" name="index_max_rows" value="<?= sanitize($cfg['index_max_rows'] ?? '200000') ?>" min="1000" max="10000000">
                         <small class="settings-hint"><?= _h('settings.index_max_rows_hint') ?></small>
                     </div>
                     <div class="col-md-3">
@@ -4171,6 +4207,30 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <input id="set-meta_worker_concurrency" type="number" class="form-control bg-dark text-light border-secondary" name="meta_worker_concurrency" value="<?= sanitize($cfg['meta_worker_concurrency'] ?? '') ?>" min="1" max="64" placeholder="<?= _h('settings.index_worker_conc_ph') ?>">
                         <small class="settings-hint"><?= __('settings.index_worker_conc_hint') ?>
                             <details class="settings-more"><summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('settings.index_worker_conc_more') ?></summary><?= _h('settings.index_worker_conc_more_body') ?></details></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section" id="section-index-block" data-group="index" data-title="<?= _h('settings.index_block_title') ?>">
+                <h5><?= _h('settings.index_block_title') ?></h5>
+                <p class="settings-hint"><?= _h('settings.index_block_intro') ?></p>
+                <div class="row g-3">
+                    <div class="col-md-3" data-setting="index_block_on">
+                        <label for="set-index_block_on" class="form-label"><?= _h('settings.index_block_on') ?></label>
+                        <select id="set-index_block_on" class="form-select bg-dark text-light border-secondary" name="index_block_on">
+                            <option value="1" <?= ($cfg['index_block_on'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.index_yes') ?></option>
+                            <option value="0" <?= ($cfg['index_block_on'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.index_block_off') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-4" data-setting="index_block_words">
+                        <label for="set-index_block_words" class="form-label"><?= _h('settings.index_block_words') ?></label>
+                        <textarea id="set-index_block_words" class="form-control bg-dark text-light border-secondary" name="index_block_words" rows="6"><?= sanitize($cfg['index_block_words'] ?? IDX_BLOCK_WORDS) ?></textarea>
+                        <small class="settings-hint"><?= _h('settings.index_block_words_hint') ?></small>
+                    </div>
+                    <div class="col-md-5" data-setting="index_block_minor">
+                        <label for="set-index_block_minor" class="form-label"><?= _h('settings.index_block_minor') ?></label>
+                        <textarea id="set-index_block_minor" class="form-control bg-dark text-light border-secondary" name="index_block_minor" rows="6"><?= sanitize($cfg['index_block_minor'] ?? IDX_BLOCK_MINOR) ?></textarea>
+                        <small class="settings-hint"><?= _h('settings.index_block_minor_hint') ?></small>
                     </div>
                 </div>
             </div>

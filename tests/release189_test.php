@@ -74,7 +74,7 @@ check('names: FHD / Full HD / QHD, a streaming service as WEB-DL, HDTC as CAM, d
 $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('name_facts_ver', '1'), ('name_facts_cursor', 'done')")->execute();
 factsNameTick($db, ['facts_source' => 'desc_name', 'name_facts_ver' => '1', 'name_facts_cursor' => 'done'] + $cfg, 0.5);
 $ver = (string)$db->query("SELECT `value` FROM settings WHERE `key` = 'name_facts_ver'")->fetchColumn();
-check('new name rules make the janitor read every name again, once', FACTS_NAME_VERSION === 2 && $ver === '2'
+check('new name rules make the janitor read every name again, once', FACTS_NAME_VERSION >= 2 && $ver === (string)FACTS_NAME_VERSION
       && str_contains($src('tools/janitor.php'), "|| (\$cfg['name_facts_ver'] ?? '1') !== (string)FACTS_NAME_VERSION) {"), $ver);
 
 $bad = array_filter(array_keys(TAGS_BASE), fn($s) => tagsSlug(TAGS_BASE[$s][0]) !== $s);

@@ -26,11 +26,12 @@ check('Polish names: PL is Polish audio, Lektor and MULTi are their own tags',
       $tags('Film.2019.PL.1080p.BluRay.x264.AC3-KiT') === 'q:1080p v:h264 a:ac3 s:bluray l:audio_pl t:movie'
       && $tags('Seriale.S01.MULTi.720p.HDTV.x264.Lektor.PL') === 'q:720p v:h264 s:hdtv l:lektor_pl l:multi t:series');
 check('an anime episode is a series: " - 04 ", "[112]"; a year after a dash is not',
-      $tags('[SubsPlease] Kyouran Reijou Nia Liston - 04 (1080p) [1A604A90].mkv') === 'q:1080p t:series'
+      $tags('[SubsPlease] Kyouran Reijou Nia Liston - 04 (1080p) [1A604A90].mkv') === 'q:1080p t:series g:anime'
       && str_ends_with($tags('[GM-Team][国漫][仙逆][Renegade Immortal][2023][112][AVC][GB][1080P].mp4'), 't:series')
       && str_ends_with($tags('Avatar - 2009 1080p BluRay'), 't:movie'));
-check('no tags without a video token: a title word, a program, a music album',
-      $tags('Sitter Cam (2014)') === '' && $tags('4K Video Downloader Plus v26.0.8 - Portable.rar') === '' && $tags('Artist - Album (2024) [WEB FLAC]') === '');
+check('no video tags without a video token: a title word, a program, a music album — only their kind (1.90.0)',
+      $tags('Sitter Cam (2014)') === 't:movie' && $tags('4K Video Downloader Plus v26.0.8 - Portable.rar') === 't:software'
+      && $tags('Artist - Album (2024) [WEB FLAC]') === 'a:flac t:music');
 check('… and no false tag inside a video name: a site\'s .PL, Multi-Subs, a film called Opus',
       !str_contains($tags('[DEVIL-TORRENTS.PL] Trouble.Man.2025.MULTI.HDR.2160p.BluRay'), 'l:audio_pl')
       && str_contains($tags('[DEVIL-TORRENTS.PL] Trouble.Man.2025.MULTI.HDR.2160p.BluRay'), 'l:multi')

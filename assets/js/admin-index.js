@@ -270,6 +270,7 @@
             tr.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a')) return; openModal(r.info_hash); });
             tb.appendChild(tr);
         });
+        A.snapIcons(tb);
         const all = $('idx-check-all');
         all.checked = state.rows.length > 0 && state.rows.every(r => state.selected.has(r.info_hash));
     }
@@ -627,7 +628,80 @@
     // a column and then its direction is two or three clicks, and at 450 ms the first one had already
     // fired a request (and, with several sort keys, a wrong one).
     const SORT_DEBOUNCE_MS = window.AdminCommon.DEBOUNCE.sort;   // one number for every list — admin-common.js
+    const BLK = { allowed: 0, page: 1 };
+    async function loadBlocked() {
+        const r = await apiCall('admin/index_blocked&allowed=' + BLK.allowed + '&page=' + BLK.page);
+        if (!r || !r.success) return;
+        const hidden = BLK.allowed ? r.other : r.total;
+        const badge = $('idx-blk-n');
+        badge.textContent = hidden ? t.num(hidden) : '';
+        badge.classList.toggle('d-hidden', !hidden);
+        const box = $('idx-blk-body');
+        box.textContent = '';
+        if (!r.rows.length) {
+            box.appendChild(el('div', { className: 'wl-small text-muted py-2', text: t.key(BLK.allowed ? 'js.index.blk_none_allowed' : 'js.index.blk_none') }));
+            return;
+        }
+        const act = async (op, hash) => {
+            const j = await apiCall('admin/index_blocked_act', 'POST', { op, hashes: [hash] });
+            showToast(j && j.success ? t.key('js.index.blk_done') : ((j && j.error) || t.key('js.index.blk_failed')), j && j.success ? 'success' : 'error');
+            loadBlocked();
+        };
+        const icon = (name, cls, label, fn) => {
+            const b = el('button', { type: 'button', className: 'btn btn-sm ' + cls + ' wl-act', title: label, 'aria-label': label }, el('i', { className: 'bi ' + name }));
+            b.addEventListener('click', fn);
+            return b;
+        };
+        const tb = el('tbody', {});
+        r.rows.forEach(row => {
+            const acts = el('td', { className: 'th-actions' });
+            if (BLK.allowed) {
+                acts.appendChild(icon('bi-eye-slash', 'btn-outline-warning', t.key('js.index.blk_hide_again'), () => act('unallow', row.info_hash)));
+            } else {
+                acts.appendChild(icon('bi-check-lg', 'btn-outline-success', t.key('js.index.blk_allow'), () => act('allow', row.info_hash)));
+                acts.appendChild(icon('bi-slash-circle', 'btn-outline-danger', t.key('js.index.blk_ban'), async () => {
+                    if (await confirmAction(t.key('js.index.blk_ban'), t.key('js.index.blk_ban_confirm', { name: row.name }), { danger: true })) act('ban', row.info_hash);
+                }));
+            }
+            tb.appendChild(el('tr', {}, [
+                el('td', {}, [el('div', { className: 'idx-blk-name', text: row.name }), el('div', { className: 'wl-small text-muted font-mono', text: row.info_hash })]),
+                el('td', {}, el('span', { className: 'wl-badge wl-b-warn' }, row.word)),
+                el('td', { className: 'wl-small', text: fmtDate(row.created_at) }),
+                acts,
+            ]));
+        });
+        box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover dash-table wl-table' }, [
+            el('thead', {}, el('tr', {}, [el('th', { text: t.key('js.index.blk_col_name') }), el('th', { text: t.key('js.index.blk_col_word') }),
+                el('th', { text: t.key('js.index.blk_col_when') }), el('th', { className: 'th-actions', text: t.key('js.index.blk_col_acts') })])),
+            tb,
+        ])));
+        A.snapIcons(tb);
+        const pager = el('div', { className: 'admin-pagination' });
+        box.appendChild(pager);
+        renderPagination(pager, { total: r.total, page: r.page, pages: r.pages, onPage: (p) => { BLK.page = p; loadBlocked(); } });
+    }
+
+    function initBlocked() {
+        const toggle = $('idx-blk-toggle');
+        if (!toggle) return;
+        toggle.addEventListener('click', () => {
+            const open = toggle.getAttribute('aria-expanded') !== 'true';
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            toggle.replaceChildren(el('i', { className: 'bi ' + (open ? 'bi-chevron-up' : 'bi-chevron-down') }), ' ', t.key(open ? 'js.index.blk_hide' : 'js.index.blk_show'));
+            $('idx-blk-body').classList.toggle('d-hidden', !open);
+            if (open) A.snapIcons($('idx-blk-body'));
+        });
+        document.querySelectorAll('#idx-blk-tabs [data-allowed]').forEach(b => b.addEventListener('click', () => {
+            BLK.allowed = Number(b.dataset.allowed);
+            BLK.page = 1;
+            document.querySelectorAll('#idx-blk-tabs [data-allowed]').forEach(x => x.classList.toggle('active', x === b));
+            loadBlocked();
+        }));
+        loadBlocked();
+    }
+
     function init() {
+        initBlocked();
         const loadDebounced = debounce(() => load(), SORT_DEBOUNCE_MS);
         makeSortStack({ table: $('idx-table'), defaultSort: [{ col: 'last', dir: 'desc' }], onChange: (stack) => { state.sort = stack; state.page = 1; loadDebounced(); } }).bindHeaders();
         $('idx-search').addEventListener('input', debounce(() => { state.search = $('idx-search').value.trim(); state.page = 1; load(); }, window.AdminCommon.DEBOUNCE.search));

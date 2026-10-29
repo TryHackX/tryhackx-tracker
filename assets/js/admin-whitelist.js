@@ -6,7 +6,7 @@
     'use strict';
     // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
     // showToast is reserved for real outcomes (added / banned / deleted / errors).
-    const { apiCall, el, showToast, confirmAction, promptModal, promptPassword, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot } = window.AdminCommon;
+    const { apiCall, el, showToast, confirmAction, promptModal, promptPassword, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, snapIcons } = window.AdminCommon;
 
     const $ = (id) => document.getElementById(id);
     const bodyDs = document.body.dataset;
@@ -333,11 +333,77 @@
     function switchView(view) {
         state.view = view;
         document.querySelectorAll('#wl-tabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
-        ['whitelist', 'banned', 'clients', 'bans'].forEach(v => $('view-' + v).classList.toggle('d-hidden', v !== view));
+        ['whitelist', 'banned', 'clients', 'bans', 'requests'].forEach(v => $('view-' + v).classList.toggle('d-hidden', v !== view));
         if (view === 'whitelist') loadWhitelist();
         else if (view === 'banned') loadBanned();
         else if (view === 'clients') loadClients();
         else if (view === 'bans') loadApiBans();
+        else if (view === 'requests') loadRequests();
+    }
+
+    const WR = { status: 'open', page: 1 };
+    async function loadRequests(badgeOnly) {
+        const r = await apiCall('admin/wl_requests&status=' + (badgeOnly ? 'open' : WR.status) + '&page=' + (badgeOnly ? 1 : WR.page));
+        if (!r || !r.success) return;
+        $('tab-badge-requests').textContent = r.open ? String(r.open) : '';
+        if (badgeOnly) return;
+        $('wr-total').textContent = t.key('js.wl.rq_total', { n: t.num(r.total) });
+        const box = $('wr-body');
+        box.textContent = '';
+        if (!r.on) box.appendChild(el('div', { className: 'wl-small text-warning mb-2', text: t.key('js.wl.rq_off') }));
+        if (!r.rows.length) {
+            box.appendChild(el('div', { className: 'wl-small text-muted py-3', text: t.key('js.wl.rq_none') }));
+            renderPagination($('wr-pagination'), { total: 0, page: 1, pages: 1, onPage: () => {} });
+            return;
+        }
+        const act = async (row, op) => {
+            let reply = '';
+            if (op === 'reject') {
+                const v = await promptModal({ title: t.key('js.wl.rq_reject_title', { name: row.name }), label: t.key('js.wl.rq_reply_label'), placeholder: t.key('js.wl.rq_reply_ph'), maxlength: 300 });
+                if (v === null || v === undefined) return;
+                reply = String(v);
+            } else if (!await confirmAction(t.key('js.wl.rq_approve'), t.key('js.wl.rq_approve_confirm', { name: row.name }))) {
+                return;
+            }
+            const j = await apiCall('admin/wl_request_act', 'POST', { id: row.id, op, reply });
+            showToast(j && j.success ? t.key('js.wl.rq_done') : ((j && j.error) || t.key('js.wl.failed')), j && j.success ? 'success' : 'danger');
+            loadRequests();
+        };
+        const tb = el('tbody', {});
+        r.rows.forEach(row => {
+            const acts = el('td', { className: 'wl-actions' });
+            if (row.status === 'open' && r.manage) {
+                acts.appendChild(iconBtn('bi-check-lg', t.key('js.wl.rq_approve'), 'btn-outline-success', () => act(row, 'approve')));
+                acts.appendChild(iconBtn('bi-x-lg', t.key('js.wl.rq_reject'), 'btn-outline-warning', () => act(row, 'reject')));
+            }
+            acts.appendChild(iconBtn('bi-box-arrow-up-right', t.key('js.wl.rq_open_info'), 'btn-outline-info', () => window.open((document.body.dataset.site || '') + '?action=search&hash=' + encodeURIComponent(row.info_hash), '_blank', 'noopener')));
+            const notes = (row.votes || []).filter(v => v.note).map(v => el('div', { className: 'wl-small' }, [el('strong', {}, [v.who || '—', ': ']), v.note]));
+            const who = (row.votes || []).map(v => v.who || '—');
+            const stats = [];
+            if (row.seeders !== null) stats.push(t.key('js.wl.rq_seeders', { n: t.num(row.seeders) }));
+            if (row.total_size) stats.push(fmtBytes(row.total_size));
+            if (row.last_seen) stats.push(t.key('js.wl.rq_seen', { date: fmtDate(row.last_seen) }));
+            if (row.seeders === null && !row.last_seen) stats.push(t.key('js.wl.rq_gone_index'));
+            const swarm = stats.flatMap((s, i) => (i ? [' · ', s] : [s]));
+            tb.appendChild(el('tr', {}, [
+                el('td', { className: 'wl-name-cell' }, [el('div', { className: 'wr-name', text: row.name || row.info_hash }),
+                    el('div', { className: 'wl-small text-muted font-mono', text: row.info_hash }), ...notes]),
+                el('td', {}, [el('span', { className: 'wl-badge wl-b-pending', title: who.join(', ') }, t.plural(row.supporters, 'js.wl.rq_people')),
+                    el('div', { className: 'wl-small text-muted', text: who.slice(0, 3).join(', ') + (who.length > 3 ? '…' : '') })]),
+                el('td', { className: 'wl-small' }, swarm),
+                el('td', { className: 'wl-small' }, [el('div', { text: fmtDate(row.created_at) }),
+                    row.decided_at ? el('div', { className: 'text-muted', text: t.key('js.wl.rq_decided', { date: fmtDate(row.decided_at), who: row.decided_name || '—' }) }) : null,
+                    row.reply ? el('div', { className: 'text-muted', text: row.reply }) : null]),
+                acts,
+            ]));
+        });
+        box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover wl-table dash-table' }, [
+            el('thead', {}, el('tr', {}, [el('th', { text: t.key('js.wl.rq_col_torrent') }), el('th', { text: t.key('js.wl.rq_col_people') }),
+                el('th', { text: t.key('js.wl.rq_col_swarm') }), el('th', { text: t.key('js.wl.rq_col_when') }), el('th', { className: 'th-actions', text: t.key('js.wl.rq_col_actions') })])),
+            tb,
+        ])));
+        snapIcons(tb);
+        renderPagination($('wr-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p) => { WR.page = p; loadRequests(); } });
     }
 
 
@@ -474,6 +540,7 @@
             body.appendChild(tr);
             lastIp = row.ip;
         });
+        snapIcons(body);
         renderPagination($('wl-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p) => { state.wl.page = p; loadWhitelist(); } });
         updateBulkBar();
         $('wl-select-all').checked = r.rows.length > 0 && r.rows.every(x => state.wl.selected.has(x.id));
@@ -1153,6 +1220,7 @@
             tr.appendChild(act);
             body.appendChild(tr);
         });
+        snapIcons(body);
         renderPagination($('bn-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p2) => { state.bn.page = p2; loadBanned(); } });
     }
 
@@ -1249,6 +1317,7 @@
             body.appendChild(tr);
             if (feats.length) body.appendChild(el('tr', { className: 'wl-cl-sub' }, el('td', { colspan: 10 }, el('div', { className: 'wl-cl-feats' }, feats))));
         });
+        snapIcons(body);
     }
 
     // The key editor. Resolves to the four answers, or null if the operator backed out — one place,
@@ -1478,6 +1547,7 @@
             tr.appendChild(act);
             body.appendChild(tr);
         });
+        snapIcons(body);
         renderPagination($('ab-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p2) => { state.ab.page = p2; loadApiBans(); } });
     }
 
@@ -1545,6 +1615,13 @@
         wlSort.bindHeaders(); bnSort.bindHeaders(); abSort.bindHeaders();
 
         document.querySelectorAll('#wl-tabs .source-tab[data-view]').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+        document.querySelectorAll('#wr-status [data-status]').forEach(b => b.addEventListener('click', () => {
+            WR.status = b.dataset.status;
+            WR.page = 1;
+            document.querySelectorAll('#wr-status [data-status]').forEach(x => x.classList.toggle('active', x === b));
+            loadRequests();
+        }));
+        loadRequests(true);
 
         $('btn-logout').addEventListener('click', async () => { await apiCall('admin/logout', 'POST', {}); window.location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
         $('btn-wl-regen').addEventListener('click', regenerate);

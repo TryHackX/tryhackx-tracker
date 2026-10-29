@@ -63,6 +63,21 @@
             <div id="idx-cov-note"></div>
         </div>
 
+        <div class="wl-status-card" id="idx-blk-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-eye-slash"></i> <?= _h('a.index.blk_head') ?> <span class="wl-badge wl-b-warn d-hidden" id="idx-blk-n"></span></h6>
+                <div class="wl-status-actions">
+                    <div class="btn-group btn-group-sm" role="group" aria-label="<?= _h('a.index.blk_head') ?>" id="idx-blk-tabs">
+                        <button type="button" class="btn btn-outline-secondary active" data-allowed="0"><?= _h('a.index.blk_hidden') ?></button>
+                        <button type="button" class="btn btn-outline-secondary" data-allowed="1"><?= _h('a.index.blk_allowed') ?></button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="idx-blk-toggle" aria-expanded="false" aria-controls="idx-blk-body"><i class="bi bi-chevron-down"></i> <?= _h('a.index.blk_show') ?></button>
+                </div>
+            </div>
+            <p class="wl-small text-muted mb-2"><?= _h('a.index.blk_intro') ?></p>
+            <div id="idx-blk-body" class="d-hidden"></div>
+        </div>
+
 
         <div class="wl-view" id="view-index">
             <div class="admin-toolbar-card">
@@ -147,7 +162,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="sf-host" id="idx-filters" data-facts="1" data-desc="1" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog($cfg) : [])) ?>"></div>
+                <div class="sf-host" id="idx-filters" data-facts="1" data-desc="1" data-popular="<?= function_exists('tagsPopularMax') ? tagsPopularMax($cfg) : 0 ?>" data-kinds="<?= sanitize(json_encode(function_exists('factsKinds') ? factsKinds($cfg) : [])) ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') ? factsCatalog($cfg, $db) : [])) ?>"></div>
                 <div class="wl-bulkbar d-hidden" id="idx-bulkbar">
                     <span id="idx-sel-count"><?= _h('a.index.sel_count', ['n' => 0]) ?></span>
                     <button type="button" class="btn btn-sm btn-outline-success" id="btn-idx-promote"><i class="bi bi-arrow-up-circle"></i> <?= __('a.index.promote') ?></button>

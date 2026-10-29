@@ -200,7 +200,7 @@ function indexCountsTick(PDO $db): bool {
 
 function indexPollMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['index_poll_minutes'] ?? 30) ?: 30)); }
 function indexMinSeeders(array $cfg): int { return max(0, min(100000, (int)($cfg['index_min_seeders'] ?? 1))); }
-function indexMaxRows(array $cfg): int { return max(10, min(5000000, (int)($cfg['index_max_rows'] ?? 200000) ?: 200000)); }
+function indexMaxRows(array $cfg): int { return max(10, min(10000000, (int)($cfg['index_max_rows'] ?? 200000) ?: 200000)); }
 function indexGraceDays(array $cfg): int { return max(1, min(90, (int)($cfg['index_grace_days'] ?? 3) ?: 3)); }
 function indexProtectDays(array $cfg): int { return max(1, min(365, (int)($cfg['index_protect_days'] ?? 10) ?: 10)); }
 
@@ -1802,14 +1802,137 @@ function indexCatalogSync(PDO $db, array $hashes, bool $mayLeave = true): void {
         $in = implode(',', array_fill(0, count($chunk), '?'));
         $st = $db->prepare("SELECT " . IDX_CATALOG_FROM_HASHES . " FROM index_hashes WHERE info_hash IN ($in) AND " . IDX_CATALOG_MEMBER);
         $st->execute($chunk);
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        [$rows, $hid] = indexBlockSplit($db, $st->fetchAll(PDO::FETCH_ASSOC));
         if ($rows) indexCatalogUpsertRows($db, $rows);
         if ($mayLeave) {
             $keep = array_flip(array_column($rows, 'info_hash'));
             $gone = array_values(array_filter($chunk, fn($h) => !isset($keep[$h])));
             if ($gone) indexCatalogForget($db, $gone);
+        } elseif ($hid) {
+            indexCatalogForget($db, $hid);
         }
     }
+}
+
+const IDX_BLOCK_WORDS = "pthc\nhussyfan\nr@ygold\njailbait\nchild porn\nkiddie porn\nkiddy porn\nunderage porn\npedo\npedophile\npaedophile\npedofil"
+    . "\nchristchurch shooting\nchristchurch mosque\nbrenton tarrant";
+const IDX_BLOCK_MINOR = "loli\nlolicon\nshota\nshotacon\npreteen\nunderage\nlittle girl\nlittle girls\nyoung girl\nchild\nchildren\nkid\nkids"
+    . "\n小学生\n中学生\n幼女\n萝莉\nロリ\n児童\n儿童\n未成年\nジュニアアイドル";
+const IDX_BLOCK_ADULT = '/(?<![a-z0-9])(?:xxx|porn\w*|sex\w*|nude\w*|naked|hentai|nsfw|r-?18|fuck\w*|cum|creampie|blowjob|onlyfans|erotic\w*|18\+)(?![a-z0-9])'
+    . '|エロ|成人|色情|無修正|无码|裸|做爱|性交|セックス/u';
+const IDX_BLOCK_AGE = '/(?<![0-9])(?:[1-9]|1[0-7])\s?(?:yo|y\/o|yrs?\s?old|years?\s?old)(?![a-z])/u';
+
+function indexBlockPattern(string $list): ?string {
+    $alts = [];
+    foreach (preg_split('/[\r\n,]+/', $list) ?: [] as $w) {
+        $w = trim(mb_strtolower($w));
+        if ($w === '' || mb_strlen($w) > 60) continue;
+        $q = str_replace(' ', '[\s._-]*', preg_quote($w, '/'));
+        $alts[] = preg_match('/[\p{Han}\p{Hiragana}\p{Katakana}]/u', $w) ? $q : '(?<![a-z0-9])' . $q . '(?![a-z0-9])';
+    }
+    return $alts ? '/' . implode('|', $alts) . '/u' : null;
+}
+
+function indexBlockMatch(array $cfg, string $name): ?string {
+    if (($cfg['index_block_on'] ?? '1') !== '1' || $name === '') return null;
+    static $memo = [];
+    $alone = (string)($cfg['index_block_words'] ?? IDX_BLOCK_WORDS);
+    $minor = (string)($cfg['index_block_minor'] ?? IDX_BLOCK_MINOR);
+    $key = md5($alone . "\0" . $minor);
+    $memo[$key] ??= [indexBlockPattern($alone), indexBlockPattern($minor)];
+    [$a, $m] = $memo[$key];
+    $n = mb_strtolower($name);
+    if ($a !== null && preg_match($a, $n, $hit)) return trim($hit[0]);
+    if ((($m !== null && preg_match($m, $n, $hit)) || preg_match(IDX_BLOCK_AGE, $n, $hit)) && preg_match(IDX_BLOCK_ADULT, $n)) return trim($hit[0]);
+    return null;
+}
+
+function indexBlockReady(PDO $db): bool {
+    static $ready = false;
+    if ($ready) return true;
+    try { $ready = (bool)$db->query("SHOW TABLES LIKE 'index_blocked'")->fetchColumn(); } catch (\Throwable $e) { $ready = false; }
+    return $ready;
+}
+
+function indexBlockSplit(PDO $db, array $rows): array {
+    $cfg = $GLOBALS['cfg'] ?? [];
+    if (!$rows || ($cfg['index_block_on'] ?? '1') !== '1' || !indexBlockReady($db)) return [$rows, []];
+    $hits = [];
+    foreach ($rows as $i => $r) {
+        $w = indexBlockMatch($cfg, (string)($r['name'] ?? ''));
+        if ($w !== null) $hits[$i] = $w;
+    }
+    if (!$hits) return [$rows, []];
+    $hashes = array_map(fn($i) => strtolower((string)$rows[$i]['info_hash']), array_keys($hits));
+    $st = $db->prepare("SELECT info_hash FROM index_blocked WHERE allowed = 1 AND info_hash IN (" . implode(',', array_fill(0, count($hashes), '?')) . ")");
+    $st->execute($hashes);
+    $ok = array_flip($st->fetchAll(PDO::FETCH_COLUMN));
+    $ins = $db->prepare("INSERT INTO index_blocked (info_hash, name, word, allowed, created_at) VALUES (?, ?, ?, 0, UTC_TIMESTAMP())
+                         ON DUPLICATE KEY UPDATE name = VALUES(name), word = VALUES(word)");
+    $kept = [];
+    $hid = [];
+    foreach ($rows as $i => $r) {
+        $h = strtolower((string)$r['info_hash']);
+        if (!isset($hits[$i]) || isset($ok[$h])) { $kept[] = $r; continue; }
+        $ins->execute([$h, mb_substr((string)$r['name'], 0, 500), mb_substr($hits[$i], 0, 100)]);
+        $hid[] = $h;
+    }
+    return [$kept, $hid];
+}
+
+function indexBlockedTick(PDO $db): void {
+    if (!indexBlockReady($db)) return;
+    $db->exec("DELETE b FROM index_blocked b LEFT JOIN index_hashes h ON h.info_hash = b.info_hash WHERE h.info_hash IS NULL");
+}
+
+function indexBlockedList(PDO $db, bool $allowed, int $page): array {
+    if (!indexBlockReady($db)) return ['rows' => [], 'total' => 0, 'other' => 0, 'page' => 1, 'pages' => 1];
+    $per = 50;
+    $st = $db->prepare("SELECT COUNT(*) FROM index_blocked WHERE allowed = ?");
+    $st->execute([$allowed ? 1 : 0]);
+    $total = (int)$st->fetchColumn();
+    $st->execute([$allowed ? 0 : 1]);
+    $other = (int)$st->fetchColumn();
+    $pages = max(1, (int)ceil($total / $per));
+    $page = max(1, min($pages, $page));
+    $st = $db->prepare("SELECT b.info_hash, b.name, b.word, b.created_at FROM index_blocked b WHERE b.allowed = ?
+                         ORDER BY b.created_at DESC, b.info_hash LIMIT $per OFFSET " . (($page - 1) * $per));
+    $st->execute([$allowed ? 1 : 0]);
+    return ['rows' => $st->fetchAll(PDO::FETCH_ASSOC), 'total' => $total, 'other' => $other, 'page' => $page, 'pages' => $pages];
+}
+
+function indexBlockedAction(PDO $db, array $cfg, string $op, array $hashes): array {
+    $hashes = array_values(array_unique(array_filter(array_map(fn($h) => strtolower(trim((string)$h)), $hashes), fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
+    if (!$hashes || count($hashes) > 200 || !indexBlockReady($db)) return ['ok' => false, 'error' => 'invalid'];
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    if ($op === 'allow') {
+        $db->prepare("UPDATE index_blocked SET allowed = 1 WHERE info_hash IN ($in)")->execute($hashes);
+        indexCatalogSync($db, $hashes, false);
+        if (function_exists('factsNameStore') && factsMode($cfg) === 'desc_name') {
+            $st = $db->prepare("SELECT info_hash, name FROM index_catalog WHERE info_hash IN ($in)");
+            $st->execute($hashes);
+            factsNameStore($db, $st->fetchAll(PDO::FETCH_ASSOC));
+        }
+        return ['ok' => true, 'n' => count($hashes)];
+    }
+    if ($op === 'unallow') {
+        $db->prepare("UPDATE index_blocked SET allowed = 0 WHERE info_hash IN ($in)")->execute($hashes);
+        indexCatalogForget($db, $hashes);
+        return ['ok' => true, 'n' => count($hashes)];
+    }
+    if ($op === 'ban') {
+        $st = $db->prepare("SELECT info_hash, word FROM index_blocked WHERE info_hash IN ($in)");
+        $st->execute($hashes);
+        $n = 0;
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            trackerBlockHash($db, $cfg, (string)$r['info_hash'], ['source' => 'admin', 'reason' => mb_substr('Hidden name: ' . $r['word'], 0, 255)]);
+            $n++;
+        }
+        $db->prepare("DELETE FROM index_blocked WHERE info_hash IN ($in)")->execute($hashes);
+        indexCatalogForget($db, $hashes);
+        return ['ok' => true, 'n' => $n];
+    }
+    return ['ok' => false, 'error' => 'invalid'];
 }
 
 /** Take these hashes out of the catalogue (they left index_hashes, or stopped being members). */
@@ -1840,7 +1963,8 @@ function indexCatalogSyncRecent(PDO $db): int {
                              WHERE meta_status = 'done' AND meta_fetched_at >= ? - INTERVAL " . IDX_CATALOG_RECENT_MARGIN_MIN . " MINUTE
                                AND " . IDX_CATALOG_MEMBER);
         $st->execute([$since]);
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        [$rows, $hid] = indexBlockSplit($db, $st->fetchAll(PDO::FETCH_ASSOC));
+        if ($hid) indexCatalogForget($db, $hid);
         if ($rows) $n = indexCatalogUpsertRows($db, $rows, true);
     }
     indexStateUpdate(function (array &$s) use ($nowDb) { $s['catalog_recent_from'] = $nowDb; return true; });
@@ -1881,7 +2005,8 @@ function indexCatalogWalk(PDO $db, ?float $seconds = null, ?int $maxRows = null)
         $sel->closeCursor();
         $last = $rows ? (string)$rows[count($rows) - 1]['info_hash'] : null;
         $end = count($rows) < IDX_CATALOG_CHUNK;
-        $members = array_values(array_filter($rows, fn($r) => (int)$r['m'] === 1));
+        [$members, $hid] = indexBlockSplit($db, array_values(array_filter($rows, fn($r) => (int)$r['m'] === 1)));
+        if ($hid) indexCatalogForget($db, $hid);
         if ($members) $out['written'] += indexCatalogUpsertRows($db, $members, $filling);
         // The catalogue's rows in this stretch of keys that are not members of it any more. The upper end is open on
         // the last chunk: anything the catalogue holds past the table's last key is gone from the table by definition.
@@ -1928,6 +2053,7 @@ function indexCatalogTick(PDO $db): array {
     try {
         $out['recent'] = indexCatalogSyncRecent($db);
         $out['walk'] = indexCatalogWalk($db);
+        if (!empty($out['walk']['passed'])) indexBlockedTick($db);
     } catch (\Throwable $e) {
         $out['error'] = $e->getMessage();
         error_log('[index catalogue] ' . $e->getMessage());
@@ -2554,6 +2680,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     $perPage = max(1, min(200, (int)($q['per_page'] ?? 25)));
     $offset = ($page - 1) * $perPage;
     $withWl = !empty($q['include_whitelist']);
+    $wlOnly = $withWl && !empty($q['wl_only']);
     $searchFiles = !empty($q['search_files']);
     $search = trim((string)($q['search'] ?? ''));
     // 1.74.0 (PERF-2/PERF-3): the narrow catalogue, once it has been made in full — see indexCatalogReady(). `catalog`
@@ -2821,7 +2948,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
     // on. `$fast` builds the ALL-WORDS arm instead: the same select, WHERE MATCH('+w1* +w2* …') in place of the OR and no
     // file-name half — see $run().
     $noRank = ['hit' => false, 'ord' => false, 'top' => 0, 'alone' => false];
-    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank, $descIdx, $inDesc, $flt): array {
+    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank, $descIdx, $inDesc, $flt, $wlOnly): array {
         $rank = $rank ?: $noRank;
         $cat = $cat && !$wl;
         $tbl = $wl ? 'whitelist' : ($cat ? 'index_catalog' : 'index_hashes');
@@ -2853,6 +2980,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
             // arm rather than quietly returning rows that cannot match.
             $where[] = '1 = 0';
         }
+        if (!$wl && $wlOnly) $where[] = '1 = 0';
         $params = [];
         if ($descIdx !== null) {
             if ($wl) {
@@ -3096,7 +3224,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         return $rows;
     };
 
-    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter, $descOnly, $filtered): array {
+    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $wlOnly, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter, $descOnly, $filtered): array {
         // Whether the relevance column is a real score or the literal 0 — see $orderFor.
         $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
         $rank = $rankFor($scored);
@@ -3106,7 +3234,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
         $arms = [$buildArm(false, $useFt, $withWl, $useCat, $rank)];
         if ($withWl) $arms[] = $buildArm(true, $useFt, false, false, $rank);
         // [total, capped]
-        $countArms = static function () use ($db, $arms, $withWl, $search, $searchFiles, $contentFilter, $useCat, $cap, $descOnly, $filtered): array {
+        $countArms = static function () use ($db, $arms, $withWl, $wlOnly, $search, $searchFiles, $contentFilter, $useCat, $cap, $descOnly, $filtered): array {
         $total = 0;
         $capped = false;
         foreach ($arms as $k => $a) {
@@ -3124,8 +3252,8 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                     // — less the hashes the whitelist arm shows instead, counted from the whitelist's side (a few
                     // hundred keys looked up) rather than by a NOT IN over every catalogue row. The same number the
                     // arm's WHERE gives, at a fraction of the reads.
-                    $count = static function () use ($db, $withWl, $contentFilter): array {
-                        if (in_array($contentFilter, ['rejected', 'approved', 'pending'], true)) return ['n' => 0];
+                    $count = static function () use ($db, $withWl, $wlOnly, $contentFilter): array {
+                        if ($wlOnly || in_array($contentFilter, ['rejected', 'approved', 'pending'], true)) return ['n' => 0];
                         $n = (int)$db->query("SELECT COUNT(*) FROM index_catalog")->fetchColumn();
                         if ($withWl) {
                             $n -= (int)$db->query("SELECT COUNT(*) FROM whitelist w JOIN index_catalog c ON c.info_hash = w.info_hash
@@ -3136,7 +3264,7 @@ function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
                 }
                 // The key has to carry everything that changes the answer, or one reader's filter
                 // becomes another reader's total.
-                $key = ($useCat && $k === 0 ? 'catc_total_' : 'cat_total_') . $k . ($withWl ? '_wl' : '') . '_' . $contentFilter;
+                $key = ($useCat && $k === 0 ? 'catc_total_' : 'cat_total_') . $k . ($withWl ? '_wl' : '') . ($wlOnly && $k === 0 ? '_only' : '') . '_' . $contentFilter;
                 $total += (int)(indexStatusCached($db, $key, $count, 120)['n'] ?? 0);
             } else {
                 // A search counts its matches only as far as $cap + 1: past that the answer is "more".

@@ -303,4 +303,6 @@ jsonResponse([
     // Comments (1.71.0, includes/comments.php): whether the section is drawn and how many there are — the
     // thread itself is its own request (api/comment_list.php), made when the section comes into view.
     'comments'    => function_exists('commentPanelInfo') ? commentPanelInfo($db, $cfg, $me, $hash) : null,
+    'wl_request'  => ($wlReq = function_exists('wlReqState') ? wlReqState($db, $cfg, $hash, $me) : null) !== null
+                     ? $wlReq + ['again_time' => infoReaderTime($wlReq['again'], $me, $cfg)] : null,
 ]);

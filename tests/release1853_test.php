@@ -64,7 +64,7 @@ $got = [$prop('Dramatyczne', 'dramatyczne'), $prop('Komediowe', 'komediowe'), $p
 check('… a genre read from the descriptions, whose whole name the word begins with (Dramatyczne is Dramat, Komediowe Komedia — not Dramat historyczny or Komediodramat)',
       $got === ['g:dramat', 'g:komedia', 'g:akcja', 'g:animacja', 'g:fantasy', 'g:kryminal', 'g:romantyczne', 'g:surrealistyczny', 'g:przygodowy'], json_encode($got));
 $got = [$prop('PL', 'pl'), $prop('IVO', 'ivo'), $prop('3D / SBS / OU', '3d-sbs-ou'), $prop('Dla młodzieży', 'dla-mlodziezy')];
-check('… and anything else a new tag', $got === ['x:pl', 'x:ivo', 'x:3d-sbs-ou', 'x:dla-mlodziezy'], json_encode($got));
+check('… PL is the PL audio tag (1.90.0), and anything else a new tag', $got === ['l:audio_pl', 'x:ivo', 'x:3d-sbs-ou', 'x:dla-mlodziezy'], json_encode($got));
 
 $ft = [['slug' => 'full-hd-1080p', 'name' => 'Full HD (1080p)', 'color' => '', 'parent' => null],
        ['slug' => 'dramatyczne', 'name' => 'Dramatyczne', 'color' => '#34495e'],
@@ -225,7 +225,7 @@ check('the Tags page draws chips that open the search, and a forum tag beside th
       && !str_contains($src('assets/js/admin-tags.js'), 'swatch(') && str_contains($src('assets/css/admin.css'), '.fchip.fchip-forum {')
       && str_contains($src('assets/css/detail-panel.css'), '.fchip-x { --fc: #8fa3bf; color: color-mix(in srgb, var(--fc) 55%, #fff); }')
       && str_contains($src('assets/js/filters.js'), 'if (editing && edit.add) bar.append(picker(), toggle);')
-      && str_contains($src('assets/css/detail-panel.css'), '.tag-edit-bar .tag-edit-toggle { flex: 0 0 auto; display: inline-flex;'));
+      && str_contains($src('assets/css/detail-panel.css'), '.tag-edit-bar .tag-edit-toggle { flex: 0 0 auto; }'));
 check('version and changelog', version_compare(TRACKER_VERSION, '1.85.6', '>=') && str_contains($src('CHANGELOG.md'), '## [1.85.6]') && str_contains($src('CHANGELOG.md'), '## [1.85.3]'));
 
 echo "\n$n checks, $fails failed\n";

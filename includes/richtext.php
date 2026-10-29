@@ -589,7 +589,7 @@ function richtextBytes(int $n): string {
 function richtextMagnetParse(string $raw): ?array {
     $u = trim((string)preg_replace('/[\r\n\t]+/', '', html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
     $u = str_replace(' ', '%20', $u);
-    if (strlen($u) > 4000 || !preg_match('/^magnet:\?([^\s<>"\'`]+)$/i', $u, $q)) return null;
+    if (strlen($u) > 12000 || !preg_match('/^magnet:\?([^\s<>"\'`]+)$/i', $u, $q)) return null;
     $hash = null;
     $dn = '';
     $xl = 0;

@@ -40,7 +40,7 @@ $allowed = [
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
     'search_share_enabled', 'search_count_common_words', 'facts_source',
     'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_max', 'thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_panel', 'thumbs_width', 'thumbs_speed', 'thumbs_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
-    'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review',
+    'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review', 'tags_popular_max', 'wl_req_enabled', 'wl_req_days', 'wl_req_per_day', 'wl_req_note',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
@@ -130,7 +130,7 @@ $allowed = [
     'stats_timeline_enabled', 'stats_timeline_interval', 'stats_timeline_raw_days', 'stats_timeline_keep_days', 'stats_timeline_public',
     'stats_timeline_ranges', 'stats_timeline_default_range', 'stats_timeline_custom_range',
     // observed-hash index (includes/index.php)
-    'index_enabled', 'index_source_url', 'index_poll_minutes', 'index_min_seeders', 'index_max_rows',
+    'index_enabled', 'index_source_url', 'index_poll_minutes', 'index_min_seeders', 'index_max_rows', 'index_block_on', 'index_block_words', 'index_block_minor',
     'index_grace_days', 'index_protect_days', 'index_meta_daily_budget', 'index_keep_files', 'index_poll_budget',
     'index_meta_auto_queue',
     // schema v44: how a file list loads — the public search page, then the panel modals
@@ -338,6 +338,9 @@ if (isset($data['tags_review'])) $data['tags_review'] = $data['tags_review'] ===
 if (isset($data['tags_max_per_torrent'])) $data['tags_max_per_torrent'] = (string)max(1, min((int)$data['tags_max_per_torrent'] ?: 40, 100));
 if (isset($data['tags_name_max'])) $data['tags_name_max'] = (string)max(2, min((int)$data['tags_name_max'] ?: 32, 40));
 if (isset($data['tags_create_per_day'])) $data['tags_create_per_day'] = (string)max(0, min((int)$data['tags_create_per_day'], 500));
+if (isset($data['tags_popular_max'])) $data['tags_popular_max'] = (string)max(0, min((int)$data['tags_popular_max'], 500));
+if (isset($data['wl_req_days'])) $data['wl_req_days'] = (string)max(0, min((int)$data['wl_req_days'], 365));
+if (isset($data['wl_req_per_day'])) $data['wl_req_per_day'] = (string)max(1, min((int)$data['wl_req_per_day'] ?: 5, 100));
 if (isset($data['tags_forum'])) $data['tags_forum'] = in_array($data['tags_forum'], ['0', 0, false], true) ? '0' : '1';
 if (isset($data['tags_forum_review'])) $data['tags_forum_review'] = $data['tags_forum_review'] === 'queue' ? 'queue' : 'bypass';
 if (isset($data['tags_add_review'])) $data['tags_add_review'] = $data['tags_add_review'] === 'approve' ? 'approve' : 'open';
@@ -444,7 +447,7 @@ $intClamp = [
     'whitelist_reload_min_interval' => [10, 3600, 45], 'api_ban_days' => [1, 3650, 30],
     'stats_timeline_interval' => [ST_INTERVAL_MIN, ST_INTERVAL_MAX, 60], 'stats_timeline_raw_days' => [1, 30, 7],
     'stats_timeline_keep_days' => [7, 3650, 60],
-    'index_poll_minutes' => [5, 1440, 30], 'index_min_seeders' => [0, 100000, 1], 'index_max_rows' => [1000, 5000000, 200000],
+    'index_poll_minutes' => [5, 1440, 30], 'index_min_seeders' => [0, 100000, 1], 'index_max_rows' => [1000, 10000000, 200000],
     'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
     'index_poll_budget' => [IDX_POLL_BUDGET_MIN, IDX_POLL_BUDGET_MAX, 45],
     // The ceilings are read from includes/index.php, never retyped: the same numbers bound the
@@ -605,7 +608,7 @@ if (isset($data['dbmem_cmd']) && !dbmemValidCommand((string)$data['dbmem_cmd']))
 if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
     jsonResponse(['error' => __('api.settings.sysctl_cmd_invalid')], 400);
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue',
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue', 'index_block_on', 'wl_req_enabled', 'wl_req_note',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist', 'search_count_common_words',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
@@ -810,6 +813,9 @@ if (isset($data['user_2fa_required']) && !in_array($data['user_2fa_required'], [
 }
 if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
     jsonResponse(['error' => __('api.settings.whitelist_submit_mode_invalid')], 400);
+}
+foreach (['index_block_words', 'index_block_minor'] as $k) {
+    if (isset($data[$k])) $data[$k] = mb_substr(implode("\n", array_filter(array_map('trim', preg_split('/[\r\n]+/', (string)$data[$k]) ?: []), fn($w) => $w !== '' && mb_strlen($w) <= 60)), 0, 4000);
 }
 if (isset($data['users_terms_text'])) {
     $data['users_terms_text'] = mb_substr($data['users_terms_text'], 0, 10000);

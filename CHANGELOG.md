@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.90.0] — 2026-10-30
+
+- **Tag categories.** Tags people add belong to categories: the built-in groups (Resolution, Video, HDR, Audio,
+  Source, Language, Genre) and categories of their own (Release, Picture, Kind, Platform, Other to start with; the
+  base tags are put in them once). A tag in a built-in group stands beside the automatic tags of that group, the
+  others get a block of their own on the Tags page and in the search filters; a tag without one is "Tags from people",
+  or "From the forum" when it came from there. Members suggest a category for a tag, or a new one (permission "Suggest
+  a category for a tag"); a moderator's choice applies at once. Panel → Tags has tabs (Tags, Categories, Changes on
+  torrents, From the forum) with counts; categories are added, renamed, coloured, ordered and deleted there, tags are
+  filtered by category, selected and moved together, unused ones found and deleted, and suggestions accepted or
+  rejected.
+- **Most popular.** A block of the most used tags of every group, people's tags included, in the search filters and
+  on the Tags page: 18 at first, "More" up to the limit in Settings → Tags (100; 0 = no block).
+- **Search.** The filters find people's tags, so they can be filtered and starred. "Only whitelisted torrents" in
+  "More filters" for readers who see the whitelist. Kinds read from names besides movies and series — games, music,
+  software, books and comics, audiobooks and 18+ — as type buttons where torrents of that kind exist; 10-bit, anime
+  (from the release groups) and French, German, Spanish, Italian, Russian, Japanese, Korean, Chinese and Hindi as
+  tags. The janitor reads every name again once.
+- **Hidden names.** A torrent whose name has words pointing at the sexual abuse of minors (alone, or a word about
+  minors together with an adult one), or at recordings of attacks, does not reach the search; Panel → Index → "Hidden
+  names" lists them to ban the hash or allow it back. The words are in Settings → Index → "Names hidden from the
+  search". Nothing is banned by itself and the whitelist is not touched.
+- **Whitelist requests.** In Info a member asks for a torrent from the index to be put on the whitelist, with a short
+  note, or supports a request already made (permission "Ask for a torrent to be put on the whitelist"). Panel →
+  Whitelist → Requests lists them with their supporters and swarm; putting one on the whitelist works like Promote and
+  everybody who asked is told the decision. Settings → Whitelist requests: on/off, days before a rejected torrent can
+  be asked for again (7), requests a member may make a day (5), the note.
+- **Forum tags.** The forum's PL and EN tags are the PL audio and EN audio tags now (favourites moved with them), and
+  a new forum tag named PL / Polski / EN / Angielski is matched to them.
+- **Fixes.** A magnet link of up to 12 000 characters in a description is a link (longer ones stayed plain text).
+  The "Edit tags" / "Done" button is centred and as tall as the field beside it. No extra gap between a name and its
+  tags on profile lists. "More filters" opens with the same animation on the search, Whitelist and Index. Icon-only
+  buttons in the panel's tables keep their icon in the middle at every position. Switching quickly between Published
+  descriptions, Proposed changes and Descriptions no longer shows the published ones in Descriptions. A tag's count
+  changes the moment it is added or removed, so a tag taken off everywhere leaves "All tags" at once. The index may
+  hold up to 10 million rows.
+- Schema 114: the tables `tag_categories`, `tag_cat_suggestions`, `index_blocked`, `wl_requests` and
+  `wl_request_votes`, the column `tags.category_id`, the settings `tags_popular_max`, `index_block_on`,
+  `wl_req_enabled`, `wl_req_days`, `wl_req_per_day` and `wl_req_note`, and the permissions `tags.categorize` and
+  `whitelist.request` for members and moderators.
+
 ## [1.89.1] — 2026-10-29
 
 - The janitor reads every torrent name again after the name rules change, also on a site that had read them all

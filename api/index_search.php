@@ -93,6 +93,7 @@ try {
         'search'            => $search,
         'search_files'      => $canFiles && ($_GET['search_files'] ?? '') === '1',
         'include_whitelist' => $canWl,
+        'wl_only'           => $canWl && ($_GET['wl'] ?? '') === '1',
         'content'           => (string)($_GET['content'] ?? 'any'),
         'desc_only'         => $canContent && ($_GET['desc'] ?? '') === '1',
         'search_desc'       => $canContent && ($_GET['in_desc'] ?? '') === '1',

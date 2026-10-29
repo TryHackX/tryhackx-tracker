@@ -79,6 +79,7 @@ function userPermissionList(bool $english = false): array {
         'index.magnet'   => 'See info hashes / copy magnet links in index search results',
         'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
         'whitelist.add'  => 'Register hashes on the whitelist (used when registration is set to "registered users")',
+        'whitelist.request' => 'Ask for a torrent from the index to be put on the whitelist, or support such a request',
         // The status page's "what does this tracker know about this hash": registered (and in what
         // state), banned, seen in the swarm, metadata, files. Answered for unknown hashes too, which
         // is why it is a grant and not a page anyone may hammer.
@@ -220,6 +221,7 @@ function userPermissionList(bool $english = false): array {
         'tags.create'        => 'Create a new tag (a moderator approves it unless Settings says otherwise)',
         'tags.moderate'      => 'Remove anybody\'s tag or a wrong automatic one, and approve or reject new tags',
         'tags.favourite'     => 'Keep favourite tags (My tags) for quick filters',
+        'tags.categorize'    => 'Suggest a category for a tag, or a new category',
 
         // ── the admin panel ──
         //
@@ -346,7 +348,7 @@ function userGroupPresets(): array {
                         'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content',
                         'panel.users.view', 'panel.users.notify',
                         'index.view', 'index.files', 'index.magnet',
-                        'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
+                        'whitelist.view', 'whitelist.add', 'whitelist.request', 'stats.view', 'stats.timeline', 'home.stats',
                         'rating.vote', 'content.submit', 'content.propose',
                         // Approving a description you are not allowed to READ is not a job (v71).
                         'content.view',
@@ -370,7 +372,7 @@ function userGroupPresets(): array {
                         // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
                         'panel.moderation.view', 'panel.moderation.handle',
                         'panel.images.view', 'panel.images.manage',
-                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite', 'images.upload', 'images.link'],
+                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite', 'tags.categorize', 'images.upload', 'images.link'],
         ],
         'reviewer' => [
             'label' => 'Content reviewer',
@@ -407,7 +409,7 @@ function userGroupPresets(): array {
             // The shipped default matrix for a signed-in account, and the same list the v71 migration
             // writes — `profile.cover` and `shout.upload_emote` are deliberately NOT here; they are
             // the premium extras below.
-            'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'info.resize', 'whitelist.view', 'whitelist.add',
+            'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'info.resize', 'whitelist.view', 'whitelist.add', 'whitelist.request',
                         'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
                         'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
                         'lists.use', 'lists.public',
@@ -421,7 +423,7 @@ function userGroupPresets(): array {
                         'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
                         'comment.images',
                         // v84: report a comment, a description or a shout to the moderators.
-                        'content.report', 'tags.add', 'tags.create', 'tags.favourite', 'images.upload', 'images.link'],
+                        'content.report', 'tags.add', 'tags.create', 'tags.favourite', 'tags.categorize', 'images.upload', 'images.link'],
         ],
         // v71. ONLY the extras: a premium account is a member as well (the default group is granted
         // at registration and `v1/users/provision` puts a bought account in it), so repeating the
@@ -1303,6 +1305,9 @@ function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
     $del("UPDATE hash_tag_log SET user_id = NULL WHERE user_id = ?", [$userId], 'tag log');
     $del("UPDATE hash_tags SET added_by = NULL WHERE added_by = ?", [$userId], 'tags added');
     $del("DELETE FROM tag_favourites WHERE user_id = ?", [$userId], 'favourite tags');
+    $del("DELETE FROM tag_cat_suggestions WHERE user_id = ?", [$userId], 'category suggestions');
+    $del("DELETE FROM wl_request_votes WHERE user_id = ?", [$userId], 'whitelist request votes');
+    $del("UPDATE wl_requests SET user_id = 0 WHERE user_id = ?", [$userId], 'whitelist requests');
     // …and what it SENT that sits in other people's notifications (1.74.0, PRIV-1): a friend request or its acceptance
     // names the account and nothing else, so it goes with it (v93 `sender_id`). What its comments said is emptied below,
     // with the comments (commentForgetAccount()).

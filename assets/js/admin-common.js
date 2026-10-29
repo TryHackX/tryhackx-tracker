@@ -1178,5 +1178,23 @@
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', markOverflow); else markOverflow();
 
-    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting, adminRichField, richFormats, resizableDialog };
+    const snapSeen = new WeakSet();
+    function snapIcons(root) {
+        const dpr = window.devicePixelRatio || 1;
+        const icons = [...(root || document).querySelectorAll(':is(.wl-actions, .th-actions) .btn > .bi:only-child')];
+        const shifts = icons.map(i => {
+            const r = i.parentElement.getBoundingClientRect();
+            const l = r.left * dpr, w = r.width * dpr;
+            return r.width ? (Math.round(l) + Math.round(l + w) - 2 * l - w) / 2 / dpr : 0;
+        });
+        icons.forEach((i, k) => i.style.setProperty('--bi-dx', shifts[k].toFixed(3) + 'px'));
+        const table = root && root.closest ? root.closest('table') : null;
+        if (table && 'ResizeObserver' in window && !snapSeen.has(table)) {
+            snapSeen.add(table);
+            new ResizeObserver(debounce(() => snapIcons(table), 100)).observe(table);
+        }
+    }
+    window.addEventListener('resize', debounce(() => snapIcons(document), 150));
+
+    window.AdminCommon = { apiCall, esc, el, emptyState, DEBOUNCE, debounce, snapIcons, showToast, confirmAction, promptModal, promptPassword, askBeforeLeaving, flashTip, makeSortStack, sortMark, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, reportsWaiting, adminRichField, richFormats, resizableDialog };
 })();

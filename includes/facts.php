@@ -1,7 +1,7 @@
 <?php
 
 const FACTS_VERSION = 2;
-const FACTS_NAME_VERSION = 2;
+const FACTS_NAME_VERSION = 3;
 const FACTS_TEXT_MAX = 400000;
 const FACTS_FILTER_CAP = 5000;
 const FACTS_TICK_BATCH = 40;
@@ -11,19 +11,24 @@ const FACTS_ONGOING = 9999;
 
 const FACTS_LABELS = [
     'q:2160p' => '2160p', 'q:1440p' => '1440p', 'q:1080p' => '1080p', 'q:720p' => '720p', 'q:sd' => 'SD',
-    'v:h264' => 'AVC', 'v:h265' => 'HEVC', 'v:av1' => 'AV1', 'v:vp9' => 'VP9', 'v:mpeg2' => 'MPEG-2', 'v:xvid' => 'XviD', 'v:vc1' => 'VC-1',
+    'v:h264' => 'AVC', 'v:h265' => 'HEVC', 'v:av1' => 'AV1', 'v:vp9' => 'VP9', 'v:mpeg2' => 'MPEG-2', 'v:xvid' => 'XviD', 'v:vc1' => 'VC-1', 'v:10bit' => '10-bit',
     'h:hdr10' => 'HDR10', 'h:hdr10p' => 'HDR10+', 'h:dv' => 'Dolby Vision', 'h:hlg' => 'HLG', 'h:hdr' => 'HDR',
     'a:aac' => 'AAC', 'a:ac3' => 'AC-3', 'a:eac3' => 'E-AC-3', 'a:atmos' => 'Atmos', 'a:dts' => 'DTS', 'a:dtshdma' => 'DTS-HD MA',
     'a:truehd' => 'TrueHD', 'a:flac' => 'FLAC', 'a:opus' => 'Opus', 'a:mp3' => 'MP3', 'a:pcm' => 'PCM',
     's:webdl' => 'WEB-DL', 's:webrip' => 'WEBRip', 's:bluray' => 'BluRay', 's:remux' => 'REMUX', 's:hdtv' => 'HDTV', 's:dvd' => 'DVD', 's:cam' => 'CAM/TS',
     'l:multi' => 'MULTi',
 ];
-const FACTS_WORDS = ['l:lektor_pl', 'l:dub_pl', 'l:sub_pl', 'l:audio_pl', 'l:audio_en', 'l:sub_en', 't:movie', 't:series'];
+const FACTS_WORDS = ['l:lektor_pl', 'l:dub_pl', 'l:sub_pl', 'l:audio_pl', 'l:audio_en', 'l:sub_en', 'l:fr', 'l:de', 'l:es', 'l:it', 'l:ru', 'l:ja', 'l:ko', 'l:zh', 'l:hi',
+    't:movie', 't:series', 't:game', 't:music', 't:software', 't:book', 't:audiobook', 't:adult'];
+const FACTS_KINDS = ['t:movie' => 1, 't:series' => 2, 't:game' => 3, 't:music' => 4, 't:software' => 5, 't:book' => 6, 't:audiobook' => 7, 't:adult' => 8];
+const FACTS_ANIME_GROUPS = 'subsplease|erai-raws|horriblesubs|ember|judas|asw|yameii|varyg|lolihouse|sakurato|nekomoe kissaten|dbd-raws|vcb-studio|kitaujisub|ani|toonshub'
+    . '|ohys-raws|leopard-raws|beatrice-raws|reinforce|commie|gjm|kaleido-subs|anime time|animerg';
 const FACTS_NAME_RES = ['q:sd' => 1, 'q:720p' => 2, 'q:1080p' => 3, 'q:1440p' => 4, 'q:2160p' => 5];
 const FACTS_NAME_BITS = ['v:h264', 'v:h265', 'v:av1', 'v:vp9', 'v:mpeg2', 'v:xvid', 'v:vc1', 'h:hdr10', 'h:hdr10p', 'h:dv', 'h:hlg', 'h:hdr',
     'a:aac', 'a:ac3', 'a:eac3', 'a:atmos', 'a:dts', 'a:dtshdma', 'a:truehd', 'a:flac', 'a:opus', 'a:mp3', 'a:pcm',
     's:webdl', 's:webrip', 's:bluray', 's:remux', 's:hdtv', 's:dvd', 's:cam',
-    'l:multi', 'l:lektor_pl', 'l:dub_pl', 'l:sub_pl', 'l:audio_pl', 'l:audio_en', 'l:sub_en'];
+    'l:multi', 'l:lektor_pl', 'l:dub_pl', 'l:sub_pl', 'l:audio_pl', 'l:audio_en', 'l:sub_en',
+    'v:10bit', 'g:anime', 'l:fr', 'l:de', 'l:es', 'l:it', 'l:ru', 'l:ja', 'l:ko', 'l:zh', 'l:hi'];
 const FACTS_NAME_LIST_CAP = 10000;
 const FACTS_ALIASES = [
     'q:2160p' => '4k uhd 2160 ultra hd', 'q:1440p' => '2k qhd 1440', 'q:1080p' => 'full hd fhd 1080 1080i', 'q:720p' => 'hd 720', 'q:sd' => 'sd 480p 576p',
@@ -37,13 +42,16 @@ const FACTS_ALIASES = [
     'l:multi' => 'multi dual audio wielojęzyczny', 'l:lektor_pl' => 'lektor polski pl voice-over voiceover', 'l:dub_pl' => 'dubbing dub polski pl pldub',
     'l:sub_pl' => 'napisy polskie pl subtitles plsub plsubs', 'l:audio_pl' => 'polski pl audio', 'l:audio_en' => 'english eng angielski audio',
     'l:sub_en' => 'napisy angielskie en english subtitles engsub',
+    'v:10bit' => '10bit 10-bit hi10 hi10p', 'l:fr' => 'french francuski vostfr truefrench', 'l:de' => 'german niemiecki deutsch',
+    'l:es' => 'spanish hiszpański castellano latino', 'l:it' => 'italian włoski ita', 'l:ru' => 'russian rosyjski rus',
+    'l:ja' => 'japanese japoński jpn', 'l:ko' => 'korean koreański kor', 'l:zh' => 'chinese chiński mandarin chs cht', 'l:hi' => 'hindi',
 ];
 
 function factsTagLabel(string $id, array $genres = []): string
 {
     if (isset(FACTS_LABELS[$id])) return FACTS_LABELS[$id];
     if (in_array($id, FACTS_WORDS, true)) return __('facts.tag.' . str_replace(':', '_', $id));
-    if (str_starts_with($id, 'g:')) return (string)($genres[substr($id, 2)] ?? substr($id, 2));
+    if (str_starts_with($id, 'g:')) return (string)($genres[substr($id, 2)] ?? ($id === 'g:anime' ? 'Anime' : substr($id, 2)));
     return $id;
 }
 
@@ -484,6 +492,7 @@ function factsFromName(string $name): array
     $n = ' ' . mb_strtolower($name) . ' ';
     $has = static fn(string $re): bool => preg_match('/(?<![a-z0-9])(?:' . $re . ')(?![a-z0-9])/u', $n) === 1;
     $caps = static fn(string $re): bool => preg_match('/(?<![A-Za-z0-9])(?:' . $re . ')(?![A-Za-z0-9])/u', ' ' . $name . ' ') === 1;
+    $adult = factsNameAdult($name, $n);
     $res = null;
     if ($has('2160p|(?:3840|4096)x\d{3,4}')) $res = 2160;
     elseif ($has('1440p|2560x\d{3,4}|qhd')) $res = 1440;
@@ -508,7 +517,7 @@ function factsFromName(string $name): array
     if ($src === null && $res !== null && $caps('AMZN|NF|DSNP|HMAX|ATVP|PCOK|HULU|PMTP|SKST|CRAV')) $src = 's:webdl';
     if ($src === null && $caps('DVD')) $src = 's:dvd';
     if ($src === null && $caps('CAM')) $src = 's:cam';
-    if (!$gate) return ['tags' => [], 'year' => null];
+    if (!$gate) return factsNameOther($name, $n, $adult);
     $tags = [];
     if ($res !== null) $tags[] = factsResTag($res);
     if ($codec !== null) $tags[] = $codec;
@@ -528,6 +537,7 @@ function factsFromName(string $name): array
     if ($caps('OPUS') || $has('opus[ ._]?[1-7]\.?[01]|(?:av1|vvc|hevc|x26[45]|vp9|aac)[ ._-]+opus|opus[ ._-]+(?:av1|vvc|hevc|x26[45]|vp9)|\[opus\]')) $tags[] = 'a:opus';
     if ($has('mp3')) $tags[] = 'a:mp3';
     if ($has('l?pcm')) $tags[] = 'a:pcm';
+    if ($has('10[ ._-]?bit|hi10p?|ma10p')) $tags[] = 'v:10bit';
     if ($src !== null) $tags[] = $src;
     $lang = [];
     if ($has('lektor(?:[ ._-]?pl)?')) $lang[] = 'l:lektor_pl';
@@ -538,17 +548,81 @@ function factsFromName(string $name): array
     if ($nAudio !== $n) $lang[] = 'l:sub_en';
     if (preg_match('/(?<![a-z0-9])(?:eng|english)(?![a-z0-9])/u', $nAudio)) $lang[] = 'l:audio_en';
     if (preg_match('/(?<![A-Za-z0-9])(?:MULTi|MULTI|Multi)\d?(?![A-Za-z0-9])(?![ ._-]?(?:subs?|SUBS?|Subs?))/u', $name) || $has('dual[ ._-]?audio')) $lang[] = 'l:multi';
-    $tags = array_merge($tags, $lang);
-    $tags[] = $has('s\d{1,2}e\d{1,3}|s\d{1,2}(?:-s?\d{1,2})?|season|sezon|complete[ ._-]series|\d{1,2}x\d{2,3}|odc(?:inek)?[ ._-]?\d{1,4}|episode[ ._-]?\d{1,4}|(?:mini)?serial') || preg_match('/\s-\s(?!19\d\d|20\d\d)\d{2,4}(?:v\d)?\s|\[(?!19\d\d\]|20\d\d\])\d{1,4}(?:v\d)?\]|第\s?\d+\s?[话話集]|全\d+集/u', $n) ? 't:series' : 't:movie';
-    $year = null;
-    $max = (int)date('Y') + 1;
-    if (preg_match('/[(\[]\s*(19[2-9][0-9]|20[0-9][0-9])(?![0-9])/', $n, $ym) && (int)$ym[1] <= $max) $year = (int)$ym[1];
-    elseif (preg_match_all('/(?<![0-9])(19[2-9][0-9]|20[0-9][0-9])(?![0-9])/', $n, $ym)) {
-        foreach (array_reverse($ym[1]) as $y) { if ((int)$y <= $max) { $year = (int)$y; break; } }
+    foreach (['l:fr' => ['french|truefrench|vostfr|vff|vfq', 'FRE|FRA'], 'l:de' => ['german|deutsch', 'GER'], 'l:es' => ['spanish|castellano|español|espanol|latino', 'SPA|ESP'],
+              'l:it' => ['italian|italiano', 'ITA'], 'l:ru' => ['russian', 'RUS'], 'l:ja' => ['japanese', 'JPN|JAP'], 'l:ko' => ['korean', 'KOR'],
+              'l:zh' => ['chinese|mandarin|cantonese|中文|国语|國語|粤语|粵語|简繁|繁中|简中|中字|简体|繁體', 'CHS|CHT'], 'l:hi' => ['hindi', 'HINDI']] as $id => [$words, $codes]) {
+        if ($has($words) || $caps($codes)) $lang[] = $id;
     }
+    $tags = array_merge($tags, $lang);
+    if (preg_match('/^\s*\[(?:' . FACTS_ANIME_GROUPS . ')\]/iu', $name)) $tags[] = 'g:anime';
+    $series = $has('s\d{1,2}e\d{1,3}|s\d{1,2}(?:-s?\d{1,2})?|season|sezon|complete[ ._-]series|\d{1,2}x\d{2,3}|odc(?:inek)?[ ._-]?\d{1,4}|episode[ ._-]?\d{1,4}|(?:mini)?serial') || preg_match('/\s-\s(?!19\d\d|20\d\d)\d{2,4}(?:v\d)?\s|\[(?!19\d\d\]|20\d\d\])\d{1,4}(?:v\d)?\]|第\s?\d+\s?[话話集]|全\d+集/u', $n);
+    $tags[] = $adult ? 't:adult' : ($series ? 't:series' : 't:movie');
     $order = array_flip(FACTS_GROUPS);
     usort($tags, fn($a, $b) => [$order[$a[0]] ?? 99] <=> [$order[$b[0]] ?? 99]);
-    return ['tags' => array_values(array_unique($tags)), 'year' => $year];
+    return ['tags' => array_values(array_unique($tags)), 'year' => factsNameYear($n)];
+}
+
+function factsNameYear(string $n): ?int
+{
+    $max = (int)date('Y') + 1;
+    if (preg_match('/[(\[]\s*(19[2-9][0-9]|20[0-9][0-9])(?![0-9])/', $n, $ym) && (int)$ym[1] <= $max) return (int)$ym[1];
+    if (preg_match_all('/(?<![0-9])(19[2-9][0-9]|20[0-9][0-9])(?![0-9])/', $n, $ym)) {
+        foreach (array_reverse($ym[1]) as $y) { if ((int)$y <= $max) return (int)$y; }
+    }
+    return null;
+}
+
+function factsNameAdult(string $name, string $n): bool
+{
+    $code = '(?:FC2[ ._-]?PPV[ ._-]?\d{5,8}|[A-Z]{2,6}-\d{3,5}(?![0-9]))';
+    $lead = '^\s*(?:(?:【[^】]{0,60}】|\[[^\]]{0,60}\])\s*)*';
+    if (preg_match('/' . $lead . 'FC2[ ._-]?PPV/iu', $name)) return true;
+    if (preg_match('/' . $lead . $code . '(?:[ ._-]?(?:C|UC|U|4K|HD|FHD|CH|uncensored|leak|破解|中文字幕))*(?:\.(?:mp4|mkv|avi|wmv))?\s*$/u', $name)) return true;
+    if (preg_match('/' . $lead . $code . '[ ._-]*(?:\[[^\]]*\]\s*)?[\p{Han}\p{Hiragana}\p{Katakana}【]/u', $name)) return true;
+    return preg_match('/(?<![a-z0-9])(?:xxx|porn|porno|pornhub|onlyfans|fansly|brazzers|bangbros|realitykings|naughty[ ._-]?america|hentai|nsfw|r-?18|jav|18\+|playboy)(?![a-z0-9])'
+                    . '|成年コミック|成人向け|無修正|无码|無碼|エロ|色情|av女优|av女優/u', $n) === 1;
+}
+
+function factsNameOther(string $name, string $n, bool $adult): array
+{
+    $has = static fn(string $re): bool => preg_match('/(?<![a-z0-9])(?:' . $re . ')(?![a-z0-9])/u', $n) === 1;
+    $caps = static fn(string $re): bool => preg_match('/(?<![A-Za-z0-9])(?:' . $re . ')(?![A-Za-z0-9])/u', ' ' . $name . ' ') === 1;
+    $tags = [];
+    $trim = trim($name);
+    if ($adult) $tags[] = 't:adult';
+    elseif ($has('fitgirl|dodi|elamigos|el[ ._-]amigos|steamrip|anadius|insaneramzes|razor1911|early[ ._-]access|nsp|xci')
+            || $caps('RUNE|PLAZA|CODEX|FLT|GOG|TENOKE|EMPRESS|DINOByTES|CPY|HOODLUM|PROPHET|TiNYiSO|SKIDROW|RELOADED|DARKSiDERS')) $tags[] = 't:game';
+    elseif ($has('audiobook|audiobooki|audio[ ._-]book|m4b|czyta|narrated|unabridged|słuchowisko|sluchowisko')) $tags[] = 't:audiobook';
+    elseif ($has('epub|pdf|mobi|azw3?|fb2|djvu|cbr|cbz|ebook|e-book|同人誌|dl版|中国翻訳') || preg_match('/\(c\d{2,3}\)/u', $n)) $tags[] = 't:book';
+    elseif ($has('flac|alac|\d{3}[ ._-]?kbps|(?:16|24)[ ._-]?bit|(?:16|24)[ ._-](?:44|48|88|96|176|192)(?:[.,]\d)?(?:[ ._-]?khz)?|hi-?res|vinyl|winyl|discography|dyskografia|ost|soundtrack|lossless')
+            || $caps('APE')) $tags[] = 't:music';
+    elseif ($has('x64|x86|amd64|arm64|portable|pre-?activated|multilingual|keygen|macos|windows|win(?:7|8|10|11)|apk|dmg|exe|msi|setup')
+            || preg_match('/(?<![0-9a-z])v\d+(?:\.\d+){2,}|_\d+(?:\.\d+){2,}/u', $n)) $tags[] = 't:software';
+    elseif ($has('mp3|wav')) $tags[] = 't:music';
+    elseif ($has('build[ ._]?\d{4,}|simulator')) $tags[] = 't:game';
+    elseif (preg_match('/^[^-–—\[\]\.]{2,80} \((?:19|20)\d{2}\)$/u', $trim) || preg_match("/^[A-Za-z0-9'&,!]+(?:\.[A-Za-z0-9'&,!]+)+\.(?:19|20)\d{2}$/u", $trim)) {
+        $tags[] = 't:movie';
+    }
+    if (in_array('t:music', $tags, true)) {
+        if ($has('flac')) $tags[] = 'a:flac';
+        if ($has('mp3|\d{3}[ ._-]?kbps')) $tags[] = 'a:mp3';
+    }
+    if (!$tags) return ['tags' => [], 'year' => null];
+    $order = array_flip(FACTS_GROUPS);
+    usort($tags, fn($a, $b) => [$order[$a[0]] ?? 99] <=> [$order[$b[0]] ?? 99]);
+    return ['tags' => $tags, 'year' => factsNameYear($n)];
+}
+
+function factsKinds(array $cfg): array
+{
+    $counts = json_decode((string)($cfg['facts_counts'] ?? ''), true);
+    $n = is_array($counts['n'] ?? null) ? $counts['n'] : [];
+    $out = [];
+    foreach (FACTS_KINDS as $id => $code) {
+        if ($code > 2 && empty($n[$id])) continue;
+        $out[] = substr($id, 2);
+    }
+    return $out;
 }
 
 function factsNameChips(string $name): ?array
@@ -590,7 +664,10 @@ function factsNameReady(PDO $db): bool
 
 function factsNameCodes(array $tags): array
 {
-    $kind = in_array('t:series', $tags, true) ? 2 : (in_array('t:movie', $tags, true) ? 1 : 0);
+    $kind = 0;
+    foreach ($tags as $id) {
+        if (isset(FACTS_KINDS[$id])) { $kind = FACTS_KINDS[$id]; break; }
+    }
     $res = 0;
     $bits = 0;
     foreach ($tags as $id) {
@@ -676,7 +753,7 @@ function factsNamePredicate(array $f): ?array
         $mask = 0;
         foreach ($set as $id) {
             if (isset(FACTS_NAME_RES[$id])) $res[] = FACTS_NAME_RES[$id];
-            elseif ($id === 't:movie' || $id === 't:series') $kinds[] = $id === 't:movie' ? 1 : 2;
+            elseif (isset(FACTS_KINDS[$id])) $kinds[] = FACTS_KINDS[$id];
             elseif (($bit = array_search($id, FACTS_NAME_BITS, true)) !== false) $mask |= 1 << $bit;
         }
         $or = [];
@@ -686,7 +763,7 @@ function factsNamePredicate(array $f): ?array
         if (!$or) return null;
         $where[] = count($or) > 1 ? '(' . implode(' OR ', $or) . ')' : $or[0];
     }
-    if (in_array($f['type'] ?? '', ['movie', 'series'], true)) { $where[] = 'nf.nf_kind = ?'; $args[] = $f['type'] === 'movie' ? 1 : 2; }
+    if (isset(FACTS_KINDS['t:' . ($f['type'] ?? '')])) { $where[] = 'nf.nf_kind = ?'; $args[] = FACTS_KINDS['t:' . $f['type']]; }
     $y = $f['year'] ?? null;
     if (is_array($y) && ($y[0] !== null || $y[1] !== null)) {
         $where[] = 'nf.nf_year > 0';
@@ -738,7 +815,7 @@ function factsFilterCondsMain(PDO $db, array $cfg, array $f, bool $canContent, b
 {
     $dims = [];
     foreach ($f['tags'] ?? [] as $set) $dims[] = [['tags' => [$set]], $set];
-    if (in_array($f['type'] ?? '', ['movie', 'series'], true)) $dims[] = [['type' => $f['type']], ['t:' . $f['type']]];
+    if (isset(FACTS_KINDS['t:' . ($f['type'] ?? '')])) $dims[] = [['type' => $f['type']], ['t:' . $f['type']]];
     if (is_array($f['year'] ?? null)) $dims[] = [['year' => $f['year']], []];
     $descOnly = array_filter(['pics' => !empty($f['pics']) ? true : null, 'imdb' => $f['imdb'] ?? null, 'filmweb' => $f['filmweb'] ?? null,
                               'vbitrate' => $f['vbitrate'] ?? null, 'duration' => $f['duration'] ?? null, 'seasons' => $f['seasons'] ?? null,
@@ -887,7 +964,8 @@ function factsCounts(PDO $db, array $cfg): array
             if ($id !== false) $n[$id] = ($n[$id] ?? 0) + (int)$c;
         }
         foreach ($db->query("SELECT nf_kind, COUNT(*) FROM name_facts GROUP BY nf_kind")->fetchAll(PDO::FETCH_NUM) as [$kind, $c]) {
-            $id = [1 => 't:movie', 2 => 't:series'][(int)$kind] ?? null;
+            $id = array_search((int)$kind, FACTS_KINDS, true);
+            $id = $id === false ? null : $id;
             if ($id !== null) $n[$id] = ($n[$id] ?? 0) + (int)$c;
         }
         $sums = [];
@@ -895,6 +973,7 @@ function factsCounts(PDO $db, array $cfg): array
         $columns = implode(', ', $sums);
         $row = $db->query("SELECT $columns FROM name_facts")->fetch(PDO::FETCH_NUM) ?: [];
         foreach (FACTS_NAME_BITS as $i => $id) if (!empty($row[$i])) $n[$id] = ($n[$id] ?? 0) + (int)$row[$i];
+        if (!empty($n['g:anime']) && !isset($genres['anime'])) $genres['anime'] = 'Anime';
     }
     arsort($n);
     return ['at' => time(), 'n' => $n, 'g' => $genres];
@@ -1148,7 +1227,7 @@ function factsFilterHashes(PDO $db, array $f, bool $signedIn): ?array
         foreach ($set as $id) { $or[] = 'tags LIKE ?'; $args[] = '%,' . $id . ',%'; }
         $where[] = '(' . implode(' OR ', $or) . ')';
     }
-    if (in_array($f['type'] ?? '', ['movie', 'series'], true)) { $where[] = 'tags LIKE ?'; $args[] = '%,t:' . $f['type'] . ',%'; }
+    if (isset(FACTS_KINDS['t:' . ($f['type'] ?? '')])) { $where[] = 'tags LIKE ?'; $args[] = '%,t:' . $f['type'] . ',%'; }
     foreach (['year' => ['year_to', 'year_from'], 'imdb' => ['imdb', 'imdb'], 'filmweb' => ['filmweb', 'filmweb'], 'vbitrate' => ['vbitrate', 'vbitrate'],
               'duration' => ['duration_min', 'duration_min'], 'seasons' => ['seasons', 'seasons'], 'episodes' => ['episodes', 'episodes']] as $k => [$colMin, $colMax]) {
         $r = $f[$k] ?? null;
