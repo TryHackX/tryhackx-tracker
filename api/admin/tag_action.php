@@ -2,7 +2,7 @@
 requirePost();
 $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
-$forumOps = ['forum_approve', 'forum_ignore', 'forum_target', 'forum_import', 'forum_all'];
+$forumOps = ['forum_approve', 'forum_ignore', 'forum_target', 'forum_import', 'forum_all', 'forum_refresh'];
 $changeOps = ['change_approve', 'change_reject', 'change_remove'];
 if (!in_array($op, array_merge(['approve', 'reject', 'save', 'hide', 'unhide', 'delete', 'merge'], $forumOps, $changeOps), true)) jsonResponse(['error' => 'invalid'], 400);
 $manage = panelCan($db, $cfg, 'panel.tags.manage');

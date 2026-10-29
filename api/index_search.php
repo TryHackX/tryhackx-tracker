@@ -110,8 +110,7 @@ try {
 }
 
 $repInResults = repEnabled($cfg) && repShowInResults($cfg);
-$repMin = repMinVotes($cfg);
-$repMode = repMode($cfg);
+$repChip = !$repInResults && repChipOn($cfg);
 
 // Which of THIS page's hashes the reader has already favourited — one query for the page, never one
 // per row. A page of 200 results would otherwise be 200 round trips against a table this database
@@ -158,15 +157,10 @@ foreach ($res['rows'] as $r) {
     }
     // Only when the operator asked for it, and only above the threshold: a column showing "100%"
     // next to a single vote would be worse than no column.
-    if ($repInResults) {
+    if ($repInResults || $repChip) {
         // votes_count, not votes_up + votes_down: in star mode there is no "up" and no "down", and
         // adding two columns that mean nothing there would produce a confident zero.
-        $cnt = (int)($r['votes_count'] ?? 0);
-        $row['rep'] = $cnt >= $repMin
-            ? ($repMode === 'stars'
-                ? ['mode' => 'stars', 'stars' => round((int)($r['score_x100'] ?? 0) / 100, 1), 'total' => $cnt]
-                : ['mode' => 'thumbs', 'pct' => (int)round((int)($r['score_x100'] ?? 0) / 100), 'total' => $cnt])
-            : null;
+        $row['rep'] = repChipFrom($cfg, (int)($r['votes_count'] ?? 0), (int)($r['score_x100'] ?? 0));
     }
     $row['content_status'] = (string)($r['content_status'] ?? 'none');
     if ($canContent) $row['desc'] = (int)($r['desc'] ?? 0);
@@ -184,4 +178,5 @@ jsonResponse([
     'sort_limited' => !empty($res['sort_limited']),
     'can' => ['files' => $canFiles, 'magnet' => $canMagnet, 'whitelist' => $canWl, 'content' => $canContent],
     'rep_in_results' => $repInResults,
+    'rep_chip' => $repChip,
 ]);

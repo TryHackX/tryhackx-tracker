@@ -127,4 +127,6 @@ jsonResponse([
     // they are not allowed to see.
     'content' => richtextContentFor($db, $cfg, $row['info_hash'], true),
     'rep_mode' => repMode($cfg),
+    'facts' => function_exists('tagsHashChips') ? tagsHashChips($db, $cfg, $row['info_hash'], null, true, true, true, 'panel') : null,
+    'gallery' => function_exists('thumbsGallery') && thumbsOn($cfg, 'panel') ? thumbsGallery($db, $row['info_hash'], true) : [],
 ]);

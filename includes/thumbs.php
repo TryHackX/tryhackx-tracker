@@ -20,7 +20,8 @@ function thumbsReady(PDO $db): bool
 
 function thumbsOn(array $cfg, string $place): bool
 {
-    return (['search' => $cfg['thumbs_search'] ?? '1', 'lists' => $cfg['thumbs_lists'] ?? '1', 'info' => $cfg['thumbs_info'] ?? '1'][$place] ?? '0') === '1';
+    return (['search' => $cfg['thumbs_search'] ?? '1', 'lists' => $cfg['thumbs_lists'] ?? '1', 'info' => $cfg['thumbs_info'] ?? '1',
+             'panel' => $cfg['thumbs_panel'] ?? '1'][$place] ?? '0') === '1';
 }
 
 function thumbsLimit(array $cfg): int

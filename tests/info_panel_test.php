@@ -33,7 +33,7 @@ check('resizing is a right of its own, given to members once, and the panel offe
       && str_contains($overlay, "data-resize=\"<?= (\$cfg['info_resize'] ?? '1') === '1' && userCan(\$db, \$cfg, 'info.resize') ? '1' : '0' ?>\""));
 check('the fold the page is given is the setting, kept within bounds', str_contains($overlay, "data-fold=\"<?= max(0, min(5000, (int)(\$cfg['info_desc_fold'] ?? 640))) ?>\""));
 check('the size is remembered in the browser only, read and written inside try, and can be reset',
-      str_contains($app, "const key = 'thx-info-size';") && substr_count(substr($app, (int)strpos($app, 'function initInfoResize'), 2500), 'try {') >= 2
+      str_contains($app, "const key = store || 'thx-info-size';") && substr_count(substr($app, (int)strpos($app, 'function initInfoResize'), 2500), 'try {') >= 2
       && str_contains($app, "'info-size-reset'"));
 check('a long description is folded only past the setting, with room to spare', str_contains($app, 'd.scrollHeight > infoDescFold + 96')
       && str_contains($app, 'body.appendChild(infoDescFold > 0 ? foldDescription(d) : d);'));

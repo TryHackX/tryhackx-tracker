@@ -216,6 +216,11 @@ if ($tagEdit !== null && $tagEdit['add']) {
     $tagEdit['suggest'] = tagsSuggest($db, $hash, $infoName,
         ($canContent && $hasWords) ? html_entity_decode(strip_tags(str_replace('<', ' <', $descHtml)), ENT_QUOTES | ENT_HTML5, 'UTF-8') : '',
         array_column($infoFacts['tags'] ?? [], 'id'));
+    if (function_exists('tagsFavList') && userCan($db, $cfg, 'tags.favourite')) {
+        $tagHave = array_flip(array_column($infoFacts['tags'] ?? [], 'id'));
+        $tagEdit['mine'] = array_values(array_filter(tagsFavChips($db, tagsFavList($db, (int)$me['id'])),
+            fn($c) => $c['g'] !== 'g' && !isset($tagHave[$c['id']])));
+    }
 }
 
 jsonResponse([

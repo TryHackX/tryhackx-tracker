@@ -244,6 +244,13 @@
                 const chips = window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null);
                 if (chips) nameCell.appendChild(chips);
             }
+            if (r.thumb && window.ThumbSlider) {
+                const thumbBox = el('div', { className: 'search-thumb' });
+                if (window.ThumbSlider.mount(thumbBox, r.thumb)) {
+                    const nameBody = el('div', { className: 'search-name-body' }, [...nameCell.childNodes]);
+                    nameCell.appendChild(el('div', { className: 'search-name-wrap' }, [thumbBox, nameBody]));
+                }
+            }
             tr.appendChild(nameCell);
             tr.appendChild(el('td', { className: 'font-mono', text: r.total_size ? fmtBytes(r.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'font-mono', text: r.files_count != null ? String(r.files_count) : '—' }));
@@ -319,14 +326,12 @@
         }
 
         if (hasText) {
-            const det = el('details', { className: 'rt-collapse' });
-            det.appendChild(el('summary', null, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), t.key('js.index.description')]));
             const body = el('div', { className: 'rt-body' });
             // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
             // whitelist. Everything else in this file goes through el()/textContent.
             body.innerHTML = c.description_html;
-            det.appendChild(body);
-            wrap.appendChild(det);
+            wrap.appendChild(el('div', { className: 'wl-kv-label wl-desc-label', text: t.key('js.index.description') }));
+            wrap.appendChild(window.DescFold ? window.DescFold(body, 420, 'btn btn-sm btn-outline-secondary') : body);
         }
         return wrap;
     }
@@ -347,6 +352,11 @@
         catch (e) { body.textContent = ''; body.appendChild(el('div', { className: 'text-danger', text: t.key('js.index.failed_error', { error: e.message }) })); return; }
         const it = d.item || {};
         body.textContent = '';
+        if (Array.isArray(d.gallery) && d.gallery.length && window.InfoGallery) body.appendChild(window.InfoGallery(d.gallery));
+        if (d.facts && window.FactChips) {
+            const chips = window.FactChips.render(d.facts, null, { all: true });
+            if (chips) body.appendChild(el('div', { className: 'wl-detail-tags' }, chips));
+        }
         // `v` may be pieces (a list): a t.key() word among them keeps its key (1.73.0)
         const kv = (k, v) => el('div', { className: 'idx-mkv' }, [el('span', { className: 'idx-mkv-k', text: k }), el('span', { className: 'idx-mkv-v' }, v)]);
         // the metadata state as a word of the dictionary, not the stored value ("done" on a Polish page, 1.73.0)

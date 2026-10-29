@@ -602,9 +602,9 @@ $post = "[center]\n## Big Buck Bunny (2008) [1.2 GiB] [AVC] [Full]\n[/center]\n\
       . "### More labels:\n[thxlabels=1][thxrow][img]https://example.org/f.jpg[/img][/thxrow][/thxlabels]\n";
 $h = richtextRender($post, 'flarum', $cfgF, true);
 check('flarum: a heading inside [center] is a centred heading, its literal [brackets] kept as words',
-      str_contains($h, '<div class="rt-center"><h4 class="rt-h">Big Buck Bunny (2008) [1.2 GiB] [AVC] [Full]</h4></div>'), substr($h, 0, 300));
+      str_contains($h, '<div class="rt-center"><h4 class="rt-h rt-h2">Big Buck Bunny (2008) [1.2 GiB] [AVC] [Full]</h4></div>'), substr($h, 0, 300));
 check('flarum: ### is a heading and [b] is bold, side by side as on the forum',
-      str_contains($h, '<h5 class="rt-h">Quick look:</h5>') && str_contains($h, '<strong>Title:</strong> Big Buck Bunny'));
+      str_contains($h, '<h5 class="rt-h rt-h3">Quick look:</h5>') && str_contains($h, '<strong>Title:</strong> Big Buck Bunny'));
 check('flarum: \\~ is a plain tilde — no backslash and no subscript',
       str_contains($h, '~10 min') && !str_contains($h, '\\~') && !str_contains($h, '<sub>10'));
 check('flarum: the magnet is a card with its name — no raw tag, no empty line where it stood',
@@ -640,7 +640,7 @@ check('flarum: >!…!< and ||…|| hide words inside a line, >! hides a block',
       substr_count($m, '<span class="rt-ispoiler" tabindex="0">') === 2 && str_contains($m, '<details class="rt-spoiler">'), $m);
 check('flarum: > quotes, one inside another',
       str_contains($m, '<blockquote class="rt-quote">quote<blockquote class="rt-quote">nested</blockquote></blockquote>'), $m);
-check('flarum: === under a line makes it a heading', str_contains($m, '<h4 class="rt-h">Setext</h4>'), $m);
+check('flarum: === under a line makes it a heading', str_contains($m, '<h4 class="rt-h rt-h1">Setext</h4>'), $m);
 check('flarum: links with a title, pictures, <address> and a reference resolve; a bracketed word with no reference stays words',
       str_contains($m, '>site</a>') && str_contains($m, 'src="https://example.org/p.png"') && str_contains($m, 'href="https://example.org/x"')
       && str_contains($m, 'href="https://example.org/r"') && str_contains($m, '[Full]') && !str_contains($m, '[1]: https'), $m);

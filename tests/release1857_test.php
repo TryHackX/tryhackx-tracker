@@ -24,7 +24,7 @@ $in = implode(',', array_fill(0, count(TAGS_BASE), '?'));
 $st = $db->prepare("SELECT slug, name, color, status FROM tags WHERE slug IN ($in)");
 $st->execute(array_keys(TAGS_BASE));
 $base = $st->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
-check('thirty base tags, approved, each in the colour of its kind', count(TAGS_BASE) === 30 && count($base) === 30
+check('thirty-seven base tags, approved, each in the colour of its kind', count(TAGS_BASE) === 37 && count($base) === 37
       && ($base['napisy-wtopione']['name'] ?? '') === 'Napisy wtopione' && ($base['imax']['color'] ?? '') === '#ffd54f'
       && !array_filter($base, fn($b) => $b['status'] !== 'approved'), json_encode(array_diff(array_keys(TAGS_BASE), array_keys($base))));
 check('… and every base slug is what its name makes', !array_filter(array_keys(TAGS_BASE), fn($s) => tagsSlug(TAGS_BASE[$s][0]) !== $s));

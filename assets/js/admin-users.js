@@ -315,6 +315,13 @@
             modField = A.adminRichField({ compact: true, rows: 2, maxLength: 2000, countMax: 2000,
                 placeholder: t.key('js.moderation.reason_ph'), ariaLabel: t.key('js.moderation.reason_ph') });
             $('ue-mod-rich').appendChild(modField.el);
+            const head = modField.el.querySelector('.arf-head');
+            const act = $('ue-mod-action');
+            const actRow = act ? act.closest('.ue-mod-row') : null;
+            if (head && act) {
+                head.prepend(act);
+                if (actRow && !actRow.children.length) actRow.remove();
+            }
         }
         return modField;
     }
@@ -789,6 +796,15 @@
         });
         tbl.appendChild(tbody);
     }
+    function geCount() {
+        const box = $('ge-perms');
+        if (!box) return;
+        box.querySelectorAll('.ge-sec').forEach(sec => {
+            const all = sec.querySelectorAll('input[data-perm]');
+            const n = sec.querySelector('.ge-sec-n');
+            if (n) n.textContent = [...all].filter(c => c.checked).length + ' / ' + all.length;
+        });
+    }
     function openGroupEditor(g) {
         editGroup = g;   // null = new
         $('ge-title').textContent = g ? t.key('js.users.group_edit_title', { name: g.name }) : t.key('js.users.group_new');
@@ -796,6 +812,15 @@
         $('ge-slug').value = g ? g.slug : '';
         $('ge-slug').disabled = !!(g && g.is_system);
         $('ge-color').value = g ? g.color : '';
+        const pick = $('ge-color-pick');
+        if (pick) {
+            pick.value = g && /^#[0-9a-f]{6}$/i.test(g.color || '') ? g.color : '#4a9eff';
+            if (!pick.dataset.wired) {
+                pick.dataset.wired = '1';
+                pick.addEventListener('input', () => { $('ge-color').value = pick.value; });
+                $('ge-color').addEventListener('input', () => { const v = $('ge-color').value.trim(); if (/^#[0-9a-f]{6}$/i.test(v)) pick.value = v; });
+            }
+        }
         $('ge-priority').value = g ? String(g.priority) : '0';
         $('ge-desc').value = g ? g.description : '';
         $('ge-default').checked = !!(g && g.is_default);
@@ -815,11 +840,12 @@
                 b.addEventListener('click', () => {
                     const set = new Set(p.perms || []);
                     $('ge-perms').querySelectorAll('input[data-perm]:not(:disabled)').forEach(cb => { cb.checked = set.has(cb.dataset.perm); });
+                    geCount();
                 });
                 pre.appendChild(b);
             });
             const none = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary ge-preset', title: t.key('js.users.presets_untick') }, [t.key('js.users.presets_none')]);
-            none.addEventListener('click', () => $('ge-perms').querySelectorAll('input[data-perm]:not(:disabled)').forEach(cb => { cb.checked = false; }));
+            none.addEventListener('click', () => { $('ge-perms').querySelectorAll('input[data-perm]:not(:disabled)').forEach(cb => { cb.checked = false; }); geCount(); });
             pre.appendChild(none);
         }
         const box = $('ge-perms');
@@ -835,6 +861,7 @@
         }
         note.textContent = isAdmin ? t.key('js.users.consent_admin_line') : '';
         note.hidden = !isAdmin;
+        const secs = new Map();
         Object.keys(state.permList).forEach((key) => {
             const id = 'gp-' + key.replace(/\./g, '-');
             const consent = state.consent.has(key);
@@ -847,8 +874,36 @@
                     consent ? el('span', { className: 'gr-consent-badge' }, t.key('js.users.consent_badge')) : null, ' — ', permWords(key)]),
             ]);
             wrap.querySelector('input').checked = blanket || !!(g && g.permissions && g.permissions[key]);
-            box.appendChild(wrap);
+            const parts = key.split('.');
+            const sk = parts[0] === 'panel' && parts.length > 2 ? parts[0] + '.' + parts[1] : parts[0];
+            if (!secs.has(sk)) {
+                const sec = el('div', { className: 'ge-sec', dataset: { sec: sk } }, [
+                    el('div', { className: 'ge-sec-h' }, [el('code', { text: sk + '.*' }), el('span', { className: 'ge-sec-n' })]),
+                    el('div', { className: 'ge-sec-list' }),
+                ]);
+                box.appendChild(sec);
+                secs.set(sk, sec);
+            }
+            secs.get(sk).querySelector('.ge-sec-list').appendChild(wrap);
         });
+        box.onchange = geCount;
+        geCount();
+        const filter = $('ge-filter');
+        if (filter) {
+            filter.value = '';
+            filter.oninput = () => {
+                const q = filter.value.trim().toLowerCase();
+                box.querySelectorAll('.ge-sec').forEach(sec => {
+                    let any = false;
+                    sec.querySelectorAll('.form-check').forEach(fc => {
+                        const hit = !q || fc.textContent.toLowerCase().includes(q);
+                        fc.hidden = !hit;
+                        if (hit) any = true;
+                    });
+                    sec.hidden = !any;
+                });
+            };
+        }
         bootstrap.Modal.getOrCreateInstance($('grEditModal')).show();
     }
     async function saveGroup() {

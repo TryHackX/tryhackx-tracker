@@ -249,9 +249,9 @@
             main.appendChild(el('span', { className: 'pf-name pf-gone', title: t.key('js.fav.gone_title'), text: t.key('js.fav.gone') }));
         }
         if (r.banned) main.appendChild(el('span', { className: 'pf-badge pf-badge-bad', text: t.key('js.fav.blocked') }));
-        if (r.facts && window.FactChips) {
-            var chips = window.FactChips.render(r.facts, null, null);
-            if (chips) main.appendChild(chips);
+        if (r.rep && window.RepChip) {
+            var rc = window.RepChip(r.rep);
+            if (rc) main.appendChild(rc);
         }
         if (r.thumb && window.ThumbSlider) {
             var thumbBox = el('div', { className: 'pf-thumb' });
@@ -262,6 +262,10 @@
         }
         if (opts.statusBadges && r.content_status && r.content_status !== 'none') {
             main.appendChild(el('span', { className: 'pf-badge pf-badge-muted', text: t.key('js.fav.content_' + r.content_status) }));
+        }
+        if (r.facts && window.FactChips) {
+            var chips = window.FactChips.render(r.facts, null, null);
+            if (chips) main.appendChild(chips);
         }
         row.appendChild(main);
 

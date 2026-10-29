@@ -94,6 +94,7 @@ $neutral = [
     'api.iplist.created_with' => '"z :n wpisami" — the instrumental is the same for 2 and 5',
     'info.days'               => '"dni" is the same for 2 and 5',
     'js.app.rep_stars_title'  => '"z :n ocen" — the genitive after "z" is right for every number',
+    'js.app.rep_thumbs_title' => '"z :n ocen" — the same',
     'js.wl.rating'            => '"z :n ocen" — the same',
     'js.wl.rating_stars'      => '"z :n ocen" — the same',
     'settings.wlupkeep_match' => '"do :n wierszy" — the genitive after "do" is right for every number',

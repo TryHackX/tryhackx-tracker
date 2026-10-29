@@ -655,6 +655,7 @@
     <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
     <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/magnetcard.js<?= assetVer('assets/js/magnetcard.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/filters.js<?= assetVer('assets/js/filters.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-whitelist.js<?= assetVer('assets/js/admin-whitelist.js') ?>"></script>
 </body>

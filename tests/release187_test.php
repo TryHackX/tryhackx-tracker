@@ -134,13 +134,13 @@ check('the cover slider: one picture at first, the next ones only while in view,
       && str_contains($js, "box.addEventListener('mouseenter', () => { hover = true; api.stop(); });") && str_contains($js, "prefers-reduced-motion: reduce")
       && str_contains($js, 'window.SiteLightbox.show(full.map('));
 check('… in the search and on profile lists, the name and its tags in the middle beside it', str_contains($app, 'nameWrap.append(thumbBox, nameBody);')
-      && str_contains($src('assets/css/style.css'), '.search-name-wrap { display: flex; align-items: center; gap: 0.6rem; }')
+      && str_contains($src('assets/css/detail-panel.css'), '.search-name-wrap { display: flex; align-items: center; gap: 0.6rem; }')
       && str_contains($src('assets/js/favourites.js'), 'window.ThumbSlider.mount(thumbBox, r.thumb)') && str_contains($src('api/index_search.php'), "\$row['thumb'] = \$thumbMap[")
-      && str_contains($src('includes/facts.php'), "if (isset(\$thumbs[\$h])) \$r['thumb'] = \$thumbs[\$h];") && str_contains($src('assets/css/style.css'), '@media (max-width: 576px) { .ts { width: 56px; } }'));
+      && str_contains($src('includes/facts.php'), "if (isset(\$thumbs[\$h])) \$r['thumb'] = \$thumbs[\$h];") && str_contains($src('assets/css/detail-panel.css'), '@media (max-width: 576px) { .ts { width: 56px; } }'));
 check('Info draws the strip at the top: arrows only while there is more to see, a click opens them all in the viewer',
       str_contains($app, 'if (Array.isArray(json.gallery) && json.gallery.length) body.appendChild(infoGallery(json.gallery));')
-      && str_contains($app, 'window.SiteLightbox.show(full, i, img)') && str_contains($app, "box.classList.toggle('can-next', track.scrollLeft < end);")
-      && str_contains($src('assets/css/style.css'), '.info-gal-nav:disabled { opacity: 0; pointer-events: none; }'));
+      && str_contains($src('assets/js/filters.js'), 'window.SiteLightbox.show(full, i, img)') && str_contains($src('assets/js/filters.js'), "box.classList.toggle('can-next', track.scrollLeft < end);")
+      && str_contains($src('assets/css/detail-panel.css'), '.info-gal-nav:disabled { opacity: 0; pointer-events: none; }'));
 check('the settings: on the page, saved within their bounds, with search words', str_contains($src('templates/admin/settings.php'), 'data-setting="thumbs_speed"')
       && str_contains($src('templates/admin/settings.php'), 'data-setting="thumbs_info"') && isset(settingsCatalogKeywords()['thumbs_info'])
       && str_contains($src('api/admin/save_settings.php'), "\$data['thumbs_width'] = (string)max(40, min((int)\$data['thumbs_width'] ?: 64, 160));")

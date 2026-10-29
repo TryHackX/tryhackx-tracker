@@ -3445,52 +3445,7 @@ window.siteToast = siteToast;
     let infoDescFold = 0;
 
     function infoGallery(list) {
-        const box = document.createElement('div');
-        box.className = 'info-gal info-section';
-        box.setAttribute('role', 'group');
-        box.setAttribute('aria-label', t.key('js.app.gal_label', {n: list.length}));
-        const track = document.createElement('div');
-        track.className = 'info-gal-track';
-        const full = list.map((g) => ({ src: g.f, alt: '' }));
-        list.forEach((g, i) => {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'info-gal-item';
-            b.style.setProperty('--r', g.w > 0 && g.h > 0 ? (g.w / g.h).toFixed(3) : '1');
-            b.setAttribute('aria-label', t.key('js.app.gal_open', {n: i + 1, total: list.length}));
-            const img = document.createElement('img');
-            img.alt = '';
-            img.decoding = 'async';
-            img.loading = i < 4 ? 'eager' : 'lazy';
-            img.src = g.t;
-            b.appendChild(img);
-            b.addEventListener('click', () => { if (window.SiteLightbox) window.SiteLightbox.show(full, i, img); });
-            track.appendChild(b);
-        });
-        box.appendChild(track);
-        const still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-        const nav = (dir) => {
-            const n = document.createElement('button');
-            n.type = 'button';
-            n.className = 'info-gal-nav ' + (dir < 0 ? 'info-gal-prev' : 'info-gal-next');
-            n.setAttribute('aria-label', t.key(dir < 0 ? 'js.app.gal_prev' : 'js.app.gal_next'));
-            n.appendChild(iconEl('bi ' + (dir < 0 ? 'bi-chevron-left' : 'bi-chevron-right')));
-            n.addEventListener('click', () => track.scrollBy({ left: dir * Math.max(120, track.clientWidth * 0.8), behavior: still ? 'auto' : 'smooth' }));
-            box.appendChild(n);
-            return n;
-        };
-        const prev = nav(-1), next = nav(1);
-        const sync = () => {
-            const end = track.scrollWidth - track.clientWidth - 8;
-            box.classList.toggle('can-prev', track.scrollLeft > 8);
-            box.classList.toggle('can-next', track.scrollLeft < end);
-            prev.disabled = track.scrollLeft <= 8;
-            next.disabled = track.scrollLeft >= end;
-        };
-        track.addEventListener('scroll', sync, { passive: true });
-        box.addEventListener('pointerenter', sync);
-        requestAnimationFrame(sync);
-        return box;
+        return window.InfoGallery(list);
     }
 
     function foldDescription(d) {
@@ -3520,11 +3475,11 @@ window.siteToast = siteToast;
         return wrap;
     }
 
-    function initInfoResize(box) {
-        const key = 'thx-info-size';
+    function initInfoResize(box, store) {
+        const key = store || 'thx-info-size';
         const head = box.querySelector('.files-head');
         const reset = iconButton('button', 'info-size-reset', 'bi-arrows-angle-contract', t.key('js.app.info_size_reset'), t.key('js.app.info_size_reset_tip'));
-        head.insertBefore(reset, head.querySelector('#info-share') || head.querySelector('#info-close'));
+        head.insertBefore(reset, head.querySelector('#info-share') || head.querySelector('.files-close'));
         const stored = () => {
             try {
                 const v = JSON.parse(localStorage.getItem(key) || 'null');
@@ -3590,6 +3545,44 @@ window.siteToast = siteToast;
         });
         apply(stored());
         window.addEventListener('resize', () => apply(stored()));
+    }
+
+    function initRowOpen() {
+        const rowSel = '#search-body > tr, .pf-row, .pv-table tbody > tr';
+        const skip = 'a, button, input, select, textarea, label, summary, details, img, video, .fchip, .ts, .rep-chip, .search-files-chip, .pf-hash-copy, [role="button"], [contenteditable="true"]';
+        const onText = (node, x, y) => {
+            for (const n of node.childNodes) {
+                if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+                const range = document.createRange();
+                range.selectNodeContents(n);
+                for (const b of range.getClientRects()) {
+                    if (x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2) return true;
+                }
+            }
+            return false;
+        };
+        const spot = (e) => {
+            const node = e.target instanceof Element ? e.target : null;
+            const row = node && node.closest(rowSel);
+            if (!row || node.closest(skip) || onText(node, e.clientX, e.clientY)) return null;
+            const btn = row.querySelector('.search-act-info, .pf-info');
+            return btn && !btn.disabled ? { row, btn } : null;
+        };
+        let lit = null;
+        document.addEventListener('mousemove', (e) => {
+            const hit = spot(e);
+            const row = hit ? hit.row : null;
+            if (row === lit) return;
+            if (lit) lit.classList.remove('row-open-spot');
+            lit = row;
+            if (lit) lit.classList.add('row-open-spot');
+        }, { passive: true });
+        document.addEventListener('click', (e) => {
+            if (e.button !== 0 || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+            if (window.getSelection && String(window.getSelection()).trim()) return;
+            const hit = spot(e);
+            if (hit) hit.btn.click();
+        });
     }
 
     function closeInfo() {
@@ -4859,6 +4852,9 @@ window.siteToast = siteToast;
         closeOnBackdrop(infoOverlay, closeInfo);
         const infoBox = infoOverlay.querySelector('.info-box');
         if (d.resize === '1' && infoBox) initInfoResize(infoBox);
+        const listBox = document.querySelector('#list-overlay .lo-box');
+        if (d.resize === '1' && listBox) initInfoResize(listBox, 'thx-list-size');
+        if (d.rows === '1') initRowOpen();
         const ic = $id('info-close');
         if (ic) ic.addEventListener('click', closeInfo);
         const shareOneBtn = $id('info-share');
@@ -5284,6 +5280,10 @@ window.siteToast = siteToast;
                         fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
                     }
                     nameTd.appendChild(fc);
+                }
+                if (json.rep_chip && r.rep && window.RepChip) {
+                    const rc = window.RepChip(r.rep);
+                    if (rc) nameTd.appendChild(rc);
                 }
                 if (r.facts && window.FactChips) {
                     const chips = window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null);

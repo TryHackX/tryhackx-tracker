@@ -201,6 +201,7 @@
     <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/ytplayer.js<?= assetVer('assets/js/ytplayer.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/magnetcard.js<?= assetVer('assets/js/magnetcard.js') ?>"></script>
+    <script src="<?= $baseUrl ?>assets/js/lightbox.js<?= assetVer('assets/js/lightbox.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/filters.js<?= assetVer('assets/js/filters.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-index.js<?= assetVer('assets/js/admin-index.js') ?>"></script>
     <script src="<?= $baseUrl ?>assets/js/admin-index-coverage.js<?= assetVer('assets/js/admin-index-coverage.js') ?>"></script>

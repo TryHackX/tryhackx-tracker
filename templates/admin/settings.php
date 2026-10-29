@@ -1428,6 +1428,14 @@
                         <input id="set-info_desc_fold" type="number" class="form-control bg-dark text-light border-secondary" name="info_desc_fold" value="<?= sanitize($cfg['info_desc_fold'] ?? '640') ?>" min="0" max="5000" step="20">
                         <small class="settings-hint"><?= _h('settings.info_desc_fold_hint') ?></small>
                     </div>
+                    <div class="col-md-3" data-setting="rows_open_info">
+                        <label for="set-rows_open_info" class="form-label"><?= _h('settings.rows_open_info') ?></label>
+                        <select id="set-rows_open_info" class="form-select bg-dark text-light border-secondary" name="rows_open_info">
+                            <option value="1" <?= ($cfg['rows_open_info'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['rows_open_info'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.rows_open_info_hint') ?></small>
+                    </div>
                     <div class="col-md-3">
                         <label for="set-index_search_include_whitelist" class="form-label"><?= _h('settings.users_search_whitelist') ?></label>
                         <select id="set-index_search_include_whitelist" class="form-select bg-dark text-light border-secondary" name="index_search_include_whitelist">
@@ -1510,6 +1518,14 @@
                             <option value="0" <?= ($cfg['thumbs_lists'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
                         </select>
                         <small class="settings-hint"><?= _h('settings.thumbs_lists_hint') ?></small>
+                    </div>
+                    <div class="col-md-4" data-setting="thumbs_panel">
+                        <label for="set-thumbs_panel" class="form-label"><?= _h('settings.thumbs_panel') ?></label>
+                        <select id="set-thumbs_panel" class="form-select bg-dark text-light border-secondary" name="thumbs_panel">
+                            <option value="1" <?= ($cfg['thumbs_panel'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.facts_on') ?></option>
+                            <option value="0" <?= ($cfg['thumbs_panel'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.facts_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.thumbs_panel_hint') ?></small>
                     </div>
                     <div class="col-md-4" data-setting="thumbs_info">
                         <label for="set-thumbs_info" class="form-label"><?= _h('settings.thumbs_info') ?></label>
@@ -3278,6 +3294,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                             <option value="0" <?= ($cfg['rep_show_in_results'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rep_show_info') ?></option>
                             <option value="1" <?= ($cfg['rep_show_in_results'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rep_show_column') ?></option>
                         </select>
+                    </div>
+                    <div class="col-md-3" data-setting="rep_chip">
+                        <label for="set-rep_chip" class="form-label"><?= _h('settings.rep_chip') ?></label>
+                        <select id="set-rep_chip" class="form-select bg-dark text-light border-secondary" name="rep_chip">
+                            <option value="1" <?= ($cfg['rep_chip'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.opt_enabled') ?></option>
+                            <option value="0" <?= ($cfg['rep_chip'] ?? '1') !== '1' ? 'selected' : '' ?>><?= _h('settings.opt_disabled') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.rep_chip_hint') ?></small>
                     </div>
                     <div class="col-md-3" data-setting="rep_min_votes">
                         <label for="set-rep_min_votes" class="form-label"><?= _h('settings.rep_min_votes') ?></label>

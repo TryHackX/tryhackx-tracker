@@ -22,6 +22,9 @@
     const PARAMS = ['type', 'tags', 'notags', 'pics'].concat(RANGES.map(r => r.key));
     const TAG_ID = (id) => /^[qvhaslt]:[a-z0-9_]{1,20}$/.test(id) || /^g:[a-z0-9-]{2,40}$/.test(id) || /^x:[a-z0-9-]{1,64}$/.test(id);
     const OPEN_KEY = 'thx-search-filters-open';
+    const TAG_PAGE = 18;
+    const GRID_ROW = 4;
+    const still = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
     function el(tag, cls, text) {
         const n = document.createElement(tag);
@@ -131,13 +134,13 @@
                 box.appendChild(all);
             }
             inner.insertBefore(box, grid);
-            tagSearch.addEventListener('input', () => showTags());
+            tagSearch.addEventListener('input', () => flip(() => showTags()));
         }
         (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'dates', 'description'] : ['release', 'ratings', 'popularity', 'dates']).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
             if ((r.facts && !facts) || (r.desc && !desc) || (r.rep && !rep)) return;
-            const box = el('div', 'sf-range');
+            const box = el('div', 'sf-range' + (r.date ? ' sf-range-date' : ''));
             const id = 'sf-' + r.key;
             const lab = el('label', 'sf-label', t.key('js.filters.' + r.label));
             lab.htmlFor = id + '-min';
@@ -187,6 +190,7 @@
             b.setAttribute('aria-pressed', 'false');
             if (c.c) b.style.setProperty('--fc', c.c);
             b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
+            b.dataset.id = c.id;
             b.addEventListener('click', () => { toggle(c.id); changed(true); });
             return b;
         };
@@ -216,6 +220,7 @@
                     b.setAttribute('aria-pressed', 'false');
                     if (c.c) b.style.setProperty('--fc', c.c);
                     b.dataset.s = [c.l, c.a || '', c.id].join(' ').toLowerCase();
+                    b.dataset.id = c.id;
                     if (typeof c.n === 'number') {
                         b.dataset.n = String(c.n);
                         b.appendChild(el('span', 'sf-n', t.num(c.n)));
@@ -226,6 +231,13 @@
                     tagBtns.set(c.id, b);
                 });
                 wrap.appendChild(list);
+                if (tags.length > TAG_PAGE) {
+                    wrap.dataset.lim = String(TAG_PAGE);
+                    const moreTagsBtn = el('button', 'sf-more-tags');
+                    moreTagsBtn.type = 'button';
+                    moreTagsBtn.addEventListener('click', () => moreTags(wrap));
+                    wrap.appendChild(moreTagsBtn);
+                }
                 section(sec).appendChild(wrap);
             });
         }
@@ -247,6 +259,17 @@
         Object.keys(sections).forEach(k => { if (sections[k].children.length <= 1) sections[k].remove(); });
         host.textContent = '';
         host.append(bar, panel);
+        let relayout = 0;
+        const queueLayout = () => {
+            if (relayout) return;
+            relayout = requestAnimationFrame(() => { relayout = 0; layout(); });
+        };
+        if ('ResizeObserver' in window) {
+            const ro = new ResizeObserver(queueLayout);
+            ro.observe(grid);
+            [...grid.children].forEach(f => ro.observe(f));
+        }
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(queueLayout);
 
         function toggle(id) {
             if (S.sel.has(id)) { S.sel.delete(id); S.not.add(id); }
@@ -262,10 +285,75 @@
                 b.hidden = !on && (!hit || b.dataset.n === '0');
                 if (!b.hidden && hit) any = true;
             });
-            grid.querySelectorAll('.sf-tags').forEach(w => { w.hidden = ![...w.querySelectorAll('.sf-tag')].some(b => !b.hidden); });
+            grid.querySelectorAll('.sf-tags').forEach(w => {
+                const moreBtn = w.querySelector(':scope > .sf-more-tags');
+                if (moreBtn) {
+                    const lim = Number(w.dataset.lim) || TAG_PAGE;
+                    const shown = Number(w.dataset.shown) || lim;
+                    let k = 0;
+                    if (!q) {
+                        w.querySelectorAll('.sf-tag').forEach(b => {
+                            if (b.hidden || S.sel.has(b.dataset.id) || S.not.has(b.dataset.id)) return;
+                            k += 1;
+                            if (k > shown) b.hidden = true;
+                        });
+                    }
+                    const rest = Math.max(0, k - shown);
+                    w.dataset.rest = String(rest);
+                    moreBtn.hidden = q !== '' || k <= lim;
+                    moreBtn.replaceChildren(icon(rest ? 'bi-chevron-down' : 'bi-chevron-up'), ' ', t.key(rest ? 'js.filters.more_tags' : 'js.filters.less_tags', { n: t.num(rest) }));
+                }
+                w.hidden = ![...w.querySelectorAll('.sf-tag')].some(b => !b.hidden);
+            });
             grid.querySelectorAll('.sf-range, .sf-check').forEach(x => { x.hidden = q !== ''; });
             grid.querySelectorAll('.sf-group').forEach(f => { f.hidden = ![...f.children].some(x => x.tagName !== 'LEGEND' && !x.hidden); });
             if (tagNone) tagNone.hidden = !q || any;
+            layout();
+        }
+        function moreTags(wrap) {
+            const lim = Number(wrap.dataset.lim) || TAG_PAGE;
+            const shown = Number(wrap.dataset.shown) || lim;
+            const rest = Number(wrap.dataset.rest) || 0;
+            const before = new Set([...wrap.querySelectorAll('.sf-tag')].filter(b => !b.hidden));
+            wrap.dataset.shown = String(rest > 0 ? shown + lim : lim);
+            flip(() => showTags());
+            wrap.querySelectorAll('.sf-tag').forEach(b => {
+                if (b.hidden || before.has(b)) return;
+                b.classList.remove('sf-in');
+                void b.offsetWidth;
+                b.classList.add('sf-in');
+            });
+        }
+        function layout() {
+            const cs = getComputedStyle(grid);
+            const cols = Math.max(1, cs.gridTemplateColumns.split(' ').filter(v => parseFloat(v) > 0).length);
+            const gap = parseFloat(cs.columnGap) || 16;
+            const groups = [...grid.children].filter(f => !f.hidden);
+            groups.forEach(f => {
+                const n = f.querySelectorAll('.sf-tag:not([hidden])').length;
+                const want = n > 40 ? 3 : (n > 16 ? 2 : 1);
+                f.style.gridColumn = 'span ' + Math.min(want, cols);
+            });
+            groups.forEach(f => {
+                f.style.gridRowEnd = 'span ' + Math.max(1, Math.ceil((f.getBoundingClientRect().height + gap * 0.7) / GRID_ROW));
+            });
+        }
+        function flip(change) {
+            const before = new Map([...grid.children].filter(f => !f.hidden).map(f => [f, f.getBoundingClientRect()]));
+            change();
+            if (still() || !S.open || typeof Element.prototype.animate !== 'function') return;
+            [...grid.children].forEach(f => {
+                if (f.hidden) return;
+                const a = before.get(f);
+                const b = f.getBoundingClientRect();
+                if (!a) {
+                    f.animate([{ opacity: 0, transform: 'scale(0.98)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: 'ease-out' });
+                    return;
+                }
+                const dx = a.left - b.left, dy = a.top - b.top;
+                if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+                f.animate([{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+            });
         }
         function readRanges() {
             const out = {};
@@ -457,6 +545,93 @@
         },
     };
 
+    window.RepChip = function (rep) {
+        if (!rep) return null;
+        const stars = rep.mode === 'stars';
+        if (stars ? rep.stars == null : rep.pct == null) return null;
+        const up = !stars && rep.pct >= 50;
+        const c = el('span', 'rep-chip ' + (stars ? 'rep-chip-stars' : (up ? 'rep-chip-up' : 'rep-chip-down')));
+        const value = stars ? t.num(Math.round(rep.stars * 10) / 10) : rep.pct + '%';
+        c.append(icon(stars ? 'bi-star-fill' : (up ? 'bi-hand-thumbs-up-fill' : 'bi-hand-thumbs-down-fill')), el('span', null, value));
+        const one = Number(rep.total) === 1;
+        c.title = stars ? t.key(one ? 'js.app.rep_stars_title_one' : 'js.app.rep_stars_title_many', { stars: String(value), n: t.num(rep.total) })
+                        : t.key(one ? 'js.app.rep_thumbs_title_one' : 'js.app.rep_thumbs_title_many', { pct: rep.pct, n: t.num(rep.total) });
+        return c;
+    };
+
+    window.InfoGallery = function (list) {
+        const box = document.createElement('div');
+        box.className = 'info-gal info-section';
+        box.setAttribute('role', 'group');
+        box.setAttribute('aria-label', t.key('js.app.gal_label', {n: list.length}));
+        const track = document.createElement('div');
+        track.className = 'info-gal-track';
+        const full = list.map((g) => ({ src: g.f, alt: '' }));
+        list.forEach((g, i) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'info-gal-item';
+            b.style.setProperty('--r', g.w > 0 && g.h > 0 ? (g.w / g.h).toFixed(3) : '1');
+            b.setAttribute('aria-label', t.key('js.app.gal_open', {n: i + 1, total: list.length}));
+            const img = document.createElement('img');
+            img.alt = '';
+            img.decoding = 'async';
+            img.loading = i < 4 ? 'eager' : 'lazy';
+            img.src = g.t;
+            b.appendChild(img);
+            b.addEventListener('click', () => { if (window.SiteLightbox) window.SiteLightbox.show(full, i, img); });
+            track.appendChild(b);
+        });
+        box.appendChild(track);
+        const still = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        const nav = (dir) => {
+            const n = document.createElement('button');
+            n.type = 'button';
+            n.className = 'info-gal-nav ' + (dir < 0 ? 'info-gal-prev' : 'info-gal-next');
+            n.setAttribute('aria-label', t.key(dir < 0 ? 'js.app.gal_prev' : 'js.app.gal_next'));
+            n.appendChild(icon(dir < 0 ? 'bi-chevron-left' : 'bi-chevron-right'));
+            n.addEventListener('click', () => track.scrollBy({ left: dir * Math.max(120, track.clientWidth * 0.8), behavior: still ? 'auto' : 'smooth' }));
+            box.appendChild(n);
+            return n;
+        };
+        const prev = nav(-1), next = nav(1);
+        const sync = () => {
+            const end = track.scrollWidth - track.clientWidth - 8;
+            box.classList.toggle('can-prev', track.scrollLeft > 8);
+            box.classList.toggle('can-next', track.scrollLeft < end);
+            prev.disabled = track.scrollLeft <= 8;
+            next.disabled = track.scrollLeft >= end;
+        };
+        track.addEventListener('scroll', sync, { passive: true });
+        box.addEventListener('pointerenter', sync);
+        requestAnimationFrame(sync);
+        return box;
+    };
+
+    window.DescFold = function (d, fold, btnCls) {
+        const wrap = el('div', 'info-desc');
+        wrap.style.setProperty('--fold', fold + 'px');
+        wrap.appendChild(d);
+        const btn = el('button', (btnCls || 'btn btn-secondary btn-small') + ' info-desc-toggle');
+        btn.type = 'button';
+        const show = (open) => {
+            wrap.classList.toggle('info-desc-open', open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            btn.replaceChildren(icon(open ? 'bi-chevron-up' : 'bi-chevron-down'), ' ', t.key(open ? 'js.app.desc_fold' : 'js.app.desc_unfold'));
+        };
+        btn.addEventListener('click', () => {
+            const open = !wrap.classList.contains('info-desc-open');
+            show(open);
+            if (!open) wrap.scrollIntoView({ block: 'start' });
+        });
+        const measure = () => wrap.classList.toggle('info-desc-long', d.scrollHeight > fold + 96);
+        d.addEventListener('load', measure, true);
+        requestAnimationFrame(measure);
+        show(false);
+        wrap.appendChild(btn);
+        return wrap;
+    };
+
     const tsReduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     let tsSeen = null;
     window.ThumbSlider = {
@@ -595,8 +770,23 @@
                     else if (edit.create) addTag({ name: q });
                     else if (items[0]) addTag({ tag: items[0].id });
                 });
-                wrap.append(input, list);
                 const have = new Set(((facts && facts.tags) || []).map(x => x.id));
+                wrap.appendChild(input);
+                const mineTags = (edit.mine || []).filter(s => !have.has(s.id));
+                if (mineTags.length) {
+                    const row = el('div', 'tag-edit-hints tag-edit-mine');
+                    row.appendChild(el('span', 'tag-edit-hints-l', t.key('js.tags.mine_quick')));
+                    mineTags.forEach(s => {
+                        const b = el('button', 'fchip fchip-' + s.g + ' tag-edit-opt', s.l);
+                        b.type = 'button';
+                        b.title = t.key('js.tags.mine_quick_title', { name: s.l });
+                        if (s.c) b.style.setProperty('--fc', s.c);
+                        b.addEventListener('click', () => addTag({ tag: s.id }));
+                        row.appendChild(b);
+                    });
+                    wrap.appendChild(row);
+                }
+                wrap.appendChild(list);
                 const hints = (edit.suggest || []).filter(s => !have.has(s.id));
                 if (hints.length) {
                     const row = el('div', 'tag-edit-hints');
@@ -642,6 +832,9 @@
     function tagsPage() {
         const q = document.getElementById('tags-page-q');
         if (!q) return;
+        const PAGE = 60;
+        const mine = document.querySelector('.tags-mine .tags-list');
+        const mineEmpty = document.querySelector('.tags-mine-empty');
         document.querySelectorAll('.tag-fav').forEach(b => b.addEventListener('click', async () => {
             const on = b.getAttribute('aria-pressed') !== 'true';
             b.disabled = true;
@@ -653,22 +846,73 @@
             b.setAttribute('aria-label', b.title);
             const i = b.querySelector('i');
             if (i) i.className = 'bi ' + (r.on ? 'bi-star-fill' : 'bi-star');
+            if (!mine) return;
+            const have = [...mine.querySelectorAll('a[data-id]')].find(a => a.dataset.id === b.dataset.id);
+            const chip = b.parentElement ? b.parentElement.querySelector('a') : null;
+            if (r.on && !have && chip) {
+                const c = chip.cloneNode(true);
+                c.querySelectorAll('.sf-n').forEach(n => n.remove());
+                c.dataset.id = b.dataset.id;
+                c.classList.add('sf-in');
+                mine.appendChild(c);
+            } else if (!r.on && have) {
+                have.remove();
+            }
+            if (mineEmpty) mineEmpty.hidden = !!mine.querySelector('a');
         }));
         const none = document.getElementById('tags-page-none');
-        q.addEventListener('input', () => {
+        document.querySelectorAll('.tags-group:not(.tags-mine)').forEach(g => {
+            if (g.querySelectorAll('.tags-list a').length <= PAGE) return;
+            g.dataset.shown = String(PAGE);
+            const more = document.createElement('button');
+            more.type = 'button';
+            more.className = 'btn btn-secondary btn-small tags-more';
+            more.addEventListener('click', () => {
+                const rest = Number(g.dataset.rest) || 0;
+                g.dataset.shown = String(rest > 0 ? Number(g.dataset.shown) + PAGE : PAGE);
+                apply(true);
+                if (!rest) g.scrollIntoView({ block: 'nearest' });
+            });
+            g.appendChild(more);
+        });
+        const apply = (reveal) => {
             const s = q.value.trim().toLowerCase();
             let any = false;
             document.querySelectorAll('.tags-group').forEach(g => {
                 let seen = false;
+                let k = 0;
+                const lim = Number(g.dataset.shown) || 0;
                 g.querySelectorAll('.tags-list a').forEach(a => {
-                    a.hidden = s !== '' && !a.dataset.s.includes(s);
-                    if (!a.hidden) seen = true;
+                    const unit = a.closest('.tag-pair') || a;
+                    const was = unit.hidden;
+                    let hide = s !== '' && !a.dataset.s.includes(s);
+                    if (!hide && s === '' && lim) {
+                        k += 1;
+                        hide = k > lim;
+                    }
+                    unit.hidden = hide;
+                    if (hide) return;
+                    seen = true;
+                    if (reveal && was) {
+                        unit.classList.remove('sf-in');
+                        void unit.offsetWidth;
+                        unit.classList.add('sf-in');
+                    }
                 });
-                g.hidden = !seen;
+                const more = g.querySelector(':scope > .tags-more');
+                if (more) {
+                    const rest = Math.max(0, k - lim);
+                    g.dataset.rest = String(rest);
+                    more.hidden = s !== '';
+                    more.replaceChildren(icon(rest ? 'bi-chevron-down' : 'bi-chevron-up'), ' ', t.key(rest ? 'js.tags.page_more' : 'js.tags.page_less', { n: t.num(rest) }));
+                }
+                g.hidden = !seen && !(s === '' && g.classList.contains('tags-mine'));
                 if (seen) any = true;
             });
-            if (none) none.hidden = any;
-        });
+            if (none) none.hidden = any || s === '';
+        };
+        q.addEventListener('input', () => apply(false));
+        apply(false);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tagsPage); else tagsPage();
 })();

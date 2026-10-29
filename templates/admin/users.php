@@ -254,7 +254,7 @@
 
     <!-- User edit modal -->
     <div class="modal fade" id="usEditModal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
             <div class="modal-content bg-dark">
 
 
@@ -352,6 +352,7 @@
                             </select>
                         </div>
                         <div id="ue-mod-rich"></div>
+                        <div class="ue-mod-go">
                         <div class="ue-mod-modes" role="radiogroup" aria-label="<?= _h('js.creport.mode_label') ?>">
                             <label class="msgrep-mode-opt"><input type="radio" name="ue-mod-mode" id="ue-mod-silent" value="silent" checked> <?= _h('js.creport.mode_silent') ?></label>
                             <label class="msgrep-mode-opt"><input type="radio" name="ue-mod-mode" id="ue-mod-loud" value="loud"> <?= _h('js.creport.mode_loud') ?></label>
@@ -360,6 +361,7 @@
                             <button type="button" class="btn btn-sm btn-outline-warning" id="ue-mod-apply"><i class="bi bi-exclamation-triangle"></i> <?= _h('a.users.mod_apply') ?></button>
                             <button type="button" class="btn btn-sm btn-outline-success" id="ue-mod-lift-mute" hidden><i class="bi bi-unlock"></i> <?= _h('js.moderation.lift_mute') ?></button>
                             <button type="button" class="btn btn-sm btn-outline-success" id="ue-mod-lift-ban" hidden><i class="bi bi-unlock"></i> <?= _h('js.moderation.lift_ban') ?></button>
+                        </div>
                         </div>
                         <div class="small" id="ue-mod-msg" aria-live="polite"></div>
                         <small class="text-muted"><?= _h('a.users.mod_hint') ?></small>
@@ -462,7 +464,7 @@
 
     <!-- Group editor modal -->
     <div class="modal fade" id="grEditModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
             <div class="modal-content bg-dark">
                 <div class="modal-header border-secondary">
                     <h5 class="modal-title"><i class="bi bi-people-fill"></i> <span id="ge-title"><?= _h('a.users.group') ?></span></h5>
@@ -475,7 +477,8 @@
                         <div class="col-md-4"><label for="ge-slug" class="form-label wl-label"><?= _h('a.users.slug') ?> <small class="text-muted">(a-z 0-9 _ -)</small></label>
                             <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-slug" maxlength="64"></div>
                         <div class="col-md-2"><label for="ge-color" class="form-label wl-label"><?= _h('a.users.color') ?></label>
-                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-color" maxlength="9" placeholder="#4a9eff"></div>
+                            <div class="ge-color-row"><input type="color" class="form-control form-control-color form-control-sm ge-color-pick" id="ge-color-pick" value="#4a9eff" aria-label="<?= _h('a.users.color') ?>">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-color" maxlength="9" placeholder="#4a9eff"></div></div>
                         <div class="col-md-2"><label for="ge-priority" class="form-label wl-label"><?= _h('a.users.priority') ?></label>
                             <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-priority" min="-1000" max="1000" value="0"></div>
                     </div>
@@ -489,12 +492,13 @@
                     <?php // Presets: a starting point, never a lock. Each fills the checkboxes below and the
                           // operator still sees — and can change — every one of them before saving. ?>
                     <div class="ge-presets" id="ge-presets"></div>
+                    <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary ge-filter" id="ge-filter" maxlength="60" placeholder="<?= _h('a.users.perm_filter_ph') ?>" aria-label="<?= _h('a.users.perm_filter_ph') ?>">
                     <div id="ge-perms" class="ge-perms"></div>
                     <div id="ge-alert"></div>
-                    <div class="d-flex justify-content-end gap-2 mt-3">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
-                        <button type="button" class="btn btn-sm btn-primary" id="ge-save"><i class="bi bi-check-lg"></i> <?= _h('a.users.save_group') ?></button>
-                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                    <button type="button" class="btn btn-sm btn-primary" id="ge-save"><i class="bi bi-check-lg"></i> <?= _h('a.users.save_group') ?></button>
                 </div>
             </div>
         </div>

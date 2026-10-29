@@ -165,7 +165,9 @@ foreach ($fetched as $r) {
 }
 $chipRows = !function_exists('factsListAttach') ? [] : factsListAttach($db, $cfg, array_map(fn($r) => ['info_hash' => (int)$r['banned'] === 1 ? null : $r['info_hash'], 'name' => $r['name']], $fetched));
 foreach ($rows as $i => &$row) {
-    if (isset($chipRows[$i]['facts'])) $row['facts'] = $chipRows[$i]['facts'];
+    foreach (['facts', 'thumb', 'rep'] as $chipKey) {
+        if (isset($chipRows[$i][$chipKey])) $row[$chipKey] = $chipRows[$i][$chipKey];
+    }
 }
 unset($row);
 // Each row's star in the READER's state (1.72.1, favMarkRows()): one question for the page.

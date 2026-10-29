@@ -39,7 +39,7 @@ $allowed = [
     'lang_swap_enabled',
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
     'search_share_enabled', 'search_count_common_words', 'facts_source',
-    'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_max', 'thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_width', 'thumbs_speed', 'thumbs_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
+    'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_max', 'thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_panel', 'thumbs_width', 'thumbs_speed', 'thumbs_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
     'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
@@ -190,7 +190,7 @@ $allowed = [
     'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_per_day_mb', 'images_quota_mb', 'images_unused_hours', 'images_in_pm', 'images_in_shout', 'images_in_bio', 'images_in_list', 'images_in_mod',
     'comment_images_upload', 'comment_images_links', 'comment_images_max', 'comment_image_max_mb', 'comment_thumb_h', 'comment_thumb_w',
     'images_gallery_enabled',
-    'forum_desc_conflict', 'info_resize', 'info_desc_fold',
+    'forum_desc_conflict', 'info_resize', 'info_desc_fold', 'rows_open_info', 'rep_chip',
     // whitelist registration audience + metadata worker concurrency (schema v8)
     'whitelist_submit_mode', 'meta_worker_concurrency',
     // schema v43: stored file paths per torrent, the second live worker override
@@ -327,7 +327,7 @@ foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_
     if (isset($data[$fk])) $data[$fk] = in_array($data[$fk], ['0', 0, false], true) ? '0' : '1';
 }
 if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min((int)$data['facts_chips_max'] ?: 6, 20));
-foreach (['thumbs_search', 'thumbs_lists', 'thumbs_info'] as $tk) {
+foreach (['thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_panel'] as $tk) {
     if (isset($data[$tk])) $data[$tk] = in_array($data[$tk], ['0', 0, false], true) ? '0' : '1';
 }
 if (isset($data['thumbs_width'])) $data['thumbs_width'] = (string)max(40, min((int)$data['thumbs_width'] ?: 64, 160));
@@ -613,7 +613,7 @@ foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker'
           'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
           'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
           'pm_archive_returns', 'auto_penalties_enabled',
-          'info_resize', 'images_gallery_enabled',
+          'info_resize', 'images_gallery_enabled', 'rows_open_info', 'rep_chip',
           'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
           'who_votes_enabled', 'who_lists_enabled',
           'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',

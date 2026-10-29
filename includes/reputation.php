@@ -46,6 +46,33 @@ function repWhoCanVote(array $cfg): string {
 
 function repShowInResults(array $cfg): bool { return ($cfg['rep_show_in_results'] ?? '0') === '1'; }
 
+function repChipOn(array $cfg): bool { return repEnabled($cfg) && ($cfg['rep_chip'] ?? '1') === '1'; }
+
+function repChipFrom(array $cfg, int $count, int $scoreX100): ?array {
+    if ($count < repMinVotes($cfg)) return null;
+    return repMode($cfg) === 'stars'
+        ? ['mode' => 'stars', 'stars' => round($scoreX100 / 100, 1), 'total' => $count]
+        : ['mode' => 'thumbs', 'pct' => (int)round($scoreX100 / 100), 'total' => $count];
+}
+
+function repChipsFor(PDO $db, array $cfg, array $hashes): array {
+    $hashes = array_values(array_unique(array_filter(array_map('strtolower', array_map('strval', $hashes)), fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
+    if (!$hashes || !repChipOn($cfg)) return [];
+    $out = [];
+    foreach (array_chunk($hashes, 500) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        foreach (['index_hashes', 'whitelist'] as $table) {
+            $st = $db->prepare("SELECT info_hash, votes_count, score_x100 FROM $table WHERE info_hash IN ($in) AND votes_count > 0");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $chip = repChipFrom($cfg, (int)$r['votes_count'], (int)$r['score_x100']);
+                if ($chip !== null) $out[strtolower((string)$r['info_hash'])] = $chip;
+            }
+        }
+    }
+    return $out;
+}
+
 /**
  * 'thumbs' — up or down. 'stars' — five stars in half-star steps.
  *

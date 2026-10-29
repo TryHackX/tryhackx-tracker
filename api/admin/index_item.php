@@ -73,4 +73,6 @@ jsonResponse([
     // Shown to an administrator whatever its review state: a moderator cannot judge text
     // they are not allowed to see.
     'content' => richtextContentFor($db, $cfg, $hash, true),
+    'facts' => function_exists('tagsHashChips') ? tagsHashChips($db, $cfg, $hash, null, true, true, true, 'panel') : null,
+    'gallery' => function_exists('thumbsGallery') && thumbsOn($cfg, 'panel') ? thumbsGallery($db, $hash, true) : [],
 ]);

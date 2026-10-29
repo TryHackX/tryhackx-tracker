@@ -1,6 +1,7 @@
 <?php
 
 const FACTS_VERSION = 2;
+const FACTS_NAME_VERSION = 2;
 const FACTS_TEXT_MAX = 400000;
 const FACTS_FILTER_CAP = 5000;
 const FACTS_TICK_BATCH = 40;
@@ -29,11 +30,13 @@ const FACTS_ALIASES = [
     'v:h264' => 'h264 h.264 x264 avc', 'v:h265' => 'h265 h.265 x265 hevc', 'v:xvid' => 'xvid divx', 'v:mpeg2' => 'mpeg2 mpeg-2', 'v:vc1' => 'vc1 vc-1',
     'h:hdr10' => 'hdr hdr10', 'h:hdr10p' => 'hdr10+ hdr10plus', 'h:dv' => 'dv dovi dolby vision', 'h:hdr' => 'hdr',
     'a:ac3' => 'ac3 ac-3 dd dolby digital', 'a:eac3' => 'eac3 e-ac-3 ddp dd+ dolby digital plus', 'a:dtshdma' => 'dts-hd ma dtshd master audio',
-    'a:truehd' => 'truehd true hd', 'a:pcm' => 'pcm lpcm',
-    's:webdl' => 'web-dl webdl web', 's:webrip' => 'webrip web-rip', 's:bluray' => 'bluray blu-ray bdrip brrip bd', 's:hdtv' => 'hdtv tvrip',
-    's:dvd' => 'dvd dvdrip', 's:cam' => 'cam ts telesync hdcam',
-    'l:multi' => 'multi', 'l:lektor_pl' => 'lektor polski pl', 'l:dub_pl' => 'dubbing dub polski pl', 'l:sub_pl' => 'napisy polskie pl subtitles',
-    'l:audio_pl' => 'polski pl audio', 'l:audio_en' => 'english eng angielski audio', 'l:sub_en' => 'napisy angielskie en english subtitles',
+    'a:truehd' => 'truehd true hd', 'a:pcm' => 'pcm lpcm', 'a:atmos' => 'atmos dolby atmos', 'a:dts' => 'dts', 'a:aac' => 'aac',
+    'a:flac' => 'flac lossless bezstratny', 'a:opus' => 'opus', 'a:mp3' => 'mp3', 'h:hlg' => 'hlg', 'v:av1' => 'av1', 'v:vp9' => 'vp9',
+    's:webdl' => 'web-dl webdl web', 's:webrip' => 'webrip web-rip', 's:bluray' => 'bluray blu-ray bdrip brrip bd', 's:hdtv' => 'hdtv tvrip pdtv',
+    's:dvd' => 'dvd dvdrip dvd5 dvd9', 's:cam' => 'cam ts telesync hdcam telecine', 's:remux' => 'remux bdremux',
+    'l:multi' => 'multi dual audio wielojęzyczny', 'l:lektor_pl' => 'lektor polski pl voice-over voiceover', 'l:dub_pl' => 'dubbing dub polski pl pldub',
+    'l:sub_pl' => 'napisy polskie pl subtitles plsub plsubs', 'l:audio_pl' => 'polski pl audio', 'l:audio_en' => 'english eng angielski audio',
+    'l:sub_en' => 'napisy angielskie en english subtitles engsub',
 ];
 
 function factsTagLabel(string $id, array $genres = []): string
@@ -483,8 +486,8 @@ function factsFromName(string $name): array
     $caps = static fn(string $re): bool => preg_match('/(?<![A-Za-z0-9])(?:' . $re . ')(?![A-Za-z0-9])/u', ' ' . $name . ' ') === 1;
     $res = null;
     if ($has('2160p|(?:3840|4096)x\d{3,4}')) $res = 2160;
-    elseif ($has('1440p|2560x\d{3,4}')) $res = 1440;
-    elseif ($has('1080[pi]|1920x\d{3,4}')) $res = 1080;
+    elseif ($has('1440p|2560x\d{3,4}|qhd')) $res = 1440;
+    elseif ($has('1080[pi]|1920x\d{3,4}|fhd|full[ ._-]?hd')) $res = 1080;
     elseif ($has('720p|1280x\d{3,4}')) $res = 720;
     elseif ($has('576[pi]|480[pi]|360p|720x(?:576|480)')) $res = 480;
     $gate = $res !== null || $has('hd-?rip|sat-?rip|dvb-?rip|tv-?rip|bd-?rip|web-?dl|web-?rip|xxx|s\d{1,2}e\d{1,3}') || $caps('PAL|NTSC')
@@ -497,11 +500,12 @@ function factsFromName(string $name): array
     }
     $src = null;
     foreach (['s:remux' => 'remux|bdremux', 's:webrip' => 'web-?rip', 's:webdl' => 'web-?dl', 's:bluray' => 'blu-?ray|bd-?rip|br-?rip|bd25|bd50',
-              's:hdtv' => 'hdtv|tv-?rip|pdtv', 's:dvd' => 'dvd-?rip|dvd5|dvd9|dvdscr', 's:cam' => 'hd-?cam|cam-?rip|telesync|hd-?ts'] as $id => $re) {
+              's:hdtv' => 'hdtv|tv-?rip|pdtv', 's:dvd' => 'dvd-?rip|dvd5|dvd9|dvdscr', 's:cam' => 'hd-?cam|cam-?rip|telesync|hd-?ts|hd-?tc|telecine'] as $id => $re) {
         if ($has($re)) { $src = $id; break; }
     }
     $gate = $gate || $codec !== null || $src !== null;
     if ($src === null && $caps('WEB')) $src = 's:webdl';
+    if ($src === null && $res !== null && $caps('AMZN|NF|DSNP|HMAX|ATVP|PCOK|HULU|PMTP|SKST|CRAV')) $src = 's:webdl';
     if ($src === null && $caps('DVD')) $src = 's:dvd';
     if ($src === null && $caps('CAM')) $src = 's:cam';
     if (!$gate) return ['tags' => [], 'year' => null];
@@ -528,12 +532,14 @@ function factsFromName(string $name): array
     $lang = [];
     if ($has('lektor(?:[ ._-]?pl)?')) $lang[] = 'l:lektor_pl';
     if ($has('dubbing(?:[ ._-]?pl)?|pldub|dubpl|dub[ ._-]?pl|pl[ ._-]?dub')) $lang[] = 'l:dub_pl';
-    if ($has('napisy(?:[ ._-]?pl)?|plsub|subpl|pl[ ._-]?subs?|subs?[ ._-]?pl')) $lang[] = 'l:sub_pl';
+    if ($has('napisy(?:[ ._-]?pl)?|plsubs?|subpl|pl[ ._-]?subs?|subs?[ ._-]?pl')) $lang[] = 'l:sub_pl';
     if (!$lang && ($has('polish') || $caps('PL|POL'))) $lang[] = 'l:audio_pl';
-    if ($has('eng|english')) $lang[] = 'l:audio_en';
-    if (preg_match('/(?<![A-Za-z0-9])(?:MULTi|MULTI|Multi)\d?(?![A-Za-z0-9])(?![ ._-]?(?:subs?|SUBS?|Subs?))/u', $name)) $lang[] = 'l:multi';
+    $nAudio = (string)preg_replace('/(?<![a-z0-9])(?:eng?|english)[ ._-]?subs?(?![a-z0-9])/u', ' ', $n);
+    if ($nAudio !== $n) $lang[] = 'l:sub_en';
+    if (preg_match('/(?<![a-z0-9])(?:eng|english)(?![a-z0-9])/u', $nAudio)) $lang[] = 'l:audio_en';
+    if (preg_match('/(?<![A-Za-z0-9])(?:MULTi|MULTI|Multi)\d?(?![A-Za-z0-9])(?![ ._-]?(?:subs?|SUBS?|Subs?))/u', $name) || $has('dual[ ._-]?audio')) $lang[] = 'l:multi';
     $tags = array_merge($tags, $lang);
-    $tags[] = $has('s\d{1,2}e\d{1,3}|s\d{1,2}(?:-s?\d{1,2})?|season|sezon|complete[ ._-]series') || preg_match('/\s-\s(?!19\d\d|20\d\d)\d{2,4}(?:v\d)?\s|\[(?!19\d\d\]|20\d\d\])\d{1,4}(?:v\d)?\]|第\s?\d+\s?[话話集]|全\d+集/u', $n) ? 't:series' : 't:movie';
+    $tags[] = $has('s\d{1,2}e\d{1,3}|s\d{1,2}(?:-s?\d{1,2})?|season|sezon|complete[ ._-]series|\d{1,2}x\d{2,3}|odc(?:inek)?[ ._-]?\d{1,4}|episode[ ._-]?\d{1,4}|(?:mini)?serial') || preg_match('/\s-\s(?!19\d\d|20\d\d)\d{2,4}(?:v\d)?\s|\[(?!19\d\d\]|20\d\d\])\d{1,4}(?:v\d)?\]|第\s?\d+\s?[话話集]|全\d+集/u', $n) ? 't:series' : 't:movie';
     $year = null;
     $max = (int)date('Y') + 1;
     if (preg_match('/[(\[]\s*(19[2-9][0-9]|20[0-9][0-9])(?![0-9])/', $n, $ym) && (int)$ym[1] <= $max) $year = (int)$ym[1];
@@ -626,6 +632,10 @@ function factsNameStore(PDO $db, array $rows): int
 function factsNameTick(PDO $db, array $cfg, float $budget = 15.0): array
 {
     if (factsMode($cfg) !== 'desc_name' || !factsNameReady($db)) return ['read' => 0, 'done' => true];
+    if (($cfg['name_facts_ver'] ?? '1') !== (string)FACTS_NAME_VERSION) {
+        $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('name_facts_cursor', ''), ('name_facts_ver', ?)")->execute([(string)FACTS_NAME_VERSION]);
+        $cfg['name_facts_cursor'] = '';
+    }
     $t0 = microtime(true);
     $cursor = (string)($cfg['name_facts_cursor'] ?? '');
     if ($cursor === 'done') return ['read' => 0, 'done' => true];
@@ -1427,7 +1437,8 @@ function factsListAttach(PDO $db, array $cfg, array $rows): array
 {
     $chipsOn = factsChipsOn($cfg, 'lists');
     $thumbsOn = function_exists('thumbsOn') && thumbsOn($cfg, 'lists');
-    if (!$rows || (!$chipsOn && !$thumbsOn)) return $rows;
+    $repOn = function_exists('repChipOn') && repChipOn($cfg);
+    if (!$rows || (!$chipsOn && !$thumbsOn && !$repOn)) return $rows;
     $hashes = [];
     foreach ($rows as $r) {
         if (!empty($r['info_hash'])) $hashes[] = strtolower((string)$r['info_hash']);
@@ -1439,10 +1450,12 @@ function factsListAttach(PDO $db, array $cfg, array $rows): array
     $me = usersEnabled($cfg) ? currentUser($db) : null;
     $extra = $chipsOn && function_exists('tagsForHashes') ? tagsForHashes($db, $hashes, $me ? (int)$me['id'] : null, $me !== null && userCan($db, $cfg, 'tags.moderate')) : [];
     $thumbs = $thumbsOn && $canContent ? thumbsFor($db, $cfg, $hashes, $signedIn) : [];
+    $reps = $repOn ? repChipsFor($db, $cfg, $hashes) : [];
     foreach ($rows as &$r) {
         $h = strtolower((string)($r['info_hash'] ?? ''));
         if ($h === '') continue;
         if (isset($thumbs[$h])) $r['thumb'] = $thumbs[$h];
+        if (isset($reps[$h])) $r['rep'] = $reps[$h];
         if (!$chipsOn) continue;
         $chips = factsRowChips($desc[$h] ?? null, (string)($r['name'] ?? ''), $cfg, 'lists');
         if (function_exists('tagsMergeChips')) $chips = tagsMergeChips($chips, $extra[$h] ?? null, $cfg);

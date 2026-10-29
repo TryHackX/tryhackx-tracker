@@ -429,6 +429,14 @@
                 const chips = window.FactChips.render(row.facts, state.wl.filters ? (id) => state.wl.filters.addTag(id) : null);
                 if (chips) nameTd.appendChild(chips);
             }
+            if (row.thumb && window.ThumbSlider) {
+                const thumbBox = el('div', { className: 'search-thumb' });
+                if (window.ThumbSlider.mount(thumbBox, row.thumb)) {
+                    const nameBody = el('div', { className: 'search-name-body' }, [...nameTd.childNodes]);
+                    nameTd.appendChild(el('div', { className: 'search-name-wrap' }, [thumbBox, nameBody]));
+                    nameTd.classList.add('wl-name-thumb');
+                }
+            }
             tr.appendChild(nameTd);
             tr.appendChild(el('td', { className: 'wl-size', text: row.total_size ? fmtBytes(row.total_size) : '—' }));
             tr.appendChild(el('td', { className: 'wl-files-col', text: row.files_count != null ? String(row.files_count) : '—' }));
@@ -859,14 +867,12 @@
         }
 
         if (hasText) {
-            const det = el('details', { className: 'rt-collapse' });
-            det.appendChild(el('summary', null, [el('i', { className: 'bi bi-chevron-right disc-chev', 'aria-hidden': 'true' }), t.key('js.wl.description')]));
             const body = el('div', { className: 'rt-body' });
             // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
             // whitelist. Everything else in this file goes through el()/textContent.
             body.innerHTML = c.description_html;
-            det.appendChild(body);
-            wrap.appendChild(det);
+            wrap.appendChild(el('div', { className: 'wl-kv-label wl-desc-label', text: t.key('js.wl.description') }));
+            wrap.appendChild(window.DescFold ? window.DescFold(body, 420, 'btn btn-sm btn-outline-secondary') : body);
         }
         return wrap;
     }
@@ -909,7 +915,12 @@
             [it.files_count != null ? it.files_count : null, it.files_count != null ? t.plural(it.files_count, 'js.wl.stat_files') : t.key('js.wl.stat_files_many')],
             [idx && idx.peak_seeders != null ? idx.peak_seeders : null, t.key('js.wl.stat_peak_seeders')],
         ]);
+        if (Array.isArray(r.gallery) && r.gallery.length && window.InfoGallery) body.appendChild(window.InfoGallery(r.gallery));
         if (strip) body.appendChild(strip);
+        if (r.facts && window.FactChips) {
+            const chips = window.FactChips.render(r.facts, null, { all: true });
+            if (chips) body.appendChild(el('div', { className: 'wl-detail-tags' }, chips));
+        }
 
         const kvBox = el('div', { className: 'wl-kv' });
         const row = (label, valueNodes) => kvBox.appendChild(el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, valueNodes)]));

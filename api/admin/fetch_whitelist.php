@@ -236,10 +236,12 @@ foreach ($rows as &$row) {
 unset($row);
 $factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($rows, 'info_hash'), true) : [];
 $tagMap = factsChipsOn($cfg, 'panel') ? tagsForHashes($db, array_column($rows, 'info_hash'), null, true) : [];
+$thumbMap = (function_exists('thumbsFor') && thumbsOn($cfg, 'panel')) ? thumbsFor($db, $cfg, array_column($rows, 'info_hash'), true) : [];
 foreach ($rows as &$row) {
     $chips = tagsMergeChips(factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg, 'panel'),
                             $tagMap[strtolower((string)$row['info_hash'])] ?? null, $cfg);
     if ($chips !== null) $row['facts'] = $chips;
+    if (isset($thumbMap[strtolower((string)$row['info_hash'])])) $row['thumb'] = $thumbMap[strtolower((string)$row['info_hash'])];
 }
 unset($row);
 

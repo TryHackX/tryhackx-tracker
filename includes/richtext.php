@@ -410,6 +410,7 @@ function richtextMailStyles(string $html): string
         'rt-footnotes' => 'font-size:12px;margin-top:12px;padding-top:6px;border-top:1px solid #8a94a6',
         'rt-task-done' => 'text-decoration:line-through',
         'rt-h'      => 'margin:14px 0 6px;font-weight:600',
+        'rt-h1' => 'font-size:24px', 'rt-h2' => 'font-size:20px', 'rt-h3' => 'font-size:17px', 'rt-h4' => 'font-size:15px', 'rt-h5' => 'font-size:14px', 'rt-h6' => 'font-size:13px',
         'rt-img'    => 'max-width:100%;height:auto;border-radius:4px;margin:8px 0',
         'rt-center' => 'text-align:center', 'rt-right' => 'text-align:right', 'rt-left' => 'text-align:left',
         'rt-hr'     => 'border:0;border-top:1px solid #8a94a6;margin:14px 0',
@@ -812,11 +813,12 @@ function richtextRender(?string $text, string $format, array $cfg, bool $signedI
         }, $s);
 
         $s = preg_replace('/^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/m', '<hr class="rt-hr">', $s);
-        $s = preg_replace('/^######\s+(.+)$/m', '<h6 class="rt-h">$1</h6>', $s);
-        $s = preg_replace('/^#{4,5}\s+(.+)$/m', '<h5 class="rt-h">$1</h5>', $s);
-        $s = preg_replace('/^###\s+(.+)$/m', '<h5 class="rt-h">$1</h5>', $s);
-        $s = preg_replace('/^##\s+(.+)$/m', '<h4 class="rt-h">$1</h4>', $s);
-        $s = preg_replace('/^#\s+(.+)$/m', '<h4 class="rt-h">$1</h4>', $s);
+        $s = preg_replace('/^######\s+(.+)$/m', '<h6 class="rt-h rt-h6">$1</h6>', $s);
+        $s = preg_replace('/^#####\s+(.+)$/m', '<h5 class="rt-h rt-h5">$1</h5>', $s);
+        $s = preg_replace('/^####\s+(.+)$/m', '<h5 class="rt-h rt-h4">$1</h5>', $s);
+        $s = preg_replace('/^###\s+(.+)$/m', '<h5 class="rt-h rt-h3">$1</h5>', $s);
+        $s = preg_replace('/^##\s+(.+)$/m', '<h4 class="rt-h rt-h2">$1</h4>', $s);
+        $s = preg_replace('/^#\s+(.+)$/m', '<h4 class="rt-h rt-h1">$1</h4>', $s);
         $s = preg_replace('/^&gt;\s?(.*)$/m', '<blockquote class="rt-quote">$1</blockquote>', $s);
         $s = preg_replace('/\*\*(.+?)\*\*/s', '<strong>$1</strong>', $s);
         $s = preg_replace('/(?<![\w*])\*([^*\n]+)\*(?![\w*])/', '<em>$1</em>', $s);
@@ -1401,12 +1403,12 @@ function richtextLitedownBlocks(string $s, callable $hold, int $depth): string {
     }, $s) ?? $s;
     $s = preg_replace_callback('/^[ \t]{0,3}(#{1,6})[ \t]+([^\n]*?)(?:[ \t]+#+)?[ \t]*$/m', function ($m) use ($hold) {
         $tag = strlen($m[1]) <= 2 ? 'h4' : (strlen($m[1]) <= 5 ? 'h5' : 'h6');
-        return $hold('<' . $tag . ' class="rt-h">') . $m[2] . $hold('</' . $tag . '>');
+        return $hold('<' . $tag . ' class="rt-h rt-h' . strlen($m[1]) . '">') . $m[2] . $hold('</' . $tag . '>');
     }, $s) ?? $s;
     $s = preg_replace_callback('/^([^\x00\x01\x05\n][^\n]*)\n[ \t]{0,3}(=+|-+)[ \t]*$/m', function ($m) use ($hold) {
         if (trim($m[1]) === '') return $m[0];
         $tag = $m[2][0] === '=' ? 'h4' : 'h5';
-        return $hold('<' . $tag . ' class="rt-h">') . trim($m[1]) . $hold('</' . $tag . '>');
+        return $hold('<' . $tag . ' class="rt-h rt-h' . ($m[2][0] === '=' ? '1' : '2') . '">') . trim($m[1]) . $hold('</' . $tag . '>');
     }, $s) ?? $s;
     $s = preg_replace_callback('/^[ \t]{0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/m',
         fn() => $hold('<hr class="rt-hr">'), $s) ?? $s;

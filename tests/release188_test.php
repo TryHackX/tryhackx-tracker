@@ -209,7 +209,7 @@ $enL = include $root . '/lang/en.php';
 $words = ['perm.images.upload', 'perm.images.link', 'api.images.place_not_yours', 'api.images.place_too_many', 'api.bio.images', 'api.lists.images',
           'settings.images_places_h', 'settings.images_in_pm', 'settings.images_in_mod_who', 'js.images.mini_add', 'js.aimg.kind_pm', 'js.images.ug_kind_shout'];
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL)) && $plL['js.images.mini_add'] === 'Dodaj obraz');
-check('version and changelog', TRACKER_VERSION === '1.88.0' && str_contains($src('CHANGELOG.md'), '## [1.88.0]'));
+check('version and changelog', version_compare(TRACKER_VERSION, '1.88.0', '>=') && str_contains($src('CHANGELOG.md'), '## [1.88.0]'));
 
 echo "\n$n checks, $fails failed\n";
 exit($fails ? 1 : 0);

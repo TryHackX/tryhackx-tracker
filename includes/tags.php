@@ -7,36 +7,43 @@ const TAGS_LIST_CAP = 10000;
 const TAGS_FORUM_MAX = 30;
 const TAGS_FORUM_GENRES = ['animowane' => 'animacja', 'animowany' => 'animacja', 'fantastyka-naukowa' => 'sci-fi', 'dreszczowce' => 'thriller'];
 const TAGS_BASE = [
-    'extended'         => ['Extended', '#ffd54f', 'extended|extended cut|extended edition|wersja rozszerzona'],
+    'extended'         => ['Extended', '#ffd54f', 'extended|extended cut|extended edition|wersja rozszerzona|rozszerzona wersja'],
     'director-s-cut'   => ["Director's Cut", '#ffd54f', "director's cut|directors cut|director cut|wersja reżyserska"],
     'uncut'            => ['Uncut', '#ffd54f', 'uncut|unrated|bez cięć|wersja nieocenzurowana'],
-    'remaster'         => ['Remaster', '#ffd54f', 'remaster|remastered|zremasterowana|zremasterowany'],
+    'remaster'         => ['Remaster', '#ffd54f', 'remaster|remastered|zremasterowana|zremasterowany|4k remaster|restored|odrestaurowana'],
     'imax'             => ['IMAX', '#ffd54f', 'imax'],
     'wersja-kinowa'    => ['Wersja kinowa', '#ffd54f', 'theatrical cut|theatrical|wersja kinowa'],
-    'kolekcja'         => ['Kolekcja', '#ffd54f', 'collection|kolekcja|box set|boxset|trylogia|trilogy|quadrilogy|duology|dylogia'],
-    'komplet-sezonow'  => ['Komplet sezonów', '#ffd54f', 'complete series|all seasons|komplet sezonów|wszystkie sezony'],
+    'kolekcja'         => ['Kolekcja', '#ffd54f', 'collection|kolekcja|box set|boxset|trylogia|trilogy|quadrilogy|duology|dylogia|tetralogy|tetralogia|pentalogy|pentalogia|hexalogy|heksalogia|saga|pakiet filmów'],
+    'komplet-sezonow'  => ['Komplet sezonów', '#ffd54f', 'complete series|all seasons|komplet sezonów|wszystkie sezony|the complete series|kompletny serial|cały serial|sezony 1'],
     '3d'               => ['3D', '#90caf9', '3d|h-sbs|hsbs|half-sbs|half sbs|half-ou|anaglyph|anaglif'],
-    'upscale-ai'       => ['Upscale AI', '#90caf9', 'upscale|upscaled|ai upscale|upscaling'],
-    'czarno-bialy'     => ['Czarno-biały', '#90caf9', 'black and white|black & white|czarno-biały'],
+    'upscale-ai'       => ['Upscale AI', '#90caf9', 'upscale|upscaled|ai upscale|upscaling|ai enhanced|topaz'],
+    'czarno-bialy'     => ['Czarno-biały', '#90caf9', 'black and white|black & white|czarno-biały|czarno-biała|b&w'],
     'koloryzacja'      => ['Koloryzacja', '#90caf9', 'colorized|colourized|koloryzowana|koloryzowany|koloryzacja'],
     'lektor-ivo'       => ['Lektor IVO', '#80deea', 'ivo|ivona|lektor ivo|lektor ivona'],
-    'lektor-ai'        => ['Lektor AI', '#80deea', 'lektor ai|ai lektor|lektor syntetyczny|lektor maszynowy'],
+    'lektor-ai'        => ['Lektor AI', '#80deea', 'lektor ai|ai lektor|lektor syntetyczny|lektor maszynowy|syntezator mowy'],
     'dubbing-ai'       => ['Dubbing AI', '#80deea', 'dubbing ai|ai dubbing|dubbing syntetyczny'],
     'lektor-amatorski' => ['Lektor amatorski', '#80deea', 'lektor amatorski|lektor ama|amatorski lektor'],
-    'napisy-wtopione'  => ['Napisy wtopione', '#80deea', 'hardsub|hardsubs|hardcoded subs|napisy wtopione|wtopione napisy'],
-    'napisy-sdh'       => ['Napisy SDH', '#80deea', 'sdh|dla niesłyszących'],
+    'napisy-wtopione'  => ['Napisy wtopione', '#80deea', 'hardsub|hardsubs|hardsubbed|hardcoded subs|hc subs|napisy wtopione|wtopione napisy|wtopione'],
+    'napisy-sdh'       => ['Napisy SDH', '#80deea', 'sdh|dla niesłyszących|napisy dla niesłyszących|closed captions'],
     'audiodeskrypcja'  => ['Audiodeskrypcja', '#80deea', 'audiodeskrypcja|audio description|audiodescription'],
     'polska-produkcja' => ['Polska produkcja', '#c5e1a5', 'polska produkcja|produkcja polska|produkcja: polska|kraj: polska|kraj produkcji: polska'],
     'klasyka'          => ['Klasyka', '#c5e1a5', 'klasyka|klasyka kina|classic'],
-    'koncert'          => ['Koncert', '#c5e1a5', 'koncert|concert|live at|live in'],
+    'koncert'          => ['Koncert', '#c5e1a5', 'koncert|concert|live at|live in|unplugged|na żywo'],
     'kabaret'          => ['Kabaret', '#c5e1a5', 'kabaret|kabareton'],
     'stand-up'         => ['Stand-up', '#c5e1a5', 'stand-up|standup|stand up comedy'],
-    'sport'            => ['Sport', '#c5e1a5', 'ufc|formula 1|formuła 1|wrc|nba|nfl|nhl|mecz|liga mistrzów|champions league'],
-    'gra'              => ['Gra', '#b0bec5', 'repack|fitgirl|dodi|elamigos|gog|pc game|gra pc'],
-    'program'          => ['Program', '#b0bec5', 'software|portable|oprogramowanie'],
-    'muzyka'           => ['Muzyka', '#b0bec5', 'discography|dyskografia|album|soundtrack|ost'],
-    'audiobook'        => ['Audiobook', '#b0bec5', 'audiobook|audiobooki|słuchowisko'],
-    'e-book'           => ['E-book', '#b0bec5', 'ebook|e-book|epub|mobi|azw3'],
+    'sport'            => ['Sport', '#c5e1a5', 'ufc|formula 1|formuła 1|wrc|nba|nfl|nhl|mecz|liga mistrzów|champions league|ekstraklasa|premier league|bundesliga|la liga|mma|ksw|boks|boxing|motogp|tour de france|igrzyska|olympics|mundial|world cup'],
+    'gra'              => ['Gra', '#b0bec5', 'repack|fitgirl|dodi|elamigos|gog|pc game|gra pc|codex|skidrow|plaza|empress|tenoke|razor1911|flt|goldberg|steamrip'],
+    'program'          => ['Program', '#b0bec5', 'software|portable|oprogramowanie|x64|x86|installer|multilingual'],
+    'muzyka'           => ['Muzyka', '#b0bec5', 'discography|dyskografia|album|soundtrack|ost|320kbps|320 kbps|mp3 320|vinyl|winyl|24bit|24-bit|hi-res|lossless'],
+    'audiobook'        => ['Audiobook', '#b0bec5', 'audiobook|audiobooki|słuchowisko|czyta|czytają|m4b'],
+    'e-book'           => ['E-book', '#b0bec5', 'ebook|e-book|epub|mobi|azw3|azw|fb2|ebooki|e-booki'],
+    'netflix'          => ['Netflix', '#ef9a9a', 'netflix|nf'],
+    'amazon-prime'     => ['Amazon Prime', '#ffcc80', 'amazon prime|prime video|amazon|amzn'],
+    'disney'           => ['Disney+', '#90caf9', 'disney+|disney plus|dsnp'],
+    'hbo-max'          => ['HBO Max', '#b39ddb', 'hbo max|hbomax|hmax|hbo'],
+    'apple-tv'         => ['Apple TV+', '#cfd8dc', 'apple tv+|apple tv plus|apple tv|atvp'],
+    'skyshowtime'      => ['SkyShowtime', '#80cbc4', 'skyshowtime|skst'],
+    'canal'            => ['Canal+', '#b0bec5', 'canal+|canal plus|cnlp'],
 ];
 
 function tagsEnabled(array $cfg): bool
@@ -385,6 +392,7 @@ function tagsUsesTick(PDO $db): void
                SET t.uses = COALESCE(c.n, 0)");
     if (tagsLogReady($db)) $db->exec("DELETE FROM hash_tag_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL 90 DAY");
     if (function_exists('schemaOnce') && schemaOnce($db, 'v109_base_tags')) tagsSeedBase($db);
+    if (function_exists('schemaOnce') && schemaOnce($db, 'v113_base_tags')) tagsSeedBase($db);
 }
 
 function tagsAdminList(PDO $db, array $q): array
@@ -734,6 +742,19 @@ function tagsForumAdmin(PDO $db, array $cfg): array
 function tagsForumDecide(PDO $db, array $cfg, string $op, array $input): array
 {
     if (!tagsReady($db) || !tagsForumReady($db)) return ['ok' => false, 'error' => 'unavailable'];
+    if ($op === 'forum_refresh') {
+        $n = 0;
+        $set = $db->prepare("UPDATE tag_forum_map SET target = ? WHERE client_id = ? AND forum_slug = ? AND state = 'proposed'");
+        foreach ($db->query("SELECT client_id, forum_slug, name, target FROM tag_forum_map WHERE state = 'proposed'")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $target = tagsForumTarget($db, (string)$r['name'], (string)$r['forum_slug']);
+            if ($target === (string)$r['target']) continue;
+            $set->execute([$target, (int)$r['client_id'], (string)$r['forum_slug']]);
+            $n++;
+        }
+        $done = tagsForumReconcile($db, $cfg, null, 50000);
+        tagsUsesTick($db);
+        return ['ok' => true, 'n' => $n] + $done;
+    }
     $cid = (int)($input['client'] ?? 0);
     $st = $db->prepare("SELECT 1 FROM api_clients WHERE id = ?");
     $st->execute([$cid]);

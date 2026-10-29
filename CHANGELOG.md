@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.89.0] — 2026-10-29
+
+- **Lists, favourites and the search.** On profile lists a torrent's tags always stand under its name, with less
+  room between them. Favourites, uploads and lists show the site's rating beside the name, and the search shows it
+  beside the files count (stars or the share of thumbs up, whichever the site uses; Settings → Ratings → "Rating
+  beside the name"; not drawn while the rating has its own column). A click on an empty part of a row — in the search,
+  on favourites, likes, descriptions and lists — opens the torrent's Info; the name, the tags and the buttons work as
+  before (Settings → "A click on a row opens Info"). A list's window can be resized like Info, and keeps its size.
+- **Info.** The pictures at the top stand in the middle when they do not fill the strip. Headings in descriptions
+  differ by level: `#` is the biggest and `######` the smallest, in Markdown and in the forum's format.
+- **The editor's toolbar.** The emoji button stays in the top right corner when the other buttons wrap.
+- **Filters as blocks.** The groups of "More filters" take one, two or three columns by how many tags they hold and
+  fill the gaps between each other; a long list (genres, tags from people) shows the most used first and "More" for
+  the rest, with a short animation. The same in the panel's Whitelist and Index. The date fields stack when their
+  block is narrow instead of running out of it.
+- **Tags.** On the Tags page a star never wraps away from its tag, starring a tag puts it in "My tags" at once, and a
+  group of more than 60 tags shows "Show more". The tag editor in Info offers "My tags" for a quick pick. The names
+  read better: FHD / Full HD (1080p), QHD (1440p), a streaming service in the name (AMZN, NF, DSNP, HMAX, ATVP, …)
+  as WEB-DL, HDTC / telecine as CAM, ENG SUB as English subtitles rather than English audio, dual audio as MULTi,
+  PLSUBS, and 1x05 / "odcinek" / "serial" as a series; the janitor reads every name again once. More words that
+  suggest the base tags, and seven new base tags for streaming services (Netflix, Amazon Prime, Disney+, HBO Max,
+  Apple TV+, SkyShowtime, Canal+).
+- **Panel.** Covers beside the names on Whitelist and Index, and in their details the description's pictures, the
+  tags, and the description folded with the same "Show the whole description" / "Fold the description" button as
+  Info (it floats at the bottom while the text is open); Settings → Tags and filters → "Covers in the panel". The
+  member editor is wider and its moderation block reads in rows; the group editor is wider, its permissions are
+  grouped by area with a count each and can be searched, and its colour has a picker. A tag's colour is picked from
+  swatches or your own colour, with a preview. Tags from the forum and the tag changes page by 25, the forum's tags
+  can be searched, and "Refresh" matches the waiting forum tags again and puts the approved ones back on torrents.
+- Schema 113: the settings `rows_open_info`, `rep_chip` and `thumbs_panel`.
+
 ## [1.88.0] — 2026-10-28
 
 - **Pictures in messages, the shoutbox, the profile and lists.** A picture button in each editor (and a pasted

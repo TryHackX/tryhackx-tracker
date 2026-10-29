@@ -64,6 +64,11 @@
         <div class="admin-toolbar-card mt-4" id="tags-forum">
             <h2 class="tags-f-title"><i class="bi bi-chat-square-text"></i> <?= _h('a.tags.forum_title') ?></h2>
             <small class="settings-hint d-block mb-2"><?= _h('a.tags.forum_intro') ?></small>
+            <div class="tags-f-tools">
+                <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary tags-f-search" id="tags-f-search" maxlength="60" placeholder="<?= _h('a.tags.f_search_ph') ?>" aria-label="<?= _h('a.tags.f_search_ph') ?>">
+                <button type="button" class="btn btn-sm btn-outline-info" id="tags-f-refresh"><i class="bi bi-arrow-repeat"></i> <?= _h('a.tags.f_refresh') ?></button>
+            </div>
+            <small class="settings-hint d-block mb-2"><?= _h('a.tags.f_refresh_hint') ?></small>
             <div id="tags-forum-body"></div>
         </div>
     </div>
