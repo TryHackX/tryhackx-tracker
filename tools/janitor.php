@@ -199,7 +199,7 @@ try {
         if ($imgGone > 0 && in_array('-v', $argv ?? [], true)) echo "[images] removed $imgGone unused pictures\n";
     }
     if (function_exists('factsNameTick') && factsMode($cfg) === 'desc_name') {
-        if (($cfg['name_facts_cursor'] ?? '') !== 'done') {
+        if (($cfg['name_facts_cursor'] ?? '') !== 'done' || ($cfg['name_facts_ver'] ?? '1') !== (string)FACTS_NAME_VERSION) {
             $nameRead = factsNameTick($db, $cfg);
             if ($nameRead['read'] > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read {$nameRead['read']} names\n";
         } elseif (time() - (int)($cfg['name_facts_wl_at'] ?? 0) >= 600) {

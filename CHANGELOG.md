@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.89.1] — 2026-10-29
+
+- The janitor reads every torrent name again after the name rules change, also on a site that had read them all
+  before (1.89.0 waited for a pass that never started there).
+
 ## [1.89.0] — 2026-10-29
 
 - **Lists, favourites and the search.** On profile lists a torrent's tags always stand under its name, with less
