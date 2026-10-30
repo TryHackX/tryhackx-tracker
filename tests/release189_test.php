@@ -124,7 +124,7 @@ $enL = include $root . '/lang/en.php';
 $words = ['settings.rows_open_info', 'settings.rows_open_info_hint', 'settings.rep_chip', 'settings.rep_chip_hint', 'settings.thumbs_panel', 'settings.thumbs_panel_hint',
           'js.app.rep_thumbs_title_one', 'js.app.rep_thumbs_title_many', 'js.filters.more_tags', 'js.filters.less_tags', 'js.tags.page_more', 'js.tags.page_less',
           'js.tags.mine_quick', 'js.tags.mine_quick_title', 'a.users.perm_filter_ph', 'a.tags.f_search_ph', 'a.tags.f_refresh', 'a.tags.f_refresh_hint',
-          'js.tags.color_custom', 'js.tags.preview', 'js.tags.f_none_match', 'js.tags.f_refreshed'];
+          'js.tags.color_custom', 'js.tags.f_none_match', 'js.tags.f_refreshed'];
 check('the words in both languages', !array_diff($words, array_keys($plL)) && !array_diff($words, array_keys($enL)) && $plL['js.tags.mine_quick'] === 'Moje tagi:',
       json_encode(array_values(array_diff($words, array_keys($plL)))));
 check('version and changelog', version_compare(TRACKER_VERSION, '1.89.0', '>=') && str_contains($src('CHANGELOG.md'), '## [1.89.0]'));

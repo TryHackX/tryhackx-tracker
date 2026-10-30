@@ -40,7 +40,7 @@ $allowed = [
     // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
     'search_share_enabled', 'search_count_common_words', 'facts_source',
     'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_max', 'thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_panel', 'thumbs_width', 'thumbs_speed', 'thumbs_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
-    'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review', 'tags_popular_max', 'wl_req_enabled', 'wl_req_days', 'wl_req_per_day', 'wl_req_note',
+    'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review', 'tags_popular_max', 'tags_prune_unused', 'wl_req_enabled', 'wl_req_days', 'wl_req_per_day', 'wl_req_note',
     // where the version line appears (templates/footer.php) and how long a search may run
     'version_display', 'search_time_budget',
     // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
@@ -186,7 +186,7 @@ $allowed = [
     // 1.75.0 (schema 94): the day's ceiling on bulk mail (0 = none) and the sender's identity for its footer
     'bulk_mail_daily_cap', 'mail_sender_address', 'auto_penalties_enabled',
     'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
-    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'rt_video_files', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
+    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'rt_video_files', 'rt_magnet_self_show', 'torrent_reports_enabled', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
     'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_per_day_mb', 'images_quota_mb', 'images_unused_hours', 'images_in_pm', 'images_in_shout', 'images_in_bio', 'images_in_list', 'images_in_mod',
     'comment_images_upload', 'comment_images_links', 'comment_images_max', 'comment_image_max_mb', 'comment_thumb_h', 'comment_thumb_w',
     'images_gallery_enabled',
@@ -608,7 +608,7 @@ if (isset($data['dbmem_cmd']) && !dbmemValidCommand((string)$data['dbmem_cmd']))
 if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
     jsonResponse(['error' => __('api.settings.sysctl_cmd_invalid')], 400);
 }
-foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue', 'index_block_on', 'wl_req_enabled', 'wl_req_note',
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue', 'index_block_on', 'rt_magnet_self_show', 'tags_prune_unused', 'torrent_reports_enabled', 'wl_req_enabled', 'wl_req_note',
           'users_enabled', 'users_registration_enabled', 'users_links_visible',
           'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist', 'search_count_common_words',
           'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',

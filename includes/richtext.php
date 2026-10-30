@@ -636,7 +636,7 @@ function richtextMagnetCan(array $cfg): bool {
 
 function richtextMagnetCard(array $m, array $cfg, string $label = ''): string {
     $self = strtolower(trim((string)($cfg['rt_magnet_self'] ?? '')));
-    if ($self !== '' && $self === $m['hash']) return '';
+    if ($self !== '' && $self === $m['hash'] && ($cfg['rt_magnet_self_show'] ?? '0') !== '1') return '';
     $e = static fn(string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     $can = richtextMagnetCan($cfg);
     $link = $can && ($cfg['rt_links_text'] ?? '') !== '1';

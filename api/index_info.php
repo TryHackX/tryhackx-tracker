@@ -303,6 +303,9 @@ jsonResponse([
     // Comments (1.71.0, includes/comments.php): whether the section is drawn and how many there are — the
     // thread itself is its own request (api/comment_list.php), made when the section comes into view.
     'comments'    => function_exists('commentPanelInfo') ? commentPanelInfo($db, $cfg, $me, $hash) : null,
+    'torrent_report' => ($me && function_exists('contentReportKindOn') && contentReportKindOn($cfg, 'torrent') && contentReportMayReport($db, $cfg, $me)
+                         && ($reportable = contentReportTorrent($db, $hash)) !== null && !$reportable['banned'])
+                        ? ['reported' => contentReportOpenBy($db, 'torrent', 0, $hash, (int)$me['id'])] : null,
     'wl_request'  => ($wlReq = function_exists('wlReqState') ? wlReqState($db, $cfg, $hash, $me) : null) !== null
                      ? $wlReq + ['again_time' => infoReaderTime($wlReq['again'], $me, $cfg)] : null,
 ]);

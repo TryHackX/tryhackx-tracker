@@ -1602,6 +1602,14 @@
                         <input type="number" min="0" max="500" step="1" id="set-tags_create_per_day" class="form-control bg-dark text-light border-secondary" name="tags_create_per_day" value="<?= (int)($cfg['tags_create_per_day'] ?? 20) ?>">
                         <small class="settings-hint"><?= _h('settings.tags_create_per_day_hint') ?></small>
                     </div>
+                    <div class="col-md-4" data-setting="tags_prune_unused">
+                        <label for="set-tags_prune_unused" class="form-label"><?= _h('settings.tags_prune_unused') ?></label>
+                        <select id="set-tags_prune_unused" class="form-select bg-dark text-light border-secondary" name="tags_prune_unused">
+                            <option value="1" <?= ($cfg['tags_prune_unused'] ?? '1') === '1' ? 'selected' : '' ?>><?= _h('settings.index_yes') ?></option>
+                            <option value="0" <?= ($cfg['tags_prune_unused'] ?? '1') === '0' ? 'selected' : '' ?>><?= _h('settings.index_block_off') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.tags_prune_unused_hint') ?></small>
+                    </div>
                     <div class="col-md-4" data-setting="tags_popular_max">
                         <label for="set-tags_popular_max" class="form-label"><?= _h('settings.tags_popular_max') ?></label>
                         <input type="number" min="0" max="500" step="1" id="set-tags_popular_max" class="form-control bg-dark text-light border-secondary" name="tags_popular_max" value="<?= (int)($cfg['tags_popular_max'] ?? 100) ?>">
@@ -3155,6 +3163,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                         <label for="set-desc_max_links" class="form-label"><?= _h('settings.content_max_links') ?></label>
                         <input id="set-desc_max_links" type="number" class="form-control bg-dark text-light border-secondary" name="desc_max_links" value="<?= sanitize($cfg['desc_max_links'] ?? '10') ?>" min="0" max="100">
                     </div>
+                    <div class="col-md-3" data-setting="torrent_reports_enabled">
+                        <label for="set-torrent_reports_enabled" class="form-label"><?= _h('settings.torrent_reports_enabled') ?></label>
+                        <select id="set-torrent_reports_enabled" class="form-select bg-dark text-light border-secondary" name="torrent_reports_enabled">
+                            <option value="0" <?= ($cfg['torrent_reports_enabled'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.index_block_off') ?></option>
+                            <option value="1" <?= ($cfg['torrent_reports_enabled'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.index_yes') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.torrent_reports_enabled_hint') ?></small>
+                    </div>
                     <div class="col-md-3" data-setting="search_allow_sl_refresh">
                         <label for="set-search_allow_sl_refresh" class="form-label"><?= _h('settings.content_sl_refresh') ?></label>
                         <select id="set-search_allow_sl_refresh" class="form-select bg-dark text-light border-secondary" name="search_allow_sl_refresh">
@@ -3412,6 +3428,14 @@ sudo chmod 440 /etc/sudoers.d/tracker-netlimit</code></pre>
                             <?php endforeach; ?>
                         </select>
                         <small class="settings-hint"><?= _h('settings.rt_youtube_hint') ?></small>
+                    </div>
+                    <div class="col-md-6" data-setting="rt_magnet_self_show">
+                        <label for="set-rt_magnet_self_show" class="form-label"><?= _h('settings.rt_magnet_self_show') ?></label>
+                        <select id="set-rt_magnet_self_show" class="form-select bg-dark text-light border-secondary" name="rt_magnet_self_show">
+                            <option value="0" <?= ($cfg['rt_magnet_self_show'] ?? '0') !== '1' ? 'selected' : '' ?>><?= _h('settings.rt_magnet_self_hide') ?></option>
+                            <option value="1" <?= ($cfg['rt_magnet_self_show'] ?? '0') === '1' ? 'selected' : '' ?>><?= _h('settings.rt_magnet_self_keep') ?></option>
+                        </select>
+                        <small class="settings-hint"><?= _h('settings.rt_magnet_self_show_hint') ?></small>
                     </div>
                     <div class="col-md-6" data-setting="rt_video_files">
                         <label for="set-rt_video_files" class="form-label"><?= _h('settings.rt_video_files') ?></label>

@@ -48,7 +48,6 @@ add('a.tags', {
 
 add('js.tags', {
     'color_custom': ('Your own colour…', 'Własny kolor…'),
-    'preview': ('Preview', 'Podgląd'),
     'f_none_match': ('No forum tag matches.', 'Żaden tag z forum nie pasuje.'),
     'f_refreshed': ('Refreshed: :n matches changed, :added tags put on, :removed taken off.', 'Odświeżono: zmienione dopasowania :n, nałożone tagi :added, zdjęte :removed.'),
 })

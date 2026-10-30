@@ -2020,16 +2020,15 @@ function wlRequestControl(st, hash, chips) {
             form.className = 'info-wlreq-form';
             let note = null;
             if (s.note) {
-                note = document.createElement('textarea');
-                note.className = 'profile-search';
-                note.rows = 2;
+                note = document.createElement('input');
+                note.type = 'text';
+                note.className = 'profile-search info-wlreq-note';
                 note.maxLength = 300;
                 note.placeholder = t.key('js.app.wlreq_note_ph');
                 note.setAttribute('aria-label', t.key('js.app.wlreq_note_ph'));
+                note.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } });
                 form.appendChild(note);
             }
-            const acts = document.createElement('div');
-            acts.className = 'info-wlreq-acts';
             const send = document.createElement('button');
             send.type = 'button';
             send.className = 'btn btn-small';
@@ -2049,8 +2048,7 @@ function wlRequestControl(st, hash, chips) {
                 if (r && r.success && r.state) { paint(r.state); return; }
                 say.textContent = (r && (r.error || r.message)) || t.key('js.app.no_answer');
             });
-            acts.append(send, cancel, say);
-            form.appendChild(acts);
+            form.append(send, cancel, say);
             chips.after(form);
             btn.setAttribute('aria-expanded', 'true');
             (note || send).focus();
@@ -4079,8 +4077,11 @@ window.siteToast = siteToast;
             });
             chips.appendChild(btn);
         }
-        if (chips.children.length || json.wl_request) body.appendChild(chips);
+        if (chips.children.length || json.wl_request || json.torrent_report) body.appendChild(chips);
         if (json.wl_request) wlRequestControl(json.wl_request, hash, chips);
+        if (json.torrent_report && window.Reports && typeof window.Reports.button === 'function') {
+            chips.appendChild(window.Reports.button({ kind: 'torrent', hash }, !!json.torrent_report.reported, 'info-torrent-report', body, chips));
+        }
 
         // 3. where it came from
         if (json.source_url) {

@@ -45,7 +45,6 @@ add('js.tags', {
     'select': ('Select “:name”', 'Zaznacz „:name”'),
     'k_none': ('No category', 'Bez kategorii'),
     'k_all': ('All categories', 'Wszystkie kategorie'),
-    'k_label': ('Category', 'Kategoria'),
     'k_new_ph': ('Name of a new category', 'Nazwa nowej kategorii'),
     'k_add': ('Add a category', 'Dodaj kategorię'),
     'k_up': ('Move up', 'W górę'),

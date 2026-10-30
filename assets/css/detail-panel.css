@@ -35,12 +35,14 @@
 .info-chip-auto { border-style: dashed; opacity: 0.7; }
 .info-chip-forum { color: inherit; text-decoration: none; white-space: nowrap; }
 a.info-chip-forum:hover { border-color: var(--accent); opacity: 1; }
-.info-refresh { margin-left: auto; }
+.info-chips > :is(.info-refresh, .info-wlreq, .info-torrent-report):first-child,
+.info-chips > .info-chip + :is(.info-refresh, .info-wlreq, .info-torrent-report) { margin-left: auto; }
+.info-chips > .info-torrent-report { flex: 0 0 auto; }
 .info-chip-wait { border-color: rgba(224, 184, 92, 0.55); color: #e0b85c; opacity: 1; }
-.info-wlreq-form { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; max-width: 34rem; }
-.info-wlreq-form textarea { width: 100%; resize: vertical; }
-.info-wlreq-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.info-wlreq-say { font-size: 0.8rem; color: var(--text-muted); }
+.info-wlreq-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.4rem; margin-top: 0.45rem; }
+.info-wlreq-form .info-wlreq-note { flex: 0 1 22rem; min-width: 12rem; width: auto; height: auto; padding-block: 0.25rem; font-size: 0.8rem; }
+.info-wlreq-say { flex-basis: 100%; text-align: right; font-size: 0.8rem; color: var(--text-muted); }
+.info-wlreq-say:empty { display: none; }
 
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.1rem 1.2rem; }
 .info-kv { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.3rem 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
@@ -227,6 +229,9 @@ button.fchip:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc) 
 .tags-page-search input { max-width: 22rem; }
 .tags-group { margin-bottom: 1.1rem; }
 .tags-group h2 { font-size: 1rem; margin: 0 0 0.45rem; }
+.tags-grp-h { font-size: 1.1rem; margin: 1.3rem 0 0.6rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--border, #222); }
+.tags-in-grp { margin-left: 0.85rem; }
+.tags-in-grp h3 { font-size: 0.95rem; margin: 0 0 0.4rem; color: var(--text-muted, #aaa); }
 .tags-list a { text-decoration: none; color: inherit; }
 .tags-list a[hidden], .tags-group[hidden] { display: none; }
 .sf-tag.is-not { color: #ff8a80; background: color-mix(in srgb, #ff5252 14%, transparent); border-color: color-mix(in srgb, #ff5252 55%, transparent); text-decoration: line-through; }

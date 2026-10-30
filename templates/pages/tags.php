@@ -17,11 +17,12 @@ $tagsOwn = [];
 foreach ($tagsItems as $c) {
     if ($c['g'] !== 'x' || (isset($c['kg']) && ($c['kg'] !== 'g' || $tagsCanDesc))) continue;
     $k = $c['k'] ?? '';
-    $tagsOwn[$k] ??= [$k === '' ? 200000 : (int)($c['ko'] ?? 0), $k === '' ? __('js.filters.t_x') : (string)($c['kl'] ?? $k), []];
+    $tagsOwn[$k] ??= [[isset($c['p']) ? 0 : 1, (int)($c['po'] ?? 0), $k === '' ? 200000 : (int)($c['ko'] ?? 0)],
+                      $k === '' ? __('js.filters.t_x') : (string)($c['kl'] ?? $k), [], (string)($c['pl'] ?? '')];
     $tagsOwn[$k][2][] = $c;
 }
 uasort($tagsOwn, fn($a, $b) => $a[0] <=> $b[0]);
-foreach ($tagsOwn as $k => [, $label, $items]) $tagsSections[] = [$k === '' ? 'x' : 'x-' . ltrim($k, '~'), $label, $items, 0];
+foreach ($tagsOwn as $k => [, $label, $items, $group]) $tagsSections[] = [$k === '' ? 'x' : 'x-' . ltrim($k, '~'), $label, $items, 0, $group];
 foreach ($tagsGroups as $g => $label) {
     if ($g === 'g' && !$tagsCanDesc) continue;
     $items = array_values(array_filter($tagsItems, fn($c) => $c['g'] === $g || ($c['kg'] ?? '') === $g));
@@ -48,9 +49,10 @@ foreach ($tagsGroups as $g => $label) {
     </div>
 </section>
 <?php endif; ?>
-<?php foreach ($tagsSections as [$key, $groupLabel, $items, $page]): ?>
-<section class="tags-group" data-g="<?= sanitize($key) ?>"<?= $page ? ' data-page="' . (int)$page . '"' : '' ?>>
-    <h2><?= sanitize($groupLabel) ?></h2>
+<?php $tagsLastGroup = ''; foreach ($tagsSections as $tagsSec): [$key, $groupLabel, $items, $page] = $tagsSec; $tagsGrp = (string)($tagsSec[4] ?? ''); ?>
+<?php if ($tagsGrp !== '' && $tagsGrp !== $tagsLastGroup): ?><h2 class="tags-grp-h"><?= sanitize($tagsGrp) ?></h2><?php endif; $tagsLastGroup = $tagsGrp; ?>
+<section class="tags-group<?= $tagsGrp !== '' ? ' tags-in-grp' : '' ?>" data-g="<?= sanitize($key) ?>"<?= $page ? ' data-page="' . (int)$page . '"' : '' ?>>
+    <<?= $tagsGrp !== '' ? 'h3' : 'h2' ?>><?= sanitize($groupLabel) ?></<?= $tagsGrp !== '' ? 'h3' : 'h2' ?>>
     <div class="fchips tags-list">
         <?php foreach ($items as $c): $cOwn = $tagsCatOn && $c['g'] === 'x'; $cPair = $tagsFavOn || $cOwn; ?>
         <?php if ($cPair): ?><span class="tag-pair"><?php endif; ?><a class="fchip fchip-<?= sanitize($c['g']) ?>" href="<?= sanitize($baseUrl) ?>?action=search&amp;tags=<?= rawurlencode($c['id']) ?>" data-s="<?= sanitize(mb_strtolower($c['l'] . ' ' . ($c['a'] ?? '') . ' ' . $c['id'])) ?>"<?= !empty($c['c']) ? ' style="--fc: ' . sanitize($c['c']) . '"' : '' ?>><?= sanitize($c['l']) ?><?php if (isset($c['n'])): ?><span class="sf-n"><?= sanitize(langNumber($c['n'])) ?></span><?php endif; ?></a><?php if ($tagsFavOn): $fOn = isset($tagsFavs[$c['id']]); ?><button type="button" class="tag-fav" data-id="<?= sanitize($c['id']) ?>" aria-pressed="<?= $fOn ? 'true' : 'false' ?>" title="<?= _h($fOn ? 'js.tags.fav_off' : 'js.tags.fav_on') ?>" aria-label="<?= _h($fOn ? 'js.tags.fav_off' : 'js.tags.fav_on') ?>"><i class="bi <?= $fOn ? 'bi-star-fill' : 'bi-star' ?>" aria-hidden="true"></i></button><?php endif; ?><?php if ($cOwn): ?><button type="button" class="tag-cat" data-id="<?= sanitize($c['id']) ?>" data-name="<?= sanitize($c['l']) ?>" data-k="<?= sanitize(ltrim((string)($c['k'] ?? ''), '~')) ?>" title="<?= _h('tags.cat_suggest') ?>" aria-label="<?= _h('tags.cat_suggest_for', ['name' => $c['l']]) ?>"><i class="bi bi-folder2" aria-hidden="true"></i></button><?php endif; ?><?php if ($cPair): ?></span><?php endif; ?>

@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format is loosely b
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.91.0] — 2026-10-30
+
+- **Unused tags go.** A tag people made is deleted when no torrent has it any more: at once when it is taken off the
+  last one, and by the janitor for the rest. Base tags, tags in a category, rejected or hidden ones and the forum's
+  mapped tags stay. Settings → Tags and filters → "Delete tags nobody uses" (on).
+- **Tags in the panel.** The table sorts by name, category, status, uses and date from its headers. A tag is edited in
+  a window of its own: name, category, colour from the palette or picked, description, with a preview.
+- **Groups of categories.** Panel → Tags → Categories → Groups: categories are put in groups, which are ordered,
+  renamed and deleted there. A group with "Own card in the filters" is a card of its own in "More filters" holding its
+  categories; the Tags page heads its categories with the group's name.
+- **Reporting a torrent from Info** (off; Settings → Descriptions & source links → "Reporting a torrent from Info").
+  A member with the Report permission gets a flag in Info that sends a short report to Panel → Reports → Torrents.
+  There the reports are closed, or the hash is banned (the tracker stops serving it and it leaves the search), and the
+  member who registered the torrent can be warned. Moderators get the two permissions of the queue. The Report page's
+  form works as before.
+- **Magnet.** A torrent's own magnet in its description stays hidden, as before (Info has its own Magnet button);
+  Settings → Text formats → "The torrent's own magnet in its description" shows it like any other.
+- **Smaller things.** The whitelist request in Info is one line with its buttons instead of a large box. "More
+  filters" over a table of more than 100 rows fades in instead of growing, which stuttered.
+- Schema 115: the table `tag_cat_groups`, the column `tag_categories.group_id`, `torrent` as a kind of report, the
+  settings `rt_magnet_self_show`, `tags_prune_unused` and `torrent_reports_enabled`, and the permissions
+  `panel.reports.torrents.view` and `panel.reports.torrents.handle` for moderators.
+
 ## [1.90.0] — 2026-10-30
 
 - **Tag categories.** Tags people add belong to categories: the built-in groups (Resolution, Video, HDR, Audio,

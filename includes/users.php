@@ -261,6 +261,8 @@ function userPermissionList(bool $english = false): array {
         'panel.reports.shouts.handle'       => 'PANEL — act on reported shouts (close, remove, warn, silence, ban the author)',
         'panel.reports.images.view'         => 'PANEL — see reported pictures',
         'panel.reports.images.handle'       => 'PANEL — act on reported pictures (close, remove and block the picture, warn, silence, ban the uploader)',
+        'panel.reports.torrents.view'       => 'PANEL — see torrents reported from Info',
+        'panel.reports.torrents.handle'     => 'PANEL — act on torrents reported from Info (close, ban the hash, warn the one who registered it)',
         'panel.appeals.resolve'  => 'PANEL — resolve and restore appeals',
         'panel.whitelist.view'   => 'PANEL — see the Whitelist and Index pages',
         'panel.whitelist.add'    => 'PANEL — register hashes from the panel',
@@ -368,6 +370,7 @@ function userGroupPresets(): array {
                         'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
                         'panel.reports.shouts.view', 'panel.reports.shouts.handle',
                         'panel.reports.images.view', 'panel.reports.images.handle',
+                        'panel.reports.torrents.view', 'panel.reports.torrents.handle',
                         // v94 (1.75.0): the Moderation page — read it and act on it (lift, revoke, warn by hand); the
                         // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
                         'panel.moderation.view', 'panel.moderation.handle',

@@ -43,11 +43,6 @@
                         <option value=""><?= _h('a.tags.f_cat_all') ?></option>
                         <option value="none"><?= _h('a.tags.f_cat_none') ?></option>
                     </select>
-                    <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="tags-f-sort" aria-label="<?= _h('a.tags.f_sort') ?>">
-                        <option value="uses"><?= _h('a.tags.f_sort_uses') ?></option>
-                        <option value="name"><?= _h('a.tags.f_sort_name') ?></option>
-                        <option value="new"><?= _h('a.tags.f_sort_new') ?></option>
-                    </select>
                     <span class="wl-small text-muted" id="tags-total"></span>
                     <span class="wl-badge wl-b-pending d-hidden" id="tags-pending-badge" title="<?= _h('a.tags.pending_title') ?>"></span>
                 </div>
@@ -65,11 +60,11 @@
                 <table class="table table-dark table-hover wl-table dash-table" id="tags-table">
                     <thead><tr>
                         <th class="tags-check"><input type="checkbox" class="form-check-input" id="tags-check-all" aria-label="<?= _h('a.tags.check_all') ?>"></th>
-                        <th><?= _h('a.tags.col_tag') ?></th>
-                        <th class="tags-cat-col"><?= _h('a.tags.col_cat') ?></th>
-                        <th class="col-badge"><?= _h('a.tags.col_status') ?></th>
-                        <th><?= _h('a.tags.col_uses') ?></th>
-                        <th><?= _h('a.tags.col_created') ?></th>
+                        <th class="sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('a.tags.col_tag') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="tags-cat-col sortable" data-sort="cat"><button type="button" class="th-sort"><?= _h('a.tags.col_cat') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="col-badge sortable" data-sort="status"><button type="button" class="th-sort"><?= _h('a.tags.col_status') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="uses"><button type="button" class="th-sort"><?= _h('a.tags.col_uses') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="created"><button type="button" class="th-sort"><?= _h('a.tags.col_created') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
                         <th class="th-actions"><?= _h('a.tags.col_actions') ?></th>
                     </tr></thead>
                     <tbody id="tags-body"></tbody>
@@ -109,6 +104,42 @@
     </div>
 
     <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
+
+    <div class="modal fade" id="tagEditModal" tabindex="-1" aria-labelledby="te-title" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title" id="te-title"><i class="bi bi-pencil"></i> <?= _h('a.tags.edit_title') ?> <span id="te-title-name" class="text-info"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-7">
+                            <label for="te-name" class="form-label wl-label"><?= _h('a.tags.edit_name') ?></label>
+                            <input type="text" id="te-name" class="form-control form-control-sm bg-dark text-light border-secondary" maxlength="40">
+                            <small class="settings-hint" id="te-slug"></small>
+                        </div>
+                        <div class="col-md-5">
+                            <label for="te-cat" class="form-label wl-label"><?= _h('a.tags.edit_cat') ?></label>
+                            <select id="te-cat" class="form-select form-select-sm bg-dark text-light border-secondary"></select>
+                        </div>
+                        <div class="col-12">
+                            <span class="form-label wl-label d-block"><?= _h('a.tags.edit_color') ?></span>
+                            <div class="te-color-row"><div id="te-swatches" class="tags-swatches" role="radiogroup" aria-label="<?= _h('a.tags.edit_color') ?>"></div><span id="te-preview" class="fchip fchip-x tags-chip tags-preview"></span></div>
+                        </div>
+                        <div class="col-12">
+                            <label for="te-desc" class="form-label wl-label"><?= _h('a.tags.edit_desc') ?></label>
+                            <input type="text" id="te-desc" class="form-control form-control-sm bg-dark text-light border-secondary" maxlength="200" placeholder="<?= _h('a.tags.edit_desc_ph') ?>">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('a.tags.edit_cancel') ?></button>
+                    <button type="button" class="btn btn-sm btn-success" id="te-save"><i class="bi bi-check-lg"></i> <?= _h('a.tags.edit_save') ?></button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
     <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>

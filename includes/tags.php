@@ -232,6 +232,37 @@ function tagsDetach(PDO $db, string $hash, string $id, ?int $userId, bool $moder
     return ['ok' => true, 'removed' => 'blocked'];
 }
 
+function tagsPrune(PDO $db, array $cfg, ?string $id = null): int
+{
+    if (($cfg['tags_prune_unused'] ?? '1') !== '1' || !tagsReady($db)) return 0;
+    if ($id !== null && !tagsIsExplicit($id)) return 0;
+    $base = array_keys(TAGS_BASE);
+    $where = ["t.status IN ('approved','pending')", 't.hidden = 0', "t.slug NOT IN (" . implode(',', array_fill(0, count($base), '?')) . ")",
+              "NOT EXISTS (SELECT 1 FROM hash_tags h WHERE h.tag = CONCAT('x:', t.slug))"];
+    $args = $base;
+    if (tagsForumReady($db)) $where[] = "NOT EXISTS (SELECT 1 FROM tag_forum_map m WHERE m.target = CONCAT('x:', t.slug))";
+    if (tagsCatReady($db)) $where[] = 't.category_id IS NULL';
+    if ($id !== null) {
+        $where[] = 't.slug = ?';
+        $args[] = substr($id, 2);
+    } else {
+        $where[] = 't.created_at < UTC_TIMESTAMP() - INTERVAL 10 MINUTE';
+    }
+    $st = $db->prepare("SELECT t.id, t.slug FROM tags t WHERE " . implode(' AND ', $where) . " LIMIT 500");
+    $st->execute($args);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) return 0;
+    $ids = array_map('intval', array_column($rows, 'id'));
+    $slugs = array_map('strval', array_column($rows, 'slug'));
+    $tagIds = array_map(fn($s) => 'x:' . $s, $slugs);
+    $q = implode(',', array_fill(0, count($ids), '?'));
+    if (tagsFavReady($db)) $db->prepare("DELETE FROM tag_favourites WHERE tag IN ($q)")->execute($tagIds);
+    $db->prepare("DELETE FROM hash_tag_blocks WHERE tag IN ($q)")->execute($tagIds);
+    if (tagsCatReady($db)) $db->prepare("DELETE FROM tag_cat_suggestions WHERE tag_slug IN ($q) AND status = 'open'")->execute($slugs);
+    $db->prepare("DELETE FROM tags WHERE id IN ($q)")->execute($ids);
+    return count($ids);
+}
+
 function tagsCount(PDO $db, string $id): void
 {
     if (!tagsIsExplicit($id) || !tagsReady($db)) return;
@@ -330,11 +361,16 @@ function tagsCatalog(PDO $db, int $limit = 300): array
 {
     if (!tagsReady($db)) return [];
     $limit = max(1, (int)$limit);
-    $st = $db->query(tagsCatReady($db)
+    $st = $db->query(tagsGroupReady($db)
+        ? "SELECT t.slug, t.name, t.color, t.uses, t.origin, c.slug AS k, c.name AS kn, c.grp AS kg, c.sort AS ko, c.origin AS kor,
+                  gg.slug AS p, gg.name AS pn, gg.sort AS po, gg.pinned AS pp
+             FROM tags t LEFT JOIN tag_categories c ON c.id = t.category_id AND c.status = 'approved' LEFT JOIN tag_cat_groups gg ON gg.id = c.group_id
+            WHERE t.status = 'approved' AND t.hidden = 0 AND t.uses > 0 ORDER BY t.uses DESC, t.name LIMIT $limit"
+        : (tagsCatReady($db)
         ? "SELECT t.slug, t.name, t.color, t.uses, t.origin, c.slug AS k, c.name AS kn, c.grp AS kg, c.sort AS ko, c.origin AS kor
              FROM tags t LEFT JOIN tag_categories c ON c.id = t.category_id AND c.status = 'approved'
             WHERE t.status = 'approved' AND t.hidden = 0 AND t.uses > 0 ORDER BY t.uses DESC, t.name LIMIT $limit"
-        : "SELECT slug, name, color, uses, origin FROM tags WHERE status = 'approved' AND hidden = 0 AND uses > 0 ORDER BY uses DESC, name LIMIT $limit");
+        : "SELECT slug, name, color, uses, origin FROM tags WHERE status = 'approved' AND hidden = 0 AND uses > 0 ORDER BY uses DESC, name LIMIT $limit"));
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $c = ['id' => 'x:' . $r['slug'], 'g' => 'x', 'l' => (string)$r['name'], 'a' => str_replace('-', ' ', (string)$r['slug']), 'n' => (int)$r['uses']];
@@ -344,6 +380,12 @@ function tagsCatalog(PDO $db, int $limit = 300): array
             $c['kl'] = tagsCatLabel(['slug' => $r['k'], 'name' => $r['kn'], 'grp' => $r['kg'], 'origin' => $r['kor']]);
             $c['ko'] = (int)$r['ko'];
             if (!empty($r['kg'])) $c['kg'] = (string)$r['kg'];
+            if (!empty($r['p'])) {
+                $c['p'] = (string)$r['p'];
+                $c['pl'] = (string)$r['pn'];
+                $c['po'] = (int)$r['po'];
+                $c['pp'] = (int)$r['pp'];
+            }
         } elseif ($r['origin'] === 'forum') {
             $c['k'] = '~forum';
             $c['kl'] = __('tags.cat_forum');
@@ -414,6 +456,7 @@ function tagsUsesTick(PDO $db): void
     if (tagsLogReady($db)) $db->exec("DELETE FROM hash_tag_log WHERE created_at < UTC_TIMESTAMP() - INTERVAL 90 DAY");
     if (function_exists('schemaOnce') && schemaOnce($db, 'v109_base_tags')) tagsSeedBase($db);
     if (function_exists('schemaOnce') && schemaOnce($db, 'v113_base_tags')) tagsSeedBase($db);
+    tagsPrune($db, $GLOBALS['cfg'] ?? []);
 }
 
 function tagsAdminList(PDO $db, array $q): array
@@ -432,7 +475,14 @@ function tagsAdminList(PDO $db, array $q): array
     if ($cats && $cat === 'none') $where[] = 't.category_id IS NULL';
     elseif ($cats && ctype_digit($cat)) { $where[] = 't.category_id = ?'; $params[] = (int)$cat; }
     $whereClause = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $orderClause = ['uses' => 't.uses DESC, t.name', 'name' => 't.name', 'new' => 't.created_at DESC, t.id DESC'][(string)($q['sort'] ?? 'uses')] ?? 't.uses DESC, t.name';
+    $sortCols = ['name' => 't.name', 'status' => 't.status', 'uses' => 't.uses', 'created' => 't.created_at', 'new' => 't.created_at'] + ($cats ? ['cat' => 'cs'] : []);
+    $orderParts = [];
+    foreach (explode(',', (string)($q['sort'] ?? 'uses:desc')) as $part) {
+        [$col, $dir] = array_pad(explode(':', trim($part)), 2, $part === 'new' ? 'desc' : ($part === 'uses' ? 'desc' : 'asc'));
+        if (!isset($sortCols[$col]) || isset($orderParts[$sortCols[$col]])) continue;
+        $orderParts[$sortCols[$col]] = $sortCols[$col] . (strtolower($dir) === 'desc' ? ' DESC' : ' ASC');
+    }
+    $orderClause = implode(', ', $orderParts ?: ['t.uses DESC']) . ', t.name, t.id';
     $perPage = max(10, min(200, (int)($q['per_page'] ?? 50)));
     $page = max(1, (int)($q['page'] ?? 1));
     $st = $db->prepare("SELECT COUNT(*) FROM tags t $whereClause");
@@ -440,14 +490,16 @@ function tagsAdminList(PDO $db, array $q): array
     $total = (int)$st->fetchColumn();
     $limit = (int)$perPage;
     $offset = ($page - 1) * $perPage;
-    $catCol = $cats ? 't.category_id' : 'NULL AS category_id';
+    $catCol = $cats ? 't.category_id, COALESCE(c.sort, 999999) AS cs' : 'NULL AS category_id';
+    $catJoin = $cats ? 'LEFT JOIN tag_categories c ON c.id = t.category_id' : '';
     $st = $db->prepare("SELECT t.id, t.slug, t.name, t.color, t.description, t.status, t.hidden, t.origin, t.uses, t.created_at, $catCol, u.username AS created_by_name
-                          FROM tags t LEFT JOIN users u ON u.id = t.created_by $whereClause ORDER BY $orderClause LIMIT $limit OFFSET $offset");
+                          FROM tags t LEFT JOIN users u ON u.id = t.created_by $catJoin $whereClause ORDER BY $orderClause LIMIT $limit OFFSET $offset");
     $st->execute($params);
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     foreach ($rows as &$r) {
         $r['id'] = (int)$r['id']; $r['hidden'] = (int)$r['hidden']; $r['uses'] = (int)$r['uses']; $r['tag'] = 'x:' . $r['slug'];
         $r['category_id'] = $r['category_id'] !== null ? (int)$r['category_id'] : null;
+        unset($r['cs']);
     }
     unset($r);
     $pending = (int)$db->query("SELECT COUNT(*) FROM tags WHERE status = 'pending'")->fetchColumn();
@@ -1073,6 +1125,91 @@ function tagsCatReady(PDO $db): bool
     return $ready;
 }
 
+function tagsGroupReady(PDO $db): bool
+{
+    static $ready = false;
+    if ($ready) return true;
+    try {
+        $ready = (bool)$db->query("SHOW TABLES LIKE 'tag_cat_groups'")->fetchColumn()
+              && (bool)$db->query("SHOW COLUMNS FROM tag_categories LIKE 'group_id'")->fetchColumn();
+    } catch (\Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+function tagsGroupList(PDO $db): array
+{
+    if (!tagsGroupReady($db)) return [];
+    $rows = $db->query("SELECT g.id, g.slug, g.name, g.sort, g.pinned, (SELECT COUNT(*) FROM tag_categories c WHERE c.group_id = g.id) AS n
+                          FROM tag_cat_groups g ORDER BY g.sort, g.id")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$r) {
+        $r['id'] = (int)$r['id'];
+        $r['sort'] = (int)$r['sort'];
+        $r['pinned'] = (int)$r['pinned'];
+        $r['n'] = (int)$r['n'];
+    }
+    unset($r);
+    return $rows;
+}
+
+function tagsGroupAction(PDO $db, string $op, array $in): array
+{
+    if (!tagsGroupReady($db)) return ['ok' => false, 'error' => 'unavailable'];
+    if ($op === 'grp_add') {
+        $name = tagsName((string)($in['name'] ?? ''), 40);
+        if ($name === null) return ['ok' => false, 'error' => 'name'];
+        $slug = tagsSlug($name);
+        $st = $db->prepare("SELECT 1 FROM tag_cat_groups WHERE slug = ?");
+        $st->execute([$slug]);
+        if ($st->fetchColumn()) return ['ok' => false, 'error' => 'exists'];
+        if ((int)$db->query("SELECT COUNT(*) FROM tag_cat_groups")->fetchColumn() >= 20) return ['ok' => false, 'error' => 'limit'];
+        $sort = (int)$db->query("SELECT COALESCE(MAX(sort), 0) FROM tag_cat_groups")->fetchColumn() + 10;
+        $db->prepare("INSERT INTO tag_cat_groups (slug, name, sort, pinned, created_at) VALUES (?, ?, ?, ?, UTC_TIMESTAMP())")
+           ->execute([$slug, $name, $sort, !empty($in['pinned']) ? 1 : 0]);
+        return ['ok' => true, 'n' => 1, 'id' => (int)$db->lastInsertId()];
+    }
+    if ($op === 'cat_group') {
+        $gid = (int)($in['group'] ?? 0);
+        if ($gid > 0) {
+            $st = $db->prepare("SELECT 1 FROM tag_cat_groups WHERE id = ?");
+            $st->execute([$gid]);
+            if (!$st->fetchColumn()) return ['ok' => false, 'error' => 'target'];
+        }
+        $st = $db->prepare("UPDATE tag_categories SET group_id = ? WHERE id = ? AND grp IS NULL");
+        $st->execute([$gid > 0 ? $gid : null, (int)($in['id'] ?? 0)]);
+        return ['ok' => true, 'n' => (int)$st->rowCount()];
+    }
+    $st = $db->prepare("SELECT * FROM tag_cat_groups WHERE id = ?");
+    $st->execute([(int)($in['id'] ?? 0)]);
+    $g = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$g) return ['ok' => false, 'error' => 'not_found'];
+    if ($op === 'grp_save') {
+        $name = tagsName((string)($in['name'] ?? $g['name']), 40);
+        if ($name === null) return ['ok' => false, 'error' => 'name'];
+        $db->prepare("UPDATE tag_cat_groups SET name = ?, pinned = ? WHERE id = ?")
+           ->execute([$name, array_key_exists('pinned', $in) ? (!empty($in['pinned']) ? 1 : 0) : (int)$g['pinned'], (int)$g['id']]);
+        return ['ok' => true, 'n' => 1];
+    }
+    if ($op === 'grp_move') {
+        $dir = (int)($in['dir'] ?? 0) < 0 ? -1 : 1;
+        $ids = array_map('intval', $db->query("SELECT id FROM tag_cat_groups ORDER BY sort, id")->fetchAll(PDO::FETCH_COLUMN));
+        $at = array_search((int)$g['id'], $ids, true);
+        $to = $at + $dir;
+        if ($at === false || $to < 0 || $to >= count($ids)) return ['ok' => true, 'n' => 0];
+        [$ids[$at], $ids[$to]] = [$ids[$to], $ids[$at]];
+        $up = $db->prepare("UPDATE tag_cat_groups SET sort = ? WHERE id = ?");
+        foreach ($ids as $k => $id) $up->execute([($k + 1) * 10, $id]);
+        return ['ok' => true, 'n' => 1];
+    }
+    if ($op === 'grp_delete') {
+        $db->prepare("UPDATE tag_categories SET group_id = NULL WHERE group_id = ?")->execute([(int)$g['id']]);
+        $db->prepare("DELETE FROM tag_cat_groups WHERE id = ?")->execute([(int)$g['id']]);
+        return ['ok' => true, 'n' => 1];
+    }
+    return ['ok' => false, 'error' => 'invalid'];
+}
+
 function tagsCatSeed(PDO $db): int
 {
     if (!tagsCatReady($db)) return 0;
@@ -1105,7 +1242,8 @@ function tagsCatLabel(array $c): string
 function tagsCatList(PDO $db, bool $all = false): array
 {
     if (!tagsCatReady($db)) return [];
-    $rows = $db->query("SELECT c.id, c.slug, c.name, c.color, c.sort, c.grp, c.status, c.origin, c.created_at, u.username AS created_by_name,
+    $groupCol = tagsGroupReady($db) ? 'c.group_id' : 'NULL AS group_id';
+    $rows = $db->query("SELECT c.id, c.slug, c.name, c.color, c.sort, c.grp, c.status, c.origin, c.created_at, u.username AS created_by_name, $groupCol,
                                (SELECT COUNT(*) FROM tags t WHERE t.category_id = c.id) AS n
                           FROM tag_categories c LEFT JOIN users u ON u.id = c.created_by"
                        . ($all ? '' : " WHERE c.status = 'approved'") . " ORDER BY c.sort, c.id")->fetchAll(PDO::FETCH_ASSOC);
@@ -1113,6 +1251,7 @@ function tagsCatList(PDO $db, bool $all = false): array
         $r['id'] = (int)$r['id'];
         $r['sort'] = (int)$r['sort'];
         $r['n'] = (int)$r['n'];
+        $r['group_id'] = $r['group_id'] !== null ? (int)$r['group_id'] : null;
         $r['l'] = tagsCatLabel($r);
     }
     unset($r);
@@ -1127,7 +1266,7 @@ function tagsCatOpen(PDO $db): int
 
 function tagsCatAdmin(PDO $db): array
 {
-    if (!tagsCatReady($db)) return ['cats' => [], 'suggestions' => []];
+    if (!tagsCatReady($db)) return ['cats' => [], 'suggestions' => [], 'groups' => []];
     $cats = tagsCatList($db, true);
     $byId = array_column($cats, null, 'id');
     $rows = $db->query("SELECT s.id, s.tag_slug, s.category_id, s.new_name, s.created_at, u.username, t.name AS tag_name, t.color AS tag_color, t.category_id AS tag_cat
@@ -1141,7 +1280,7 @@ function tagsCatAdmin(PDO $db): array
                   'cat' => $cat ? $cat['l'] : null, 'new' => $r['new_name'], 'now' => $now ? $now['l'] : null,
                   'who' => $r['username'], 'at' => $r['created_at']];
     }
-    return ['cats' => $cats, 'suggestions' => $out];
+    return ['cats' => $cats, 'suggestions' => $out, 'groups' => tagsGroupList($db)];
 }
 
 function tagsCatCreate(PDO $db, string $name, ?string $color, string $origin, ?int $userId, string $status = 'approved'): array

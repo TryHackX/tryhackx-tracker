@@ -51,7 +51,7 @@ require_once __DIR__ . '/antispam.php';
 // (1.75.0). It lives in its own file; this one is where the report cards call it from.
 require_once __DIR__ . '/moderation.php';
 
-const CONTENT_REPORT_KINDS         = ['comment', 'description', 'shout', 'image'];
+const CONTENT_REPORT_KINDS         = ['comment', 'description', 'shout', 'image', 'torrent'];
 const CONTENT_REPORT_REASON_MAX    = 300;     // a member's reason
 const CONTENT_REPORT_TEXT_MAX      = 500;     // a moderator's note, answer and reason (the columns' width)
 const CONTENT_REPORT_RATE_PER_HOUR = 20;      // reports an account may file in an hour (contentReportFloodCheck())
@@ -69,13 +69,29 @@ function contentReportKindOn(array $cfg, string $kind): bool
     if ($kind === 'description') return function_exists('contentEnabled') && contentEnabled($cfg);
     if ($kind === 'shout') return function_exists('shoutEnabled') && shoutEnabled($cfg);
     if ($kind === 'image') return function_exists('imagesRow');
+    if ($kind === 'torrent') return ($cfg['torrent_reports_enabled'] ?? '0') === '1' && function_exists('indexEnabled') && indexEnabled($cfg);
     return false;
+}
+
+function contentReportTorrent(PDO $db, string $hash): ?array
+{
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return null;
+    $st = $db->prepare("SELECT name, submitter_id, banned FROM whitelist WHERE info_hash = ? LIMIT 1");
+    $st->execute([$hash]);
+    $w = $st->fetch(PDO::FETCH_ASSOC);
+    if ($w) return ['name' => (string)($w['name'] ?? ''), 'owner' => $w['submitter_id'] !== null ? (int)$w['submitter_id'] : null, 'banned' => (int)$w['banned'] === 1];
+    $st = $db->prepare("SELECT (SELECT name FROM index_hashes WHERE info_hash = ? LIMIT 1) AS name, EXISTS(SELECT 1 FROM banned_hashes WHERE info_hash = ?) AS banned,
+                               (SELECT snapshot FROM content_reports WHERE kind = 'torrent' AND info_hash = ? ORDER BY id DESC LIMIT 1) AS said");
+    $st->execute([$hash, $hash, $hash]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$r || ($r['name'] === null && (int)$r['banned'] !== 1)) return null;
+    return ['name' => (string)($r['name'] ?? $r['said'] ?? ''), 'owner' => null, 'banned' => (int)$r['banned'] === 1];
 }
 
 /** The panel permission of one kind's queue: panel.reports.comments.view, …descriptions.handle, … */
 function contentReportPerm(string $kind, string $what): string
 {
-    $plural = ['comment' => 'comments', 'description' => 'descriptions', 'shout' => 'shouts', 'image' => 'images'][$kind] ?? 'none';
+    $plural = ['comment' => 'comments', 'description' => 'descriptions', 'shout' => 'shouts', 'image' => 'images', 'torrent' => 'torrents'][$kind] ?? 'none';
     return 'panel.reports.' . $plural . '.' . ($what === 'handle' ? 'handle' : 'view');
 }
 
@@ -236,6 +252,13 @@ function contentReportTargetFor(PDO $db, array $cfg, ?array $me, string $kind, i
         return ['kind' => 'shout', 'target_id' => (int)$row['id'], 'info_hash' => '',
                 'author_id' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
                 'text' => (string)$row['body'], 'format' => (string)$row['body_format']];
+    }
+    if ($kind === 'torrent') {
+        $hash = strtolower(trim($hash));
+        if (!userIdHasPermission($db, $cfg, $uid, 'index.view')) return null;
+        $tr = contentReportTorrent($db, $hash);
+        if ($tr === null || $tr['banned']) return null;
+        return ['kind' => 'torrent', 'target_id' => 0, 'info_hash' => $hash, 'author_id' => $tr['owner'], 'text' => $tr['name'], 'format' => 'plain'];
     }
     if ($kind === 'image') {
         if ($id <= 0 || !function_exists('imagesRow')) return null;
@@ -407,7 +430,7 @@ function contentReportRequest(PDO $db, array $cfg, ?array $me, array $input, str
     $rid = (int)$db->lastInsertId();
     antispamRecord($db, $ticket);
     if (function_exists('auditLog')) {
-        auditLog($db, 'creport.file', ['target_type' => $kind, 'target_id' => $kind === 'description' ? $t['info_hash'] : (string)$t['target_id'],
+        auditLog($db, 'creport.file', ['target_type' => $kind, 'target_id' => in_array($kind, ['description', 'torrent'], true) ? $t['info_hash'] : (string)$t['target_id'],
             'summary' => (string)($me['username'] ?? '#' . $uid) . ' → reported a ' . $kind . (in_array($kind, ['shout', 'image'], true) ? ' #' . $t['target_id'] : ' on ' . substr((string)$t['info_hash'], 0, 12)),
             'detail' => ['report' => $rid, 'kind' => $kind, 'target' => (int)$t['target_id'], 'hash' => (string)$t['info_hash'],
                          'author_id' => $t['author_id']]]);
@@ -585,7 +608,7 @@ function contentReportOpenCounts(PDO $db, array $kinds): array
  */
 function panelReportsWaiting(PDO $db, array $cfg): array
 {
-    $parts = ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 0, 'description' => 0, 'shout' => 0, 'image' => 0];
+    $parts = ['reports' => 0, 'archives' => 0, 'appeals' => 0, 'messages' => 0, 'comment' => 0, 'description' => 0, 'shout' => 0, 'image' => 0, 'torrent' => 0];
     $count = static function (string $sql) use ($db): int {
         try { return (int)$db->query($sql)->fetchColumn(); } catch (\Throwable $e) { return 0; }
     };
@@ -632,6 +655,13 @@ function contentReportLike(string $s, bool $prefixOnly = false): string
 function contentReportCurrent(PDO $db, array $cfg, string $kind, int $targetId, string $hash): array
 {
     $gone = ['exists' => false, 'state' => 'gone', 'text' => '', 'format' => 'plain', 'author_id' => null, 'author' => '', 'name' => ''];
+    if ($kind === 'torrent') {
+        $tr = contentReportTorrent($db, $hash);
+        if ($tr === null) return $gone;
+        $u = $tr['owner'] !== null ? userFindById($db, (int)$tr['owner']) : null;
+        return ['exists' => !$tr['banned'], 'state' => $tr['banned'] ? 'banned' : 'visible', 'text' => $tr['name'], 'format' => 'plain',
+                'author_id' => $tr['owner'], 'author' => $u ? (string)$u['username'] : '', 'name' => $tr['name']];
+    }
     if ($kind === 'image') {
         $row = function_exists('imagesRow') ? imagesRow($db, $targetId) : null;
         if ($row === null) {
@@ -718,7 +748,7 @@ function contentReportRender(PDO $db, array $cfg, string $kind, string $text, st
 function contentReportWhere(array $cfg, string $kind, int $targetId, string $hash): string
 {
     if ($kind === 'comment' && $hash !== '') return '?action=search&hash=' . $hash . '#comment-' . $targetId;
-    if ($kind === 'description' && $hash !== '') return '?action=search&hash=' . $hash;
+    if (($kind === 'description' || $kind === 'torrent') && $hash !== '') return '?action=search&hash=' . $hash;
     if ($kind === 'shout') {
         $page = function_exists('shoutPlacement') && in_array(shoutPlacement($cfg), ['page', 'both'], true);
         return ($page ? '?action=' . (function_exists('shoutPageAction') ? shoutPageAction($cfg) : 'shoutbox') : '?') . '#shout-' . $targetId;
@@ -936,7 +966,7 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
     if (!in_array($action, CONTENT_REPORT_ACTIONS, true)) return contentReportPanelFail(400, 'unknown_action');
     $mode = ($input['mode'] ?? 'silent') === 'loud' ? 'loud' : 'silent';
     if ($action === 'warn') $mode = 'loud';
-    $targetId = $kind === 'description' ? 0 : max(0, (int)($input['target_id'] ?? 0));
+    $targetId = in_array($kind, ['description', 'torrent'], true) ? 0 : max(0, (int)($input['target_id'] ?? 0));
     $hash = in_array($kind, ['shout', 'image'], true) ? '' : strtolower(trim((string)($input['hash'] ?? '')));
     if (!in_array($kind, ['shout', 'image'], true) && !preg_match('/^[0-9a-f]{40}$/', $hash)) return contentReportPanelFail(400, 'not_found');
     $note = contentReportClean($input['note'] ?? '', CONTENT_REPORT_TEXT_MAX);
@@ -995,7 +1025,7 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
             $up->execute([$kind, $targetId, $hash]);
             $out['reopened'] = $up->rowCount();
         }
-        auditLog($db, 'creport.' . $action, ['target_type' => $kind, 'target_id' => $kind === 'description' ? $hash : (string)$targetId,
+        auditLog($db, 'creport.' . $action, ['target_type' => $kind, 'target_id' => in_array($kind, ['description', 'torrent'], true) ? $hash : (string)$targetId,
             'summary' => $by . ' → ' . $action . ' the reports of a ' . $what, 'detail' => $detail]);
         return ['status' => 200, 'body' => $out];
     }
@@ -1017,6 +1047,13 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
             $rec = contentRecordFor($db, $hash);
             if ($rec === null || !contentOccupied($rec)) return contentReportPanelFail(409, 'gone');
             contentDelete($db, $cfg, $rec, $me, 'any', ['notify' => false]);
+        } elseif ($kind === 'torrent') {
+            $ctx = ['source' => 'admin', 'reason' => mb_substr('Torrent report #' . (int)$rows[0]['id'] . ($reason !== '' ? ': ' . $reason : ''), 0, 255)];
+            $r = trackerBlockHash($db, $cfg, $hash, $ctx);
+            if (!empty($r['errors'])) return contentReportPanelFail(409, 'failed', ['message' => implode(' ', (array)$r['errors'])]);
+            if ($r['mode'] !== 'whitelist' && !(function_exists('scheduleEnabled') && scheduleEnabled($cfg))) whitelistBan($db, $cfg, [$hash], $ctx);
+            if (function_exists('indexCatalogForget')) indexCatalogForget($db, [$hash]);
+            $out['banned'] = true;
         } elseif ($kind === 'image') {
             $r = imagesModerationRemove($db, $cfg, $targetId, !empty($input['block']), $by);
             if (empty($r['ok'])) return contentReportPanelFail(409, 'gone');
@@ -1040,7 +1077,7 @@ function contentReportActionRequest(PDO $db, array $cfg, array $input): array
             elseif ($mode === 'loud') return contentReportPanelFail((int)$m['status'], (string)$m['error'], array_diff_key($m, ['ok' => 1, 'status' => 1, 'error' => 1]));
         }
         $detail['warning'] = $out['warning'] ?? null;
-        auditLog($db, 'creport.remove', ['target_type' => $kind, 'target_id' => $kind === 'description' ? $hash : (string)$targetId,
+        auditLog($db, 'creport.remove', ['target_type' => $kind, 'target_id' => in_array($kind, ['description', 'torrent'], true) ? $hash : (string)$targetId,
             'summary' => $by . ' → removed a ' . $what . ($authorName !== '' ? ' by ' . $authorName : '') . ' (' . $mode . ')', 'detail' => $detail]);
         return ['status' => 200, 'body' => $out];
     }

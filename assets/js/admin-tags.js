@@ -4,8 +4,8 @@
     if (!A) return;
     const { apiCall, el, showToast, confirmAction, promptModal, renderPagination, fmtDate, debounce, DEBOUNCE } = A;
     const $ = (id) => document.getElementById(id);
-    const S = { page: 1, status: '', q: '', sort: 'uses', cat: '', manage: false, rows: [], sel: new Set() };
-    const K = { cats: [], sugg: [], manage: false };
+    const S = { page: 1, status: '', q: '', sort: 'uses:desc', cat: '', manage: false, rows: [], sel: new Set() };
+    const K = { cats: [], sugg: [], groups: [], manage: false };
     const VIEWS = ['list', 'cats', 'changes', 'forum'];
 
     function tabCount(view, n) {
@@ -95,14 +95,24 @@
 
     const PALETTE = ['#ffd54f', '#ffb74d', '#ff8a80', '#f48fb1', '#ce93d8', '#9fa8da', '#90caf9', '#4fc3f7', '#80deea', '#81c784', '#c5e1a5', '#b0bec5'];
 
-    function editRow(tr, row) {
-        const cell = tr.children[1];
-        cell.textContent = '';
-        const name = el('input', { type: 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary', maxlength: '40', value: row.name, 'aria-label': t.key('js.tags.name') });
+    function openEdit(row) {
+        const modal = $('tagEditModal');
+        $('te-title-name').textContent = row.name;
+        $('te-slug').textContent = row.tag;
+        const name = $('te-name');
+        name.value = row.name;
+        const desc = $('te-desc');
+        desc.value = row.description || '';
+        const cat = $('te-cat');
+        catOptions(cat, [['0', t.key('js.tags.k_none')]]);
+        cat.value = String(row.category_id || 0);
         let current = row.color || '';
-        const preview = chip(row.name, 'x', null, ' tags-preview');
+        const preview = $('te-preview');
+        preview.textContent = row.name;
+        const swatches = $('te-swatches');
+        swatches.textContent = '';
         const native = el('input', { type: 'color', className: 'tags-color-native', value: current || '#8fa3bf', 'aria-label': t.key('js.tags.color_custom') });
-        const swatches = el('div', { className: 'tags-swatches', role: 'radiogroup', 'aria-label': t.key('js.tags.color') });
+        const custom = el('label', { className: 'tags-swatch tags-swatch-custom', title: t.key('js.tags.color_custom') }, [el('i', { className: 'bi bi-palette', 'aria-hidden': 'true' }), native]);
         const paint = () => {
             if (current) preview.style.setProperty('--fc', current); else preview.style.removeProperty('--fc');
             let known = false;
@@ -122,28 +132,15 @@
         };
         swatches.appendChild(paletteButton('', t.key('js.tags.no_color'), el('i', { className: 'bi bi-slash-circle', 'aria-hidden': 'true' })));
         PALETTE.forEach(c => swatches.appendChild(paletteButton(c, c)));
-        const custom = el('label', { className: 'tags-swatch tags-swatch-custom', title: t.key('js.tags.color_custom') }, [el('i', { className: 'bi bi-palette', 'aria-hidden': 'true' }), native]);
         native.addEventListener('input', () => { current = native.value; paint(); });
         swatches.appendChild(custom);
-        name.addEventListener('input', () => { preview.textContent = name.value.trim() || row.name; });
-        const desc = el('input', { type: 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary', maxlength: '200', value: row.description || '', placeholder: t.key('js.tags.description'), 'aria-label': t.key('js.tags.description') });
-        const cat = el('select', { className: 'form-select form-select-sm bg-dark text-light border-secondary w-auto', 'aria-label': t.key('js.tags.k_label') });
-        catOptions(cat, [['0', t.key('js.tags.k_none')]]);
-        cat.value = String(row.category_id || 0);
-        const save = el('button', { type: 'button', className: 'btn btn-sm btn-success' }, t.key('js.tags.save'));
-        const cancel = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary' }, t.key('js.tags.cancel'));
-        save.addEventListener('click', () => act('save', [row.id], { name: name.value, color: current, description: desc.value, category: Number(cat.value) }));
-        cancel.addEventListener('click', () => render());
-        cell.append(el('div', { className: 'tags-edit' }, [
-            name,
-            el('div', { className: 'tags-edit-color' }, [el('span', { className: 'wl-small text-muted', text: t.key('js.tags.color') }), swatches]),
-            el('div', { className: 'tags-edit-row' }, [el('span', { className: 'wl-small text-muted', text: t.key('js.tags.preview') }), preview]),
-            desc,
-            el('div', { className: 'tags-edit-row' }, [el('span', { className: 'wl-small text-muted', text: t.key('js.tags.k_label') }), cat]),
-            el('div', { className: 'tags-edit-row' }, [save, cancel]),
-        ]));
+        name.oninput = () => { preview.textContent = name.value.trim() || row.name; };
+        $('te-save').onclick = async () => {
+            if (await act('save', [row.id], { name: name.value, color: current, description: desc.value, category: Number(cat.value) })) bootstrap.Modal.getOrCreateInstance(modal).hide();
+        };
         paint();
-        name.focus();
+        modal.addEventListener('shown.bs.modal', () => name.focus(), { once: true });
+        bootstrap.Modal.getOrCreateInstance(modal).show();
     }
 
     async function merge(row) {
@@ -189,7 +186,7 @@
                 if (await confirmAction(t.key('js.tags.reject'), t.key('js.tags.reject_confirm', { name: row.name, n: t.num(row.uses || 0) }))) act('reject', [row.id]);
             }));
             if (S.manage) {
-                acts.appendChild(btn('bi-pencil', 'btn-outline-info', t.key('js.tags.edit'), () => editRow(tr, row)));
+                acts.appendChild(btn('bi-pencil', 'btn-outline-info', t.key('js.tags.edit'), () => openEdit(row)));
                 acts.appendChild(btn(row.hidden ? 'bi-eye' : 'bi-eye-slash', 'btn-outline-secondary', t.key(row.hidden ? 'js.tags.unhide' : 'js.tags.hide'), () => act(row.hidden ? 'unhide' : 'hide', [row.id])));
                 acts.appendChild(btn('bi-box-arrow-in-right', 'btn-outline-secondary', t.key('js.tags.merge'), () => merge(row)));
                 acts.appendChild(btn('bi-trash', 'btn-outline-danger', t.key('js.tags.delete'), async () => {
@@ -394,6 +391,7 @@
         if (!r || r.error) return;
         K.cats = r.cats || [];
         K.sugg = r.suggestions || [];
+        K.groups = r.groups || [];
         K.manage = !!r.manage;
         tabCount('cats', K.sugg.length);
         catOptions($('tags-f-cat'), [['', t.key('js.tags.k_all')], ['none', t.key('js.tags.k_none')]]);
@@ -425,9 +423,66 @@
         name.focus();
     }
 
+    function renderGroups(box) {
+        box.appendChild(el('h3', { className: 'tags-f-title tags-k-grp-title' }, [el('i', { className: 'bi bi-collection' }), ' ', t.key('js.tags.g_title')]));
+        box.appendChild(el('small', { className: 'settings-hint d-block mb-2', text: t.key('js.tags.g_intro') }));
+        if (K.manage) {
+            const name = el('input', { type: 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary tags-cat-name', maxlength: '40', placeholder: t.key('js.tags.g_new_ph'), 'aria-label': t.key('js.tags.g_new_ph') });
+            const pin = el('input', { type: 'checkbox', className: 'form-check-input', id: 'tags-grp-pin', checked: true });
+            const pinLab = el('label', { className: 'form-check tags-grp-pin' }, [pin, el('span', { className: 'form-check-label' }, t.key('js.tags.g_pinned'))]);
+            const add = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success' }, [el('i', { className: 'bi bi-plus-lg' }), ' ', t.key('js.tags.g_add')]);
+            const go = async () => { if (name.value.trim() && await catAct('grp_add', { name: name.value, pinned: pin.checked })) name.value = ''; };
+            add.addEventListener('click', go);
+            name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+            box.appendChild(el('div', { className: 'tags-f-tools' }, [name, pinLab, add]));
+        }
+        if (!K.groups.length) {
+            box.appendChild(el('div', { className: 'wl-small text-muted mb-3', text: t.key('js.tags.g_none') }));
+            return;
+        }
+        const tb = el('tbody', {});
+        K.groups.forEach(g => {
+            const acts = el('td', { className: 'th-actions' });
+            const tr = el('tr', {});
+            const pin = el('input', { type: 'checkbox', className: 'form-check-input', checked: !!g.pinned, disabled: !K.manage, 'aria-label': t.key('js.tags.g_pinned') });
+            pin.addEventListener('change', () => catAct('grp_save', { id: g.id, pinned: pin.checked }));
+            if (K.manage) {
+                acts.appendChild(btn('bi-arrow-up', 'btn-outline-secondary', t.key('js.tags.k_up'), () => catAct('grp_move', { id: g.id, dir: -1 })));
+                acts.appendChild(btn('bi-arrow-down', 'btn-outline-secondary', t.key('js.tags.k_down'), () => catAct('grp_move', { id: g.id, dir: 1 })));
+                acts.appendChild(btn('bi-pencil', 'btn-outline-info', t.key('js.tags.edit'), async () => {
+                    const v = await promptModal({ title: t.key('js.tags.g_rename'), label: t.key('js.tags.name'), value: g.name, maxlength: 40 });
+                    if (v !== null && v !== undefined && String(v).trim() !== '') catAct('grp_save', { id: g.id, name: String(v) });
+                }));
+                acts.appendChild(btn('bi-trash', 'btn-outline-danger', t.key('js.tags.delete'), async () => {
+                    if (await confirmAction(t.key('js.tags.delete'), t.key('js.tags.g_delete_confirm', { name: g.name, n: t.num(g.n) }), { danger: true })) catAct('grp_delete', { id: g.id });
+                }));
+            }
+            tr.append(el('td', {}, el('strong', { text: g.name })), el('td', {}, el('label', { className: 'form-check form-switch m-0' }, pin)),
+                el('td', { className: 'font-mono', text: t.num(g.n) }), acts);
+            tb.appendChild(tr);
+        });
+        box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover wl-table dash-table tags-k-table' }, [
+            el('thead', {}, el('tr', {}, [el('th', { text: t.key('js.tags.g_col_group') }), el('th', { text: t.key('js.tags.g_col_pinned') }),
+                el('th', { className: 'tags-f-n', text: t.key('js.tags.g_col_n') }), el('th', { className: 'th-actions', text: t.key('js.tags.f_col_actions') })])),
+            tb,
+        ])));
+    }
+
+    function groupSelect(c) {
+        const sel = el('select', { className: 'form-select form-select-sm bg-dark text-light border-secondary tags-cat-grp', 'aria-label': t.key('js.tags.g_col_group') });
+        sel.appendChild(el('option', { value: '0' }, t.key('js.tags.g_no_group')));
+        K.groups.forEach(g => sel.appendChild(el('option', { value: String(g.id) }, g.name)));
+        sel.value = String(c.group_id || 0);
+        sel.disabled = !K.manage || !!c.grp;
+        sel.addEventListener('change', () => catAct('cat_group', { id: c.id, group: Number(sel.value) }));
+        return sel;
+    }
+
     function renderCats() {
         const box = $('tags-cats-body');
         box.textContent = '';
+        renderGroups(box);
+        box.appendChild(el('h3', { className: 'tags-f-title tags-k-grp-title' }, [el('i', { className: 'bi bi-folder2' }), ' ', t.key('js.tags.k_list_title')]));
         if (K.manage) {
             const name = el('input', { type: 'text', className: 'form-control form-control-sm bg-dark text-light border-secondary tags-cat-name', maxlength: '40', placeholder: t.key('js.tags.k_new_ph'), 'aria-label': t.key('js.tags.k_new_ph') });
             const color = el('input', { type: 'color', className: 'tags-cat-color', value: '#8fa3bf', 'aria-label': t.key('js.tags.color') });
@@ -455,12 +510,14 @@
             tr.append(
                 el('td', {}, el('div', { className: 'tags-name' }, [chip(c.l, 'x', c.color), el('span', { className: 'wl-small text-muted', text: c.slug })])),
                 el('td', { className: 'wl-small' }, [t.key(kind), c.created_by_name ? ' · ' + c.created_by_name : null]),
+                el('td', {}, c.grp ? el('span', { className: 'wl-small text-muted', text: '—' }) : groupSelect(c)),
                 el('td', {}, count),
                 acts);
             tb.appendChild(tr);
         });
         box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover wl-table dash-table tags-k-table' }, [
             el('thead', {}, el('tr', {}, [el('th', { text: t.key('js.tags.k_col_cat') }), el('th', { text: t.key('js.tags.k_col_kind') }),
+                el('th', { text: t.key('js.tags.g_col_group') }),
                 el('th', { className: 'tags-f-n', text: t.key('js.tags.k_col_n') }), el('th', { className: 'th-actions', text: t.key('js.tags.f_col_actions') })])),
             tb,
         ])));
@@ -512,7 +569,8 @@
         const q = $('tags-f-q');
         q.addEventListener('input', debounce(() => { S.q = q.value.trim(); S.page = 1; load(); }, DEBOUNCE.search));
         $('tags-f-status').addEventListener('change', (e) => { S.status = e.target.value; S.page = 1; load(); });
-        $('tags-f-sort').addEventListener('change', (e) => { S.sort = e.target.value; S.page = 1; load(); });
+        A.makeSortStack({ table: $('tags-table'), defaultSort: [{ col: 'uses', dir: 'desc' }],
+                          onChange: (stack) => { S.sort = stack.map(x => x.col + ':' + x.dir).join(','); S.page = 1; load(); } }).bindHeaders();
         if (new URLSearchParams(location.search).get('status') === 'pending') { S.status = 'pending'; $('tags-f-status').value = 'pending'; }
         const fq = $('tags-f-search');
         if (fq) fq.addEventListener('input', debounce(() => { F.q = fq.value.trim(); F.page = {}; renderForum(); }, DEBOUNCE.search));

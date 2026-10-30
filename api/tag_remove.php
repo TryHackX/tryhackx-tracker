@@ -20,6 +20,7 @@ $r = tagsDetach($db, $hash, $id, (int)$me['id'], $moderate);
 if (empty($r['ok'])) jsonResponse(['error' => $r['error'], 'message' => tagsMessage((string)$r['error'])], 400);
 tagsLog($db, $hash, $id, $r['removed'] === 'blocked' ? 'block' : 'remove', (int)$me['id']);
 tagsCount($db, $id);
+tagsPrune($db, $cfg, $id);
 if ($moderate && ($r['removed'] === 'blocked' || !empty($r['others']))) {
     auditLog($db, $r['removed'] === 'blocked' ? 'tags.block' : 'tags.remove', ['target_type' => 'torrent', 'target_id' => $hash,
         'summary' => (string)($me['username'] ?? '#' . (int)$me['id']) . ' → ' . $id]);

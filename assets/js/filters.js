@@ -113,10 +113,12 @@
         const grid = el('div', 'sf-grid');
         inner.appendChild(grid);
         const sections = {};
+        const pinned = new Map();
+        catalog.forEach(c => { if (c.g === 'x' && !c.kg && c.pp && c.p) pinned.set('grp-' + c.p, { l: c.pl, o: c.po || 0 }); });
         const section = (key) => {
             if (sections[key]) return sections[key];
             const f = el('fieldset', 'sf-group');
-            f.appendChild(el('legend', null, t.key('js.filters.g_' + key)));
+            f.appendChild(el('legend', null, pinned.has(key) ? pinned.get(key).l : t.key('js.filters.g_' + key)));
             grid.appendChild(f);
             return (sections[key] = f);
         };
@@ -142,7 +144,8 @@
             inner.insertBefore(box, grid);
             tagSearch.addEventListener('input', () => flip(() => showTags()));
         }
-        (facts ? ['tags', 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'dates', 'description'] : ['release', 'ratings', 'popularity', 'dates']).concat(wlOpt ? ['whitelist'] : []).forEach(section);
+        const pinnedKeys = facts ? [...pinned.entries()].sort((a, b) => a[1].o - b[1].o).map(([k]) => k) : [];
+        (facts ? ['tags', ...pinnedKeys, 'release', 'quality', 'language', 'genre', 'ratings', 'popularity', 'dates', 'description'] : ['release', 'ratings', 'popularity', 'dates']).concat(wlOpt ? ['whitelist'] : []).forEach(section);
         const inputs = {};
         RANGES.forEach(r => {
             if ((r.facts && !facts) || (r.desc && !desc) || (r.rep && !rep)) return;
@@ -258,10 +261,11 @@
                 const own = new Map();
                 catalog.filter(c => c.g === 'x' && (!c.kg || (c.kg === 'g' && !desc))).forEach(c => {
                     const k = c.k || '';
-                    if (!own.has(k)) own.set(k, { o: k ? (c.ko || 0) : 200000, label: k ? c.kl : t.key('js.filters.t_x'), tags: [] });
+                    const into = c.pp && c.p ? 'grp-' + c.p : sec;
+                    if (!own.has(k)) own.set(k, { o: k ? (c.ko || 0) : 200000, label: k ? c.kl : t.key('js.filters.t_x'), sec: into, tags: [] });
                     own.get(k).tags.push(c);
                 });
-                [...own.values()].sort((a, b) => a.o - b.o).forEach(x => block(x.label, x.tags, sec, tagBtns));
+                [...own.values()].sort((a, b) => a.o - b.o).forEach(x => block(x.label, x.tags, x.sec, tagBtns));
             });
         }
         if (facts && desc) {
@@ -491,6 +495,10 @@
             store(openKey, false, S.open);
             paint();
             if (still() || typeof panel.animate !== 'function') return;
+            if (document.querySelectorAll('tbody > tr').length > 100) {
+                if (S.open) slid = inner.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: 'ease-out' });
+                return;
+            }
             panel.classList.add('sf-moving');
             const a = panel.animate([{ height: from + 'px' }, { height: (S.open ? inner.scrollHeight : 0) + 'px' }], { duration: 200, easing: 'ease' });
             slid = a;

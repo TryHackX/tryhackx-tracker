@@ -40,7 +40,8 @@
         $crTabs = ['comment' => ['comments', 'bi-chat-left-text', 'a.reports.tab_comments'],
                    'description' => ['descriptions', 'bi-card-text', 'a.reports.tab_descriptions'],
                    'shout' => ['shouts', 'bi-chat-left-dots', 'a.reports.tab_shouts'],
-                   'image' => ['images', 'bi-image', 'a.reports.tab_images']];
+                   'image' => ['images', 'bi-image', 'a.reports.tab_images'],
+                   'torrent' => ['torrents', 'bi-flag', 'a.reports.tab_torrents']];
         ?>
         <!-- Source Tabs -->
         <div class="source-tabs">
@@ -58,7 +59,7 @@
             <?php endif; ?>
             <?php /* Reported comments, descriptions and shouts (1.71.0, includes/reports.php): a tab each, each with
                      its own count of the things waiting — drawn while the feature is on and the session holds that
-                     kind's view. One view below serves all three (assets/js/admin-contentreports.js). */ ?>
+                     kind's view. One view below serves them all (assets/js/admin-contentreports.js). */ ?>
             <?php foreach ($crKinds as $k): [$src, $icon, $label] = $crTabs[$k]; ?>
             <button class="source-tab<?= $firstTab === $src ? ' active' : '' ?>" data-source="<?= $src ?>" data-crep-kind="<?= $k ?>"><i class="bi <?= $icon ?>"></i> <?= _h($label) ?> <span id="crep-badge-<?= $k ?>" class="appeals-count-badge d-hidden"></span></button>
             <?php endforeach; ?>

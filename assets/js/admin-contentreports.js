@@ -132,6 +132,7 @@
 
     function stateWord(g) {
         if (g.kind === 'image' && !g.exists && g.state === 'deleted') return t.key(g.blocked ? 'js.creport.state_image_blocked' : 'js.creport.state_image_removed');
+        if (g.kind === 'torrent' && !g.exists && g.state === 'banned') return t.key('js.creport.state_torrent_banned');
         if (!g.exists) return t.key(g.state === 'none' ? 'js.creport.state_none' : g.state === 'deleted' ? 'js.creport.state_deleted' : 'js.creport.state_gone');
         if (g.kind === 'comment' && g.state === 'pending') return t.key('js.creport.state_pending');
         if (g.kind === 'description' && g.state !== 'approved') return t.key('js.creport.state_unpublished');
@@ -168,7 +169,7 @@
         head.appendChild(el('span', 'badge-table crep-kind', t.key('js.creport.kind_' + g.kind)));
         var person = g.author ? { name: g.author, avatar: g.author_avatar } : null;
         var nobody = g.guest_tag ? t.key('js.creport.guest', { tag: g.guest_tag }) : t.key(g.author_state === null && !g.author ? 'js.creport.no_author' : 'js.creport.nobody');
-        head.appendChild(phrase('span', 'msgrep-who', g.kind === 'image' && g.copy ? 'js.creport.head_image_copy' : 'js.creport.head_' + g.kind, person || { name: nobody, avatar: '' },
+        head.appendChild(phrase('span', 'msgrep-who', g.kind === 'image' && g.copy ? 'js.creport.head_image_copy' : (g.kind === 'torrent' && !g.author ? 'js.creport.head_torrent_index' : 'js.creport.head_' + g.kind), person || { name: nobody, avatar: '' },
                                 { name: g.name || (g.hash ? g.hash.slice(0, 12) + '…' : '') }));
         if (g.where) {
             var a = el('a', 'crep-where', t.key('js.creport.open_site'));
@@ -359,6 +360,9 @@
             bl.appendChild(blockBox);
             bl.append(' ', t.key('js.creport.block_image'));
             btns.appendChild(bl);
+        } else if (g.exists && g.kind === 'torrent') {
+            btns.appendChild(confirmThen(t.key('js.creport.remove_torrent_q'), t.key('js.creport.remove_torrent'), 'btn-outline-danger crep-remove',
+                                         function (b) { run('remove', 0, b); }));
         } else if (g.exists) btns.appendChild(confirmThen(t.key('js.creport.remove_q'), t.key('js.creport.remove'), 'btn-outline-danger crep-remove',
                                                    function (b) { run('remove', 0, b); }));
         if (account) btns.appendChild(confirmThen(t.key('js.creport.warn_q', { user: g.author }), t.key('js.creport.warn'), 'btn-outline-warning crep-warn',
@@ -393,7 +397,7 @@
         } else if (st && (st.staff || st.you)) {
             pun.appendChild(el('span', 'text-muted', t.key('js.creport.account_note')));
         } else {
-            pun.appendChild(el('span', 'text-muted', t.key('js.creport.err_no_author')));
+            pun.appendChild(el('span', 'text-muted', t.key(g.kind === 'torrent' ? 'js.creport.no_owner_torrent' : 'js.creport.err_no_author')));
         }
         pun.appendChild(say);
         c.appendChild(pun);

@@ -4,12 +4,12 @@ $input = readJsonBody();
 $op = (string)($input['op'] ?? '');
 $forumOps = ['forum_approve', 'forum_ignore', 'forum_target', 'forum_import', 'forum_all', 'forum_refresh'];
 $changeOps = ['change_approve', 'change_reject', 'change_remove'];
-$catOps = ['cat_add', 'cat_save', 'cat_move', 'cat_delete', 'cat_assign', 'sugg_accept', 'sugg_reject'];
+$catOps = ['cat_add', 'cat_save', 'cat_move', 'cat_delete', 'cat_assign', 'sugg_accept', 'sugg_reject', 'grp_add', 'grp_save', 'grp_move', 'grp_delete', 'cat_group'];
 if (!in_array($op, array_merge(['approve', 'reject', 'save', 'hide', 'unhide', 'delete', 'merge'], $forumOps, $changeOps, $catOps), true)) jsonResponse(['error' => 'invalid'], 400);
 $manage = panelCan($db, $cfg, 'panel.tags.manage');
 if (in_array($op, $catOps, true)) {
     if (!$manage) jsonResponse(['success' => false, 'error' => 'forbidden', 'message' => tagsMessage('forbidden')], 403);
-    $r = tagsCatAction($db, $op, $input, null);
+    $r = in_array($op, ['grp_add', 'grp_save', 'grp_move', 'grp_delete', 'cat_group'], true) ? tagsGroupAction($db, $op, $input) : tagsCatAction($db, $op, $input, null);
     if (empty($r['ok'])) jsonResponse(['success' => false, 'error' => $r['error'], 'message' => tagsMessage((string)$r['error'])], 400);
     auditLog($db, 'tags.' . $op, ['target_type' => 'tag_category', 'target_id' => (string)(int)($input['id'] ?? $input['category'] ?? 0),
         'summary' => mb_substr($op . (is_string($input['name'] ?? null) ? ' ' . $input['name'] : '') . (isset($input['ids']) ? ' ' . count((array)$input['ids']) : ''), 0, 200)]);
