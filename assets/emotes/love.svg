@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Heart">
+  <title>Heart</title>
+  <path d="M32 56C11 41 5 31 5 22.5A14.5 14.5 0 0 1 32 15a14.5 14.5 0 0 1 27 7.5C59 31 53 41 32 56Z" fill="#e0245e"/>
+  <path d="M18 20a8 8 0 0 1 8-4 9 9 0 0 0-8 10Z" fill="#ff8aa8"/>
+</svg>

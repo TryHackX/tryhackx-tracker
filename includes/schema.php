@@ -1,0 +1,5053 @@
+<?php
+/**
+ * Idempotent schema bootstrap.
+ *
+ * The project has no migration runner: production is a plain file copy and the installer only runs
+ * once. This module lets a deploy create/upgrade the tables it needs on the first request after the
+ * upload. Every statement is idempotent (CREATE TABLE IF NOT EXISTS / guarded ALTER), the whole run is
+ * serialised with a MySQL advisory lock, and the resulting version is stored in the `settings` table
+ * (`schema_version`) so the fast path on every later request is a single array lookup.
+ *
+ * Bump TRACKER_SCHEMA_VERSION and append to trackerSchemaStatements() when adding tables/columns.
+ */
+
+const TRACKER_SCHEMA_VERSION = 115;  // 94 = rich messages (1.75.0, includes/htmlsafe.php; Part C+D of the release extend this same step): `mail_queue`.format gains 'html' and `mail_queue`.frame ENUM('site','none') DEFAULT 'site' (whether the site's dark frame wraps the message; the footer with the preferences and unsubscribe links is kept either way); `user_notifications`.rich (MEDIUMTEXT NULL — the SOURCE of a rich notification) + rich_format ENUM('bbcode','markdown','html') NULL, while `body` stays the plain text with its localized lead-ins; the words a moderator writes when acting on a report become texts of up to 2 000 characters with a format of their own: `content_reports`.note / .reply and `message_reports`.note / .reply VARCHAR(500) → TEXT, `content_reports`.reply_format / `message_reports`.reply_format and `user_warnings`.reason VARCHAR(500) → TEXT + reason_format (all ENUM('plain','bbcode','markdown') DEFAULT 'plain'); the answer to an appeal and the log of a custom report mail keep RAW text beside a format (`appeals` / `appeal_archives`.admin_response_format, `sent_emails`.message_format — those tables are install.php's, so each is guarded on its existence); every change only when schemaColumnType() says the column differs, so a fresh install (the CREATE list) and an upgrade (the guarded list) end the same; and the settings `mail_sender_address` ('' — the sender's identity / postal address, shown in both footers of a bulk message) and `bulk_mail_daily_cap` ('0' — messages a day the janitor may send, 0 = no cap); and the moderation overview with the automatic penalties (includes/moderation.php, the Moderation page): `user_warnings`.loud (TINYINT DEFAULT 1 — a SILENT action is a row too, loud 0, and never counts), revoked_at / revoked_by_id / revoked_by_name / revoke_note + revoke_note_format (a warning is REVOKED, not deleted: it stays, struck through, and counts nowhere) + KEY idx_warn_revoked_by, source_kind also 'manual' and 'auto' (an automatic penalty: source_id is the rule, reason "<warnings>|<days>"), `users` KEY idx_users_muted (pm_muted_until), the table `auto_penalty_rules` (warnings, window_days, action mute|ban, duration_days — 0 = until lifted, enabled, sort; seeded once, schemaOnce 'v94_auto_rules', with 3 in 30 days → mute 3 days, 5 in 60 → mute 14, 7 in 90 → ban 30) and the setting `auto_penalties_enabled` ('0'), and granted once (v94_moderation) panel.moderation.view + .handle to moderator (panel.moderation.rules to nobody: the Admin group's blanket and a tick); 93 = the audit of 1.73.2 (1.74.0): `user_notifications`.sender_id (INT UNSIGNED NULL — the account a friend request or its acceptance is from) + KEY idx_un_sender (sender_id) + KEY idx_un_link (link(100)), one guarded ALTER of only what is missing; once (schemaOnce 'v93_notify_senders', schemaNotifySenders()) the friend notifications already written get their sender read from the title by the sentence of every installed language, those of an account already deleted deleted, unreadable ones left; the table `index_catalog` (info_hash PK, name, eff_seeders / eff_leechers, total_size, files_count, last_seen; a key per sort column with info_hash, FULLTEXT on the name) created EMPTY by schemaIndexCatalogDdl() — the janitor fills it and the search reads it only after a whole pass (config/index_state.json → catalog_pass_at); and the setting `confirm_mail_daily_cap` ('200': the site's daily cap on report and appeal confirmation mails, 0 = none); 92 = the packets lost OUTSIDE this machine (1.73.3, includes/netlimit.php, tools/tuner.py): `net_samples`.tcp_retrans_x10 (SMALLINT UNSIGNED NULL — TCP segments resent per 1 000 sent over the sample's span, from /proc/net/snmp; NULL when unreadable or fewer than 300 were sent; one guarded ALTER of only what is missing) and the stability probe's settings `tuner_loss_targets` ('1.1.1.1 9.9.9.9'), `tuner_retrans_max` ('5.0') and `tuner_ping_loss_max` ('10'); 91 = what a deleted account left behind, and one missing default (1.73.0): once (schemaOnce 'v91_account_orphans', schemaAccountOrphans()) the `user_twofa` rows (TOTP secret, recovery hashes) and `message_typing` rows whose account is gone deleted, a bulk mail still QUEUED for a gone account skipped ('account deleted'), and a vote of a gone account (`hash_votes` voter_type 'user', from before 1.42.0's cascade) deleted with the stored totals of its hashes counted again (repRecount()) — userDeleteCascade() covers all four from now on; and the setting `transparency_enabled` ('1' — the nav link and the page's text read a missing row as on, the page's data endpoint as off) — no table changes; 90 = a messages' Archive and Trash, per side (includes/people.php, 1.73.0): `message_threads`.u_low_trash_upto / u_high_trash_upto (BIGINT UNSIGNED, the last message id that side put in its Trash, 0 = an empty trash) and u_low_trashed_at / u_high_trashed_at (DATETIME, when — NULL exactly when the trash is empty) + KEY idx_thread_trash_low / idx_thread_trash_high (the janitor's purge, oldest first), every existing row an empty trash (schemaPmTrashMigration(): one ALTER of only what is missing) — the Archive is u_*_hidden under its new name, the watermark u_*_cleared_id stays what deletes for good; and the settings `pm_archive_returns` (1: a new message brings an archived conversation back to the inbox, as hiding did) and `pm_trash_days` (30, 0-365; 0 = no Trash, Delete deletes at once); 89 = the Admin group's stored list says what its blanket holds (includes/users.php, 1.72.0): every registered CAPABILITY written into the admin group's permissions — schemaAdminGrant(), on every data-migration pass and by every schemaGrantOnce(), idempotent, never a consent id (userConsentPermissions(): content.public, favourites.public, lists.public, rating.public, uploads.public — what others may see of an administrator stays a grant somebody gives, tools/groups.php --consent or the panel's tick), never a removal — so the Users page's matrix is true on every install; and the moderator's fresh-install seed is the moderator every existing install has (without index.files_all, favourites.use/.public/.view_others and uploads.public, which the INSERT text gained at v42/v47 for new installs only — a moderator is a member too); no table changes; 88 = replies to comments, as a tree (includes/comments.php): `hash_comments`.parent_id (the comment answered; NULL = top level), root_id (the thread's top-level comment; NULL for it) and depth (0 for the top level, a reply its parent's + 1) + KEY idx_hc_thread (info_hash, root_id, id, status) — the page's top-level comments and one thread's replies, each one keyed range; users.comment_notify's fifth bit, 16 = a reply to one of my comments, ON for every account (guarded on the column's live DEFAULT 15, which becomes 31); the settings `comments_reply_depth` (3: the deepest reply level — 0 = no replies, at most 8) and `sound_default_comment_reply` (''); and granted once (v88_replies) comment.reply to member and moderator — the guest group nothing; 87 = who sees a list (includes/lists.php): `user_lists.visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private' in place of the boolean `is_public` (a public list stays public, every other one private — none loses its meaning) and KEY idx_list_visibility in place of idx_list_public; 'friends' = the owner and the members they are friends with (schemaListVisibilityMigration(): guarded on the old column, a NULL while unconverted, so a stop anywhere is safe); 86 = where the Info panel's comments stand and whether they open folded (includes/comments.php): `comments_position` ('after_files' — the panel's very end —, 'before_files', or 'after_rating', 1.71.0's place) and `comments_expanded` ('0': folded until opened) — settings only; 85 = one anti-spam layer for everything people write (includes/antispam.php): `antispam_state` (a row per context and subject — the account, or a guest's address group: the ladder's level, the last write and the earliest next one as unix seconds by the database's clock, the hits at the top of the ladder and whether a CAPTCHA is due, the refusals in a row, the last correction, the fingerprints of the last words, a revision counter; '*' rows throttle the audit), the settings antispam_enabled (1) / antispam_captcha_after (3) / antispam_guest_captcha (1) / antispam_staff_exempt (1) / antispam_new_days (3) / antispam_new_factor (2) / antispam_new_links (1) / antispam_dup_seconds (600) / antispam_pm_new_hour (8) / _day (20) / _hour_new (2) / _day_new (4) / antispam_pm_spread (2) and per context (shout, message, comment, description, report, list, bio, emote, vote) antispam_<context>_burst / _steps / _reset, rate_limit_pm (240: messages' own address ceiling instead of the favourites' one), and — defaults at last — the five recaptcha_on_<form> switches the Settings page always showed (report 1, login / status / appeal / block_check 0); 84 = reports of what people write in public, and warnings (includes/reports.php): `content_reports` (a comment, a torrent's description or a shout — kind, target id, the torrent's hash, whose words they were, the reporter and their reason, the words AS REPORTED and their format, open | closed with `open_slot` 1 / NULL so a UNIQUE key allows one OPEN report per member per target, what closed it, who and when, the note for the log and the answer to the reporter), `user_warnings` (the member, the moderator's reason, what it was about — kind, id, torrent —, what came with it, who gave it, when), and granted once (v84_reports) content.report to member and panel.reports.{comments,descriptions,shouts}.{view,handle} to moderator — the message queue (panel.messages.*) still to nobody, the guest group nothing; 83 = comments on a torrent (includes/comments.php): `hash_comments` (by info hash; the source as typed + its format, a guest's tag and address group, status visible | pending — a guest's, held for a moderator — | deleted, and who edited, let through or took it down, when and why; keys for a thread's page and count, a member's comments, the guest queue), users.comment_notify (15: the four kinds of news a member is told of), user_notifications.link (where a notification happened, site-relative), the settings comments_enabled (1) / comment_max_chars (500) / comment_links (1) / comment_edit_minutes (15) / comment_delete_own_minutes (60) / comments_per_page (20) / comment_rate_per_hour (30) / captcha_pts_comment (1) / comments_guest_review (1) and the two sound defaults sound_default_comment / sound_default_comment_mention (''), and granted once (v83_comments) comment.view + comment.post + comment.edit_own + comment.delete_own to member and comment.view + comment.post + comment.moderate to moderator — the guest group nothing; 82 = a torrent's "who has this" in three sections (includes/who.php): users.votes_listed (0 — the likes' and ratings' twin of fav_listed: may my name and my vote appear there; votes_public is needed as well), `who_votes_enabled` and `who_lists_enabled` (1), and on wl_content_edits KEY idx_edits_wl_status (whitelist_id, status) + KEY idx_edits_hc_status (hash_content_id, status) for the pending count of one description — keys only: the replaced versions already kept are trimmed one description at a time when a proposal on it is applied (contentArchivePrune(), the newest ten kept), never by the migration; 81 = a torrent's description can be deleted, edited and credited (includes/content.php, includes/profiledescs.php): `whitelist.content_credits` / `hash_content.content_credits` (TEXT, the compact JSON credit chain — who wrote it first, who edited it since and by what share; initialised from content_user_id, an author whose account is gone as u=0, and such a dangling author id let go), `wl_content_edits.kind` ENUM('rewrite','edit') DEFAULT 'rewrite' + KEY idx_edits_user, users.content_credit_public (1: names are shown as they always were) and users.descriptions_public (0), `profile_descriptions_enabled` (1), and granted once (v81_content) `content.delete_own` + `content.public` to member and `content.delete_any` to moderator; 80 = a list's description as rich text (includes/lists.php): `user_lists.description` VARCHAR(500) → TEXT (NULL = none; MySQL 5.7 cannot default a TEXT), `user_lists.description_format` ENUM('bbcode','markdown') DEFAULT 'bbcode', the plain descriptions written until now rewritten as BBCode that reads the same (schemaListDescPlainToBbcode(), guarded on the format column's absence, so exactly once), and `lists_desc_max` (the longest description, in characters a reader sees; 1000); 79 = the room's emotes and stickers beyond the room (includes/shout.php, emotesEverywhere()): `emotes_everywhere` (1 = also in messages, torrent descriptions and the proposals that rewrite them, list descriptions and the profile's description; 0 = the room only) — a setting only; the emote store, its approval and its image endpoint are the room's own; 78 = how much of the Font Awesome Pro package the shoutbox picker offers (includes/emoji.php): `shout_emoji_fa_scope` ('faces' the faces only, the default | 'search' the faces and a search that finds every icon | 'all' every icon on the pages of Font Awesome's categories) — a setting only; the catalogue it needs is a file beside the package (config/iconpacks/<id>/catalog.json); 77 = Font Awesome's faces in the shoutbox picker (includes/emoji.php): `shout_emoji_fa` ('off' | 'fa' instead of the ordinary emoji | 'mixed' beside them, default off; offered only while a Font Awesome Pro package is the icon source) and `shout_emoji_fa_style` (the faces' default style key, '' = the site's fa_style) — settings only; 76 = which Font Awesome draws the icons: `fa_source` ('cdn6' Free 6.7.2 | 'cdn7' Free 7.3.1 | 'pack', default cdn6), `fa_pack` (an installed package's id, ''), `fa_pack_styles` (JSON list of its extra style files, '[]'), `fa_style` (the style the site's icons use, 'solid') — settings only, packages live on disk in config/iconpacks/; 75 = a member's likes or ratings listed on the account page and the profile (includes/profilevotes.php): users.votes_public (TINYINT, 0 = shown to nobody else until they say so), `profile_votes_enabled` (1; shows nothing while rep_enabled is off), and `rating.public` granted once to the member group (v75_rating_public); 74 = a description on the profile: users.bio (TEXT, the BBCode source as typed) + users.bio_updated_at, `profile_bio_enabled` (1) / `profile_bio_max` (300, clamped 20-1000), and `profile.bio` granted once to the member group (v74_profile_bio); 73 = `icon_library` ('bootstrap' | 'fontawesome', default bootstrap): which library draws every icon on the site; 72 =a shout can be corrected and a correction leaves a mark: shouts.edited_at / edited_by (+ idx_shouts_edited_by, the flood check for edits), shout_mentions.late (a mention an edit added still counts as unread), `shout.edit_own` to member and `shout.edit_any` to moderator ONLY, `shout_edit_minutes` / `shout_delete_own_minutes` (10 each; delete-your-own gets a window for the first time); `shout_order` back to 'bottom' by default with a stored 'top' moved back once; `account_media_side` split into `account_picture_side` (left) / `account_cover_side` (right), seeded from a stored 'left' and then removed
+                                    // 71 = the default permission matrix, a `premium` group and a shop's order book: `user_group_orders` (UNIQUE(client_id, order_id) is what makes a retried purchase webhook grant one month instead of two), the seeded `premium` group (profile.cover + shout.upload_emote, no panel id, so a key may sell it), `member` brought up to the shipped matrix (index.view/index.files/index.magnet/whitelist.add, which its index.files_all grant had been paging without), `profile.cover` taken OFF member — the one removal this project has shipped, and the image is KEPT — and `content.view` added to `moderator`, which had been approving descriptions it could not read
+                                    // 70 = "delete this conversation, for me" and two settings: `message_threads`.u_low_cleared_id / u_high_cleared_id (BIGINT UNSIGNED, 0 = nothing deleted — every read path filters `m.id >` the reader's own, so a thread goes for one side and stays whole for the other, and a new message brings it back showing only what came after), plus `shout_order` (top | bottom — which end of the room the newest line is at) and `account_media_side` (left | right — which card of the account page holds Picture and Cover)
+                                    // 69 = pictures and profile covers (includes/usermedia.php): the `user_media` table (the images, as re-encoded WebP rows, never on `users`), eight small columns on `users` (avatar_sha/x/y/zoom, cover_sha/x/y/zoom), the eight avatar_*/cover_* settings plus the site defaults' own, and profile.avatar / profile.cover to the member group
+                                    // 68 = one setting and one column: `site_timezone` (the zone this site shows times in; empty = follow tracker_schedule_tz, then PHP's own) and users.timezone (NULL = the site's) — the shoutbox is the first reader of both
+                                    // 67 = one setting and one permission, no tables: `shout_page_action` (the action name the room answers on, so an operator can have ?action=chat) and `shout.emote_auto` (an upload that skips the approval queue) — registered and, like shout.upload_emote before it, granted to nobody
+                                    // 66 = the shoutbox's pinned line (shouts.pinned_at/pinned_by, at most one of them at a time) and the lines the SITE says (shouts.is_system) — which is why user_id is nullable from here on: an announcement has no author, and a row pointing at account 0 would be a lie rather than an absence
+                                    // 65 = shout_emote_approval and the approved_at stamp beside it: a member's uploaded emote waits for the operator instead of being everybody's the moment it lands, and the stamp is what keeps "waiting to be let in" apart from "switched off afterwards"
+                                    // 64 = shoutbox emotes and stickers (includes/shout.php): `shout_emotes` (images as rows, like `sounds`), the five shout_emote_*/shout_stickers_* settings, the `shout.upload_emote` permission (registered, granted to nobody), and the shipped examples seeded from assets/emotes/*.svg
+                                    // 63 = the shoutbox (includes/shout.php): `shouts` + `shout_mentions` + users.shout_seen_id, the shout_* settings, and shout.view/post/delete_own to the member group (shout.moderate to the moderator one)
+                                    // 62 = index_hashes.idx_index_meta_done_fetched (a heavy index, built by the janitor's CLI run) for the bounded protection backfill; the owner's mirror row takes the panel's current password hash (once), csp_report_enabled ships off, the old pm-notification delete runs once instead of at every bump
+                                    // 61 = sounds (the owner's uploads, as rows) + users.sound_prefs + sounds.use to the member group + sounds_enabled / sound_default_* settings
+                                    // 60 = a setting only: site_live_seconds, so an upgraded install gets the row and its default
+                                    // 59 = message_reports.reply — what the moderator answered the reporter, kept beside the log note
+                                    // 58 = hash_content (words about a torrent the tracker has only seen), whitelist.content_user_id, proposals that may belong to either home, and content.view to the member group
+                                    // 57 = a grant only: status.hash_check to the member group — the status page can be asked what the tracker knows about a hash
+                                    // 56 = data only: the 'pm' notifications go, because an unread message is counted where it is read
+                                    // 55 = users.pm_muted_until + users.banned_until — a moderator can answer a reported message with something between nothing and a permanent ban
+                                    // 54 = message_typing — a conversation that refreshes itself, and the line that says the other person is writing
+                                    // 53 = user_twofa + users.sessions_valid_from + user_tokens.ip/ua — a second factor for member accounts, and "signed in on N devices"
+                                    // 52 = message_threads/user_messages/message_reports + user_friends + user_blocks + users.pm_who/profile_listed — people reaching each other
+                                    // 47 = user_favourites  // 47 = user_favourites + users.fav_public/fav_listed + whitelist.submitter_id/submitter_public — favourites, public profiles and "my uploads"
+                                    // 46 = csp_reports (one row per KIND of violation, hits counts occurrences) + the four csp_* settings — the policy moved out of .htaccess and into PHP, where a nonce can exist
+// 45 = settings only (transport: cookie_secure_mode, client_proto_header, hsts_*) — every reader carries its own `?? default`, so the rows only make them visible in Settings
+// 44 = settings only (index_files_*: how a file list loads — mode, batch, total, once for the search page and once for the panel)
+// 43 = settings only (meta_max_files: the worker's stored-files-per-torrent cap, live from the panel)
+// 42 = settings only (dbmem_cmd, dbmem_enabled: the database-memory helper). 41 = page_content.lang — Terms and Info are written per language
+// 40 = users.language — the interface language follows the account
+// 39 = page_content — Terms and Info editable through the panel's own editor
+// 38 = net_limit_blocked — hand-typed addresses that beat an allow list
+// 37 = index_polls — what each scrape poll actually delivered, kept as a series
+// 36 = ip_lists.addr4 — an "entry" is a network, not an address, and the page has to say which
+// 35 = index_hashes.eff_seeders (virtual) + its index — the catalogue's own first page was a 2 890 ms scan
+// 34 = address lists for the inbound limit (ip_lists, ip_list_entries)
+// 33 = settings only (probe load headroom / hard stop)
+// 32 = settings only (db_time_zone, net_limit_trusted)  // 32 = settings only (db_time_zone, net_limit_trusted)
+// 31 = two index_hashes indexes (seen_count, last_completed)
+// so the fetch order can offer "seen most often" and "most completed" without a filesort,
+// plus the three settings that go with them. HEAVY: the ALTER is deferred to the janitor.
+// 30 = settings only (metadata fetch order + mix shares)
+// 29 = settings only (the stability probe, off by default) —
+                                    // and settings-only STILL needs the number to move, because the
+                                    // default rows are inserted by the migration block.
+                                    // 28 = the audit log: who did what in the panel. It had none,
+                                    // which was survivable with one administrator and stopped being
+                                    // so the moment the Moderator group existed.
+                                    // 27 = index_fetched becomes NULLABLE, so a sample taken before
+                                    // the column existed reads as "not measured" instead of as a
+                                    // confident zero the chart then drew as a flat line.
+                                    // 26 = the timeline also records how many indexed hashes have
+                                    // their metadata resolved, so "fetched" can be drawn beside
+                                    // "indexed" instead of inferred from the queue depth.
+                                    // 25 = panel permissions and a system `moderator` group: until
+                                    // now the admin panel had no permissions at all, so the only two
+                                    // states were owner and stranger.
+                                    // 24 = grant the three permissions v1.19.0 registered but never
+                                    // gave to anybody: with the users feature ON, an absent key means
+                                    // DENIED, so ratings and descriptions were admin-only in practice.
+                                    // 23 = bulk messages carry their markup format, so the HTML part
+                                    // of the mail is rendered rather than escaped line by line.
+                                    // 22 = a star rating mode beside the up/down one (rep_mode,
+                                    // votes_count on both rating tables) and the permissions the
+                                    // descriptions, ratings and rewrite proposals should have
+                                    // shipped with. 21 = ratings (hash_votes + the totals kept on the row), the
+                                    // whitelist refresh/cleanup schedule, description edit
+                                    // proposals, and the "prove it" probe state on a submission.
+                                    // 20 = settings only, and it needs its own number for the
+                                    // reason every "settings only" bump in this list needed one:
+                                    // default rows are inserted by the migration block, and that
+                                    // block runs when the VERSION moves. Adding keys without moving
+                                    // it leaves them absent from the table -- harmless, since every
+                                    // reader has a fallback, but the Settings page then shows values
+                                    // nothing saved. The keys: the whitelist source link and
+                                    // description (with their limits and the trusted-domain list),
+                                    // bulk mail, the re-authentication throttle, and live sync.
+                                    // 19 = source link + description on whitelist rows (with a review queue), the bulk mail queue, users.bulk_optout, and the two composite indexes the catalogue always needed — its own default first page was a full scan of 2.7 M rows, measured at 1 747 ms. Earlier: // …, 8 = system admin group + panel-admin migration + submit mode + worker concurrency, 9 = two-step email change (users.pending_email/email_changed_at) + verification gate + terms + search toggles, 10 = settings only (hCaptcha provider, movable admin sign-in path, timeline range buttons), 11 = UDP traffic monitor + rate limit (net_samples + net_* settings) and panel-driven backups (backup_* settings), 12 = per-client rate limits on the server-to-server API (api_clients.rl_*), 13 = machine load recorded alongside each traffic sample (net_samples.load_x100) so the panel can say where this box starts struggling, 14 = settings only (OpenTracker performance knobs: ot_*), 15 = federation P1: index_hashes.meta_origin_at (when the metadata was FIRST resolved anywhere, so it stops circulating between three or more nodes) + the fed_review quarantine table, 16 = settings only (curated kernel network buffers: sysctl_*), 17 = settings only (extra opentracker instances: ot_cluster_*), 18 = settings only (admin_2fa_enabled: a MIRROR of config/admin_2fa.json, which is authoritative)
+
+/**
+ * All DDL, in order. Shared with install.php (fresh installs run exactly the same statements),
+ * so there is one place that defines the schema of the whitelist / API tables.
+ */
+function trackerSchemaStatements(): array {
+    $engine = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    return [
+        // ── Whitelist: DB is the source of truth; the accesslist file is generated from it ──
+        "CREATE TABLE IF NOT EXISTS `whitelist` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `name` VARCHAR(255) DEFAULT NULL,
+            `magnet_link` TEXT DEFAULT NULL,
+            `source` ENUM('web','api','admin','forum') NOT NULL DEFAULT 'web',
+            `source_ref` VARCHAR(512) DEFAULT NULL,
+            `api_client_id` INT UNSIGNED DEFAULT NULL,
+            `ip` VARCHAR(45) NOT NULL DEFAULT '',
+            `ip_bucket` VARCHAR(45) NOT NULL DEFAULT '',
+            `banned` TINYINT(1) NOT NULL DEFAULT 0,
+            `meta_status` ENUM('none','pending','fetching','done','failed') NOT NULL DEFAULT 'none',
+            `meta_priority` TINYINT NOT NULL DEFAULT 0,
+            `meta_requested_at` DATETIME DEFAULT NULL,
+            `meta_claimed_at` DATETIME DEFAULT NULL,
+            `meta_claim` CHAR(16) DEFAULT NULL,
+            `meta_fetched_at` DATETIME DEFAULT NULL,
+            `meta_error` VARCHAR(255) DEFAULT NULL,
+            `total_size` BIGINT UNSIGNED DEFAULT NULL,
+            `files_count` INT UNSIGNED DEFAULT NULL,
+            `piece_length` INT UNSIGNED DEFAULT NULL,
+            `scrape_seeders` INT UNSIGNED DEFAULT NULL,
+            `scrape_leechers` INT UNSIGNED DEFAULT NULL,
+            `scrape_completed` INT UNSIGNED DEFAULT NULL,
+            `scraped_at` DATETIME DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            -- v47: who registered it while signed in (NULL = nobody's: anonymous, the API, the
+            -- panel, or a row older than this column), and whether they want it on their profile.
+            -- `submitter_public` decides whose PROFILE a row appears on and nothing else — never
+            -- what the tracker serves and never what the search finds.
+            `submitter_id` INT UNSIGNED DEFAULT NULL,
+            `submitter_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v48: THE ONE COLUMN THAT GATES WHAT THE TRACKER SERVES.
+            -- 'none' is every row that predates this and every row from a partner allowed to publish
+            -- directly, so switching the feature on never retroactively unpublishes anything. Only
+            -- 'pending' and 'rejected' are withheld, and the accesslist generator is the only place
+            -- that reads it that way — tests/sql_safety_test.php pins that query.
+            `review_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `review_note` VARCHAR(255) DEFAULT NULL,
+            `reviewed_at` DATETIME DEFAULT NULL,
+            -- ── v19 / v21 / v58, written out here and NOT only as ALTERs ─────────────────────────
+            -- Every one of these also exists as a guarded ADD COLUMN in trackerSchemaGuardedStatements(),
+            -- which is where an upgrade picks them up. They have to be in both places: a fresh
+            -- install that only ran the CREATE list would have a different `whitelist` from an
+            -- upgraded one, and the pages select these by name. Types and defaults below are copied
+            -- from those ALTERs character for character — change one, change the other.
+            `content_user_id` INT UNSIGNED DEFAULT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
+            `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `content_reviewed_at` DATETIME DEFAULT NULL,
+            `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            -- v81: who wrote the words and who edited them since, in order — the credit chain the Info
+            -- panel draws under the description: by A (first), then B (25% edit). Compact JSON written
+            -- only by includes/content.php (contentCreditsEncode()); NULL = nobody credited.
+            `content_credits` TEXT DEFAULT NULL,
+            -- 'none' = never asked to prove anything, which is what every row starts as.
+            `probe_status` ENUM('none','probing','passed','failed') NOT NULL DEFAULT 'none',
+            `probe_started_at` DATETIME DEFAULT NULL,
+            `probe_error` VARCHAR(255) DEFAULT NULL,
+            -- NULL means not dead as far as anybody knows, which is also what a row that has never
+            -- been scraped says — no data is not the same as no peers.
+            `dead_since` DATETIME DEFAULT NULL,
+            -- v21/v22: the rating totals kept on the row, so a listing of fifty is one query rather
+            -- than fifty aggregates. `votes_count` is its own column and not votes_up + votes_down:
+            -- in star mode there is no up and no down, there is a count and an average.
+            `votes_up` INT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_down` INT UNSIGNED NOT NULL DEFAULT 0,
+            `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            UNIQUE KEY `uq_whitelist_hash` (`info_hash`),
+            KEY `idx_wl_submitter` (`submitter_id`, `created_at`),
+            KEY `idx_wl_review` (`review_status`, `created_at`),
+            KEY `idx_whitelist_ip_bucket` (`ip_bucket`, `created_at`),
+            KEY `idx_whitelist_created` (`created_at`),
+            KEY `idx_whitelist_source` (`source`, `created_at`),
+            KEY `idx_whitelist_meta` (`meta_status`, `meta_priority`, `meta_requested_at`),
+            KEY `idx_whitelist_banned` (`banned`),
+            -- the three that come with the columns above (same rule, same ALTERs)
+            KEY `idx_whitelist_content` (`content_status`, `created_at`),
+            KEY `idx_whitelist_dead` (`dead_since`),
+            KEY `idx_whitelist_probe` (`probe_status`, `probe_started_at`),
+            FULLTEXT KEY `ft_whitelist_name` (`name`)
+        ) $engine",
+
+        // ── Torrent file lists (written by the metadata worker; searchable) ──
+        "CREATE TABLE IF NOT EXISTS `whitelist_files` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `whitelist_id` INT UNSIGNED NOT NULL,
+            `path` VARCHAR(1000) NOT NULL,
+            `size` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            KEY `idx_wf_whitelist` (`whitelist_id`),
+            FULLTEXT KEY `ft_wf_path` (`path`)
+        ) $engine",
+
+        // ── Hashes that must never be served (whitelist mode: block = ban) ──
+        "CREATE TABLE IF NOT EXISTS `banned_hashes` (
+            `info_hash` CHAR(40) NOT NULL PRIMARY KEY,
+            `reason` VARCHAR(255) DEFAULT NULL,
+            `source` ENUM('report','appeal','admin','import') NOT NULL DEFAULT 'admin',
+            `source_id` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_banned_created` (`created_at`)
+        ) $engine",
+
+        // ── Server-to-server API clients (bearer key: <key_id>.<secret>; only the hash is stored) ──
+        "CREATE TABLE IF NOT EXISTS `api_clients` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `label` VARCHAR(100) NOT NULL,
+            `key_id` CHAR(16) NOT NULL,
+            `secret_hash` CHAR(64) NOT NULL,
+            `secret_hint` CHAR(4) NOT NULL DEFAULT '',
+            `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist',
+            `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            -- v48. auto_approve = 1 means this partner publishes straight to the tracker; 0 puts
+            -- everything they send into the review queue on the Whitelist page. required_fields is a
+            -- comma list of names this partner's items must carry ('name', 'url', 'source_id'), so a
+            -- feed that arrives without a title is refused at the door rather than becoming a row
+            -- nobody can identify.
+            `auto_approve` TINYINT(1) NOT NULL DEFAULT 1,
+            `required_fields` VARCHAR(255) NOT NULL DEFAULT '',
+            -- v50, and DEFAULT 0 where `auto_approve` above defaults to 1: registering a hash a
+            -- partner already published is not an escalation, blocking one is. A key that can file
+            -- abuse reports gets them REVIEWED unless somebody deliberately says otherwise.
+            -- Also a guarded ALTER (upgrades) — the two definitions must stay identical.
+            `abuse_auto_block` TINYINT(1) NOT NULL DEFAULT 0,
+            `image_domains` VARCHAR(1000) NOT NULL DEFAULT '',
+            `describe_mode` VARCHAR(8) NOT NULL DEFAULT 'off',
+            `describe_accounts` INT UNSIGNED DEFAULT NULL,
+            `image_consent` TINYINT(1) DEFAULT NULL,
+            `image_consent_at` DATETIME DEFAULT NULL,
+            `tags_import` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_used_at` DATETIME DEFAULT NULL,
+            `last_used_ip` VARCHAR(45) DEFAULT NULL,
+            `requests_count` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `rl_min_start` DATETIME DEFAULT NULL,
+            `rl_min_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `rl_day` DATE DEFAULT NULL,
+            `rl_day_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `rl_blocked_count` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            UNIQUE KEY `uq_api_clients_key` (`key_id`)
+        ) $engine",
+
+        // ── API bans (30 days by default) with the full offending request for review ──
+        "CREATE TABLE IF NOT EXISTS `api_bans` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `ip` VARCHAR(45) NOT NULL,
+            `ip_bucket` VARCHAR(45) NOT NULL,
+            `reason` VARCHAR(32) NOT NULL,
+            `detail` VARCHAR(255) DEFAULT NULL,
+            `key_id` VARCHAR(64) DEFAULT NULL,
+            `endpoint` VARCHAR(64) DEFAULT NULL,
+            `request_snapshot` MEDIUMTEXT DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME NOT NULL,
+            `lifted_at` DATETIME DEFAULT NULL,
+            `lifted_by` VARCHAR(32) DEFAULT NULL,
+            KEY `idx_api_bans_active` (`ip_bucket`, `lifted_at`, `expires_at`),
+            KEY `idx_api_bans_created` (`created_at`)
+        ) $engine",
+
+        // ── Statistics timeline (schema v5, includes/stats_timeline.php): raw samples + 5-minute / hourly roll-ups.
+        //    `ts` = UNIX seconds (sample time / bucket start). Counters (completed, *_announces, connects,
+        //    scrapes) are OpenTracker's cumulative values; the API derives per-second rates from them.
+        "CREATE TABLE IF NOT EXISTS `stats_samples` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `torrents` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peers` INT UNSIGNED NOT NULL DEFAULT 0,
+            `seeds` INT UNSIGNED NOT NULL DEFAULT 0,
+            `leechers` INT UNSIGNED NOT NULL DEFAULT 0,
+            `completed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `udp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `tcp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `connects` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `scrapes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
+            `mode` ENUM('whitelist','blacklist') NOT NULL DEFAULT 'blacklist',
+            `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_fetched` INT UNSIGNED DEFAULT NULL
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `stats_samples_5m` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `samples` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `torrents_avg` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_min` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `peers_min` INT UNSIGNED NOT NULL DEFAULT 0, `peers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `seeds_avg` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_min` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `leechers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_min` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `completed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `udp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `tcp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `connects` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `scrapes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
+            `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_fetched` INT UNSIGNED DEFAULT NULL
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `stats_samples_1h` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `samples` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `torrents_avg` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_min` INT UNSIGNED NOT NULL DEFAULT 0, `torrents_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `peers_min` INT UNSIGNED NOT NULL DEFAULT 0, `peers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `seeds_avg` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_min` INT UNSIGNED NOT NULL DEFAULT 0, `seeds_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `leechers_avg` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_min` INT UNSIGNED NOT NULL DEFAULT 0, `leechers_max` INT UNSIGNED NOT NULL DEFAULT 0,
+            `completed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `udp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `tcp_announces` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `connects` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `scrapes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `uptime` INT UNSIGNED NOT NULL DEFAULT 0,
+            `wl_share` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `whitelist_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_rows` INT UNSIGNED NOT NULL DEFAULT 0,
+            `index_fetched` INT UNSIGNED DEFAULT NULL
+        ) $engine",
+
+        // ── UDP traffic samples (schema v11, includes/netlimit.php): nftables counters turned into
+        //    packets/second, one row per sample. The cumulative columns are kept next to the derived
+        //    rates so a gap (or a counter reset after "Apply") can always be told apart from a lull.
+        //    Retention is net_keep_days; there is no roll-up — at one minute and 14 days that is
+        //    ~20 000 rows, small enough to read raw.
+        // schema v37: one row per scrape poll, so "how much of the tracker did we actually see" can be
+        // asked about last week and not only about the last half hour.
+        //
+        // Everything in here was already being computed — indexPoll() returns all of it — and thrown
+        // away: the state file keeps a single `last_poll` key and the next poll overwrites it. At a
+        // poll every 30 minutes this is 48 rows a day.
+        //
+        // The distinction that makes the whole table worth having: `entries` is a FILE POSITION, not
+        // a delivery count. A pass that resumes at a cursor counts every entry it walks past,
+        // including the ones a previous pass already handled, so `entries` alone reads as though a
+        // resumed poll delivered the whole file again. `skip_from` is the cursor this pass started
+        // at, and `entries - skip_from` is what it actually contributed.
+        "CREATE TABLE IF NOT EXISTS `index_polls` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `entries` INT UNSIGNED NOT NULL DEFAULT 0,
+            `skip_from` INT UNSIGNED NOT NULL DEFAULT 0,
+            `kept` INT UNSIGNED NOT NULL DEFAULT 0,
+            `bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `ms` INT UNSIGNED NOT NULL DEFAULT 0,
+            `truncated` TINYINT(1) NOT NULL DEFAULT 0,
+            `partial` VARCHAR(64) DEFAULT NULL,
+            `removed_wl` INT UNSIGNED NOT NULL DEFAULT 0,
+            `removed_ban` INT UNSIGNED NOT NULL DEFAULT 0,
+            -- How many torrents the TRACKER said it had at that moment, from the same stats fetch the
+            -- swarm timeline uses. NULL when that number was not available: a coverage ratio with an
+            -- invented denominator is worse than no ratio, so the chart leaves a gap instead.
+            `rows_total` INT UNSIGNED DEFAULT NULL,
+            -- What the index held afterwards, so the chart can show the catalogue growing next to
+            -- what each poll delivered.
+            `index_rows` INT UNSIGNED DEFAULT NULL,
+            `error` VARCHAR(190) DEFAULT NULL,
+            KEY `idx_ipoll_ts` (`ts`)
+        ) $engine",
+
+        // Content-Security-Policy violations (includes/csp.php, csp-report.php).
+        //
+        // THE PRIMARY KEY IS THE AGGREGATION KEY: sha1(scope|directive|blocked_origin). One row per
+        // KIND of violation and a counter, which is the difference between a table that grows with
+        // page views and one that grows with the number of real problems — this is written by a
+        // PUBLIC unauthenticated endpoint that every browser on the site can reach, into a MariaDB
+        // shared with a mail server, a forum and a file host.
+        //
+        // `blocked` holds the ORIGIN of a blocked URL and never its path or query (a blocked-uri
+        // routinely carries a token), and `sample_doc` holds the `?action=` of the page and nothing
+        // else from that URL. Everything a backup dumps from here is meant to be dumpable.
+        "CREATE TABLE IF NOT EXISTS `csp_reports` (
+            `sig`        CHAR(40) NOT NULL PRIMARY KEY,
+            `scope`      VARCHAR(8)   NOT NULL DEFAULT 'public',
+            `directive`  VARCHAR(48)  NOT NULL DEFAULT '',
+            `blocked`    VARCHAR(255) NOT NULL DEFAULT '',
+            `sample_doc` VARCHAR(64)  NOT NULL DEFAULT '',
+            `hits`       INT UNSIGNED NOT NULL DEFAULT 0,
+            `first_seen` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_seen`  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `k_csp_last` (`last_seen`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `net_samples` (
+            `ts` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `span` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `in_total` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `in_passed` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `in_capped` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `out_ok` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `out_capped` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `pps_total` INT UNSIGNED NOT NULL DEFAULT 0,
+            `pps_passed` INT UNSIGNED NOT NULL DEFAULT 0,
+            `pps_capped` INT UNSIGNED NOT NULL DEFAULT 0,
+            `epps_ok` INT UNSIGNED NOT NULL DEFAULT 0,
+            `epps_capped` INT UNSIGNED NOT NULL DEFAULT 0,
+            `limit_pps` INT UNSIGNED NOT NULL DEFAULT 0,
+            -- Load average per core when the sample was taken, x100 (1.25 -> 125). NULL when the
+            -- platform cannot report it: the study skips those rows rather than inventing a zero,
+            -- because a load of nothing and an unknown load are different claims.
+            `load_x100` SMALLINT UNSIGNED DEFAULT NULL,
+            -- v92 (1.73.3): TCP segments the machine resent per 1 000 it sent over the sample's span
+            -- (/proc/net/snmp) — the packets the provider drops OUTSIDE the VM, which nothing inside it
+            -- shows. NULL when unreadable or when fewer than 300 segments were sent: no reading, not a zero.
+            `tcp_retrans_x10` SMALLINT UNSIGNED DEFAULT NULL
+        ) $engine",
+
+        // ── Observed-hash index (schema v6, includes/index.php): a catalogue of info hashes seen on the
+        //    tracker (mostly during OPEN hours via full scrape). NOT a whitelist — it is never served. Meta
+        //    columns mirror `whitelist` so the metadata worker drains both queues with one code path.
+        "CREATE TABLE IF NOT EXISTS `index_hashes` (
+            `info_hash` CHAR(40) NOT NULL PRIMARY KEY,
+            `name` VARCHAR(255) DEFAULT NULL,
+            `first_seen` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_seen` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `seen_count` INT UNSIGNED NOT NULL DEFAULT 1,
+            `last_seeders` INT UNSIGNED NOT NULL DEFAULT 0,
+            `last_leechers` INT UNSIGNED NOT NULL DEFAULT 0,
+            `last_completed` INT UNSIGNED NOT NULL DEFAULT 0,
+            `peak_seeders` INT UNSIGNED NOT NULL DEFAULT 0,
+            `grace_until` DATETIME DEFAULT NULL,
+            `protected_until` DATETIME DEFAULT NULL,
+            `promoted_at` DATETIME DEFAULT NULL,
+            `meta_status` ENUM('none','pending','fetching','done','failed') NOT NULL DEFAULT 'none',
+            `meta_priority` TINYINT NOT NULL DEFAULT -1,
+            `meta_requested_at` DATETIME DEFAULT NULL,
+            `meta_claimed_at` DATETIME DEFAULT NULL,
+            `meta_claim` CHAR(16) DEFAULT NULL,
+            `meta_fetched_at` DATETIME DEFAULT NULL,
+            -- When this metadata was first resolved ANYWHERE, as opposed to when it arrived here.
+            -- With two nodes the difference is cosmetic; with three it is the whole game. A row
+            -- imported from B and re-stamped NOW() looks brand new to C, which sends it back to A,
+            -- which sends it on again: the same rows circulate for ever and every pass rewrites
+            -- them. Carrying the original time means the second cycle recognises the row, changes
+            -- nothing, and therefore never re-enters anyone's export window.
+            `meta_origin_at` DATETIME DEFAULT NULL,
+            `meta_error` VARCHAR(255) DEFAULT NULL,
+            `meta_source` VARCHAR(24) DEFAULT NULL,
+            `total_size` BIGINT UNSIGNED DEFAULT NULL,
+            `files_count` INT UNSIGNED DEFAULT NULL,
+            `piece_length` INT UNSIGNED DEFAULT NULL,
+            `scrape_seeders` INT UNSIGNED DEFAULT NULL,
+            `scrape_leechers` INT UNSIGNED DEFAULT NULL,
+            `scrape_completed` INT UNSIGNED DEFAULT NULL,
+            `scraped_at` DATETIME DEFAULT NULL,
+            -- The seeder count the catalogue actually sorts by: the scrape figure when there is one,
+            -- otherwise the last announce. VIRTUAL, so it costs no row space and no write — it exists
+            -- purely so the expression can be INDEXED. Sorting by the COALESCE directly cannot use an
+            -- index, and the catalogue's own default first page was therefore a full scan and a
+            -- filesort of the whole table: measured at 2 890 ms on 1.9 M rows, on a page any member
+            -- can open. With the index below the same page is 1 ms.
+            -- v21/v22: the rating totals, kept on the row — the same four columns, with the same
+            -- types and defaults, that trackerSchemaGuardedStatements() adds to an existing
+            -- database. They matter here more than anywhere else in this file: THAT ALTER is one of
+            -- the two the web declines (index_hashes carries a FULLTEXT index, so adding a column
+            -- rebuilds the table), and a declined migration leaves schema_version unwritten. A
+            -- browser install would therefore stop at version 0 and wait for a CLI run. On an empty
+            -- table there is nothing to rebuild, so the right place for them is right here.
+            `votes_up` INT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_down` INT UNSIGNED NOT NULL DEFAULT 0,
+            `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `votes_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `eff_seeders` INT UNSIGNED GENERATED ALWAYS AS (COALESCE(`scrape_seeders`, `last_seeders`)) VIRTUAL,
+            KEY `idx_index_eff_seed` (`eff_seeders`, `info_hash`),
+            KEY `idx_index_seen` (`seen_count`),
+            KEY `idx_index_meta_fetched` (`meta_fetched_at`),
+            KEY `idx_index_last_seen` (`last_seen`),
+            KEY `idx_index_grace` (`grace_until`),
+            KEY `idx_index_protected` (`protected_until`),
+            KEY `idx_index_meta` (`meta_status`, `meta_priority`, `meta_requested_at`),
+            KEY `idx_index_seeders` (`last_seeders`),
+            KEY `idx_index_promoted` (`promoted_at`),
+            -- v19/v31: the composite indexes the catalogue and the fetch-order selectors need. The
+            -- other half of the same deferred ALTER as the four columns above — free on an empty
+            -- table, minutes long on a live one, so a fresh install builds them with the table.
+            KEY `idx_index_seed_seen` (`last_seeders`, `last_seen`),
+            KEY `idx_index_meta_seed` (`meta_status`, `last_seeders`, `last_seen`),
+            KEY `idx_index_meta_seen` (`meta_status`, `seen_count`),
+            KEY `idx_index_meta_completed` (`meta_status`, `last_completed`),
+            KEY `idx_index_meta_done_fetched` (`meta_status`, `meta_fetched_at`),
+            FULLTEXT KEY `ft_index_name` (`name`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `index_files` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `path` VARCHAR(1000) NOT NULL,
+            `size` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            KEY `idx_if_hash` (`info_hash`),
+            FULLTEXT KEY `ft_if_path` (`path`)
+        ) $engine",
+        // v93 (1.74.0): the public catalogue's narrow twin of index_hashes — see schemaIndexCatalogDdl().
+        schemaIndexCatalogDdl($engine),
+
+        // ── User accounts (schema v7, includes/users.php): registration/login, groups with JSON
+        //    permissions, timed memberships, in-app notifications and remember/reset tokens.
+        //    All optional — nothing is used unless users_enabled=1.
+        "CREATE TABLE IF NOT EXISTS `users` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `username` VARCHAR(32) NOT NULL,
+            `email` VARCHAR(190) DEFAULT NULL,
+            `pass_hash` VARCHAR(255) NOT NULL,
+            `status` VARCHAR(16) NOT NULL DEFAULT 'active',
+            `email_verified` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `created_ip` VARCHAR(45) DEFAULT NULL,
+            `last_login_at` DATETIME DEFAULT NULL,
+            `last_login_ip` VARCHAR(45) DEFAULT NULL,
+            `pending_email` VARCHAR(190) DEFAULT NULL,
+            `email_changed_at` DATETIME DEFAULT NULL,
+            -- v19: whoever does not want the newsletter must be able to say so once and be believed.
+            -- It lived only in the guarded ALTER list until now, which is exactly the split the
+            -- comment on `fav_public` below warns about — a fresh install and an upgraded one
+            -- disagreeing about the shape of `users`.
+            `bulk_optout` TINYINT(1) NOT NULL DEFAULT 0,
+            `language` VARCHAR(3) DEFAULT NULL,
+            -- v47. Two flags, not one, because they answer two different questions and a reader who
+            -- says yes to one has not said yes to the other:
+            --   fav_public — may a stranger read MY list of favourites on my profile?
+            --   fav_listed — may my name appear on somebody else's list of who favourited a hash?
+            -- Both default to 0. A privacy flag that ships on is not a choice anybody made.
+            `fav_public` TINYINT(1) NOT NULL DEFAULT 0,
+            `fav_listed` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v51, and a third question again: may a stranger see that I HAVE lists at all? It is
+            -- not covered by fav_public — somebody may be happy to show what they starred and not
+            -- what they collected — and each list carries its own visibility underneath it (v87:
+            -- private, friends or public; is_public before).
+            `lists_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v75, and a fourth question of the same kind: may a stranger see what I liked or rated
+            -- (includes/profilevotes.php)? Its own flag, because the list shows the thumbs down and
+            -- the low stars as well, and somebody happy to publish their favourites has not said yes
+            -- to that. 0 like the others: shown to nobody but its owner until they say so.
+            `votes_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v82, the likes' and ratings' twin of fav_listed (includes/who.php): may my name, with my vote
+            -- beside it, appear in a torrent's “who has this”? Its own question, as fav_listed is beside
+            -- fav_public: somebody who shows their likes on a profile they chose to publish has not said
+            -- yes to being named from every torrent's page. 0 like the others, and both are needed.
+            `votes_listed` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v81, two more (includes/content.php, includes/profiledescs.php). The first is the one
+            -- privacy flag in this table that ships ON, and on purpose: names have always been shown under
+            -- the descriptions people write, and an upgrade must not silently take every name away —
+            -- off, every place that credits this account says 'a member' instead. The second is the
+            -- ordinary kind: may a stranger see the list of descriptions I wrote? No, until I say so.
+            `content_credit_public` TINYINT(1) NOT NULL DEFAULT 1,
+            `descriptions_public` TINYINT(1) NOT NULL DEFAULT 0,
+            `images_public` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v55. Two answers a moderator can give that are not 'delete the line': silence this
+            -- account's MESSAGES until a date, and ban the account until a date. Both are NULL for
+            -- everybody, both are a moment rather than a flag, and a moment that has passed needs
+            -- nobody to remember to undo it — a flag does, and the person who would have to
+            -- remember is the one who was angry a week ago.
+            `pm_muted_until` DATETIME DEFAULT NULL,
+            `banned_until` DATETIME DEFAULT NULL,
+            -- v61: what this reader chose to hear (includes/sounds.php): a JSON blob, NULL = never asked = muted
+            `sound_prefs` VARCHAR(600) DEFAULT NULL,
+            -- v63: how far this reader has read the shoutbox. One column instead of a table of read
+            -- marks: how many since this id is a walk down the primary key, and nothing has to be
+            -- pruned afterwards. 0 = has never looked, which is what every existing account gets.
+            `shout_seen_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            -- v68: the zone this reader sees times in, as an IANA name (Europe/Warsaw). NULL is not
+            -- a zone: it means 'use the site zone', so moving the site zone moves everybody who
+            -- never chose and nobody who did. Validated against the zones PHP knows wherever it is
+            -- written (userSetTimezone), and read as NULL wherever PHP does not know it.
+            `timezone` VARCHAR(64) DEFAULT NULL,
+            -- v69: the picture and the profile cover (includes/usermedia.php). SMALL COLUMNS ONLY:
+            -- this row is read with SELECT * on nearly every request, so the images themselves live
+            -- in `user_media` and what rides along here is just enough to build their addresses
+            -- without another query. `avatar_sha` names one CROP (every size of it shares the id),
+            -- `cover_sha` names the stored cover; NULL is 'none of my own'. The focus is a percentage
+            -- of the image (0-100, CSS object-position semantics) and the zoom a factor (0.5-4) — the
+            -- numbers the editor, the profile page and the server-side crop all read the same way.
+            `avatar_sha` CHAR(40) DEFAULT NULL,
+            `avatar_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `avatar_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `avatar_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+            `cover_sha` CHAR(40) DEFAULT NULL,
+            `cover_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `cover_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00,
+            `cover_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00,
+            -- v74: the description on the profile (includes/profilebio.php), AS TYPED: the BBCode
+            -- source, rendered when a page is drawn, so a fix to the renderer reaches every text
+            -- already stored. Small by construction -- the save caps the source at four times the
+            -- visible limit and never above 8 KB -- which is what lets it ride on a row that is read
+            -- with SELECT * on nearly every request. NULL is 'none written'. The stamp is the last
+            -- write, a clear by the owner or a moderator included.
+            `bio` TEXT DEFAULT NULL,
+            `bio_updated_at` DATETIME DEFAULT NULL,
+            -- v53. The instant every OTHER session of this account stopped counting: a unix time,
+            -- stamped by 'sign out everywhere else' and by a password change. A UNIX TIMESTAMP and
+            -- not a DATETIME on purpose — it is compared against the session login time, which
+            -- PHP wrote, and this schema has been bitten before by a database and an app that
+            -- disagree about which zone they are in.
+            `sessions_valid_from` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            -- v52. NULL is not a fourth value: it means 'whatever the site says', so an operator who
+            -- changes the default changes it for everybody who never expressed a preference, and
+            -- nobody who did is overruled.
+            `pm_who` ENUM('all','friends','nobody') DEFAULT NULL,
+            -- 'my profile is public' and 'put me in the directory' are different sentences: one is
+            -- about a page somebody may be sent, the other about being FOUND by strangers browsing.
+            `profile_listed` TINYINT(1) NOT NULL DEFAULT 0,
+            -- v83: which comments this account is told about (includes/comments.php, COMMENT_NOTIFY_*):
+            -- a bit each for a comment on a torrent it registered (1), on a description it wrote (2), in
+            -- a thread it commented in (4), and an @-mention of it (8) — and since v88 a reply to one of
+            -- its comments (16). 31 = all five, the default — a bitmask so the fan-out asks it in the one
+            -- query that finds the people.
+            `comment_notify` TINYINT UNSIGNED NOT NULL DEFAULT 31,
+            UNIQUE KEY `uq_users_username` (`username`),
+            UNIQUE KEY `uq_users_email` (`email`),
+            KEY `idx_users_status` (`status`),
+            KEY `idx_users_created` (`created_at`),
+            KEY `idx_users_muted` (`pm_muted_until`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_groups` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `slug` VARCHAR(64) NOT NULL,
+            `name` VARCHAR(64) NOT NULL,
+            `description` VARCHAR(255) NOT NULL DEFAULT '',
+            `color` VARCHAR(16) NOT NULL DEFAULT '',
+            `priority` INT NOT NULL DEFAULT 0,
+            `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+            `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+            `permissions` TEXT DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_user_groups_slug` (`slug`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_group_members` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `group_id` INT UNSIGNED NOT NULL,
+            `granted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME DEFAULT NULL,
+            `granted_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `note` VARCHAR(255) NOT NULL DEFAULT '',
+            `warned_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_ugm_user_group` (`user_id`, `group_id`),
+            KEY `idx_ugm_group` (`group_id`),
+            KEY `idx_ugm_expires` (`expires_at`)
+        ) $engine",
+        // v71: what a SHOP asked for, so asking twice does it once (api/v1/users_grant.php).
+        //
+        // A payment webhook retries. Every shop's does: the reply was slow, the connection dropped,
+        // the queue redelivered — and a grant endpoint that simply extends by a month each time hands
+        // out three months for one payment. The fix is not "try to notice a duplicate", it is a row
+        // the database refuses to hold twice: UNIQUE(client_id, order_id), INSERT IGNORE as the
+        // test-and-set, and the stored answer replayed to every retry.
+        //
+        // client_id is part of the key for the same reason it is in `user_identities`: two shops both
+        // numbering their orders from 1 are two different orders.
+        //
+        // `prev_expires_at` + `prev_member` are what a refund needs. Taking back "that order's month"
+        // means putting the membership back where the order found it, and NULL alone cannot say
+        // whether it found a permanent membership or no membership at all — so the flag says which.
+        "CREATE TABLE IF NOT EXISTS `user_group_orders` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `client_id` INT UNSIGNED NOT NULL,
+            `order_id` VARCHAR(64) NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `group_id` INT UNSIGNED NOT NULL,
+            `action` VARCHAR(16) NOT NULL DEFAULT 'grant',
+            `duration` VARCHAR(16) NOT NULL DEFAULT '',
+            `until` DATETIME DEFAULT NULL,
+            `prev_member` TINYINT(1) NOT NULL DEFAULT 0,
+            `prev_expires_at` DATETIME DEFAULT NULL,
+            `new_expires_at` DATETIME DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_ugo_client_order` (`client_id`, `order_id`),
+            KEY `idx_ugo_user` (`user_id`, `group_id`)
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_notifications` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `type` VARCHAR(32) NOT NULL DEFAULT 'info',
+            `title` VARCHAR(190) NOT NULL,
+            `body` TEXT DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `read_at` DATETIME DEFAULT NULL,
+            -- v83: where the notification happened, as a SITE-RELATIVE address (`?action=…`) the account
+            -- page offers as a button (Show the comment); NULL for the ones that are about the account
+            -- itself. Only this code writes it (userNotify()), never somebody's text.
+            `link` VARCHAR(255) DEFAULT NULL,
+            -- v93: the account it is FROM, where there is one (a friend request, its acceptance) — so it goes
+            -- with that account (userDeleteCascade()), and a second request is not announced while the first is
+            -- unread. NULL for everything else.
+            `sender_id` INT UNSIGNED DEFAULT NULL,
+            -- v94 (1.75.0): the SOURCE of a notification that has formatting — a bulk message written in BBCode,
+            -- Markdown or HTML, a moderator's reason or answer — and the format it is written in; NULL for every
+            -- notification that is plain text (which is nearly all of them). `body` stays the plain text with the
+            -- localized lead-ins (warning number 3 …), so it never has to be escaped into a markup. The account
+            -- page's endpoint renders `rich` at read time (api/user_notifications.php), so a change to a renderer
+            -- reaches the notifications already written. MEDIUMTEXT because a TEXT is 64 KB of BYTES and a campaign
+            -- is allowed 60 000 of them.
+            `rich` MEDIUMTEXT DEFAULT NULL,
+            `rich_format` ENUM('bbcode','markdown','html','flarum') DEFAULT NULL,
+            KEY `idx_un_user` (`user_id`, `read_at`),
+            KEY `idx_un_created` (`created_at`),
+            KEY `idx_un_sender` (`sender_id`),
+            -- v93: the copies of a comment's words follow the comment by this address (commentNotifyFollow()).
+            KEY `idx_un_link` (`link`(100))
+        ) $engine",
+        "CREATE TABLE IF NOT EXISTS `user_tokens` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `type` VARCHAR(16) NOT NULL,
+            `token_hash` CHAR(64) NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME NOT NULL,
+            `used_at` DATETIME DEFAULT NULL,
+            -- v53: what this token was handed to, so 'signed in on N devices' can say something
+            -- about each one. Written when the token is issued and again on every rotation, so the
+            -- list describes where the cookie is NOW, not where it started.
+            `ip` VARCHAR(45) DEFAULT NULL,
+            `ua` VARCHAR(255) DEFAULT NULL,
+            UNIQUE KEY `uq_ut_hash` (`token_hash`),
+            KEY `idx_ut_user` (`user_id`, `type`),
+            KEY `idx_ut_expires` (`expires_at`)
+        ) $engine",
+
+        // Baseline groups: `guest` = permissions of ANONYMOUS visitors only (signed-in users get the
+        // union of their own groups instead); `member` = default group granted on registration;
+        // `admin` = site administrators (its members pass every permission check, see
+        // userEffectivePermissions). All editable but cannot be deleted (is_system). INSERT IGNORE
+        // keeps admin edits; member is seeded with guest's classic permissions so a fresh registration
+        // never sees LESS than an anonymous visitor by default.
+        "INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+            ('guest', 'Guest', 'Permissions of anonymous (not signed-in) visitors.', 0, 0, 1,
+             '{\"whitelist.view\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}'),
+            ('member', 'Member', 'Default group for newly registered users.', 1, 1, 1,
+             '{\"whitelist.view\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}'),
+            ('admin', 'Admin', 'Site administrators — members pass every permission check.', 1000, 0, 1,
+             '{\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')",
+
+        // ── Federation peers (schema v7, includes/federation.php): other tracker nodes we exchange index
+        //    metadata with. Inbound access = an api_clients row with scope 'federation' (api_client_id);
+        //    outbound pull = their bearer stored here, consumed by worker/federation.py.
+        // Quarantine for `fed_import_mode = review`. A peer you do not fully trust must not be able to
+        // put names into the public catalogue merely by answering an HTTP request, so in review mode
+        // nothing it sends reaches index_hashes at all -- it lands here until an admin accepts it.
+        //
+        // Deliberately a separate table rather than an extra meta_status value: index_hashes carries a
+        // FULLTEXT index and millions of rows, so widening its ENUM means a full rebuild, and every
+        // query that lists the catalogue would have to learn the new state or start leaking unreviewed
+        // names. A holding pen has neither problem, and dropping it undoes the feature completely.
+        //
+        // `files_json` is the file list as it arrived, capped (FED_REVIEW_FILES_MAX) -- past the cap the
+        // row is still reviewable and still acceptable, just without per-file paths.
+        "CREATE TABLE IF NOT EXISTS `fed_review` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `info_hash` CHAR(40) NOT NULL,
+            `peer_id` INT UNSIGNED DEFAULT NULL,
+            `peer_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `name` VARCHAR(512) DEFAULT NULL,
+            `total_size` BIGINT UNSIGNED DEFAULT NULL,
+            `files_count` INT UNSIGNED DEFAULT NULL,
+            `piece_length` INT UNSIGNED DEFAULT NULL,
+            `origin_at` DATETIME DEFAULT NULL,
+            `files_json` MEDIUMTEXT DEFAULT NULL,
+            `files_truncated` TINYINT(1) NOT NULL DEFAULT 0,
+            `state` ENUM('pending','rejected') NOT NULL DEFAULT 'pending',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `decided_at` DATETIME DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_fed_review` (`info_hash`, `peer_name`),
+            KEY `idx_fed_review_state` (`state`, `id`),
+            KEY `idx_fed_review_peer` (`peer_name`, `state`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        "CREATE TABLE IF NOT EXISTS `fed_peers` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(64) NOT NULL,
+            `base_url` VARCHAR(255) NOT NULL,
+            `bearer` VARCHAR(100) NOT NULL DEFAULT '',
+            `api_client_id` INT UNSIGNED DEFAULT NULL,
+            `pull_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+            `pull_files` TINYINT(1) NOT NULL DEFAULT 1,
+            `last_pull_at` DATETIME DEFAULT NULL,
+            `last_pull_cursor` VARCHAR(64) NOT NULL DEFAULT '',
+            `last_status` VARCHAR(255) NOT NULL DEFAULT '',
+            `rows_imported` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_fed_peers_name` (`name`)
+        ) $engine",
+
+        // ── Proposed rewrites of somebody else's description ─────────────
+        // Anyone can register a hash, including somebody else's, and attach an ugly description to
+        // it. The answer is not to lock the fields — the first submitter is not necessarily the
+        // right one either — but to let a later submission PROPOSE a replacement that a moderator
+        // decides on. Nothing here changes what is public until somebody says so.
+        "CREATE TABLE IF NOT EXISTS `wl_content_edits` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            -- one of the two is set: the whitelist row, or (v58) the hash_content row, the proposal is about
+            `whitelist_id` INT UNSIGNED DEFAULT NULL,
+            `hash_content_id` INT UNSIGNED DEFAULT NULL,
+            `info_hash` CHAR(40) NOT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
+            `status` ENUM('pending','applied','rejected') NOT NULL DEFAULT 'pending',
+            -- v81: a REWRITE replaces the author (the proposer becomes it); an EDIT keeps the author and
+            -- credits the proposer beside them with the share of the text it changed, measured when a
+            -- moderator applies it (includes/content.php, contentEditShare()).
+            `kind` ENUM('rewrite','edit') NOT NULL DEFAULT 'rewrite',
+            `ip` VARCHAR(45) NOT NULL DEFAULT '',
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `note` VARCHAR(255) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `reviewed_at` DATETIME DEFAULT NULL,
+            KEY `idx_edits_status` (`status`, `created_at`),
+            KEY `idx_edits_hash` (`info_hash`),
+            KEY `idx_edits_hc` (`hash_content_id`),
+            -- v81: a member's own proposals, for their list of descriptions (includes/profiledescs.php)
+            KEY `idx_edits_user` (`user_id`, `created_at`),
+            -- v82: the proposals still waiting on ONE description, counted before a new one is taken
+            -- (wl_edit_max_pending) and withdrawn with a delete — on either home. Without these the count
+            -- read every row the description ever had, the replaced versions kept on apply included.
+            KEY `idx_edits_wl_status` (`whitelist_id`, `status`),
+            KEY `idx_edits_hc_status` (`hash_content_id`, `status`)
+        ) $engine",
+
+        // ── Words about a torrent the tracker has only SEEN (v58) ─────────
+        // A description of an index-only hash. It is NOT a whitelist row on purpose: a whitelist row
+        // is a registration — the index poll drops such a hash out of the index, and in whitelist
+        // mode the accesslist is built from those rows. Words are not a registration. Same content
+        // columns as the whitelist's, so includes/content.php treats both homes through one contract.
+        "CREATE TABLE IF NOT EXISTS `hash_content` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
+            `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `content_user_id` INT UNSIGNED DEFAULT NULL,
+            `content_reviewed_at` DATETIME DEFAULT NULL,
+            `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- v81: the credit chain, as on the whitelist row (see there)
+            `content_credits` TEXT DEFAULT NULL,
+            UNIQUE KEY `uq_hc_hash` (`info_hash`),
+            KEY `idx_hc_status` (`content_status`, `created_at`)
+        ) $engine",
+
+
+        // ── Ratings: one row per hash per identity ───────────────────────
+        // The UNIQUE key is the point. One vote per identity is enforced HERE, where two requests
+        // arriving together actually collide — a check-then-insert in PHP is a race with a
+        // comfortable window, and a voting button is the most automated thing on any public site.
+        // ── Favourites (v47) ─────────────────────────────────────────────
+        //
+        // A REAL user_id, not the (type, key) pair hash_votes uses. That pair exists because a vote's
+        // identity is not uniform — an account OR a bucket of IP addresses. A favourite is only ever
+        // an account's: an anonymous one has nowhere to live (a household shares one IP bucket and it
+        // rotates), nowhere to be shown (there is no anonymous profile) and no way to honour a
+        // privacy choice. The gain is concrete: joining `users` is an eq_ref on the primary key
+        // instead of a string-to-int comparison, and the unique key is 44 bytes instead of 105 —
+        // which matters because it is copied into both of the other indexes.
+        //
+        // No FOREIGN KEY: this schema has never had one, and the first would change what
+        // includes/backup.php has to know about restore order. userDeleteCascade() is what keeps
+        // this table honest when an account goes.
+        "CREATE TABLE IF NOT EXISTS `user_favourites` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `info_hash` CHAR(40) NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- the toggle is idempotent without a read-modify-write, so two taps cannot race
+            UNIQUE KEY `uq_fav_once` (`user_id`, `info_hash`),
+            -- the profile's own list, newest first, with no filesort
+            KEY `idx_fav_user` (`user_id`, `created_at`),
+            -- the list of who favourited one hash, and the count that goes with it
+            KEY `idx_fav_hash` (`info_hash`, `user_id`)
+        ) $engine",
+
+        // ── Lists (v51) ──────────────────────────────────────────────────────────────────────
+        //
+        // A favourite is one bit about one hash. A LIST is something somebody made: a name, an
+        // order they chose, and a decision about who may see it. They are separate tables and not a
+        // "list_id" on user_favourites, because starring something and putting it in a collection
+        // are different acts — un-starring a torrent must not silently empty somebody's pack.
+        //
+        // No FOREIGN KEY, for the reason user_favourites gives above; userDeleteCascade() is what
+        // keeps both tables honest when an account goes.
+        "CREATE TABLE IF NOT EXISTS `user_lists` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `name` VARCHAR(80) NOT NULL,
+            -- the address a public list is reachable at, chosen from the name and kept stable when
+            -- the name is edited: a link somebody sent must not stop working because of a rename
+            `slug` VARCHAR(90) NOT NULL,
+            -- v80: the description as TYPED, in `description_format` (the site's two syntaxes), drawn
+            -- by the description renderer with the room's emotes (listDescRender(), includes/lists.php).
+            -- TEXT, so NULL means none as well as '' — MySQL 5.7 cannot give a TEXT column a default.
+            `description` TEXT DEFAULT NULL,
+            `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
+            -- v87: who sees it besides its owner — nobody (private), the members the owner is friends
+            -- with (friends), or everybody a profile is shown to (public); includes/lists.php decides
+            -- what each one needs. Private by default, like every other privacy answer in this schema:
+            -- a list that ships shared is not a choice anybody made. (A boolean, is_public, until v87.)
+            `visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_list_slug` (`user_id`, `slug`),
+            KEY `idx_list_user` (`user_id`, `updated_at`),
+            KEY `idx_list_visibility` (`visibility`, `updated_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `user_list_items` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `list_id` INT UNSIGNED NOT NULL,
+            `info_hash` CHAR(40) NOT NULL,
+            -- the name as it was when the row was added. The catalogue prunes hashes nobody has
+            -- announced for a while, and a list that then says nothing but forty hex characters is
+            -- a list the person who made it cannot read either.
+            `name` VARCHAR(255) DEFAULT NULL,
+            `added_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- adding twice is the same list, not a longer one
+            UNIQUE KEY `uq_list_item` (`list_id`, `info_hash`),
+            KEY `idx_list_added` (`list_id`, `added_at`),
+            -- which public lists is this hash on, for the Info panel
+            KEY `idx_item_hash` (`info_hash`)
+        ) $engine",
+
+        // ── A second factor for a member account (v53) ───────────────────────────────────────
+        //
+        // Its own table rather than columns on `users`, for the reason a row here is EXCEPTIONAL:
+        // most accounts never set one up, the secret is the most sensitive thing this schema holds,
+        // and a JOIN that returns nothing is a cheaper answer than four more columns on every user
+        // row in every query the site makes.
+        //
+        // `enabled = 0` with a secret present is a setup somebody started and never confirmed with a
+        // code; it expires by `created_at` rather than being cleaned up, so an abandoned attempt
+        // costs one row and never a half-armed account.
+        "CREATE TABLE IF NOT EXISTS `user_twofa` (
+            `user_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `secret` VARCHAR(64) NOT NULL,
+            `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+            -- SHA-256 of each unused recovery code, as a JSON array. Hashed for the same reason the
+            -- password is: a code that can be read out of the database is a password nobody typed.
+            `recovery` TEXT DEFAULT NULL,
+            -- The last TOTP step this account accepted. A code stays valid for a whole 30-second
+            -- window (and one either side), so without this the same six digits — shoulder-surfed,
+            -- or replayed off the wire on a plain-HTTP install — work twice.
+            `last_step` BIGINT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `confirmed_at` DATETIME DEFAULT NULL,
+            `last_used_at` DATETIME DEFAULT NULL
+        ) $engine",
+
+        // ── "…is typing" (v54) ──────────────────────────────────────────────────────────────
+        //
+        // One row per person per conversation, and it EXPIRES: `until` is a few seconds ahead of
+        // whoever last pressed a key, so a browser that closes mid-sentence says nothing rather than
+        // leaving somebody permanently writing. Nothing here is history — the janitor sweeps rows
+        // whose moment has passed, and losing the whole table would cost one refresh of one line.
+        //
+        // A table rather than a cache: this install may be two web servers behind one database, and
+        // an APCu entry on one of them is a fact the other cannot see.
+        // ── Sounds (v61, includes/sounds.php): the owner's uploads, as rows ─────────────────────────
+        // A row rather than a file: the web root is installed read-only on purpose, and a backup that
+        // carries the database carries these. Capped at 512 KB and forty rows by the code that writes
+        // them; `sha1` keeps the same file from being stored twice and versions its URL.
+        "CREATE TABLE IF NOT EXISTS `sounds` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(60) NOT NULL,
+            `mime` VARCHAR(32) NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `duration_ms` INT UNSIGNED DEFAULT NULL,
+            `sha1` CHAR(40) NOT NULL,
+            `data` MEDIUMBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_sounds_sha1` (`sha1`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `message_typing` (
+            `thread_id` INT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `until` DATETIME NOT NULL,
+            PRIMARY KEY (`thread_id`, `user_id`),
+            KEY `idx_typing_until` (`until`)
+        ) $engine",
+
+        // ── The shoutbox (v63, includes/shout.php): one room, and nothing kept for long ─────────────
+        //
+        // No thread, no subject, no edit: a shout is a sentence. `deleted_at`/`deleted_by` are a SOFT
+        // delete, so a moderator's decision leaves a trace for as long as anything here lasts — which
+        // is not long, because retention (shout_keep_rows / shout_keep_days) removes rows for good.
+        // `ip_bucket` is the same bucket the rate limiter uses (IPv4 exact, IPv6 /64), kept only as
+        // long as the row is.
+        //
+        // The indexes answer the only questions asked: "what is newer/older than this id" walks the
+        // primary key, `idx_shouts_created` is what retention sweeps by, `idx_shouts_user` is the
+        // flood check ("when did this account last speak"), and `idx_shouts_pinned` is the one
+        // pinned line — a column that is NULL on all but one row, looked up on every render.
+        //
+        // v66: `user_id` is NULLABLE and `is_system` says why. A line the site says ("a torrent was
+        // registered") has no author, and `user_id = 0` would be a row pointing at an account that
+        // does not exist — an absence written as a lie. A system line MAY still carry an author, the
+        // submitter it is about, when that submitter asked to be named; what `is_system` decides is
+        // that nobody owns it, it is nobody's unread and it makes no sound.
+        //
+        // v72: a line CAN be corrected now, and the correction leaves a mark. `edited_at` is the last
+        // time the words changed and `edited_by` who changed them — the author, or a moderator
+        // holding `shout.edit_any`, which is the difference every reader is shown. The index answers
+        // the one question an edit asks before it writes: "when did this account last edit", the
+        // flood interval for edits, the way `idx_shouts_user` answers it for posting.
+        "CREATE TABLE IF NOT EXISTS `shouts` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `body` VARCHAR(2000) NOT NULL,
+            `body_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
+            `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+            `ip_bucket` VARCHAR(45) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `pinned_at` DATETIME DEFAULT NULL,
+            `pinned_by` INT UNSIGNED DEFAULT NULL,
+            `edited_at` DATETIME DEFAULT NULL,
+            `edited_by` INT UNSIGNED DEFAULT NULL,
+            `deleted_by` INT UNSIGNED DEFAULT NULL,
+            `deleted_at` DATETIME DEFAULT NULL,
+            KEY `idx_shouts_created` (`created_at`),
+            KEY `idx_shouts_user` (`user_id`),
+            KEY `idx_shouts_pinned` (`pinned_at`),
+            KEY `idx_shouts_edited_by` (`edited_by`, `edited_at`)
+        ) $engine",
+
+        // Who a shout named, decided ONCE when it was written. Parsing every body on every read
+        // would mean a rename retro-mentions somebody, which is not what "did this line mean me"
+        // asks. The pair is the primary key, so saying a name twice in one line is one mention.
+        //
+        // v72: `late` marks a mention an EDIT added to a line the person may already have read past.
+        // Unread is counted by id ("everything above the last id I saw"), and an edit does not move a
+        // line's id — so without this, somebody newly named in a corrected line would never hear of
+        // it. It counts until they next look at the room (shoutSeen() clears it).
+        "CREATE TABLE IF NOT EXISTS `shout_mentions` (
+            `shout_id` BIGINT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `late` TINYINT(1) NOT NULL DEFAULT 0,
+            PRIMARY KEY (`shout_id`, `user_id`),
+            KEY `idx_mention_user` (`user_id`, `shout_id`)
+        ) $engine",
+
+        // ── Emotes and stickers (v64, includes/shout.php): the pictures `:code:` stands for ─────────
+        //
+        // Rows rather than files, for the reason `sounds` is: the web root is installed read-only on
+        // purpose, and a backup that carries the database carries these. `code` is what somebody
+        // types between colons and is therefore UNIQUE; `sha1` is what stops the same picture being
+        // stored twice and what versions its URL, so a replaced emote is a new address.
+        //
+        // `is_sticker` is the whole difference between the two things this table holds: a sticker is
+        // an emote that is drawn big when a shout is nothing but its token. `uploaded_by` NULL means
+        // the site put it there — the shipped examples and anything the owner adds from Settings —
+        // and is what the per-person cap counts against for everybody else.
+        //
+        // `mime` is the type this code SNIFFED, never the one an uploader declared, and it is what
+        // api/shout_emote.php sends back with nosniff on top.
+        //
+        // `approved_at` (v65) is a DECISION, and `enabled` is a state — two facts that looked like
+        // one for as long as the approval gate had only the second. NULL means nobody has let this
+        // picture through yet; a stamp means somebody did, whatever the row is switched to now. So a
+        // moderator who deliberately switches an approved emote off gets an emote that is off, not
+        // one that climbs back into the waiting queue asking to be approved a second time.
+        "CREATE TABLE IF NOT EXISTS `shout_emotes` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `code` VARCHAR(32) NOT NULL,
+            `name` VARCHAR(60) NOT NULL,
+            `mime` VARCHAR(32) NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `width` SMALLINT UNSIGNED DEFAULT NULL,
+            `height` SMALLINT UNSIGNED DEFAULT NULL,
+            `is_sticker` TINYINT(1) NOT NULL DEFAULT 0,
+            `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            `approved_at` DATETIME DEFAULT NULL,
+            `uploaded_by` INT UNSIGNED DEFAULT NULL,
+            `sha1` CHAR(40) NOT NULL,
+            `data` MEDIUMBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_emote_code` (`code`),
+            UNIQUE KEY `uq_emote_sha1` (`sha1`),
+            KEY `idx_emote_user` (`uploaded_by`)
+        ) $engine",
+
+        // ── Pictures and profile covers (v69, includes/usermedia.php) ──────────────────────────
+        //
+        // Rows rather than files, for the reason `sounds` and `shout_emotes` are: the web root is
+        // installed read-only, and a backup that carries the database carries these. And NOT on
+        // `users`, which is read with SELECT * on almost every request — megabytes of image riding
+        // along with every currentUser() would be the most expensive column in the schema.
+        //
+        // Every byte in here was decoded, turned upright, stripped and re-encoded to WebP by the one
+        // door that writes it (userMediaPrepare), so nothing an uploader sent survives verbatim.
+        //
+        // `kind` says what the row is: `avatar_src` is the uncropped picture the avatar is cut from
+        // (streamed to its owner and the panel only — it may show what somebody cropped away on
+        // purpose), `avatar` one cut square with its edge in `size`, `cover` the cover and
+        // `cover_thumb` its small copy. `sha1` is what the public address carries: the crop id for
+        // the squares (all three sizes of one crop share it, which is what KEY(sha1, size) finds),
+        // the bytes' own hash for everything else — a thumb shares its cover's, so one address
+        // prefix reaches both. `user_id` NULL is the SITE's: the default picture and default cover.
+        "CREATE TABLE IF NOT EXISTS `user_media` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `kind` ENUM('avatar_src','avatar','cover','cover_thumb') NOT NULL,
+            `size` SMALLINT UNSIGNED DEFAULT NULL,
+            `sha1` CHAR(40) NOT NULL,
+            `mime` VARCHAR(32) NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `width` SMALLINT UNSIGNED NOT NULL,
+            `height` SMALLINT UNSIGNED NOT NULL,
+            `data` MEDIUMBLOB NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_media_user` (`user_id`, `kind`),
+            KEY `idx_media_sha` (`sha1`, `size`)
+        ) $engine",
+
+        // ── People reaching each other (v52) ─────────────────────────────────────────────────
+        //
+        // A THREAD is a pair of accounts, not a subject line. Two people have one conversation here,
+        // the way they do in a chat window: `u_low`/`u_high` are the two ids sorted, so the unique
+        // key finds the same row whoever opens it and there can never be two threads for one pair.
+        //
+        // Hiding is per side (`u_low_hidden` / `u_high_hidden`) and is not deletion. A conversation
+        // that one person cleared out of their inbox still exists for the other, and a message that
+        // has been REPORTED must still be readable by the moderator who has to decide about it —
+        // letting either side erase evidence of what they sent is a feature nobody asked for.
+        // v70: `u_*_cleared_id` is "delete this conversation, for me". It holds the id of the last
+        // message this side had when they deleted it, and every read path filters `m.id >` their
+        // own watermark — so the thread disappears for them and stays whole for the other person,
+        // and a NEW message (a higher id) brings it back showing only what has arrived since.
+        // Nothing is deleted: a reported message has to stay readable to the panel.
+        // v90 (1.73.0): the Archive is `u_*_hidden` under its own name, and each side has a TRASH:
+        // `u_*_trash_upto` is the last message id this side put there (0 = an empty trash) and
+        // `u_*_trashed_at` when (NULL exactly when the trash is empty). What lies above the watermark
+        // and up to trash_upto is in the Trash — restorable until the janitor, pm_trash_days later,
+        // moves the watermark over it (includes/people.php, pmTrashPurgeExpired(), by these two keys).
+        "CREATE TABLE IF NOT EXISTS `message_threads` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `u_low` INT UNSIGNED NOT NULL,
+            `u_high` INT UNSIGNED NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_message_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `u_low_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+            `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+            `u_low_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_high_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_low_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_high_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `u_low_trashed_at` DATETIME DEFAULT NULL,
+            `u_high_trashed_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
+            KEY `idx_thread_low` (`u_low`, `last_message_at`),
+            KEY `idx_thread_high` (`u_high`, `last_message_at`),
+            KEY `idx_thread_trash_low` (`u_low_trashed_at`),
+            KEY `idx_thread_trash_high` (`u_high_trashed_at`)
+        ) $engine",
+
+        // `read_at` belongs to the MESSAGE and not to a per-person table: a thread has exactly two
+        // people in it, so "read" can only mean "the other one read it".
+        "CREATE TABLE IF NOT EXISTS `user_messages` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `thread_id` INT UNSIGNED NOT NULL,
+            `sender_id` INT UNSIGNED NOT NULL,
+            `body` TEXT NOT NULL,
+            `body_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `read_at` DATETIME DEFAULT NULL,
+            `reported` TINYINT(1) NOT NULL DEFAULT 0,
+            KEY `idx_msg_thread` (`thread_id`, `id`),
+            KEY `idx_msg_unread` (`thread_id`, `sender_id`, `read_at`),
+            KEY `idx_msg_sender` (`sender_id`, `created_at`)
+        ) $engine",
+
+        // A report carries the reported message and the one before it, and NOTHING else. The
+        // moderator has to judge one exchange, not read a correspondence — that is a privacy
+        // decision and it lives in the schema so no query can quietly widen it later.
+        "CREATE TABLE IF NOT EXISTS `message_reports` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `message_id` BIGINT UNSIGNED NOT NULL,
+            `context_id` BIGINT UNSIGNED DEFAULT NULL,
+            `thread_id` INT UNSIGNED NOT NULL,
+            `reporter_id` INT UNSIGNED NOT NULL,
+            `reported_user_id` INT UNSIGNED NOT NULL,
+            `reason` VARCHAR(500) NOT NULL DEFAULT '',
+            `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+            `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `handled_at` DATETIME DEFAULT NULL,
+            -- v94 (1.75.0): the moderator's note (the panel's own) and answer (the reporter's) are texts of up to
+            -- 2 000 characters, the answer with a format — TEXT, nullable (MySQL 5.7 cannot default a TEXT).
+            `note` TEXT DEFAULT NULL,
+            `reply` TEXT DEFAULT NULL,
+            `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
+            KEY `idx_mreport_status` (`status`, `created_at`),
+            KEY `idx_mreport_user` (`reported_user_id`)
+        ) $engine",
+
+        // FOLLOWING and FRIENDSHIP are the same table read two ways, which is the operator's own
+        // decision recorded in code: one row is "A asked B", and until B answers it means A follows
+        // B. Accepted, the pair are friends — one row, two directions, so a friendship cannot exist
+        // in one place and not in the other.
+        "CREATE TABLE IF NOT EXISTS `user_friends` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `friend_id` INT UNSIGNED NOT NULL,
+            `status` ENUM('pending','accepted') NOT NULL DEFAULT 'pending',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `accepted_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_friend_once` (`user_id`, `friend_id`),
+            KEY `idx_friend_of` (`friend_id`, `status`),
+            KEY `idx_friend_mine` (`user_id`, `status`)
+        ) $engine",
+
+        // A block is one-directional and says WHAT it blocks. `hide_profile` is the second half the
+        // operator asked for: some people want to stop the messages, some want to disappear.
+        "CREATE TABLE IF NOT EXISTS `user_blocks` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `blocked_id` INT UNSIGNED NOT NULL,
+            `hide_profile` TINYINT(1) NOT NULL DEFAULT 0,
+            `note` VARCHAR(200) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_block_once` (`user_id`, `blocked_id`),
+            KEY `idx_block_target` (`blocked_id`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `hash_votes` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `voter_type` ENUM('ip','user') NOT NULL,
+            `voter_key` VARCHAR(64) NOT NULL,
+            `vote` TINYINT NOT NULL,
+            `scale` ENUM('thumbs','stars') NOT NULL DEFAULT 'thumbs',
+            `weight` SMALLINT UNSIGNED NOT NULL DEFAULT 100,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_vote_once` (`info_hash`, `voter_type`, `voter_key`),
+            KEY `idx_votes_hash` (`info_hash`),
+            KEY `idx_votes_voter` (`voter_type`, `voter_key`, `created_at`)
+        ) $engine",
+
+        // ── Comments on a torrent (v83, includes/comments.php) ────────────────────────────────────
+        //
+        // Keyed by the INFO HASH, like the votes above, and not by a whitelist or an index row: a torrent
+        // the tracker has only seen and one it registered are commented on alike, and a hash that moves
+        // from one home to the other keeps its thread.
+        //
+        // `body` is the source AS TYPED (cleaned — commentClean()), rendered when a page is drawn, so a
+        // fix to the renderer reaches every comment already stored; `body_format` is 'bbcode' for all of
+        // them today ('plain' — every character text — is the renderer's answer to anything else), and is
+        // here so a later syntax never has to guess what an old row is.
+        //
+        // `user_id` NULL is a GUEST (possible only where the operator granted comment.post to the guest
+        // group): `guest_tag` is the short pseudonym that tells two guests apart on one day without saying
+        // anything about them (a keyed hash of the day and the address group — never the address), and
+        // `ip_bucket` that address group, kept for the operator and never shown. A member's row has
+        // neither: the account is who wrote it.
+        //
+        // `status`: 'visible'; 'pending' — a guest's comment held for a moderator (comments_guest_review),
+        // the queue part E's Reports page works through; 'deleted' — taken down, SOFTLY: the row keeps who
+        // took it down, when and why (`delete_reason`, shown to the author), and nobody reads it any more.
+        // A correction leaves `edited_at` / `edited_by` (the author, or a moderator — which every reader is
+        // shown); a released guest comment `approved_at` / `approved_by`.
+        //
+        // The keys answer the questions asked: a torrent's count of visible comments (hash, status, id); a
+        // member's comments — the account's deletion, the participants of a thread, the queue's filters
+        // (user, created); the guest queue across every torrent (status, created).
+        //
+        // v88 (1.72.0): a reply answers another comment. `parent_id` is the comment it answers (NULL: a
+        // comment of the top level), `root_id` the top-level comment its thread hangs from (NULL for that
+        // comment itself), `depth` how far down it is (0 for the top level; a reply is its parent's + 1, and
+        // `comments_reply_depth` is the deepest the site accepts). `root_id` is what a page asks by — MySQL 5.7
+        // has no recursive query, so a thread is ONE keyed range (root, id), never one query per level — and
+        // idx_hc_thread answers both of the page's questions: the top-level comments in id order
+        // (root_id IS NULL) and one thread's replies in id order (root_id = R), with `status` last so the
+        // filter and the counts are read from the key itself.
+        "CREATE TABLE IF NOT EXISTS `hash_comments` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `parent_id` BIGINT UNSIGNED DEFAULT NULL,
+            `root_id` BIGINT UNSIGNED DEFAULT NULL,
+            `depth` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `guest_tag` CHAR(4) DEFAULT NULL,
+            `body` TEXT NOT NULL,
+            `body_format` ENUM('bbcode','plain') NOT NULL DEFAULT 'bbcode',
+            `status` ENUM('visible','pending','deleted') NOT NULL DEFAULT 'visible',
+            `ip_bucket` VARCHAR(45) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `edited_at` DATETIME DEFAULT NULL,
+            `edited_by` INT UNSIGNED DEFAULT NULL,
+            `approved_at` DATETIME DEFAULT NULL,
+            `approved_by` INT UNSIGNED DEFAULT NULL,
+            `deleted_at` DATETIME DEFAULT NULL,
+            `deleted_by` INT UNSIGNED DEFAULT NULL,
+            `delete_reason` VARCHAR(255) DEFAULT NULL,
+            KEY `idx_hc_hash` (`info_hash`, `status`, `id`),
+            KEY `idx_hc_user` (`user_id`, `created_at`),
+            KEY `idx_hc_status` (`status`, `created_at`),
+            KEY `idx_hc_thread` (`info_hash`, `root_id`, `id`, `status`)
+        ) $engine",
+
+        // ── Reports of what people write in public, and warnings (v84, includes/reports.php) ─────
+        //
+        // A table of its OWN beside `message_reports`, not that table made generic: a message report is a
+        // privacy rule written into a schema (exactly the reported message and the one before it), and every
+        // query, gate and test of the message queue is built on that shape. These three kinds are public
+        // words — a comment, a torrent's description, a shout — and share one table and one card.
+        //
+        // The TARGET is (kind, target_id, info_hash): a comment's or a shout's id, and the torrent a comment
+        // or a description belongs to; a description is its torrent's (target_id 0), a shout has no torrent
+        // (''). `author_id` is whose words they were when reported (NULL: a guest, the site, nobody).
+        // `snapshot` is the words AS REPORTED, in `snapshot_format` — a shout is pruned by retention, and a
+        // comment or a description can be corrected or replaced after the report, so the moderator reads
+        // what the reporter read as well as what is there now.
+        //
+        // ONE OPEN REPORT PER MEMBER PER TARGET, held by the database: `open_slot` is 1 while a report is
+        // open and NULL once it is closed, and a UNIQUE key does not compare NULLs — so a member has at most
+        // one open report on a target, and may report it again after the first was closed. (No generated
+        // column: MySQL 5.7 and MariaDB would each want their own syntax for it.) The unique key's prefix
+        // answers "the reports of one target"; the queue asks by kind and status.
+        //
+        // `outcome` is what closed it (closed | removed | warned | muted | banned); `note` stays in the panel,
+        // `reply` is what the reporter is told — the two texts of the message queue.
+        "CREATE TABLE IF NOT EXISTS `content_reports` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `kind` ENUM('comment','description','shout','image','torrent') NOT NULL,
+            `target_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `info_hash` CHAR(40) NOT NULL DEFAULT '',
+            `author_id` INT UNSIGNED DEFAULT NULL,
+            `reporter_id` INT UNSIGNED NOT NULL,
+            `reason` VARCHAR(500) NOT NULL DEFAULT '',
+            `snapshot` TEXT NOT NULL,
+            `snapshot_format` VARCHAR(16) NOT NULL DEFAULT 'plain',
+            `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+            `open_slot` TINYINT UNSIGNED DEFAULT 1,
+            `outcome` VARCHAR(16) NOT NULL DEFAULT '',
+            `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `handled_at` DATETIME DEFAULT NULL,
+            `note` TEXT DEFAULT NULL,
+            `reply` TEXT DEFAULT NULL,
+            `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`),
+            KEY `idx_crep_queue` (`kind`, `status`, `created_at`),
+            KEY `idx_crep_author` (`author_id`),
+            KEY `idx_crep_reporter` (`reporter_id`, `created_at`)
+        ) $engine",
+
+        // A WARNING: a moderator told a member, in their notifications, that something they did was wrong —
+        // the loud half of every action on a report (includes/reports.php). Kept here so the next moderator
+        // sees the count and the latest ones on the member's card and in Users; the member sees each one as a
+        // notification and nowhere else. `source_kind` / `source_id` / `info_hash` say what it was about (a
+        // comment, a description — its torrent —, a shout, a message; '' for none), `action` what came with
+        // it (warn | remove | mute | ban), `by_id` / `by_name` the moderator (NULL id: the owner's session).
+        // v94 (1.75.0): every punishment is a row, SILENT ones too (`loud` 0 — the member was told nothing, and the row
+        // never counts toward a threshold), `source_kind` also says 'manual' (a moderator's own decision from the Users
+        // or Moderation page) and 'auto' (an automatic penalty: `source_id` is the rule, `reason` is "<warnings>|<days>"),
+        // and a warning can be REVOKED — it stays, struck through, and counts nowhere (includes/moderation.php).
+        "CREATE TABLE IF NOT EXISTS `user_warnings` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            -- v94 (1.75.0): the moderator's reason is a text of up to 2 000 characters in a format of its own
+            -- (the member sees it rendered), TEXT and nullable like the reports' columns.
+            `reason` TEXT DEFAULT NULL,
+            `reason_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+            `source_kind` VARCHAR(16) NOT NULL DEFAULT '',
+            `source_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `info_hash` CHAR(40) NOT NULL DEFAULT '',
+            `action` VARCHAR(16) NOT NULL DEFAULT 'warn',
+            `loud` TINYINT NOT NULL DEFAULT 1,
+            `by_id` INT UNSIGNED DEFAULT NULL,
+            `by_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `revoked_at` DATETIME DEFAULT NULL,
+            `revoked_by_id` INT UNSIGNED DEFAULT NULL,
+            `revoked_by_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `revoke_note` TEXT DEFAULT NULL,
+            `revoke_note_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+            KEY `idx_warn_user` (`user_id`, `created_at`),
+            KEY `idx_warn_by` (`by_id`),
+            KEY `idx_warn_revoked_by` (`revoked_by_id`)
+        ) $engine",
+
+        // v94 (1.75.0): AUTOMATIC PENALTIES — the ladder (includes/moderation.php, moderationAutoEvaluate()). A rule says
+        // "this many loud, un-revoked warnings inside this many days → this action for this long": `duration_days` 0 means
+        // until somebody lifts it (written as the 2099 sentinel, never NULL). Whether the ladder runs at all is the setting
+        // `auto_penalties_enabled` (off until the operator has read it). Seeded once by the data migration.
+        "CREATE TABLE IF NOT EXISTS `auto_penalty_rules` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `warnings` SMALLINT UNSIGNED NOT NULL,
+            `window_days` SMALLINT UNSIGNED NOT NULL,
+            `action` ENUM('mute','ban') NOT NULL DEFAULT 'mute',
+            `duration_days` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `enabled` TINYINT NOT NULL DEFAULT 1,
+            `sort` INT NOT NULL DEFAULT 0,
+            KEY `idx_apr_sort` (`enabled`, `sort`)
+        ) $engine",
+
+        // ── One anti-spam layer for everything people write (v85, includes/antispam.php) ────────
+        //
+        // A row per (context, subject): the context is where the words go (shout, message, comment,
+        // description, report, list, bio, emote, vote — and '*', a subject's audit throttle), the subject who
+        // writes them ('u:<account id>', or 'g:<address group>' for a guest). `level` is the writes of the
+        // current streak, `last_at` the last one, `next_at` the earliest the next may come, `top_hits` the
+        // writes and attempts at the top of the ladder since it last eased, `captcha` 1 while a CAPTCHA is due,
+        // `refused` the refusals in a row, `edit_at` the last correction, `recent` the fingerprints of the last
+        // words (JSON [[fingerprint, at, target]], for the duplicate and spread rules), `rev` a counter every
+        // change bumps (a reservation is handed back only if nobody wrote since). Every time is unix seconds by
+        // the DATABASE's clock, stored as a number: no zone can reinterpret it, and a web server with a drifting
+        // clock cannot let a burst through. Rows nobody touched for two days are pruned by the janitor.
+        "CREATE TABLE IF NOT EXISTS `antispam_state` (
+            `context` VARCHAR(16) NOT NULL,
+            `subject` VARCHAR(64) NOT NULL,
+            `level` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `last_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            `next_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            `top_hits` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `captcha` TINYINT(1) NOT NULL DEFAULT 0,
+            `refused` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `edit_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            `recent` VARCHAR(1000) NOT NULL DEFAULT '',
+            `rev` INT UNSIGNED NOT NULL DEFAULT 0,
+            `updated_at` INT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (`context`, `subject`),
+            KEY `idx_as_updated` (`updated_at`)
+        ) $engine",
+
+        // ── Outgoing bulk mail, one row per recipient ────────────────────
+        // Nothing is sent from a web request. The panel writes rows here and the janitor drains them
+        // at a configured rate, because this server sends through PHP's mail() with no relay in front
+        // of it: fire fifty at once and the domain's reputation is what pays, which then costs the
+        // password-reset messages that actually matter.
+        "CREATE TABLE IF NOT EXISTS `audit_log` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            -- owner = the panel password; admin/moderator = a user holding a panel session;
+            -- user = the public site; api = a server-to-server client; system = the janitor.
+            `actor_type` ENUM('owner','admin','moderator','user','api','system') NOT NULL DEFAULT 'system',
+            `actor_id` INT UNSIGNED DEFAULT NULL,
+            `actor_name` VARCHAR(64) NOT NULL DEFAULT '',
+            `action` VARCHAR(40) NOT NULL,
+            `action_group` VARCHAR(16) NOT NULL DEFAULT 'other',
+            `target_type` VARCHAR(24) NOT NULL DEFAULT '',
+            `target_id` VARCHAR(80) NOT NULL DEFAULT '',
+            `summary` VARCHAR(255) NOT NULL DEFAULT '',
+            -- JSON, capped by the writer. Credentials are recorded as \"changed\", never as values.
+            `detail` TEXT DEFAULT NULL,
+            `ip` VARCHAR(45) NOT NULL DEFAULT '',
+            `ok` TINYINT(1) NOT NULL DEFAULT 1,
+            KEY `idx_audit_at` (`at`),
+            KEY `idx_audit_group` (`action_group`, `id`),
+            KEY `idx_audit_actor` (`actor_name`, `id`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `mail_queue` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `batch_id` CHAR(16) NOT NULL,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `email` VARCHAR(190) NOT NULL,
+            `subject` VARCHAR(255) NOT NULL,
+            `body` MEDIUMTEXT NOT NULL,
+            -- The format travels WITH the row rather than being read from settings at send time: a
+            -- batch written in Markdown and sent an hour after somebody switched Markdown off must
+            -- still arrive as the sender saw it, not as a page of raw asterisks. 'html' (v94, 1.75.0) is a
+            -- campaign: the body is the administrator's HTML, cleaned by htmlSafeClean() when the mail is built.
+            `format` ENUM('plain','bbcode','markdown','html','flarum') NOT NULL DEFAULT 'plain',
+            -- v94: 'site' wraps the message in the site's dark frame, 'none' sends it as the author designed it
+            -- with only the footer the law asks for (the preferences and unsubscribe links, the sender's address).
+            `frame` ENUM('site','none') NOT NULL DEFAULT 'site',
+            `status` ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+            `attempts` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `last_error` VARCHAR(255) NOT NULL DEFAULT '',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `next_attempt_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `sent_at` DATETIME DEFAULT NULL,
+            KEY `idx_mq_due` (`status`, `next_attempt_at`),
+            KEY `idx_mq_batch` (`batch_id`, `status`)
+        ) $engine",
+
+        // schema v34: address lists for the inbound UDP limit — allow, block, block-under-pressure.
+        // See includes/iplist.php for what the three kinds mean and the order they are applied in.
+        // schema v39: an operator's replacement for a shipped page.
+        //
+        // Only ever an OVERRIDE. The templates stay in the package and remain the default, so
+        // restoring is a DELETE rather than a copy that has to be kept in step with them — and a
+        // page nobody edited costs a row that does not exist.
+        "CREATE TABLE IF NOT EXISTS `page_content` (
+            `page` VARCHAR(32) NOT NULL,
+            -- v41: one version per language. A single text served to everybody was fine while the
+            -- site had one language; with two it means a Polish visitor reads English terms.
+            `lang` VARCHAR(3) NOT NULL DEFAULT 'en',
+            `format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'markdown',
+            `body` MEDIUMTEXT NOT NULL,
+            -- Stored but off is a DRAFT. The router checks this as well as emptiness, so a half
+            -- written page cannot replace a live one merely by having been saved.
+            `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_by` VARCHAR(64) DEFAULT NULL,
+            PRIMARY KEY (`page`, `lang`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `ip_lists` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `name` VARCHAR(64) NOT NULL,
+            `kind` ENUM('allow','block') NOT NULL DEFAULT 'block',
+            -- Only meaningful for a block list. 'hard' drops always; 'soft' gives the addresses a
+            -- budget a fifth the size of everyone else's, so they are refused first under load.
+            `mode` ENUM('hard','soft') NOT NULL DEFAULT 'hard',
+            `source` ENUM('manual','url') NOT NULL DEFAULT 'manual',
+            `url` VARCHAR(500) NOT NULL DEFAULT '',
+            -- How long a fetched copy stays fresh. A country zone changes a few times a year;
+            -- re-downloading it every janitor tick would be rude to the people hosting it.
+            `ttl_minutes` INT UNSIGNED NOT NULL DEFAULT 720,
+            `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+            -- How many IPv4 ADDRESSES the entries cover, and how many of the entries are IPv6.
+            --
+            -- An entry is a NETWORK, not an address: China's zone file is 8 810 entries and covers
+            -- 342 983 424 addresses. Somebody reading 8 810 and wondering whether that is enough to
+            -- block a country is asking a reasonable question about the wrong number, so both are
+            -- kept. Computed once when the entries are stored — summing 250 000 rows on every poll of
+            -- a page that refreshes every few seconds is not a thing to do.
+            `addr4` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            `nets6` INT UNSIGNED NOT NULL DEFAULT 0,
+            `last_fetch_at` DATETIME DEFAULT NULL,
+            `last_try_at` DATETIME DEFAULT NULL,
+            -- A failed refresh changes no entries: the last good copy stays in force and this says
+            -- why, because a 404 must not silently open a door that was closed.
+            `last_error` VARCHAR(190) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uq_ipl_name` (`name`)
+        ) $engine",
+
+        // ── The sign-in bridge (v49) ────────────────────────────────────────────────────────────
+        //
+        // One row per (partner key, their user id). The tracker account is ours and stays ours: the
+        // bridge says "the person behind forum user 412 is tracker user 7", and everything else about
+        // user 7 — their group, their favourites, their uploads — belongs to the tracker and survives
+        // the partner going away.
+        //
+        // client_id is part of the identity, not a note beside it. Two forums both numbering their
+        // users from 1 are two different people, and a UNIQUE on external_id alone would quietly hand
+        // the second forum's user 1 the first forum's account.
+        "CREATE TABLE IF NOT EXISTS `user_identities` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `client_id` INT UNSIGNED NOT NULL,
+            -- What to SHOW the person: 'the forum', 'Flarum', whatever the operator called the key.
+            -- Copied from api_clients.label when the link is made rather than joined at read time,
+            -- so a profile still says where an account came from after the key is deleted.
+            `provider` VARCHAR(64) NOT NULL DEFAULT '',
+            `external_id` VARCHAR(191) NOT NULL,
+            `external_name` VARCHAR(191) DEFAULT NULL,
+            `external_email` VARCHAR(191) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_login_at` DATETIME DEFAULT NULL,
+            -- Set when the partner says the person signed out over there. The tracker reads it in
+            -- currentUser(): a session opened through the bridge dies when the far side ends it,
+            -- which is the half of two-way sign-out that cannot be done by deleting a session file.
+            `logout_at` DATETIME DEFAULT NULL,
+            UNIQUE KEY `uq_ident_ext` (`client_id`, `external_id`),
+            UNIQUE KEY `uq_ident_user` (`user_id`, `client_id`),
+            KEY `idx_ident_user` (`user_id`)
+        ) $engine",
+
+        // The one-time ticket that carries a sign-in across the redirect between the two sites.
+        //
+        // Only the HASH is stored, for the same reason as a password: this row is enough to become
+        // somebody if the plain token is in it. It is single-use (used_at), short-lived (expires_at),
+        // and bound to the key that minted it.
+        "CREATE TABLE IF NOT EXISTS `auth_handoffs` (
+            `token_hash` CHAR(64) NOT NULL PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `client_id` INT UNSIGNED NOT NULL,
+            -- 'in'  — minted by the partner's API call, redeemed by the browser at ?action=bridge
+            -- 'out' — minted for a signed-in tracker user, redeemed by the partner at v1/auth/verify
+            `direction` ENUM('in','out') NOT NULL DEFAULT 'in',
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `expires_at` DATETIME NOT NULL,
+            `used_at` DATETIME DEFAULT NULL,
+            `created_ip` VARCHAR(45) DEFAULT NULL,
+            KEY `idx_handoff_expiry` (`expires_at`),
+            KEY `idx_handoff_user` (`user_id`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `ip_list_entries` (
+            `list_id` INT UNSIGNED NOT NULL,
+            `cidr` VARCHAR(64) NOT NULL,
+            `family` TINYINT UNSIGNED NOT NULL DEFAULT 4,
+            PRIMARY KEY (`list_id`, `cidr`),
+            KEY `idx_ipe_list` (`list_id`, `family`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `ip_list_sources` (
+            `list_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+            `text` MEDIUMTEXT NOT NULL,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_blobs` (
+            `sha256` CHAR(64) NOT NULL PRIMARY KEY,
+            `mime` ENUM('image/webp','image/gif') NOT NULL DEFAULT 'image/webp',
+            `animated` TINYINT(1) NOT NULL DEFAULT 0,
+            `w` SMALLINT UNSIGNED NOT NULL,
+            `h` SMALLINT UNSIGNED NOT NULL,
+            `full_w` SMALLINT UNSIGNED NOT NULL,
+            `full_h` SMALLINT UNSIGNED NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL,
+            `data_page` MEDIUMBLOB NOT NULL,
+            `data_full` MEDIUMBLOB DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `images` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `blob_sha` CHAR(64) NOT NULL,
+            `name` VARCHAR(120) NOT NULL DEFAULT '',
+            `source` ENUM('upload','copy') NOT NULL DEFAULT 'upload',
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `public_at` DATETIME DEFAULT NULL,
+            `checked_at` DATETIME DEFAULT NULL,
+            `removal_at` DATETIME DEFAULT NULL,
+            `dead_since` DATETIME DEFAULT NULL,
+            KEY `idx_img_user` (`user_id`, `id`),
+            KEY `idx_img_blob` (`blob_sha`),
+            KEY `idx_img_created` (`created_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_uploads` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `bytes` INT UNSIGNED NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            KEY `idx_imgup_user` (`user_id`, `created_at`),
+            KEY `idx_imgup_created` (`created_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_remote` (
+            `url_sha` CHAR(64) NOT NULL PRIMARY KEY,
+            `url` VARCHAR(500) NOT NULL,
+            `host` VARCHAR(255) NOT NULL DEFAULT '',
+            `status` ENUM('pending','done','failed','ignored') NOT NULL DEFAULT 'pending',
+            `tries` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `error` VARCHAR(64) NOT NULL DEFAULT '',
+            `image_id` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `next_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `done_at` DATETIME DEFAULT NULL,
+            `etag` VARCHAR(255) NOT NULL DEFAULT '',
+            `last_modified` VARCHAR(64) NOT NULL DEFAULT '',
+            `bytes_sha` CHAR(64) NOT NULL DEFAULT '',
+            `checked_at` DATETIME DEFAULT NULL,
+            `check_after` DATETIME DEFAULT NULL,
+            `checks` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            KEY `idx_imgrem_due` (`status`, `next_at`),
+            KEY `idx_imgrem_image` (`image_id`),
+            KEY `idx_imgrem_check` (`status`, `check_after`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `forum_descs` (
+            `info_hash` CHAR(40) NOT NULL PRIMARY KEY,
+            `client_id` INT UNSIGNED NOT NULL,
+            `discussion_id` INT UNSIGNED NOT NULL,
+            `post_id` INT UNSIGNED NOT NULL DEFAULT 0,
+            `url` VARCHAR(500) DEFAULT NULL,
+            `author_ext_id` VARCHAR(191) DEFAULT NULL,
+            `author_name` VARCHAR(191) DEFAULT NULL,
+            `author_user_id` INT UNSIGNED DEFAULT NULL,
+            `forum_at` DATETIME DEFAULT NULL,
+            `forum_sha` CHAR(64) DEFAULT NULL,
+            `forum_chars` INT UNSIGNED NOT NULL DEFAULT 0,
+            `forum_images` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `forum_links` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `audience` ENUM('guests','members') NOT NULL DEFAULT 'guests',
+            `import_sha` CHAR(64) DEFAULT NULL,
+            `state` VARCHAR(16) NOT NULL DEFAULT 'imported',
+            `note` VARCHAR(255) DEFAULT NULL,
+            `edit_id` BIGINT UNSIGNED DEFAULT NULL,
+            `imported_at` DATETIME DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            KEY `idx_fd_topic` (`client_id`, `discussion_id`),
+            KEY `idx_fd_state` (`state`),
+            KEY `idx_fd_edit` (`edit_id`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_refs` (
+            `image_id` INT UNSIGNED NOT NULL,
+            `src` ENUM('wl','idx','edit','cm','page','pm','shout','bio','list','warn','crep','mrep') NOT NULL,
+            `src_key` VARCHAR(48) NOT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`image_id`, `src`, `src_key`),
+            KEY `idx_iref_src` (`src`, `src_key`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_remote_refs` (
+            `url_sha` CHAR(64) NOT NULL,
+            `src` ENUM('wl','idx','edit','cm','page','pm','shout','bio','list','warn','crep','mrep') NOT NULL,
+            `src_key` VARCHAR(48) NOT NULL,
+            PRIMARY KEY (`url_sha`, `src`, `src_key`),
+            KEY `idx_irref_src` (`src`, `src_key`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `render_cache` (
+            `k` CHAR(64) CHARACTER SET ascii NOT NULL,
+            `html` MEDIUMBLOB NOT NULL,
+            `used_at` DATETIME NOT NULL,
+            PRIMARY KEY (`k`),
+            KEY `idx_rc_used` (`used_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `magnet_clicks` (
+            `info_hash` CHAR(40) CHARACTER SET ascii NOT NULL,
+            `clicks` INT UNSIGNED NOT NULL DEFAULT 0,
+            `last_at` DATETIME DEFAULT NULL,
+            PRIMARY KEY (`info_hash`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `magnet_click_log` (
+            `info_hash` CHAR(40) CHARACTER SET ascii NOT NULL,
+            `who` CHAR(64) CHARACTER SET ascii NOT NULL,
+            `day` DATE NOT NULL,
+            PRIMARY KEY (`info_hash`, `who`, `day`),
+            KEY `idx_mcl_day` (`day`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `image_removals` (
+            `image_id` INT UNSIGNED NOT NULL,
+            `blob_sha` CHAR(64) NOT NULL,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `source` ENUM('upload','copy') NOT NULL DEFAULT 'upload',
+            `name` VARCHAR(120) NOT NULL DEFAULT '',
+            `mime` VARCHAR(32) NOT NULL DEFAULT '',
+            `w` INT UNSIGNED NOT NULL DEFAULT 0,
+            `h` INT UNSIGNED NOT NULL DEFAULT 0,
+            `full_w` INT UNSIGNED NOT NULL DEFAULT 0,
+            `full_h` INT UNSIGNED NOT NULL DEFAULT 0,
+            `blocked` TINYINT NOT NULL DEFAULT 0,
+            `removed_by` VARCHAR(64) NOT NULL DEFAULT '',
+            `removed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`image_id`),
+            KEY `idx_imgrm_sha` (`blob_sha`, `blocked`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `desc_facts` (
+            `info_hash` CHAR(40) CHARACTER SET ascii NOT NULL,
+            `src` ENUM('wl','idx') NOT NULL DEFAULT 'wl',
+            `ver` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `text_sha` CHAR(40) CHARACTER SET ascii NOT NULL DEFAULT '',
+            `res` SMALLINT UNSIGNED DEFAULT NULL,
+            `vbitrate` INT UNSIGNED DEFAULT NULL,
+            `year_from` SMALLINT UNSIGNED DEFAULT NULL,
+            `year_to` SMALLINT UNSIGNED DEFAULT NULL,
+            `seasons` SMALLINT UNSIGNED DEFAULT NULL,
+            `episodes` INT UNSIGNED DEFAULT NULL,
+            `duration_min` SMALLINT UNSIGNED DEFAULT NULL,
+            `imdb` DECIMAL(3,1) DEFAULT NULL,
+            `filmweb` DECIMAL(3,1) DEFAULT NULL,
+            `pics` TINYINT NOT NULL DEFAULT 0,
+            `tags` VARCHAR(600) NOT NULL DEFAULT '',
+            `genres` VARCHAR(400) NOT NULL DEFAULT '',
+            `vbitrate_max` INT UNSIGNED DEFAULT NULL,
+            `vmode` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+            `obitrate` INT UNSIGNED DEFAULT NULL,
+            `obitrate_max` INT UNSIGNED DEFAULT NULL,
+            `omode` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+            `abitrate` INT UNSIGNED DEFAULT NULL,
+            `abitrate_max` INT UNSIGNED DEFAULT NULL,
+            `amode` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+            `acodec` VARCHAR(24) DEFAULT NULL,
+            `achannels` VARCHAR(8) CHARACTER SET ascii DEFAULT NULL,
+            `updated_at` DATETIME DEFAULT NULL,
+            PRIMARY KEY (`info_hash`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `name_facts` (
+            `info_hash` CHAR(40) NOT NULL,
+            `nf_kind` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `nf_res` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `nf_year` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+            `nf_bits` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY (`info_hash`),
+            KEY `idx_nf` (`nf_kind`, `nf_res`, `nf_year`, `nf_bits`),
+            KEY `idx_nf_year` (`nf_year`, `info_hash`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `tags` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `slug` VARCHAR(64) CHARACTER SET ascii NOT NULL,
+            `name` VARCHAR(40) NOT NULL,
+            `color` CHAR(7) CHARACTER SET ascii DEFAULT NULL,
+            `description` VARCHAR(200) DEFAULT NULL,
+            `status` ENUM('approved','pending','rejected') NOT NULL DEFAULT 'approved',
+            `hidden` TINYINT NOT NULL DEFAULT 0,
+            `origin` ENUM('member','moderator','forum') NOT NULL DEFAULT 'member',
+            `uses` INT UNSIGNED NOT NULL DEFAULT 0,
+            `created_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_tags_slug` (`slug`),
+            KEY `idx_tags_status` (`status`, `uses`),
+            KEY `idx_tags_creator` (`created_by`, `created_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `hash_tags` (
+            `info_hash` CHAR(40) NOT NULL,
+            `tag` VARCHAR(70) CHARACTER SET ascii NOT NULL,
+            `origin` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+            `added_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL,
+            `pending` TINYINT NOT NULL DEFAULT 0,
+            PRIMARY KEY (`info_hash`, `tag`),
+            KEY `idx_ht_tag` (`tag`, `info_hash`),
+            KEY `idx_ht_user` (`added_by`),
+            KEY `idx_ht_pending` (`pending`, `created_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `hash_tag_blocks` (
+            `info_hash` CHAR(40) NOT NULL,
+            `tag` VARCHAR(70) CHARACTER SET ascii NOT NULL,
+            `blocked_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`info_hash`, `tag`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `tag_forum_map` (
+            `client_id` INT UNSIGNED NOT NULL,
+            `forum_slug` VARCHAR(100) COLLATE utf8mb4_bin NOT NULL,
+            `name` VARCHAR(100) NOT NULL,
+            `color` CHAR(7) CHARACTER SET ascii DEFAULT NULL,
+            `parent` VARCHAR(100) COLLATE utf8mb4_bin DEFAULT NULL,
+            `target` VARCHAR(70) CHARACTER SET ascii DEFAULT NULL,
+            `state` ENUM('proposed','approved','ignored') NOT NULL DEFAULT 'proposed',
+            `seen_at` DATETIME NOT NULL,
+            `decided_at` DATETIME DEFAULT NULL,
+            PRIMARY KEY (`client_id`, `forum_slug`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `hash_forum_tags` (
+            `info_hash` CHAR(40) NOT NULL,
+            `client_id` INT UNSIGNED NOT NULL,
+            `forum_slug` VARCHAR(100) COLLATE utf8mb4_bin NOT NULL,
+            PRIMARY KEY (`info_hash`, `client_id`, `forum_slug`),
+            KEY `idx_hft_slug` (`client_id`, `forum_slug`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `hash_tag_log` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `info_hash` CHAR(40) NOT NULL,
+            `tag` VARCHAR(70) CHARACTER SET ascii NOT NULL,
+            `action` ENUM('add','remove','approve','reject','block') NOT NULL,
+            `user_id` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_htl_time` (`created_at`),
+            KEY `idx_htl_hash` (`info_hash`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `tag_favourites` (
+            `user_id` INT UNSIGNED NOT NULL,
+            `tag` VARCHAR(70) CHARACTER SET ascii NOT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`user_id`, `tag`),
+            KEY `idx_tf_tag` (`tag`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `wl_requests` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `info_hash` CHAR(40) NOT NULL,
+            `name` VARCHAR(500) NOT NULL DEFAULT '',
+            `status` ENUM('open','approved','rejected') NOT NULL DEFAULT 'open',
+            `open_slot` TINYINT DEFAULT 1,
+            `user_id` INT UNSIGNED NOT NULL,
+            `note` VARCHAR(300) DEFAULT NULL,
+            `supporters` INT UNSIGNED NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL,
+            `decided_by` INT UNSIGNED DEFAULT NULL,
+            `decided_at` DATETIME DEFAULT NULL,
+            `reply` VARCHAR(300) DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_wlr_open` (`info_hash`, `open_slot`),
+            KEY `idx_wlr_status` (`status`, `created_at`),
+            KEY `idx_wlr_hash` (`info_hash`, `status`, `decided_at`),
+            KEY `idx_wlr_user` (`user_id`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `wl_request_votes` (
+            `request_id` INT UNSIGNED NOT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `note` VARCHAR(300) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`request_id`, `user_id`),
+            KEY `idx_wlrv_user` (`user_id`, `created_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `index_blocked` (
+            `info_hash` CHAR(40) NOT NULL,
+            `name` VARCHAR(500) NOT NULL,
+            `word` VARCHAR(100) NOT NULL,
+            `allowed` TINYINT NOT NULL DEFAULT 0,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`info_hash`),
+            KEY `idx_ib_allowed` (`allowed`, `created_at`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `tag_categories` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `slug` VARCHAR(64) CHARACTER SET ascii NOT NULL,
+            `name` VARCHAR(40) NOT NULL,
+            `color` CHAR(7) CHARACTER SET ascii DEFAULT NULL,
+            `sort` INT NOT NULL DEFAULT 0,
+            `grp` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+            `status` ENUM('approved','pending') NOT NULL DEFAULT 'approved',
+            `origin` ENUM('system','moderator','member','forum') NOT NULL DEFAULT 'moderator',
+            `created_by` INT UNSIGNED DEFAULT NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_tc_slug` (`slug`),
+            KEY `idx_tc_sort` (`sort`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `tag_cat_groups` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `slug` VARCHAR(64) CHARACTER SET ascii NOT NULL,
+            `name` VARCHAR(40) NOT NULL,
+            `sort` INT NOT NULL DEFAULT 0,
+            `pinned` TINYINT NOT NULL DEFAULT 1,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uq_tcg_slug` (`slug`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `tag_cat_suggestions` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `tag_slug` VARCHAR(64) CHARACTER SET ascii NOT NULL,
+            `category_id` INT UNSIGNED DEFAULT NULL,
+            `new_name` VARCHAR(40) DEFAULT NULL,
+            `user_id` INT UNSIGNED NOT NULL,
+            `created_at` DATETIME NOT NULL,
+            `status` ENUM('open','accepted','rejected') NOT NULL DEFAULT 'open',
+            `decided_by` INT UNSIGNED DEFAULT NULL,
+            `decided_at` DATETIME DEFAULT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_tcs_status` (`status`, `created_at`),
+            KEY `idx_tcs_user` (`user_id`, `created_at`),
+            KEY `idx_tcs_tag` (`tag_slug`)
+        ) $engine",
+
+        "CREATE TABLE IF NOT EXISTS `hash_thumbs` (
+            `info_hash` CHAR(40) NOT NULL,
+            `pos` TINYINT UNSIGNED NOT NULL,
+            `image_id` INT UNSIGNED NOT NULL,
+            PRIMARY KEY (`info_hash`, `pos`),
+            KEY `idx_ht_image` (`image_id`)
+        ) $engine",
+    ];
+}
+
+/**
+ * Column/index additions for tables that may pre-date v7 (CREATE TABLE IF NOT EXISTS never touches an
+ * existing table). Returns only the ALTERs that are actually missing; ensureSchema runs them after the
+ * CREATE list. Fresh installs get these columns from the CREATE statements directly.
+ */
+function trackerSchemaGuardedStatements(PDO $db): array {
+    $out = [];
+    // The same clause trackerSchemaStatements() uses. Two CREATE TABLEs live down here as well —
+    // a table that has to appear on an EXISTING install is a migration, and a migration that left
+    // this off would create it with the server's default charset instead of the site's.
+    $engine = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+    if (schemaTableExists($db, 'desc_facts') && !schemaColumnExists($db, 'desc_facts', 'obitrate')) {
+        $out[] = "ALTER TABLE `desc_facts` ADD COLUMN `vbitrate_max` INT UNSIGNED DEFAULT NULL, ADD COLUMN `vmode` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+                  ADD COLUMN `obitrate` INT UNSIGNED DEFAULT NULL, ADD COLUMN `obitrate_max` INT UNSIGNED DEFAULT NULL, ADD COLUMN `omode` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+                  ADD COLUMN `abitrate` INT UNSIGNED DEFAULT NULL, ADD COLUMN `abitrate_max` INT UNSIGNED DEFAULT NULL, ADD COLUMN `amode` CHAR(1) CHARACTER SET ascii DEFAULT NULL,
+                  ADD COLUMN `acodec` VARCHAR(24) DEFAULT NULL, ADD COLUMN `achannels` VARCHAR(8) CHARACTER SET ascii DEFAULT NULL";
+    }
+    if (schemaColumnExists($db, 'name_facts', 'tags')) {
+        $out[] = "DELETE FROM `name_facts`";
+        $out[] = "ALTER TABLE `name_facts` DROP COLUMN `tags`, DROP COLUMN `year`, ADD COLUMN `nf_kind` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                  ADD COLUMN `nf_res` TINYINT UNSIGNED NOT NULL DEFAULT 0, ADD COLUMN `nf_year` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+                  ADD COLUMN `nf_bits` BIGINT UNSIGNED NOT NULL DEFAULT 0, ADD KEY `idx_nf` (`nf_kind`, `nf_res`, `nf_year`, `nf_bits`)";
+        $out[] = "UPDATE `settings` SET `value` = '' WHERE `key` = 'name_facts_cursor'";
+    }
+    if (!schemaColumnExists($db, 'api_clients', 'scope')) {
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `scope` VARCHAR(32) NOT NULL DEFAULT 'whitelist'";
+    }
+    // v13: machine load next to each traffic sample. net_samples is small (one row a minute,
+    // 14 days by default) so this ALTER is quick even on a busy box.
+    // net_samples is created by the CREATE list above, so by the time the guarded ALTERs run it
+    // always exists — schemaColumnExists() answers false for a missing table anyway.
+    // The literal name, deliberately: NET_SAMPLE_TABLE lives in includes/netlimit.php, and schema.php
+    // is loaded on its own by callers that do not need it. Referencing the constant here made
+    // ensureSchema() throw for them — and since ensureSchema is what writes schema_version, the whole
+    // migration silently stopped happening. The CREATE statement above uses the literal for the same
+    // reason; this must match it.
+    if (!schemaColumnExists($db, 'net_samples', 'load_x100')) {
+        $out[] = "ALTER TABLE `net_samples` ADD COLUMN `load_x100` SMALLINT UNSIGNED DEFAULT NULL";
+    }
+    // v92 (1.73.3): the TCP resent share beside each sample — what the provider drops outside the machine. The same
+    // small table, the same literal name and the same shape as load_x100 above; only when it is missing.
+    if (!schemaColumnExists($db, 'net_samples', 'tcp_retrans_x10')) {
+        $out[] = "ALTER TABLE `net_samples` ADD COLUMN `tcp_retrans_x10` SMALLINT UNSIGNED DEFAULT NULL";
+    }
+    // v12: the rate-limit counters live on the client row, so the budget is per key rather than per
+    // IP — a federation peer pulls from one address and would otherwise share a bucket with anyone
+    // behind the same NAT. api_clients is a handful of rows, so this ALTER is instant.
+    $aparts = [];
+    foreach ([
+        'rl_min_start'     => "ADD COLUMN `rl_min_start` DATETIME DEFAULT NULL",
+        'rl_min_count'     => "ADD COLUMN `rl_min_count` INT UNSIGNED NOT NULL DEFAULT 0",
+        'rl_day'           => "ADD COLUMN `rl_day` DATE DEFAULT NULL",
+        'rl_day_bytes'     => "ADD COLUMN `rl_day_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0",
+        'rl_blocked_count' => "ADD COLUMN `rl_blocked_count` BIGINT UNSIGNED NOT NULL DEFAULT 0",
+    ] as $col => $sql) {
+        if (!schemaColumnExists($db, 'api_clients', $col)) $aparts[] = $sql;
+    }
+    if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
+    if (!schemaColumnExists($db, 'api_clients', 'image_domains')) {
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `image_domains` VARCHAR(1000) NOT NULL DEFAULT ''";
+    }
+    $dparts = [];
+    if (!schemaColumnExists($db, 'api_clients', 'describe_mode')) $dparts[] = "ADD COLUMN `describe_mode` VARCHAR(8) NOT NULL DEFAULT 'off'";
+    if (!schemaColumnExists($db, 'api_clients', 'describe_accounts')) $dparts[] = "ADD COLUMN `describe_accounts` INT UNSIGNED DEFAULT NULL";
+    if (!schemaColumnExists($db, 'api_clients', 'image_consent')) $dparts[] = "ADD COLUMN `image_consent` TINYINT(1) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'api_clients', 'image_consent_at')) $dparts[] = "ADD COLUMN `image_consent_at` DATETIME DEFAULT NULL";
+    if (!schemaColumnExists($db, 'api_clients', 'tags_import')) $dparts[] = "ADD COLUMN `tags_import` TINYINT(1) NOT NULL DEFAULT 0";
+    if (schemaTableExists($db, 'name_facts') && schemaColumnExists($db, 'name_facts', 'nf_year') && !schemaIndexExists($db, 'name_facts', 'idx_nf_year')) {
+        if (schemaHeavyAllowed()) {
+            $alter = "ALTER TABLE `name_facts` ADD KEY `idx_nf_year` (`nf_year`, `info_hash`)";
+            $out[] = [$alter . ", ALGORITHM=INPLACE, LOCK=NONE", $alter];
+        } else {
+            schemaDeferHeavy('name_facts: idx_nf_year');
+        }
+    }
+    if (schemaTableExists($db, 'hash_tags') && !schemaColumnExists($db, 'hash_tags', 'pending')) {
+        $out[] = "ALTER TABLE `hash_tags` ADD COLUMN `pending` TINYINT NOT NULL DEFAULT 0, ADD KEY `idx_ht_pending` (`pending`, `created_at`)";
+    }
+    if (schemaTableExists($db, 'tags') && !schemaColumnExists($db, 'tags', 'category_id')) {
+        $out[] = "ALTER TABLE `tags` ADD COLUMN `category_id` INT UNSIGNED DEFAULT NULL, ADD KEY `idx_tags_cat` (`category_id`)";
+    }
+    if (schemaTableExists($db, 'tag_categories') && !schemaColumnExists($db, 'tag_categories', 'group_id')) {
+        $out[] = "ALTER TABLE `tag_categories` ADD COLUMN `group_id` INT UNSIGNED DEFAULT NULL, ADD KEY `idx_tc_group` (`group_id`)";
+    }
+    if ($dparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $dparts);
+    // index_hashes carries a FULLTEXT index, so ADD COLUMN cannot be INSTANT — it is a full table
+    // rebuild on a live 200k-row table. Do BOTH changes in ONE ALTER (one rebuild, not two), no
+    // AFTER clause (column position doesn't matter, and AFTER also blocks INSTANT on newer MySQL).
+    // Tip for big deployments: run `sudo -u www-data php tools/janitor.php` right after upload so
+    // the rebuild happens off the web request path.
+    $parts = [];
+    if (!schemaColumnExists($db, 'index_hashes', 'meta_source')) {
+        $parts[] = "ADD COLUMN `meta_source` VARCHAR(24) DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'index_hashes', 'meta_origin_at')) {
+        $parts[] = "ADD COLUMN `meta_origin_at` DATETIME DEFAULT NULL";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched')) {
+        $parts[] = "ADD KEY `idx_index_meta_fetched` (`meta_fetched_at`)";
+    }
+    if ($parts) {
+        // ...and it must not happen inside a page view. On a real catalogue that rebuild runs for
+        // minutes and holds a SHARED lock (InnoDB does not permit concurrent DML while it rebuilds a
+        // FULLTEXT table), so a browser request would occupy one of five php-fpm children while every
+        // write on the site queued behind it. The janitor is an ordinary CLI job running every minute,
+        // so the web declines and the next tick performs it -- the version simply stays put until
+        // then. Fresh installs never reach here: the columns are already in CREATE TABLE.
+        if (schemaHeavyAllowed()) {
+            // Candidates, cheapest first. INSTANT is metadata only — sub-second on any size, and on
+            // this table it is usually available because the columns go on the end. It is offered
+            // rather than assumed: the restrictions vary by server version and row format, and the
+            // wrong guess would abort the whole upgrade over a column that could have been added
+            // the slow way. The bare statement last is the one that always works.
+            $alter = "ALTER TABLE `index_hashes` " . implode(', ', $parts);
+            $out[] = [$alter . ", ALGORITHM=INSTANT", $alter . ", ALGORITHM=INPLACE", $alter];
+        } else {
+            schemaDeferHeavy('index_hashes: ' . implode(', ', $parts));
+        }
+    }
+    // v41: page_content gains a language and a composite key. The table holds at most a handful of
+    // rows, so this is instant — but the ORDER matters: the column has to exist before the old
+    // single-column primary key can be replaced, and MariaDB will not drop a PRIMARY KEY and add
+    // one in separate statements without a moment where the table has none. One ALTER does both.
+    // No table-exists guard needed: schemaColumnExists() reads information_schema and answers
+    // false for a table that is not there — and the CREATE list above has already run.
+    if (!schemaColumnExists($db, 'page_content', 'lang')) {
+        // Existing rows were written when there was one language; they belong to whatever the site
+        // default was then, and 'en' is what that column defaults to for a fresh install.
+        $out[] = "ALTER TABLE `page_content` ADD COLUMN `lang` VARCHAR(3) NOT NULL DEFAULT 'en',
+                  DROP PRIMARY KEY, ADD PRIMARY KEY (`page`, `lang`)";
+    }
+
+    // v9: two-step email change scratch columns (users is tiny — instant ALTER)
+    $uparts = [];
+    if (!schemaColumnExists($db, 'users', 'pending_email')) $uparts[] = "ADD COLUMN `pending_email` VARCHAR(190) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'email_changed_at')) $uparts[] = "ADD COLUMN `email_changed_at` DATETIME DEFAULT NULL";
+    // v19: whoever does not want the newsletter must be able to say so once and be believed.
+    if (!schemaColumnExists($db, 'users', 'bulk_optout')) $uparts[] = "ADD COLUMN `bulk_optout` TINYINT(1) NOT NULL DEFAULT 0";
+    // v40: the interface language, so it follows the account to another browser rather than living
+    // in a cookie that a different machine does not have. NULL means "whatever the site default is",
+    // which is not the same as any particular language -- change the site default and these accounts
+    // follow it, while an account that picked English stays English.
+    if (!schemaColumnExists($db, 'users', 'language')) $uparts[] = "ADD COLUMN `language` VARCHAR(3) DEFAULT NULL";
+    // v47: the two favourites privacy flags. In BOTH places on purpose: the CREATE above carries every
+    // column and index this list adds (checked mechanically for 1.57.0 — a fresh install and an
+    // upgraded one build the same tables, and tests/install_web_test.py drives the browser installer
+    // to prove it). A split between the two is a bug waiting, and one such split once stopped a
+    // fresh install at version 0.
+    if (!schemaColumnExists($db, 'users', 'fav_public')) $uparts[] = "ADD COLUMN `fav_public` TINYINT(1) NOT NULL DEFAULT 0";
+    if (!schemaColumnExists($db, 'users', 'fav_listed')) $uparts[] = "ADD COLUMN `fav_listed` TINYINT(1) NOT NULL DEFAULT 0";
+    // v51: the same rule, one flag lower — see the CREATE above.
+    if (!schemaColumnExists($db, 'users', 'lists_public')) $uparts[] = "ADD COLUMN `lists_public` TINYINT(1) NOT NULL DEFAULT 0";
+    // v75: may a stranger see my likes or ratings — see the CREATE above. 0 for every existing
+    // account: an upgrade publishes nobody's votes.
+    if (!schemaColumnExists($db, 'users', 'votes_public')) $uparts[] = "ADD COLUMN `votes_public` TINYINT(1) NOT NULL DEFAULT 0";
+    // v82: may my name and my vote appear in a torrent's "who has this" — see the CREATE above. 0 for every
+    // existing account: an upgrade names nobody.
+    if (!schemaColumnExists($db, 'users', 'votes_listed')) $uparts[] = "ADD COLUMN `votes_listed` TINYINT(1) NOT NULL DEFAULT 0";
+    // v81: my name on the descriptions I write (1 for every existing account: names were shown until
+    // now, and an upgrade hides nobody's), and my list of them on my profile (0: shown to nobody else).
+    if (!schemaColumnExists($db, 'users', 'content_credit_public')) $uparts[] = "ADD COLUMN `content_credit_public` TINYINT(1) NOT NULL DEFAULT 1";
+    if (!schemaColumnExists($db, 'users', 'descriptions_public')) $uparts[] = "ADD COLUMN `descriptions_public` TINYINT(1) NOT NULL DEFAULT 0";
+    // v52: who may write to me, and may strangers find me by browsing.
+    if (!schemaColumnExists($db, 'users', 'pm_who')) $uparts[] = "ADD COLUMN `pm_who` ENUM('all','friends','nobody') DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'profile_listed')) $uparts[] = "ADD COLUMN `profile_listed` TINYINT(1) NOT NULL DEFAULT 0";
+    // v53: when every other session of this account stopped counting. 0 = never, which is what every
+    // existing account gets, so an upgrade signs nobody out.
+    if (!schemaColumnExists($db, 'users', 'sessions_valid_from')) $uparts[] = "ADD COLUMN `sessions_valid_from` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+    // v55: the two moments a moderator can set — see the CREATE above.
+    if (!schemaColumnExists($db, 'users', 'pm_muted_until')) $uparts[] = "ADD COLUMN `pm_muted_until` DATETIME DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'banned_until')) $uparts[] = "ADD COLUMN `banned_until` DATETIME DEFAULT NULL";
+    // v61: what this reader chose to hear — see the CREATE above.
+    if (!schemaColumnExists($db, 'users', 'sound_prefs')) $uparts[] = "ADD COLUMN `sound_prefs` VARCHAR(600) DEFAULT NULL";
+    // v63: how far this reader has read the shoutbox — see the CREATE above. 0 for every existing
+    // account, which means "everything in the room is new" until they open it once.
+    if (!schemaColumnExists($db, 'users', 'shout_seen_id')) $uparts[] = "ADD COLUMN `shout_seen_id` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+    // v68: the zone this reader sees times in — see the CREATE above. NULL for every existing
+    // account, which is "the site's zone": an upgrade moves nobody's clock except to the site's.
+    if (!schemaColumnExists($db, 'users', 'timezone')) $uparts[] = "ADD COLUMN `timezone` VARCHAR(64) DEFAULT NULL";
+    // v69: the picture and the cover — see the CREATE above. The images are in `user_media`; these
+    // are the eight small columns every SELECT * may carry for free. NULL / 50 / 50 / 1 for every
+    // existing account, which is "nothing of my own", so an upgrade changes nobody's page.
+    foreach ([
+        'avatar_sha'  => "ADD COLUMN `avatar_sha` CHAR(40) DEFAULT NULL",
+        'avatar_x'    => "ADD COLUMN `avatar_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'avatar_y'    => "ADD COLUMN `avatar_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'avatar_zoom' => "ADD COLUMN `avatar_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00",
+        'cover_sha'   => "ADD COLUMN `cover_sha` CHAR(40) DEFAULT NULL",
+        'cover_x'     => "ADD COLUMN `cover_x` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'cover_y'     => "ADD COLUMN `cover_y` DECIMAL(5,2) NOT NULL DEFAULT 50.00",
+        'cover_zoom'  => "ADD COLUMN `cover_zoom` DECIMAL(4,2) NOT NULL DEFAULT 1.00",
+    ] as $mcol => $msql) {
+        if (!schemaColumnExists($db, 'users', $mcol)) $uparts[] = $msql;
+    }
+    // v74: the description on the profile and when it was last written — see the CREATE above. NULL
+    // for every existing account, which is "none written": an upgrade puts words on nobody's page.
+    if (!schemaColumnExists($db, 'users', 'bio')) $uparts[] = "ADD COLUMN `bio` TEXT DEFAULT NULL";
+    if (!schemaColumnExists($db, 'users', 'bio_updated_at')) $uparts[] = "ADD COLUMN `bio_updated_at` DATETIME DEFAULT NULL";
+    // v83: which comments this account is told about — see the CREATE above. All of them for every existing
+    // account, the same answer a new one starts with (31 since v88: the reply's bit with the other four).
+    if (!schemaColumnExists($db, 'users', 'comment_notify')) $uparts[] = "ADD COLUMN `comment_notify` TINYINT UNSIGNED NOT NULL DEFAULT 31";
+    if ($uparts) $out[] = "ALTER TABLE `users` " . implode(', ', $uparts);
+    // v88: a reply to one of my comments is a fifth kind of news (bit 16), ON for everybody, as the other four
+    // are. Guarded on the column's LIVE default, never on a marker (the local bootstrap wipes markers — v80's
+    // reason): while it still says 15 the bit has not been handed out. The UPDATE first, then the default — a run
+    // stopped between the two does the OR again, which changes nothing; nobody can have switched the bit off
+    // before it existed.
+    if (schemaColumnExists($db, 'users', 'comment_notify') && schemaColumnDefault($db, 'users', 'comment_notify') === '15') {
+        $out[] = "UPDATE `users` SET `comment_notify` = `comment_notify` | 16";
+        $out[] = "ALTER TABLE `users` ALTER COLUMN `comment_notify` SET DEFAULT 31";
+    }
+
+    // v83: where a notification happened — see the CREATE above. NULL for every row already written.
+    if (!schemaColumnExists($db, 'user_notifications', 'link')) {
+        $out[] = "ALTER TABLE `user_notifications` ADD COLUMN `link` VARCHAR(255) DEFAULT NULL";
+    }
+
+    // v93 (1.74.0, PRIV-1): who a notification is from, and the address it carries keyed — see the CREATE above.
+    // One ALTER of only what is missing, AFTER the v83 one (the key is on `link`). The friend notifications already
+    // written get their sender once, from their titles (schemaNotifySenders(), trackerSchemaDataMigrations()).
+    $un = [];
+    if (!schemaColumnExists($db, 'user_notifications', 'sender_id')) $un[] = "ADD COLUMN `sender_id` INT UNSIGNED DEFAULT NULL";
+    if (!schemaIndexExists($db, 'user_notifications', 'idx_un_sender')) $un[] = "ADD KEY `idx_un_sender` (`sender_id`)";
+    if (!schemaIndexExists($db, 'user_notifications', 'idx_un_link')) $un[] = "ADD KEY `idx_un_link` (`link`(100))";
+    if ($un) $out[] = "ALTER TABLE `user_notifications` " . implode(', ', $un);
+
+    // v56: a message no longer leaves a notification behind.
+    //
+    // It used to leave two records of one event — a row in user_notifications and an unread message
+    // — and only one of them was cleared by reading the message, so the account link kept a number
+    // that nothing on the page could explain. The unread message is now the only record, counted on
+    // the Messages tab and added into the number in the navigation.
+    //
+    // The old rows are deleted rather than left to be filtered out for ever: they say "somebody sent
+    // you a message" about messages that have long since been read, and nothing will ever write
+    // another one. ONCE: the table has no index on `type`, so this is a scan of every notification
+    // ever written — not "one indexed delete of nothing" — and it was repeated at every version bump
+    // (inside the schema lock, possibly from a web request) until 1.57.0.
+    if (schemaOnce($db, 'v56_pm_notifications')) $out[] = "DELETE FROM `user_notifications` WHERE `type` = 'pm'";
+
+    // v47: who registered a whitelist row, and whether they want it shown on their profile.
+    //
+    // `submitter_public` is deliberately NOT called `public` or `visible`: somebody reading the
+    // accesslist generator must not be able to mistake it for "served". It decides ONE thing —
+    // whose profile a row appears on. The generator, indexSearchCatalogue() and api/index_info.php
+    // never read it, and tests/sql_safety_test.php fails if the generator's SQL ever mentions it.
+    $wparts = [];
+    if (!schemaColumnExists($db, 'whitelist', 'submitter_id')) $wparts[] = "ADD COLUMN `submitter_id` INT UNSIGNED DEFAULT NULL";
+    if (!schemaColumnExists($db, 'whitelist', 'submitter_public')) $wparts[] = "ADD COLUMN `submitter_public` TINYINT(1) NOT NULL DEFAULT 0";
+    if (!schemaColumnExists($db, 'whitelist', 'review_status')) {
+        $wparts[] = "ADD COLUMN `review_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'review_note')) $wparts[] = "ADD COLUMN `review_note` VARCHAR(255) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'whitelist', 'reviewed_at')) $wparts[] = "ADD COLUMN `reviewed_at` DATETIME DEFAULT NULL";
+    if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
+    if (!schemaIndexExists($db, 'whitelist', 'idx_wl_submitter')) {
+        $out[] = "ALTER TABLE `whitelist` ADD KEY `idx_wl_submitter` (`submitter_id`, `created_at`)";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_wl_review')) {
+        $out[] = "ALTER TABLE `whitelist` ADD KEY `idx_wl_review` (`review_status`, `created_at`)";
+    }
+
+    // v48: what a partner's key is allowed to do on its own.
+    $aparts = [];
+    if (!schemaColumnExists($db, 'api_clients', 'auto_approve')) {
+        // 1, not 0: every key that exists today publishes directly, and a migration that silently
+        // put every partner's traffic into a review queue nobody is watching would take the tracker
+        // off the air for those hashes.
+        $aparts[] = "ADD COLUMN `auto_approve` TINYINT(1) NOT NULL DEFAULT 1";
+    }
+    if (!schemaColumnExists($db, 'api_clients', 'required_fields')) {
+        $aparts[] = "ADD COLUMN `required_fields` VARCHAR(255) NOT NULL DEFAULT ''";
+    }
+    if ($aparts) $out[] = "ALTER TABLE `api_clients` " . implode(', ', $aparts);
+
+    // v52: people reaching each other. Five new tables, so CREATE TABLE IF NOT EXISTS carries the
+    // whole migration — the definitions are the ones above, kept identical on purpose.
+    $out[] = "CREATE TABLE IF NOT EXISTS `message_threads` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `u_low` INT UNSIGNED NOT NULL,
+        `u_high` INT UNSIGNED NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `last_message_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `u_low_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+        `u_high_hidden` TINYINT(1) NOT NULL DEFAULT 0,
+        `u_low_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_high_cleared_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_low_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_high_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `u_low_trashed_at` DATETIME DEFAULT NULL,
+        `u_high_trashed_at` DATETIME DEFAULT NULL,
+        UNIQUE KEY `uq_thread_pair` (`u_low`, `u_high`),
+        KEY `idx_thread_low` (`u_low`, `last_message_at`),
+        KEY `idx_thread_high` (`u_high`, `last_message_at`),
+        KEY `idx_thread_trash_low` (`u_low_trashed_at`),
+        KEY `idx_thread_trash_high` (`u_high_trashed_at`)
+    ) $engine";
+    // v70: "delete this conversation, for me" — see the CREATE above. 0 for every existing row,
+    // which is "I have deleted nothing", so an upgrade hides nothing from anybody.
+    $mtParts = [];
+    foreach (['u_low_cleared_id', 'u_high_cleared_id'] as $mtCol) {
+        if (!schemaColumnExists($db, 'message_threads', $mtCol)) {
+            $mtParts[] = "ADD COLUMN `$mtCol` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+        }
+    }
+    if ($mtParts) $out[] = "ALTER TABLE `message_threads` " . implode(', ', $mtParts);
+    // v90: the Trash, per side — see the CREATE above. An empty trash on every existing row (0, NULL), so an
+    // upgrade moves nothing anywhere: today's hidden conversations ARE the Archive, today's deleted ones stay
+    // deleted. One helper, so tests/pm_trash_test.php can run it against a table of the old shape.
+    foreach (schemaPmTrashMigration($db) as $mtSql) $out[] = $mtSql;
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_messages` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `thread_id` INT UNSIGNED NOT NULL,
+        `sender_id` INT UNSIGNED NOT NULL,
+        `body` TEXT NOT NULL,
+        `body_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `read_at` DATETIME DEFAULT NULL,
+        `reported` TINYINT(1) NOT NULL DEFAULT 0,
+        KEY `idx_msg_thread` (`thread_id`, `id`),
+        KEY `idx_msg_unread` (`thread_id`, `sender_id`, `read_at`),
+        KEY `idx_msg_sender` (`sender_id`, `created_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `message_reports` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `message_id` BIGINT UNSIGNED NOT NULL,
+        `context_id` BIGINT UNSIGNED DEFAULT NULL,
+        `thread_id` INT UNSIGNED NOT NULL,
+        `reporter_id` INT UNSIGNED NOT NULL,
+        `reported_user_id` INT UNSIGNED NOT NULL,
+        `reason` VARCHAR(500) NOT NULL DEFAULT '',
+        `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+        `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+        `handled_at` DATETIME DEFAULT NULL,
+        `note` TEXT DEFAULT NULL,
+        `reply` TEXT DEFAULT NULL,
+        `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_report_once` (`message_id`, `reporter_id`),
+        KEY `idx_mreport_status` (`status`, `created_at`),
+        KEY `idx_mreport_user` (`reported_user_id`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_friends` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `friend_id` INT UNSIGNED NOT NULL,
+        `status` ENUM('pending','accepted') NOT NULL DEFAULT 'pending',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `accepted_at` DATETIME DEFAULT NULL,
+        UNIQUE KEY `uq_friend_once` (`user_id`, `friend_id`),
+        KEY `idx_friend_of` (`friend_id`, `status`),
+        KEY `idx_friend_mine` (`user_id`, `status`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_blocks` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `blocked_id` INT UNSIGNED NOT NULL,
+        `hide_profile` TINYINT(1) NOT NULL DEFAULT 0,
+        `note` VARCHAR(200) NOT NULL DEFAULT '',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_block_once` (`user_id`, `blocked_id`),
+        KEY `idx_block_target` (`blocked_id`)
+    ) $engine";
+
+    // v58: the second home for descriptions, the author of the current text on a whitelist row, and
+    // proposals that may point at either home. Same definition as the CREATE above.
+    $out[] = "CREATE TABLE IF NOT EXISTS `hash_content` (
+            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            `info_hash` CHAR(40) NOT NULL,
+            `source_url` VARCHAR(500) DEFAULT NULL,
+            `description` MEDIUMTEXT DEFAULT NULL,
+            `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode',
+            `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none',
+            `content_user_id` INT UNSIGNED DEFAULT NULL,
+            `content_reviewed_at` DATETIME DEFAULT NULL,
+            `content_rejected_note` VARCHAR(255) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `content_credits` TEXT DEFAULT NULL,
+            UNIQUE KEY `uq_hc_hash` (`info_hash`),
+            KEY `idx_hc_status` (`content_status`, `created_at`)
+        ) $engine";
+    if (!schemaColumnExists($db, 'whitelist', 'content_user_id')) {
+        $out[] = "ALTER TABLE `whitelist` ADD COLUMN `content_user_id` INT UNSIGNED DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'wl_content_edits', 'hash_content_id')) {
+        $out[] = "ALTER TABLE `wl_content_edits` MODIFY COLUMN `whitelist_id` INT UNSIGNED DEFAULT NULL,
+                  ADD COLUMN `hash_content_id` INT UNSIGNED DEFAULT NULL, ADD KEY `idx_edits_hc` (`hash_content_id`)";
+    }
+
+    // v59: the answer to the reporter, beside the note for the log. Same definition as the CREATE above.
+    if (!schemaColumnExists($db, 'message_reports', 'reply')) {
+        // (a TEXT from 1.75.0, v94 — the v94 step below widens the ones that were added as VARCHAR(500))
+        $out[] = "ALTER TABLE `message_reports` ADD COLUMN `reply` TEXT DEFAULT NULL";
+    }
+
+    // v61: the owner's sound uploads. Same definition as the CREATE above.
+    $out[] = "CREATE TABLE IF NOT EXISTS `sounds` (
+        `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        `name` VARCHAR(60) NOT NULL,
+        `mime` VARCHAR(32) NOT NULL,
+        `bytes` INT UNSIGNED NOT NULL,
+        `duration_ms` INT UNSIGNED DEFAULT NULL,
+        `sha1` CHAR(40) NOT NULL,
+        `data` MEDIUMBLOB NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_sounds_sha1` (`sha1`)
+    ) $engine";
+
+    // v54: who is typing, right now. Same definition as the CREATE above.
+    $out[] = "CREATE TABLE IF NOT EXISTS `message_typing` (
+        `thread_id` INT UNSIGNED NOT NULL,
+        `user_id` INT UNSIGNED NOT NULL,
+        `until` DATETIME NOT NULL,
+        PRIMARY KEY (`thread_id`, `user_id`),
+        KEY `idx_typing_until` (`until`)
+    ) $engine";
+
+    // v63: the shoutbox. Same definitions as the CREATEs above — a split between the two lists is
+    // the bug that once stopped a fresh install at version 0 (see the note on `fav_public`).
+    $out[] = "CREATE TABLE IF NOT EXISTS `shouts` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED DEFAULT NULL,
+        `body` VARCHAR(2000) NOT NULL,
+        `body_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
+        `is_system` TINYINT(1) NOT NULL DEFAULT 0,
+        `ip_bucket` VARCHAR(45) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `pinned_at` DATETIME DEFAULT NULL,
+        `pinned_by` INT UNSIGNED DEFAULT NULL,
+        `edited_at` DATETIME DEFAULT NULL,
+        `edited_by` INT UNSIGNED DEFAULT NULL,
+        `deleted_by` INT UNSIGNED DEFAULT NULL,
+        `deleted_at` DATETIME DEFAULT NULL,
+        KEY `idx_shouts_created` (`created_at`),
+        KEY `idx_shouts_user` (`user_id`),
+        KEY `idx_shouts_pinned` (`pinned_at`),
+        KEY `idx_shouts_edited_by` (`edited_by`, `edited_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `shout_mentions` (
+        `shout_id` BIGINT UNSIGNED NOT NULL,
+        `user_id` INT UNSIGNED NOT NULL,
+        `late` TINYINT(1) NOT NULL DEFAULT 0,
+        PRIMARY KEY (`shout_id`, `user_id`),
+        KEY `idx_mention_user` (`user_id`, `shout_id`)
+    ) $engine";
+
+    // v83: comments on a torrent (includes/comments.php). Same definition as the CREATE above — a split
+    // between the two lists is the bug that once stopped a fresh install at version 0. (v88's reply columns
+    // and key are in it; a table made before v88 gets them just below.)
+    $out[] = "CREATE TABLE IF NOT EXISTS `hash_comments` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `info_hash` CHAR(40) NOT NULL,
+        `parent_id` BIGINT UNSIGNED DEFAULT NULL,
+        `root_id` BIGINT UNSIGNED DEFAULT NULL,
+        `depth` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+        `user_id` INT UNSIGNED DEFAULT NULL,
+        `guest_tag` CHAR(4) DEFAULT NULL,
+        `body` TEXT NOT NULL,
+        `body_format` ENUM('bbcode','plain') NOT NULL DEFAULT 'bbcode',
+        `status` ENUM('visible','pending','deleted') NOT NULL DEFAULT 'visible',
+        `ip_bucket` VARCHAR(45) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `edited_at` DATETIME DEFAULT NULL,
+        `edited_by` INT UNSIGNED DEFAULT NULL,
+        `approved_at` DATETIME DEFAULT NULL,
+        `approved_by` INT UNSIGNED DEFAULT NULL,
+        `deleted_at` DATETIME DEFAULT NULL,
+        `deleted_by` INT UNSIGNED DEFAULT NULL,
+        `delete_reason` VARCHAR(255) DEFAULT NULL,
+        KEY `idx_hc_hash` (`info_hash`, `status`, `id`),
+        KEY `idx_hc_user` (`user_id`, `created_at`),
+        KEY `idx_hc_status` (`status`, `created_at`),
+        KEY `idx_hc_thread` (`info_hash`, `root_id`, `id`, `status`)
+    ) $engine";
+    // v88: replies (1.72.0) — see the CREATE above. A table made before v88 holds only comments of the top level,
+    // which is exactly what the new columns say of a row with nothing in them (NULL parent, NULL root, depth 0):
+    // nothing is rewritten. The columns stand where a fresh table has them, so the two shapes are one.
+    $hparts = [];
+    if (!schemaColumnExists($db, 'hash_comments', 'parent_id')) $hparts[] = "ADD COLUMN `parent_id` BIGINT UNSIGNED DEFAULT NULL AFTER `info_hash`";
+    if (!schemaColumnExists($db, 'hash_comments', 'root_id')) $hparts[] = "ADD COLUMN `root_id` BIGINT UNSIGNED DEFAULT NULL AFTER `parent_id`";
+    if (!schemaColumnExists($db, 'hash_comments', 'depth')) $hparts[] = "ADD COLUMN `depth` TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER `root_id`";
+    if (!schemaIndexExists($db, 'hash_comments', 'idx_hc_thread')) $hparts[] = "ADD KEY `idx_hc_thread` (`info_hash`, `root_id`, `id`, `status`)";
+    if ($hparts && schemaTableExists($db, 'hash_comments')) $out[] = "ALTER TABLE `hash_comments` " . implode(', ', $hparts);
+
+    // v84: reports of comments, descriptions and shouts, and warnings (includes/reports.php). Same definitions
+    // as the CREATEs above — a split between the two lists is the bug that once stopped a fresh install at
+    // version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `content_reports` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `kind` ENUM('comment','description','shout','image','torrent') NOT NULL,
+        `target_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `info_hash` CHAR(40) NOT NULL DEFAULT '',
+        `author_id` INT UNSIGNED DEFAULT NULL,
+        `reporter_id` INT UNSIGNED NOT NULL,
+        `reason` VARCHAR(500) NOT NULL DEFAULT '',
+        `snapshot` TEXT NOT NULL,
+        `snapshot_format` VARCHAR(16) NOT NULL DEFAULT 'plain',
+        `status` ENUM('open','closed') NOT NULL DEFAULT 'open',
+        `open_slot` TINYINT UNSIGNED DEFAULT 1,
+        `outcome` VARCHAR(16) NOT NULL DEFAULT '',
+        `handled_by` VARCHAR(64) NOT NULL DEFAULT '',
+        `handled_at` DATETIME DEFAULT NULL,
+        `note` TEXT DEFAULT NULL,
+        `reply` TEXT DEFAULT NULL,
+        `reply_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_crep_open` (`kind`, `target_id`, `info_hash`, `reporter_id`, `open_slot`),
+        KEY `idx_crep_queue` (`kind`, `status`, `created_at`),
+        KEY `idx_crep_author` (`author_id`),
+        KEY `idx_crep_reporter` (`reporter_id`, `created_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_warnings` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `reason` TEXT DEFAULT NULL,
+        `reason_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+        `source_kind` VARCHAR(16) NOT NULL DEFAULT '',
+        `source_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        `info_hash` CHAR(40) NOT NULL DEFAULT '',
+        `action` VARCHAR(16) NOT NULL DEFAULT 'warn',
+        `loud` TINYINT NOT NULL DEFAULT 1,
+        `by_id` INT UNSIGNED DEFAULT NULL,
+        `by_name` VARCHAR(64) NOT NULL DEFAULT '',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `revoked_at` DATETIME DEFAULT NULL,
+        `revoked_by_id` INT UNSIGNED DEFAULT NULL,
+        `revoked_by_name` VARCHAR(64) NOT NULL DEFAULT '',
+        `revoke_note` TEXT DEFAULT NULL,
+        `revoke_note_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain',
+        KEY `idx_warn_user` (`user_id`, `created_at`),
+        KEY `idx_warn_by` (`by_id`),
+        KEY `idx_warn_revoked_by` (`revoked_by_id`)
+    ) $engine";
+    // v94 (1.75.0): the ladder of automatic penalties — the same definition as the CREATE list's.
+    $out[] = "CREATE TABLE IF NOT EXISTS `auto_penalty_rules` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `warnings` SMALLINT UNSIGNED NOT NULL,
+        `window_days` SMALLINT UNSIGNED NOT NULL,
+        `action` ENUM('mute','ban') NOT NULL DEFAULT 'mute',
+        `duration_days` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `enabled` TINYINT NOT NULL DEFAULT 1,
+        `sort` INT NOT NULL DEFAULT 0,
+        KEY `idx_apr_sort` (`enabled`, `sort`)
+    ) $engine";
+
+    // v93 (1.74.0): the narrow catalogue (includes/index.php, indexCatalog*). The same DDL as the CREATE list — one
+    // function, so the two cannot split. An empty table, so this is instant anywhere; it is FILLED by the janitor
+    // (indexCatalogWalk()), never here, and the search does not read it until a whole pass has been made.
+    $out[] = schemaIndexCatalogDdl($engine);
+
+    // v85: one anti-spam layer (includes/antispam.php). Same definition as the CREATE above — a split between
+    // the two lists is the bug that once stopped a fresh install at version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `antispam_state` (
+        `context` VARCHAR(16) NOT NULL,
+        `subject` VARCHAR(64) NOT NULL,
+        `level` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `last_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        `next_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        `top_hits` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `captcha` TINYINT(1) NOT NULL DEFAULT 0,
+        `refused` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+        `edit_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        `recent` VARCHAR(1000) NOT NULL DEFAULT '',
+        `rev` INT UNSIGNED NOT NULL DEFAULT 0,
+        `updated_at` INT UNSIGNED NOT NULL DEFAULT 0,
+        PRIMARY KEY (`context`, `subject`),
+        KEY `idx_as_updated` (`updated_at`)
+    ) $engine";
+
+    // v64: the emotes and stickers `:code:` stands for. Same definition as the CREATE above — a
+    // split between the two lists is the bug that once stopped a fresh install at version 0.
+    $out[] = "CREATE TABLE IF NOT EXISTS `shout_emotes` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `code` VARCHAR(32) NOT NULL,
+        `name` VARCHAR(60) NOT NULL,
+        `mime` VARCHAR(32) NOT NULL,
+        `bytes` INT UNSIGNED NOT NULL,
+        `width` SMALLINT UNSIGNED DEFAULT NULL,
+        `height` SMALLINT UNSIGNED DEFAULT NULL,
+        `is_sticker` TINYINT(1) NOT NULL DEFAULT 0,
+        `enabled` TINYINT(1) NOT NULL DEFAULT 1,
+        `approved_at` DATETIME DEFAULT NULL,
+        `uploaded_by` INT UNSIGNED DEFAULT NULL,
+        `sha1` CHAR(40) NOT NULL,
+        `data` MEDIUMBLOB NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_emote_code` (`code`),
+        UNIQUE KEY `uq_emote_sha1` (`sha1`),
+        KEY `idx_emote_user` (`uploaded_by`)
+    ) $engine";
+    // v65: the moment somebody let this picture through, as opposed to whether it happens to be
+    // switched on right now. An install that already has the table gets the column here; a fresh one
+    // gets it from the CREATE above. The rows that pre-date it are stamped by the data migration —
+    // untouched, they would every one of them read as "nobody has looked at this yet".
+    if (!schemaColumnExists($db, 'shout_emotes', 'approved_at')) {
+        $out[] = "ALTER TABLE `shout_emotes` ADD COLUMN `approved_at` DATETIME DEFAULT NULL";
+    }
+
+    // v69: pictures and covers. Same definition as the CREATE above — a split between the two lists
+    // is the bug that once stopped a fresh install at version 0 (see the note on `fav_public`).
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_media` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED DEFAULT NULL,
+        `kind` ENUM('avatar_src','avatar','cover','cover_thumb') NOT NULL,
+        `size` SMALLINT UNSIGNED DEFAULT NULL,
+        `sha1` CHAR(40) NOT NULL,
+        `mime` VARCHAR(32) NOT NULL,
+        `bytes` INT UNSIGNED NOT NULL,
+        `width` SMALLINT UNSIGNED NOT NULL,
+        `height` SMALLINT UNSIGNED NOT NULL,
+        `data` MEDIUMBLOB NOT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        KEY `idx_media_user` (`user_id`, `kind`),
+        KEY `idx_media_sha` (`sha1`, `size`)
+    ) $engine";
+
+    // v66: the pinned announcement and the lines the site says. One ALTER rather than four, because
+    // each one of them rebuilds the table and the room is read on every front page.
+    //
+    // The `user_id` change is the interesting half: it goes from NOT NULL to nullable because an
+    // announcement has no author. Guarded on the column's own nullability (schemaColumnNullable)
+    // rather than on a marker, so it runs exactly once and a database that already answers "yes" is
+    // never rebuilt again — and behind schemaTableExists(), because a MODIFY against a table that is
+    // not there throws, and a throw here stops every migration after it.
+    $sparts = [];
+    if (schemaTableExists($db, 'shouts')) {
+        if (!schemaColumnExists($db, 'shouts', 'is_system')) $sparts[] = "ADD COLUMN `is_system` TINYINT(1) NOT NULL DEFAULT 0";
+        if (!schemaColumnExists($db, 'shouts', 'pinned_at')) $sparts[] = "ADD COLUMN `pinned_at` DATETIME DEFAULT NULL";
+        if (!schemaColumnExists($db, 'shouts', 'pinned_by')) $sparts[] = "ADD COLUMN `pinned_by` INT UNSIGNED DEFAULT NULL";
+        if (!schemaColumnNullable($db, 'shouts', 'user_id')) $sparts[] = "MODIFY COLUMN `user_id` INT UNSIGNED DEFAULT NULL";
+        if (!schemaIndexExists($db, 'shouts', 'idx_shouts_pinned')) $sparts[] = "ADD KEY `idx_shouts_pinned` (`pinned_at`)";
+    }
+    if ($sparts) $out[] = "ALTER TABLE `shouts` " . implode(', ', $sparts);
+
+    // v72: a line can be corrected, and says so (`edited_at` / `edited_by`), and a mention an edit
+    // added is counted as unread until its reader next looks (`shout_mentions.late`). One ALTER per
+    // table for the reason the v66 block gives, and behind schemaTableExists() for the one it gives
+    // too: an ALTER against a missing table throws, and a throw here stops every migration after it.
+    $eparts = [];
+    if (schemaTableExists($db, 'shouts')) {
+        if (!schemaColumnExists($db, 'shouts', 'edited_at')) $eparts[] = "ADD COLUMN `edited_at` DATETIME DEFAULT NULL";
+        if (!schemaColumnExists($db, 'shouts', 'edited_by')) $eparts[] = "ADD COLUMN `edited_by` INT UNSIGNED DEFAULT NULL";
+        if (!schemaIndexExists($db, 'shouts', 'idx_shouts_edited_by')) $eparts[] = "ADD KEY `idx_shouts_edited_by` (`edited_by`, `edited_at`)";
+    }
+    if ($eparts) $out[] = "ALTER TABLE `shouts` " . implode(', ', $eparts);
+    if (schemaTableExists($db, 'shout_mentions') && !schemaColumnExists($db, 'shout_mentions', 'late')) {
+        $out[] = "ALTER TABLE `shout_mentions` ADD COLUMN `late` TINYINT(1) NOT NULL DEFAULT 0";
+    }
+
+    // v53: the second factor, and what a remember-me token was handed to. Same definitions as the
+    // CREATE above, for the reason the v51 comment gives.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_twofa` (
+        `user_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+        `secret` VARCHAR(64) NOT NULL,
+        `enabled` TINYINT(1) NOT NULL DEFAULT 0,
+        `recovery` TEXT DEFAULT NULL,
+        `last_step` BIGINT UNSIGNED DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `confirmed_at` DATETIME DEFAULT NULL,
+        `last_used_at` DATETIME DEFAULT NULL
+    ) $engine";
+    $tparts = [];
+    if (!schemaColumnExists($db, 'user_tokens', 'ip')) $tparts[] = "ADD COLUMN `ip` VARCHAR(45) DEFAULT NULL";
+    if (!schemaColumnExists($db, 'user_tokens', 'ua')) $tparts[] = "ADD COLUMN `ua` VARCHAR(255) DEFAULT NULL";
+    if ($tparts) $out[] = "ALTER TABLE `user_tokens` " . implode(', ', $tparts);
+
+    // v51: lists. Two new tables, so the definitions above carry the migration too — kept identical
+    // on purpose, the way the v49 tables are.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_lists` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `name` VARCHAR(80) NOT NULL,
+        `slug` VARCHAR(90) NOT NULL,
+        `description` TEXT DEFAULT NULL,
+        `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode',
+        `visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_list_slug` (`user_id`, `slug`),
+        KEY `idx_list_user` (`user_id`, `updated_at`),
+        KEY `idx_list_visibility` (`visibility`, `updated_at`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_list_items` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `list_id` INT UNSIGNED NOT NULL,
+        `info_hash` CHAR(40) NOT NULL,
+        `name` VARCHAR(255) DEFAULT NULL,
+        `added_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_list_item` (`list_id`, `info_hash`),
+        KEY `idx_list_added` (`list_id`, `added_at`),
+        KEY `idx_item_hash` (`info_hash`)
+    ) $engine";
+    // v80: a list's description becomes rich text (1.70.0). The CREATEs carry the new shape for a table
+    // made today; an existing one is brought to it here, its plain texts rewritten as BBCode that reads
+    // the same — schemaListDescMigration() says why the order is what makes it safe to stop anywhere.
+    foreach (schemaListDescMigration($db) as $sql) $out[] = $sql;
+    // v87: a list's boolean `is_public` becomes its visibility — private, friends or public (1.72.0). The same
+    // pattern: the CREATEs above carry the new shape, an existing table is brought to it here, and
+    // schemaListVisibilityMigration() says why a stop anywhere is safe.
+    foreach (schemaListVisibilityMigration($db) as $sql) $out[] = $sql;
+
+    // v50: a report can now arrive from a partner's key instead of from the public form, and the
+    // queue has to say which. The column is NULLABLE and has no default: every report that exists
+    // today came from a person on the Report page, and writing a partner id into those rows — or
+    // inventing one — would be the migration making a claim about where they came from.
+    //
+    // `archives` gets the same column because archiveReport() copies a row across verbatim when a
+    // report is resolved; without it the partner's name would be lost at exactly the moment the
+    // record becomes the permanent one.
+    foreach (['reports', 'archives'] as $rt) {
+        if (!schemaTableExists($db, $rt)) continue;   // install.php owns these two; see the helper
+        if (!schemaColumnExists($db, $rt, 'api_client_id')) {
+            $out[] = "ALTER TABLE `$rt` ADD COLUMN `api_client_id` INT UNSIGNED DEFAULT NULL";
+        }
+        if (!schemaIndexExists($db, $rt, 'idx_' . $rt . '_api_client')) {
+            $out[] = "ALTER TABLE `$rt` ADD INDEX `idx_" . $rt . "_api_client` (`api_client_id`)";
+        }
+    }
+    // DEFAULT 0, and that is the decision this release is about: `auto_approve` above defaults to 1
+    // because registering a hash a partner already published is not an escalation. Blocking one is.
+    // A key that can file abuse reports gets them REVIEWED unless somebody deliberately says
+    // otherwise, so the two settings are separate columns rather than one column read two ways.
+    if (!schemaColumnExists($db, 'api_clients', 'abuse_auto_block')) {
+        $out[] = "ALTER TABLE `api_clients` ADD COLUMN `abuse_auto_block` TINYINT(1) NOT NULL DEFAULT 0";
+    }
+
+    // v49: the sign-in bridge. Two new tables, so CREATE TABLE IF NOT EXISTS carries the whole
+    // migration — the definitions are the ones above, kept identical on purpose.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_identities` (
+        `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `client_id` INT UNSIGNED NOT NULL,
+        `provider` VARCHAR(64) NOT NULL DEFAULT '',
+        `external_id` VARCHAR(191) NOT NULL,
+        `external_name` VARCHAR(191) DEFAULT NULL,
+        `external_email` VARCHAR(191) DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `last_login_at` DATETIME DEFAULT NULL,
+        `logout_at` DATETIME DEFAULT NULL,
+        UNIQUE KEY `uq_ident_ext` (`client_id`, `external_id`),
+        UNIQUE KEY `uq_ident_user` (`user_id`, `client_id`),
+        KEY `idx_ident_user` (`user_id`)
+    ) $engine";
+    // v71: the shop's order book — see the CREATE above, kept identical on purpose. A new table on
+    // an existing install is a migration, which is why it is repeated down here rather than assumed.
+    $out[] = "CREATE TABLE IF NOT EXISTS `user_group_orders` (
+        `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        `client_id` INT UNSIGNED NOT NULL,
+        `order_id` VARCHAR(64) NOT NULL,
+        `user_id` INT UNSIGNED NOT NULL,
+        `group_id` INT UNSIGNED NOT NULL,
+        `action` VARCHAR(16) NOT NULL DEFAULT 'grant',
+        `duration` VARCHAR(16) NOT NULL DEFAULT '',
+        `until` DATETIME DEFAULT NULL,
+        `prev_member` TINYINT(1) NOT NULL DEFAULT 0,
+        `prev_expires_at` DATETIME DEFAULT NULL,
+        `new_expires_at` DATETIME DEFAULT NULL,
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY `uq_ugo_client_order` (`client_id`, `order_id`),
+        KEY `idx_ugo_user` (`user_id`, `group_id`)
+    ) $engine";
+    $out[] = "CREATE TABLE IF NOT EXISTS `auth_handoffs` (
+        `token_hash` CHAR(64) NOT NULL PRIMARY KEY,
+        `user_id` INT UNSIGNED NOT NULL,
+        `client_id` INT UNSIGNED NOT NULL,
+        `direction` ENUM('in','out') NOT NULL DEFAULT 'in',
+        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        `expires_at` DATETIME NOT NULL,
+        `used_at` DATETIME DEFAULT NULL,
+        `created_ip` VARCHAR(45) DEFAULT NULL,
+        KEY `idx_handoff_expiry` (`expires_at`),
+        KEY `idx_handoff_user` (`user_id`)
+    ) $engine";
+
+    // v19: a source link and a description on a whitelist row. The table is small (hundreds of rows),
+    // so this is an ordinary ALTER — nothing here needs the deferral machinery below.
+    $wparts = [];
+    if (!schemaColumnExists($db, 'whitelist', 'source_url')) {
+        $wparts[] = "ADD COLUMN `source_url` VARCHAR(500) DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'description')) {
+        $wparts[] = "ADD COLUMN `description` MEDIUMTEXT DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'description_format')) {
+        $wparts[] = "ADD COLUMN `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'content_status')) {
+        $wparts[] = "ADD COLUMN `content_status` ENUM('none','pending','approved','rejected') NOT NULL DEFAULT 'none'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'content_reviewed_at')) {
+        $wparts[] = "ADD COLUMN `content_reviewed_at` DATETIME DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'content_rejected_note')) {
+        $wparts[] = "ADD COLUMN `content_rejected_note` VARCHAR(255) DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'probe_status')) {
+        // 'none' for everything that already exists: rows registered before this feature were never
+        // asked to prove anything, and retroactively marking them unproven would empty the tracker.
+        $wparts[] = "ADD COLUMN `probe_status` ENUM('none','probing','passed','failed') NOT NULL DEFAULT 'none'";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'probe_started_at')) {
+        $wparts[] = "ADD COLUMN `probe_started_at` DATETIME DEFAULT NULL";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'probe_error')) {
+        $wparts[] = "ADD COLUMN `probe_error` VARCHAR(255) DEFAULT NULL";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_probe')) {
+        $wparts[] = "ADD KEY `idx_whitelist_probe` (`probe_status`, `probe_started_at`)";
+    }
+    if (!schemaColumnExists($db, 'whitelist', 'dead_since')) {
+        // When the maintenance pass first found no seeders and no leechers on this row. NULL means
+        // "not dead as far as anybody knows", which is also what a row that has never been scraped
+        // says — no data is not the same as no peers.
+        $wparts[] = "ADD COLUMN `dead_since` DATETIME DEFAULT NULL";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_dead')) {
+        $wparts[] = "ADD KEY `idx_whitelist_dead` (`dead_since`)";
+    }
+    if (!schemaIndexExists($db, 'whitelist', 'idx_whitelist_content')) {
+        $wparts[] = "ADD KEY `idx_whitelist_content` (`content_status`, `created_at`)";
+    }
+    if ($wparts) $out[] = "ALTER TABLE `whitelist` " . implode(', ', $wparts);
+
+    // v81: the credit chain on both homes, the kind of a proposal, and a member's proposals by member
+    // (includes/content.php, includes/profiledescs.php). Here, after the block above, because the
+    // chain is initialised from the content columns that block adds on an old enough install. Same
+    // definitions as the CREATEs.
+    foreach (['whitelist', 'hash_content'] as $ct) {
+        if (!schemaColumnExists($db, $ct, 'content_credits')) $out[] = "ALTER TABLE `$ct` ADD COLUMN `content_credits` TEXT DEFAULT NULL";
+    }
+    $eparts = [];
+    if (!schemaColumnExists($db, 'wl_content_edits', 'kind')) $eparts[] = "ADD COLUMN `kind` ENUM('rewrite','edit') NOT NULL DEFAULT 'rewrite'";
+    if (!schemaIndexExists($db, 'wl_content_edits', 'idx_edits_user')) $eparts[] = "ADD KEY `idx_edits_user` (`user_id`, `created_at`)";
+    if ($eparts) $out[] = "ALTER TABLE `wl_content_edits` " . implode(', ', $eparts);
+    // v82: the pending count of one description, on both homes — see the CREATE above. After the v58 block,
+    // which adds hash_content_id on an old enough install. Keys only: the replaced versions an install
+    // already keeps are NOT deleted here; contentArchivePrune() trims one description at a time, when a
+    // proposal on it is applied (includes/content.php).
+    $kparts = [];
+    if (!schemaIndexExists($db, 'wl_content_edits', 'idx_edits_wl_status')) $kparts[] = "ADD KEY `idx_edits_wl_status` (`whitelist_id`, `status`)";
+    if (!schemaIndexExists($db, 'wl_content_edits', 'idx_edits_hc_status')) $kparts[] = "ADD KEY `idx_edits_hc_status` (`hash_content_id`, `status`)";
+    if ($kparts) $out[] = "ALTER TABLE `wl_content_edits` " . implode(', ', $kparts);
+    // Every described row that has an author and no chain starts one: that author, as the first — or,
+    // where their account is already gone, "a deleted account" (u = 0). The text is exactly what
+    // contentCreditsEncode() writes for such a chain, so the member search (a LIKE on it) finds these
+    // too. Only NULL chains, so it is idempotent and runs harmlessly at every later bump; after it, an
+    // author id that names no account is let go (the next account MySQL 5.7 hands the same id after a
+    // restart must not become the author of record of somebody else's words).
+    foreach (['whitelist', 'hash_content'] as $ct) {
+        $out[] = "UPDATE `$ct` t LEFT JOIN `users` u ON u.id = t.content_user_id
+                     SET t.content_credits = CONCAT('[{\"u\":', IF(u.id IS NULL, 0, t.content_user_id), ',\"k\":\"f\",\"t\":',
+                                                    UNIX_TIMESTAMP(COALESCE(t.content_reviewed_at, t.created_at)), '}]')
+                   WHERE t.content_credits IS NULL AND t.content_user_id > 0 AND t.content_status <> 'none'";
+        $out[] = "UPDATE `$ct` t LEFT JOIN `users` u ON u.id = t.content_user_id SET t.content_user_id = NULL
+                   WHERE t.content_user_id IS NOT NULL AND u.id IS NULL";
+    }
+
+    // v21: the rating totals, kept on the row. A listing that showed a score for fifty rows would
+    // otherwise be fifty aggregate queries, and this project has already been bitten once by a
+    // listing doing per-row work over a large table.
+    foreach (['index_hashes', 'whitelist'] as $rt) {
+        $rparts = [];
+        if (!schemaColumnExists($db, $rt, 'votes_up'))   $rparts[] = "ADD COLUMN `votes_up` INT UNSIGNED NOT NULL DEFAULT 0";
+        if (!schemaColumnExists($db, $rt, 'votes_down')) $rparts[] = "ADD COLUMN `votes_down` INT UNSIGNED NOT NULL DEFAULT 0";
+        if (!schemaColumnExists($db, $rt, 'score_x100')) $rparts[] = "ADD COLUMN `score_x100` SMALLINT UNSIGNED NOT NULL DEFAULT 0";
+        // v22: how many votes, as its own column rather than votes_up + votes_down.
+        //
+        // With stars there is no "up" and no "down" — there is a count and an average — and reusing
+        // votes_up to mean "count in one mode and up-votes in the other" is exactly the overload that
+        // produces a wrong number two releases later, in whichever branch nobody re-read.
+        if (!schemaColumnExists($db, $rt, 'votes_count')) $rparts[] = "ADD COLUMN `votes_count` INT UNSIGNED NOT NULL DEFAULT 0";
+        if (!$rparts) continue;
+        if ($rt === 'whitelist') {
+            $out[] = "ALTER TABLE `whitelist` " . implode(', ', $rparts);
+        } elseif (schemaHeavyAllowed()) {
+            // index_hashes carries a FULLTEXT index, so this is a rebuild — the janitor, never a page.
+            $alter = "ALTER TABLE `index_hashes` " . implode(', ', $rparts);
+            $out[] = [$alter . ", ALGORITHM=INSTANT", $alter . ", ALGORITHM=INPLACE", $alter];
+        } else {
+            schemaDeferHeavy('index_hashes: ' . implode(', ', $rparts));
+        }
+    }
+
+    // v26: how many indexed hashes have their metadata resolved. Three small-to-medium tables; the
+    // raw one is the only sizeable one and an INT column is an instant add on it.
+    //
+    // v27 makes it NULLABLE, and that is the whole point of the change: every row that existed before
+    // the column did was given 0, and 0 is a claim — "at that moment nothing had been fetched" — which
+    // was not true, nothing had been MEASURED. The chart drew that as a flat line at zero across all
+    // of history, which is exactly the shape of a broken feature. NULL says "no reading", the payload
+    // passes it through, and the line simply does not start until the data does.
+    foreach (['stats_samples', 'stats_samples_5m', 'stats_samples_1h'] as $stTable) {
+        if (!schemaColumnExists($db, $stTable, 'index_fetched')) {
+            $out[] = "ALTER TABLE `$stTable` ADD COLUMN `index_fetched` INT UNSIGNED DEFAULT NULL";
+        } elseif (!schemaColumnNullable($db, $stTable, 'index_fetched')) {
+            $out[] = "ALTER TABLE `$stTable` MODIFY COLUMN `index_fetched` INT UNSIGNED DEFAULT NULL";
+            // the zeros already written were never a measurement; say so
+            $out[] = "UPDATE `$stTable` SET `index_fetched` = NULL WHERE `index_fetched` = 0";
+        }
+    }
+
+    // v23: the markup format of a queued bulk message. Small table, ordinary ALTER.
+    if (!schemaColumnExists($db, 'mail_queue', 'format')) {
+        $out[] = "ALTER TABLE `mail_queue` ADD COLUMN `format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'";
+    }
+
+    // ── v94 (1.75.0): rich messages — see the version note and the CREATEs above ──────────────────────────────
+    //
+    // Each change only when schemaColumnType() says the column is not already the shape wanted: a fresh install's
+    // CREATE list has all of this and adds nothing here, an upgrade gets exactly what is missing, and a run that
+    // stopped half-way finds the rest still different and does it again (a MODIFY to the same type changes nothing).
+    // No ENUM was ever WIDENED before this, and no VARCHAR turned TEXT on these tables — the v80 TEXT conversion
+    // (schemaListDescMigration()) is the style. All of these tables are small (a queue, a few thousand
+    // notifications, the reports and warnings of a tracker), so an ordinary ALTER is fine.
+    //   The format column of a queued message is widened AFTER v23's ADD above on a database that lacks it; the
+    //   statement list runs in this order.
+    $mq = [];
+    if (schemaColumnType($db, 'mail_queue', 'format') !== "enum('plain','bbcode','markdown','html','flarum')") {
+        $mq[] = "MODIFY COLUMN `format` ENUM('plain','bbcode','markdown','html','flarum') NOT NULL DEFAULT 'plain'";
+    }
+    if (!schemaColumnExists($db, 'mail_queue', 'frame')) $mq[] = "ADD COLUMN `frame` ENUM('site','none') NOT NULL DEFAULT 'site'";
+    if ($mq) $out[] = "ALTER TABLE `mail_queue` " . implode(', ', $mq);
+
+    $rn = [];
+    if (!schemaColumnExists($db, 'user_notifications', 'rich')) $rn[] = "ADD COLUMN `rich` MEDIUMTEXT DEFAULT NULL";
+    if (!schemaColumnExists($db, 'user_notifications', 'rich_format')) $rn[] = "ADD COLUMN `rich_format` ENUM('bbcode','markdown','html','flarum') DEFAULT NULL";
+    if ($rn) $out[] = "ALTER TABLE `user_notifications` " . implode(', ', $rn);
+
+    // The texts a moderator writes: VARCHAR(500) → TEXT (nullable: MySQL 5.7 cannot default a TEXT), and the
+    // format beside the one a member reads. [table => [column to widen…, column to add + its definition]].
+    $fmtDef = "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'";
+    foreach ([
+        'content_reports' => [['note', 'reply'], 'reply_format'],
+        'message_reports' => [['note', 'reply'], 'reply_format'],
+        'user_warnings'   => [['reason'], 'reason_format'],
+    ] as $tbl => [$widen, $fmtCol]) {
+        // A table that is not there yet is made new-shaped by the CREATE above in this same list (a database from before
+        // v84); an ALTER computed now would meet that new shape and fail on a column that already exists.
+        if (!schemaTableExists($db, $tbl)) continue;
+        $parts = [];
+        foreach ($widen as $col) {
+            $ty = schemaColumnType($db, $tbl, $col);
+            if ($ty !== null && $ty !== 'text') $parts[] = "MODIFY COLUMN `$col` TEXT DEFAULT NULL";
+        }
+        if (!schemaColumnExists($db, $tbl, $fmtCol)) $parts[] = "ADD COLUMN `$fmtCol` $fmtDef";
+        if ($parts) $out[] = "ALTER TABLE `$tbl` " . implode(', ', $parts);
+    }
+
+    // The answer to an appeal and the log of a custom report mail keep RAW text and its format (they were stored
+    // through sanitize() and escaped AGAIN by the panel). install.php's tables, not the CREATE list's: guarded on
+    // their existence, as every statement on them is (a database built from the CREATE list alone has none).
+    foreach (['appeals' => 'admin_response_format', 'appeal_archives' => 'admin_response_format', 'sent_emails' => 'message_format'] as $tbl => $col) {
+        if (schemaTableExists($db, $tbl) && !schemaColumnExists($db, $tbl, $col)) {
+            $out[] = "ALTER TABLE `$tbl` ADD COLUMN `$col` $fmtDef";
+        }
+    }
+    // ── v94, Parts C + D (1.75.0): the moderation overview and the automatic penalties ───────────────────────────
+    //
+    // user_warnings (see its CREATE): `loud` (every old row is a warning the member was told of, so DEFAULT 1 is true of
+    // them all), the revocation (`revoked_*`, `revoke_note` + its format) and a key on the revoker (userDeleteCascade()
+    // sets it NULL). One ALTER of only what is missing; a table the CREATE above is about to make is left to it.
+    if (schemaTableExists($db, 'user_warnings')) {
+        $uw = [];
+        foreach ([
+            'loud'               => "ADD COLUMN `loud` TINYINT NOT NULL DEFAULT 1",
+            'revoked_at'         => "ADD COLUMN `revoked_at` DATETIME DEFAULT NULL",
+            'revoked_by_id'      => "ADD COLUMN `revoked_by_id` INT UNSIGNED DEFAULT NULL",
+            'revoked_by_name'    => "ADD COLUMN `revoked_by_name` VARCHAR(64) NOT NULL DEFAULT ''",
+            'revoke_note'        => "ADD COLUMN `revoke_note` TEXT DEFAULT NULL",
+            'revoke_note_format' => "ADD COLUMN `revoke_note_format` ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'",
+        ] as $col => $def) {
+            if (!schemaColumnExists($db, 'user_warnings', $col)) $uw[] = $def;
+        }
+        if (!schemaIndexExists($db, 'user_warnings', 'idx_warn_revoked_by')) $uw[] = "ADD KEY `idx_warn_revoked_by` (`revoked_by_id`)";
+        if ($uw) $out[] = "ALTER TABLE `user_warnings` " . implode(', ', $uw);
+    }
+    // "Restricted now" asks which accounts are muted at this moment: a key on the one column that answers it (the
+    // banned ones are idx_users_status's).
+    if (!schemaIndexExists($db, 'users', 'idx_users_muted')) $out[] = "ALTER TABLE `users` ADD KEY `idx_users_muted` (`pm_muted_until`)";
+    // (auto_penalty_rules is made by the CREATE above and seeded once by the data migration; the permissions
+    // panel.moderation.* are granted once there as well — trackerSchemaDataMigrations(), v94_moderation.)
+
+    // v19: the two composite indexes the catalogue has always needed.
+    //
+    // Measured on the live table (2 746 616 rows, 2 GB): the Index page's own default first page ran
+    // `ORDER BY last_seeders DESC, last_seen DESC LIMIT 50` as `type=ALL … Using filesort` — a full
+    // scan of every row, 1 747 ms, on every single load. There WAS an index on `last_seeders` alone,
+    // and a single-column index cannot satisfy a two-column sort, so the optimiser discarded it.
+    //
+    // The public search is the same shape with `WHERE meta_status='done'` in front.
+    //
+    // This is worth more than any cache in front of it: a cache would have hidden a 1.7-second scan
+    // that also evicts a 512 MB InnoDB buffer pool with 2 GB of table on every miss — and that pool
+    // is shared with the mail, the forum and the file service on this machine. The fix belongs here.
+    $iparts = [];
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_seed_seen')) {
+        $iparts[] = "ADD KEY `idx_index_seed_seen` (`last_seeders`, `last_seen`)";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_seed')) {
+        $iparts[] = "ADD KEY `idx_index_meta_seed` (`meta_status`, `last_seeders`, `last_seen`)";
+    }
+    // schema v31: two more, for the fetch-order selectors "seen most often" and "most completed".
+    //
+    // These exist so that choosing an order in the panel stays a query plan rather than a wish. A
+    // claim runs on every fetch slot — several times a second on a queue of three million rows — so
+    // `ORDER BY seen_count DESC` without an index is a filesort of the whole table at that rate,
+    // which is not a slow setting but a stopped machine.
+    //
+    // The cost is honest and worth stating: two more secondary indexes on a table the index poll
+    // rewrites wholesale every 30 minutes. That is the reason the list of selectors stops here
+    // rather than offering every column — see metaOrderRejected() for the ones left out.
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_seen')) {
+        $iparts[] = "ADD KEY `idx_index_meta_seen` (`meta_status`, `seen_count`)";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_completed')) {
+        $iparts[] = "ADD KEY `idx_index_meta_completed` (`meta_status`, `last_completed`)";
+    }
+    // v62: the prune's protection backfill asks "done rows resolved since the last pass (or never
+    // stamped)" — a tight range on this pair instead of a scan of the whole catalogue every hour.
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_done_fetched')) {
+        $iparts[] = "ADD KEY `idx_index_meta_done_fetched` (`meta_status`, `meta_fetched_at`)";
+    }
+    // schema v36: what a list covers, not merely how many lines it has.
+    foreach (['addr4' => "ADD COLUMN `addr4` BIGINT UNSIGNED NOT NULL DEFAULT 0",
+              'nets6' => "ADD COLUMN `nets6` INT UNSIGNED NOT NULL DEFAULT 0"] as $col => $sql) {
+        if (!schemaColumnExists($db, 'ip_lists', $col)) {
+            // ip_lists is tens of rows; this is instant and needs no janitor.
+            $out[] = "ALTER TABLE `ip_lists` " . $sql;
+        }
+    }
+
+    // schema v35: the column the catalogue sorts by, so that it can be indexed.
+    //
+    // The public catalogue orders by COALESCE(scrape_seeders, last_seeders) — an expression, which no
+    // index can serve. Its own default first page, with no search typed at all, was therefore a full
+    // scan plus a filesort of the whole table: 2 890 ms measured on 1.9 M rows, on a page any member
+    // can open and reload. Not a cache problem; a plan problem.
+    //
+    // A VIRTUAL column is stored nowhere and written never — it is computed when read — so adding it
+    // is instant and costs no row space. What it buys is the right to put an INDEX on the expression,
+    // which turns the sort into an index walk that stops after 25 rows: 1 ms for the same page, and
+    // 11 ms at page 40. The index build itself took 8.8 s online on production.
+    if (!schemaColumnExists($db, 'index_hashes', 'eff_seeders')) {
+        // Adding a VIRTUAL column touches no rows, so this one is safe outside the janitor even on a
+        // table this size — unlike the stored columns above, which mean a rebuild.
+        $out[] = "ALTER TABLE `index_hashes` ADD COLUMN `eff_seeders` INT UNSIGNED "
+               . "GENERATED ALWAYS AS (COALESCE(`scrape_seeders`, `last_seeders`)) VIRTUAL";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_eff_seed')) {
+        $iparts[] = "ADD KEY `idx_index_eff_seed` (`eff_seeders`, `info_hash`)";
+    }
+    // schema v35: "times seen" on the admin index listing.
+    //
+    // ONE of the nine unindexed sorts, not all of them, and the choice is deliberate. Measured on the
+    // 1.9 M-row production table, every sort without an index costs about the same:
+    //
+    //     seen_count      2 311 ms        name             2 186 ms
+    //     peak_seeders    1 986 ms        scrape_seeders   1 966 ms
+    //     files_count     1 951 ms        total_size       1 930 ms
+    //     first_seen      1 870 ms        last_leechers    1 876 ms
+    //     meta_status     1 846 ms        (last_seen and last_seeders are already 1 ms)
+    //
+    // Indexing all of them would fix all of them — and this table already carries 2 738 MiB of index
+    // against 584 MiB of data, and the index poll rewrites hundreds of thousands of rows every thirty
+    // minutes, paying for every one of those indexes on every row. So the line is drawn at the column
+    // the fetch-order work made worth looking at: "times seen" is how an operator decides what the
+    // swarm actually cares about. The rest stay a filesort on a deliberate click, and that is a
+    // choice recorded here rather than an oversight.
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_seen')) {
+        $iparts[] = "ADD KEY `idx_index_seen` (`seen_count`)";
+    }
+    if (!schemaIndexExists($db, 'index_hashes', 'idx_index_meta_grace')) {
+        $iparts[] = "ADD KEY `idx_index_meta_grace` (`meta_status`, `grace_until`)";
+    }
+    if ($iparts) {
+        // Same reasoning as the ALTER above: FULLTEXT on this table means a rebuild, minutes long,
+        // holding a shared lock — never inside a page view. The janitor picks it up on its next tick.
+        if (schemaHeavyAllowed()) {
+            $alter = "ALTER TABLE `index_hashes` " . implode(', ', $iparts);
+            $out[] = [$alter . ", ALGORITHM=INPLACE, LOCK=NONE", $alter . ", ALGORITHM=INPLACE", $alter];
+        } else {
+            schemaDeferHeavy('index_hashes: ' . implode(', ', $iparts));
+        }
+    }
+    foreach (['whitelist', 'hash_content', 'wl_content_edits'] as $tbl) {
+        $ty = schemaTableExists($db, $tbl) ? schemaColumnType($db, $tbl, 'description_format') : null;
+        if ($ty !== null && $ty !== "enum('markdown','bbcode','flarum')") {
+            $out[] = "ALTER TABLE `$tbl` MODIFY COLUMN `description_format` ENUM('markdown','bbcode','flarum') NOT NULL DEFAULT 'bbcode'";
+        }
+    }
+    foreach ([
+        ['user_messages', 'body_format', "ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'"],
+        ['user_lists', 'description_format', "ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'"],
+        ['shouts', 'body_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'"],
+        ['content_reports', 'reply_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['content_reports', 'kind', "ENUM('comment','description','shout','image','torrent') NOT NULL"],
+        ['message_reports', 'reply_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['user_warnings', 'reason_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['user_warnings', 'revoke_note_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['appeals', 'admin_response_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['appeal_archives', 'admin_response_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['sent_emails', 'message_format', "ENUM('plain','bbcode','markdown','flarum') NOT NULL DEFAULT 'plain'"],
+        ['mail_queue', 'format', "ENUM('plain','bbcode','markdown','html','flarum') NOT NULL DEFAULT 'plain'"],
+        ['user_notifications', 'rich_format', "ENUM('bbcode','markdown','html','flarum') DEFAULT NULL"],
+        ['page_content', 'format', "ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'markdown'"],
+    ] as [$tbl, $col, $def]) {
+        $ty = schemaTableExists($db, $tbl) ? schemaColumnType($db, $tbl, $col) : null;
+        if ($ty !== null && $ty !== strtolower(substr($def, 0, strpos($def, ')') + 1))) {
+            $out[] = "ALTER TABLE `$tbl` MODIFY COLUMN `$col` $def";
+        }
+    }
+    $iparts = [];
+    if (schemaTableExists($db, 'images')) {
+        if (!schemaColumnExists($db, 'images', 'removal_at')) $iparts[] = "ADD COLUMN `removal_at` DATETIME DEFAULT NULL";
+        if (!schemaColumnExists($db, 'images', 'dead_since')) $iparts[] = "ADD COLUMN `dead_since` DATETIME DEFAULT NULL";
+        if ($iparts) $out[] = "ALTER TABLE `images` " . implode(', ', $iparts);
+    }
+    $rparts = [];
+    if (schemaTableExists($db, 'image_remote')) {
+        foreach ([
+            'etag'          => "ADD COLUMN `etag` VARCHAR(255) NOT NULL DEFAULT ''",
+            'last_modified' => "ADD COLUMN `last_modified` VARCHAR(64) NOT NULL DEFAULT ''",
+            'bytes_sha'     => "ADD COLUMN `bytes_sha` CHAR(64) NOT NULL DEFAULT ''",
+            'checked_at'    => "ADD COLUMN `checked_at` DATETIME DEFAULT NULL",
+            'check_after'   => "ADD COLUMN `check_after` DATETIME DEFAULT NULL",
+            'checks'        => "ADD COLUMN `checks` SMALLINT UNSIGNED NOT NULL DEFAULT 0",
+        ] as $col => $sql) {
+            if (!schemaColumnExists($db, 'image_remote', $col)) $rparts[] = $sql;
+        }
+        if (schemaColumnType($db, 'image_remote', 'status') !== "enum('pending','done','failed','ignored')") {
+            $rparts[] = "MODIFY COLUMN `status` ENUM('pending','done','failed','ignored') NOT NULL DEFAULT 'pending'";
+        }
+        if (!schemaIndexExists($db, 'image_remote', 'idx_imgrem_check')) $rparts[] = "ADD KEY `idx_imgrem_check` (`status`, `check_after`)";
+        if ($rparts) $out[] = "ALTER TABLE `image_remote` " . implode(', ', $rparts);
+    }
+    if (schemaTableExists($db, 'image_uploads') && !schemaColumnExists($db, 'image_uploads', 'bytes')) {
+        $out[] = "ALTER TABLE `image_uploads` ADD COLUMN `bytes` INT UNSIGNED NOT NULL DEFAULT 0";
+    }
+    foreach (['image_refs', 'image_remote_refs'] as $tbl) {
+        if (schemaTableExists($db, $tbl) && schemaColumnType($db, $tbl, 'src') !== "enum('wl','idx','edit','cm','page','pm','shout','bio','list','warn','crep','mrep')") {
+            $out[] = "ALTER TABLE `$tbl` MODIFY COLUMN `src` ENUM('wl','idx','edit','cm','page','pm','shout','bio','list','warn','crep','mrep') NOT NULL";
+        }
+    }
+    if (!schemaColumnExists($db, 'users', 'images_public')) {
+        $out[] = "ALTER TABLE `users` ADD COLUMN `images_public` TINYINT(1) NOT NULL DEFAULT 0";
+    }
+    if (schemaTableExists($db, 'forum_descs') && !schemaColumnExists($db, 'forum_descs', 'imported_at')) {
+        $out[] = "ALTER TABLE `forum_descs` ADD COLUMN `imported_at` DATETIME DEFAULT NULL";
+    }
+    if (schemaTableExists($db, 'hash_votes') && !schemaColumnExists($db, 'hash_votes', 'scale')) {
+        $out[] = "ALTER TABLE `hash_votes` ADD COLUMN `scale` ENUM('thumbs','stars') NOT NULL DEFAULT 'thumbs' AFTER `vote`";
+    }
+    if (schemaTableExists($db, 'forum_descs') && !schemaColumnExists($db, 'forum_descs', 'forum_images')) {
+        $out[] = "ALTER TABLE `forum_descs` ADD COLUMN `forum_images` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `forum_chars`, "
+               . "ADD COLUMN `forum_links` SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER `forum_images`";
+    }
+    if (schemaTableExists($db, 'forum_descs') && !schemaColumnExists($db, 'forum_descs', 'audience')) {
+        $out[] = "ALTER TABLE `forum_descs` ADD COLUMN `audience` ENUM('guests','members') NOT NULL DEFAULT 'guests' AFTER `forum_links`";
+    }
+    return $out;
+}
+
+/**
+ * Data migrations that need PHP logic (not plain idempotent SQL). Runs after the DDL, inside the
+ * schema lock. v8: make sure the `admin` system group exists (older installs pre-date the seed
+ * above) and mirror the PANEL admin into the `users` table so the site owner shows up in the user
+ * list with the admin group. The panel password hash is copied once — later panel password changes
+ * do NOT sync (the two logins stay independent).
+ */
+/**
+ * Grant permissions to a seeded group ONCE, without disturbing what the operator has decided since.
+ *
+ * The problem this solves: a newly registered permission defaults to DENIED for every existing group,
+ * because userEffectivePermissions() reads each group's stored JSON and an absent key is absent. So
+ * shipping a permission for a feature that previously had no permission check SILENTLY TAKES THE
+ * FEATURE AWAY from everyone but admins — which is exactly what v1.19.0 did to ratings, descriptions
+ * and rewrite proposals. The fix is not to make absent keys default to allowed (that would make the
+ * whole permission system advisory); it is to grant, deliberately, at the moment the permission is
+ * introduced.
+ *
+ * ONCE is the important word. trackerSchemaDataMigrations() runs on every version bump, so a plain
+ * grant would resurrect a permission an operator had removed on purpose, every time anything else in
+ * the schema changed. The marker row makes it fire exactly once per install; INSERT IGNORE returning
+ * a row is the atomic test-and-set, so two workers migrating together cannot both do it.
+ *
+ * Returns the number of groups actually changed.
+ */
+/**
+ * A one-time step that is not a grant: records `schema_once_<marker>` and answers true exactly once
+ * per install. The local bootstrap wipes these (it keeps only schema_grant_* rows), so on a test
+ * database the step repeats — every such step must be idempotent anyway.
+ */
+function schemaOnce(PDO $db, string $marker): bool {
+    $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+    $ins->execute(['schema_once_' . $marker, (string)time()]);
+    return $ins->rowCount() === 1;
+}
+
+function schemaGrantOnce(PDO $db, string $marker, array $bySlug): int {
+    $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+    $ins->execute(['schema_grant_' . $marker, (string)time()]);
+    if ($ins->rowCount() !== 1) return 0;   // somebody already did it on this install
+
+    $changed = 0;
+    foreach ($bySlug as $slug => $perms) {
+        $st = $db->prepare("SELECT id, permissions FROM user_groups WHERE slug = ?");
+        $st->execute([$slug]);
+        $g = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$g) continue;
+        $cur = json_decode((string)$g['permissions'], true);
+        if (!is_array($cur)) $cur = [];
+        $before = count($cur);
+        foreach ($perms as $perm) if (!array_key_exists($perm, $cur)) $cur[$perm] = true;
+        if (count($cur) === $before) continue;
+        $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+           ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$g['id']]);
+        $changed++;
+    }
+    // 1.72.0: a capability a grant introduces is the Admin group's too — STORED, not only held by its blanket, so
+    // the Users page's matrix says what is true (schemaAdminGrant(); never a consent id). Not counted in the return
+    // value, which is about the groups the call names.
+    schemaAdminGrant($db, array_merge(...array_values(array_map(fn($p) => (array)$p, $bySlug))));
+    return $changed;
+}
+
+/**
+ * The Admin group's STORED list holds every capability (1.72.0): the capability ids among $ids — with null, the whole
+ * registry's. Returns the ids it added.
+ *
+ * Its members pass every check by the blanket (userEffectivePermissions()), so this changes nothing anybody may do;
+ * it makes the stored JSON — what the Users page's matrix draws, what userGroupIdsWithPermission() reads — say what
+ * is true. Before it, the owner's matrix showed fifteen empty boxes for permissions he held.
+ *
+ * NEVER a consent id (userConsentPermissions()): what others may see of an administrator is a grant somebody gives
+ * (the principle in includes/favourites.php), so a migration does not give it — tools/groups.php --consent does, or
+ * the panel's tick. NEVER a removal.
+ *
+ * Called by schemaGrantOnce() for the ids each grant introduces, and on EVERY data-migration pass for the whole
+ * registry (trackerSchemaDataMigrations()). That is a deliberate exception to "once": a marker protects an operator's
+ * decision from the next release, and on the Admin group a capability is never a decision — the blanket holds it,
+ * the editor shows it ticked and cannot clear it, the editor's save keeps it (api/admin/group_save.php) and a reset
+ * never removes it. So adding it again restores nothing anybody chose, and an id registered later that its release
+ * grants to nobody (as shout.emote_auto and panel.messages.* are) reaches the stored list at the next bump as well —
+ * which no per-grant helper could promise.
+ */
+function schemaAdminGrant(PDO $db, ?array $ids = null): array {
+    // install.php and the CLIs (tools/iconpack.php) reach ensureSchema() without the account code, and this needs its
+    // registry: pulled in here rather than assumed, as the emotes step below does with shout.php.
+    if (!function_exists('userCapabilityPermissions') && is_file(__DIR__ . '/users.php')) require_once __DIR__ . '/users.php';
+    if (!function_exists('userCapabilityPermissions')) return [];
+    $caps = userCapabilityPermissions();
+    $want = $ids === null ? $caps : array_values(array_intersect($caps, array_map('strval', $ids)));
+    if (!$want) return [];
+    $st = $db->prepare("SELECT id, permissions FROM user_groups WHERE slug = 'admin'");
+    $st->execute();
+    $g = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$g) return [];
+    $cur = json_decode((string)$g['permissions'], true);
+    if (!is_array($cur)) $cur = [];
+    $added = [];
+    foreach ($want as $p) {
+        if (empty($cur[$p])) { $cur[$p] = true; $added[] = $p; }
+    }
+    if (!$added) return [];
+    $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+       ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$g['id']]);
+    return $added;
+}
+
+function trackerSchemaDataMigrations(PDO $db, array $cfg): void {
+    // admin group (INSERT IGNORE above only fires on fresh CREATE; existing installs need it too)
+    $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+        ('admin', 'Admin', 'Site administrators — members pass every permission check.', 1000, 0, 1,
+         '{\"index.view\":true,\"index.files\":true,\"index.files_all\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true}')");
+    // flag legacy guest/member rows as system if an old install lost the flag
+    $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug IN ('guest','member','admin')");
+    // refresh the guest seed description ONLY if the admin never touched it (old wording implied
+    // guest was a baseline for signed-in users too, which is no longer true)
+    $db->prepare("UPDATE `user_groups` SET description = ? WHERE slug = 'guest' AND description = ?")
+       ->execute(['Permissions of anonymous (not signed-in) visitors.', 'Baseline permissions for every visitor (anonymous included).']);
+    // v25: a system `moderator` group.
+    //
+    // The starting set is the LIMITED reading of the word: everything needed to work a queue —
+    // reports, appeals, the whitelist, submitted descriptions — plus seeing the user list and being
+    // able to message somebody. It deliberately does NOT include deleting whitelist rows, editing
+    // users, changing group membership, or the Traffic and Backups pages. A "full" moderator is the
+    // same group with more boxes ticked in Users → Groups; the panel has always rendered its
+    // checkbox list straight from userPermissionList(), so every panel permission appears there with
+    // no further work. That is the answer to "a mod can be limited or full": one group, and the
+    // operator decides how far it reaches.
+    //
+    // is_default is 0. Nobody becomes a moderator by signing up.
+    //
+    // 1.72.0: this text is what a NEW install's moderator starts from, and it had drifted from the moderator every
+    // existing install has: `index.files_all` was added to it at v42 and the four favourites / uploads ids at v47,
+    // while those releases granted them to member alone — so an upgraded install never had them, and a fresh one
+    // did. The five are membership's (a moderator is a member too, through the default group), two of them are
+    // consent (userConsentPermissions()), and the recommended moderator (userGroupRecommended()) is the one every
+    // install already has. So they are gone from here as well; nothing is taken from a group that has them.
+    $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `color`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+        ('moderator', 'Moderator', 'Works the queues: reports, appeals, the whitelist and submitted descriptions. Settings, backups, the machine controls and anything needing the owner password stay out of reach.', '#4a9eff', 500, 0, 1,
+         '{\"panel.access\":true,\"panel.reports.view\":true,\"panel.reports.status\":true,\"panel.reports.block\":true,\"panel.reports.email\":true,\"panel.reports.archive\":true,\"panel.appeals.resolve\":true,\"panel.whitelist.view\":true,\"panel.whitelist.add\":true,\"panel.whitelist.ban\":true,\"panel.whitelist.meta\":true,\"panel.whitelist.content\":true,\"panel.users.view\":true,\"panel.users.notify\":true,\"index.view\":true,\"index.files\":true,\"index.magnet\":true,\"whitelist.view\":true,\"whitelist.add\":true,\"stats.view\":true,\"stats.timeline\":true,\"home.stats\":true,\"rating.vote\":true,\"content.submit\":true,\"content.propose\":true}')");
+    $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug = 'moderator'");
+
+    // v24: the permissions v1.19.0 registered and never granted.
+    //
+    // Before they existed, whether somebody could rate or attach a description was decided entirely by
+    // the feature settings (rep_who_can_vote, whitelist_submit_mode, wl_allow_description). Adding a
+    // permission put a second gate in front of those, and every existing group failed it. Granting the
+    // three here restores exactly the previous behaviour: the feature settings remain the policy, and
+    // the permissions become the narrowing tool an operator can now reach for — rather than a silent
+    // change of policy nobody asked for.
+    //
+    // Guest gets them too, for the same reason: an anonymous visitor's ability to rate was governed by
+    // rep_who_can_vote (which defaults to signed-in accounts anyway), not by a permission. Withholding
+    // the grant here would not be caution, it would be a behaviour change disguised as one.
+    // index.files_all (v42): the first page of a file list came with index.files, and until now so did
+    // every page after it. The grant keeps that for the seeded member group; a group the operator
+    // made by hand with index.files gets the new id only if the operator hands it out, which is the
+    // point of having it.
+    schemaGrantOnce($db, 'v42_index_files_all', [
+        'member' => ['index.files_all'],
+    ]);
+
+    // v47: the favourites and uploads permissions.
+    //
+    // GUEST GETS NOTHING. That is the operator's decision recorded in code: profiles and favourite
+    // lists are for signed-in readers, so an anonymous visitor sees exactly what they see when the
+    // account system is switched off. It is also why userLegacyDefault() answers false for both
+    // prefixes — unlike rating.* and content.*, which work without accounts and would be switched
+    // OFF by a false there.
+    schemaGrantOnce($db, 'v47_favourites', [
+        'member' => ['favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public'],
+    ]);
+
+    // v51: the list permissions, to the same group and for the same reason as v47 — a member who
+    // may keep favourites may keep a collection. GUEST GETS NOTHING, again: a list belongs to an
+    // account.
+    schemaGrantOnce($db, 'v51_lists', [
+        'member' => ['lists.use', 'lists.public'],
+    ]);
+
+    // v52: the account-to-account permissions, to the same group and for the same reason.
+    // GUEST GETS NOTHING: writing to somebody needs an account by definition.
+    schemaGrantOnce($db, 'v52_people', [
+        'member' => ['pm.send', 'pm.report', 'friends.use', 'directory.view'],
+    ]);
+
+    // v57: "what does this tracker know about this hash", on the status page. Members by default —
+    // the operator's own answer to "public or behind a permission" — and GUEST GETS NOTHING: the
+    // endpoint answers for unknown hashes too, and an anonymous caller with it is an oracle for
+    // walking the catalogue one hash at a time, rate limit or not.
+    schemaGrantOnce($db, 'v57_hash_check', [
+        'member' => ['status.hash_check'],
+    ]);
+
+    // v58: reading descriptions is a grant of its own, to members — the operator's answer to "who may
+    // see them": signed-in readers. GUEST GETS NOTHING, unless the operator hands it out. With
+    // accounts switched off userLegacyDefault() still answers true for content.*, so an install
+    // without groups keeps showing what it showed.
+    schemaGrantOnce($db, 'v58_content_view', [
+        'member' => ['content.view'],
+    ]);
+
+    // v61: choosing a sound is a member's feature — the preferences live on the account, so a guest
+    // has nowhere to keep them, and there is nothing to grant a guest.
+    schemaGrantOnce($db, 'v61_sounds', [
+        'member' => ['sounds.use'],
+    ]);
+
+    // v63: the shoutbox. GUEST GETS NOTHING — the operator's own answer to "does a visitor read the
+    // room": no, and `shout.view` is a grant they can hand out if they change their mind. The seeded
+    // moderator group gets the reading and writing ids as well as `shout.moderate`: a permission to
+    // delete somebody's line in a room you cannot see is not a permission, it is a dead checkbox.
+    schemaGrantOnce($db, 'v63_shout', [
+        'member'    => ['shout.view', 'shout.post', 'shout.delete_own'],
+        'moderator' => ['shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate'],
+    ]);
+
+    // v69: a picture and a profile cover of their own, to members — the owner's own answer to "who
+    // may": the people with accounts, from the day it ships. GUEST GETS NOTHING: a picture belongs to
+    // an account, and an unverified account sits at guest level until its address is confirmed, so
+    // this is also what keeps a throwaway registration from putting an image on the site.
+    schemaGrantOnce($db, 'v69_profile_media', [
+        'member' => ['profile.avatar', 'profile.cover'],
+    ]);
+
+    // ── v71: the default permission matrix, and a `premium` group to hold the paid extras ────────
+    //
+    // Why this is one schemaOnce() step and not four schemaGrantOnce() calls: it is a single decision
+    // by the owner ("set the group permissions sensibly, and on my server too"), it contains the ONE
+    // removal this project has ever shipped, and a marker per part would let an install end up half
+    // way through the matrix with nothing to say which half.
+    //
+    // WHAT IT DOES, in order:
+    //   1. creates `premium` if it is absent — the extras only, because a premium account is a member
+    //      as well and a lapse must take away the extras rather than the site;
+    //   2. adds to `member` whatever of the shipped matrix it is missing. A fresh install had
+    //      `index.files_all` (v42) and NOT index.view / index.files / index.magnet / whitelist.add, so
+    //      the paging grant it did have was governing a page it was never allowed to open;
+    //   3. takes `profile.cover` OFF `member` — THE one removal, and the owner's own instruction. The
+    //      uploaded image is NOT touched: userCoverFor() stops drawing it and puts it back the moment
+    //      the permission returns;
+    //   4. adds `content.view` to `moderator`, which has approved descriptions it could not read since
+    //      v58.
+    //
+    // Nothing else an operator added is removed — every step below either inserts a missing key or
+    // deletes the two ids this release deliberately moves.
+    if (schemaOnce($db, 'v71_group_matrix')) {
+        try {
+            // A group a shop can sell: no `panel.*` id (api/v1/users_grant.php refuses a group that
+            // carries one), is_system so it cannot be deleted out from under a running integration,
+            // is_default 0 so nobody becomes premium by signing up, and a priority between member (1)
+            // and moderator (500) so its colour is the one a premium member's name wears.
+            $db->exec("INSERT IGNORE INTO `user_groups` (`slug`, `name`, `description`, `color`, `priority`, `is_default`, `is_system`, `permissions`) VALUES
+                ('premium', 'Premium', 'Granted by hand or bought: a profile cover and emotes of their own, on top of an ordinary membership. Uploads still wait for a moderator.', '#e3a008', 100, 0, 1,
+                 '{\"profile.cover\":true,\"shout.upload_emote\":true}')");
+            $db->exec("UPDATE `user_groups` SET is_system = 1 WHERE slug = 'premium'");
+
+            // The shipped matrix for a signed-in account, written out rather than read from
+            // userGroupPresets(): this is the statement of what an install gets, and a test that
+            // compared the migration with the preset it was generated from would be comparing a thing
+            // with itself. tests/groups_matrix_test.php holds a third copy and all three must agree.
+            $memberMatrix = ['index.view', 'index.files', 'index.files_all', 'index.magnet',
+                             'whitelist.view', 'whitelist.add', 'stats.view', 'stats.timeline', 'home.stats',
+                             'rating.vote', 'content.submit', 'content.propose', 'content.view',
+                             'status.hash_check', 'sounds.use',
+                             'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
+                             'lists.use', 'lists.public',
+                             'pm.send', 'pm.report', 'friends.use', 'directory.view',
+                             'shout.view', 'shout.post', 'shout.delete_own', 'profile.avatar'];
+            $st = $db->prepare("SELECT id, permissions FROM user_groups WHERE slug = ?");
+            $st->execute(['member']);
+            $mg = $st->fetch(PDO::FETCH_ASSOC);
+            if ($mg) {
+                $cur = json_decode((string)$mg['permissions'], true);
+                if (!is_array($cur)) $cur = [];
+                foreach ($memberMatrix as $p) if (!array_key_exists($p, $cur)) $cur[$p] = true;
+                // The removal. Both ids, because the `premium` group is where they live now and a
+                // member holding either would make the paid group buy nothing.
+                unset($cur['profile.cover'], $cur['shout.upload_emote']);
+                $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+                   ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$mg['id']]);
+            }
+            // The moderator's missing reading grant, added the same careful way: what is there stays.
+            $st->execute(['moderator']);
+            $modg = $st->fetch(PDO::FETCH_ASSOC);
+            if ($modg) {
+                $cur = json_decode((string)$modg['permissions'], true);
+                if (!is_array($cur)) $cur = [];
+                foreach (['content.view'] as $p) if (!array_key_exists($p, $cur)) $cur[$p] = true;
+                $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ?")
+                   ->execute([json_encode($cur, JSON_UNESCAPED_SLASHES), (int)$modg['id']]);
+            }
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v71 group matrix: ' . $e->getMessage());
+        }
+    }
+
+    // ── v72: a line can be corrected, the room is the right way up again, the two blocks apart ──
+    //
+    // Two ids, granted apart ON PURPOSE. `shout.edit_own` goes to members beside `shout.delete_own`:
+    // correcting a typo in your own sentence for a few minutes is the same kind of right as taking it
+    // back. `shout.edit_any` goes to the moderator group ONLY, and never rides along with
+    // `shout.moderate`: deleting somebody's line is visible and honest, rewriting it leaves words
+    // under their name that they did not write — so that authority is handed out deliberately, and
+    // an operator who made a moderator group of their own has to tick it themselves.
+    schemaGrantOnce($db, 'v72_shout_edit', [
+        'member'    => ['shout.edit_own'],
+        'moderator' => ['shout.edit_any'],
+    ]);
+
+    // v74: a description on your own profile, to members — the owner's answer to "who may": on by
+    // default, like the feature switch beside it. GUEST GETS NOTHING: the text belongs to an account,
+    // and an unverified account sits at guest level until its address is confirmed, so a throwaway
+    // registration cannot put words on a profile page. ONCE: an operator who takes it away from
+    // members afterwards keeps it taken away.
+    schemaGrantOnce($db, 'v74_profile_bio', [
+        'member' => ['profile.bio'],
+    ]);
+
+    // v75: a member's likes or ratings on their profile (includes/profilevotes.php) — the group half
+    // of a three-part yes: the site's switch, this grant, and the member's own users.votes_public,
+    // which starts as no. A grant about what others may SEE, like favourites.public, so it is read
+    // with userIdHasGrantedPermission() and the admin group's blanket does not count. GUEST GETS
+    // NOTHING: the list belongs to an account. ONCE: an operator who takes it away keeps it away.
+    schemaGrantOnce($db, 'v75_rating_public', [
+        'member' => ['rating.public'],
+    ]);
+
+    // v81: descriptions (includes/content.php, includes/profiledescs.php). Members may delete a
+    // description they are the author of, and may let the list of descriptions they wrote be shown on
+    // their profile — `content.public` is a grant about what others may SEE, read with
+    // userIdHasGrantedPermission() like rating.public above, and the member's own
+    // users.descriptions_public still has to say yes. Deleting ANYBODY's published description is the
+    // moderator's, and only the moderator's. GUEST GETS NOTHING. ONCE: an operator who takes any of
+    // them away afterwards keeps it away.
+    schemaGrantOnce($db, 'v81_content', [
+        'member'    => ['content.delete_own', 'content.public'],
+        'moderator' => ['content.delete_any'],
+    ]);
+
+    // v83: comments on a torrent (includes/comments.php). Members read them, write them, and correct or
+    // take back their own for as long as the two windows say; taking down or editing ANYBODY's — and
+    // letting a guest's held comment through — is the moderator's, and only the moderator's (reading
+    // and writing come with it: a moderator acts from the Info panel, in the thread). GUEST GETS
+    // NOTHING: a passer-by reading the members' words is the operator's decision, like the descriptions
+    // (content.view is a member's too), and a guest may write only where the operator also grants
+    // comment.post to the guest group — every such comment behind a CAPTCHA, and by default held for a
+    // moderator. ONCE: an operator who takes any of these away afterwards keeps it away.
+    schemaGrantOnce($db, 'v83_comments', [
+        'member'    => ['comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own'],
+        'moderator' => ['comment.view', 'comment.post', 'comment.moderate'],
+    ]);
+
+    // v84: reports of comments, descriptions and shouts (includes/reports.php). Members may report what they
+    // can read (`content.report`, one id for the three kinds, as `pm.report` is one for messages); the
+    // moderator reads and works each kind's queue on the Reports page — six ids, a view and a handle per
+    // kind, so an operator can hand one queue to one person. The MESSAGE queue is not among them and stays
+    // with nobody (panel.messages.*, see its note in includes/users.php). GUEST GETS NOTHING: a report is
+    // filed by an account, which is who hears what became of it. ONCE: an operator who takes any of these
+    // away afterwards keeps it away.
+    schemaGrantOnce($db, 'v84_reports', [
+        'member'    => ['content.report'],
+        'moderator' => ['panel.reports.comments.view', 'panel.reports.comments.handle',
+                        'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
+                        'panel.reports.shouts.view', 'panel.reports.shouts.handle'],
+    ]);
+
+    // v94 (1.75.0): the Moderation page (includes/moderation.php). A moderator who works the report queues sees the
+    // restricted members and the warnings log and may lift, revoke and warn / silence / ban by hand; changing the
+    // automatic penalties' rules (panel.moderation.rules) is nobody's by default — the Admin group's blanket holds it
+    // (schemaGrantOnce() writes it into the stored list as well), and anyone else gets it by a tick on purpose. ONCE: an
+    // operator who takes any of these away afterwards keeps it away.
+    schemaGrantOnce($db, 'v94_moderation', [
+        'moderator' => ['panel.moderation.view', 'panel.moderation.handle'],
+    ]);
+    // …and the ladder's suggested rules, once, into an empty table (the marker is wiped by the local bootstrap, so the
+    // emptiness is asked as well — an operator who deleted every rule does not get them back on a real install, where the
+    // marker stays). 3 warnings in 30 days → silenced 3 days; 5 in 60 → 14 days; 7 in 90 → banned 30 days.
+    try {
+        if (schemaOnce($db, 'v94_auto_rules') && !(int)$db->query("SELECT COUNT(*) FROM auto_penalty_rules")->fetchColumn()) {
+            $seed = $db->prepare("INSERT INTO auto_penalty_rules (warnings, window_days, action, duration_days, enabled, sort) VALUES (?, ?, ?, ?, 1, ?)");
+            foreach ([[3, 30, 'mute', 3], [5, 60, 'mute', 14], [7, 90, 'ban', 30]] as $i => [$w, $d, $a, $dur]) {
+                $seed->execute([$w, $d, $a, $dur, ($i + 1) * 10]);
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v94 auto penalty rules: ' . $e->getMessage());
+    }
+
+    schemaGrantOnce($db, 'v96_images', [
+        'member'    => ['content.images', 'comment.images'],
+        'moderator' => ['panel.images.view', 'panel.images.manage'],
+    ]);
+    schemaGrantOnce($db, 'v99_info_resize', ['member' => ['info.resize']]);
+    schemaGrantOnce($db, 'v100_images_public', ['member' => ['images.public']]);
+    schemaGrantOnce($db, 'v103_image_reports', ['moderator' => ['panel.reports.images.view', 'panel.reports.images.handle']]);
+    schemaGrantOnce($db, 'v107_tags', ['member' => ['tags.add', 'tags.create'], 'moderator' => ['tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view']]);
+    schemaGrantOnce($db, 'v110_tag_favourites', ['member' => ['tags.favourite'], 'moderator' => ['tags.favourite']]);
+    schemaGrantOnce($db, 'v112_image_places', ['member' => ['images.upload', 'images.link'], 'moderator' => ['images.upload', 'images.link']]);
+    schemaGrantOnce($db, 'v114_tag_categorize', ['member' => ['tags.categorize'], 'moderator' => ['tags.categorize']]);
+    schemaGrantOnce($db, 'v114_wl_request', ['member' => ['whitelist.request'], 'moderator' => ['whitelist.request']]);
+    schemaGrantOnce($db, 'v115_torrent_reports', ['moderator' => ['panel.reports.torrents.view', 'panel.reports.torrents.handle']]);
+    try {
+        if (function_exists('tagsSeedBase') && schemaTableExists($db, 'tags') && schemaOnce($db, 'v109_base_tags')) tagsSeedBase($db);
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v109 base tags: ' . $e->getMessage());
+    }
+    try {
+        if (schemaTableExists($db, 'tag_forum_map') && schemaOnce($db, 'v114_forum_lang')) {
+            foreach (['x:pl' => 'l:audio_pl', 'x:en' => 'l:audio_en'] as $from => $to) {
+                $db->prepare("UPDATE tag_forum_map SET target = ? WHERE target = ?")->execute([$to, $from]);
+                if (schemaTableExists($db, 'tag_favourites')) {
+                    $db->prepare("INSERT IGNORE INTO tag_favourites (user_id, tag, created_at) SELECT user_id, ?, created_at FROM tag_favourites WHERE tag = ?")->execute([$to, $from]);
+                    $db->prepare("DELETE FROM tag_favourites WHERE tag = ?")->execute([$from]);
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v114 forum languages: ' . $e->getMessage());
+    }
+    try {
+        if (function_exists('tagsCatSeed') && schemaTableExists($db, 'tag_categories') && schemaColumnExists($db, 'tags', 'category_id') && schemaOnce($db, 'v114_tag_categories')) {
+            if (function_exists('tagsSeedBase')) tagsSeedBase($db);
+            tagsCatSeed($db);
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v114 tag categories: ' . $e->getMessage());
+    }
+    try {
+        if (schemaOnce($db, 'v100_image_recheck')) {
+            $db->exec("UPDATE image_remote r JOIN images i ON i.id = r.image_id
+                          SET r.bytes_sha = i.blob_sha, r.checked_at = COALESCE(r.done_at, NOW()),
+                              r.check_after = NOW() + INTERVAL FLOOR(1 + RAND() * 168) HOUR
+                        WHERE r.status = 'done' AND r.bytes_sha = ''");
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v100 image recheck: ' . $e->getMessage());
+    }
+    try {
+        if (schemaOnce($db, 'v101_vote_scale')) {
+            $now = (string)($cfg['rep_mode'] ?? 'thumbs') === 'stars' ? 'stars' : 'thumbs';
+            $sql = match ($now) {
+                'stars' => "UPDATE hash_votes SET scale = CASE WHEN vote = -1 THEN 'thumbs' ELSE 'stars' END",
+                default => "UPDATE hash_votes SET scale = CASE WHEN vote >= 2 THEN 'stars' ELSE 'thumbs' END",
+            };
+            $db->exec($sql);
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v101 vote scale: ' . $e->getMessage());
+    }
+    try {
+        if (schemaOnce($db, 'v100_forum_imported')) {
+            $db->exec("UPDATE forum_descs SET imported_at = COALESCE(forum_at, updated_at) WHERE import_sha IS NOT NULL AND imported_at IS NULL");
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v100 forum imported_at: ' . $e->getMessage());
+    }
+
+    if (schemaOnce($db, 'v95_formats')) {
+        $base = [];
+        if (($cfg['desc_allow_bbcode'] ?? '1') === '1') $base[] = 'bbcode';
+        if (($cfg['desc_allow_markdown'] ?? '1') === '1') $base[] = 'markdown';
+        if (!$base) $base[] = 'bbcode';
+        $base[] = 'flarum';
+        $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+        foreach (['message', 'list', 'shout', 'report', 'page', 'mail'] as $place) {
+            $ins->execute(['rt_formats_' . $place, implode(',', $base)]);
+        }
+    }
+
+    // v88: replying to a comment (includes/comments.php, 1.72.0) — to the two groups that write comments: a member
+    // answers a comment where they may comment at all, and so does a moderator. GUEST GETS NOTHING: an operator who
+    // grants it (with comment.view and comment.post) gets a guest's reply held to every guest rule — "Guest #tag",
+    // a CAPTCHA every time, no link, held for a moderator. The admin group needs no grant (its blanket passes every
+    // check). ONCE: an operator who takes it away afterwards keeps it away.
+    schemaGrantOnce($db, 'v88_replies', [
+        'member'    => ['comment.reply'],
+        'moderator' => ['comment.reply'],
+    ]);
+
+    // `shout_order` back to 'bottom' where it says 'top'. Changing the DEFAULT does nothing to a row
+    // that already exists, and every install that ran 1.64.0 got the row: 'top' was the shipped
+    // default for one afternoon, the owner used it and rejected it, and nobody else can have chosen
+    // it deliberately yet. So a stored 'top' is the old default, not a decision — moved once, and an
+    // operator who picks 'top' again from now on keeps it.
+    if (schemaOnce($db, 'v72_shout_order_bottom')) {
+        try {
+            $db->exec("UPDATE settings SET `value` = 'bottom' WHERE `key` = 'shout_order' AND `value` = 'top'");
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v72 shout order: ' . $e->getMessage());
+        }
+    }
+
+    // `account_media_side` (1.64.0) moved the picture AND the cover; it becomes two settings, one
+    // per block. A stored 'left' was somebody's choice — 'right' was the shipped default — so it
+    // seeds BOTH new keys and the account page looks exactly as it did. A stored 'right' is that
+    // default, which is where both blocks sit on the live site and exactly what the owner asked to
+    // change: it seeds nothing, and the new defaults put the picture on the left and leave the cover
+    // on the right. Then the old key goes, because a row nothing reads is a setting that lies.
+    //
+    // This runs BEFORE the defaults pass (ensureSchema() inserts those afterwards, INSERT IGNORE), so
+    // a seeded value is never overwritten by a default, and a key an install already has is kept.
+    if (schemaOnce($db, 'v72_account_sides')) {
+        try {
+            $st = $db->prepare("SELECT `value` FROM settings WHERE `key` = 'account_media_side' LIMIT 1");
+            $st->execute();
+            $old = $st->fetchColumn();
+            if ($old !== false && (string)$old === 'left') {
+                $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, 'left')");
+                $ins->execute(['account_picture_side']);
+                $ins->execute(['account_cover_side']);
+            }
+            $db->exec("DELETE FROM settings WHERE `key` = 'account_media_side'");
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v72 account sides: ' . $e->getMessage());
+        }
+    }
+
+    // v64: the shipped example emotes, read from assets/emotes/*.svg and kept as rows.
+    //
+    // NO GRANT goes with them. `shout.upload_emote` is registered and given to nobody: the admin
+    // group passes every check anyway, and letting members add pictures to a shared room is a
+    // decision an operator makes on purpose, not one they inherit from an upgrade.
+    //
+    // A DATA migration rather than a file list read at render time, because the web root is
+    // installed read-only and a backup that carries the database has to carry the pictures too —
+    // once seeded, assets/emotes/ is documentation. Idempotent on purpose: the local bootstrap
+    // wipes schema_once_* markers, so this runs again on a test database and must not duplicate or
+    // resurrect what somebody deleted (the sha1 and the code are both unique, and a row that is
+    // already there is left exactly as the operator left it).
+    //
+    // shout.php is pulled in HERE rather than assumed: install.php and the janitor reach
+    // ensureSchema() without it, and the marker must not be burned by a run that then found no
+    // sniffer to seed with — so the require comes before schemaOnce(), not after.
+    if (!function_exists('shoutEmoteSniff') && is_file(__DIR__ . '/shout.php')) require_once __DIR__ . '/shout.php';
+    if (function_exists('shoutEmoteSniff') && schemaOnce($db, 'v64_emotes')) {
+        $seedDir = shoutEmoteSeedDir();
+        foreach (is_dir($seedDir) ? (scandir($seedDir) ?: []) : [] as $f) {
+            if (!preg_match('/^([a-z0-9_]{2,32})\.svg$/', $f, $m)) continue;
+            $bytes = @file_get_contents($seedDir . '/' . $f);
+            if ($bytes === false || $bytes === '') continue;
+            $kind = shoutEmoteSniff($bytes);
+            if ($kind === null) continue;   // a shipped file that would be refused from a form is refused here too
+            try {
+                // approved_at NOW(): the examples are the site's own, and the site's own never
+                // queue — the person who would be approving them is the one who installed them.
+                $st = $db->prepare("INSERT IGNORE INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, approved_at, sha1, data)
+                                    VALUES (?, ?, ?, ?, ?, ?, 0, 1, NULL, NOW(), ?, ?)");
+                $st->bindValue(1, $m[1]);
+                $st->bindValue(2, shoutEmotePrettyName($m[1]));
+                $st->bindValue(3, $kind['mime']);
+                $st->bindValue(4, strlen($bytes), PDO::PARAM_INT);
+                $st->bindValue(5, $kind['w'] > 0 ? $kind['w'] : null, $kind['w'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $st->bindValue(6, $kind['h'] > 0 ? $kind['h'] : null, $kind['h'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $st->bindValue(7, sha1($bytes));
+                $st->bindValue(8, $bytes, PDO::PARAM_LOB);
+                $st->execute();
+            } catch (\Throwable $e) {
+                error_log('[tracker schema] v64 emote ' . $f . ': ' . $e->getMessage());
+            }
+        }
+    }
+
+    // v65: everything that was already in the room when `approved_at` arrived counts as approved.
+    //
+    // A site upgrading from 1.59.0 has no queue — nobody could have uploaded into one, because the
+    // column that remembers the decision did not exist. Leaving those rows NULL would invent a queue
+    // out of the whole library the morning after an upgrade, and every emote an operator had ever
+    // switched off would sit in it asking to be approved. `created_at` rather than NOW() so the date
+    // the manager prints is the day the picture arrived, not the day of the upgrade.
+    //
+    // WHERE approved_at IS NULL, so it is safe to meet twice: it stamps what has no stamp and reads
+    // no rows it has already done.
+    if (schemaOnce($db, 'v65_emote_approved')) {
+        try {
+            $db->exec("UPDATE shout_emotes SET approved_at = created_at WHERE approved_at IS NULL");
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v65 emote approval backfill: ' . $e->getMessage());
+        }
+    }
+
+    // v62: the owner's mirror row follows the panel password. api/admin/change_password.php kept
+    // only config/hash.txt up to date, so an owner who had rotated the panel password could still
+    // open the panel through ?action=login with the OLD one — the mirror's hash was the one from
+    // install day. Once here; from 1.57.0 on the endpoint writes both.
+    if (defined('ADMIN_PASSWORD_HASH') && ADMIN_PASSWORD_HASH !== '' && schemaOnce($db, 'v62_mirror_hash')) {
+        $adminUser = trim((string)($cfg['admin_username'] ?? ''));
+        if ($adminUser !== '') {
+            $db->prepare("UPDATE users SET pass_hash = ? WHERE username = ? AND pass_hash <> ?")
+               ->execute([ADMIN_PASSWORD_HASH, $adminUser, ADMIN_PASSWORD_HASH]);
+        }
+    }
+
+    schemaGrantOnce($db, 'v24_content_rating', [
+        'guest'  => ['rating.vote', 'content.submit', 'content.propose'],
+        'member' => ['rating.vote', 'content.submit', 'content.propose'],
+    ]);
+
+    // v89 (1.72.0): the Admin group's stored list holds every registered capability — on EVERY pass, after every
+    // grant above, and never a consent id (schemaAdminGrant() says why this one is not "once"). The owner's server
+    // showed fifteen empty boxes in the matrix for permissions his account held by the blanket.
+    try {
+        schemaAdminGrant($db);
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v89 admin capabilities: ' . $e->getMessage());
+    }
+
+    // v91 (1.73.0): what userDeleteCascade() left behind before it knew about these tables — once
+    // (schemaAccountOrphans() below says what and why).
+    if (schemaOnce($db, 'v91_account_orphans')) {
+        schemaAccountOrphans($db, $cfg);
+    }
+
+    // v93 (1.74.0, PRIV-1): the friend notifications written before `sender_id` existed — once
+    // (schemaNotifySenders() below says how and why).
+    if (schemaOnce($db, 'v93_notify_senders')) {
+        try {
+            schemaNotifySenders($db, $cfg);
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v93 notification senders: ' . $e->getMessage());
+        }
+    }
+
+    // panel admin → users row (username from settings, hash from config/app.php, email = the
+    // site contact address — verified, it is the owner's own)
+    $adminUser = trim((string)($cfg['admin_username'] ?? ''));
+    if ($adminUser !== '' && defined('ADMIN_PASSWORD_HASH') && preg_match('/^[A-Za-z0-9_.-]{3,32}$/', $adminUser)) {
+        $adminMail = trim((string)($cfg['site_email'] ?? ''));
+        if ($adminMail === '' || strlen($adminMail) > 190 || filter_var($adminMail, FILTER_VALIDATE_EMAIL) === false) $adminMail = null;
+        $st = $db->prepare("SELECT id FROM users WHERE username = ?");
+        $st->execute([$adminUser]);
+        $uid = (int)($st->fetchColumn() ?: 0);
+        if ($uid === 0) {
+            try {
+                $db->prepare("INSERT INTO users (username, email, pass_hash, email_verified) VALUES (?, ?, ?, ?)")
+                   ->execute([$adminUser, $adminMail, ADMIN_PASSWORD_HASH, $adminMail !== null ? 1 : 0]);
+            } catch (PDOException $e) {   // site_email already used by another account
+                $db->prepare("INSERT INTO users (username, email, pass_hash) VALUES (?, NULL, ?)")
+                   ->execute([$adminUser, ADMIN_PASSWORD_HASH]);
+            }
+            $uid = (int)$db->lastInsertId();
+        }
+        $gid = (int)($db->query("SELECT id FROM user_groups WHERE slug = 'admin'")->fetchColumn() ?: 0);
+        if ($uid > 0 && $gid > 0) {
+            $db->prepare("INSERT IGNORE INTO user_group_members (user_id, group_id, granted_by, note) VALUES (?, ?, 'migration', 'panel admin')")
+               ->execute([$uid, $gid]);
+        }
+    }
+}
+
+/**
+ * Default settings introduced by schema version 2. Only inserted when the key is absent, so an
+ * admin's later edits are never overwritten. Also seeded by install.php.
+ */
+function trackerSchemaDefaultSettings(): array {
+    $selfIps = ['127.0.0.1', '::1'];
+    $srv = $_SERVER['SERVER_ADDR'] ?? '';
+    if ($srv !== '' && filter_var($srv, FILTER_VALIDATE_IP)) $selfIps[] = $srv;
+    return [
+        'tracker_mode'                => 'blacklist',
+        'whitelist_path'              => '',
+        'whitelist_public_enabled'    => '1',
+        'whitelist_max_per_submission'=> '20',
+        'rate_limit_whitelist'        => '10',
+        'whitelist_ip_daily_max'      => '50',
+        'whitelist_daily_cap'         => '2000',
+        'whitelist_reload_min_interval' => '45',
+        'whitelist_scrape_url'        => 'http://127.0.0.1:6969/scrape',
+        'captcha_provider'            => 'recaptcha',
+        'turnstile_site_key'          => '',
+        'turnstile_secret'            => '',
+        // schema v4: Google reCAPTCHA v3 (invisible, score based) as a third provider
+        'recaptcha_v3_site_key'       => '',
+        'recaptcha_v3_secret'         => '',
+        'recaptcha_v3_min_score'      => '0.5',
+        // schema v10: hCaptcha as a fourth provider
+        'hcaptcha_site_key'           => '',
+        'hcaptcha_secret'             => '',
+        'api_enabled'                 => '0',
+        'api_ban_days'                => '30',
+        'api_ban_exempt_ips'          => implode(', ', array_unique($selfIps)),
+        // v91 (1.73.0): the Transparency page, ON as the installer has always written it. Without the row the
+        // menu link and the page's text read it as on (`?? '1'`) while the page's own data (api/transparency.php)
+        // read it as off and answered 403 — a link to a page that could not load its table.
+        'transparency_enabled'        => '1',
+        // schema v3: scheduled tracker mode (includes/schedule.php)
+        'tracker_schedule_enabled'    => '0',
+        'tracker_schedule'            => '{"mon":"none","tue":"none","wed":"none","thu":"none","fri":"none","sat":"none","sun":"none"}',
+        'tracker_schedule_tz'         => 'Europe/Warsaw',
+        'tracker_mode_switch_cmd'     => 'sudo -n /usr/local/sbin/tracker-mode.sh',
+        'tuner_enabled'               => '0',
+        'tuner_python'                => 'python3',
+        'audit_enabled'               => '1',
+        'audit_keep_days'             => '180',
+        // schema v5: statistics timeline (includes/stats_timeline.php)
+        'stats_timeline_enabled'      => '0',
+        'stats_timeline_interval'     => '60',
+        'stats_timeline_raw_days'     => '7',
+        'stats_timeline_keep_days'    => '60',
+        'stats_timeline_public'       => '1',
+        // schema v10: which range buttons the chart offers, which one opens, free span slider
+        'stats_timeline_ranges'       => '24h,7d,14d,30d,90d,all',
+        'stats_timeline_default_range' => '24h',
+        'stats_timeline_custom_range' => '0',
+        // schema v6: observed-hash index (includes/index.php)
+        'index_enabled'               => '0',
+        'index_source_url'            => 'http://127.0.0.1:6969/scrape',
+        'index_poll_minutes'          => '30',
+        'index_min_seeders'           => '1',
+        'index_max_rows'              => '200000',
+        'index_grace_days'            => '3',
+        'index_protect_days'          => '10',
+        'index_meta_daily_budget'     => '500',
+        'index_keep_files'            => '1',
+        // schema v37: how long the per-poll history is kept. 90 days of a 30-minute poll is 4 320
+        // rows — small enough that there is no roll-up and never will be.
+        'index_poll_keep_days'        => '90',
+        'index_poll_budget'           => '45',
+        // schema v44: how a file list LOADS, once for the public search page and once for the panel
+        // modals. Mode is scroll|button|all and decides only WHEN the browser asks again; the two
+        // numbers are server rules (includes/index.php clamps them again on read). The defaults are
+        // what 1.37.0 did: the search page scrolls and takes 2 000 a request, the modals show 5 000
+        // and offer a button for the rest. index_files_max is the one new rule — before it, a member
+        // with index.files_all could page a 500 000-file torrent to its end one OFFSET at a time.
+        'index_files_mode'            => 'scroll',
+        'index_files_batch'           => '2000',
+        'index_files_max'             => '20000',
+        'index_files_admin_mode'      => 'button',
+        'index_files_admin_batch'     => '5000',
+        'index_files_admin_max'       => '1000000',
+        // schema v7: index metadata auto-queue + admin near-pages radius
+        'index_meta_auto_queue'       => '0',
+        'admin_near_pages'            => '2',
+        // schema v7: user accounts (includes/users.php) — everything off/neutral by default
+        'users_enabled'               => '0',
+        'users_registration_enabled'  => '1',
+        'users_links_visible'         => '1',
+        'users_default_group'         => 'member',
+        'users_notify_expiry_days'    => '3',
+        'rate_limit_user_login'       => '10',
+        'rate_limit_user_register'    => '5',
+        'rate_limit_index_search'     => '120',
+        'rate_limit_hash_check'       => '120',   // status page hash lookups per IP per hour; 0 = no limit
+        // schema v8: whitelist registration audience ('public' = anyone with CAPTCHA,
+        // 'users' = signed-in accounts with the whitelist.add permission, no CAPTCHA)
+        'whitelist_submit_mode'       => 'public',
+        // schema v8: metadata worker parallel fetches (empty = keep the worker's own config file
+        // value; 1-16 overrides it live — the worker re-reads this setting every ~60 s)
+        'meta_worker_concurrency'     => '',
+        // schema v43: how many file paths the worker stores for ONE torrent, in both queues
+        // (finish() is shared). Empty = keep the worker's own `max_files`; 1-META_MAX_FILES_MAX
+        // overrides it live on the same ~60 s re-read. Empty is the default and must stay a real
+        // value: an upgrade may not silently rewrite the length of the lists a running worker
+        // produces. Imported peer lists keep federation's own limits — see effective_max_files().
+        'meta_max_files'              => '',
+        // schema v30: which pending hash the metadata worker takes next. The index queue is
+        // millions of rows deep, so this decides what the tracker knows anything about for months.
+        // 'oldest' is the order it has always used, and stays the default: an upgrade must not
+        // silently reorder a running queue.
+        //   oldest | newest | seeders | random | mix
+        'meta_order_mode'             => 'oldest',
+        // The mix, in percent, always summing to 100 (the panel keeps them there and the worker
+        // re-normalises whatever it finds). Only consulted when the mode is 'mix'.
+        'meta_order_mix_oldest'       => '0',
+        'meta_order_mix_newest'       => '15',
+        'meta_order_mix_seeders'      => '70',
+        'meta_order_mix_random'       => '15',
+        // schema v31: three more shares. `whitelist` at 0 does NOT mean "never" — it means the
+        // whitelist keeps ABSOLUTE priority, exactly as in every non-mix mode, so an upgrade
+        // changes nothing. Give it a number and it becomes a guaranteed share of the rotation.
+        'meta_order_mix_whitelist'    => '0',
+        'meta_order_mix_seen'         => '0',
+        'meta_order_mix_completed'    => '0',
+        // schema v32: the time zone the panel's own database session runs in, published so that
+        // OTHER processes on the same database can match it. config/database.php sets the session
+        // to PHP's zone, so every DATETIME the panel writes is in that zone -- and anything reading
+        // those rows in a different one is silently hours out. Written by the janitor, read by the
+        // metadata worker. Empty = never published yet; a reader must then leave its clock alone.
+        'db_time_zone'                => '',
+        // schema v32: addresses the inbound UDP rate limit must never drop. Comma or newline
+        // separated, IPv4/IPv6, plain or CIDR. Empty = nobody is exempt (the shipped default).
+        'net_limit_trusted'           => '',
+        // schema v38: the mirror image of the box above. Addresses typed here are ALWAYS dropped, and
+        // they beat an allow list — which is the whole point: "allow all of Poland, except these
+        // three hosts" cannot be said with lists alone, because a list has no way to be more specific
+        // than another list. Only trusted addresses beat these.
+        'net_limit_blocked'           => '',
+        // schema v33: how the stability probe judges load. The first number is what a run is allowed
+        // to ADD to the load it found when it started -- an absolute ceiling is meaningless on a
+        // machine whose normal working load is already near it, which is how every run on this box
+        // stopped on its first step. The second is a hard stop for a machine genuinely being driven
+        // into the ground, and is deliberately far above anything normal.
+        'tuner_load_headroom'         => '0.35',
+        'tuner_load_hard'             => '2.0',
+        // v92 (1.73.3): the probe also stops a step that loses packets OUTSIDE the machine (tools/tuner.py) — the share of
+        // TCP segments resent over the step above tuner_retrans_max (%), or the mean loss of pings to these targets above
+        // tuner_ping_loss_max (%). Empty targets = no pings. Absolute thresholds: a loss outside belongs to the level held.
+        'tuner_loss_targets'          => '1.1.1.1 9.9.9.9',
+        'tuner_retrans_max'           => '5.0',
+        'tuner_ping_loss_max'         => '10',
+        // sender address for outgoing mail (empty = use site_email); domain-validated on save
+        'mail_from_email'             => '',
+        // schema v9: registration requires an email + only verified accounts get their groups
+        // (unverified sign-ins act as guests until the link is clicked); terms checkbox content
+        // (empty = link to ?action=tos, otherwise shown in a modal); email-change cooldown; member
+        // search master switches
+        'users_require_email_verify'  => '1',
+        // How many wrong password confirmations sign the session out. Registered here as well as in
+        // the allow-list, the catalogue and the form: three of four is a setting the page shows and
+        // the table has never heard of.
+        'admin_reauth_max_attempts'   => '5',
+        'bulk_mail_enabled'           => '0',
+        'bulk_mail_per_minute'        => '20',
+        'bulk_mail_max_attempts'      => '3',
+        // 1.75.0 (v94): a ceiling on what the janitor sends in a day (0 = none), and the sender's identity — a
+        // postal address, a company — shown in the footer of a bulk message beside the preferences link.
+        'bulk_mail_daily_cap'         => '0',
+        'mail_sender_address'         => '',
+        // 1.75.0 (v94): the ladder of automatic penalties (auto_penalty_rules, includes/moderation.php) runs only when this
+        // is '1' — off until the operator has read the rules and wants them.
+        'auto_penalties_enabled'      => '0',
+        // Source links and descriptions on whitelist rows. Everything OFF, because these are fields
+        // anonymous strangers type into, and an operator should have to decide to want them.
+        'wl_allow_source_url'         => '0',
+        'wl_allow_description'        => '0',
+        'wl_content_review'           => '1',
+        'desc_allow_bbcode'           => '1',
+        'desc_allow_markdown'         => '1',
+        'desc_allow_flarum'           => '1',
+        'rt_formats_message'          => 'bbcode,markdown,flarum',
+        'rt_formats_list'             => 'bbcode,markdown,flarum',
+        'rt_formats_shout'            => 'bbcode,markdown,flarum',
+        'rt_formats_report'           => 'bbcode,markdown,flarum',
+        'rt_formats_page'             => 'bbcode,markdown,flarum',
+        'rt_formats_mail'             => 'bbcode,markdown,flarum',
+        'rt_youtube'                  => 'link',
+        'rt_video_files'              => '0',
+        'rt_magnet_self_show'         => '0',
+        'torrent_reports_enabled'     => '0',
+        'tags_prune_unused'           => '1',
+        'images_max_mb'               => '8',
+        'images_max_edge'             => '2048',
+        'images_max_mpx'              => '24',
+        'images_webp_quality'         => '82',
+        'images_per_day'              => '60',
+        'images_quota_mb'             => '250',
+        'images_unused_hours'         => '48',
+        'images_per_day_mb'           => '100',
+        'images_gallery_enabled'      => '1',
+        'images_in_pm'                => '4',
+        'images_in_shout'             => '1',
+        'images_in_bio'               => '2',
+        'images_in_list'              => '4',
+        'images_in_mod'               => '4',
+        'comment_images_upload'       => '0',
+        'info_resize'                 => '1',
+        'info_desc_fold'              => '640',
+        'rows_open_info'              => '1',
+        'comment_images_links'        => '1',
+        'comment_images_max'          => '18',
+        'comment_image_max_mb'        => '4',
+        'comment_thumb_h'             => '240',
+        'comment_thumb_w'             => '360',
+        'forum_desc_conflict'         => 'proposal',
+        'desc_max_chars'              => '4000',
+        'desc_max_images'             => '3',
+        'desc_max_links'              => '10',
+        'link_trusted_domains'        => 'tryhackx.org',
+        'search_allow_sl_refresh'     => '0',
+        'search_sl_refresh_seconds'   => '120',
+        'rate_limit_sl_refresh'       => '30',
+        'rate_limit_preview'          => '30',
+        // Ratings. Off, and read-only for anonymous visitors by default: a public voting button is
+        // the easiest thing on a site to automate, and the operator should choose to open it.
+        'rep_enabled'                 => '0',
+        'rep_mode'                    => 'thumbs',
+        'rep_who_can_vote'            => 'users',
+        'rep_show_in_results'         => '0',
+        'rep_chip'                    => '1',
+        'rep_min_votes'               => '3',
+        'rep_anon_weight'             => '25',
+        'rep_rate_per_hour'           => '30',
+        'captcha_pts_vote'            => '2',
+        // Publish descriptions without review. Separate from wl_content_review because "I do not
+        // moderate" and "I moderate, but let this through" are different decisions.
+        'wl_content_autopublish'      => '0',
+        'wl_edit_max_pending'         => '3',
+        // Whitelist upkeep. Both off: refreshing costs tracker requests, and a rule that removes
+        // other people's registrations must be switched on deliberately, never inherited.
+        'wl_scrape_every_hours'       => '0',
+        'wl_scrape_batch'             => '200',
+        'wl_dead_after_days'          => '0',
+        'wl_dead_action'              => 'mark',
+        'wl_dead_every_days'          => '30',
+        // Make a submission prove itself before the tracker serves it. Off: it changes what
+        // registering MEANS, and that is not a thing to inherit from an upgrade.
+        'wl_probe_required'           => '0',
+        'wl_probe_timeout_minutes'    => '10',
+        'wl_probe_on_fail'            => 'delete',
+        // Live peer sync between two trackers. Off, with no command, on every install: the protocol
+        // has no authentication, so this is the last thing that should ever default to on.
+        'livesync_enabled'            => '0',
+        'livesync_cmd'                => '',
+        'livesync_bind_ip'            => '',
+        'livesync_peer_ip'            => '',
+        'livesync_port'               => '9696',
+        'users_terms_text'            => '',
+        'users_email_change_cooldown_days' => '30',
+        'index_search_enabled'        => '1',
+        'index_search_include_whitelist' => '1',
+        // schema v7: federation (includes/federation.php + worker/federation.py)
+        // Per-client budgets for the server-to-server API. A valid bearer used to be a licence to
+        // hammer the database as fast as the network allowed; a federation peer pulling pages is
+        // exactly the shape of traffic that needs a ceiling. 0 = no limit.
+        'api_rate_limit_per_min'      => '60',
+        'api_rate_limit_bytes_day'    => '5368709120',   // 5 GB
+        // OpenTracker performance knobs. These describe what the admin WANTS; nothing is written
+        // to the unit until Apply is pressed, so a fresh install has no drop-in and behaves as before.
+        'ot_perf_cmd'                 => 'sudo -n /usr/local/sbin/tracker-instance.sh',
+        'ot_nice'                     => '-2',
+        'ot_cpu_weight'               => '100',
+        'ot_cpu_affinity'             => '',
+        'ot_limit_nofile'             => '65536',
+        'ot_udp_workers'              => '',      // empty = leave opentracker's own config alone
+        // Kernel network buffers (v16). The command is EMPTY by default and the feature is off:
+        // defaulting it to a path would make every existing install start polling an endpoint that
+        // shells out to a script nobody installed. The eight values are empty too — an empty value
+        // means "the panel does not manage this key", and an unmanaged key never appears in the file
+        // it writes. A form with eight boxes that writes all eight is how the expensive one gets
+        // raised by accident.
+        'sysctl_cmd'                  => '',
+        'sysctl_enabled'              => '0',
+        'sysctl_confirm_seconds'      => '120',   // clamped to whole minutes, 60-900
+        // Database memory (includes/dbmem.php): the root helper that reads and sets the engine's memory knobs
+        'dbmem_cmd'                   => '',
+        'dbmem_enabled'               => '0',
+
+        // Extra opentracker instances (v17). Three rows is the ENTIRE database cost of the
+        // feature: systemd and the filesystem already hold the roster, and a second copy in the
+        // panel would be a thing that drifts and survives teardown. Off, and with no command, so
+        // an install that never wanted this never renders a card or forks a helper.
+        'ot_cluster_enabled'          => '0',
+        'ot_cluster_cmd'              => '',
+        'ot_cluster_port_base'        => '',      // empty = derive from the primary's own port
+
+        // Two-factor authentication (v18). This row is a MIRROR so the settings search can find the
+        // section and a cheap check does not have to read a file; config/admin_2fa.json is
+        // authoritative and holds the secret, because a TOTP secret is a credential and the settings
+        // table is dumped by every backup. Deliberately absent from the save allow-list: no form post
+        // may switch this, only the endpoint that also demands a password and a code.
+        'admin_2fa_enabled'           => '0',
+        'fed_enabled'                 => '0',
+        'fed_node_name'               => '',
+        'fed_export_enabled'          => '0',
+        'fed_export_files'            => '1',
+        'fed_export_max_batch'        => '2000',
+        // rows alone never bounded a page: 20 000 torrents can carry millions of file records
+        'fed_export_max_bytes'        => '8388608',    // 8 MB on the wire
+        'fed_export_max_files'        => '200000',
+        'fed_import_new'              => '0',
+        'fed_import_mode'             => 'fill',       // fill = merge straight in; review = quarantine first
+        // The importer's own ceilings. It runs as a separate process precisely so a big exchange
+        // cannot burn web-request time; these keep it from burning the machine's RAM either.
+        'fed_import_batch_rows'       => '500',
+        'fed_import_batch_bytes'      => '33554432',   // 32 MB held at most, then commit
+        'fed_import_max_seconds'      => '600',        // one pass; the cursor continues next time
+        'fed_worker_mem_mb'           => '256',        // hard RLIMIT_AS — it dies rather than the box
+        'fed_pull_minutes'            => '60',
+        // schema v10: the admin sign-in address and what other panel URLs answer when signed out
+        // (defaults = the classic behaviour of ?action=admin, with the login form nowhere else)
+        'admin_login_path'            => 'admin',
+        'admin_hidden_behavior'       => 'home',
+        // schema v11: inbound UDP monitor + rate limit (includes/netlimit.php +
+        // tools/opentracker/tracker-netlimit.sh). Everything off: a fresh install never calls the
+        // helper, never writes an nftables rule and behaves exactly as before.
+        'net_monitor_enabled'         => '0',
+        'net_sample_seconds'          => '60',
+        'net_keep_days'               => '14',
+        'net_limit_enabled'           => '0',
+        'net_limit_pps'               => '30000',
+        'net_limit_burst'             => '100',
+        'net_limit_port'              => '6969',
+        'net_limit_cmd'               => 'sudo -n /usr/local/sbin/tracker-netlimit.sh',
+        'net_auto_enabled'            => '0',
+        'net_auto_min'                => '10000',
+        'net_auto_max'                => '80000',
+        'net_auto_target'             => '30000',
+        'net_auto_target_cpu'         => '70',
+        // schema v34: address lists. `net_lists_enabled` is the master switch — with it off the
+        // firewall carries no list sets at all, whatever the individual lists say, so one click
+        // undoes the whole feature without deleting anything anybody spent time importing.
+        'net_lists_enabled'           => '0',
+        'net_lists_ttl_default'       => '720',
+        // A digest of the file the firewall was last loaded from, so the janitor can tell whether
+        // anything actually changed instead of re-applying the ruleset every minute for nothing.
+        'net_lists_stamp'             => '',
+        // schema v11: panel-driven backups (includes/backup.php + tools/opentracker/tracker-backup.sh).
+        // Off by default; the archives live outside the web root and are only ever read through the
+        // root helper, so nothing here is reachable without the admin password.
+        'backup_enabled'              => '0',
+        'backup_dir'                  => '/var/backups/tracker',
+        'backup_profile'              => 'tracker-lekki',
+        'backup_items'                => '',
+        'backup_schedule'             => '',
+        'backup_schedule_tz'          => 'Europe/Warsaw',
+        'backup_keep'                 => '7',
+        'backup_keep_days'            => '30',
+        'backup_max_size_gb'          => '20',
+        'backup_gpg_recipient'        => '',
+        'backup_nice'                 => '15',
+        'backup_verify_after'         => '1',
+        'backup_cmd'                  => 'sudo -n /usr/local/sbin/tracker-backup.sh',
+        'backup_script_path'          => '/usr/local/sbin/Backup-serwera.sh',
+        'backup_db_name'              => 'tracker',
+        // schema v45: transport security (includes/functions.php).
+        //
+        // `auto` is what every existing installation gets on upgrade and it changes nothing an
+        // operator has to react to: it asks THIS request whether it was HTTPS, so a plain-HTTP LAN
+        // panel keeps setting cookies without Secure and an HTTPS one starts setting it. Nobody is
+        // logged out either way — Secure is a rule about SENDING a cookie, not about storing one,
+        // and PHP only re-emits the session cookie when it creates or regenerates an id.
+        // `always` is the one value that can lock the owner out, so save_settings refuses to store
+        // it unless the saving request itself proves it is HTTPS.
+        'cookie_secure_mode'          => 'auto',
+        'client_proto_header'         => 'X-Forwarded-Proto',
+        // HSTS is off, and stays off until somebody reads what it does. The pin lives in other
+        // people's browsers and outlives any switch here; max-age starts at ONE DAY rather than the
+        // year every guide recommends, because the default is what an operator gets the moment they
+        // first flip the switch, and a mistake at one day costs one day.
+        'hsts_enabled'                => '0',
+        'hsts_max_age'                => '86400',
+        'hsts_include_subdomains'     => '0',
+        'hsts_preload'                => '0',
+        // schema v46: Content-Security-Policy (includes/csp.php).
+        //
+        // 'report' on every installation, new and upgraded. A Content-Security-Policy-Report-Only
+        // header cannot break a page on any browser: it is a different header name from the
+        // enforcing one, so an Apache install whose .htaccess still ships the old policy keeps that
+        // protection untouched while this one only observes. Enforcing is the operator's own move,
+        // after they have looked at the violations list and cleared their server config.
+        'csp_mode'                    => 'report',
+        // Collection is OFF. Report-only still REPORTS, and browser extensions are the largest
+        // source of CSP noise on the web — switching this on on upgrade day would point a firehose
+        // of unauthenticated POSTs at a database three other applications share. The operator turns
+        // it on for a day when they want evidence.
+        // Off, as includes/csp.php says it is: every page that trips the policy is an unauthenticated
+        // POST into the database, most of it browser-extension noise, so collecting is a day of
+        // evidence the operator switches on deliberately, not a default. (Until 1.57.0 this row said
+        // '1' while the code's own fallback and its comment said off; an install that already has the
+        // row keeps whatever it chose.)
+        'csp_report_enabled'          => '0',
+        'csp_report_keep_rows'        => '500',
+        'csp_extra_hosts'             => '',
+        // ── Favourites, public profiles and "my uploads" (v47) ──────────────────────────────
+        // Every one of these ships OFF except the per-user limit. A feature that appears on an
+        // operator's site without them switching it on is a decision taken on their behalf, and
+        // these carry privacy: a list of what somebody likes is a list about them.
+        'fav_enabled'                 => '0',   // the master switch; off, everything below answers 404/400
+        'fav_max_per_user'            => '500', // what makes the query strategy safe; clamped [10, 5000]
+        'fav_public_enabled'          => '0',   // may a list be public at all
+        'fav_who_enabled'             => '0',   // does "who has this in favourites" exist
+        'profiles_enabled'            => '0',   // is ?action=u reachable (uploads use it too, hence separate)
+        // ── Lists (v51) ─────────────────────────────────────────────────────────────────────
+        // Off, like everything above it. `lists_public_enabled` is the site-wide half of "may a
+        // list be public": a reader's own per-list switch cannot outrank it, and turning it off
+        // takes every list back off the public side without editing anybody's list for them.
+        'lists_enabled'               => '0',   // the master switch; off, the endpoints answer 404
+        'lists_public_enabled'        => '0',   // may any list be public at all
+        'lists_max_per_user'          => '20',  // clamped [1, 200]
+        'lists_max_items'             => '500', // rows in one list; clamped [10, 5000]
+        // v80 (1.70.0): the longest description a list may have, in the characters a READER sees —
+        // the words, not the tags (listDescVisible(), includes/lists.php); clamped [50, 5000]. The text
+        // as typed may be four times that, and never more than 16 000 characters.
+        'lists_desc_max'              => '1000',
+        // What the janitor does with a hash somebody kept: off | forever | extend (see
+        // indexKeepSavedClause()). 'off' by default — the lifecycle an install already has is not
+        // something to change under an operator who has not asked.
+        'index_keep_saved'            => 'off',
+        'index_keep_saved_days'       => '90',  // clamped [1, 3650]
+        // ── The janitor's digest (includes/digest.php) ───────────────────────────────────────
+        // Off, like every other mail this site can send on its own. `digest_hours` is a floor
+        // between mails rather than an alarm clock, and `digest_min` is how much has to be waiting
+        // before one is worth sending; `digest_last_at` is state this feature writes, not a setting.
+        'digest_enabled'              => '0',
+        'digest_to'                   => '',    // empty = the site contact address
+        'digest_hours'                => '24',  // clamped [1, 168]
+        'digest_min'                  => '1',   // clamped [0, 10000]
+        'digest_last_at'              => '0',
+        // ?action=health (includes/health.php). Empty = the endpoint does not exist; a token has to
+        // be at least HEALTH_TOKEN_MIN characters or it is treated as empty, because a guessable
+        // token is not a smaller secret — it is a public endpoint.
+        'health_token'                => '',
+        // The site's daily cap on report and appeal confirmation mails (1.74.0, PUB-1, confirmMailAllow() in
+        // includes/functions.php): each goes to an address the sender typed and nobody verified. 0 = none sent.
+        'confirm_mail_daily_cap'      => '200',
+        // ── A second factor for member accounts (v53, includes/user2fa.php) ──────────────────
+        // Off, like everything else that is new. `user_2fa_required` is 'off' | 'panel' | 'all':
+        // 'panel' means an account that can open the admin panel must carry one — and until it does,
+        // THE PANEL does not open for it. The account itself still works: a requirement that locks
+        // people out of their own account is a requirement operators turn off again.
+        'user_2fa_enabled'            => '0',
+        'user_2fa_required'           => 'off',
+        // ── A conversation that keeps up with itself (v54) ───────────────────────────────────
+        // `pm_live_seconds` is how often an OPEN conversation asks whether anything arrived; 0 is
+        // off, which is what an install that has not thought about it should be doing. The typing
+        // line is a second switch because it costs a write per few keystrokes and an operator may
+        // want the refresh without it.
+        'pm_live_seconds'             => '0',   // 0 = off; otherwise clamped [2, 60]
+        'pm_typing_enabled'           => '0',
+        // ── The number on the account link, kept current (1.55.0) ────────────────────────────
+        // How often any page a signed-in reader has open asks api/user_pulse.php for the two
+        // counts. On by default, once a minute: two indexed COUNTs per reader per minute is what a
+        // badge that is not a snapshot costs, and one tab asks for all of them (localStorage lease).
+        'site_live_seconds'           => '60',  // 0 = off; otherwise clamped [10, 300]
+        // ── Sounds (v61, includes/sounds.php) ──────────────────────────────────────────────────
+        // The feature is on, but every reader starts MUTED (users.sound_prefs): a page that begins
+        // making noise uninvited is a page people mute for good. The two defaults name what plays for
+        // a reader who switched sounds on and left the choice to the site; '' is "nothing", and the
+        // owner picks from Settings → Sounds.
+        'sounds_enabled'              => '1',
+        'sound_default_notification'  => '',
+        'sound_default_message_friend' => '',
+        'sound_default_message'       => '',
+        'sound_default_shout_friend'  => '',
+        'sound_default_shout'         => '',
+        'sound_default_mention'       => '',
+        // v83: somebody commented where I am told of it, and a comment named me (includes/comments.php) —
+        // offered while comments are on, '' like the others until the owner picks.
+        'sound_default_comment'       => '',
+        'sound_default_comment_mention' => '',
+        // v88: somebody replied to my comment (1.72.0) — a kind of its own, '' like every other: a default
+        // sound is the owner's choice, never the code's.
+        'sound_default_comment_reply' => '',
+        // ── The shoutbox (v63, includes/shout.php) ─────────────────────────────────────────────
+        // OFF, like every new feature here. `shout_placement` decides where the box is drawn; the
+        // two row counts are how much history the widget and the page start with. `shout_format` is
+        // the DEFAULT markup — 'plain' means no formatting at all and no choice in the composer.
+        // Retention is both halves at once: two thousand lines or thirty days, whichever bites first.
+        'shout_enabled'               => '0',
+        'shout_placement'             => 'home',  // home | page | both
+        // Which end of the room the newest line is at (1.64.0). 'bottom' is chat order — the composer
+        // under the list, oldest first, newest last — and from 1.66.0 the default again: 'top' was
+        // tried on the live site for an afternoon and the owner wanted the ordinary shape back. What
+        // was actually wrong with it (the list never scrolled, so it opened on its OLDEST line) is
+        // fixed in assets/js/shoutbox.js instead: it opens at the newest line, follows new ones while
+        // the reader is down there, and offers a "new lines" button instead of dragging them down
+        // while they are reading history. A stored 'top' is moved back once by the v72 migration.
+        'shout_order'                 => 'bottom', // top | bottom
+        'shout_widget_rows'           => '25',    // clamped [5, 100]
+        'shout_page_rows'             => '100',   // clamped [20, 500]
+        'shout_max_chars'             => '500',   // clamped [1, 2000]
+        'shout_flood_seconds'         => '5',     // clamped [0, 300]
+        // 0 = do not poll at all; anything above is floored at three seconds on read, the same way
+        // pm_live_seconds is floored at two.
+        'shout_live_seconds'          => '10',    // clamped [0, 120], read as 0 or 3..120
+        'shout_keep_rows'             => '2000',  // clamped [100, 100000]
+        'shout_keep_days'             => '30',    // clamped [1, 3650]
+        'shout_format'                => 'bbcode', // plain | bbcode | markdown
+        'shout_rules'                 => '',      // an optional line of house rules above the box
+        // ── Correcting a line, and taking one back (v72) ───────────────────────────────────────
+        // How long a member may correct their own line (`shout.edit_own`), in minutes counted from
+        // when it was said. 0 = never: only `shout.edit_any` edits at all. And how long they may
+        // take one back (`shout.delete_own`); 0 = no limit, which is what every install did before
+        // 1.66.0 — ten is the owner's own request. A moderator (`shout.moderate`, `shout.edit_any`)
+        // is held by neither. Both are checked by the server against `created_at`, on its own clock.
+        'shout_edit_minutes'          => '10',    // clamped [0, 1440]; 0 = no window at all
+        'shout_delete_own_minutes'    => '10',    // clamped [0, 1440]; 0 = no limit
+        // ── Emotes and stickers (v64) ──────────────────────────────────────────────────────────
+        // ON, unlike the room itself: with the shoutbox switched off none of this is reachable, so
+        // the only thing a default of 0 would buy is an operator who turns the room on and finds the
+        // shipped examples mysteriously absent. The caps are what keep it cheap — 64 KB and 128 px
+        // is a picture beside a sentence, and twenty per person is a vocabulary, not a gallery.
+        // Uploading needs `shout.upload_emote`, which nobody but the admin group has until the
+        // operator hands it out.
+        'shout_emotes_enabled'        => '1',
+        'shout_emote_max_kb'          => '64',    // clamped [8, 512]
+        'shout_emote_max_px'          => '128',   // clamped [32, 512]
+        'shout_emote_per_user'        => '20',    // clamped [1, 200]
+        'shout_stickers_enabled'      => '1',
+        // ── A member's upload waits for the operator (v65) ──────────────────────────────────────
+        // ON, and it changes nothing until somebody is granted `shout.upload_emote`: this is the
+        // answer to "what happens the first time I grant it". An upload by an ACCOUNT lands
+        // switched off and shows in the manager's waiting queue; the panel's own never waits, and
+        // with this off the behaviour is what it was in 1.59.0 — visible to everybody at once.
+        'shout_emote_approval'        => '1',
+        // ── The emotes beyond the room (v79, 1.70.0) ────────────────────────────────────────────
+        // ON: the owner asked for them in messages, torrent descriptions (and the proposals that
+        // rewrite them), list descriptions and the profile's description, and every one of those
+        // needs the room's emotes on as well — this is their store (emotesEverywhere(), includes/
+        // shout.php). Off, a `:code:` there is the text it was typed as and those pickers offer none;
+        // the room is not affected either way.
+        'emotes_everywhere'           => '1',
+        // ── The room in the navigation, a guest's own cadence, and the site's own lines (v66) ──
+        // All three off or conservative, like everything new here. `shout_nav` puts a Shoutbox link
+        // in the bar with a counter of its OWN — never folded into the account badge, which means
+        // notifications and messages and has to go on meaning exactly that.
+        //
+        // `shout_live_seconds_guest` is the cadence for a reader with no account: they read and
+        // never write, and on a public tracker there are far more of them, so the number that is
+        // right for somebody waiting for an answer is wrong for somebody who is only watching. 0
+        // means a guest does not poll at all.
+        //
+        // `shout_system_lines` lets the SITE say something in the room ("a torrent was registered"),
+        // one line per batch, naming the submitter only where the submitter is public. Off, because
+        // a room that fills with the tracker talking to itself is a room people stop reading.
+        'shout_nav'                   => '0',
+        'shout_live_seconds_guest'    => '30',  // clamped [0, 300], read as 0 or 3..300
+        'shout_system_lines'          => '0',
+        // ── Font Awesome's faces in the picker (v77, includes/emoji.php) ───────────────────────────
+        // Off: the picker's emoji are the ordinary ones, every one Unicode has up to what the readers'
+        // fonts draw. 'fa' shows the Font Awesome Pro package's faces instead of them, 'mixed' beside
+        // them — read only while such a package is the site's icon source (the panel offers the choice
+        // only then). A face travels as a :fa-NAME: token and falls back to the ordinary emoji it stands
+        // for wherever Font Awesome cannot draw it. `shout_emoji_fa_style` is the style a face is drawn
+        // in by default: '' follows the site's own fa_style.
+        'shout_emoji_fa'              => 'off',
+        'shout_emoji_fa_style'        => '',
+        // ── How much of the package the picker offers (v78) ──────────────────────────────────────
+        // 'faces': the faces and nothing more, as 1.69.0 had it (and what anything else reads as);
+        // 'search': the faces, and a search box that finds every icon of the package; 'all': every
+        // icon, on the pages of Font Awesome's own categories. How the picker OFFERS icons, not what
+        // a stored message may show: a :fa-NAME: token for any icon of the package is drawn whatever
+        // this says. The two wider ones need the package's index (its catalogue is built from it).
+        'shout_emoji_fa_scope'        => 'faces',
+        // ── The address the room answers on (v67) ───────────────────────────────────────────────
+        // The action name, so an operator who calls the thing a chat can have `?action=chat`. It
+        // ships as the literal it has always been, which is what makes this setting invisible until
+        // somebody wants it. shoutPageAction() refuses a name that is already another page's
+        // (siteRoutes() is what it asks) and falls back to this, because a bad row here would
+        // otherwise take an address off the site rather than merely rename one.
+        'shout_page_action'           => 'shoutbox',
+        // ── The site's clock (v68) ──────────────────────────────────────────────────────────────
+        // The zone this site shows times in, as an IANA name. EMPTY until the operator picks one,
+        // and empty is not UTC: siteTimezone() reads it as "the zone the schedule already runs in
+        // (tracker_schedule_tz), else the one PHP runs in" — decided on read, so it follows whatever
+        // the operator has actually told the panel rather than a guess frozen at upgrade time. Every
+        // account without a zone of its own (users.timezone NULL) reads the room in this one.
+        'site_timezone'               => '',
+        // ── Pictures and profile covers (v69, includes/usermedia.php) ──────────────────────────
+        // ON, both of them: the owner wants members to have these from the day it ships, and the
+        // permissions (profile.avatar / profile.cover, granted to members) are what an operator
+        // narrows. `avatar_max_kb` is the ceiling for EVERY upload of either kind and is checked
+        // before a byte is decoded; `avatar_max_mp` is the pixel count read from the header, also
+        // before the decode — 24 MP of RGBA is about 96 MB of memory, well inside php-fpm's 512 MB,
+        // and 40 would be about 160. The two heights are the profile band on a desktop and on a
+        // phone; `cover_overlay` is the layer that keeps a name readable over a bright photo.
+        'avatars_enabled'             => '1',
+        'covers_enabled'              => '1',
+        'avatar_max_kb'               => '8192',   // clamped [256, 20480]
+        'avatar_max_mp'               => '24',     // clamped [4, 40]
+        'cover_height'                => '220',    // clamped [96, 600]
+        'cover_height_mobile'         => '160',    // clamped [96, 600]
+        'cover_overlay'               => 'gradient', // gradient | darken | none
+        // What somebody without a picture of their own is drawn with: a letter on a colour taken
+        // from their name ('generated'), or the site's own picture ('image') once the owner has set
+        // one in Settings -> Profiles — until then 'image' falls back to the letter.
+        'avatar_default'              => 'generated', // generated | image
+        // Which card of the account page each block is drawn in (1.66.0 — until then one setting,
+        // `account_media_side`, moved both together and the v72 migration removes it). The picture
+        // on the LEFT, at the end of the card that holds Account security, which is where the owner
+        // wants it; the cover on the right, under the privacy answers, where both used to sit.
+        'account_picture_side'        => 'left',     // left | right
+        'account_cover_side'          => 'right',    // left | right
+        // The site's default picture and default cover, as the rows they point at (user_media,
+        // user_id NULL) and the framing chosen for them. Written by admin/user_media, never by the
+        // settings form: the id is a fact about stored bytes, not something to type.
+        'avatar_default_sha'          => '',
+        'avatar_default_x'            => '50',
+        'avatar_default_y'            => '50',
+        'avatar_default_zoom'         => '1',
+        'cover_default_sha'           => '',
+        'cover_default_x'             => '50',
+        'cover_default_y'             => '50',
+        'cover_default_zoom'          => '1',
+        // ── The description on a profile (v74, includes/profilebio.php) ────────────────────────
+        // ON, like the pictures: the owner wants members to have it from the day it ships, and the
+        // `profile.bio` permission (granted to members) is what an operator narrows. The maximum
+        // counts what a READER sees — the words, not the tags around them — clamped [20, 1000]; the
+        // source as typed may be four times that, and never more than 4000 characters (8 KB).
+        'profile_bio_enabled'         => '1',
+        'profile_bio_max'             => '300',
+        // ── A member's likes or ratings on the profile (v75, includes/profilevotes.php) ─────────
+        // ON: the tab and the section exist for everybody the moment ratings do. It shows nothing
+        // anywhere while `rep_enabled` is off, and another member's list only with their group's
+        // `rating.public` and their own users.votes_public — which is where the privacy lives.
+        'profile_votes_enabled'       => '1',
+        // ── "Who has this" beyond the favourites (v82, includes/who.php) ─────────────────────────
+        // ON, like the two features they belong to: a section shows nothing until the feature under it
+        // is on (ratings and the likes on profiles; public lists), nobody is named among the likes until
+        // they tick users.votes_listed (0) as well as votes_public, and a list is exactly as public there
+        // as it already is on its owner's profile.
+        'who_votes_enabled'           => '1',
+        'who_lists_enabled'           => '1',
+        // ── The descriptions a member wrote, on the profile (v81, includes/profiledescs.php) ─────
+        // ON, as the likes above: it shows nothing anywhere while descriptions and source links are
+        // both off, and another member's list only with their group's `content.public`, their own
+        // users.descriptions_public (0 until they say so) and their name shown on their descriptions.
+        'profile_descriptions_enabled' => '1',
+        // ── Comments on a torrent (v83, includes/comments.php) ───────────────────────────────────
+        // ON: the owner asked for them, and who may read and write is the permissions (comment.view /
+        // comment.post, members; nothing for guests until the operator grants it). The length counts
+        // what a READER sees (clamped 20–5000; the source may be four times that, never over 20 000
+        // characters); links ON (members only — a guest's are always text); a member may correct their
+        // own for 15 minutes and take it back for 60 (0 = no correcting / no limit); twenty to a page,
+        // thirty an hour for an account (or an address, for guests), one CAPTCHA point each; and a
+        // guest's comment waits for a moderator.
+        'comments_enabled'            => '1',
+        'comment_max_chars'           => '500',
+        'comment_links'               => '1',
+        'comment_edit_minutes'        => '15',
+        'comment_delete_own_minutes'  => '60',
+        'comments_per_page'           => '20',
+        'comment_rate_per_hour'       => '30',
+        'captcha_pts_comment'         => '1',
+        'comments_guest_review'       => '1',
+        // Where the Info panel's Comments section stands and how it opens (v86, 1.72.0): at the panel's very end,
+        // after the files — a long thread pushed the torrent's own record and files down (the owner) — and folded,
+        // its count in its heading, the thread loaded when it is opened. 'before_files' and 'after_rating' (1.71.0's
+        // place) are the other answers; '1' opens it unfolded.
+        'comments_position'           => 'after_files',
+        'comments_expanded'           => '0',
+        // How deep a thread of replies may go (v88, 1.72.0): the deepest REPLY level — 3 is a comment, a reply
+        // to it, a reply to that and a reply to THAT (the owner's "Reddit-like, three rows"); 0 = no replies
+        // (the flat thread of 1.71.0); at most 8. Lowered later, the deeper replies already written stay and
+        // are drawn at the deepest level allowed — only new ones are refused.
+        'comments_reply_depth'        => '3',
+        // ── One anti-spam layer (v85, includes/antispam.php) ─────────────────────────────────────
+        // ON. Per context a free burst, then growing pauses (seconds), all forgotten after `reset` quiet
+        // seconds — the room exactly as the owner sketched it (three lines free, then 5, 15, 30, 60; two
+        // minutes resets it); comments slower; messages counted by the conversations somebody STARTS, not by
+        // line; descriptions and reports much slower (a moderator reads every one of them); lists, the
+        // profile's description and emote uploads are one person's own things, a few saves free; votes ten
+        // free (somebody rating as they browse), then short pauses. Three hits at the top of a ladder and a
+        // CAPTCHA is due; a guest solves one every time they write. A new account (three days) waits twice as
+        // long, starts fewer conversations and its links are text. The same words again within ten minutes
+        // are refused; the same words to more than two people, as spam. Staff are exempt from the pauses.
+        'antispam_enabled'            => '1',
+        'antispam_captcha_after'      => '3',   // top-of-ladder hits before a CAPTCHA (0 = never)
+        'antispam_guest_captcha'      => '1',
+        'antispam_staff_exempt'       => '1',
+        'antispam_new_days'           => '3',   // 0 = no new-account rules
+        'antispam_new_factor'         => '2',
+        'antispam_new_links'          => '1',
+        'antispam_dup_seconds'        => '600', // 0 = no duplicate rule
+        'antispam_pm_new_hour'        => '8',   // new conversations an hour / a day (0 = no limit)
+        'antispam_pm_new_day'         => '20',
+        'antispam_pm_new_hour_new'    => '2',   // …for a new account
+        'antispam_pm_new_day_new'     => '4',
+        'antispam_pm_spread'          => '2',   // the same words to at most this many people (0 = no rule)
+        'antispam_shout_burst'        => '3',   'antispam_shout_steps'       => '5,15,30,60',     'antispam_shout_reset'       => '120',
+        'antispam_message_burst'      => '3',   'antispam_message_steps'     => '30,60,120,300',  'antispam_message_reset'     => '600',
+        'antispam_comment_burst'      => '2',   'antispam_comment_steps'     => '15,30,60,120',   'antispam_comment_reset'     => '300',
+        'antispam_description_burst'  => '2',   'antispam_description_steps' => '60,300,900,1800', 'antispam_description_reset' => '3600',
+        'antispam_report_burst'       => '3',   'antispam_report_steps'      => '30,120,300,900', 'antispam_report_reset'      => '1800',
+        'antispam_list_burst'         => '3',   'antispam_list_steps'        => '10,30,60,120',   'antispam_list_reset'        => '600',
+        'antispam_bio_burst'          => '3',   'antispam_bio_steps'         => '30,60,120,300',  'antispam_bio_reset'         => '900',
+        'antispam_emote_burst'        => '3',   'antispam_emote_steps'       => '30,60,120,300',  'antispam_emote_reset'       => '1800',
+        'antispam_vote_burst'         => '10',  'antispam_vote_steps'        => '2,5,10,30',      'antispam_vote_reset'        => '120',
+        // Messages' own address ceiling (an hour, per address group). The send used to read
+        // `rate_limit_favourites` — a key no setting ever defined, so always its fallback, 240: the same
+        // number, now a setting of the messages' own that an operator can find and change.
+        'rate_limit_pm'               => '240',
+        // The CAPTCHA's per-form switches (v85): on the Settings page, in the save list and in install.php
+        // since they exist, but never among the defaults — an install whose settings came from the migration
+        // was shown "Yes" for the abuse report form (the form's own fallback) while the code read the missing
+        // key as no. The values here are what the page shows for a missing key. Since 1.74.1 they are also the
+        // ONLY place that names them: install.php lists no switch of its own (its sign-in one said 1 where this
+        // says 0, so a site answered differently by how it had been installed) and takes these through
+        // `$defaults += trackerSchemaDefaultSettings()`; whether the CAPTCHA is on at all is `recaptcha_enabled`,
+        // which the installer sets from the keys.
+        'recaptcha_on_report'         => '1',
+        'recaptcha_on_login'          => '0',
+        'recaptcha_on_status'         => '0',
+        'recaptcha_on_appeal'         => '0',
+        'recaptcha_on_block_check'    => '0',
+        // ── People reaching each other (v52) ─────────────────────────────────────────────────
+        // Off, like everything above. `pm_who` is the DEFAULT a reader inherits until they choose
+        // for themselves; 'friends' rather than 'all', because an inbox anybody may write to is a
+        // decision to make deliberately rather than one to arrive at by not thinking about it.
+        'pm_enabled'                  => '0',   // private messages exist at all
+        'pm_who'                      => 'friends', // all | friends | nobody — the site default
+        'pm_max_per_day'              => '50',  // clamped [1, 1000]
+        'pm_max_chars'                => '4000',// clamped [200, 20000]
+        // ── The Archive and the Trash (v90, 1.73.0, includes/people.php) ─────────────────────
+        // Whether a new message brings an archived conversation back to the inbox: 1 is what hiding did
+        // until 1.73.0; 0 keeps it in the Archive, marked unread there (and counted on the badge). And how
+        // many days a conversation stays in the Trash before it is deleted for the member who put it there
+        // — 0 = no Trash, Delete deletes at once (the 1.64.0 behaviour).
+        'pm_archive_returns'          => '1',
+        'pm_trash_days'               => '30',  // clamped [0, 365]
+        'friends_enabled'             => '0',   // following and friendship
+        'directory_enabled'           => '0',   // a browsable list of the people who asked to be on it
+        'wl_submitter_public'         => '0',   // does the per-row visibility flag apply anywhere
+        // Where the version line may appear: none | public | panel | both. The panel, by default:
+        // an operator needs to know which build is answering, and a version number on a public page
+        // mostly tells a visitor which published bugs to try.
+        'version_display'             => 'panel',
+        // How long the catalogue search may run before PHP stops it, in seconds. The point is that
+        // it be a number somebody can see and change: php-fpm's own max_execution_time is 30 on this
+        // deployment, and a search that crossed it came back as a bare 500 with nothing in any log.
+        'search_time_budget'          => '60',
+        // The Share buttons on the search page. The VIEW is addressable either way — the state is
+        // in the address whether or not anybody is offered a button for it — so this switch is
+        // about whether the site hands out links, not about what may be reached.
+        'search_share_enabled'        => '1',
+        // Whether the search counts the words the fulltext index cannot hold — "the", "of", two-letter ones like "tv" and "uk" —
+        // when it groups results by how many of the typed words a name has (1.75.1, indexRankWords()). They are found by a REGEXP
+        // on the name, which costs a little on a very common query; '0' is 1.75.0's behaviour (only the words the index holds).
+        'search_count_common_words'   => '1',
+        'facts_source'                => 'desc',
+        'facts_chips_search'          => '1',
+        'facts_chips_info'            => '1',
+        'facts_chips_panel'           => '1',
+        'facts_chips_max'             => '6',
+        'facts_chips_rates'           => '1',
+        'facts_chips_ratings'         => '1',
+        'facts_filter_counts'         => '1',
+        'tags_enabled'                => '1',
+        'tags_review'                 => 'approve',
+        'tags_max_per_torrent'        => '40',
+        'tags_name_max'               => '32',
+        'tags_create_per_day'         => '20',
+        'tags_forum'                  => '1',
+        'tags_forum_review'           => 'bypass',
+        'tags_add_review'             => 'open',
+        'tags_popular_max'            => '100',
+        'index_block_on'              => '1',
+        'wl_req_enabled'              => '1',
+        'wl_req_days'                 => '7',
+        'wl_req_per_day'              => '5',
+        'wl_req_note'                 => '1',
+        'facts_chips_lists'           => '1',
+        'thumbs_search'               => '1',
+        'thumbs_lists'                => '1',
+        'thumbs_panel'                => '1',
+        'thumbs_info'                 => '1',
+        'thumbs_width'                => '64',
+        'thumbs_speed'                => '4',
+        'thumbs_max'                  => '10',
+        // The language switcher rewrites the page instead of reloading it (assets/js/lang-swap.js).
+        // Shipped off in 1.40.0 and on from 1.41.0: it had a release to be wrong in, every failure
+        // path still falls back to the plain navigation it replaces, and the reload it replaces is
+        // the thing people actually complained about.
+        'lang_swap_enabled'           => '1',
+        // Which library draws every icon on the site, public pages and panel alike (v73):
+        // 'bootstrap' | 'fontawesome'. Bootstrap Icons, because every icon has been written in its
+        // markup from the start and with it chosen nothing on a page changes; Font Awesome is laid
+        // over that same markup through one name map (includes/icons.php).
+        'icon_library'                => 'bootstrap',
+        // ── Which Font Awesome (v76, includes/icons.php + includes/iconpack.php) ─────────────────
+        // Read only while icon_library is 'fontawesome'. 'cdn6' (Free 6.7.2 from jsDelivr, what 1.68
+        // drew) | 'cdn7' (Free 7.3.1) | 'pack' (an installed package, `fa_pack` = its id). The package's
+        // extra style files to load are a JSON list (`fa_pack_styles`; its all.css styles load anyway),
+        // and `fa_style` is the style the site's own icons use — solid, which is 1.68's look on every
+        // source. All four are checked against what is installed on every save.
+        'fa_source'                   => 'cdn6',
+        'fa_pack'                     => '',
+        'fa_pack_styles'              => '[]',
+        'fa_style'                    => 'solid',
+        // ── The sign-in bridge (v49) ────────────────────────────────────────────────────────
+        // Off. It lets somebody holding a key say "this is user 412 and I vouch for them", which is
+        // the strongest thing any credential on this site can say — it must be a switch an operator
+        // deliberately threw, never a default.
+        'auth_bridge_enabled'         => '0',
+        // May the bridge CREATE accounts, or only sign in ones that already exist and are linked?
+        // On: a forum that is already the front door of the community should not need a second
+        // registration step. Off is for an operator who wants to hand out accounts themselves.
+        'auth_bridge_create'          => '1',
+        // Whether an unlinked forum identity may take over an existing local account that shares its
+        // address: 'none' (the default) or 'email_verified'.
+        //
+        // 'none' because email matching is account takeover wearing a helpful face: a partner who can
+        // assert any address can assert an administrator's. 'email_verified' is still only "the
+        // TRACKER verified this address", so it is offered for the case an operator actually has —
+        // one community, two logins, everyone's address already confirmed here.
+        'auth_bridge_merge'           => 'none',
+        // How long the one-time handoff ticket lives, in seconds. Clamped [30, 900]. It only has to
+        // survive one redirect.
+        'auth_bridge_ttl'             => '120',
+        // Where "continue to the forum" sends a signed-in tracker user. Must be an absolute http(s)
+        // address; empty switches the outbound half off.
+        'auth_bridge_return_url'      => '',
+        // The forum's own sign-in page, offered on the tracker's login form as "sign in with …".
+        'auth_bridge_login_url'       => '',
+        // Does a sign-out on one side end the session on the other.
+        'auth_bridge_logout'          => '1',
+    ];
+}
+
+/**
+ * v91 (1.73.0): what userDeleteCascade() left behind before it knew about these tables. Each statement touches only
+ * rows whose account no longer exists (a LEFT JOIN to `users` that finds nothing), so a live account loses nothing
+ * and the step is safe to meet twice (the local bootstrap wipes its once-marker; tests/account_delete_test.php
+ * calls it directly).
+ *   * the second factor of a gone account: its TOTP secret and its recovery hashes (user_twofa);
+ *   * its "…is typing" rows (they expire by themselves, but they are its rows);
+ *   * a bulk mail still QUEUED for it: skipped, never sent — the janitor would have mailed a deleted person;
+ *   * its votes, from before 1.42.0 put hash_votes in the cascade — they still counted, live and in the totals
+ *     stored on the catalogue rows, which are counted again (repRecount(), in the site's mode) for exactly the
+ *     hashes they touched.
+ * Returns what each step changed.
+ */
+function schemaAccountOrphans(PDO $db, array $cfg): array {
+    $out = ['user_twofa' => 0, 'message_typing' => 0, 'mail_queue' => 0, 'hash_votes' => 0, 'recounted' => 0];
+    $steps = [
+        'user_twofa'     => "DELETE t FROM user_twofa t LEFT JOIN users u ON u.id = t.user_id WHERE u.id IS NULL",
+        'message_typing' => "DELETE y FROM message_typing y LEFT JOIN users u ON u.id = y.user_id WHERE u.id IS NULL",
+        'mail_queue'     => "UPDATE mail_queue q LEFT JOIN users u ON u.id = q.user_id
+                                SET q.status = 'skipped', q.last_error = 'account deleted'
+                              WHERE q.status = 'queued' AND q.user_id IS NOT NULL AND u.id IS NULL",
+    ];
+    foreach ($steps as $table => $sql) {
+        try {
+            if (schemaTableExists($db, $table)) $out[$table] = (int)$db->exec($sql);
+        } catch (\Throwable $e) {
+            error_log('[tracker schema] v91 ' . $table . ': ' . $e->getMessage());
+        }
+    }
+    try {
+        if (schemaTableExists($db, 'hash_votes')) {
+            // voter_key is the account id as text for a member's vote (an address bucket for a guest's).
+            $hashes = $db->query("SELECT DISTINCT v.info_hash FROM hash_votes v
+                                    LEFT JOIN users u ON u.id = CAST(v.voter_key AS UNSIGNED)
+                                   WHERE v.voter_type = 'user' AND u.id IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+            if ($hashes) {
+                $out['hash_votes'] = (int)$db->exec("DELETE v FROM hash_votes v
+                                                       LEFT JOIN users u ON u.id = CAST(v.voter_key AS UNSIGNED)
+                                                      WHERE v.voter_type = 'user' AND u.id IS NULL");
+                if (!function_exists('repRecount') && is_file(__DIR__ . '/reputation.php')) require_once __DIR__ . '/reputation.php';
+                if (function_exists('repRecount')) {
+                    foreach ($hashes as $h) { repRecount($db, (string)$h, $cfg); $out['recounted']++; }
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] v91 hash_votes: ' . $e->getMessage());
+    }
+    return $out;
+}
+
+/**
+ * v93 (1.74.0, PRIV-1): a friend request and its acceptance written before `user_notifications`.sender_id existed
+ * name the account they are from only in their TITLE — ":user would like to be your friend", in the language of
+ * whoever wrote it (until 1.74.0, the sender's request). So the name is read back out of the title by the sentence
+ * of EVERY installed language (notify.friend_request / notify.friend_accepted, the `:user` in it a name), and:
+ *   - the account still exists → `sender_id` is set, and the row goes with that account from now on;
+ *   - no account has that name any more → the row is deleted: it named a person whose account is gone — exactly
+ *     what userDeleteCascade() removes from now on;
+ *   - no sentence matches (a title from a language since removed) → left alone.
+ * Only rows still without a sender; so a second run (the local bootstrap wipes the marker) changes nothing.
+ * Returns ['linked' => n, 'deleted' => n, 'unread' => n] (unread: matched no sentence).
+ */
+function schemaNotifySenders(PDO $db, array $cfg): array {
+    $out = ['linked' => 0, 'deleted' => 0, 'unread' => 0];
+    if (!schemaTableExists($db, 'user_notifications') || !schemaColumnExists($db, 'user_notifications', 'sender_id')) return $out;
+    if (!function_exists('langFor') && is_file(__DIR__ . '/lang.php')) require_once __DIR__ . '/lang.php';
+    $codes = function_exists('langAvailable') ? array_keys(langAvailable()) : ['en'];
+    $patterns = [];   // type => [regex]
+    foreach (['friend_request', 'friend_accepted'] as $type) {
+        foreach ($codes as $code) {
+            $sentence = function_exists('langFor') ? langFor($code, 'notify.' . $type) : '';
+            if (substr_count($sentence, ':user') !== 1) continue;
+            [$before, $after] = explode(':user', $sentence, 2);
+            $patterns[$type][] = '/^' . preg_quote($before, '/') . '(.+?)' . preg_quote($after, '/') . '$/u';
+        }
+        $patterns[$type] = array_values(array_unique($patterns[$type] ?? []));
+    }
+    $rows = $db->query("SELECT id, type, title FROM user_notifications
+                         WHERE type IN ('friend_request', 'friend_accepted') AND sender_id IS NULL
+                         ORDER BY id LIMIT 100000")->fetchAll(PDO::FETCH_ASSOC);
+    $find = $db->prepare("SELECT id FROM users WHERE username = ?");
+    $link = $db->prepare("UPDATE user_notifications SET sender_id = ? WHERE id = ? AND sender_id IS NULL");
+    $drop = $db->prepare("DELETE FROM user_notifications WHERE id = ? AND sender_id IS NULL");
+    $known = [];
+    foreach ($rows as $r) {
+        $name = null;
+        foreach ($patterns[(string)$r['type']] ?? [] as $re) {
+            if (preg_match($re, (string)$r['title'], $m)) { $name = $m[1]; break; }
+        }
+        if ($name === null) { $out['unread']++; continue; }
+        if (!array_key_exists($name, $known)) {
+            $find->execute([$name]);
+            $known[$name] = (int)($find->fetchColumn() ?: 0);
+        }
+        if ($known[$name] > 0) {
+            $link->execute([$known[$name], (int)$r['id']]);
+            $out['linked'] += $link->rowCount();
+        } else {
+            $drop->execute([(int)$r['id']]);
+            $out['deleted'] += $drop->rowCount();
+        }
+    }
+    return $out;
+}
+
+function schemaColumnExists(PDO $db, string $table, string $column): bool {
+    $st = $db->prepare("SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
+    $st->execute([$table, $column]);
+    return (bool)$st->fetchColumn();
+}
+
+/** Is this column nullable? Used when a column's MEANING changes from "zero" to "no reading". */
+function schemaColumnNullable(PDO $db, string $table, string $column): bool {
+    $st = $db->prepare("SELECT IS_NULLABLE FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
+    $st->execute([$table, $column]);
+    return strtoupper((string)$st->fetchColumn()) === 'YES';
+}
+
+/**
+ * A column's default as the server states it — null when it has none or the column is not there (1.72.0, v88:
+ * users.comment_notify's 15 says the reply's bit has not been handed out yet). MariaDB quotes a string default
+ * where MySQL does not; the quotes are taken off, so the two servers answer alike.
+ */
+function schemaColumnDefault(PDO $db, string $table, string $column): ?string {
+    $st = $db->prepare("SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
+    $st->execute([$table, $column]);
+    $v = $st->fetchColumn();
+    if ($v === false || $v === null || strtoupper((string)$v) === 'NULL') return null;
+    $v = (string)$v;
+    if (strlen($v) >= 2 && $v[0] === "'" && substr($v, -1) === "'") $v = str_replace("''", "'", substr($v, 1, -1));
+    return $v;
+}
+
+/**
+ * A column's type as the server states it, lower-case — `text`, `varchar(500)`, `enum('plain','bbcode')` — or null
+ * when the column is not there (1.75.0, v94). A migration that widens an ENUM or turns a VARCHAR into a TEXT runs
+ * its ALTER only when this differs from what it wants, so the same list serves a fresh install and an upgrade
+ * and a second run does nothing. MariaDB and MySQL write the type alike for the shapes used here.
+ */
+function schemaColumnType(PDO $db, string $table, string $column): ?string {
+    $st = $db->prepare("SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? LIMIT 1");
+    $st->execute([$table, $column]);
+    $v = $st->fetchColumn();
+    return $v === false || $v === null ? null : strtolower((string)$v);
+}
+
+/**
+ * Does this table exist at all?
+ *
+ * `reports`, `archives` and the rest of the pre-schema tables are written by install.php, not by
+ * trackerSchemaStatements() — so a database built from the statement list alone (which is what
+ * tests/install_test.php builds, deliberately) does not have them. An ALTER against a table that is
+ * not there throws, ensureSchema() stops on the spot, and every migration after it silently never
+ * runs: the schema version stays where it was and nothing says why.
+ */
+function schemaTableExists(PDO $db, string $table): bool {
+    $st = $db->prepare("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1");
+    $st->execute([$table]);
+    return (bool)$st->fetchColumn();
+}
+
+function schemaIndexExists(PDO $db, string $table, string $index): bool {
+    $st = $db->prepare("SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1");
+    $st->execute([$table, $index]);
+    return (bool)$st->fetchColumn();
+}
+
+/**
+ * v80 (1.70.0): an existing `user_lists` brought to the rich-text shape — the statements, in order, or
+ * none when the table already has it (or is not there: the CREATE list then makes it new-shaped).
+ *
+ * Guarded on the ABSENCE of `description_format`, not on a marker. That column is what makes a
+ * description anything but plain text, so while it is missing every stored description is known to be
+ * the plain text the old `describe` op kept — and the step runs exactly then, never over a text somebody
+ * has since written as BBCode (a marker is wiped by the local bootstrap, and a second run of an escape
+ * over real markup would take the markup away). The ORDER is what makes every stopping point safe:
+ *   1. the column becomes TEXT — the rewritten text can be longer than the 500 it was cut to;
+ *   2. each non-empty description is rewritten as BBCode that reads the same (schemaListDescPlainToBbcode()),
+ *      `updated_at` held where it was, so no list moves on anybody's shelf;
+ *   3. only then the format column arrives — and with it the first chance to store real markup.
+ * A run that stops after 1 or 2 finds the format column still missing and does it again: 1 is the same
+ * definition, and 2 is idempotent (its output has nothing left to escape).
+ *
+ * $table is for tests/lists_test.php, which walks this upgrade on a scratch table of the old shape.
+ */
+function schemaListDescMigration(PDO $db, string $table = 'user_lists'): array {
+    if (!preg_match('/^[a-z0-9_]{1,64}$/', $table)) return [];
+    if (!schemaTableExists($db, $table) || schemaColumnExists($db, $table, 'description_format')) return [];
+    $out = ["ALTER TABLE `$table` MODIFY COLUMN `description` TEXT DEFAULT NULL"];
+    $rows = $db->query("SELECT `id`, `description` FROM `$table` WHERE `description` IS NOT NULL AND `description` <> ''")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $r) {
+        $was = (string)$r['description'];
+        $now = schemaListDescPlainToBbcode($was);
+        if ($now !== $was) {
+            $out[] = "UPDATE `$table` SET `description` = " . $db->quote($now) . ", `updated_at` = `updated_at` WHERE `id` = " . (int)$r['id'];
+        }
+    }
+    $out[] = "ALTER TABLE `$table` ADD COLUMN `description_format` ENUM('bbcode','markdown','flarum') NOT NULL DEFAULT 'bbcode'";
+    return $out;
+}
+
+/**
+ * A plain text as BBCode that READS THE SAME (v80) — what a list's description was until 1.70.0 (the old
+ * `describe` op kept whatever it was given, and the card showed it with textContent), made safe to hand
+ * to the description renderer, where it would otherwise have become markup by accident: `[b]` bold,
+ * `:fire:` an emoji, `:fa-rocket:` an icon, `:flame:` an emote, a pasted address a link.
+ *
+ * The site's BBCode has no escape, so this is the one it can have: U+2060 WORD JOINER, which draws
+ * nothing and joins what is on either side of it, put where each of those rules would begin — after a
+ * `[` that opens something tag-shaped (a letter, `/` or `*`: every tag the renderer knows, `[hide]`
+ * included), after a `:` that opens something token-shaped (`:` + the tokens' own letters + `:` — the
+ * shortcodes, Font Awesome's `:fa-…:` and the emotes), and between `http(s)` and `://` (the bare-address
+ * linker). The words, their line breaks and any HTML (the renderer escapes that anyway) stay as they
+ * were; the C0 control characters but tab and the line breaks go — they are no text, and three of them
+ * are the renderer's own placeholders. Byte-safe (every pattern is ASCII), and idempotent: its output
+ * has no such place left, so a second run changes nothing.
+ */
+function schemaListDescPlainToBbcode(string $plain): string {
+    $wj = "\u{2060}";
+    $s = (string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $plain);
+    $s = (string)preg_replace('/\[(?=\/?[A-Za-z*])/', '[' . $wj, $s);
+    $s = (string)preg_replace('/:(?=[a-z0-9_+\/-]+:)/', ':' . $wj, $s);
+    return (string)preg_replace('/(https?)(?=:\/\/)/i', '$1' . $wj, $s);
+}
+
+/**
+ * v87 (1.72.0): an existing `user_lists` — public or not, a boolean `is_public` — brought to a VISIBILITY:
+ * private, friends or public. The statements, in order, or none when the table has no `is_public` any more
+ * (or is not there: the CREATE list then makes it new-shaped).
+ *
+ * No list loses its meaning: public stays public, every other one is private; `friends` is new and nobody has
+ * chosen it yet. Guarded on the old column's PRESENCE, never on a marker (the local bootstrap wipes the markers
+ * — v80's reason), and the ORDER is what makes every stopping point safe:
+ *   1. the new column arrives NULLABLE, where the old one stands: NULL means "not converted yet", and every
+ *      reader takes it for private (listVisibilityOf(), includes/lists.php) — nothing is shown that was not,
+ *      for the moment the migration takes;
+ *   2. every row still NULL takes its old answer, `updated_at` held where it was (no list moves on anybody's
+ *      shelf) — ONLY the NULL ones: a choice made since the column arrived is never taken back (the site's
+ *      code writes the column, and writes a new list's 'private' itself);
+ *   3. one ALTER finishes it — the column NOT NULL with its default, the old key and the old column gone, the
+ *      new key in — so the table is either the old shape with the new column, or the new shape.
+ * A run that stops after 1 or 2 finds `is_public` still there and does the rest again: 1 is skipped (the
+ * column is there), 2 touches only what is still NULL.
+ *
+ * $table is for tests/lists_test.php, which walks this upgrade on a scratch table of the old shape.
+ */
+function schemaListVisibilityMigration(PDO $db, string $table = 'user_lists'): array {
+    if (!preg_match('/^[a-z0-9_]{1,64}$/', $table)) return [];
+    if (!schemaTableExists($db, $table) || !schemaColumnExists($db, $table, 'is_public')) return [];
+    $out = [];
+    if (!schemaColumnExists($db, $table, 'visibility')) {
+        $out[] = "ALTER TABLE `$table` ADD COLUMN `visibility` ENUM('private','friends','public') DEFAULT NULL AFTER `is_public`";
+    }
+    $out[] = "UPDATE `$table` SET `visibility` = IF(`is_public` = 1, 'public', 'private'), `updated_at` = `updated_at` WHERE `visibility` IS NULL";
+    $last = ["MODIFY COLUMN `visibility` ENUM('private','friends','public') NOT NULL DEFAULT 'private'"];
+    if (schemaIndexExists($db, $table, 'idx_list_public')) $last[] = "DROP KEY `idx_list_public`";
+    $last[] = "DROP COLUMN `is_public`";
+    if (!schemaIndexExists($db, $table, 'idx_list_visibility')) $last[] = "ADD KEY `idx_list_visibility` (`visibility`, `updated_at`)";
+    $out[] = "ALTER TABLE `$table` " . implode(', ', $last);
+    return $out;
+}
+
+/**
+ * v90 (1.73.0): a Trash on each side of a conversation — the four columns and the janitor's two keys that
+ * `message_threads` gains (see its CREATE), for a table made before them. ONE ALTER, and only what is missing,
+ * so a second run is nothing and a run that stopped half way does the rest.
+ *
+ * Every existing row gets an EMPTY trash — 0 and NULL, the pair includes/people.php keeps together (trashed_at
+ * is NULL exactly when trash_upto is 0) — so the upgrade moves no conversation anywhere: a conversation hidden
+ * until today is in the Archive (the same column, its new name), one deleted until today stays deleted (the
+ * watermark, untouched), and nothing is in anybody's Trash until they put it there.
+ *
+ * $table is for tests/pm_trash_test.php, which walks this upgrade on a scratch table of the old shape.
+ */
+function schemaPmTrashMigration(PDO $db, string $table = 'message_threads'): array {
+    if (!preg_match('/^[a-z0-9_]{1,64}$/', $table) || !schemaTableExists($db, $table)) return [];
+    $parts = [];
+    foreach (['u_low', 'u_high'] as $side) {
+        if (!schemaColumnExists($db, $table, $side . '_trash_upto')) $parts[] = "ADD COLUMN `{$side}_trash_upto` BIGINT UNSIGNED NOT NULL DEFAULT 0";
+    }
+    foreach (['u_low', 'u_high'] as $side) {
+        if (!schemaColumnExists($db, $table, $side . '_trashed_at')) $parts[] = "ADD COLUMN `{$side}_trashed_at` DATETIME DEFAULT NULL";
+    }
+    foreach (['low', 'high'] as $side) {
+        if (!schemaIndexExists($db, $table, 'idx_thread_trash_' . $side)) $parts[] = "ADD KEY `idx_thread_trash_{$side}` (`u_{$side}_trashed_at`)";
+    }
+    return $parts ? ["ALTER TABLE `$table` " . implode(', ', $parts)] : [];
+}
+
+/**
+ * v93 (1.74.0, PERF-2/PERF-3): `index_catalog`, the public catalogue's narrow twin of index_hashes.
+ *
+ * The search page lists only NAMED rows — about 714 000 of production's 4.75 million — and sorts them by six columns.
+ * Out of index_hashes that meant a full scan and a filesort for every order but seeders (4.4 s warm, 7.6–8.4 s at a
+ * small pool, on one click of any signed-in member) and, for a common word, a random read of a wide row per hit (13 s).
+ * This holds the same rows with only what is searched and sorted on: the name (with its own FULLTEXT index) and the
+ * six sort columns, each with an index ending in the key, so every order of the page is an index walk that stops
+ * after a page. Display values still come from index_hashes, joined by the key for the one page shown.
+ *
+ * Membership is the catalogue's own rule (IDX_CATALOG_MEMBER in includes/index.php): `done`, or a name. Kept by the
+ * code that writes those rows (the poll's batches, the scrapes, the deletes, the prune) and, for what the metadata
+ * worker and federation write from Python, by the janitor following meta_fetched_at; the janitor's rolling walk
+ * fills it and puts right anything that drifted.
+ */
+function schemaIndexCatalogDdl(string $engine): string {
+    return "CREATE TABLE IF NOT EXISTS `index_catalog` (
+        `info_hash` CHAR(40) NOT NULL PRIMARY KEY,
+        `name` VARCHAR(255) NOT NULL DEFAULT '',
+        `eff_seeders` INT UNSIGNED NOT NULL DEFAULT 0,
+        `eff_leechers` INT UNSIGNED NOT NULL DEFAULT 0,
+        `total_size` BIGINT UNSIGNED DEFAULT NULL,
+        `files_count` INT UNSIGNED DEFAULT NULL,
+        `last_seen` DATETIME NOT NULL,
+        KEY `idx_cat_seed` (`eff_seeders`, `info_hash`),
+        KEY `idx_cat_leech` (`eff_leechers`, `info_hash`),
+        KEY `idx_cat_size` (`total_size`, `info_hash`),
+        KEY `idx_cat_files` (`files_count`, `info_hash`),
+        KEY `idx_cat_last` (`last_seen`, `info_hash`),
+        KEY `idx_cat_name` (`name`, `info_hash`),
+        FULLTEXT KEY `ft_cat_name` (`name`)
+    ) $engine";
+}
+
+/**
+ * Is this a context that may spend minutes rebuilding a large table? Only the CLI is.
+ *
+ * Every migration in this file is cheap except the ones that rebuild index_hashes, and those are
+ * worth deferring by a minute rather than risking the site for them. Define
+ * TRACKER_SCHEMA_FORCE_HEAVY before bootstrapping to override.
+ */
+function schemaHeavyAllowed(): bool {
+    return PHP_SAPI === 'cli' || defined('TRACKER_SCHEMA_FORCE_HEAVY');
+}
+
+/**
+ * Remember that a migration was declined, so ensureSchema does NOT record the new version -- the
+ * schema really is not at that version, and writing the number anyway would strand the missing
+ * column for ever. Static rather than a stored flag: it lasts exactly one process, which is exactly
+ * as long as the question is open.
+ */
+function schemaDeferHeavy(?string $what = null): array {
+    static $deferred = [];
+    if ($what !== null) $deferred[] = $what;
+    return $deferred;
+}
+
+/**
+ * THE WEB'S PAUSE AFTER AN UPGRADE IT COULD NOT FINISH (1.74.0, QUAL-24). An upgrade that failed, or that left its
+ * heavy part to the janitor, does not record the version — so every web request that won the lock ran the whole
+ * list again: ~0.3 s of building the guarded statements plus their UPDATE … JOINs over the big tables, one request
+ * after another, for as long as the cause lasted. Now such an attempt writes a time a minute ahead into
+ * config/schema_retry.marker, and until then the web runs on the schema it has (as it already did whenever the
+ * lock was taken). The CLI never pauses — the janitor is what finishes a deferred upgrade, and a test migrates
+ * when it asks — and a recorded version removes the marker. An unwritable config/ means no pause: as before.
+ */
+const SCHEMA_WEB_RETRY_SECONDS = 60;
+function schemaRetryMarker(): string {
+    return defined('TRACKER_SCHEMA_RETRY_MARKER') ? (string)TRACKER_SCHEMA_RETRY_MARKER : dirname(__DIR__) . '/config/schema_retry.marker';
+}
+/** Is the web inside its pause at $now? */
+function schemaRetryPaused(?int $now = null): bool {
+    $f = schemaRetryMarker();
+    if (!is_file($f)) return false;
+    $until = (int)trim((string)@file_get_contents($f));
+    return $until > ($now ?? time());
+}
+function schemaRetryPause(?int $now = null): void {
+    @file_put_contents(schemaRetryMarker(), (string)(($now ?? time()) + SCHEMA_WEB_RETRY_SECONDS), LOCK_EX);
+}
+function schemaRetryClear(): void {
+    if (is_file(schemaRetryMarker())) @unlink(schemaRetryMarker());
+}
+
+/**
+ * Bring the database up to TRACKER_SCHEMA_VERSION. Cheap when current (one array lookup).
+ * Never throws — a failure leaves the version untouched so a later request retries (the web after its pause, see
+ * schemaRetryPaused()), and the error is logged. $cfg is refreshed in place so callers see the seeded defaults
+ * immediately.
+ */
+function ensureSchema(PDO $db, array &$cfg): void {
+    if ((int)($cfg['schema_version'] ?? 0) >= TRACKER_SCHEMA_VERSION) return;
+    if (PHP_SAPI !== 'cli' && schemaRetryPaused()) return;
+    try {
+        // The web never waits for this lock. While a deferred heavy migration is running (the janitor
+        // rebuilding index_hashes, which takes minutes) schema_version stays stale, so EVERY request
+        // came here and sat in GET_LOCK for five seconds -- with a five-child php-fpm pool that was the
+        // whole site, gone for the length of the rebuild. A request that finds the lock taken simply
+        // runs on the schema it already has (it did before too, it just paid five seconds first) and
+        // the holder records the version when it is done. The CLI keeps its wait: two janitors meeting
+        // at the same migration is exactly the case the lock exists for, and there the wait is cheap.
+        $lockWait = PHP_SAPI === 'cli' ? 5 : 0;
+        $st = $db->prepare("SELECT GET_LOCK('tracker_schema', ?)");
+        $st->execute([$lockWait]);
+        $lock = $st->fetchColumn();
+        if ((int)$lock !== 1) return; // someone else is migrating — they will set the version
+        try {
+            // Re-check under the lock: another worker may have just finished.
+            $cur = (int)($db->query("SELECT `value` FROM settings WHERE `key` = 'schema_version'")->fetchColumn() ?: 0);
+            if ($cur >= TRACKER_SCHEMA_VERSION) {
+                $cfg = getSettings($db, true);
+                return;
+            }
+            foreach (trackerSchemaStatements() as $sql) {
+                try { $db->exec($sql); } catch (PDOException $e) { error_log('[tracker schema] ' . $e->getMessage()); throw $e; }
+            }
+            foreach (trackerSchemaGuardedStatements($db) as $sql) {
+                // A guarded statement may be a list of equivalent candidates, cheapest first (see the
+                // index_hashes ALTER). Only the last failure is fatal — the earlier ones are a server
+                // saying "not that way", which is information, not an error.
+                $tries = is_array($sql) ? $sql : [$sql];
+                $lastErr = null;
+                foreach ($tries as $i => $one) {
+                    try { $db->exec($one); $lastErr = null; break; }
+                    catch (PDOException $e) {
+                        $lastErr = $e;
+                        if ($i < count($tries) - 1) error_log('[tracker schema] retrying without: ' . $e->getMessage());
+                    }
+                }
+                if ($lastErr !== null) { error_log('[tracker schema] ' . $lastErr->getMessage()); throw $lastErr; }
+            }
+            try { trackerSchemaDataMigrations($db, $cfg); } catch (\Throwable $e) { error_log('[tracker schema] data migration: ' . $e->getMessage()); }
+            $ins = $db->prepare("INSERT IGNORE INTO settings (`key`, `value`) VALUES (?, ?)");
+            foreach (trackerSchemaDefaultSettings() as $k => $v) {
+                $ins->execute([$k, $v]);
+            }
+            // Only claim the version if everything actually ran. A deferred rebuild means the schema
+            // is not at this version, and recording the number anyway would strand the missing column.
+            if (!schemaDeferHeavy()) {
+                $db->prepare("INSERT INTO settings (`key`, `value`) VALUES ('schema_version', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)")
+                   ->execute([(string)TRACKER_SCHEMA_VERSION]);
+                schemaRetryClear();
+            } else {
+                schemaRetryPause();      // the janitor finishes it; the web waits a minute before it looks again
+            }
+            $cfg = getSettings($db, true);
+        } finally {
+            $db->query("SELECT RELEASE_LOCK('tracker_schema')");
+        }
+    } catch (\Throwable $e) {
+        error_log('[tracker schema] upgrade failed: ' . $e->getMessage() . ' — the web retries in ' . SCHEMA_WEB_RETRY_SECONDS . ' s');
+        schemaRetryPause();
+    }
+}

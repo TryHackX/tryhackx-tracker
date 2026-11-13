@@ -1,0 +1,646 @@
+<?php
+// Resolve the endpoint BEFORE starting a session: server-to-server calls (v1/*) are stateless and
+// must not create a PHP session per request.
+$endpoint = $_GET['endpoint'] ?? $_GET['action'] ?? '';
+$endpoint = preg_replace('/[^a-z0-9_\/\-]/', '', strtolower($endpoint));
+$isS2S = str_starts_with($endpoint, 'v1/');
+// The session itself starts further down, after getSettings()/ensureSchema(): the Secure flag on
+// its cookie is a setting now. The `v1/*` decision stays here because it is what that call is
+// guarded by, and because nothing below may assume a session exists for an S2S request.
+
+if (!file_exists(__DIR__ . '/config/installed.lock')) {
+    http_response_code(503);
+    echo json_encode(['error' => 'Not installed']);
+    exit;
+}
+
+require_once __DIR__ . '/config/app.php';
+require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/includes/settings.php';
+require_once __DIR__ . '/includes/functions.php';
+require_once __DIR__ . '/includes/schema.php';
+require_once __DIR__ . '/includes/whitelist.php';
+require_once __DIR__ . '/includes/schedule.php';
+require_once __DIR__ . '/includes/stats_timeline.php';
+require_once __DIR__ . '/includes/index.php';
+require_once __DIR__ . '/includes/api_auth.php';
+require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/twofa.php';
+require_once __DIR__ . '/includes/bulkmail.php';
+require_once __DIR__ . '/includes/richtext.php';
+require_once __DIR__ . '/includes/livesync.php';
+require_once __DIR__ . '/includes/reputation.php';
+require_once __DIR__ . '/includes/wlmaint.php';
+require_once __DIR__ . '/includes/wlprobe.php';
+require_once __DIR__ . '/includes/mail.php';
+require_once __DIR__ . '/includes/users.php';
+require_once __DIR__ . '/includes/favourites.php';
+require_once __DIR__ . '/includes/sounds.php';
+require_once __DIR__ . '/includes/shout.php';
+// Pictures and profile covers (v69): the pipeline, the stream and userAvatarUrl()/userAvatarHtml().
+require_once __DIR__ . '/includes/usermedia.php';
+require_once __DIR__ . '/includes/images.php';
+require_once __DIR__ . '/includes/facts.php';
+require_once __DIR__ . '/includes/tags.php';
+require_once __DIR__ . '/includes/wlrequests.php';
+require_once __DIR__ . '/includes/thumbs.php';
+// The description on a profile (v74): its renderer, its rules and the save the endpoint runs.
+require_once __DIR__ . '/includes/profilebio.php';
+// A member's likes or ratings on the profile (v75): the gate, the parameters and the one query.
+require_once __DIR__ . '/includes/profilevotes.php';
+// The descriptions a member wrote, on the profile (v81): the gate, the parameters and the bounded read.
+require_once __DIR__ . '/includes/profiledescs.php';
+require_once __DIR__ . '/includes/profileimages.php';
+// Comments on a torrent (v83): the renderer, the rules, the people told, and every request the endpoints make.
+require_once __DIR__ . '/includes/comments.php';
+// Reports of comments, descriptions and shouts, and warnings (1.71.0): after comments.php, whose rows it reads.
+require_once __DIR__ . '/includes/reports.php';
+// One anti-spam layer for everything people write (1.71.0): every writer endpoint asks it before it writes.
+require_once __DIR__ . '/includes/antispam.php';
+require_once __DIR__ . '/includes/lists.php';
+// "Who has this" (1.70.0): the favourites, the likes / ratings and the lists of one torrent, every gate in SQL.
+require_once __DIR__ . '/includes/who.php';
+require_once __DIR__ . '/includes/people.php';
+require_once __DIR__ . '/includes/user2fa.php';
+require_once __DIR__ . '/includes/authbridge.php';
+require_once __DIR__ . '/includes/audit.php';
+require_once __DIR__ . '/includes/tuner.php';
+require_once __DIR__ . '/includes/federation.php';
+require_once __DIR__ . '/includes/netlimit.php';
+require_once __DIR__ . '/includes/iplist.php';
+require_once __DIR__ . '/includes/backup.php';
+require_once __DIR__ . '/includes/opentracker.php';
+require_once __DIR__ . '/includes/sysctl.php';
+require_once __DIR__ . '/includes/dbmem.php';
+require_once __DIR__ . '/includes/cluster.php';
+require_once __DIR__ . '/includes/lang.php';
+
+header('Content-Type: application/json; charset=utf-8');
+
+// Same failure as in index.php, in the API's own shape: a 503 the pollers already treat as "keep the
+// last good numbers" (markStale in admin-index.js) and a Retry-After the S2S clients can honour.
+// English only -- langInit() needs $cfg and $cfg needs the database, so this is the one message that
+// cannot follow the visitor's language, and it is better to say it in English than not at all.
+// langFor() rather than __(): before langInit() the request has no dictionary loaded and __() hands
+// back the key; langFor() reads the language file itself and is right whatever ran before it.
+try {
+    $db = getDb();
+} catch (PDOException $e) {
+    error_log('[tracker] database unavailable: ' . $e->getMessage());
+    http_response_code(503);
+    header('Retry-After: 60');
+    echo json_encode(['success' => false, 'error' => langFor('en', 'api.db_unavailable'), 'retry_after' => 60]);
+    exit;
+}
+// A ceiling on how long ONE query may run inside a web request. Not a substitute for writing the
+// query properly — a bad plan is still a bug — but the difference between a bad plan costing one
+// visitor an error page and it holding a php-fpm child until the whole site stops answering. The
+// pool here has five children; one search that ran for twenty-four minutes was enough to take
+// every page down, and each retry started another.
+//
+// SESSION only, and only for requests served over the web: the janitor, the metadata worker and
+// mariadb-dump all run legitimately long statements from the CLI and must not be touched. MariaDB
+// applies it to SELECTs; anything it cannot apply to is left alone.
+if (PHP_SAPI !== 'cli') {
+    try { $db->exec('SET SESSION max_statement_time = 20'); } catch (\Throwable $e) { /* older server: no such variable */ }
+}
+
+$cfg = getSettings($db);
+$GLOBALS['cfg'] = $cfg;   // for the helpers that have no $cfg of their own (soundEventKinds, userRememberIssue): the janitor does the same
+ensureSchema($db, $cfg);
+
+// THE SESSION STARTS HERE, and nothing above it may read $_SESSION (the CSRF check is at the
+// bottom of this file, currentUser() is the line below). Same reason as index.php: the Secure flag
+// is cookie_secure_mode and that is a database row, so the call cannot stay at the top of the file
+// where it used to compute `!empty($_SERVER['HTTPS'])` and get `false` on an HTTPS-only site.
+// header() above does not count as output — headers are buffered until the first byte — so this
+// still runs with headers unsent on a normal request.
+if (headers_sent($hsFile, $hsLine)) {
+    error_log('[tracker] output began at ' . $hsFile . ':' . $hsLine . ' before session_start — the session cookie cannot be set');
+}
+if ($endpoint === 'image') {
+    $early = imagesServe($db, (int)($_GET['id'] ?? 0), (int)($_GET['w'] ?? 0), (int)($_GET['h'] ?? 0),
+                         strtolower((string)($_GET['ext'] ?? '')), isset($_GET['full']), null, false);
+    if ($early !== null && $early['public']) {
+        sendSecurityHeaders($cfg, 'api');
+        imagesSend($early);
+    }
+    session_cache_limiter('');
+}
+if (!$isS2S) session_start(sessionCookieParams($cfg));
+// 'api': a JSON body has no subresources, so this response gets default-src 'none' — the strictest
+// policy there is, at no cost. It also means an endpoint that ever starts answering with HTML fails
+// loudly instead of quietly becoming the one page on the site with no policy.
+sendSecurityHeaders($cfg, 'api');
+
+// The API answers in the caller's language too -- an error message that comes back in English
+// while the page around it is in Polish is worse than one that was never translated at all.
+// Resolved from the same places the page uses (the account first, then the cookie), so the two
+// cannot disagree about which language this visitor is reading.
+$langUser = (!$isS2S && usersEnabled($cfg)) ? currentUser($db) : null;
+langInit($cfg, $langUser['language'] ?? null);
+
+// Background janitors run on normal API traffic but are skipped for the high-frequency pollers —
+// the stats poller and the admin tracker-service status poll are both hit repeatedly and have
+// nothing to do with the report/appeal janitors, so running them there is pure overhead. They
+// still run everywhere else. S2S calls never run them either.
+if (!$isS2S && !in_array($endpoint, ['tracker_stats', 'stats_timeline', 'sound', 'shout_emote', 'user_media', 'image', 'user_avatar_default', 'shout_list', 'admin/tracker_service_status', 'admin/whitelist_status', 'admin/index_status', 'admin/net_status', 'admin/backup_status', 'admin/ot_status', 'admin/sysctl_status', 'admin/ot_cluster_status'], true)) {
+    autoArchiveOldReports($db, $cfg);
+    autoArchiveOldAppeals($db, $cfg);
+    pruneOldSentEmails($db, $cfg);
+}
+// The whitelist janitor is cheap (one small state-file read) and deliberately runs on EVERY request,
+// pollers included, so a debounced tracker reload fires even on a quiet site.
+whitelistJanitor($db, $cfg);
+
+$apiRoutes = [
+    'submit_report'         => 'api/submit_report.php',
+    'check_status'          => 'api/check_status.php',
+    'check_block'           => 'api/check_block.php',
+    'submit_appeal'         => 'api/submit_appeal.php',
+    'unsubscribe'           => 'api/unsubscribe.php',
+    'save_email_preferences' => 'api/save_email_preferences.php',
+    'transparency'          => 'api/transparency.php',
+    'tracker_stats'         => 'api/tracker_stats.php',
+    'stats_timeline'        => 'api/stats_timeline.php',
+    'admin/login'           => 'api/admin/login.php',
+    'admin/login_2fa'       => 'api/admin/login_2fa.php',
+    'admin/twofa'           => 'api/admin/twofa.php',
+    'admin/logout'          => 'api/admin/logout.php',
+    'admin/fetch_reports'   => 'api/admin/fetch_reports.php',
+    // Reported private messages — two endpoints, and their own permissions (includes/people.php).
+    'admin/fetch_message_reports' => 'api/admin/fetch_message_reports.php',
+    'admin/message_report_action' => 'api/admin/message_report_action.php',
+    // Reported comments, descriptions and shouts (1.71.0, includes/reports.php).
+    'admin/content_reports'       => 'api/admin/content_reports.php',
+    'admin/content_report_action' => 'api/admin/content_report_action.php',
+    // The preview of the words a moderator writes (1.75.0) — one component, every window (adminRichField()).
+    'admin/rich_preview'          => 'api/admin/rich_preview.php',
+    // The Moderation page (1.75.0, includes/moderation.php): who is silenced or banned, the warnings log, the automatic
+    // penalties — read, act (lift, revoke, warn / silence / ban by hand), and their rules.
+    'admin/fetch_moderation'      => 'api/admin/fetch_moderation.php',
+    'admin/moderation_action'     => 'api/admin/moderation_action.php',
+    'admin/moderation_rules'      => 'api/admin/moderation_rules.php',
+    'admin/images'                => 'api/admin/images.php',
+    'admin/tags'                  => 'api/admin/tags.php',
+    'admin/tag_action'            => 'api/admin/tag_action.php',
+    'admin/tag_forum'             => 'api/admin/tag_forum.php',
+    'admin/tag_changes'           => 'api/admin/tag_changes.php',
+    'admin/tag_cats'              => 'api/admin/tag_cats.php',
+    'tag_fav'                     => 'api/tag_fav.php',
+    'admin/image_action'          => 'api/admin/image_action.php',
+    'admin/change_status'   => 'api/admin/change_status.php',
+    'admin/block_hash'      => 'api/admin/block_hash.php',
+    'admin/unblock_hash'    => 'api/admin/unblock_hash.php',
+    'admin/send_email'      => 'api/admin/send_email.php',
+    'admin/delete_report'   => 'api/admin/delete_report.php',
+    'admin/delete_all'      => 'api/admin/delete_all.php',
+    'admin/save_settings'   => 'api/admin/save_settings.php',
+    'admin/settings_catalog' => 'api/admin/settings_catalog.php',
+    // Reading and clearing the Content-Security-Policy violations the public endpoint collected.
+    // Deliberately NOT in adminEndpointPermission() below: unlisted means owner-only, and the whole
+    // Settings page it is drawn on is owner-only already.
+    'admin/csp_reports'     => 'api/admin/csp_reports.php',
+    'admin/change_password' => 'api/admin/change_password.php',
+    'admin/account_email'   => 'api/admin/account_email.php',
+    'admin/check_blacklist' => 'api/admin/check_blacklist.php',
+    'admin/notify_review'   => 'api/admin/notify_review.php',
+    'admin/restore_report'  => 'api/admin/restore_report.php',
+    'admin/fetch_appeals'   => 'api/admin/fetch_appeals.php',
+    'admin/resolve_appeal'  => 'api/admin/resolve_appeal.php',
+    'admin/block_archived'  => 'api/admin/block_archived.php',
+    'admin/restore_appeal'  => 'api/admin/restore_appeal.php',
+    'admin/update_field'    => 'api/admin/update_field.php',
+    'admin/delete_permanently' => 'api/admin/delete_permanently.php',
+    'admin/tracker_service_status' => 'api/admin/tracker_service_status.php',
+    'admin/restart_tracker' => 'api/admin/restart_tracker.php',
+    'admin/reload_tracker'  => 'api/admin/reload_tracker.php',
+    'admin/test_tracker_permission' => 'api/admin/test_tracker_permission.php',
+    // ── Inbound UDP monitor + rate limit (admin; includes/netlimit.php) ──
+    'admin/net_status'      => 'api/admin/net_status.php',
+    'admin/ot_status'       => 'api/admin/ot_status.php',
+    'admin/ot_apply'        => 'api/admin/ot_apply.php',
+    'admin/ot_test'         => 'api/admin/ot_test.php',
+    // ── Kernel network buffers (admin; includes/sysctl.php) ──
+    'admin/sysctl_status'   => 'api/admin/sysctl_status.php',
+    'admin/sysctl_apply'    => 'api/admin/sysctl_apply.php',
+    'admin/sysctl_test'     => 'api/admin/sysctl_test.php',
+    // ── Database memory (admin; includes/dbmem.php) ──
+    'admin/dbmem_status'    => 'api/admin/dbmem_status.php',
+    'admin/dbmem_apply'     => 'api/admin/dbmem_apply.php',
+    'admin/dbmem_test'      => 'api/admin/dbmem_test.php',
+    // -- Extra opentracker instances (admin; includes/cluster.php) --
+    'admin/ot_cluster_status' => 'api/admin/ot_cluster_status.php',
+    'admin/ot_cluster_apply'  => 'api/admin/ot_cluster_apply.php',
+    'admin/ot_cluster_test'   => 'api/admin/ot_cluster_test.php',
+    'admin/ip_lists'        => 'api/admin/ip_lists.php',
+    'admin/ip_list_action'  => 'api/admin/ip_list_action.php',
+    'admin/net_samples'     => 'api/admin/net_samples.php',
+    'admin/net_apply'       => 'api/admin/net_apply.php',
+    'admin/net_test'        => 'api/admin/net_test.php',
+    // ── Backups (admin; includes/backup.php) ──
+    'admin/backup_status'   => 'api/admin/backup_status.php',
+    'admin/backup_action'   => 'api/admin/backup_action.php',
+    'admin/backup_test_path' => 'api/admin/backup_test_path.php',
+    'admin/backup_download' => 'api/admin/backup_download.php',
+    // ── Whitelist (public) ──
+    'whitelist_submit'      => 'api/whitelist_submit.php',
+    'whitelist_check'       => 'api/whitelist_check.php',
+    // ── Whitelist (admin) ──
+    'admin/check_whitelist_path' => 'api/admin/check_whitelist_path.php',
+    'admin/whitelist_status'     => 'api/admin/whitelist_status.php',
+    'admin/tracker_mode'         => 'api/admin/tracker_mode.php',
+    'admin/audit_log'            => 'api/admin/audit_log.php',
+    'admin/tuner'                => 'api/admin/tuner.php',
+    'admin/fetch_whitelist'      => 'api/admin/fetch_whitelist.php',
+    'admin/whitelist_item'       => 'api/admin/whitelist_item.php',
+    'admin/whitelist_add'        => 'api/admin/whitelist_add.php',
+    'admin/whitelist_delete'     => 'api/admin/whitelist_delete.php',
+    'admin/whitelist_ban'        => 'api/admin/whitelist_ban.php',
+    'admin/whitelist_unban'      => 'api/admin/whitelist_unban.php',
+    'admin/whitelist_fetch_meta' => 'api/admin/whitelist_fetch_meta.php',
+    'admin/whitelist_scrape'     => 'api/admin/whitelist_scrape.php',
+    'admin/whitelist_scrape_bulk' => 'api/admin/whitelist_scrape_bulk.php',
+    'admin/whitelist_meta_queue' => 'api/admin/whitelist_meta_queue.php',
+    'admin/whitelist_regenerate' => 'api/admin/whitelist_regenerate.php',
+    'admin/whitelist_import_blacklist' => 'api/admin/whitelist_import_blacklist.php',
+    'admin/fetch_banned'         => 'api/admin/fetch_banned.php',
+    'admin/banned_add'           => 'api/admin/banned_add.php',
+    // ── Observed-hash index (admin) ──
+    'admin/fetch_index'          => 'api/admin/fetch_index.php',
+    'admin/index_item'           => 'api/admin/index_item.php',
+    'admin/index_delete'         => 'api/admin/index_delete.php',
+    'admin/index_promote'        => 'api/admin/index_promote.php',
+    'admin/index_fetch_meta'     => 'api/admin/index_fetch_meta.php',
+    'admin/index_scrape'         => 'api/admin/index_scrape.php',
+    'admin/index_scrape_bulk'    => 'api/admin/index_scrape_bulk.php',
+    'admin/index_status'         => 'api/admin/index_status.php',
+    'admin/index_polls'          => 'api/admin/index_polls.php',
+    'admin/index_blocked'        => 'api/admin/index_blocked.php',
+    'admin/index_blocked_act'    => 'api/admin/index_blocked_act.php',
+    'admin/wl_requests'          => 'api/admin/wl_requests.php',
+    'admin/wl_request_act'       => 'api/admin/wl_request_act.php',
+    'admin/page_content'         => 'api/admin/page_content.php',
+    'admin/home_layout'          => 'api/admin/home_layout.php',
+    'admin/languages'            => 'api/admin/languages.php',
+    'admin/sounds'               => 'api/admin/sounds.php',
+    // Font Awesome packages (1.69.0, includes/iconpack.php) — owner only, like the rest of Settings.
+    'admin/iconpacks'            => 'api/admin/iconpacks.php',
+
+    'admin/index_poll_now'       => 'api/admin/index_poll_now.php',
+    // ── API clients / bans (admin) ──
+    'admin/fetch_api_clients'    => 'api/admin/fetch_api_clients.php',
+    'admin/api_client_create'    => 'api/admin/api_client_create.php',
+    'admin/api_client_update'    => 'api/admin/api_client_update.php',
+    'admin/api_client_delete'    => 'api/admin/api_client_delete.php',
+    'admin/fetch_api_bans'       => 'api/admin/fetch_api_bans.php',
+    'admin/api_ban_lift'         => 'api/admin/api_ban_lift.php',
+    'admin/api_ban_add'          => 'api/admin/api_ban_add.php',
+    'admin/whitelist_review'     => 'api/admin/whitelist_review.php',
+    // ── User accounts (public; includes/users.php) ──
+    'user_register'              => 'api/user_register.php',
+    'user_login'                 => 'api/user_login.php',
+    'user_logout'                => 'api/user_logout.php',
+    'user_me'                    => 'api/user_me.php',
+    'user_update'                => 'api/user_update.php',
+    // Account security (includes/user2fa.php): the second factor, and where this account is signed in.
+    'user_2fa'                   => 'api/user_2fa.php',
+    'user_sessions'              => 'api/user_sessions.php',
+    'user_notifications'         => 'api/user_notifications.php',
+    'user_reset_request'         => 'api/user_reset_request.php',
+    'user_reset_confirm'         => 'api/user_reset_confirm.php',
+    'user_verify_send'           => 'api/user_verify_send.php',
+    'user_email_prefs'           => 'api/user_email_prefs.php',
+    'user_language'              => 'api/user_language.php',
+    'index_search'               => 'api/index_search.php',
+    'index_files'                => 'api/index_files.php',
+    'index_info'                 => 'api/index_info.php',
+    'hash_check'                 => 'api/hash_check.php',
+    'magnet_stats'               => 'api/magnet_stats.php',
+    'magnet_click'               => 'api/magnet_click.php',
+    'content_submit'             => 'api/content_submit.php',
+    // Taking a description down from the Info panel (1.70.0, includes/content.php): the author's own or,
+    // with content.delete_any, anybody's published one.
+    'content_delete'             => 'api/content_delete.php',
+    'user_pulse'                 => 'api/user_pulse.php',
+    // Sounds (1.56.0): the library and a reader's choices; `sound` streams one of the owner's uploads.
+    'sounds'                     => 'api/sounds.php',
+    'sound'                      => 'api/sound.php',
+    'user_sound_prefs'           => 'api/user_sound_prefs.php',
+    // The shoutbox (1.58.0, includes/shout.php). `shout_list` is the polled one and lets go of the
+    // session before it reads; `admin/shout_purge` is owner-only (absent from adminEndpointPermission).
+    'shout_list'                 => 'api/shout_list.php',
+    'shout_post'                 => 'api/shout_post.php',
+    'shout_delete'               => 'api/shout_delete.php',
+    'shout_seen'                 => 'api/shout_seen.php',
+    // Who the composer's `@` is offering (1.61.0): a PREFIX match over `users`, at most eight names
+    // and nothing but names, behind a rate limit of its own. It lets go of the session before the
+    // read like `shout_list` does — somebody typing is making one of these every few keystrokes.
+    'shout_mentions'             => 'api/shout_mentions.php',
+    // Pinning is a moderator's act through the public endpoint, like taking a line down: it is not
+    // an `admin/` road, because the person doing it need never see the panel.
+    'shout_pin'                  => 'api/shout_pin.php',
+    // Correcting a line (1.66.0): GET reads the stored words back for the editor, POST saves them.
+    // The author inside `shout_edit_minutes`, or `shout.edit_any` — decided in includes/shout.php.
+    'shout_edit'                 => 'api/shout_edit.php',
+    'admin/shout_purge'          => 'api/admin/shout_purge.php',
+    // Emotes and stickers (1.59.0). `shout_emote` streams one picture and is PUBLIC, like `sound`:
+    // it is referenced from every rendered line. `admin/shout_emotes` is the manager and is
+    // owner-only (absent from adminEndpointPermission), while taking one down is a moderator's act
+    // through the public endpoint.
+    'shout_emote'                => 'api/shout_emote.php',
+    'shout_emotes'               => 'api/shout_emotes.php',
+    'shout_emote_upload'         => 'api/shout_emote_upload.php',
+    'shout_emote_delete'         => 'api/shout_emote_delete.php',
+    'admin/shout_emotes'         => 'api/admin/shout_emotes.php',
+    // Font Awesome's faces for the picker (1.69.0, includes/emoji.php); the ordinary emoji are a static
+    // file under assets/emoji/ and never pass through here.
+    'shout_emoji'                => 'api/shout_emoji.php',
+    // Pictures and profile covers (1.63.0, includes/usermedia.php). `user_avatar` / `user_cover` are a
+    // member's own (upload + framing in one multipart request, reframe, remove); `user_media` streams
+    // one stored image by a hash prefix and a size, and `user_avatar_default` the generated letter —
+    // both PUBLIC and cached for a year, like `sound` and `shout_emote`. `admin/user_media` is the
+    // panel's: removing a member's picture (panel.users.edit) and the site's own defaults (owner).
+    'user_avatar'                => 'api/user_avatar.php',
+    'user_cover'                 => 'api/user_cover.php',
+    'user_media'                 => 'api/user_media.php',
+    'user_avatar_default'        => 'api/user_avatar_default.php',
+    'admin/user_media'           => 'api/admin/user_media.php',
+    'images'                     => 'api/images.php',
+    'image'                      => 'api/image.php',
+    // The description on a profile (1.69.0, includes/profilebio.php): a member's own save, and the
+    // panel's clear (panel.users.edit, like taking a picture down).
+    'profile_bio'                => 'api/profile_bio.php',
+    'admin/user_bio'             => 'api/admin/user_bio.php',
+    'richtext_preview'           => 'api/richtext_preview.php',
+    'rate_hash'                  => 'api/rate_hash.php',
+    // Comments on a torrent (1.71.0, includes/comments.php): a thread's page (GET), a new one, a correction
+    // (GET the stored words / POST them), taking one down (the author's own, or a moderator's with a reason),
+    // letting a guest's held comment through, and the account's four "tell me when" switches. Each endpoint
+    // hands the request to a function there and sends back what it answers.
+    'comment_list'               => 'api/comment_list.php',
+    'comment_post'               => 'api/comment_post.php',
+    'comment_edit'               => 'api/comment_edit.php',
+    'comment_delete'             => 'api/comment_delete.php',
+    'comment_approve'            => 'api/comment_approve.php',
+    'comment_prefs'              => 'api/comment_prefs.php',
+    // A member reports a comment, a description or a shout (1.71.0, includes/reports.php).
+    'content_report'             => 'api/content_report.php',
+    'tags_search'                => 'api/tags_search.php',
+    'tag_add'                    => 'api/tag_add.php',
+    'tag_remove'                 => 'api/tag_remove.php',
+    'tag_cat_suggest'            => 'api/tag_cat_suggest.php',
+    'wl_request'                 => 'api/wl_request.php',
+    // ── People reaching each other (includes/people.php) ──
+    'user_people'                => 'api/user_people.php',
+    'user_messages'              => 'api/user_messages.php',
+    'user_directory'             => 'api/user_directory.php',
+    // ── Lists (includes/lists.php) ──
+    'user_lists'                 => 'api/user_lists.php',
+    'user_list_items'            => 'api/user_list_items.php',
+    // ── Favourites, profiles and uploads (includes/favourites.php) ──
+    'user_favourites'            => 'api/user_favourites.php',
+    // A member's likes or ratings (1.69.0, includes/profilevotes.php): GET only, the same 404 for
+    // every no that the favourites list gives.
+    'user_votes'                 => 'api/user_votes.php',
+    // The descriptions a member wrote (1.70.0, includes/profiledescs.php): GET only, the same 404 for
+    // every no.
+    'user_descriptions'          => 'api/user_descriptions.php',
+    'user_images'                => 'api/user_images.php',
+    'hash_favourites'            => 'api/hash_favourites.php',
+    // "Who has this" (1.70.0, includes/who.php): favourites, likes / ratings and lists, one section a
+    // request, GET only, the same 404 for every no.
+    'hash_who'                   => 'api/hash_who.php',
+    'user_uploads'               => 'api/user_uploads.php',
+    'user_privacy'               => 'api/user_privacy.php',
+    'whitelist_probe'            => 'api/whitelist_probe.php',
+    // ── User accounts (admin) ──
+    'admin/fetch_users'          => 'api/admin/fetch_users.php',
+    'admin/user_create'          => 'api/admin/user_create.php',
+    'admin/user_update'          => 'api/admin/user_update.php',
+    'admin/user_delete'          => 'api/admin/user_delete.php',
+    'admin/user_grant'           => 'api/admin/user_grant.php',
+    'admin/user_revoke'          => 'api/admin/user_revoke.php',
+    'admin/user_notify'          => 'api/admin/user_notify.php',
+    'admin/bulk_send'            => 'api/admin/bulk_send.php',
+    'admin/wl_content'           => 'api/admin/wl_content.php',
+    'admin/livesync_test'        => 'api/admin/livesync_test.php',
+    'admin/livesync_apply'       => 'api/admin/livesync_apply.php',
+    'admin/fetch_groups'         => 'api/admin/fetch_groups.php',
+    'admin/group_save'           => 'api/admin/group_save.php',
+    'admin/group_delete'         => 'api/admin/group_delete.php',
+    // 1.72.0: a seeded group's recommended set — preview (GET), add what is missing / reset (POST). Owner-only, as
+    // group editing is: deliberately absent from adminEndpointPermission() below.
+    'admin/group_recommended'    => 'api/admin/group_recommended.php',
+    // ── Federation peers (admin; includes/federation.php) ──
+    'admin/fetch_fed_peers'      => 'api/admin/fetch_fed_peers.php',
+    'admin/fed_peer_save'        => 'api/admin/fed_peer_save.php',
+    'admin/fed_peer_delete'      => 'api/admin/fed_peer_delete.php',
+    'admin/fed_peer_test'        => 'api/admin/fed_peer_test.php',
+    'admin/fed_review'           => 'api/admin/fed_review.php',
+    'admin/fed_purge'            => 'api/admin/fed_purge.php',
+    // ── Server-to-server API (bearer key; see includes/api_auth.php) ──
+    'v1/whitelist/submit'        => 'api/v1/whitelist_submit.php',
+    'v1/whitelist/ping'          => 'api/v1/whitelist_ping.php',
+    'v1/whitelist/describe'      => 'api/v1/whitelist_describe.php',
+    // What happened to the rows a partner sent — including the note a moderator wrote when turning
+    // one down. Without it a key that does not publish directly gets 'pending' and never hears again.
+    'v1/whitelist/status'        => 'api/v1/whitelist_status.php',
+    // Its own scope, not a flag on the one above: registering a hash and blocking one are two
+    // different authorities, and a forum trusted with the first is not thereby trusted with the second.
+    'v1/blacklist/submit'        => 'api/v1/blacklist_submit.php',
+    'v1/users/lookup'            => 'api/v1/users_lookup.php',
+    'v1/users/grant'             => 'api/v1/users_grant.php',
+    'v1/users/revoke'            => 'api/v1/users_revoke.php',
+    'v1/users/provision'         => 'api/v1/users_provision.php',
+    'v1/federation/ping'         => 'api/v1/federation_ping.php',
+    'v1/federation/export'       => 'api/v1/federation_export.php',
+    // ── The sign-in bridge (includes/authbridge.php). All five take the 'users' scope: each one
+    //    amounts to deciding who exists here or who is signed in as them. ──
+    'v1/auth/login'              => 'api/v1/auth_login.php',
+    'v1/auth/logout'             => 'api/v1/auth_logout.php',
+    'v1/auth/verify'             => 'api/v1/auth_verify.php',
+    'v1/auth/merge'              => 'api/v1/auth_merge.php',
+    'v1/auth/status'             => 'api/v1/auth_status.php',
+];
+
+if (!isset($apiRoutes[$endpoint])) {
+    jsonResponse(['error' => 'Unknown endpoint'], 404);
+}
+
+// admin/login_2fa is the second half of a sign-in, so by definition there is no session yet. It has
+// its own gate instead: it only works from a session that has just passed the password step, only
+// for five minutes, it carries its own CSRF token in the body like admin/login, and every failure
+// counts against the same brute-force lockout.
+/**
+ * Which panel permission each admin endpoint needs.
+ *
+ * DEFAULT DENY: an endpoint that is not in this map can be reached only by the OWNER's own session.
+ * That is the safe direction — a new endpoint is admin-only until somebody deliberately decides
+ * otherwise, rather than quietly inheriting whatever a moderator happens to hold. It also means this
+ * table is the whole answer to "what can a moderator do", in one place, auditable by reading it.
+ *
+ * Everything absent is absent on purpose: Settings, the credential and 2FA endpoints, group editing,
+ * user deletion, API clients and bans, federation, the firewall / sysctl / opentracker helpers,
+ * tracker restarts, whitelist regeneration, backup restore-delete-download, and bulk mail. Most of
+ * those also demand the owner's password through adminReauth(), which a moderator does not have —
+ * this map simply agrees with that boundary instead of contradicting it.
+ */
+function adminEndpointPermission(string $endpoint): ?string {
+    static $map = [
+        // Reports
+        'admin/fetch_reports'      => 'panel.reports.view',
+        // NOT panel.reports.*: reading a reported private message is a different kind of access.
+        'admin/fetch_message_reports' => 'panel.messages.view',
+        'admin/message_report_action' => 'panel.messages.handle',
+        // Reported comments, descriptions and shouts (1.71.0): the KIND decides the permission —
+        // panel.reports.<kind>.view to read its queue, .handle to act — so the router asks only for the panel
+        // and each endpoint asks its kind's own (as admin/backup_action asks for its op).
+        'admin/content_reports'       => 'panel.access',
+        'admin/content_report_action' => 'panel.access',
+        // A pure rendering of the text a moderator is typing (1.75.0): reads and writes nothing.
+        'admin/rich_preview'          => 'panel.access',
+        // The Moderation page (1.75.0): reading it, acting on it, and the automatic penalties' rules are three permissions.
+        'admin/fetch_moderation'      => 'panel.moderation.view',
+        'admin/moderation_action'     => 'panel.moderation.handle',
+        'admin/moderation_rules'      => 'panel.moderation.rules',
+        'admin/images'                => 'panel.images.view',
+        'admin/tags'                  => 'panel.tags.view',
+        'admin/tag_action'            => 'panel.tags.view',
+        'admin/tag_forum'             => 'panel.tags.view',
+        'admin/tag_cats'              => 'panel.tags.view',
+        'admin/tag_changes'           => 'panel.tags.view',
+        'admin/image_action'          => 'panel.images.manage',
+        'admin/fetch_appeals'      => 'panel.reports.view',
+        'admin/change_status'      => 'panel.reports.status',
+        'admin/update_field'       => 'panel.reports.status',
+        'admin/block_hash'         => 'panel.reports.block',
+        'admin/unblock_hash'       => 'panel.reports.block',
+        'admin/check_blacklist'    => 'panel.reports.block',
+        'admin/block_archived'     => 'panel.reports.block',
+        'admin/send_email'         => 'panel.reports.email',
+        'admin/notify_review'      => 'panel.reports.email',
+        'admin/delete_report'      => 'panel.reports.archive',
+        'admin/restore_report'     => 'panel.reports.archive',
+        'admin/resolve_appeal'     => 'panel.appeals.resolve',
+        'admin/restore_appeal'     => 'panel.appeals.resolve',
+        // Whitelist + Index (one page each, one view permission)
+        'admin/whitelist_status'   => 'panel.whitelist.view',
+        'admin/fetch_whitelist'    => 'panel.whitelist.view',
+        'admin/whitelist_item'     => 'panel.whitelist.view',
+        'admin/index_status'       => 'panel.whitelist.view',
+        // The same permission as the Index page it is drawn on: this is a chart of that page's
+        // own poll, and reading it is reading the page.
+        'admin/index_polls'        => 'panel.whitelist.view',
+        'admin/fetch_index'        => 'panel.whitelist.view',
+        'admin/index_item'         => 'panel.whitelist.view',
+        'admin/index_blocked'      => 'panel.whitelist.view',
+        'admin/index_blocked_act'  => 'panel.whitelist.ban',
+        'admin/wl_requests'        => 'panel.whitelist.view',
+        'admin/wl_request_act'     => 'panel.whitelist.add',
+        'admin/fetch_banned'       => 'panel.whitelist.view',
+        'admin/whitelist_add'      => 'panel.whitelist.add',
+        'admin/whitelist_delete'   => 'panel.whitelist.delete',
+        'admin/index_delete'       => 'panel.whitelist.delete',
+        'admin/index_promote'      => 'panel.whitelist.add',
+        'admin/whitelist_ban'      => 'panel.whitelist.ban',
+        'admin/whitelist_unban'    => 'panel.whitelist.ban',
+        'admin/banned_add'         => 'panel.whitelist.ban',
+        'admin/whitelist_fetch_meta' => 'panel.whitelist.meta',
+        'admin/whitelist_meta_queue' => 'panel.whitelist.meta',
+        'admin/whitelist_scrape'   => 'panel.whitelist.meta',
+        'admin/whitelist_scrape_bulk' => 'panel.whitelist.meta',
+        'admin/index_fetch_meta'   => 'panel.whitelist.meta',
+        'admin/index_scrape_bulk'  => 'panel.whitelist.meta',
+        'admin/index_scrape'       => 'panel.whitelist.meta',
+        'admin/wl_content'         => 'panel.whitelist.content',
+        // Approving a partner's submission and approving their description are the same act
+        // by the same person: somebody decided whether this belongs on the site.
+        'admin/whitelist_review'   => 'panel.whitelist.content',
+        // Users
+        'admin/fetch_users'        => 'panel.users.view',
+        'admin/fetch_groups'       => 'panel.users.view',
+        'admin/user_create'        => 'panel.users.edit',
+        'admin/user_update'        => 'panel.users.edit',
+        // Taking a member's picture or cover down is the same authority as editing them. The site's
+        // own default images live on the same endpoint and are Settings, so the endpoint asks the
+        // owner question itself for those operations (api/admin/user_media.php).
+        'admin/user_media'         => 'panel.users.edit',
+        // Clearing a member's description is the same authority as taking their picture down (1.69.0).
+        'admin/user_bio'           => 'panel.users.edit',
+        'admin/user_notify'        => 'panel.users.notify',
+        'admin/user_grant'         => 'panel.users.groups',
+        'admin/audit_log'          => 'panel.audit.view',
+        // Reading the probe's state is part of reading the Traffic page. Starting, cancelling and
+        // applying all go through requireAdminReauth() inside the endpoint, which checks the OWNER's
+        // password — so a moderator reaching this endpoint can see what it is doing and nothing else.
+        'admin/tuner'              => 'panel.traffic.view',
+        'admin/user_revoke'        => 'panel.users.groups',
+        // Backups — see and run, never restore or delete
+        'admin/backup_status'      => 'panel.backups.view',
+        // backup_action is NOT here: its op decides. Running a backup is a moderator action,
+        // restoring or deleting one is not, and a single grant for the endpoint cannot tell them
+        // apart — so the endpoint checks its own op (api/admin/backup_action.php).
+        // Traffic, read-only
+        'admin/net_status'         => 'panel.traffic.view',
+        // Reading the address lists is part of reading the Traffic page. Changing them is not: like
+        // every other control on that page, admin/ip_list_action has no entry here and is owner-only.
+        'admin/ip_lists'           => 'panel.traffic.view',
+        'admin/net_samples'        => 'panel.traffic.view',
+        'admin/ot_status'          => 'panel.traffic.view',
+        'admin/ot_cluster_status'  => 'panel.traffic.view',
+        'admin/sysctl_status'      => 'panel.traffic.view',
+        'admin/dbmem_status'       => 'panel.traffic.view',
+        'admin/tracker_service_status' => 'panel.traffic.view',
+        // Shared chrome every panel page needs to render at all
+        'admin/logout'             => 'panel.access',
+    ];
+    return $map[$endpoint] ?? null;
+}
+
+$GLOBALS['__audit_endpoint'] = $endpoint;
+
+if (str_starts_with($endpoint, 'admin/') && $endpoint !== 'admin/login' && $endpoint !== 'admin/login_2fa') {
+    requireAuth($cfg);
+    // The session is valid; now, is it allowed to do THIS? For the owner's own session panelCan()
+    // is always true and this costs one function call. For a moderator it is the whole boundary.
+    $needPerm = adminEndpointPermission($endpoint);
+    if (!panelCan($db, $cfg, $needPerm ?? 'panel.owner.__never__')) {
+        jsonResponse(['error' => $needPerm === null
+            ? 'That action is reserved for the site owner.'
+            : 'Your panel account does not have access to that.'], 403);
+    }
+    // CSRF: every admin write (non-GET) must carry a valid X-CSRF-Token header.
+    // Reads (GET: fetch_reports/fetch_appeals) are exempt. Login uses its own body token.
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET' && !verifyCsrfHeader()) {
+        jsonResponse(['error' => 'Invalid CSRF token'], 403);
+    }
+    // PHP's file session handler holds an EXCLUSIVE lock for the whole request, so two requests from
+    // the same admin never overlap — they queue. The panel's pages poll several of these endpoints at
+    // once, and one of them forks a firewall helper: without this, a single slow poll stalls every
+    // other request the page makes, and with only a handful of php-fpm children that is how a card
+    // ends up stuck on "loading" while the server is answering fine. These endpoints only read, and
+    // they are past the auth check, so nothing below needs the session open any more.
+    //
+    // The LISTINGS belong here too, and their absence is what made the Index page feel like it jammed
+    // the panel. A catalogue search is three to nine seconds of MariaDB; while it ran it held the
+    // session lock, so clicking through to another admin page did not load until the search finished.
+    // It looked like PHP or the database was struggling and it was neither: one request was simply
+    // waiting for another to let go of a file lock. Every endpoint below is a GET that only reads and
+    // is already past the auth check, so nothing after this point needs the session open.
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && in_array($endpoint, [
+            'admin/net_status', 'admin/net_samples', 'admin/backup_status',
+            'admin/whitelist_status', 'admin/index_status', 'admin/tracker_service_status',
+            'admin/ot_status', 'admin/sysctl_status', 'admin/dbmem_status', 'admin/ot_cluster_status',
+            'admin/fetch_index', 'admin/fetch_whitelist', 'admin/fetch_banned',
+            'admin/fetch_reports', 'admin/fetch_appeals', 'admin/fetch_users', 'admin/content_reports', 'admin/fetch_moderation', 'admin/images',
+            'admin/fetch_groups', 'admin/fetch_api_clients', 'admin/fetch_api_bans',
+            'admin/fetch_fed_peers', 'admin/user_media',
+            // 1.74.0 (PERF-12): the two pollers that were missing — the whitelist modal's row (every 3 s, and
+            // a live scrape of up to 2 s inside it) and the Index page's poll passes.
+            'admin/whitelist_item', 'admin/index_polls'], true)) {
+        session_write_close();
+    }
+}
+
+require_once __DIR__ . '/' . $apiRoutes[$endpoint];

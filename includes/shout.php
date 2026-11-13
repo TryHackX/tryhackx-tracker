@@ -1,0 +1,2145 @@
+<?php
+/**
+ * Shoutbox (1.58.0, schema 63): one room, one line each, nothing kept for long.
+ *
+ * ── what it is, and what it deliberately is not ────────────────────────────────────────────────
+ *
+ * A shout is a sentence, not a post. It carries no notification of its own, and it expires:
+ * `shout_keep_rows` newest rows and `shout_keep_days` of age, whichever bites first, swept by the
+ * janitor. That is the whole retention policy, and it is why the table has no archive and no
+ * history — a room people talk in is not a record.
+ *
+ * From 1.66.0 a line CAN be corrected — by its author for `shout_edit_minutes`, by a moderator
+ * holding `shout.edit_any` at any time — and a correction is never silent: the row keeps when and by
+ * whom (`edited_at`, `edited_by`), every reader is shown "(edited)" beside the time, and a line
+ * somebody else changed says so. There is still no history of the old words: the audit log records
+ * that a moderator changed a line, not what it used to say.
+ *
+ * ── only new rows ever travel ──────────────────────────────────────────────────────────────────
+ *
+ * The widget is drawn by the server with its newest id in the markup, and the browser asks for
+ * `after=<that id>` from then on. Nothing is ever redrawn: the lesson of 1.48 and 1.50 is that a
+ * list which repaints itself eats what the person below it is typing. Reading older lines is the
+ * mirror image (`before=<oldest id>`), prepended, with the scroll position kept.
+ *
+ * ── who may do what ────────────────────────────────────────────────────────────────────────────
+ *
+ * Four permissions, no switches: `shout.view` (a member's by default — a guest reads nothing unless
+ * the operator says so), `shout.post`, `shout.delete_own`, `shout.moderate`. Silence is INHERITED
+ * rather than duplicated: `users.pm_muted_until` is the one moment a moderator sets, and somebody
+ * silenced in private messages is silenced here too. They still read — a mute is about writing.
+ *
+ * 1.66.0 adds two more and two windows: `shout.edit_own` (a member's, for `shout_edit_minutes`) and
+ * `shout.edit_any` (the moderator group's alone), and `shout.delete_own` now holds for
+ * `shout_delete_own_minutes`. Every window is measured by the DATABASE against `created_at`, never by
+ * anything a browser sends; the browser only hides a button it already knows would be refused.
+ *
+ * ── three kinds of "new" ───────────────────────────────────────────────────────────────────────
+ *
+ * A shout from a FRIEND, a shout from anybody else and an @-mention of me are three different
+ * events, because the sounds (includes/sounds.php) tell them apart. They are counted from one
+ * column, `users.shout_seen_id`: "how many since the last id this reader saw", by the primary key,
+ * instead of a table of read marks that would need its own retention.
+ *
+ * Mentions are resolved ONCE, when the shout is written (`shout_mentions`), rather than by parsing
+ * every body on every read — a rename afterwards does not retro-mention somebody, which is the
+ * behaviour a person expects from "did this line mean me".
+ *
+ * ── how fast (1.71.0) ─────────────────────────────────────────────────────────────────────────
+ *
+ * Asked of the site's one anti-spam layer (includes/antispam.php, context `shout`): three lines free,
+ * then 5, 15, 30 and 60 seconds between lines, two quiet minutes and it starts over — the owner's own
+ * sketch — with `shout_flood_seconds` as the least pause once any pause applies, the gap between two
+ * corrections, and, with the layer switched off, the room's old fixed wall between every two lines.
+ * A new account's links are drawn as text (antispamWrittenNew()).
+ */
+require_once __DIR__ . '/antispam.php';
+
+/* ── the switches, all clamped on read ─────────────────────────────────────── */
+
+/** The feature as a whole: accounts on, and the owner has switched the shoutbox on. */
+function shoutEnabled(array $cfg): bool
+{
+    return usersEnabled($cfg) && (($cfg['shout_enabled'] ?? '0') === '1');
+}
+
+/** Where it is drawn: 'home' (the front-page block), 'page' (?action=shoutbox) or 'both'. */
+function shoutPlacement(array $cfg): string
+{
+    $v = (string)($cfg['shout_placement'] ?? 'home');
+    return in_array($v, ['home', 'page', 'both'], true) ? $v : 'home';
+}
+
+/**
+ * Which end of the room the newest line is at (1.64.0): 'bottom' (chat) or 'top' (newest first).
+ *
+ * The room used to be drawn oldest-to-newest with nothing ever scrolling the list, so a reader
+ * opening it was looking at its OLDEST lines. 1.64.0 answered that with 'top' as the default; the
+ * owner used it and wanted the ordinary shape back, so from 1.66.0 'bottom' is the default again and
+ * the fault it had is fixed where it lived — assets/js/shoutbox.js opens the list at its newest line,
+ * follows new lines while the reader is down there, and offers a "new lines" button instead of
+ * dragging somebody down while they read history. 'top' still works, mirrored.
+ */
+function shoutOrder(array $cfg): string
+{
+    $v = (string)($cfg['shout_order'] ?? 'bottom');
+    return $v === 'top' ? 'top' : 'bottom';
+}
+
+/**
+ * How long a member may correct their own line, in MINUTES from when it was said (1.66.0).
+ *
+ * 0 means no window at all — nobody edits their own line and only `shout.edit_any` edits anything —
+ * which is a different answer from "a very long window", so it is not floored. The ceiling is a day:
+ * past that a correction is rewriting yesterday's conversation, and that is a moderator's decision.
+ */
+function shoutEditMinutes(array $cfg): int
+{
+    return max(0, min(1440, (int)($cfg['shout_edit_minutes'] ?? 10)));
+}
+
+/**
+ * How long a member may take their own line back, in MINUTES (1.66.0). 0 = no limit, which is what
+ * `shout.delete_own` meant before this setting existed; `shout.moderate` is never held by it.
+ */
+function shoutDeleteOwnMinutes(array $cfg): int
+{
+    return max(0, min(1440, (int)($cfg['shout_delete_own_minutes'] ?? 10)));
+}
+
+/**
+ * The DEFAULT markup of a shout.
+ *
+ * 'plain' is not merely a syntax — it switches formatting off entirely, composer included.
+ * With bbcode or markdown the writer picks per shout; this only says which one the box starts on.
+ */
+function shoutFormat(array $cfg): string
+{
+    $v = (string)($cfg['shout_format'] ?? 'bbcode');
+    if ($v === 'plain') return 'plain';
+    $on = richtextFormats($cfg, 'shout');
+    return in_array($v, $on, true) ? $v : $on[0];
+}
+
+/** The formats a writer may choose from. One entry for 'plain' — there is nothing to choose. */
+function shoutFormatChoices(array $cfg): array
+{
+    return shoutFormat($cfg) === 'plain' ? ['plain'] : richtextFormats($cfg, 'shout');
+}
+
+/**
+ * How often an on-screen widget asks for new lines. 0 = never, which is what an install that has
+ * not thought about it should be doing; anything above is floored at three seconds, because below
+ * that this stops being a refresh and becomes a load.
+ */
+function shoutLiveSeconds(array $cfg): int
+{
+    $v = (int)($cfg['shout_live_seconds'] ?? 10);
+    return $v <= 0 ? 0 : max(3, min(120, $v));
+}
+
+/**
+ * The same cadence, asked about a reader with no account (v66).
+ *
+ * A guest the operator handed `shout.view` reads and never writes, and on a public tracker there
+ * are far more of them than there are members — so the number that is right for somebody waiting
+ * for an answer to what they just said is, for a guest, a request every ten seconds that buys
+ * nothing. 0 means a guest does not poll at all and reads whatever the page was drawn with.
+ *
+ * The ceiling is wider than the member one (five minutes rather than two) because "every few
+ * minutes" is a sensible answer for somebody who is only reading; the floor is the same three
+ * seconds, because below that this stops being a refresh whoever is asking.
+ */
+function shoutLiveSecondsGuest(array $cfg): int
+{
+    $v = (int)($cfg['shout_live_seconds_guest'] ?? 30);
+    return $v <= 0 ? 0 : max(3, min(300, $v));
+}
+
+/** Which of the two this reader gets, so the widget and the endpoint cannot disagree about it. */
+function shoutLiveSecondsFor(array $cfg, bool $isGuest): int
+{
+    return $isGuest ? shoutLiveSecondsGuest($cfg) : shoutLiveSeconds($cfg);
+}
+
+function shoutMaxChars(array $cfg): int   { return max(1, min(2000, (int)($cfg['shout_max_chars'] ?? 500) ?: 500)); }
+function shoutWidgetRows(array $cfg): int { return max(5, min(100, (int)($cfg['shout_widget_rows'] ?? 25) ?: 25)); }
+function shoutPageRows(array $cfg): int   { return max(20, min(500, (int)($cfg['shout_page_rows'] ?? 100) ?: 100)); }
+function shoutFloodSeconds(array $cfg): int { return max(0, min(300, (int)($cfg['shout_flood_seconds'] ?? 5))); }
+function shoutKeepRows(array $cfg): int   { return max(100, min(100000, (int)($cfg['shout_keep_rows'] ?? 2000) ?: 2000)); }
+function shoutKeepDays(array $cfg): int   { return max(1, min(3650, (int)($cfg['shout_keep_days'] ?? 30) ?: 30)); }
+
+/** The optional house rules printed above the box. Plain text, bounded where it is saved. */
+function shoutRules(array $cfg): string { return trim((string)($cfg['shout_rules'] ?? '')); }
+
+/**
+ * Is the room in the navigation, with a number of its own? (v66)
+ *
+ * The number is NOT folded into the account badge, and that is the whole decision here: that badge
+ * means "notifications and messages waiting", a reader who sees 5 on it has two tabs to look in,
+ * and a third meaning would leave it answering nothing. So this is a second element beside it, the
+ * way the sounds note already is.
+ */
+function shoutNav(array $cfg): bool
+{
+    return shoutEnabled($cfg) && (($cfg['shout_nav'] ?? '0') === '1');
+}
+
+/**
+ * Where that link goes — which is wherever the box actually is.
+ *
+ * With `shout_placement` on 'home' there is nothing at ?action=shoutbox to send anybody to (that
+ * address answers "there is no shoutbox here"), and the badge is cleared by a widget being on the
+ * screen, so the link has to land on a page that draws one or the number never clears.
+ */
+function shoutNavUrl(array $cfg, string $baseUrl): string
+{
+    return shoutPlacement($cfg) === 'home' ? $baseUrl : $baseUrl . '?action=' . shoutPageAction($cfg);
+}
+
+/**
+ * The action name the room answers on: 'shoutbox', unless the operator renamed it (1.61.0).
+ *
+ * An operator whose site calls this a chat wants `?action=chat`, and the whole cost of that is one
+ * string — every link is built from here rather than from the literal, and index.php teaches the
+ * router the name on the way past.
+ *
+ * REFUSED WHEN THE NAME IS ALREADY SOMEBODY ELSE'S PAGE, and the list of those is siteRoutes()
+ * rather than a list written out here. A hand-written one would be wrong the first time anybody
+ * added a page, and wrong in the direction that hurts: the room would quietly swallow
+ * `?action=login` and the operator's next problem would be that nobody can sign in. 'shoutbox' is
+ * the one name in that map this may legally be, because it is the room's own.
+ *
+ * Anything invalid falls back rather than breaking the route. A settings row can arrive from a
+ * restored backup or from a MySQL client on a database three applications share, and the answer to
+ * a bad one is the address the site has always had — not a site with no shoutbox anywhere on it.
+ */
+function shoutPageAction(array $cfg): string
+{
+    $v = strtolower(trim((string)($cfg['shout_page_action'] ?? '')));
+    // The same character class index.php reduces $action to, so a name that survives here is a name
+    // the router can actually be asked for.
+    if (!preg_match('/^[a-z0-9_-]{2,32}$/', $v)) return 'shoutbox';
+    if ($v !== 'shoutbox' && function_exists('siteRoutes') && isset(siteRoutes()[$v])) return 'shoutbox';
+    return $v;
+}
+
+/** Does the site write its own lines into the room ("a torrent was registered")? (v66) */
+function shoutSystemLines(array $cfg): bool
+{
+    return shoutEnabled($cfg) && (($cfg['shout_system_lines'] ?? '0') === '1');
+}
+
+/* ── who may read, who may write ───────────────────────────────────────────── */
+
+/** May the reader of THIS request see the room at all? */
+function shoutMayView(PDO $db, array $cfg): bool
+{
+    return shoutEnabled($cfg) && userCan($db, $cfg, 'shout.view');
+}
+
+/**
+ * May this ACCOUNT write, and if not, why — as one answer the composer can print.
+ *
+ *   reason  '' | 'disabled' | 'login' | 'no_permission' | 'muted'   ('until' carries the date)
+ *
+ * Asked about a NAMED user rather than about whoever is making the request (userIdHasPermission,
+ * not userCan): a CLI test has no session and a panel session answers yes to everything, so a gate
+ * that cannot be asked about an account is a gate that cannot be tested. Muted comes last of the
+ * four because it is the only one that is temporary — the others are about who somebody is.
+ */
+function shoutMayPost(PDO $db, array $cfg, ?array $user): array
+{
+    if (!shoutEnabled($cfg)) return ['ok' => false, 'reason' => 'disabled', 'until' => null];
+    if (!$user || (int)($user['id'] ?? 0) <= 0) return ['ok' => false, 'reason' => 'login', 'until' => null];
+    if (!userIdHasPermission($db, $cfg, (int)$user['id'], 'shout.post')) {
+        return ['ok' => false, 'reason' => 'no_permission', 'until' => null];
+    }
+    $until = function_exists('pmMutedUntil') ? pmMutedUntil($user) : null;
+    if ($until !== null) return ['ok' => false, 'reason' => 'muted', 'until' => $until];
+    return ['ok' => true, 'reason' => '', 'until' => null];
+}
+
+/* ── mentions ──────────────────────────────────────────────────────────────── */
+
+/**
+ * The names a token may be, the whole of it first: "@bob.." → ["bob..", "bob.", "bob"] (1.71.0).
+ *
+ * The name's characters are userValidUsername()'s, and '.' and '-' are among them — so "thanks @bob." used to
+ * look up an account called "bob." and mention nobody: the full stop that ENDS a sentence was read as part of
+ * the name. A run of '.' / '-' at the end is sentence punctuation unless an account's name really ends with it:
+ * the longest candidate that is an account wins, and a name with a dot inside ("john.doe") is the whole token.
+ */
+function shoutMentionCandidates(string $token): array
+{
+    $out = [$token];
+    while (strlen($token) > 3 && ($token[strlen($token) - 1] === '.' || $token[strlen($token) - 1] === '-')) {
+        $token = substr($token, 0, -1);
+        $out[] = $token;
+    }
+    return $out;
+}
+
+/** The @-tokens in a body, as written, and the names each may be (shoutMentionCandidates()) — nothing looked up yet. */
+function shoutMentionTokens(string $body): array
+{
+    // Not preceded by a word character (so an e-mail address is not a mention) and not by another
+    // '@'. The character class is userValidUsername()'s, so a token that cannot be a name is never
+    // looked up.
+    if (!preg_match_all('/(?<![\w@])@([A-Za-z0-9_.-]{3,32})/', $body, $m)) return [];
+    $out = [];
+    foreach ($m[1] as $token) {
+        foreach (shoutMentionCandidates($token) as $name) {
+            $k = mb_strtolower($name);
+            if (!isset($out[$k])) $out[$k] = $name;
+        }
+    }
+    return $out;   // lower-case key => the name as it was typed
+}
+
+/**
+ * Which accounts a body actually mentions: up to five distinct existing users, never the author.
+ *
+ * Five because a mention is a nudge, not a mailing list — and because the row count per shout is
+ * what decides whether `shout_mentions` stays a small table. The author is dropped rather than
+ * refused: @-ing yourself is a typo, not an offence. Each token names the LONGEST of its candidates
+ * that is an account (1.71.0: "@bob." is bob, unless there is a "bob.").
+ */
+function shoutParseMentions(PDO $db, string $body, int $authorId): array
+{
+    if (!preg_match_all('/(?<![\w@])@([A-Za-z0-9_.-]{3,32})/', $body, $m)) return [];
+    $cands = [];
+    foreach ($m[1] as $token) foreach (shoutMentionCandidates($token) as $c) $cands[mb_strtolower($c)] = $c;
+    $names = array_slice(array_values($cands), 0, 40);   // look up a bounded number, keep five
+    $in = implode(',', array_fill(0, count($names), '?'));
+    $st = $db->prepare("SELECT id, username FROM users WHERE username IN ($in) LIMIT 40");
+    $st->execute($names);
+    $found = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $u) $found[mb_strtolower((string)$u['username'])] = (int)$u['id'];
+    $ids = [];
+    foreach ($m[1] as $token) {
+        foreach (shoutMentionCandidates($token) as $c) {
+            $id = $found[mb_strtolower($c)] ?? 0;
+            if ($id <= 0) continue;
+            if ($id !== $authorId && !in_array($id, $ids, true)) $ids[] = $id;
+            break;
+        }
+        if (count($ids) >= 5) break;
+    }
+    return $ids;
+}
+
+/**
+ * The names in a batch of bodies that really are accounts, as lower-case => the account's own
+ * spelling. One query for the whole page rather than one per row.
+ */
+function shoutKnownNames(PDO $db, array $bodies): array
+{
+    $tokens = [];
+    foreach ($bodies as $b) {
+        foreach (shoutMentionTokens((string)$b) as $k => $raw) {
+            if (!isset($tokens[$k])) $tokens[$k] = $raw;
+            if (count($tokens) >= 100) break 2;   // a page of shouts, not a dictionary attack
+        }
+    }
+    if (!$tokens) return [];
+    $names = array_values($tokens);
+    $in = implode(',', array_fill(0, count($names), '?'));
+    $st = $db->prepare("SELECT username FROM users WHERE username IN ($in)");
+    $st->execute($names);
+    $known = [];
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $u) $known[mb_strtolower((string)$u)] = (string)$u;
+    return $known;
+}
+
+/**
+ * Turn @name into a link, in the TEXT of already-rendered HTML and nowhere else.
+ *
+ * The split is on tags, so an '@' inside an href or a class attribute is left alone — richtextRender
+ * escapes every author byte before it builds a tag, so nothing between '<' and '>' at this point
+ * came from the writer, and nothing outside them is markup. Text already inside a link is skipped
+ * too: a mention written as the label of a [url] must not become a second <a> inside the first.
+ */
+function shoutLinkMentions(string $html, array $known, string $baseUrl, string $meName = ''): string
+{
+    if ($html === '' || !$known) return $html;
+    $meKey = $meName === '' ? '' : mb_strtolower($meName);
+    $parts = preg_split('/(<[^>]*>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    if ($parts === false) return $html;
+    $inLink = 0;
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 1) {                                   // odd entries are the tags
+            if (preg_match('#^<a\b#i', $part)) $inLink++;
+            elseif (preg_match('#^</a\s*>#i', $part)) $inLink = max(0, $inLink - 1);
+            continue;
+        }
+        if ($inLink > 0 || $part === '' || !str_contains($part, '@')) continue;
+        $parts[$i] = preg_replace_callback('/(?<![\w@])@([A-Za-z0-9_.-]{3,32})/', function ($m) use ($known, $baseUrl, $meKey) {
+            // The longest candidate that is an account (shoutMentionCandidates()): "@bob." links bob and leaves
+            // the full stop after the link as the text it is — unless an account really is called "bob.".
+            foreach (shoutMentionCandidates($m[1]) as $cand) {
+                $key = mb_strtolower($cand);
+                if (!isset($known[$key])) continue;
+                $cls = 'shout-mention' . ($meKey !== '' && $key === $meKey ? ' shout-mention-me' : '');
+                return '<a class="' . $cls . '" href="' . htmlspecialchars($baseUrl . '?action=u&name=' . rawurlencode($known[$key]), ENT_QUOTES, 'UTF-8')
+                     . '">@' . htmlspecialchars($cand, ENT_QUOTES, 'UTF-8') . '</a>'
+                     . htmlspecialchars(substr($m[1], strlen($cand)), ENT_QUOTES, 'UTF-8');
+            }
+            return $m[0];
+        }, $part) ?? $part;
+    }
+    return implode('', $parts);
+}
+
+/**
+ * Make every picture in a shout openable (1.62.0): each `<img class="rt-img">` the renderer built is
+ * wrapped in a link to its own address, opening in a new tab.
+ *
+ * A LINK, not a script's idea of one. assets/js/shoutbox.js intercepts only the unmodified primary
+ * click to open the lightbox; Ctrl/Cmd+click, a middle click, the context menu's "open in new tab"
+ * and a long press on a phone all stay the browser's, and none of them had to be written again.
+ *
+ * The address is the `src` the renderer already put through richtextSafeUrl() (http/https, a host,
+ * control characters gone) and escaped — reused byte for byte, never decoded and never parsed, so
+ * nothing here can make an address the renderer refused. No `data-external`: the picture has already
+ * been fetched from that host to be on the screen at all, and opening it bigger shows the same bytes,
+ * so the "you are leaving" question would be asked about a page the reader is already looking at —
+ * and it would swallow the Ctrl+click this exists to leave alone. `noreferrer` keeps the rule the
+ * image itself follows (referrerpolicy="no-referrer").
+ *
+ * Only pictures the RENDERER made: emotes are words and a sticker is already its own full size, and
+ * both are drawn later by shoutRenderEmotes() with classes of their own. A picture that is already
+ * inside a link is left alone as well — the author made it point somewhere, and a link inside a link
+ * is not HTML. The split is on tags, like shoutLinkMentions(), so an `rt-img` inside some text is text.
+ */
+function shoutLinkImages(string $html, string $title = ''): string
+{
+    if ($html === '' || !str_contains($html, 'rt-img')) return $html;
+    $parts = preg_split('/(<[^>]*>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    if ($parts === false) return $html;
+    $titleAttr = $title !== '' ? ' title="' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '"' : '';
+    $inLink = 0;
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 0) continue;                           // even entries are the text between tags
+        if (preg_match('#^<a\b#i', $part)) { $inLink++; continue; }
+        if (preg_match('#^</a\s*>#i', $part)) { $inLink = max(0, $inLink - 1); continue; }
+        if ($inLink > 0 || !preg_match('#^<img\b[^>]*\bclass="rt-img"#i', $part)) continue;
+        if (!preg_match('#\bsrc="([^"]+)"#', $part, $m)) continue;
+        $parts[$i] = '<a class="shout-img-link" href="' . $m[1] . '" target="_blank" rel="noopener noreferrer"'
+                   . $titleAttr . '>' . $part . '</a>';
+    }
+    return implode('', $parts);
+}
+
+/* ── one body: what is wrong with it, and what it renders as (1.67.0) ───────── */
+
+/**
+ * What is wrong with a shout's words, or null. The ONE answer shoutPost(), shoutEdit() and the
+ * composer's Preview (api/richtext_preview.php with `for: shout`) give, so the box under the Preview
+ * says exactly what pressing Enter would be refused for.
+ *
+ * The SHOUT's length limit is handed to the shared validator in place of the description's — the
+ * counter under the box has to say the number the send is actually judged against (the same trick
+ * api/user_messages.php uses). 'plain' is the whole feature's answer, not this shout's: nothing is
+ * parsed, so there is nothing to validate beyond the length the caller has already checked.
+ */
+function shoutBodyProblem(array $cfg, string $body, string $format): ?string
+{
+    if ($format === 'plain' || !function_exists('richtextValidate')) return null;
+    return richtextValidate($body, $format, array_merge($cfg, ['desc_max_chars' => (string)shoutMaxChars($cfg)]), 'shout');
+}
+
+/**
+ * What the body renderer needs to know, asked ONCE for a batch of bodies: the names that exist (for
+ * the @mentions), the site's address, the reader's own name, the emote table, whether stickers are
+ * on, and the words a picture's link says when the pointer rests on it.
+ */
+function shoutRenderContext(PDO $db, array $cfg, array $me, array $bodies): array
+{
+    return [
+        'known'     => shoutKnownNames($db, $bodies),
+        'base'      => function_exists('getBaseUrl') ? getBaseUrl() : '',
+        'me_name'   => (string)($me['username'] ?? ''),
+        // Empty when the feature is off, which is what makes shoutRenderEmotes() a no-op instead of a
+        // second switch (1.59.0).
+        'emotes'    => shoutEmotes($db, $cfg),
+        'stickers'  => shoutStickersEnabled($cfg),
+        'img_title' => __('shout.img_open'),
+    ];
+}
+
+/**
+ * One body, as HTML — the room's own pipeline, and the only one (1.67.0). shoutShape() draws every
+ * line through it and the composer's Preview draws the words being typed through it, so what the
+ * Preview shows is byte for byte what the line will be once it is said: the same renderer with hidden
+ * blocks shown (a line in the room has no "signed in" half), pictures made openable (1.62.0), then
+ * mentions, then emotes. Whatever the renderer does not support comes out the way a posted line
+ * would show it — as text — rather than as an error.
+ *
+ * Mentions first, emotes last: both walk the TEXT of finished html and neither may see the other's
+ * tag as writing. `:code:` inside an href is an address, not an emote.
+ */
+function shoutBodyHtml(string $body, string $format, array $cfg, array $ctx): string
+{
+    // A new account's links are TEXT (1.71.0, `links_text` — shoutShape() asks antispamWrittenNew() per line):
+    // the renderer builds no link at all (richtextLinkAttrs() under `rt_links_text`), and no picture is made
+    // into one either. The words, the address as words, stay.
+    $asText = !empty($ctx['links_text']);
+    // A Font Awesome face (:fa-NAME:, 1.69.0) is drawn in 'plain' as well, as an emote is: the picker
+    // puts it in the box whatever the room's format, and plain means no markup, not no emoji.
+    $html = $format === 'plain'
+        ? (function_exists('emojiFaRenderHtml') ? emojiFaRenderHtml(nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false), $cfg)
+                                                  : nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), false))
+        : ($asText ? richtextRender($body, $format, ['rt_links_text' => '1', 'rt_magnet_compact' => '1'] + $cfg, true)
+                   : shoutLinkImages(richtextRender($body, $format, ['rt_magnet_compact' => '1'] + $cfg, true), (string)($ctx['img_title'] ?? '')));
+    return shoutRenderEmotes(shoutLinkMentions($html, (array)($ctx['known'] ?? []), (string)($ctx['base'] ?? ''), (string)($ctx['me_name'] ?? '')),
+                             (array)($ctx['emotes'] ?? []), (string)($ctx['base'] ?? ''), !empty($ctx['stickers']));
+}
+
+/* ── writing one ───────────────────────────────────────────────────────────── */
+
+/**
+ * Write a shout. ['ok' => true, 'row' => …] or ['ok' => false, 'error' => code] with codes
+ * disabled | no_permission | muted | flood | antispam | empty | too_long | invalid_body.
+ *
+ * The ORDER is the endpoint's order and is part of the contract: who somebody is comes before how
+ * fast they are typing, and both come before what they typed — being told "too long" by a room you
+ * may not write in at all is an answer to a question nobody asked.
+ *
+ * How fast is the site's one anti-spam layer (1.71.0, includes/antispam.php, context `shout`): the
+ * room's ladder with `shout_flood_seconds` as its floor — and with the layer switched off, that setting
+ * alone, between every two lines, as it always was. Measured by the DATABASE's clock, from the last line
+ * the layer saw this account write (a line the SITE says about somebody never passes it, so registering
+ * a torrent does not gag the person it names). A wait is still `flood` with `retry_after`; any other
+ * refusal of the layer's (a CAPTCHA due, the same words again) is `antispam`; both carry the layer's own
+ * answer in `antispam` for the endpoint to hand on. `$opts['input']` is the request (a CAPTCHA token).
+ */
+function shoutPost(PDO $db, array $cfg, array $user, string $body, string $format, string $ip, array $opts = []): array
+{
+    $gate = shoutMayPost($db, $cfg, $user);
+    if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until'], 'row' => null];
+    $uid = (int)$user['id'];
+
+    $body = trim($body);
+    $t = antispamCheck($db, $cfg, 'shout', antispamSubject($user, $ip), $body, ['input' => (array)($opts['input'] ?? []), 'verify' => $opts['verify'] ?? null]);
+    if (!$t['ok']) {
+        return ['ok' => false, 'error' => $t['kind'] === 'wait' ? 'flood' : 'antispam', 'retry_after' => (int)$t['seconds'],
+                'antispam' => $t, 'row' => null];
+    }
+    $ticket = $t['ticket'];
+    // What they typed, now — and a refusal of the words hands the reserved line back to the layer.
+    $refuse = function (array $r) use ($db, $ticket): array { antispamRelease($db, $ticket); return $r; };
+
+    if ($body === '') return $refuse(['ok' => false, 'error' => 'empty', 'row' => null]);
+    $max = shoutMaxChars($cfg);
+    if (mb_strlen($body) > $max) return $refuse(['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null]);
+
+    // 'plain' is the whole feature's answer, not this shout's: when the site says plain, nothing is
+    // parsed and there is nothing to validate beyond the length above. The rest is shoutBodyProblem(),
+    // the same answer the composer's Preview gives (1.67.0).
+    $format = in_array($format, shoutFormatChoices($cfg), true) ? $format : shoutFormat($cfg);
+    $bad = shoutBodyProblem($cfg, $body, $format);
+    if ($bad === null && function_exists('imagesPlaceCheck')) $bad = imagesPlaceCheck($db, $cfg, 'shout', $body, $format, $user);
+    if ($bad !== null) return $refuse(['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null]);
+
+    $bucket = function_exists('ipBucket') && $ip !== '' ? ipBucket($ip) : '';
+    $db->prepare("INSERT INTO shouts (user_id, body, body_format, ip_bucket) VALUES (?, ?, ?, ?)")
+       ->execute([$uid, $body, $format, mb_substr($bucket, 0, 45)]);
+    $id = (int)$db->lastInsertId();
+    antispamRecord($db, $ticket);
+    if (function_exists('imagesRefsTouch') && str_contains($body, '/i/')) imagesRefsTouch($db, $cfg, 'shout', (string)$id);
+
+    foreach (shoutParseMentions($db, $body, $uid) as $mid) {
+        // IGNORE: the primary key is the pair, and two mentions of one person in one line are one.
+        $db->prepare("INSERT IGNORE INTO shout_mentions (shout_id, user_id) VALUES (?, ?)")->execute([$id, $mid]);
+    }
+
+    // Rendered by the same function the poll uses, so the line that appears on Enter is byte for
+    // byte the line everybody else will be handed. Checked by id rather than trusted: if this row
+    // were already gone the answer must be "nothing to append", not somebody else's sentence.
+    $rows = shoutRows($db, $cfg, $user, 1, $id - 1);
+    $row = ($rows && (int)$rows[0]['id'] === $id) ? $rows[0] : null;
+    return ['ok' => true, 'error' => '', 'row' => $row, 'id' => $id];
+}
+
+/* ── lines the site says (v66) ─────────────────────────────────────────────── */
+
+/**
+ * Write a line the SITE said. Returns the new id, or 0 when there was nothing to write.
+ *
+ * Not shoutPost() with a flag, because shoutPost() is about a PERSON: it asks whether they may
+ * write here, how fast they are typing and whether what they typed survives richtextValidate(),
+ * and not one of those questions has an answer when the writer is the tracker. The body is composed
+ * by this file out of a dictionary string and a number, so there is nothing somebody typed to
+ * validate — and `plain` is the format for the same reason, since markup nobody asked for is markup
+ * nobody is responsible for.
+ *
+ * `$userId` is who the line is ABOUT, and becomes the name it is signed with: the submitter, when
+ * they asked to be named. NULL signs it with the site. Either way the row is `is_system`, which is
+ * what keeps it out of everybody's unread counts (so registering a torrent never makes the room
+ * ping) and out of "own" (so the person it names cannot delete it, and nor can anybody but a
+ * moderator).
+ */
+function shoutSystemPost(PDO $db, array $cfg, string $body, ?int $userId = null): int
+{
+    $body = trim($body);
+    if (!shoutSystemLines($cfg) || $body === '') return 0;
+    $author = ($userId !== null && $userId > 0) ? $userId : null;
+    try {
+        $st = $db->prepare("INSERT INTO shouts (user_id, body, body_format, is_system) VALUES (?, ?, 'plain', 1)");
+        $st->bindValue(1, $author, $author === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+        // Bounded by the COLUMN's sense of a sentence, not by `shout_max_chars`: that number is how
+        // much a member may say, and an operator who sets it to ten has not asked for the site's own
+        // announcements to be cut in half.
+        $st->bindValue(2, mb_substr($body, 0, 500));
+        $st->execute();
+        return (int)$db->lastInsertId();
+    } catch (\Throwable $e) {
+        return 0;   // the columns arrive with schema 66, and a batch of hashes has to land either way
+    }
+}
+
+/**
+ * "A torrent was registered", once per batch.
+ *
+ * ONE line for the batch rather than one per hash: somebody registering forty torrents is one thing
+ * that happened, and forty lines is the room emptied of everything anybody said.
+ *
+ * WHO IT NAMES is `wl_submitter_public`'s decision and not this function's — a submitter who is not
+ * public is named nowhere else on the site and must not be named here either, so the line becomes
+ * the site saying that a torrent arrived. The name rides as the row's AUTHOR rather than as a word
+ * inside the sentence, because a name dropped into a sentence has to agree with a verb, and this
+ * sentence is written once per language and then read by everybody.
+ *
+ * In the site's OWN language (`default_language`), not the visitor's: the row is written once and
+ * read by every reader afterwards, so the language of whoever happened to press the button is the
+ * one thing it must not be.
+ */
+function shoutSystemWhitelistAdded(PDO $db, array $cfg, int $count, ?int $submitterId): void
+{
+    if ($count <= 0 || !shoutSystemLines($cfg) || !function_exists('langFor')) return;
+    $named = $submitterId !== null && $submitterId > 0;
+    $key = 'shout.sys_wl_' . ($named ? 'named' : 'anon') . ($count === 1 ? '_one' : '_many');
+    shoutSystemPost($db, $cfg, langFor((string)($cfg['default_language'] ?? ''), $key, ['n' => $count]),
+                    $named ? $submitterId : null);
+}
+
+/* ── reading them ──────────────────────────────────────────────────────────── */
+
+/**
+ * What a shout IS, as far as every read path is concerned. One string, so the list, the "older"
+ * button and the pinned line cannot drift apart about which columns a row carries.
+ *
+ * A LEFT join from v66: `shouts.user_id` is nullable now, because a line the SITE said has no
+ * author. An inner join would have silently dropped exactly those rows from every list.
+ */
+const SHOUT_ROW_SELECT = "SELECT s.id, s.user_id, s.body, s.body_format, s.created_at, s.is_system,
+                                 s.pinned_at, s.edited_at, s.edited_by, u.username, u.avatar_sha,
+                                 UNIX_TIMESTAMP(s.created_at) AS created_ts,
+                                 UNIX_TIMESTAMP(s.edited_at) AS edited_ts,
+                                 TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s,
+                                 TIMESTAMPDIFF(SECOND, u.created_at, COALESCE(s.edited_at, s.created_at)) AS author_age_s
+                            FROM shouts s LEFT JOIN users u ON u.id = s.user_id";
+// `author_age_s` (1.71.0): how old the author's account was when these words were last written — a new
+// account's links are drawn as text (antispamWrittenNew(), includes/antispam.php). Both DATETIMEs of this
+// database, so the difference is the same whatever zone they were written in.
+// `edited_ts` and `age_s` (1.66.0): when the words last changed, as an instant for the same reason
+// `created_ts` is one, and how old the line is — by the DATABASE's clock, the one `created_at` was
+// written on — so the two windows (edit, delete-your-own) are measured without PHP's clock taking part.
+// `avatar_sha` (1.63.0) is the picture beside the name, from the same join that brings the name: a
+// room of twenty-five lines is one query, not twenty-six.
+// `created_ts` (1.62.0) is the moment as an INSTANT, converted by the database from its own session
+// zone — the zone that DATETIME was written in. PHP reading `created_at` as a string would assume its
+// own zone instead, which is right on a machine where the two agree and hours off on one where they do
+// not (includes/db_clock.php). Every time a reader sees is made from this number.
+
+/**
+ * When a row was said, as a unix time — or null when nothing says.
+ *
+ * From `created_ts`, which SHOUT_ROW_SELECT has the database compute, because only the database knows
+ * which zone its DATETIME was written in. A row that reached here some other way (a hand-built array)
+ * is asked about the same way rather than parsed in PHP: UNIX_TIMESTAMP() of the string reads it in
+ * the session zone, which is exactly what `new DateTime()` would get wrong.
+ */
+function shoutRowInstant(PDO $db, array $r): ?int
+{
+    if (isset($r['created_ts']) && is_numeric($r['created_ts'])) return (int)$r['created_ts'];
+    $at = (string)($r['created_at'] ?? '');
+    if ($at === '') return null;
+    try {
+        $st = $db->prepare("SELECT UNIX_TIMESTAMP(?)");
+        $st->execute([$at]);
+        $v = $st->fetchColumn();
+        return is_numeric($v) ? (int)$v : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * The newest id in the room — the baseline a freshly drawn widget starts polling from. Asked in every reply of the
+ * room's poll, so it walks the primary key down from its end (1.74.0, PERF-15): MAX(id) with a condition on a column
+ * no index carries read the whole table instead — 18–21 ms a poll at the largest retention.
+ */
+function shoutNewestId(PDO $db): int
+{
+    try {
+        return (int)($db->query("SELECT id FROM shouts WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 1")->fetchColumn() ?: 0);
+    } catch (\Throwable $e) {
+        return 0;   // the table arrives with schema 63; a page rendered mid-upgrade has no room yet
+    }
+}
+
+/**
+ * Is there anything ABOVE this id? One indexed lookup, and it is what decides whether the "older"
+ * button is drawn at all — by the endpoint AND by the first server-side render of the widget, so
+ * the two cannot disagree about whether there is more to read.
+ */
+function shoutHasOlder(PDO $db, int $oldestId): bool
+{
+    if ($oldestId <= 0) return false;
+    try {
+        $st = $db->prepare("SELECT 1 FROM shouts WHERE deleted_at IS NULL AND id < ? LIMIT 1");
+        $st->execute([$oldestId]);
+        return (bool)$st->fetchColumn();
+    } catch (\Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Rows for the client, NEWEST LAST — the order they are read in, so the browser appends rather than
+ * reverses. `$after` asks for what is newer than an id, `$before` for what is older; neither asks
+ * for the last `$limit`.
+ *
+ * `$me` may be an empty array: a guest the operator handed `shout.view` reads the room and owns
+ * nothing in it.
+ */
+function shoutRows(PDO $db, array $cfg, array $me, int $limit, ?int $after = null, ?int $before = null): array
+{
+    $limit = max(1, min(500, $limit));
+    if ($after !== null) {
+        $st = $db->prepare(SHOUT_ROW_SELECT . " WHERE s.deleted_at IS NULL AND s.id > ? ORDER BY s.id ASC LIMIT $limit");
+        $st->execute([(int)$after]);
+        $raw = $st->fetchAll(PDO::FETCH_ASSOC);
+    } else {
+        // Newest first for the query (that is what the index answers from the end), reversed below.
+        $sql = SHOUT_ROW_SELECT . " WHERE s.deleted_at IS NULL";
+        $args = [];
+        if ($before !== null) { $sql .= " AND s.id < ?"; $args[] = (int)$before; }
+        $st = $db->prepare($sql . " ORDER BY s.id DESC LIMIT $limit");
+        $st->execute($args);
+        $raw = array_reverse($st->fetchAll(PDO::FETCH_ASSOC));
+    }
+    return shoutShape($db, $cfg, $me, $raw);
+}
+
+/**
+ * Raw rows -> the rows the browser is handed. The ONE place a shout becomes something to display.
+ *
+ * Split out of shoutRows() in v66 because there are two ways to ask for a shout now — the list and
+ * the pinned line — and a second copy of "what may this reader do with it, and what does the body
+ * render as" is a second answer waiting to disagree with the first.
+ */
+function shoutShape(PDO $db, array $cfg, array $me, array $raw): array
+{
+    if (!$raw) return [];
+    $meId = (int)($me['id'] ?? 0);
+
+    // Two permissions, asked once for the reader rather than once per row.
+    $mayModerate = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
+    $mayDeleteOwn = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.delete_own');
+    // …and the two that correct a line, with the windows (1.66.0), once for the batch too. The
+    // buttons are drawn from exactly the rules shoutEdit() and shoutDelete() enforce, so nobody is
+    // offered a control that will refuse them — but the server checks again either way. Editing is
+    // WRITING: somebody who may not write here right now (silenced, or without shout.post) is not
+    // offered the pencil either.
+    $mayEditAny = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.edit_any');
+    $mayEditOwn = $meId > 0 && userIdHasPermission($db, $cfg, $meId, 'shout.edit_own');
+    $mayWrite   = ($mayEditAny || $mayEditOwn) && !empty(shoutMayPost($db, $cfg, $me)['ok']);
+    $editWin    = shoutEditMinutes($cfg) * 60;          // 0 = no window: own lines are never editable
+    $delWin     = shoutDeleteOwnMinutes($cfg) * 60;     // 0 = no limit
+    // What the body renderer needs, once for the batch rather than once per line: the known names,
+    // the address, the emote table (1.59.0)… — see shoutRenderContext(). The composer's Preview asks
+    // for the same thing for one body, which is how the two can never draw a line differently.
+    $render = shoutRenderContext($db, $cfg, $me, array_column($raw, 'body'));
+    $base = (string)$render['base'];
+    // What a line with no author is signed with. `user_id` is nullable from v66, so a row can
+    // honestly have nobody behind it — and a blank name column reads as a bug rather than as the
+    // site saying something.
+    $siteName = trim((string)($cfg['site_name'] ?? ''));
+    if ($siteName === '') $siteName = __('shout.system_who');
+    // …and the picture beside it (1.63.0): the site's own mark, once for the batch. '' while pictures
+    // are switched off, which both renderers read as "draw nothing".
+    $siteMark = function_exists('userAvatarSiteField') ? userAvatarSiteField($base, $cfg) : '';
+
+    // THE READER'S CLOCK (1.62.0), once for the batch. Every row this function shapes — the first
+    // page the server draws and every row a poll appends — gets its time from here, so the two can
+    // never disagree about what hour a line was said at. Their own zone when they chose one, the
+    // site's otherwise; a guest has no row and reads the site's. A caller holding only part of the
+    // account row (a test, a hand-built array) has the zone asked for rather than silently guessed.
+    $tzRow = $meId > 0 ? $me : null;
+    if ($meId > 0 && !array_key_exists('timezone', $me)) {
+        try {
+            $st = $db->prepare("SELECT timezone FROM users WHERE id = ?");
+            $st->execute([$meId]);
+            $tzRow = ['timezone' => $st->fetchColumn() ?: null];
+        } catch (\Throwable $e) {
+            $tzRow = null;   // the column arrives with schema 68; mid-upgrade everybody reads the site's
+        }
+    }
+    $tz = userDisplayTimezone($tzRow, $cfg);
+
+    // Which of these lines named me — from the table written when they were said, not from parsing
+    // them again now.
+    $mine = [];
+    if ($meId > 0) {
+        $ids = array_map('intval', array_column($raw, 'id'));
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $st = $db->prepare("SELECT shout_id FROM shout_mentions WHERE user_id = ? AND shout_id IN ($in)");
+        $st->execute(array_merge([$meId], $ids));
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $sid) $mine[(int)$sid] = true;
+    }
+
+    // …and which of them a FRIEND said. One query for the batch, exactly like the mentions above,
+    // and only while the feature that defines a friend is switched on at all. It exists so the sound
+    // player can tell a friend's line from a stranger's (1.61.0) without asking the server a second
+    // question about rows it has already been handed — the three sounds are three events, and two of
+    // them are indistinguishable in the browser.
+    $pals = [];
+    if ($meId > 0 && function_exists('friendsEnabled') && friendsEnabled($cfg)) {
+        $authors = [];
+        foreach ($raw as $r) {
+            $a = $r['user_id'] === null ? 0 : (int)$r['user_id'];
+            if ($a > 0 && $a !== $meId) $authors[$a] = true;
+        }
+        if ($authors) {
+            $ids = array_keys($authors);
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $st = $db->prepare("SELECT user_id, friend_id FROM user_friends
+                                 WHERE status = 'accepted'
+                                   AND ((user_id = ? AND friend_id IN ($in)) OR (friend_id = ? AND user_id IN ($in)))");
+            $st->execute(array_merge([$meId], $ids, [$meId], $ids));
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $f) {
+                $pals[(int)$f['user_id'] === $meId ? (int)$f['friend_id'] : (int)$f['user_id']] = true;
+            }
+        }
+    }
+
+    // Which lines THIS reader may report to the moderators, and has already reported (1.71.0, includes/reports.php):
+    // somebody else's line, never one the site said, for a reader holding content.report — one query for the batch.
+    $reportFlags = function_exists('contentReportFlags') ? contentReportFlags($db, $cfg, $meId > 0 ? $me : null, 'shout', $raw) : [];
+
+    $out = [];
+    foreach ($raw as $r) {
+        $system = !empty($r['is_system']);
+        // An author this site can still name. A row whose account has gone (or which never had
+        // one) is the site speaking, and `user_id` 0 is what tells both renderers not to link it.
+        $authorId = $r['user_id'] === null ? 0 : (int)$r['user_id'];
+        $authorName = ($authorId > 0 && $r['username'] !== null) ? (string)$r['username'] : '';
+        // A system line is never MINE, whoever it happens to be about: "own" is what lets somebody
+        // take back their own sentence, and nobody wrote this one.
+        $own = !$system && $meId > 0 && $authorId === $meId;
+        $fmt = (string)$r['body_format'];
+        $ts = shoutRowInstant($db, $r);
+        // How old the line is, by the database's clock (SHOUT_ROW_SELECT). NULL for a hand-built row
+        // that did not come through it — and a line whose age nobody can say is inside no window.
+        $age = (isset($r['age_s']) && is_numeric($r['age_s'])) ? max(0, (int)$r['age_s']) : null;
+        // May THIS reader correct it, and for how much longer? `edit_left` is seconds from this answer
+        // and 0 when there is no clock on it (a moderator's `shout.edit_any`); the browser uses it only
+        // to take the button away once it can no longer work. Nobody edits a line the SITE said: its
+        // words are the site's, and a moderator who disagrees with one takes it down instead.
+        $editable = false;
+        $editLeft = 0;
+        if (!$system && $mayWrite) {
+            if ($mayEditAny) {
+                $editable = true;
+            } elseif ($own && $mayEditOwn && $editWin > 0 && $age !== null && $age < $editWin) {
+                $editable = true;
+                $editLeft = $editWin - $age;
+            }
+        }
+        // Taking it back: a moderator always, the author inside `shout_delete_own_minutes` (0 = no
+        // limit, the only answer before 1.66.0). `del_left` is the same kind of number as `edit_left`.
+        $deletable = $mayModerate;
+        $delLeft = 0;
+        if (!$deletable && $own && $mayDeleteOwn) {
+            if ($delWin === 0) {
+                $deletable = true;
+            } elseif ($age !== null && $age < $delWin) {
+                $deletable = true;
+                $delLeft = $delWin - $age;
+            }
+        }
+        // The mark a correction leaves. `edited_mod` is "somebody other than the author changed these
+        // words" — a moderator with shout.edit_any, since nobody else can — and it is the difference a
+        // reader must be able to see: the author fixing a typo is not the same event as words being put
+        // under their name. Compared on the raw ids, so it still holds after the author's account goes.
+        $editedTs = (isset($r['edited_ts']) && is_numeric($r['edited_ts'])) ? (int)$r['edited_ts'] : null;
+        $editedBy = (($r['edited_by'] ?? null) === null) ? 0 : (int)$r['edited_by'];
+        // Written while the account was new: its links are text (1.71.0, includes/antispam.php).
+        $render['links_text'] = !$system && $authorId > 0 && antispamWrittenNew($db, $cfg, $authorId, $r['author_age_s'] ?? null);
+        $out[] = [
+            'id'          => (int)$r['id'],
+            'user'        => $authorName !== '' ? $authorName : $siteName,
+            'user_id'     => $authorName !== '' ? $authorId : 0,
+            // The picture beside the name, as an ADDRESS built here (1.63.0): the author's own, the
+            // site's default or their letter — and for a line the SITE said, the site's mark, even when
+            // it is signed with the name of the person it is about: it is still the site talking. The
+            // same field reaches templates/partials/shoutbox_widget.php and assets/js/shoutbox.js, so
+            // the first page and a polled row draw one element from one input.
+            'avatar'      => ($system || $authorName === '')
+                ? $siteMark
+                : (function_exists('userAvatarField')
+                    ? userAvatarField(['username' => $authorName, 'avatar_sha' => $r['avatar_sha'] ?? null], 20, $base, $cfg)
+                    : ''),
+            // The moment, three ways, all in the READER's zone: `time` is what the list prints,
+            // `at` is the title over it — the full date with its offset, so nobody has to guess
+            // which clock "14:05" was on — and `ts` is the instant itself for anything that has to
+            // compare two rows. The raw column never leaves the server: it is a wall-clock string in
+            // the database session's zone, and that zone is nobody's.
+            'time'        => $ts !== null ? userDisplayTime($ts, $tz, 'H:i') : '',
+            'at'          => $ts !== null ? userDisplayTime($ts, $tz, 'Y-m-d H:i:s P') : '',
+            'ts'          => $ts,
+            // The day of the week beside the hour (1.66.0), in the reader's zone and — from the
+            // dictionary, never a PHP locale — in the reader's language: `day` is what is printed,
+            // `dow` (1 = Monday … 7 = Sunday) is what the browser renames it from after a live
+            // language switch that could not reach this row. Always shown, today's lines included.
+            'day'         => $ts !== null ? userDisplayWeekday($ts, $tz) : '',
+            'dow'         => $ts !== null ? userDisplayDow($ts, $tz) : 0,
+            // The body through the room's one pipeline — renderer, openable pictures (1.62.0), mentions,
+            // emotes — which is also what the composer's Preview draws (1.67.0). This is the one place
+            // a stored shout becomes something to display, so the first page and the poll hand over
+            // the same markup.
+            'html'        => shoutBodyHtml((string)$r['body'], $fmt, $cfg, $render),
+            'own'         => $own,
+            'system'      => $system,
+            'pinned'      => ($r['pinned_at'] ?? null) !== null,
+            'deletable'   => $deletable,
+            'del_left'    => $delLeft,
+            'editable'    => $editable,
+            'edit_left'   => $editLeft,
+            'edited'      => $editedTs !== null,
+            'edited_mod'  => $editedTs !== null && $editedBy > 0 && $editedBy !== $authorId,
+            // The exact moment, in the reader's zone with its offset — the title over "(edited)".
+            'edited_at'   => $editedTs !== null ? userDisplayTime($editedTs, $tz, 'Y-m-d H:i:s P') : '',
+            'mentions_me' => isset($mine[(int)$r['id']]),
+            // Never true for a line the SITE said, whoever it happens to be signed with: an
+            // announcement is nobody's unread (shoutUnreadCounts agrees) and must not be the reason
+            // a friend's chime plays.
+            'friend'      => !$system && $authorId > 0 && isset($pals[$authorId]),
+            // The flag on the row (1.71.0): may this reader report the line, and have they (an open report).
+            'can_report'  => !empty($reportFlags[(int)$r['id']]['can']),
+            'reported'    => !empty($reportFlags[(int)$r['id']]['reported']),
+        ];
+    }
+    return $out;
+}
+
+/* ── the one pinned line (v66) ─────────────────────────────────────────────── */
+
+/**
+ * The pinned announcement, shaped exactly like any other row, or null when there is none.
+ *
+ * At most one row ever carries `pinned_at` — shoutPin() is what keeps that true — so this is one
+ * indexed lookup and not a sort. It is deliberately NOT part of the `after=` answer: that path
+ * appends at the bottom of the list, and a pinned row handed to it would be appended again on
+ * every tick until the room was nothing else.
+ */
+function shoutPinned(PDO $db, array $cfg, ?array $me): ?array
+{
+    try {
+        $st = $db->prepare(SHOUT_ROW_SELECT . " WHERE s.deleted_at IS NULL AND s.pinned_at IS NOT NULL
+                                                ORDER BY s.pinned_at DESC LIMIT 1");
+        $st->execute();
+        $raw = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        return null;   // the columns arrive with schema 66; mid-upgrade nothing is pinned
+    }
+    $rows = shoutShape($db, $cfg, is_array($me) ? $me : [], $raw);
+    return $rows ? $rows[0] : null;
+}
+
+/**
+ * Pin a line, or unpin it. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => …] with
+ * not_found | no_permission | failed.
+ *
+ * ONE AT A TIME, and that is the whole rule: pinning is a moderator saying "this is the thing
+ * everybody should read", and two of them is nobody reading either. So the unpin of whatever was
+ * there and the pin of this one are a single transaction — half of that pair is a room with two
+ * announcements, or with none where a moment ago there was one.
+ *
+ * `shout.moderate` and no new permission: it already means room-wide authority, it is already what
+ * takes somebody else's line down, and a grant nobody has been given yet is a feature nobody can
+ * use until the operator goes looking for it.
+ *
+ * THE PAGE TOGGLES, THE SERVER DOES WHAT IT IS ASKED (1.67.0). On the line that is pinned the row's
+ * pin is drawn filled, says "Unpin" and sends `pin: false` — that is the toggle the owner asked for,
+ * and it lives in the button. Here, `pin: true` on a line that is already pinned changes nothing, and
+ * `pin: false` takes down THAT line only. The first build toggled on the server as well, and a
+ * browser check caught what that meant: a moderator whose page had not yet seen a colleague pin a
+ * line would press "pin" and take the colleague's announcement DOWN; and an unpin cleared whatever
+ * was pinned, so a stale "Unpin" could remove a different announcement altogether. Both decided on a
+ * locking read of the row inside the transaction, so two moderators pressing at once act in turn.
+ * A request that changes nothing writes no audit line — the log records what happened to the room.
+ * ['ok' => true, 'id' => <the pinned id afterwards, 0 for none>, 'changed' => bool].
+ */
+function shoutPin(PDO $db, array $cfg, array $me, int $id, bool $on): array
+{
+    $meId = (int)($me['id'] ?? 0);
+    if ($meId <= 0 || !userIdHasPermission($db, $cfg, $meId, 'shout.moderate')) {
+        return ['ok' => false, 'error' => 'no_permission'];
+    }
+    $st = $db->prepare("SELECT id FROM shouts WHERE id = ? AND deleted_at IS NULL LIMIT 1");
+    $st->execute([$id]);
+    if (!$st->fetchColumn()) return ['ok' => false, 'error' => 'not_found'];
+
+    $changed = false;
+    try {
+        $db->beginTransaction();
+        $st = $db->prepare("SELECT pinned_at IS NOT NULL FROM shouts WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+        $st->execute([$id]);
+        $isPinned = (int)$st->fetchColumn() === 1;
+        if ($on && !$isPinned) {
+            // At most one: whatever was pinned comes down in the same transaction this one goes up in.
+            $db->prepare("UPDATE shouts SET pinned_at = NULL, pinned_by = NULL WHERE pinned_at IS NOT NULL")->execute();
+            $db->prepare("UPDATE shouts SET pinned_at = NOW(), pinned_by = ? WHERE id = ?")->execute([$meId, $id]);
+            $changed = true;
+        } elseif (!$on && $isPinned) {
+            // THIS line only, never "whatever is pinned".
+            $db->prepare("UPDATE shouts SET pinned_at = NULL, pinned_by = NULL WHERE id = ?")->execute([$id]);
+            $changed = true;
+        }
+        $db->commit();
+    } catch (\Throwable $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        return ['ok' => false, 'error' => 'failed'];
+    }
+    if ($changed && function_exists('auditLog')) {
+        auditLog($db, 'shout.pin', ['target_type' => 'shout', 'target_id' => $id,
+            'summary' => (string)($me['username'] ?? '#' . $meId) . ($on ? ' → pinned shout #' : ' → unpinned shout #') . $id]);
+    }
+    $pinnedNow = (int)$db->query("SELECT COALESCE(MAX(id), 0) FROM shouts WHERE pinned_at IS NOT NULL AND deleted_at IS NULL")->fetchColumn();
+    return ['ok' => true, 'error' => '', 'id' => $pinnedNow, 'changed' => $changed];
+}
+
+/* ── removing one ──────────────────────────────────────────────────────────── */
+
+/**
+ * Delete a shout. ['ok' => true] or ['ok' => false, 'error' => 'not_found' | 'no_permission'].
+ *
+ * A SOFT delete: the row keeps its place until retention takes it, so a moderator's decision leaves
+ * a trace for as long as anything here lasts. Publicly the line is simply gone — every read path
+ * asks for `deleted_at IS NULL`.
+ *
+ * Somebody else's line is an audited act; your own is not. Deleting what you just said is tidying.
+ *
+ * 1.66.0: your own only for `shout_delete_own_minutes` (0 = no limit) — 'too_late' after that, and
+ * measured by the database against `created_at`, never by anything the request carries.
+ * `shout.moderate` is held by no window.
+ *
+ * `$opts['authority'] === 'panel'` (1.71.0 part E, includes/reports.php): the Reports page, whose caller has
+ * already asked panelCan() for `panel.reports.shouts.handle` — a moderator's removal whatever the account behind
+ * the panel session holds; the owner's own session (no account, id 0) stamps no one.
+ */
+function shoutDelete(PDO $db, array $cfg, array $me, int $id, array $opts = []): array
+{
+    $meId = (int)($me['id'] ?? 0);
+    $panel = ($opts['authority'] ?? '') === 'panel';
+    if ($meId <= 0 && !$panel) return ['ok' => false, 'error' => 'no_permission'];
+    $st = $db->prepare("SELECT s.id, s.user_id, s.is_system, u.username,
+                               TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
+                          FROM shouts s LEFT JOIN users u ON u.id = s.user_id
+                         WHERE s.id = ? AND s.deleted_at IS NULL LIMIT 1");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'error' => 'not_found'];
+
+    // Nobody owns a line the site said, not even the account it names — so taking one down is a
+    // moderator's act and `shout.delete_own` never reaches it.
+    $own = empty($row['is_system']) && $row['user_id'] !== null && $meId > 0 && (int)$row['user_id'] === $meId;
+    $mayModerate = $panel || userIdHasPermission($db, $cfg, $meId, 'shout.moderate');
+    if (!$mayModerate && !($own && userIdHasPermission($db, $cfg, $meId, 'shout.delete_own'))) {
+        return ['ok' => false, 'error' => 'no_permission'];
+    }
+    if (!$mayModerate) {
+        $win = shoutDeleteOwnMinutes($cfg) * 60;
+        if ($win > 0 && (int)$row['age_s'] >= $win) return ['ok' => false, 'error' => 'too_late'];
+    }
+    $db->prepare("UPDATE shouts SET deleted_by = ?, deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL")
+       ->execute([$meId > 0 ? $meId : null, $id]);
+    if (!$own && function_exists('auditLog')) {
+        auditLog($db, 'shout.delete', ['target_type' => 'user', 'target_id' => (int)$row['user_id'],
+            'summary' => (string)($me['username'] ?? '#' . $meId) . ' → shout #' . $id . ' by ' . (string)$row['username']]);
+    }
+    return ['ok' => true, 'error' => ''];
+}
+
+/* ── correcting one (1.66.0) ───────────────────────────────────────────────── */
+
+/**
+ * The row an edit is about, with its age by the database's clock. Null when it is not there.
+ * One reader for the two edit paths below, so they cannot disagree about what a line is.
+ */
+function shoutEditRow(PDO $db, int $id): ?array
+{
+    if ($id <= 0) return null;
+    $st = $db->prepare("SELECT s.id, s.user_id, s.body, s.body_format, s.is_system, s.created_at, u.username,
+                               TIMESTAMPDIFF(SECOND, s.created_at, NOW()) AS age_s
+                          FROM shouts s LEFT JOIN users u ON u.id = s.user_id
+                         WHERE s.id = ? AND s.deleted_at IS NULL LIMIT 1");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/**
+ * May this account change these words right now? '' when it may, otherwise 'no_permission' or
+ * 'too_late'. The ONE place the rule lives — shoutShape() draws the pencil from the same three facts.
+ *
+ *   · a line the SITE said is nobody's to rewrite, `shout.edit_any` included: its words are the
+ *     site's, and a moderator who disagrees with one takes it down;
+ *   · `shout.edit_any` edits anybody's line at any time — the moderator group's, and nobody else's
+ *     unless an operator hands it out;
+ *   · `shout.edit_own` edits your OWN line for `shout_edit_minutes` from when it was said; 0 minutes
+ *     means members do not edit at all. "Own" is the stored author, compared with the account the
+ *     SESSION says is asking — nothing in the request can claim a different author or a younger line.
+ */
+function shoutEditRight(PDO $db, array $cfg, int $meId, array $row): string
+{
+    if ($meId <= 0 || !empty($row['is_system'])) return 'no_permission';
+    if (userIdHasPermission($db, $cfg, $meId, 'shout.edit_any')) return '';
+    $own = $row['user_id'] !== null && (int)$row['user_id'] === $meId;
+    if (!$own || !userIdHasPermission($db, $cfg, $meId, 'shout.edit_own')) return 'no_permission';
+    $win = shoutEditMinutes($cfg) * 60;
+    if ($win <= 0) return 'no_permission';
+    return (int)$row['age_s'] < $win ? '' : 'too_late';
+}
+
+/**
+ * The words as they are STORED, for the editor to start from: ['ok' => true, 'id', 'body', 'format',
+ * 'left'] or ['ok' => false, 'error' => …]. The rendered HTML is not something to edit, and the list
+ * carries nothing else — so the editor asks for this when it opens, and the same gate as the save
+ * answers, which also means a window that closed since the page was drawn is caught before anybody
+ * types a word.
+ */
+function shoutEditSource(PDO $db, array $cfg, array $me, int $id): array
+{
+    $gate = shoutMayPost($db, $cfg, $me);
+    if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until']];
+    $row = shoutEditRow($db, $id);
+    if (!$row) return ['ok' => false, 'error' => 'not_found'];
+    $meId = (int)$me['id'];
+    $why = shoutEditRight($db, $cfg, $meId, $row);
+    if ($why !== '') return ['ok' => false, 'error' => $why];
+    // Seconds left in the author's own window, or 0 when no clock applies (shout.edit_any).
+    $left = 0;
+    if (!userIdHasPermission($db, $cfg, $meId, 'shout.edit_any')) {
+        $left = max(0, shoutEditMinutes($cfg) * 60 - (int)$row['age_s']);
+    }
+    return ['ok' => true, 'error' => '', 'id' => (int)$row['id'], 'body' => (string)$row['body'],
+            'format' => (string)$row['body_format'], 'left' => $left];
+}
+
+/**
+ * Bring a line's mention rows in line with its words: ['added' => ids, 'dropped' => ids].
+ *
+ * The same parse a new line gets (shoutParseMentions: real names, five at most, never the author —
+ * the line's AUTHOR, also when a moderator is the one editing). Somebody named in both the old words
+ * and the new keeps the row they had, untouched, so nobody is told twice; somebody dropped loses it;
+ * somebody newly named gets one with `late = 1`, because unread is counted by id and an edit does not
+ * move the line's id — shoutUnreadCounts() counts a late mention below the reader's mark until
+ * shoutSeen() says they have looked at the room again.
+ */
+function shoutSyncMentions(PDO $db, int $shoutId, string $body, int $authorId): array
+{
+    $want = shoutParseMentions($db, $body, $authorId);
+    $st = $db->prepare("SELECT user_id FROM shout_mentions WHERE shout_id = ?");
+    $st->execute([$shoutId]);
+    $have = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    $add = array_values(array_diff($want, $have));
+    $drop = array_values(array_diff($have, $want));
+    if ($add) {
+        $ins = $db->prepare("INSERT IGNORE INTO shout_mentions (shout_id, user_id, late) VALUES (?, ?, 1)");
+        foreach ($add as $uid) $ins->execute([$shoutId, $uid]);
+    }
+    if ($drop) {
+        $in = implode(',', array_fill(0, count($drop), '?'));
+        $db->prepare("DELETE FROM shout_mentions WHERE shout_id = ? AND user_id IN ($in)")
+           ->execute(array_merge([$shoutId], $drop));
+    }
+    return ['added' => $add, 'dropped' => $drop];
+}
+
+/**
+ * Correct a line. ['ok' => true, 'row' => …, 'changed' => bool] or ['ok' => false, 'error' => code]
+ * with codes disabled | login | no_permission | muted | not_found | too_late | flood | empty |
+ * too_long | invalid_body.
+ *
+ * THROUGH THE SAME DOOR AS POSTING, in the same order: who is asking (the composer's own gate — the
+ * room on, `shout.post`, not silenced: an edit is writing), whether they may touch THIS line, how
+ * fast they are going, and only then what they typed. The words are judged exactly as a new line's
+ * are — the length limit, and for the STORED `body_format` the same validator with the shout's own
+ * limit — and rendered by the same function, so a corrected line is byte for byte what the poll
+ * would hand anybody.
+ *
+ * The flood interval is `shout_flood_seconds` between two EDITS by one account — asked of the site's
+ * anti-spam layer as a CORRECTION (1.71.0, includes/antispam.php: never laddered, no duplicate rule, no
+ * CAPTCHA; the gap between two corrections, on the database's clock), so an edit box is not a way round
+ * the interval posting has; a post does not count against it, because fixing the typo in what you just
+ * said is the commonest edit there is. The address ceiling is the endpoint's (api/shout_edit.php).
+ *
+ * Words that did not change change nothing: no mark, no mention pass, no audit line.
+ */
+function shoutEdit(PDO $db, array $cfg, array $me, int $id, string $body, string $ip = ''): array
+{
+    $gate = shoutMayPost($db, $cfg, $me);
+    if (!$gate['ok']) return ['ok' => false, 'error' => $gate['reason'], 'until' => $gate['until'], 'row' => null];
+    $meId = (int)$me['id'];
+
+    $row = shoutEditRow($db, $id);
+    if (!$row) return ['ok' => false, 'error' => 'not_found', 'row' => null];
+    $why = shoutEditRight($db, $cfg, $meId, $row);
+    if ($why !== '') return ['ok' => false, 'error' => $why, 'row' => null];
+
+    $t = antispamCheck($db, $cfg, 'shout', antispamSubject($me, $ip), null, ['mode' => 'edit', 'edit_gap' => shoutFloodSeconds($cfg)]);
+    if (!$t['ok']) {
+        return ['ok' => false, 'error' => $t['kind'] === 'wait' ? 'flood' : 'antispam', 'retry_after' => (int)$t['seconds'],
+                'antispam' => $t, 'row' => null];
+    }
+    $ticket = $t['ticket'];
+    $refuse = function (array $r) use ($db, $ticket): array { antispamRelease($db, $ticket); return $r; };
+
+    $body = trim($body);
+    if ($body === '') return $refuse(['ok' => false, 'error' => 'empty', 'row' => null]);
+    $max = shoutMaxChars($cfg);
+    if (mb_strlen($body) > $max) return $refuse(['ok' => false, 'error' => 'too_long', 'limit' => $max, 'row' => null]);
+    // The format the line was WRITTEN in. Changing it in an edit would change how every other word
+    // of it renders, which is not a correction — and it is the one the reader has been reading.
+    $format = (string)$row['body_format'];
+    $bad = shoutBodyProblem($cfg, $body, $format);
+    if ($bad === null && function_exists('imagesPlaceCheck')) $bad = imagesPlaceCheck($db, $cfg, 'shout', $body, $format, $me, (string)$row['body']);
+    if ($bad !== null) return $refuse(['ok' => false, 'error' => 'invalid_body', 'detail' => $bad, 'row' => null]);
+
+    $changed = $body !== (string)$row['body'];
+    if (!$changed) antispamRelease($db, $ticket);   // words that did not change are not a correction either
+    if ($changed) {
+        $st = $db->prepare("UPDATE shouts SET body = ?, edited_at = NOW(), edited_by = ? WHERE id = ? AND deleted_at IS NULL");
+        $st->execute([$body, $meId, $id]);
+        if ($st->rowCount() < 1) return $refuse(['ok' => false, 'error' => 'not_found', 'row' => null]);   // deleted meanwhile
+        antispamRecord($db, $ticket);
+        if (function_exists('imagesRefsTouch') && (str_contains($body, '/i/') || str_contains((string)$row['body'], '/i/'))) imagesRefsTouch($db, $cfg, 'shout', (string)$id);
+        $authorId = $row['user_id'] === null ? 0 : (int)$row['user_id'];
+        shoutSyncMentions($db, $id, $body, $authorId);
+        // Somebody ELSE's words: an audited act, like taking a line down — who changed it and when,
+        // not what it said (the room keeps no history of words, and the log is kept longer than the
+        // room is). The author tidying their own line is not an act anybody needs a record of.
+        if ($authorId !== $meId && function_exists('auditLog')) {
+            $wst = $db->prepare("SELECT edited_at FROM shouts WHERE id = ?");
+            $wst->execute([$id]);
+            $when = (string)($wst->fetchColumn() ?: '');
+            auditLog($db, 'shout.edit', [
+                'target_type' => 'shout', 'target_id' => $id,
+                'summary' => (string)($me['username'] ?? '#' . $meId) . ' → edited shout #' . $id . ' by '
+                           . (string)($row['username'] ?? ('#' . $authorId)),
+                'detail' => ['editor' => (string)($me['username'] ?? ''), 'editor_id' => $meId,
+                             'author' => (string)($row['username'] ?? ''), 'author_id' => $authorId,
+                             'edited_at' => $when, 'said_at' => (string)$row['created_at']],
+            ]);
+        }
+    }
+
+    $rows = shoutRows($db, $cfg, $me, 1, $id - 1);
+    $out = ($rows && (int)$rows[0]['id'] === $id) ? $rows[0] : null;
+    return ['ok' => true, 'error' => '', 'row' => $out, 'changed' => $changed, 'id' => $id];
+}
+
+/* ── what is new for one reader ────────────────────────────────────────────── */
+
+/** Remember how far this reader has read. GREATEST, so a slow tab cannot move the mark backwards. */
+function shoutSeen(PDO $db, int $userId, int $id): void
+{
+    if ($userId <= 0 || $id <= 0) return;
+    $db->prepare("UPDATE users SET shout_seen_id = GREATEST(shout_seen_id, ?) WHERE id = ?")->execute([$id, $userId]);
+    // …and a mention an EDIT added to a line at or below that id (v72) has now been in front of
+    // them: it stops counting. Up to the id THIS tab says it saw, not to the stored mark — a slow tab
+    // reporting an older id clears less, never more.
+    try {
+        $db->prepare("UPDATE shout_mentions SET late = 0 WHERE user_id = ? AND late = 1 AND shout_id <= ?")->execute([$userId, $id]);
+    } catch (\Throwable $e) {
+        // the column arrives with schema 72; mid-upgrade there is nothing late to clear
+    }
+}
+
+/**
+ * The reader's accepted friends as ids, each once — asked once per count (1.74.0, PERF-1) instead of once per line.
+ * A friendship is one row whichever side asked, so it is read from both of its keys (idx_friend_mine, idx_friend_of).
+ */
+function shoutFriendIds(PDO $db, int $meId): array
+{
+    if ($meId <= 0) return [];
+    $st = $db->prepare("SELECT friend_id AS id FROM user_friends WHERE user_id = ? AND status = 'accepted'
+                        UNION
+                        SELECT user_id FROM user_friends WHERE friend_id = ? AND status = 'accepted'");
+    $st->execute([$meId, $meId]);
+    $ids = array_values(array_unique(array_filter(array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)), fn($v) => $v > 0)));
+    sort($ids);
+    return $ids;
+}
+
+/**
+ * An account that has never looked at the room (`shout_seen_id` 0, which is where every account starts) is caught
+ * up at its first count (1.74.0, PERF-1): what others said BEFORE the account existed was never new to it. Its mark
+ * moves to the newest such line, once and for good, so a new member's badge does not open on the room's whole
+ * backlog and its pulses walk only what came after. A line said after the account was made is still new — which is
+ * also why an account the tests put back at 0 still counts everything it has not read. The reader's OWN lines are
+ * left out of it: they are never counted anyway, and one dated before the account (a test ages a line to close an
+ * edit window) must not carry the mark past other people's later words.
+ *
+ * Returns the mark to count from. GREATEST, so a widget stamping the mark at the same moment is never moved back.
+ */
+function shoutCatchUpNew(PDO $db, int $meId): int
+{
+    $st = $db->prepare("SELECT COALESCE(MAX(s.id), 0) FROM shouts s
+                         WHERE s.created_at < (SELECT u.created_at FROM users u WHERE u.id = ?)
+                           AND (s.user_id IS NULL OR s.user_id <> ?)");
+    $st->execute([$meId, $meId]);
+    $mark = (int)($st->fetchColumn() ?: 0);
+    if ($mark > 0) {
+        $db->prepare("UPDATE users SET shout_seen_id = GREATEST(shout_seen_id, ?) WHERE id = ?")->execute([$mark, $meId]);
+    }
+    return $mark;
+}
+
+/**
+ * How much is new: ['shout' => n, 'shout_friend' => n, 'mention' => n].
+ *
+ * `shout` is the TOTAL; the other two are subsets of it (a friend's shout that mentions me is in
+ * all three). The sounds want "a friend", "anybody else" and "me by name" as three events, and
+ * anybody else is the subtraction the client does — the same shape as the message counts.
+ *
+ * My own lines are never new to me, a deleted one is not new to anybody, and a line the SITE said
+ * (v66) is new to nobody at all: an announcement that made every reader's badge count up — and, on
+ * the readers who asked for one, made a sound — every time somebody registered a torrent is the one
+ * thing "the site says something occasionally" must not turn into.
+ */
+function shoutUnreadCounts(PDO $db, array $cfg, array $me): array
+{
+    $zero = ['shout' => 0, 'shout_friend' => 0, 'mention' => 0];
+    $meId = (int)($me['id'] ?? 0);
+    if ($meId <= 0 || !shoutEnabled($cfg)) return $zero;
+    $seen = array_key_exists('shout_seen_id', $me) ? (int)$me['shout_seen_id'] : null;
+    try {
+        if ($seen === null) {
+            $st = $db->prepare("SELECT shout_seen_id FROM users WHERE id = ?");
+            $st->execute([$meId]);
+            $seen = (int)($st->fetchColumn() ?: 0);
+        }
+        if ($seen === 0) $seen = shoutCatchUpNew($db, $meId);
+        // One pass over the tail of the primary key. `shouts` is bounded by retention, so the worst
+        // case here is a reader who has never looked at a full room.
+        //
+        // A friend is decided against the reader's friends fetched ONCE (1.74.0, PERF-1): the old
+        // correlated EXISTS (… OR …) ran an index_merge over every friendship of the reader for every
+        // unread line — 1 s a minute at 2 000 unread lines and 400 friendships, 15 s at 30 000, killed
+        // by max_statement_time (and answered as zeros) above that. A list of ids is a binary search
+        // per line, the same three numbers.
+        $friends = shoutFriendIds($db, $meId);
+        $isFriend = $friends ? 's.user_id IN (' . implode(',', $friends) . ')' : '0';
+        $st = $db->prepare(
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM($isFriend), 0) AS friends,
+                    COALESCE(SUM(EXISTS(SELECT 1 FROM shout_mentions m WHERE m.shout_id = s.id AND m.user_id = ?)), 0) AS mentions
+               FROM shouts s
+              WHERE s.id > ? AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
+        $st->execute([$meId, $seen, $meId]);
+        $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        $out = ['shout' => (int)($r['total'] ?? 0), 'shout_friend' => (int)($r['friends'] ?? 0),
+                'mention' => (int)($r['mentions'] ?? 0)];
+    } catch (\Throwable $e) {
+        return $zero;   // mid-upgrade: no table, no numbers, no error page
+    }
+    // …plus the lines an EDIT named this reader in after they had already read past them (v72,
+    // shout_mentions.late). Unread is counted by id and an edit does not move a line's id, so these
+    // are counted here, BELOW the mark only — a late row above it is already counted by the query
+    // above and must not be counted twice. Each is a mention and a line, and a friend's line when a
+    // friend said it, so the two subsets stay subsets of the total. Its own try: the column arrives
+    // with schema 72, and its absence must not take the numbers above away with it.
+    try {
+        $st = $db->prepare(
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM($isFriend), 0) AS friends
+               FROM shout_mentions m JOIN shouts s ON s.id = m.shout_id
+              WHERE m.user_id = ? AND m.late = 1 AND m.shout_id <= ?
+                AND s.deleted_at IS NULL AND s.is_system = 0 AND s.user_id <> ?");
+        $st->execute([$meId, $seen, $meId]);
+        $late = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        $n = (int)($late['total'] ?? 0);
+        $out['shout'] += $n;
+        $out['mention'] += $n;
+        $out['shout_friend'] += (int)($late['friends'] ?? 0);
+    } catch (\Throwable $e) {
+        // mid-upgrade: nothing is late yet
+    }
+    return $out;
+}
+
+/* ── retention ─────────────────────────────────────────────────────────────── */
+
+/** The rows a batch is allowed to remove in one pass, so one janitor tick cannot lock the table. */
+const SHOUT_PRUNE_BATCH = 1000;
+
+/** Delete these ids and the mentions that point at them. Mentions FIRST: no orphan is ever visible. */
+function shoutDeleteIds(PDO $db, array $ids): int
+{
+    if (!$ids) return 0;
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $db->prepare("DELETE FROM shout_mentions WHERE shout_id IN ($in)")->execute($ids);
+    $st = $db->prepare("DELETE FROM shouts WHERE id IN ($in)");
+    $st->execute($ids);
+    return $st->rowCount();
+}
+
+/**
+ * Retention, both halves: ['by_age' => n, 'by_count' => n].
+ *
+ * HARD deletes — a swept shout leaves nothing, moderator-deleted or not. Batched by primary key
+ * rather than done in one statement because "one DELETE" on a table somebody is reading is how a
+ * shared MariaDB becomes everybody's problem; the janitor comes back in a minute for the rest.
+ */
+function shoutPrune(PDO $db, array $cfg): array
+{
+    $out = ['by_age' => 0, 'by_count' => 0];
+    try {
+        $days = shoutKeepDays($cfg);
+        $st = $db->prepare("SELECT id FROM shouts WHERE created_at < (NOW() - INTERVAL ? DAY) ORDER BY id ASC LIMIT " . SHOUT_PRUNE_BATCH);
+        $st->execute([$days]);
+        $out['by_age'] = shoutDeleteIds($db, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+
+        // By count: everything older than the `keep`-th newest row. OFFSET is interpolated because a
+        // bound parameter is a string there under emulated prepares; it is an integer this file
+        // clamped two lines up.
+        $keep = shoutKeepRows($cfg);
+        $cut = (int)($db->query("SELECT id FROM shouts ORDER BY id DESC LIMIT 1 OFFSET " . $keep)->fetchColumn() ?: 0);
+        if ($cut > 0) {
+            $st = $db->prepare("SELECT id FROM shouts WHERE id <= ? ORDER BY id ASC LIMIT " . SHOUT_PRUNE_BATCH);
+            $st->execute([$cut]);
+            $out['by_count'] = shoutDeleteIds($db, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+        }
+    } catch (\Throwable $e) {
+        return $out;   // no table yet, or the database is busy: the next tick tries again
+    }
+    return $out;
+}
+
+/**
+ * The owner emptying the room from Settings: everything ($olderThanDays === null) or everything
+ * older than N days. Hard, and not batched — this is a deliberate act with a password behind it,
+ * and it is meant to finish.
+ */
+function shoutPurge(PDO $db, array $cfg, ?int $olderThanDays): int
+{
+    try {
+        if ($olderThanDays === null) {
+            $db->exec("DELETE FROM shout_mentions");
+            return (int)$db->exec("DELETE FROM shouts");
+        }
+        $days = max(0, min(3650, $olderThanDays));
+        $gone = 0;
+        // In batches for the same reason the janitor is: an operator purging a year of a busy room
+        // must not be the reason the site stops answering.
+        while (true) {
+            $st = $db->prepare("SELECT id FROM shouts WHERE created_at < (NOW() - INTERVAL ? DAY) ORDER BY id ASC LIMIT " . SHOUT_PRUNE_BATCH);
+            $st->execute([$days]);
+            $ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+            if (!$ids) break;
+            $gone += shoutDeleteIds($db, $ids);
+        }
+        return $gone;
+    } catch (\Throwable $e) {
+        return 0;
+    }
+}
+
+/* ── emotes and stickers (1.59.0, schema 64) ───────────────────────────────────────────────────
+ *
+ * Emoji are not here, and that is the decision: a smiley in a shout is a Unicode character, drawn
+ * by whatever emoji font the reader's own device has (Segoe UI Emoji, Noto, Apple's). The site
+ * ships no picture of one, which is why the picker in the browser is plain text and this file
+ * knows nothing about it.
+ *
+ * What IS here is the CUSTOM half: an image somebody uploaded, addressed by a short code and
+ * written as `:code:`. Kept as rows of `shout_emotes` for the same reason the sounds are rows —
+ * the web root is installed read-only and a backup that carries the database carries these. A
+ * STICKER is the same row with one flag: when a whole shout is nothing but its token, it is drawn
+ * big instead of inline, which is the only difference between the two.
+ *
+ * ── the bytes decide, and an SVG is guilty until proven otherwise ──────────────────────────────
+ *
+ * An <img> is not a safe frame for an SVG: an SVG is a document, it can carry a script, event
+ * handlers and references to other origins, and served from this origin it would run with this
+ * origin's rights. So there are three independent walls and any one of them is meant to be enough:
+ *
+ *   1. shoutEmoteSvgIssue() refuses the upload — a script element, on*= handlers, javascript:,
+ *      data:text/html, foreignObject, an embedded frame, an entity declaration, or any href that is
+ *      not a local `#fragment`. Checked on the bytes with entities decoded, so `java&#115;cript:`
+ *      is the same word to this code as it is to a browser.
+ *   2. api/shout_emote.php serves it with the type the sniff CHOSE (never the uploader's), plus
+ *      `X-Content-Type-Options: nosniff`, so nothing can be re-read as HTML.
+ *   3. …and with `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'` on that
+ *      response, so even a trick none of the above spotted has nothing it is allowed to do.
+ */
+
+/** `:code:` — short, lower case, and the same character class a file name may have. */
+const SHOUT_EMOTE_CODE_RE = '/^[a-z0-9_]{2,32}$/';
+/** The token as it appears inside a line of text. Kept beside the code rule so the two agree. */
+const SHOUT_EMOTE_TOKEN_RE = '/:([a-z0-9_]{2,32}):/';
+const SHOUT_EMOTE_MIN_BYTES = 32;
+const SHOUT_EMOTE_NAME_MAX = 60;
+const SHOUT_EMOTE_NAME_MIN = 2;
+
+/** Where the shipped examples live; the v64 migration seeds the table from this directory. */
+function shoutEmoteSeedDir(): string { return dirname(__DIR__) . '/assets/emotes'; }
+
+/* ── the switches ──────────────────────────────────────────────────────────── */
+
+/** Custom images at all. A room that is off has no emotes either — this is the whole feature. */
+function shoutEmotesEnabled(array $cfg): bool
+{
+    return shoutEnabled($cfg) && (($cfg['shout_emotes_enabled'] ?? '1') === '1');
+}
+
+/** The big ones. A sticker is an emote first, so this cannot be on while emotes are off. */
+function shoutStickersEnabled(array $cfg): bool
+{
+    return shoutEmotesEnabled($cfg) && (($cfg['shout_stickers_enabled'] ?? '1') === '1');
+}
+
+/**
+ * Does a MEMBER's upload wait for the operator before the whole site can see it?
+ *
+ * On by default (v65). Nobody holds `shout.upload_emote` until an operator hands it out, so this
+ * changes nothing on an install that has not granted it — it is the answer to "what happens the
+ * first time I do". The panel's own uploads (`uploaded_by` NULL) are never held: the person who
+ * would be approving is the person who added it.
+ */
+function shoutEmoteApproval(array $cfg): bool
+{
+    return ($cfg['shout_emote_approval'] ?? '1') === '1';
+}
+
+function shoutEmoteMaxKb(array $cfg): int    { return max(8, min(512, (int)($cfg['shout_emote_max_kb'] ?? 64) ?: 64)); }
+function shoutEmoteMaxBytes(array $cfg): int { return shoutEmoteMaxKb($cfg) * 1024; }
+function shoutEmoteMaxPx(array $cfg): int    { return max(32, min(512, (int)($cfg['shout_emote_max_px'] ?? 128) ?: 128)); }
+function shoutEmotePerUser(array $cfg): int  { return max(1, min(200, (int)($cfg['shout_emote_per_user'] ?? 20) ?: 20)); }
+
+function shoutEmoteValidCode(string $code): bool { return (bool)preg_match(SHOUT_EMOTE_CODE_RE, $code); }
+
+/** "thumbs_up" -> "Thumbs up". The fallback name when the uploader gave none. */
+function shoutEmotePrettyName(string $code): string
+{
+    return ucfirst(trim((string)preg_replace('/[-_]+/', ' ', $code)));
+}
+
+/** A display name: printable, trimmed, bounded. '' when nothing usable is left. */
+function shoutEmoteCleanName(string $name): string
+{
+    $name = trim((string)preg_replace('/[\x00-\x1f\x7f]+/', ' ', $name));
+    $name = (string)preg_replace('/\s+/', ' ', $name);
+    return mb_substr($name, 0, SHOUT_EMOTE_NAME_MAX);
+}
+
+/** What two names are compared by: cleaned, then case-folded. "Wave" and " wave " are one name. */
+function shoutEmoteNameKey(string $name): string
+{
+    return mb_strtolower(shoutEmoteCleanName($name), 'UTF-8');
+}
+
+/**
+ * Every name the table already answers to, as comparison keys. `$exceptId` is the row being
+ * renamed: a name is not taken by itself.
+ *
+ * Straight from the database rather than through shoutEmotes(), because a name has to be unique
+ * among ALL of them — a switched-off one and a member's upload still waiting for the operator are
+ * both going to be on the screen beside the others the moment they come back.
+ */
+function shoutEmoteNamesTaken(PDO $db, int $exceptId = 0): array
+{
+    $keys = [];
+    try {
+        $rows = $db->query("SELECT id, name FROM shout_emotes")->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (\Throwable $e) {
+        return $keys;   // the table arrives with schema 64; mid-upgrade nothing is taken
+    }
+    foreach ($rows as $r) {
+        if ((int)$r['id'] === $exceptId) continue;
+        $keys[shoutEmoteNameKey((string)$r['name'])] = true;
+    }
+    return $keys;
+}
+
+/**
+ * The one place the NAME rules live, so an upload and a rename cannot drift apart — the rule the
+ * sounds library got in 1.59.0 (soundNameProblem), for the same reason: two emotes called "Wave"
+ * are two identical lines in the manager and on the Emotes page, and the person picking one of them
+ * is guessing. Returns a lang key, or null when the name is fine.
+ *
+ * The upper bound is not an error: shoutEmoteCleanName() has already cut the name to
+ * SHOUT_EMOTE_NAME_MAX, which is also the width of the column.
+ */
+function shoutEmoteNameProblem(PDO $db, string $name, int $exceptId = 0): ?string
+{
+    $name = shoutEmoteCleanName($name);
+    if ($name === '') return 'api.emote.name_required';
+    if (mb_strlen($name, 'UTF-8') < SHOUT_EMOTE_NAME_MIN) return 'api.emote.name_short';
+    if (isset(shoutEmoteNamesTaken($db, $exceptId)[shoutEmoteNameKey($name)])) return 'api.emote.name_taken';
+    return null;
+}
+
+/* ── the table ─────────────────────────────────────────────────────────────── */
+
+/** Forget the per-request cache. Called by everything that writes a row. */
+function shoutEmotesInvalidate(): void { shoutEmotes(null, [], true, true); }
+
+/**
+ * The emotes, KEYED BY CODE, without their bytes.
+ *
+ * `$enabledOnly` (the default) is the reader's view and answers NOTHING while the feature is
+ * switched off — which is what makes shoutRenderEmotes() a no-op rather than a second switch to
+ * forget. `false` is the manager's view: the panel has to list what it may switch back on.
+ *
+ * Cached per request, because every rendered line asks for it.
+ */
+function shoutEmotes(?PDO $db, array $cfg, bool $enabledOnly = true, bool $flush = false): array
+{
+    static $cache = [];
+    if ($flush) { $cache = []; return []; }
+    if ($db === null) return [];
+    $on = !$enabledOnly || shoutEmotesEnabled($cfg);
+    $key = ($enabledOnly ? 'on' : 'all') . ':' . ($on ? '1' : '0');
+    if (isset($cache[$key])) return $cache[$key];
+    if (!$on) return $cache[$key] = [];
+
+    $sql = "SELECT id, code, name, mime, bytes, width, height, is_sticker, enabled, approved_at, uploaded_by, sha1, created_at
+              FROM shout_emotes ";
+    $sql .= $enabledOnly ? "WHERE enabled = 1 ORDER BY code" : "ORDER BY code";
+    try {
+        $rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (\Throwable $e) {
+        return $cache[$key] = [];   // the table arrives with schema 64; mid-upgrade there are none
+    }
+    $out = [];
+    foreach ($rows as $r) {
+        $out[(string)$r['code']] = [
+            'id'          => (int)$r['id'],
+            'code'        => (string)$r['code'],
+            'name'        => (string)$r['name'],
+            'mime'        => (string)$r['mime'],
+            'bytes'       => (int)$r['bytes'],
+            'width'       => $r['width'] === null ? null : (int)$r['width'],
+            'height'      => $r['height'] === null ? null : (int)$r['height'],
+            'is_sticker'  => (int)$r['is_sticker'] === 1,
+            'enabled'     => (int)$r['enabled'] === 1,
+            'approved_at' => $r['approved_at'] === null ? null : (string)$r['approved_at'],
+            // Two facts, not one. `enabled` is what the row IS; `waiting` is whether anybody has
+            // ever answered for it. Reading the second off the first — which is all 1.59.1 could do
+            // — put every emote a moderator had switched off back into the approval queue.
+            'waiting'     => $r['approved_at'] === null,
+            'uploaded_by' => $r['uploaded_by'] === null ? null : (int)$r['uploaded_by'],
+            'sha1'        => (string)$r['sha1'],
+            'created_at'  => (string)$r['created_at'],
+        ];
+    }
+    return $cache[$key] = $out;
+}
+
+/** One emote WITH its bytes, or null. Only api/shout_emote.php needs this shape. */
+function shoutEmoteGet(PDO $db, int $id): ?array
+{
+    if ($id <= 0) return null;
+    try {
+        $st = $db->prepare("SELECT id, code, name, mime, bytes, width, height, is_sticker, enabled, sha1, data FROM shout_emotes WHERE id = ?");
+        $st->execute([$id]);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+/** How many this account has uploaded. NULL asks for the shipped/panel ones. */
+function shoutEmoteCountFor(PDO $db, ?int $uploader): int
+{
+    try {
+        if ($uploader === null) {
+            return (int)$db->query("SELECT COUNT(*) FROM shout_emotes WHERE uploaded_by IS NULL")->fetchColumn();
+        }
+        $st = $db->prepare("SELECT COUNT(*) FROM shout_emotes WHERE uploaded_by = ?");
+        $st->execute([$uploader]);
+        return (int)$st->fetchColumn();
+    } catch (\Throwable $e) {
+        return 0;
+    }
+}
+
+/**
+ * Where the image is. The first eight characters of the sha1 ride along, so replacing an emote is a
+ * new address and the old one may be cached for a month — the trick api/sound.php uses.
+ */
+function shoutEmoteUrl(array $row, string $baseUrl = ''): string
+{
+    return $baseUrl . 'api.php?endpoint=shout_emote&id=' . (int)$row['id'] . '&v=' . substr((string)$row['sha1'], 0, 8);
+}
+
+/** One emote as the browser sees it: no sha1, no uploader, no bytes. */
+function shoutEmoteForClient(array $row, string $baseUrl = ''): array
+{
+    return ['id' => (int)$row['id'], 'code' => (string)$row['code'], 'name' => (string)$row['name'],
+            'url' => shoutEmoteUrl($row, $baseUrl), 'sticker' => !empty($row['is_sticker']),
+            'w' => $row['width'] === null ? null : (int)$row['width'],
+            'h' => $row['height'] === null ? null : (int)$row['height']];
+}
+
+/* ── drawing them ──────────────────────────────────────────────────────────── */
+
+/** The image tag for one emote, inline or as a sticker. Every attribute escaped, nothing trusted. */
+function shoutEmoteImg(array $row, string $baseUrl = '', bool $sticker = false): string
+{
+    $w = (int)($row['width'] ?? 0);
+    $h = (int)($row['height'] ?? 0);
+    $out = '<img class="' . ($sticker ? 'shout-sticker' : 'shout-emote') . '"'
+         . ' src="' . htmlspecialchars(shoutEmoteUrl($row, $baseUrl), ENT_QUOTES, 'UTF-8') . '"'
+         . ' alt="' . htmlspecialchars(':' . (string)$row['code'] . ':', ENT_QUOTES, 'UTF-8') . '"'
+         . ' title="' . htmlspecialchars((string)$row['name'], ENT_QUOTES, 'UTF-8') . '"'
+         . ' loading="lazy" decoding="async"';
+    if ($w > 0 && $h > 0) $out .= ' width="' . $w . '" height="' . $h . '"';
+    return $out . '>';
+}
+
+/**
+ * Replace `:code:` with an image, in the TEXT of already-rendered HTML and nowhere else.
+ *
+ * The split is on tags, exactly as shoutLinkMentions() does it and for the same reason: by this
+ * point richtextRender() has escaped every byte the writer typed, so nothing between '<' and '>'
+ * came from them — and `:code:` inside an href is part of an address, not a token.
+ *
+ * ONE STICKER ON ITS OWN IS THE WHOLE LINE. That is decided on the text content rather than on the
+ * html, because markdown wraps a paragraph and bbcode leaves a line break, and neither of those is
+ * the person saying something besides the sticker. The frontend relies on this: a shout that is one
+ * sticker arrives as a single `<img class="shout-sticker">` and nothing else.
+ */
+function shoutRenderEmotes(string $html, array $emotes, string $baseUrl = '', bool $stickersOn = true): string
+{
+    if ($html === '' || !$emotes || !str_contains($html, ':')) return $html;
+
+    if ($stickersOn) {
+        $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if (preg_match('/^:([a-z0-9_]{2,32}):$/', $text, $m) && !empty($emotes[$m[1]]['is_sticker'])) {
+            return shoutEmoteImg($emotes[$m[1]], $baseUrl, true);
+        }
+    }
+
+    $parts = preg_split('/(<[^>]*>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    if ($parts === false) return $html;
+    foreach ($parts as $i => $part) {
+        if ($i % 2 === 1 || $part === '' || !str_contains($part, ':')) continue;   // odd entries are the tags
+        $parts[$i] = preg_replace_callback(SHOUT_EMOTE_TOKEN_RE, function ($m) use ($emotes, $baseUrl) {
+            $e = $emotes[$m[1]] ?? null;
+            return $e === null ? $m[0] : shoutEmoteImg($e, $baseUrl, false);
+        }, $part) ?? $part;
+    }
+    return implode('', $parts);
+}
+
+/* ── the emotes outside the room (1.70.0) ──────────────────────────────────────
+ *
+ * The owner asked for the emotes and stickers in private messages, in torrent descriptions (and the
+ * proposals that rewrite them, and the editor that writes them), and the profile's description; a list's
+ * description (1.70.0 D) renders through the same path. The store is this one, the address is the same
+ * image endpoint, and the drawing is emoteRenderHtml() (includes/emoji.php) on the finished HTML of
+ * each — the room's own pipeline (shoutRenderEmotes() above) is not touched.
+ *
+ * Per context, and why:
+ *   message      emotes, and a sticker at the room's sticker size (128 px): a message is a conversation
+ *                with one person, the thing a sticker is for;
+ *   description  emotes, and a sticker BOUNDED (96 px): a description is a page about a torrent, read in
+ *   list         the Info panel down to a phone's width — a picture beside the words, not instead of them;
+ *   bio          emotes, and a sticker drawn as an emote: a profile's description is a line or two under a
+ *   comment      name, and a 128-pixel picture would be the whole of it — and (1.71.0) a comment under a
+ *                torrent is a line in a thread, where a big picture is the thing the owner said no to
+ *                ("simple BBCode without pictures"). Their pickers offer no stickers;
+ *   e-mail       nothing — a token stays the text it was typed as (richtextRenderForEmail() never calls
+ *                the stage; the images would be fetched from this site by somebody's mail client).
+ * With `shout_stickers_enabled` off a sticker is an emote everywhere, as it is in the room.
+ */
+
+/**
+ * The emotes beyond the room at all: the room's own emotes on (the room, and its emotes — this is their
+ * store and their manager) and `emotes_everywhere` (v79, on by default). Off, a `:code:` in a message, a
+ * description, a list's or a profile's description is the text it was typed as, and those pickers offer
+ * no emotes; the room itself is not affected.
+ */
+function emotesEverywhere(array $cfg): bool
+{
+    return shoutEmotesEnabled($cfg) && (($cfg['emotes_everywhere'] ?? '1') === '1');
+}
+
+/** Does this context draw (and its picker offer) emotes? The room by its own switch, the rest by the one above. */
+function emoteContextOn(string $for, array $cfg): bool
+{
+    return $for === 'shout' ? shoutEmotesEnabled($cfg) : emotesEverywhere($cfg);
+}
+
+/**
+ * How a context draws a sticker (see the table above): `room` (the room's own rule — alone, the whole
+ * line; in a sentence, an emote), `sticker` (the room's size), `small` (bounded) or `emote` (inline, the
+ * size of the words — and not offered by the picker).
+ */
+function emoteStickerMode(string $for, array $cfg): string
+{
+    if (!shoutStickersEnabled($cfg)) return 'emote';
+    return match ($for) {
+        'shout'               => 'room',
+        'message'             => 'sticker',
+        'description', 'list' => 'small',
+        // Written out, not left to the default: a comment's sticker is an emote BY DECISION (1.71.0).
+        'bio', 'comment'      => 'emote',
+        default               => 'emote',
+    };
+}
+
+/**
+ * The emotes a context draws, KEYED BY CODE, as the browser may see them (shoutEmoteForClient()) plus
+ * `draw` (emote | sticker | small) — the map emoteRenderHtml() takes. Built from shoutEmotes(), whose
+ * per-request cache is the ONE query however many messages a thread shows; the switched-off rows are not
+ * in it, and a row still WAITING for the operator is dropped here as well (it is switched off while it
+ * waits; this is the second wall). Empty when the context has no emotes.
+ */
+function emoteMapFor(?PDO $db, array $cfg, string $for, ?string $baseUrl = null): array
+{
+    if ($db === null || !emoteContextOn($for, $cfg)) return [];
+    $base = $baseUrl ?? (function_exists('getBaseUrl') ? getBaseUrl() : '');
+    $mode = emoteStickerMode($for, $cfg);
+    $out = [];
+    foreach (shoutEmotes($db, $cfg) as $code => $e) {
+        if (!empty($e['waiting']) || empty($e['enabled'])) continue;
+        $row = shoutEmoteForClient($e, $base);
+        $row['draw'] = !empty($e['is_sticker']) && in_array($mode, ['sticker', 'small'], true) ? $mode : 'emote';
+        $out[(string)$code] = $row;
+    }
+    return $out;
+}
+
+/**
+ * What a picker in this context offers (api/shout_emotes.php with `for`): the rows of the map above, a
+ * sticker only where the context draws stickers as stickers — so a profile's picker has no Stickers page.
+ */
+function emotePickerRows(PDO $db, array $cfg, string $for, ?string $baseUrl = null): array
+{
+    $stickers = emoteStickerMode($for, $cfg) !== 'emote';
+    $rows = [];
+    foreach (emoteMapFor($db, $cfg, $for, $baseUrl) as $r) {
+        if ($r['sticker'] && !$stickers) continue;
+        unset($r['draw']);
+        $rows[] = $r;
+    }
+    return $rows;
+}
+
+/* ── what an upload is ─────────────────────────────────────────────────────── */
+
+/**
+ * Why these bytes are not an SVG this site will serve — or null when they are.
+ *
+ * Codes: not_svg | script | handler | javascript | data_html | foreign_object | embed | entity |
+ * external_ref. The scheme checks run on the bytes with entities decoded and whitespace removed,
+ * because a browser reads `java&#115;cript&#58;` and `java script :` as the word this refuses.
+ */
+function shoutEmoteSvgIssue(string $b): ?string
+{
+    // A BOM and leading whitespace are packaging, not content.
+    $s = ltrim($b, "\xEF\xBB\xBF \t\r\n");
+    if ($s === '' || !preg_match('/^(<\?xml|<!--|<!DOCTYPE|<svg)/i', substr($s, 0, 64))) return 'not_svg';
+    $low = strtolower($s);
+    if (!str_contains($low, '<svg')) return 'not_svg';
+
+    if (preg_match('/<\s*script/i', $s)) return 'script';
+    if (preg_match('/<\s*foreignobject/i', $s)) return 'foreign_object';
+    if (preg_match('/<\s*(iframe|embed|object|frame|set|animate)\b/i', $s)) return 'embed';
+    if (str_contains($low, '<!entity') || (str_contains($low, '<!doctype') && str_contains($low, 'entity'))) return 'entity';
+    // An event handler is an attribute, so the character before it cannot be a letter: `monitor=`
+    // is somebody's attribute name, `<svg onload=` is not.
+    if (preg_match('/(?<![a-z-])on[a-z]+\s*=/i', $s)) return 'handler';
+
+    // Entities decoded and whitespace gone: the two ways a scheme hides from a literal search.
+    $flat = strtolower((string)preg_replace('/\s+/', '', html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    if (str_contains($flat, 'javascript:')) return 'javascript';
+    if (str_contains($flat, 'data:text/html')) return 'data_html';
+
+    // A reference that leaves this document is a reference to somebody else's server. `#id` is the
+    // only kind an emote needs, and refusing the rest is cheaper than judging origins.
+    if (preg_match_all('/\b(?:xlink:href|href|src)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))/i', $s, $m, PREG_SET_ORDER)) {
+        foreach ($m as $one) {
+            $raw = ($one[1] ?? '') !== '' ? $one[1] : ((($one[2] ?? '') !== '') ? $one[2] : ($one[3] ?? ''));
+            $v = trim(html_entity_decode($raw, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if ($v === '' || $v[0] === '#') continue;
+            return 'external_ref';
+        }
+    }
+    return null;
+}
+
+/** The size an SVG declares: its width/height, or failing that its viewBox. 0 when it says nothing. */
+function shoutEmoteSvgSize(string $b): array
+{
+    if (!preg_match('/<svg\b[^>]*>/i', $b, $m)) return [0, 0];
+    $tag = $m[0];
+    $num = function (string $attr) use ($tag): int {
+        if (!preg_match('/\b' . $attr . '\s*=\s*(?:"([^"]*)"|\'([^\']*)\')/i', $tag, $a)) return 0;
+        $v = ($a[1] ?? '') !== '' ? $a[1] : ($a[2] ?? '');
+        if (str_contains($v, '%')) return 0;                 // a percentage is not a size
+        return preg_match('/^\s*([0-9]+(?:\.[0-9]+)?)/', $v, $d) ? (int)round((float)$d[1]) : 0;
+    };
+    $w = $num('width');
+    $h = $num('height');
+    if (($w <= 0 || $h <= 0)
+        && preg_match('/\bviewBox\s*=\s*["\']\s*[-0-9.]+[\s,]+[-0-9.]+[\s,]+([0-9.]+)[\s,]+([0-9.]+)/i', $tag, $v)) {
+        if ($w <= 0) $w = (int)round((float)$v[1]);
+        if ($h <= 0) $h = (int)round((float)$v[2]);
+    }
+    return [max(0, $w), max(0, $h)];
+}
+
+/**
+ * What these bytes are, decided from the bytes: ['mime', 'ext', 'w', 'h'] or null.
+ *
+ * PNG, GIF and WebP are recognised by their magic bytes AND measured by getimagesizefromstring(),
+ * which has to agree about the type — a GIF header in front of something else is not a GIF. An SVG
+ * has to survive shoutEmoteSvgIssue() before it is a picture at all.
+ */
+function shoutEmoteSniff(string $b): ?array
+{
+    if ($b === '') return null;
+    $png  = str_starts_with($b, "\x89PNG\r\n\x1a\n");
+    $gif  = str_starts_with($b, 'GIF87a') || str_starts_with($b, 'GIF89a');
+    $webp = strlen($b) > 12 && str_starts_with($b, 'RIFF') && substr($b, 8, 4) === 'WEBP';
+    if ($png || $gif || $webp) {
+        $info = @getimagesizefromstring($b);
+        if (!is_array($info) || (int)($info[0] ?? 0) <= 0 || (int)($info[1] ?? 0) <= 0) return null;
+        $want = $png ? IMAGETYPE_PNG : ($gif ? IMAGETYPE_GIF : IMAGETYPE_WEBP);
+        if ((int)($info[2] ?? 0) !== $want) return null;
+        $kind = [IMAGETYPE_PNG => ['image/png', 'png'], IMAGETYPE_GIF => ['image/gif', 'gif'],
+                 IMAGETYPE_WEBP => ['image/webp', 'webp']][$want];
+        return ['mime' => $kind[0], 'ext' => $kind[1], 'w' => (int)$info[0], 'h' => (int)$info[1]];
+    }
+    if (shoutEmoteSvgIssue($b) !== null) return null;
+    [$w, $h] = shoutEmoteSvgSize($b);
+    return ['mime' => 'image/svg+xml', 'ext' => 'svg', 'w' => $w, 'h' => $h];
+}
+
+/** The extension this site serves each type under. Never the uploader's file name. */
+function shoutEmoteExt(string $mime): string
+{
+    return ['image/svg+xml' => 'svg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'][$mime] ?? 'bin';
+}
+
+/**
+ * Keep an upload. ['ok' => true, 'row' => …] or ['ok' => false, 'error' => <lang key>, 'status' => N].
+ *
+ * `$uploader` is the account that asked, or NULL for the panel — and the per-person cap is the one
+ * rule that difference changes, because the owner uploading from Settings is not "a person filling
+ * the room with pictures", which is what that cap is about.
+ *
+ * The order is the order of the questions: is this a code at all, is it a plausible size, is it an
+ * image, is it small enough on screen, has this person had enough, and only then whether anybody
+ * already has these exact bytes or this exact code.
+ */
+function shoutEmoteStore(PDO $db, array $cfg, string $code, string $name, string $bytes, ?int $uploader, bool $sticker): array
+{
+    $code = strtolower(trim($code));
+    if (!shoutEmoteValidCode($code)) return ['ok' => false, 'status' => 400, 'error' => 'api.emote.bad_code'];
+    // A code the rich-text pass already turns into a Unicode emoji (richtextEmoji: fire, heart, star…)
+    // would be replaced before shoutRenderEmotes() ever ran, so the uploaded image would never show.
+    // Refuse it rather than store a picture nobody can see.
+    if (function_exists('richtextEmoji') && isset(richtextEmoji()[$code])) {
+        return ['ok' => false, 'status' => 409, 'error' => 'api.emote.code_reserved'];
+    }
+    // The NAME, judged here and in shoutEmoteRename() by one function. An empty box still falls back
+    // to the prettified code — that is the convenience it always was — but the FALLBACK is checked
+    // too: silently storing a second "Wave" because nobody typed anything is the same collision,
+    // arrived at by not thinking about it.
+    $name = shoutEmoteCleanName($name);
+    if ($name === '') $name = shoutEmotePrettyName($code);
+    if (($bad = shoutEmoteNameProblem($db, $name)) !== null) {
+        return ['ok' => false, 'status' => 409, 'error' => $bad, 'detail' => $name];
+    }
+
+    $len = strlen($bytes);
+    if ($len < SHOUT_EMOTE_MIN_BYTES) return ['ok' => false, 'status' => 400, 'error' => 'api.emote.too_small'];
+    $maxKb = shoutEmoteMaxKb($cfg);
+    if ($len > $maxKb * 1024) return ['ok' => false, 'status' => 413, 'error' => 'api.emote.too_large', 'limit' => $maxKb];
+
+    $kind = shoutEmoteSniff($bytes);
+    if ($kind === null) {
+        // "Not an image" and "an SVG this site will not serve" are different answers, and somebody
+        // whose drawing was refused for carrying a script deserves to be told which one it was.
+        $issue = shoutEmoteSvgIssue($bytes);
+        return ['ok' => false, 'status' => 400, 'detail' => (string)$issue,
+                'error' => ($issue !== null && $issue !== 'not_svg') ? 'api.emote.unsafe_svg' : 'api.emote.not_image'];
+    }
+    $px = shoutEmoteMaxPx($cfg);
+    if ($kind['w'] > $px || $kind['h'] > $px) {
+        return ['ok' => false, 'status' => 400, 'error' => 'api.emote.too_big_px', 'limit' => $px,
+                'detail' => $kind['w'] . 'x' . $kind['h']];
+    }
+    if ($uploader !== null) {
+        $cap = shoutEmotePerUser($cfg);
+        if (shoutEmoteCountFor($db, $uploader) >= $cap) {
+            return ['ok' => false, 'status' => 409, 'error' => 'api.emote.too_many', 'limit' => $cap];
+        }
+    }
+
+    $sha = sha1($bytes);
+    $st = $db->prepare("SELECT code FROM shout_emotes WHERE sha1 = ? LIMIT 1");
+    $st->execute([$sha]);
+    $same = $st->fetchColumn();
+    if ($same !== false) return ['ok' => false, 'status' => 409, 'error' => 'api.emote.duplicate', 'detail' => (string)$same];
+    $st = $db->prepare("SELECT id FROM shout_emotes WHERE code = ? LIMIT 1");
+    $st->execute([$code]);
+    if ($st->fetchColumn() !== false) return ['ok' => false, 'status' => 409, 'error' => 'api.emote.code_taken'];
+
+    // Whether the whole site can see it YET. A member's upload waits for somebody with
+    // `shout.moderate` while the gate is on; the panel's own (NULL) never does, because the person
+    // who would be approving is the person who just added it, and neither does a member's while the
+    // gate is off — going live at once is the whole of what "off" means.
+    //
+    // Anything that does not wait is STAMPED here rather than merely switched on. The stamp is what
+    // lets somebody switch this emote off tomorrow without it queueing up to be approved again: a
+    // row with no stamp is a question nobody has answered, and that is the only thing a queue is.
+    //
+    // `shout.emote_auto` is the third way past the gate (1.61.0), and it is about the PERSON rather
+    // than about the site's mood: an operator who has been letting the same member's drawings
+    // through for a year can stop being asked. Held by nobody until it is granted, so this changes
+    // nothing on an install that has not gone looking for it — and it is asked of the uploading
+    // ACCOUNT (userIdHasPermission, not userCan), because the panel has no account and a test has no
+    // session, which is the same reason shoutMayPost() asks that way.
+    $auto = $uploader !== null && function_exists('userIdHasPermission')
+            && userIdHasPermission($db, $cfg, $uploader, 'shout.emote_auto');
+    $approved = $uploader === null || !shoutEmoteApproval($cfg) || $auto;
+    $enabled = $approved ? 1 : 0;
+    $approvedAt = $approved ? date('Y-m-d H:i:s') : null;
+
+    $st = $db->prepare("INSERT INTO shout_emotes (code, name, mime, bytes, width, height, is_sticker, enabled, uploaded_by, approved_at, sha1, data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $st->bindValue(1, $code);
+    $st->bindValue(2, $name);
+    $st->bindValue(3, $kind['mime']);
+    $st->bindValue(4, $len, PDO::PARAM_INT);
+    $st->bindValue(5, $kind['w'] > 0 ? $kind['w'] : null, $kind['w'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+    $st->bindValue(6, $kind['h'] > 0 ? $kind['h'] : null, $kind['h'] > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+    $st->bindValue(7, $sticker ? 1 : 0, PDO::PARAM_INT);
+    $st->bindValue(8, $enabled, PDO::PARAM_INT);
+    $st->bindValue(9, $uploader, $uploader === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $st->bindValue(10, $approvedAt, $approved ? PDO::PARAM_STR : PDO::PARAM_NULL);
+    $st->bindValue(11, $sha);
+    $st->bindValue(12, $bytes, PDO::PARAM_LOB);
+    $st->execute();
+    shoutEmotesInvalidate();
+
+    $id = (int)$db->lastInsertId();
+    return ['ok' => true, 'status' => 200, 'pending' => !$approved, 'row' => [
+        'id' => $id, 'code' => $code, 'name' => $name, 'mime' => $kind['mime'], 'bytes' => $len,
+        'width' => $kind['w'] > 0 ? $kind['w'] : null, 'height' => $kind['h'] > 0 ? $kind['h'] : null,
+        'is_sticker' => $sticker, 'enabled' => $enabled === 1, 'approved_at' => $approvedAt,
+        'waiting' => !$approved, 'uploaded_by' => $uploader, 'sha1' => $sha,
+    ]];
+}
+
+/**
+ * Remove one. `$asUser` NULL is the panel; an id means "and it has to be theirs" — a member's own
+ * upload and nothing else, which is why a shipped emote (uploaded_by NULL) can never match one.
+ *
+ * The endpoint is what decides whether a moderator may pass NULL; this only enforces ownership.
+ */
+function shoutEmoteDelete(PDO $db, int $id, ?int $asUser = null): array
+{
+    if ($id <= 0) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    $st = $db->prepare("SELECT id, code, name, uploaded_by FROM shout_emotes WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    if ($asUser !== null && ($row['uploaded_by'] === null || (int)$row['uploaded_by'] !== $asUser)) {
+        return ['ok' => false, 'status' => 403, 'error' => 'api.emote.not_yours'];
+    }
+    $db->prepare("DELETE FROM shout_emotes WHERE id = ?")->execute([$id]);
+    shoutEmotesInvalidate();
+    return ['ok' => true, 'status' => 200,
+            'row' => ['id' => (int)$row['id'], 'code' => (string)$row['code'], 'name' => (string)$row['name'],
+                      'uploaded_by' => $row['uploaded_by'] === null ? null : (int)$row['uploaded_by']]];
+}
+
+/**
+ * Rename one. Only the display text changes: the CODE is what people type into a sentence, and
+ * changing it would break every line that already says it — so it stays, exactly as a sound's id
+ * stays across soundRename().
+ *
+ * ['ok' => true, 'row' => ['id' => …, 'name' => …]] or ['ok' => false, 'error' => <lang key>].
+ */
+function shoutEmoteRename(PDO $db, int $id, string $name): array
+{
+    if ($id <= 0) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    $st = $db->prepare("SELECT id, code FROM shout_emotes WHERE id = ?");
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['ok' => false, 'status' => 404, 'error' => 'api.emote.unknown'];
+    $name = shoutEmoteCleanName($name);
+    // An empty box means the prettified code here too, so "clear the name" is a way back to the
+    // default rather than a refusal — and the fallback is checked like any other name.
+    if ($name === '') $name = shoutEmotePrettyName((string)$row['code']);
+    if (($bad = shoutEmoteNameProblem($db, $name, $id)) !== null) {
+        return ['ok' => false, 'status' => 409, 'error' => $bad, 'detail' => $name];
+    }
+    $db->prepare("UPDATE shout_emotes SET name = ? WHERE id = ?")->execute([$name, $id]);
+    shoutEmotesInvalidate();
+    return ['ok' => true, 'status' => 200, 'row' => ['id' => $id, 'code' => (string)$row['code'], 'name' => $name]];
+}
+
+/**
+ * Switch one flag on a row. `$field` is one of two names and each has its own literal statement —
+ * there is no column name built from a string here, and there is not going to be one.
+ *
+ * `approved_at` is deliberately NOT reachable from here. Switching an emote off is tidying and must
+ * leave the decision that let it through standing; the one thing that may write that column is
+ * shoutEmoteApprove() below.
+ */
+function shoutEmoteSetFlag(PDO $db, int $id, string $field, bool $on): bool
+{
+    $sql = match ($field) {
+        'enabled'    => "UPDATE shout_emotes SET enabled = ? WHERE id = ?",
+        'is_sticker' => "UPDATE shout_emotes SET is_sticker = ? WHERE id = ?",
+        default      => '',
+    };
+    if ($sql === '' || $id <= 0) return false;
+    $st = $db->prepare($sql);
+    $st->execute([$on ? 1 : 0, $id]);
+    shoutEmotesInvalidate();
+    return $st->rowCount() > 0;
+}
+
+/**
+ * Let one through: the room gets it, and the decision is remembered.
+ *
+ * COALESCE, not a plain assignment, so this says the same thing whichever of the two acts it is.
+ * Approving a picture nobody had answered for stamps the moment somebody did; switching an already
+ * approved one back on is not a second approval and must not move the date the manager prints
+ * beside it. Either way the row ends up enabled, which is what the person pressing the button asked
+ * for — and `approved_at` is the reason it will never be asked for again.
+ */
+function shoutEmoteApprove(PDO $db, int $id): bool
+{
+    if ($id <= 0) return false;
+    $st = $db->prepare("UPDATE shout_emotes SET enabled = 1, approved_at = COALESCE(approved_at, ?) WHERE id = ?");
+    $st->execute([date('Y-m-d H:i:s'), $id]);
+    shoutEmotesInvalidate();
+    return $st->rowCount() > 0;
+}

@@ -1,0 +1,1109 @@
+<?php $meUser = currentUser($db); ?>
+<?php if ($meUser === null): ?>
+<h1><?= _h('account.h1') ?></h1>
+<p><?= _h('account.not_signed') ?></p>
+<p><a class="btn" href="<?= $baseUrl ?>?action=login"><?= _h('common.sign_in') ?></a></p>
+<?php
+// A visitor's page ends here. The lists, messages and people sections further down sit AFTER the
+// signed-in branch closes and read $accLists / $accPeople, which only that branch defines — so a
+// guest opening ?action=account produced eight "undefined variable" warnings per view (in the
+// server's error log on production, in the page itself on a dev box with display_errors) since
+// 1.44.0. The layout carries on with the footer; only this template stops.
+return;
+?>
+<?php else: ?>
+<?php
+$accHasEmail = trim((string)($meUser['email'] ?? '')) !== '';
+$accVerified = (int)$meUser['email_verified'] === 1;
+$accRestricted = userEmailVerifyRequired($cfg) && !($accHasEmail && $accVerified) && !userIsAdminGroup($db, (int)$meUser['id']);
+$accPending = userEmailChangeState($db, $meUser);
+$accCooldownDays = userEmailChangeCooldownDays($cfg);
+$accFav = favContext($db, $cfg, $meUser);
+// Likes or ratings (1.69.0, includes/profilevotes.php): the tab after Favourites and the privacy switch.
+$accVotes = function_exists('profileVotesContext') ? profileVotesContext($db, $cfg, $meUser)
+    : ['enabled' => false, 'mode' => 'thumbs', 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false];
+// The descriptions this account wrote (1.70.0, includes/profiledescs.php): the tab after Likes / Ratings,
+// the list's privacy switch after the likes one, and the name switch every credit of theirs follows.
+$accDescs = function_exists('profileDescsContext') ? profileDescsContext($db, $cfg, $meUser)
+    : ['credit_ok' => false, 'enabled' => false, 'public_ok' => false, 'may_publish' => false, 'publish_blocked' => false, 'name_hidden' => false];
+$accImages = function_exists('profileImagesContext') ? profileImagesContext($db, $cfg, $meUser)
+    : ['enabled' => false, 'may_publish' => false, 'publish_blocked' => false];
+$accLists = listsContext($db, $cfg, $meUser);
+$accPeople = peopleContext($db, $cfg, $meUser);
+// "Account standing" (1.75.0, includes/moderation.php): the silence or ban that runs now with its end, and the warnings that
+// count, as the member was told them. The SESSION'S OWN id and nothing else is ever passed — nobody else's standing is read
+// by a page — and an account in good standing gets [] and no card.
+$accStanding = function_exists('accountStandingContext') ? accountStandingContext($db, $cfg, (int)$meUser['id']) : [];
+// Whether this reader may search inside file names — the same permission the search page asks, and
+// the endpoints ask it again themselves.
+$mayFileSearch = userCan($db, $cfg, 'index.files');
+// Account security: the second factor (when the operator has switched the feature on) and where this
+// account is signed in. Both are about the account itself rather than about what it publishes, so
+// they sit in the Profile card under their own heading and not in the privacy block.
+$accTwofa = ['feature' => user2faFeatureEnabled($cfg), 'enabled' => false, 'required' => false, 'why' => null, 'left' => 0];
+if ($accTwofa['feature']) {
+    $accNeed = user2faRequiredFor($db, $cfg, $meUser);
+    $accTwofa['enabled']  = user2faEnabled($db, (int)$meUser['id']);
+    $accTwofa['required'] = (bool)$accNeed['required'];
+    $accTwofa['why']      = $accNeed['why'];
+    $accTwofa['left']     = user2faRecoveryLeft($db, (int)$meUser['id']);
+}
+// The uploads tab is hidden ENTIRELY, not shown empty, where a submission cannot happen — a tab that
+// can only ever be empty teaches people the feature is broken rather than absent.
+$accShowUploads = $accFav['uploads'] && uploadsPublicEnabled($cfg);
+$accSounds = soundsEnabled($cfg) && userCan($db, $cfg, 'sounds.use');
+$accTabs = $accFav['may_use'] || $accVotes['enabled'] || $accDescs['enabled'] || $accShowUploads || $accLists['may_use']
+        || $accPeople['may_message'] || $accPeople['may_friend'] || $accSounds;
+?>
+<div class="account-head">
+    <?php /* The picture goes where the NAME goes inside the sentence (1.63.0), whichever end of it the
+             language puts the name at — so it is part of the name the heading substitutes, not a
+             prefix to the whole line. The row is the reader's own, already read: no query. */ ?>
+    <h1><?= __('account.h1_named', ['user' => '<span class="av-who">'
+        . (function_exists('userAvatarHtml') ? userAvatarHtml($meUser, 32, $baseUrl, 'avatar acc-h1-av js-avatar-me', $cfg) : '')
+        . sanitize($meUser['username']) . '</span>']) ?></h1>
+    <?php /* The two things somebody does with their own profile, where they can see them: at the top
+             of the page, beside the one button that was already there. Down in Privacy they were a
+             quiet grey pair under a paragraph, and the first person to look for them missed them. */ ?>
+    <div class="account-head-acts">
+        <?php if (($cfg['search_share_enabled'] ?? '1') === '1'): ?>
+        <button type="button" class="btn btn-secondary js-profile-share" data-user="<?= sanitize((string)$meUser['username']) ?>"
+                title="<?= _h('profile.share_title') ?>"><?= _h('search.share') ?></button>
+        <?php endif; ?>
+        <a class="btn btn-secondary" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)$meUser['username']) ?>"><?= _h('account.open_profile') ?></a>
+        <button type="button" class="btn btn-secondary" id="account-logout"><?= _h('common.sign_out') ?></button>
+    </div>
+</div>
+<input type="hidden" id="account-csrf" value="<?= $csrfToken ?>">
+<?php if ($accRestricted): ?>
+<div class="alert alert-error show"><?= __('account.restricted', [
+    'hint' => __($accHasEmail ? 'account.restricted_has' : 'account.restricted_none'),
+]) ?></div>
+<?php endif; ?>
+<?php if ($accPending !== null): ?>
+<div class="alert alert-success show" id="acc-pending-box"><?= __('account.pending', [
+        'email' => $accPending['pending_email'] === '' ? __('account.pending_removal') : sanitize($accPending['pending_email']),
+        'stage' => __($accPending['stage'] === 'old' ? 'account.stage_current' : 'account.stage_new'),
+    ]) ?>
+    <button type="button" class="btn btn-secondary btn-small" id="acc-cancel-echange"><?= _h('account.cancel_change') ?></button></div>
+<?php endif; ?>
+
+<?php if ($accTabs): ?>
+<?php /* Tabs by location.hash, not by ?query — nothing in this codebase reads a query parameter on
+         this page, and a hash costs no request. Visually the .rt-tabs pattern the rich-text editor
+         already uses, so the page does not grow a second idea of what a tab looks like. */ ?>
+<div class="rt-tabs acc-tabs" id="acc-tabs" role="tablist">
+    <button type="button" class="rt-tab active" data-pane="overview"><?= _h('account.tab_overview') ?></button>
+    <?php if ($accFav['may_use']): ?>
+    <button type="button" class="rt-tab" data-pane="favourites"><?= _h('account.tab_favourites') ?></button>
+    <?php endif; ?>
+    <?php if ($accVotes['enabled']): ?>
+    <?php /* Named by the rating system's mode: thumbs are likes, stars are ratings. Right after
+             Favourites, as the owner asked — the router's list in assets/js/favourites.js names it too. */ ?>
+    <button type="button" class="rt-tab" data-pane="votes"><?= _h('account.tab_votes_' . $accVotes['mode']) ?></button>
+    <?php endif; ?>
+    <?php if ($accDescs['enabled']): ?>
+    <?php /* The descriptions this account wrote (1.70.0), right after Likes / Ratings — the router's list
+             in assets/js/favourites.js names it too. */ ?>
+    <button type="button" class="rt-tab" data-pane="descriptions"><?= _h('account.tab_descriptions') ?></button>
+    <?php endif; ?>
+    <?php if ($accImages['enabled']): ?>
+    <button type="button" class="rt-tab" data-pane="images"><?= _h('account.tab_images') ?></button>
+    <?php endif; ?>
+    <?php if ($accShowUploads): ?>
+    <button type="button" class="rt-tab" data-pane="uploads"><?= _h('account.tab_uploads') ?></button>
+    <?php endif; ?>
+    <?php if ($accLists['may_use']): ?>
+    <button type="button" class="rt-tab" data-pane="lists"><?= _h('account.tab_lists') ?></button>
+    <?php endif; ?>
+    <?php if ($accPeople['may_message']): ?>
+    <button type="button" class="rt-tab" data-pane="messages"><?= _h('account.tab_messages') ?>
+        <span class="pm-unread-badge" id="pm-unread"<?= $accPeople['unread'] ? '' : ' hidden' ?>><?= (int)$accPeople['unread'] ?></span></button>
+    <?php endif; ?>
+    <?php if ($accPeople['may_friend']): ?>
+    <button type="button" class="rt-tab" data-pane="people"><?= _h('account.tab_people') ?>
+        <?php /* Somebody waiting for an answer is the one thing on this page that is about to go
+                 stale, so it is the one that carries a number. */ ?>
+        <span class="pm-unread-badge" id="pe-incoming" hidden></span></button>
+    <?php endif; ?>
+    <?php if ($accPeople['may_directory']): ?>
+    <button type="button" class="rt-tab" data-pane="members"><?= _h('people.dir_h1') ?></button>
+    <?php endif; ?>
+    <?php if ($accSounds): ?>
+    <button type="button" class="rt-tab" data-pane="sounds"><?= _h('account.tab_sounds') ?></button>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
+<div class="acc-pane" id="acc-pane-overview">
+<?php /* THE OVERVIEW IN CARDS (1.71.0). It was two cards of very different heights — the Profile card on the
+         left grew with every browser this account had asked to be remembered on, the right one held the
+         groups, the language, the zone, Privacy and the cover — and a column stood half empty beside the
+         other. Each group is a card of its own now, under a heading and a line that says what it is for,
+         and the cards FLOW into two columns the browser balances (.acc-flow: CSS columns, no card split),
+         in this order, which is also the order on a phone: Profile, the picture and the cover when their
+         setting says the left column, what we may send you, your groups, the language, the zone, Privacy,
+         the picture and the cover when it says the right column, a linked sign-in. The part that grows —
+         the second factor and the signed-in browsers — is the last card, the full width, under both
+         columns. Every id, and every class a script or a check reads, is where it was: on the card that
+         is now the block. */ ?>
+<div class="acc-flow">
+    <?php if ($accStanding): ?>
+    <?php /* ACCOUNT STANDING (1.75.0): only for an account that has something to show — a silence or a ban running now, a warning
+             that counts. Active warnings only (loud, not revoked): a silent action was never told to the member, a withdrawn
+             warning is withdrawn. No moderator's name. The reasons are the site's own rendering (reportTextHtml()). */ ?>
+    <section class="account-card acc-card acc-standing" id="acc-card-standing">
+        <h2><?= _h('account.standing') ?></h2>
+        <p class="acc-card-desc"><?= _h('account.standing_desc') ?></p>
+        <?php foreach (['ban' => 'account.standing_banned', 'mute' => 'account.standing_muted'] as $accK => $accKey): if (!$accStanding[$accK]) continue; $accR = $accStanding[$accK]; ?>
+        <p class="acc-standing-restr acc-standing-<?= $accK ?>"><i class="bi bi-<?= $accK === 'ban' ? 'slash-circle' : 'volume-mute' ?>" aria-hidden="true"></i>
+            <?= $accR['until'] === null ? _h($accKey . '_nodate') : ($accR['forever'] ? _h($accKey . '_forever') : _h($accKey, ['date' => $accR['until']])) ?></p>
+        <?php endforeach; ?>
+        <?php if ($accStanding['warnings']): ?>
+        <p class="acc-standing-count"><?= _h('account.standing_count', ['n' => (int)$accStanding['count']]) ?></p>
+        <ul class="acc-standing-list">
+            <?php foreach ($accStanding['warnings'] as $accW): ?>
+            <li>
+                <span class="acc-standing-when"><?= sanitize($accW['at']) ?></span>
+                <strong><?= _h('account.standing_act_' . ($accW['auto'] ? 'auto_' : '') . $accW['action']) ?></strong>
+                <?php if ($accW['auto']): ?>
+                <div class="acc-standing-reason"><?= _h('account.standing_auto', [
+                    'warnings' => plural((int)$accW['auto']['count'], 'notify.auto_warnings'), 'window' => plural((int)$accW['auto']['window'], 'notify.auto_window')]) ?></div>
+                <?php elseif ($accW['html'] !== ''): ?>
+                <div class="acc-standing-reason rt-body richtext" data-lang-keep><?= $accW['html'] ?></div>
+                <?php endif; ?>
+            </li>
+            <?php endforeach; ?>
+        </ul>
+        <?php endif; ?>
+    </section>
+    <?php endif; ?>
+    <section class="account-card acc-card" id="acc-card-profile">
+        <h2><?= _h('account.profile') ?></h2>
+        <p class="acc-card-desc"><?= _h('account.card_profile_desc') ?></p>
+        <table class="account-kv">
+            <tr><td><?= _h('account.username') ?></td><td><?= sanitize($meUser['username']) ?></td></tr>
+            <tr><td><?= _h('account.email') ?></td><td>
+                <div class="acc-email-line">
+                    <span id="acc-email" class="acc-email-addr" data-has-email="<?= $accHasEmail ? '1' : '0' ?>"><?= $accHasEmail ? sanitize($meUser['email']) : '<em>' . _h('common.none') . '</em>' ?></span>
+                    <?php if ($accHasEmail): ?>
+                    <span id="acc-email-badge" class="acc-badge <?= $accVerified ? 'acc-badge-ok' : 'acc-badge-warn' ?>"><?= _h($accVerified ? 'account.verified' : 'account.unverified') ?></span>
+                    <?php endif; ?>
+                </div>
+                <?php if ($accHasEmail && !$accVerified): ?>
+                <button type="button" class="btn btn-secondary btn-small acc-email-resend" id="acc-verify-send" title="<?= _h('account.resend_title') ?>"><?= _h('account.resend') ?></button>
+                <?php endif; ?>
+            </td></tr>
+            <tr><td><?= _h('account.member_since') ?></td><td><?= sanitize((string)$meUser['created_at']) ?></td></tr>
+            <tr><td><?= _h('account.last_login') ?></td><td><?= sanitize((string)($meUser['last_login_at'] ?? '—')) ?></td></tr>
+            <?php /* The description (1.69.0): written where it is read, on the profile — this row shows it
+                     and sends you there with the editor open (#bio). Only while the feature is on and the
+                     account may write one: a row about something you cannot change is not a setting. */ ?>
+            <?php if (function_exists('profileBioMayWrite') && profileBioMayWrite($db, $cfg, $meUser)): ?>
+            <?php $accBio = profileBioFor($db, $cfg, $meUser); ?>
+            <tr id="acc-bio-row"><td><?= _h('account.bio') ?></td><td>
+                <?php if ($accBio !== ''): ?>
+                <div class="acc-bio-text" id="acc-bio-text" dir="auto" data-lang-keep><?= $accBio ?></div>
+                <?php else: ?>
+                <em class="text-muted" id="acc-bio-none"><?= _h('account.bio_none') ?></em>
+                <?php endif; ?>
+                <a class="acc-bio-edit" id="acc-bio-edit" href="<?= $baseUrl ?>?action=u&amp;name=<?= urlencode((string)$meUser['username']) ?>#bio"><i class="bi bi-pencil" aria-hidden="true"></i> <?= _h('account.bio_edit') ?></a>
+            </td></tr>
+            <?php endif; ?>
+        </table>
+        <?php if ($accHasEmail && !$accVerified): ?>
+        <p class="text-muted acc-verify-note"><?= _h('account.verify_note') ?></p>
+        <?php endif; ?>
+    </section>
+        <?php
+        // THE PICTURE AND THE COVER (1.63.0, includes/usermedia.php). A card each (1.71.0): they are how
+        // this account looks to everybody else. The drop zone is the Emotes page's own; a chosen file
+        // opens as a LOCAL preview in the editor (assets/js/media-editor.js) and nothing leaves the
+        // browser until Save, which sends the file and its framing in one request. Remove is drawn even
+        // without the permission: taking your own picture down is never something to be allowed to do.
+        //
+        // WHICH COLUMN each one stands in is a setting of its own (1.66.0): `account_picture_side` and
+        // `account_cover_side` — until then `account_media_side` (1.64.0) moved both together. Each
+        // block is built once, into a buffer of its own, and echoed at one of two places in the flow of
+        // cards: right after Profile (the left column's top) or right after Privacy (the right column,
+        // the end of the flow). The ids and the classes are identical wherever a block lands, so
+        // media-editor.js finds exactly what it found before (it looks for #acc-avatar, #acc-cover and
+        // #acc-media-data, never for a column) and nothing else on the page has to know the settings
+        // exist. Output buffers rather than closures because this is a template: the blocks are
+        // written as markup, and a closure would have turned fifty lines of it into strings.
+        $accAvOn = function_exists('userAvatarsEnabled') && userAvatarsEnabled($cfg);
+        $accCvOn = function_exists('userCoversEnabled') && userCoversEnabled($cfg);
+        $accAvatarHtml = '';
+        $accCoverHtml = '';
+        $accPicSide = function_exists('accountPictureSide') ? accountPictureSide($cfg) : 'left';
+        $accCovSide = function_exists('accountCoverSide') ? accountCoverSide($cfg) : 'right';
+        if ($accAvOn || $accCvOn):
+            $accMedia = userMediaEditorState($db, $cfg, $meUser, $baseUrl);
+            $accMayAv = $accAvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.avatar');
+            $accMayCv = $accCvOn && userIdHasPermission($db, $cfg, (int)$meUser['id'], 'profile.cover');
+            // Where a cover comes from, for somebody who cannot set one (1.65.0). Since the cover
+            // became a Premium extra this is the NORMAL state of every member, so it is an answer —
+            // "it comes with Premium" — not the warning a missing grant usually earns, which reads
+            // as a misconfiguration. The admin group is left out (it passes by its blanket and hands
+            // nothing to anybody), and so is guest. One constant query, filtered here: a handful of
+            // group rows, and no list of ids pasted into SQL.
+            $accCvGroups = [];
+            if ($accCvOn && !$accMayCv && function_exists('userGroupIdsWithPermission')) {
+                $accCvIds = userGroupIdsWithPermission($db, 'profile.cover');
+                foreach ($db->query("SELECT id, slug, name FROM user_groups ORDER BY priority DESC, name")->fetchAll(PDO::FETCH_ASSOC) as $accG) {
+                    if (in_array((int)$accG['id'], $accCvIds, true) && !in_array((string)$accG['slug'], ['admin', 'guest'], true)) {
+                        $accCvGroups[] = (string)$accG['name'];
+                    }
+                }
+            }
+            $accCover = $accCvOn ? userCoverFor($meUser, $baseUrl, $cfg) : null;
+            $accMaxKb = (int)floor(userMediaMaxBytes($cfg) / 1024);
+            $accMedia['avatar'] += ['url64' => userAvatarUrl($meUser, 32, $baseUrl, $cfg), 'url128' => userAvatarUrl($meUser, 64, $baseUrl, $cfg)];
+            $accMedia['cover'] += ['css' => $accCover !== null ? userCoverCssVars($accCover) : '', 'is_default' => $accCover !== null && !empty($accCover['default'])];
+        ?>
+        <?php /* What the editor starts from, once for both blocks and printed here whichever column
+                 they land in: a script element takes no room, and there is exactly one of it. */ ?>
+        <script type="application/json" id="acc-media-data"<?= nonceAttr() ?>><?= json_encode($accMedia + [
+            'max_bytes' => userMediaMaxBytes($cfg), 'cover_h' => userCoverHeight($cfg), 'cover_hm' => userCoverHeightMobile($cfg),
+            'desk_w' => USER_COVER_DESKTOP_W, 'phone_w' => USER_COVER_PHONE_W,
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES) ?></script>
+        <?php ob_start(); ?>
+        <?php if ($accAvOn): ?>
+        <section class="account-card acc-card acc-media" id="acc-avatar">
+            <h2><?= _h('account.media_avatar_head') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_avatar_desc') ?></p>
+            <div class="acc-media-row">
+                <?php /* The three sizes it is really drawn at — beside names in lists, in the shoutbox, on
+                         the profile — so nobody has to guess what a crop will look like small. */ ?>
+                <div class="acc-media-now" aria-hidden="true">
+                    <?= userAvatarHtml($meUser, 64, $baseUrl, 'acc-av', $cfg) ?>
+                    <?= userAvatarHtml($meUser, 32, $baseUrl, 'acc-av', $cfg) ?>
+                    <?= userAvatarHtml($meUser, 24, $baseUrl, 'acc-av', $cfg) ?>
+                </div>
+                <div class="acc-media-side">
+                    <?php if ($accMayAv): ?>
+                    <div class="emote-drop acc-media-drop" tabindex="0" role="button" aria-label="<?= _h('account.media_drop_aria_avatar') ?>">
+                        <i class="bi bi-person-square emote-drop-icon" aria-hidden="true"></i>
+                        <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
+                        <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => langNumber($accMaxKb)]) ?></span>
+                        <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif" aria-label="<?= _h('account.media_drop_aria_avatar') ?>">
+                    </div>
+                    <?php endif; ?>
+                    <?php /* The same two buttons, with the same icons, as Settings → Profiles in the panel. */ ?>
+                    <div class="acc-media-acts">
+                        <?php if ($accMayAv): ?>
+                        <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><i class="bi bi-arrows-move" aria-hidden="true"></i> <?= _h('account.media_adjust') ?></button>
+                        <?php endif; ?>
+                        <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['avatar']['has'] ? '' : ' hidden' ?>><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('account.media_remove') ?></button>
+                        <span class="acc-media-status" role="status" aria-live="polite"></span>
+                    </div>
+                </div>
+            </div>
+            <p class="text-muted acc-verify-note"><?= _h('account.media_avatar_note') ?></p>
+            <?php if (!$accMayAv): ?>
+            <p class="acc-perm-warn"><?= __('account.media_no_grant', ['perm' => 'profile.avatar']) ?></p>
+            <?php endif; ?>
+        </section>
+        <?php endif; ?>
+        <?php
+        $accAvatarHtml = (string)ob_get_clean();
+        ob_start();
+        ?>
+        <?php /* Shown when there is something to do or to know: the account may set a cover, a group
+                 exists that would let it, or a cover of its own is being kept. A block that could only
+                 ever say "no" to somebody with no way to change that is left out altogether. */ ?>
+        <?php if ($accCvOn && ($accMayCv || $accCvGroups || !empty($accMedia['cover']['has']))): ?>
+        <section class="account-card acc-card acc-media" id="acc-cover">
+            <h2><?= _h('account.media_cover_head') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_cover_desc') ?></p>
+            <?php /* A miniature of the real header: the same shape and the same painting as the band on
+                     the profile page (.cv-paint), with the site's default cover when this account has
+                     none of its own. */ ?>
+            <div class="acc-cover-now<?= $accCover !== null ? ' has-cover' : '' ?><?= $accCover !== null && $accCover['zoom'] < 1 ? ' cv-zoomout' : '' ?> cv-overlay-<?= sanitize(userCoverOverlay($cfg)) ?>" id="acc-cover-now">
+                <div class="cv-paint" aria-hidden="true"><div class="cv-shade"></div></div>
+                <span class="acc-cover-empty"><?= _h('account.media_cover_none') ?></span>
+                <span class="acc-cover-default"<?= $accCover !== null && !empty($accCover['default']) ? '' : ' hidden' ?>><?= _h('account.media_cover_default') ?></span>
+            </div>
+            <?= userCoverStyleBlock('#acc-cover-now', $accCover, $cfg) ?>
+            <div class="acc-media-side acc-media-side-wide">
+                <?php if ($accMayCv): ?>
+                <div class="emote-drop acc-media-drop" tabindex="0" role="button" aria-label="<?= _h('account.media_drop_aria_cover') ?>">
+                    <i class="bi bi-image emote-drop-icon" aria-hidden="true"></i>
+                    <span class="emote-drop-main"><u><?= _h('account.media_drop_choose') ?></u> <?= _h('account.media_drop_or') ?></span>
+                    <span class="emote-drop-sub"><?= _h('account.media_drop_sub', ['kb' => langNumber($accMaxKb)]) ?></span>
+                    <input type="file" class="emote-drop-input" accept="image/jpeg,image/png,image/webp,image/gif" aria-label="<?= _h('account.media_drop_aria_cover') ?>">
+                </div>
+                <?php endif; ?>
+                <div class="acc-media-acts">
+                    <?php if ($accMayCv): ?>
+                    <button type="button" class="btn btn-secondary btn-small acc-media-adjust"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><i class="bi bi-arrows-move" aria-hidden="true"></i> <?= _h('account.media_adjust') ?></button>
+                    <?php endif; ?>
+                    <button type="button" class="btn btn-secondary btn-small acc-media-remove"<?= $accMedia['cover']['has'] ? '' : ' hidden' ?>><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('account.media_remove') ?></button>
+                    <span class="acc-media-status" role="status" aria-live="polite"></span>
+                </div>
+            </div>
+            <p class="text-muted acc-verify-note"><?= _h('account.media_cover_note') ?></p>
+            <?php if (!$accMayCv): ?>
+                <?php if ($accCvGroups): ?>
+            <p class="text-muted acc-verify-note acc-cover-with"><?= __('account.media_cover_with', ['groups' => sanitize(implode(', ', $accCvGroups))]) ?></p>
+                <?php endif; ?>
+            <?php /* 1.65.0: the cover is a premium extra now, so this member may be holding a picture
+                     the site has stopped painting. The row is untouched — say that, because a band
+                     that simply went blank looks like the site lost the file. */ ?>
+                <?php if (!empty($accMedia['cover']['has'])): ?>
+            <p class="acc-perm-warn"><?= __('account.media_cover_kept') ?></p>
+                <?php endif; ?>
+            <?php endif; ?>
+        </section>
+        <?php endif; ?>
+        <?php
+        $accCoverHtml = (string)ob_get_clean();
+        endif;
+        ?>
+    <?php /* The picture and the cover, each where its own setting says (1.66.0): here, right under
+             Profile — the left column's top, the picture's shipped place — or after Privacy, at the end
+             of the flow: the right column. Picture first when both land in one place. */ ?>
+    <?php if ($accPicSide === 'left') echo $accAvatarHtml; ?>
+    <?php if ($accCovSide === 'left') echo $accCoverHtml; ?>
+        <?php if ($accHasEmail): ?>
+    <section class="account-card acc-card acc-mail-card" id="acc-card-mail">
+            <h2><?= _h('account.mail_prefs') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_mail_desc') ?></p>
+            <label class="search-check acc-pref-row">
+                <input type="checkbox" id="acc-mail-pref"><span class="search-check-box" aria-hidden="true"></span>
+                <span class="acc-pref-text">
+                    <span class="acc-pref-name"><?= _h('account.pref_account') ?> <span class="acc-pref-state" id="acc-mail-pref-label">&hellip;</span></span>
+                    <span class="acc-pref-note"><?= _h('account.pref_account_note') ?></span>
+                </span>
+            </label>
+            <label class="search-check acc-pref-row">
+                <input type="checkbox" id="acc-bulk-pref"><span class="search-check-box" aria-hidden="true"></span>
+                <span class="acc-pref-text">
+                    <span class="acc-pref-name"><?= _h('account.pref_bulk') ?> <span class="acc-pref-state" id="acc-bulk-pref-label">&hellip;</span></span>
+                    <span class="acc-pref-note"><?= _h('account.pref_bulk_note') ?></span>
+                </span>
+            </label>
+    </section>
+        <?php endif; ?>
+    <section class="account-card acc-card" id="acc-card-groups">
+        <h2><?= _h('account.groups') ?></h2>
+        <p class="acc-card-desc"><?= _h('account.card_groups_desc') ?></p>
+        <?php /* Drawn here, where the page is written, and not only by the script (1.71.0): the columns are
+                 balanced on the cards' heights, and a card that grew from "Loading…" to its groups after the
+                 page had been laid out moved the cards after it into the other column as the page opened.
+                 assets/js/app.js (loadAccount()) draws the same rows again from user_me — with the date in
+                 the reader's own format — whenever the account is read. */ ?>
+        <div id="acc-groups"><?php
+            $accGroupRows = function_exists('userGroups') ? userGroups($db, (int)$meUser['id']) : [];
+            if (!$accGroupRows): ?><span class="text-muted"><?= _h('js.app.no_groups') ?></span><?php
+            else: foreach ($accGroupRows as $accG):
+                // The date as the script writes it — the stored clock reading, day first — so the row is the
+                // same length before and after the script draws it again.
+                $accGUntil = $accG['expires_at'] ? DateTime::createFromFormat('Y-m-d H:i:s', (string)$accG['expires_at']) : null;
+                ?><div class="acc-group"><strong<?= preg_match('/^#[0-9a-fA-F]{3,8}$/', (string)($accG['color'] ?? '')) ? ' style="color:' . sanitize((string)$accG['color']) . '"' : '' ?>><?= sanitize((string)$accG['name']) ?></strong><span class="text-muted"> — <?= $accG['expires_at']
+                ? _h('js.app.group_until', ['date' => $accGUntil ? $accGUntil->format('d.m.Y, H:i') : (string)$accG['expires_at']])
+                : _h('js.app.group_permanent') ?></span><?php if (trim((string)($accG['description'] ?? '')) !== ''): ?><div class="acc-group-desc text-muted"><?= sanitize((string)$accG['description']) ?></div><?php endif; ?></div><?php
+            endforeach; endif; ?></div>
+    </section>
+<?php ob_start(); /* the security card, printed under the columns (below) */ ?>
+        <?php /* ── Account security ──────────────────────────────────────────────────────────────
+                 The second factor and the list of signed-in devices. Both answer the same question —
+                 "who else can be me?" — and neither is about what this account publishes, which is what
+                 the privacy card is for. The one card that GROWS (every browser asked to be remembered
+                 is a line), so since 1.71.0 it is the last one, the page's full width, under the two
+                 balanced columns — where it cannot make one of them longer than the other. */ ?>
+    <section class="account-card acc-card acc-wide acc-security-block" id="acc-security">
+            <h2><?= _h('account.security') ?></h2>
+            <p class="acc-card-desc"><?= _h($accTwofa['feature'] ? 'account.card_security_desc' : 'account.card_security_desc_sessions') ?></p>
+            <?php if ($accTwofa['feature']): ?>
+            <label class="search-check acc-pref-row">
+                <input type="checkbox" id="acc-2fa"<?= $accTwofa['enabled'] ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span class="acc-pref-text">
+                    <span class="acc-pref-name"><?= _h('account.twofa') ?> <span class="acc-pref-state" id="acc-2fa-state"><?= _h($accTwofa['enabled'] ? 'account.twofa_on' : 'account.twofa_off') ?></span></span>
+                    <span class="acc-pref-note"><?= _h('account.twofa_note') ?></span>
+                </span>
+            </label>
+            <?php if ($accTwofa['required'] && !$accTwofa['enabled']): ?>
+            <?php /* Not a scolding: it says what is actually withheld, which for 'panel' is the panel
+                     and nothing else — the account itself keeps working. */ ?>
+            <p class="acc-perm-warn"><?= __('account.twofa_required_' . $accTwofa['why']) ?></p>
+            <?php endif; ?>
+            <?php if ($accTwofa['enabled'] && $accTwofa['left'] > 0): ?>
+            <p class="text-muted acc-pref-note" id="acc-2fa-left"><?= __('account.twofa_left', ['n' => (int)$accTwofa['left']]) ?>
+                <button type="button" class="btn btn-secondary btn-small" id="acc-2fa-newcodes"><?= _h('account.twofa_newcodes') ?></button></p>
+            <?php endif; ?>
+            <?php if (userIdHasPermission($db, $cfg, (int)$meUser['id'], 'panel.access')): ?>
+            <?php /* Somebody who can open the panel has TWO of these, and they are not the same one.
+                     Said here rather than left to be discovered when the panel asks for a code that
+                     this page never issued. */ ?>
+            <p class="text-muted acc-pref-note"><?= __('account.twofa_panel_note') ?></p>
+            <?php endif; ?>
+            <div class="acc-2fa-box" id="acc-2fa-box" hidden></div>
+            <?php endif; ?>
+
+            <div class="acc-sessions" id="acc-sessions">
+                <p class="acc-sessions-head" id="acc-sessions-head"><?= _h('common.loading') ?></p>
+                <div class="acc-sessions-list" id="acc-sessions-list"></div>
+                <div class="acc-sessions-act" id="acc-sessions-act" hidden>
+                    <input type="password" class="profile-search" id="acc-sessions-pass" autocomplete="current-password" placeholder="<?= _h('account.cur_pass') ?>">
+                    <button type="button" class="btn btn-secondary btn-small" id="acc-sessions-go"><?= _h('account.sessions_clear') ?></button>
+                    <span class="text-muted" id="acc-sessions-msg"></span>
+                </div>
+                <p class="text-muted acc-pref-note"><?= __('account.sessions_note') ?></p>
+            </div>
+    </section>
+<?php $accSecurityHtml = (string)ob_get_clean(); ?>
+<?php
+// The interface language: a card of its own since 1.71.0 (it was a sub-section under the groups, which
+// had been "not a third card: a card for one <select> read as a feature and sat mostly empty" — the
+// columns are made of small cards now, and its note is the line under its heading).
+//
+// Only when there is a choice. One language is not a preference, it is a fact about the site, and a
+// select with a single option is a control that teaches people it does nothing.
+$accLangs = function_exists('langForUsers') ? langForUsers($cfg) : [];
+if (count($accLangs) > 1):
+    $accLangNow = (string)($meUser['language'] ?? '');
+?>
+    <section class="account-card acc-card acc-lang-block" id="acc-card-lang">
+            <h2><?= _h('account.lang_head') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.lang_note') ?></p>
+            <select id="acc-language" class="acc-language" aria-label="<?= _h('account.lang_head') ?>">
+                <option value=""<?= $accLangNow === '' ? ' selected' : '' ?>><?= _h('account.lang_site') ?></option>
+                <?php foreach ($accLangs as $accCode => $accName): ?>
+                <option value="<?= sanitize($accCode) ?>"<?= $accLangNow === $accCode ? ' selected' : '' ?>><?= sanitize($accName) ?></option>
+                <?php endforeach; ?>
+            </select>
+    </section>
+<?php endif; ?>
+<?php
+// THE ZONE THIS READER SEES TIMES IN (v68). Moved here in 1.64.0, under Interface language, because
+// that is what it is: another answer about how this reader wants the site written for them, and it
+// sat in the Profile card among the facts about the account. OUTSIDE the language block's `if` —
+// that one only renders where the site has more than one language, and a site with one language
+// still has readers in more than one zone.
+//
+// "Site default" first and named with the zone it stands for right now, because a bare "default" is
+// a promise nobody can check; then every zone, from the same list Settings → Site offers, written
+// SHORT (tzChoices(null, true)): a native select's open list is as wide as its longest option and
+// no stylesheet can narrow it, and the region is already written on the group above the option.
+// A stored name PHP no longer knows reads as the default here, which is what every page already
+// treats it as (userDisplayTimezone()).
+$accTzOwn  = trim((string)($meUser['timezone'] ?? ''));
+if (!tzValidName($accTzOwn)) $accTzOwn = '';
+$accTzSite = new DateTimeZone(siteTimezone($cfg));
+?>
+    <section class="account-card acc-card acc-tz-block" id="acc-tz">
+            <h2><label for="acc-timezone"><?= _h('account.tz_head') ?></label></h2>
+            <p class="acc-card-desc"><?= _h('account.tz_note') ?></p>
+            <?php /* A wrapper, because the "Saved" tooltip is drawn against an element and a <select>
+                     cannot hold one — it is the wrapper pubTip() measures. */ ?>
+            <span class="acc-tz-wrap" id="acc-timezone-wrap">
+                <select id="acc-timezone" class="acc-language acc-timezone">
+                    <option value=""<?= $accTzOwn === '' ? ' selected' : '' ?>><?= _h('account.tz_site', ['zone' => $accTzSite->getName(), 'offset' => tzOffsetLabel($accTzSite)]) ?></option>
+                    <?php foreach (tzChoices(null, true) as $accTzGrp => $accTzIds): ?>
+                    <optgroup label="<?= sanitize(tzRegionLabel($accTzGrp)) ?>">
+                        <?php foreach ($accTzIds as $accTzId => $accTzLabel): ?>
+                        <option value="<?= sanitize($accTzId) ?>"<?= $accTzOwn === $accTzId ? ' selected' : '' ?>><?= sanitize($accTzLabel) ?></option>
+                        <?php endforeach; ?>
+                    </optgroup>
+                    <?php endforeach; ?>
+                </select>
+            </span>
+    </section>
+<?php /* The privacy block belongs to whichever of these features is on: favourites, lists, or both.
+         Gating it on favourites alone hid the lists switch on an install that runs lists without
+         them. */ ?>
+<?php if (($accFav['may_use'] && ($accFav['public_ok'] || $accFav['who_ok']))
+          || $accVotes['public_ok'] || $accDescs['public_ok'] || $accDescs['credit_ok']
+          || ($accLists['may_use'] && $accLists['public_ok'])
+          || $accPeople['pm'] || $accPeople['directory']): ?>
+        <?php /* A card of its own since 1.71.0 — the longest one, what others see of this account. */ ?>
+    <section class="account-card acc-card acc-privacy-block" id="acc-privacy">
+            <h2><?= _h('account.fav_privacy') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_privacy_desc') ?></p>
+            <?php if ($accFav['may_use'] && ($accFav['may_publish'] || $accFav['publish_blocked'])): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-fav-public"<?= (int)($meUser['fav_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.fav_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.fav_public_hint', ['name' => sanitize($meUser['username'])]) ?></p>
+            <?php if ($accFav['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'favourites.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php /* Likes or ratings on my profile (1.69.0): drawn exactly when the favourites switch above
+                     is — whenever there is a public side for it to control — and, with the grant missing,
+                     still drawn with the sentence that says who has to change what. The label and the
+                     warning follow the mode: thumbs down and low stars are listed too, and saying so is
+                     the point of asking. */ ?>
+            <?php if ($accVotes['may_publish'] || $accVotes['publish_blocked']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-votes-public"<?= (int)($meUser['votes_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.votes_public_label_' . $accVotes['mode']) ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.votes_public_hint_' . $accVotes['mode']) ?></p>
+            <?php if ($accVotes['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'rating.public']) ?></p>
+            <?php endif; ?>
+            <?php /* …and my name, with my vote, in a torrent's "Who has this" (1.70.0, includes/who.php) — the twin
+                     of the favourites' "let my name appear", right under the switch it needs: drawn while that
+                     section exists at all, and named by the mode like the switch above. */ ?>
+            <?php if (function_exists('whoVotesEnabled') && whoVotesEnabled($cfg)): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-votes-listed"<?= (int)($meUser['votes_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.votes_listed_label_' . $accVotes['mode']) ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.votes_listed_hint_' . $accVotes['mode']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php /* The descriptions I wrote on my profile (1.70.0), right after the likes: drawn the way that
+                     switch is, with the grant warning, and — while my name is hidden on my descriptions —
+                     the sentence that says the list is then shown to nobody else either. */ ?>
+            <?php if ($accDescs['may_publish'] || $accDescs['publish_blocked']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-descs-public"<?= (int)($meUser['descriptions_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.descs_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.descs_public_hint') ?></p>
+            <p class="acc-perm-warn" id="acc-descs-name-hidden"<?= $accDescs['name_hidden'] ? '' : ' hidden' ?>><?= __('account.descs_public_name_hidden') ?></p>
+            <?php if ($accDescs['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'content.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php if ($accImages['may_publish'] || $accImages['publish_blocked']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-images-public"<?= (int)($meUser['images_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.images_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.images_public_hint') ?></p>
+            <?php if ($accImages['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'images.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php /* My name on the descriptions I write and edit (1.70.0): ON unless I say otherwise — names
+                     have always been shown there. Off, every credit of mine says "a member". */ ?>
+            <?php if ($accDescs['credit_ok']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-credit-public"<?= (int)($meUser['content_credit_public'] ?? 1) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.credit_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.credit_public_hint') ?></p>
+            <?php endif; ?>
+            <?php if ($accLists['may_use'] && ($accLists['may_publish'] || $accLists['publish_blocked'])): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-lists-public"<?= (int)($meUser['lists_public'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.lists_public_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.lists_public_hint') ?></p>
+            <?php /* Without the grant the switch still acts for the lists shared with friends (1.72.0), so the
+                     warning says what it does then rather than that nothing acts on it. */ ?>
+            <?php if ($accLists['publish_blocked'] && !$accLists['may_friends']): ?>
+            <p class="acc-perm-warn"><?= __('account.needs_grant', ['perm' => 'lists.public']) ?></p>
+            <?php elseif ($accLists['publish_blocked']): ?>
+            <p class="acc-perm-warn"><?= __('account.lists_friends_only', ['perm' => 'lists.public']) ?></p>
+            <?php endif; ?>
+            <?php endif; ?>
+            <?php if ($accPeople['directory']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-profile-listed"<?= (int)($meUser['profile_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.profile_listed_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.profile_listed_hint') ?></p>
+            <?php endif; ?>
+            <?php if ($accPeople['pm']): ?>
+            <div class="acc-pm-who">
+                <label class="cl-label" for="acc-pm-who"><?= _h('account.pm_who_label') ?></label>
+                <select id="acc-pm-who" class="profile-search acc-pm-select">
+                    <option value=""<?= ($meUser['pm_who'] ?? null) === null ? ' selected' : '' ?>><?= __('account.pm_who_default', ['what' => _h('account.pm_who_' . $accPeople['who_default'])]) ?></option>
+                    <option value="all"<?= ($meUser['pm_who'] ?? null) === 'all' ? ' selected' : '' ?>><?= _h('account.pm_who_all') ?></option>
+                    <option value="friends"<?= ($meUser['pm_who'] ?? null) === 'friends' ? ' selected' : '' ?>><?= _h('account.pm_who_friends') ?></option>
+                    <option value="nobody"<?= ($meUser['pm_who'] ?? null) === 'nobody' ? ' selected' : '' ?>><?= _h('account.pm_who_nobody') ?></option>
+                </select>
+                <p class="text-muted acc-verify-note"><?= __('account.pm_who_hint') ?></p>
+            </div>
+            <?php endif; ?>
+            <?php if ($accFav['may_use'] && $accFav['who_ok']): ?>
+            <label class="search-check acc-check"><input type="checkbox" id="acc-fav-listed"<?= (int)($meUser['fav_listed'] ?? 0) === 1 ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+                <span><?= _h('account.fav_listed_label') ?></span></label>
+            <p class="text-muted acc-verify-note"><?= __('account.fav_listed_hint') ?></p>
+            <?php endif; ?>
+    </section>
+<?php endif; ?>
+<?php /* The picture and the cover when their settings say the right column (1.66.0 — the cover's shipped
+         place): after the privacy answers, at the end of the flow of cards, which is the right column's
+         foot. Exactly the markup built above — each block one piece, two possible places. */ ?>
+<?php if ($accPicSide === 'right') echo $accAvatarHtml; ?>
+<?php if ($accCovSide === 'right') echo $accCoverHtml; ?>
+<?php
+// WHERE THIS ACCOUNT SIGNS IN FROM. Shown to the person holding it, not only to the operator: an
+// account that a forum created on somebody's behalf should say so to them, and the sentence about
+// "your own password" is the answer to "what happens if the forum goes away".
+$accBridgeOn = function_exists('authBridgeEnabled') && authBridgeEnabled($cfg);
+$accIdents = $accBridgeOn ? authIdentitiesForUser($db, (int)$meUser['id']) : [];
+$accBridgeOut = $accBridgeOn ? authBridgeReturnUrl($cfg) : '';
+?>
+<?php if ($accBridgeOn): ?>
+    <section class="account-card acc-card acc-bridge-block" id="acc-bridge">
+            <h2><?= _h('bridge.linked_heading') ?></h2>
+            <p class="acc-card-desc"><?= _h('account.card_bridge_desc') ?></p>
+            <?php if ($accIdents): ?>
+            <?php foreach ($accIdents as $accId): ?>
+            <p class="acc-bridge-line">
+                <?= _h('bridge.linked_via', ['name' => (string)($accId['provider'] ?? '')]) ?>
+                <?php if (!empty($accId['external_name'])): ?>
+                <span class="text-muted"><?= _h('bridge.linked_as', ['name' => (string)$accId['external_name']]) ?></span>
+                <?php endif; ?>
+                <span class="text-muted"><?= _h('bridge.linked_since', ['date' => (string)($accId['created_at'] ?? '')]) ?></span>
+            </p>
+            <?php endforeach; ?>
+            <?php if ($accBridgeOut !== ''): ?>
+            <p class="acc-bridge-go">
+                <a class="btn btn-secondary btn-small" href="<?= $baseUrl ?>?action=bridge_out" rel="nofollow"><?= _h('bridge.continue_to', ['name' => authBridgeProviderName($db, $cfg)]) ?></a>
+                <span class="text-muted acc-verify-note"><?= _h('bridge.continue_hint') ?></span>
+            </p>
+            <?php endif; ?>
+            <?php else: ?>
+            <p class="text-muted acc-verify-note"><?= _h('bridge.not_linked') ?></p>
+            <?php endif; ?>
+    </section>
+<?php endif; ?>
+</div><?php /* /.acc-flow */ ?>
+<?php /* The second factor and the signed-in browsers: the card that grows, under both columns. */ ?>
+<?= $accSecurityHtml ?>
+
+</div><?php /* /#acc-pane-overview */ ?>
+
+<?php /* The cluster's extra announce ports, the way templates/pages/search.php emits them: with
+         several opentracker ports a magnet that names only the two from Settings sends the client
+         to a fraction of the swarm. Computed once — all three sections below carry it. */
+$accExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                    array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>
+
+<?php if ($accFav['may_use']): ?>
+<div class="acc-pane" id="acc-pane-favourites" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.fav_heading') ?></h2>
+    <div id="account-fav" class="profile-section"
+         data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
+         data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
+         data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+         data-announce-extra="<?= sanitize(implode(' ', $accExtra)) ?>"
+         data-empty-text="<?= _h('account.fav_none') ?>">
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="af-search" maxlength="120" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
+            <select id="af-sort" title="<?= _h('profile.sort') ?>">
+                <option value="added:desc"><?= _h('profile.sort_added') ?></option>
+                <option value="name:asc"><?= _h('profile.sort_name') ?></option>
+                <option value="size:desc"><?= _h('profile.sort_size') ?></option>
+                <option value="seeders:desc"><?= _h('profile.sort_seeders') ?></option>
+            </select>
+            <?php if ($mayFileSearch): ?>
+            <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="af-files" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+            <?php endif; ?>
+            <span class="profile-total" id="af-total"></span>
+        </div>
+        <div class="profile-list" id="af-list"></div>
+        <div class="trans-pagination" id="af-pager"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accVotes['enabled']): ?>
+<?php /* Likes or ratings (1.69.0): the torrents this account voted on, in the mode the site is in. The
+         table and its toolbar are one partial, shared with the profile's section; assets/js/favourites.js
+         fills it from api/user_votes.php. Your own list, so "your" in every label. */ ?>
+<div class="acc-pane" id="acc-pane-votes" hidden>
+    <h2 class="section-heading-spaced" id="acc-votes-heading"><?= _h('profile.votes_' . $accVotes['mode']) ?></h2>
+    <div id="account-votes" class="profile-section">
+        <?php $pvUser = ''; $pvSelf = true; $pvExtra = $accExtra; include __DIR__ . '/../partials/votes_section.php'; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accDescs['enabled']): ?>
+<?php /* The descriptions this account wrote (1.70.0): every state of its own, and its own proposals still
+         waiting or turned down. One partial with the profile's section; assets/js/favourites.js fills it
+         from api/user_descriptions.php. */ ?>
+<div class="acc-pane" id="acc-pane-descriptions" hidden>
+    <h2 class="section-heading-spaced" id="acc-descs-heading"><?= _h('account.descs_heading') ?></h2>
+    <div id="account-descs" class="profile-section">
+        <?php $pdUser = ''; $pdSelf = true; $pdExtra = $accExtra; include __DIR__ . '/../partials/descs_section.php'; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accImages['enabled']): ?>
+<div class="acc-pane" id="acc-pane-images" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.images_heading') ?></h2>
+    <p class="text-muted ug-intro"><?= _h('account.images_intro') ?></p>
+    <div class="ug-root profile-section" id="account-images" data-own="1"></div>
+</div>
+<?php endif; ?>
+
+<?php if ($accShowUploads): ?>
+<div class="acc-pane" id="acc-pane-uploads" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_uploads') ?></h2>
+    <div id="account-uploads" class="profile-section"
+         data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
+         data-may-publish="<?= $accFav['uploads_pub'] ? '1' : '0' ?>"
+         data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
+         data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+         data-announce-extra="<?= sanitize(implode(' ', $accExtra)) ?>"
+         data-empty-text="<?= _h('account.uploads_none') ?>">
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="au-search" maxlength="120" placeholder="<?= _h('profile.search_ph') ?>" autocomplete="off">
+            <select id="au-status" title="<?= _h('profile.status') ?>">
+                <option value=""><?= _h('profile.status_any') ?></option>
+                <option value="live"><?= _h('profile.status_live') ?></option>
+                <option value="waiting"><?= _h('profile.status_waiting') ?></option>
+                <option value="refused"><?= _h('profile.status_refused') ?></option>
+                <option value="blocked"><?= _h('profile.status_blocked') ?></option>
+            </select>
+            <select id="au-sort" title="<?= _h('profile.sort') ?>">
+                <option value="added:desc"><?= _h('profile.sort_added') ?></option>
+                <option value="name:asc"><?= _h('profile.sort_name') ?></option>
+                <option value="size:desc"><?= _h('profile.sort_size') ?></option>
+                <option value="seeders:desc"><?= _h('profile.sort_seeders') ?></option>
+            </select>
+            <span class="profile-total" id="au-total"></span>
+        </div>
+        <div class="profile-list" id="au-list"></div>
+        <div class="trans-pagination" id="au-pager"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<div class="acc-pane" id="acc-pane-rest">
+<h2 class="section-heading-spaced"><?= _h('account.notifications') ?> <span id="acc-unread-badge" class="acc-badge" hidden></span>
+    <span class="acc-notif-tools">
+        <button type="button" class="btn btn-secondary btn-small" id="acc-mark-all"><?= _h('account.mark_all') ?></button>
+        <?php /* What takes something away looks like it (1.74.0, .btn-danger-soft): beside "Mark all read", same grey. */ ?>
+        <button type="button" class="btn btn-danger-soft btn-small" id="acc-delete-read" title="<?= _h('account.delete_read_title') ?>"><?= _h('account.delete_read') ?></button>
+    </span></h2>
+<div id="acc-notifications"><span class="text-muted"><?= _h('common.loading') ?></span></div>
+<div class="trans-pagination acc-notif-pagination" id="acc-notif-pagination"></div>
+<p class="text-muted acc-notif-note"><?= _h('account.notif_note') ?></p>
+<?php /* Which comments this account is told about (1.71.0, includes/comments.php, users.comment_notify): five
+         switches under the notifications they decide — the fifth, a reply to one of my comments, since 1.72.0 —
+         each saved as it is ticked (assets/js/comments.js). Only while comments exist and this account may read
+         them — a switch about news it cannot receive is not one. */ ?>
+<?php if (function_exists('commentsEnabled') && commentsEnabled($cfg) && commentCan($db, $cfg, $meUser, 'comment.view')): ?>
+<?php $accCmPrefs = commentNotifyPrefs($meUser); ?>
+<div class="acc-comment-prefs" id="acc-comment-prefs">
+    <h3 class="acc-comment-prefs-head" id="acc-comment-prefs-head"><i class="bi bi-chat-left-text" aria-hidden="true"></i> <?= _h('account.comment_prefs_head') ?></h3>
+    <p class="text-muted acc-pref-note" id="acc-comment-prefs-note"><?= _h('account.comment_prefs_note') ?></p>
+    <?php foreach (['mine', 'desc', 'thread', 'mention', 'reply'] as $accCmKey): ?>
+    <label class="search-check acc-check acc-comment-pref"><input type="checkbox" id="acc-cm-<?= $accCmKey ?>" data-pref="<?= $accCmKey ?>"<?= !empty($accCmPrefs[$accCmKey]) ? ' checked' : '' ?>><span class="search-check-box" aria-hidden="true"></span>
+        <span id="acc-cm-<?= $accCmKey ?>-label"><?= _h('account.comment_pref_' . $accCmKey) ?></span></label>
+    <?php endforeach; ?>
+    <span class="text-muted acc-comment-prefs-msg" id="acc-comment-prefs-msg" role="status" aria-live="polite"></span>
+</div>
+<?php endif; ?>
+
+<h2 class="section-heading-spaced"><?= _h('account.change_head') ?></h2>
+<div id="account-alert" class="alert"></div>
+<form id="account-form" class="user-form" novalidate>
+    <div class="form-group">
+        <label for="acc-cur-pass"><?= _h('account.cur_pass') ?> <small class="form-hint"><?= _h('account.cur_pass_hint') ?></small></label>
+        <input type="password" id="acc-cur-pass" autocomplete="current-password" maxlength="200" required>
+    </div>
+    <div class="form-group">
+        <label for="acc-new-email"><?= _h('account.email') ?> <small class="form-hint"><?= __('account.email_hint') ?><?=
+        $accHasEmail ? __('account.email_hint_confirm')
+            . ($accCooldownDays > 0 ? __('account.email_hint_cooldown', ['days' => $accCooldownDays]) : '') : '' ?></small></label>
+        <input type="email" id="acc-new-email" maxlength="190" autocomplete="email" value="<?= sanitize((string)($meUser['email'] ?? '')) ?>">
+        <?php /* The four messages of this form have their ids from the server (1.74.0, UX-12): liveValidate() names each as its
+                 field's description, and an id a script adds after load has no counterpart in the fetched page — the live
+                 language switch pairs by id first (assets/js/lang-swap.js) and left the words in the old language. The ids
+                 are the ones the script makes: <field id>-error. */ ?>
+        <div class="error-msg" id="acc-new-email-error"><?= _h('account.email_err') ?></div>
+    </div>
+    <div class="form-group" id="acc-new-email2-group" hidden>
+        <label for="acc-new-email2"><?= _h('account.email2') ?></label>
+        <input type="email" id="acc-new-email2" maxlength="190" autocomplete="off">
+        <div class="error-msg" id="acc-new-email2-error"><?= _h('account.email2_err') ?></div>
+    </div>
+    <div class="form-group">
+        <label for="acc-new-pass"><?= _h('account.new_pass') ?> <small class="form-hint"><?= _h('account.new_pass_hint') ?></small></label>
+        <input type="password" id="acc-new-pass" maxlength="200" autocomplete="new-password">
+        <div class="pw-checklist" id="acc-pw-checklist" hidden></div>
+        <div class="error-msg" id="acc-new-pass-error"><?= _h('account.new_pass_err') ?></div>
+    </div>
+    <div class="form-group" id="acc-new-pass2-group" hidden>
+        <label for="acc-new-pass2"><?= _h('account.new_pass2') ?></label>
+        <input type="password" id="acc-new-pass2" maxlength="200" autocomplete="new-password">
+        <div class="error-msg" id="acc-new-pass2-error"><?= _h('account.new_pass2_err') ?></div>
+    </div>
+    <div class="form-center"><button type="submit" class="btn" id="account-save"><?= _h('account.save') ?></button></div>
+</form>
+</div><?php /* /#acc-pane-rest */ ?>
+<?php endif; ?>
+
+<?php if ($accLists['may_use']): ?>
+<?php /* Lists. A card each, because a list is a thing with a name and a decision attached — a row
+         in a table would be the wrong shape for something you open. The cards and everything under
+         them are drawn by assets/js/favourites.js from api/user_lists.php. */ ?>
+<div class="acc-pane" id="acc-pane-lists" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_lists') ?></h2>
+    <div id="account-lists" class="profile-section"
+         data-magnet="<?= userCan($db, $cfg, 'index.magnet') ? '1' : '0' ?>"
+         <?php /* Sharing a list hands over a PROFILE address (?action=u&name=…#list:<slug>), so it
+                  needs the site's Share switch AND profiles to be on. With profiles off the button
+                  would copy a link to a page that answers "not found". */ ?>
+         data-share="<?= (($cfg['search_share_enabled'] ?? '1') === '1' && profilesEnabled($cfg)) ? '1' : '0' ?>"
+         data-may-publish="<?= $accLists['may_publish'] ? '1' : '0' ?>"
+         data-public-ok="<?= $accLists['public_ok'] ? '1' : '0' ?>"
+         data-max-lists="<?= (int)$accLists['max_lists'] ?>"
+         data-max-items="<?= (int)$accLists['max_items'] ?>"
+         data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>"
+         data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+         data-announce-extra="<?= sanitize(implode(' ', $accExtra)) ?>">
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="ul-search" maxlength="80" placeholder="<?= _h('lists.search_ph') ?>" autocomplete="off">
+            <?php /* A shelf of lists is searched by the NAME of the list — until somebody is looking
+                     for the list that has a particular torrent in it, which is the other half of the
+                     question and the half a name cannot answer. Both are checkboxes rather than a
+                     mode, because the answer is usually "either". */ ?>
+            <label class="search-check" title="<?= _h('lists.find_items_title') ?>"><input type="checkbox" id="ul-items"><span class="search-check-box" aria-hidden="true"></span> <?= _h('lists.find_items') ?></label>
+            <?php if ($mayFileSearch): ?>
+            <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="ul-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+            <?php endif; ?>
+            <button type="button" class="btn btn-small" id="ul-new"><?= _h('lists.new') ?></button>
+            <span class="profile-total" id="ul-total"></span>
+        </div>
+        <p class="text-muted lists-intro"><?= __('lists.intro') ?></p>
+        <div class="lists-cards" id="ul-cards"></div>
+    </div>
+</div>
+<?php /* A card's Edit window (1.70.0): the name and the description. Outside the pane, so a pane that is
+         hidden never hides the window with it. */ ?>
+<?php include __DIR__ . '/../partials/list_edit.php'; ?>
+<?php endif; ?>
+
+<?php if ($accPeople['may_message']): ?>
+<?php /* Messages. The inbox on the left, the conversation beside it — and nothing about either is
+         rendered here: api/user_messages.php decides what this reader may see, including whether
+         they may write at all, and says why when they may not. */ ?>
+<?php
+// The three places' sizes (1.73.0), drawn with the page so the tabs are right before the list arrives — the
+// list's own answer carries them again, and every operation's.
+$accBoxes = pmBoxCounts($db, (int)$meUser['id']);
+$accTrashDays = (int)$accPeople['trash_days'];
+?>
+<div class="acc-pane" id="acc-pane-messages" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_messages') ?></h2>
+    <div id="account-messages" class="profile-section pm-wrap"
+         data-max-chars="<?= (int)$accPeople['max_chars'] ?>"
+         data-max-day="<?= (int)$accPeople['max_per_day'] ?>"
+         data-trash-days="<?= $accTrashDays ?>"
+         data-archive-returns="<?= $accPeople['archive_returns'] ? '1' : '0' ?>">
+        <div class="pm-left">
+            <div class="profile-toolbar">
+                <input type="text" class="profile-search" id="pm-search" maxlength="60" placeholder="<?= _h('pm.search_ph') ?>" autocomplete="off">
+                <?php /* An inbox with nobody in it needs a way in. The name box below only appears
+                         when this is pressed — a page that opens with an empty form on it is a page
+                         telling somebody to fill it in. */ ?>
+                <button type="button" class="btn btn-small" id="pm-new"><?= _h('pm.new') ?></button>
+            </div>
+            <?php /* Searching the CONVERSATIONS is free — the list is already in the browser. Looking
+                     INSIDE them is a LIKE over this reader's own messages, so it is a checkbox they
+                     turn on, it waits for them to stop typing, and the endpoint holds its own
+                     rate limit. */ ?>
+            <label class="search-check pm-search-deep" title="<?= _h('pm.search_deep_title') ?>"><input type="checkbox" id="pm-deep"><span class="search-check-box" aria-hidden="true"></span> <?= _h('pm.search_deep') ?></label>
+            <div class="pm-new-row" id="pm-new-row" hidden>
+                <input type="text" class="profile-search" id="pm-new-who" maxlength="32" placeholder="<?= _h('pm.new_ph') ?>" autocomplete="off" list="pm-friends">
+                <datalist id="pm-friends"></datalist>
+                <button type="button" class="btn btn-small" id="pm-new-go"><?= _h('pm.new_go') ?></button>
+            </div>
+            <?php /* THE THREE PLACES (1.73.0): the Inbox, the Archive (what "hide" did — nothing deleted, back in
+                     one click) and the Trash (Delete: restorable for pm_trash_days, then deleted for good — for this
+                     reader; the other person keeps their copy). The words are the page's, so the language switch
+                     swaps them with everything else; the numbers are assets/js/people.js's, kept current from every
+                     answer: how many conversations are there, and — for the two places the badge counts — how many
+                     messages wait unread. The Trash tab is not drawn where there is no Trash, unless one is left. */ ?>
+            <div class="rt-tabs pm-views" id="pm-views" role="tablist" aria-label="<?= _h('pm.views_label') ?>">
+                <button type="button" class="rt-tab active" id="pm-view-inbox" data-view="inbox" role="tab" aria-selected="true" aria-controls="pm-threads"><i class="bi bi-inbox" aria-hidden="true"></i> <?= _h('pm.view_inbox') ?> <span class="pm-unread-badge pm-view-unread"<?= $accBoxes['unread_inbox'] ? '' : ' hidden' ?>><span class="pm-sr"><?= _h('pm.unread_sr') ?></span><span class="pm-view-unread-n"><?= (int)$accBoxes['unread_inbox'] ?></span></span></button>
+                <button type="button" class="rt-tab" id="pm-view-archive" data-view="archive" role="tab" aria-selected="false" aria-controls="pm-threads"><i class="bi bi-archive" aria-hidden="true"></i> <?= _h('pm.view_archive') ?> <span class="pm-view-n">(<?= (int)$accBoxes['archive'] ?>)</span> <span class="pm-unread-badge pm-view-unread"<?= $accBoxes['unread_archive'] ? '' : ' hidden' ?>><span class="pm-sr"><?= _h('pm.unread_sr') ?></span><span class="pm-view-unread-n"><?= (int)$accBoxes['unread_archive'] ?></span></span></button>
+                <button type="button" class="rt-tab" id="pm-view-trash" data-view="trash" role="tab" aria-selected="false" aria-controls="pm-threads"<?= ($accTrashDays > 0 || $accBoxes['trash'] > 0) ? '' : ' hidden' ?>><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('pm.view_trash') ?> <span class="pm-view-n">(<?= (int)$accBoxes['trash'] ?>)</span></button>
+            </div>
+            <p class="text-muted pm-view-note" id="pm-note-archive" hidden><?= _h($accPeople['archive_returns'] ? 'pm.note_archive' : 'pm.note_archive_stays') ?></p>
+            <div class="pm-view-note pm-trash-note" id="pm-note-trash" hidden>
+                <span class="text-muted"><?= $accTrashDays > 0 ? _h($accTrashDays === 1 ? 'pm.note_trash_one' : 'pm.note_trash_many', ['days' => $accTrashDays]) : _h('pm.note_trash_none') ?></span>
+                <button type="button" class="btn btn-danger-soft btn-small" id="pm-empty-trash"><i class="bi bi-trash" aria-hidden="true"></i> <?= _h('pm.empty_trash') ?></button>
+            </div>
+            <div class="pm-list" id="pm-threads" role="tabpanel" aria-labelledby="pm-view-inbox"></div>
+        </div>
+        <div class="pm-right" id="pm-thread" hidden></div>
+    </div>
+    <p class="text-muted pm-note"><?= __('pm.note', ['n' => (int)$accPeople['max_per_day']]) ?></p>
+
+    <?php /* Reporting one line. A window rather than window.prompt(), because a prompt cannot say
+             what the moderator will and will not see — and that sentence is the whole reason
+             somebody is willing to press the button. */ ?>
+    <div class="files-overlay" id="pmreport-overlay" hidden>
+        <div class="files-box pmreport-box" role="dialog" aria-modal="true" aria-labelledby="pmreport-title">
+            <div class="files-head">
+                <h3 id="pmreport-title"><?= _h('pm.report_head') ?></h3>
+                <button type="button" class="files-close" id="pmreport-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+            </div>
+            <div class="files-body">
+                <p class="text-muted pmreport-note"><?= __('pm.report_note') ?></p>
+                <textarea id="pmreport-why" class="pm-input" rows="3" maxlength="500" placeholder="<?= _h('pm.report_ph') ?>"></textarea>
+                <div class="pmreport-acts">
+                    <button type="button" class="btn btn-small" id="pmreport-go"><?= _h('pm.report_send') ?></button>
+                    <span class="text-muted" id="pmreport-msg"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <?php /* THE COMPOSER, cloned into a conversation when one opens.
+             It is the editor the description form uses — tabs, the formatting rail, the live
+             preview and the counter — because a message is the same kind of text and the site
+             already knows how to write one. Rendered here rather than built in JavaScript so its
+             labels come from the same dictionary as everything else on the page. */ ?>
+    <template id="pm-editor-tpl">
+        <div class="rt-editor pm-editor">
+            <div class="rt-tabs">
+                <button type="button" class="rt-tab active" data-rt="write"><?= _h('whitelist.write') ?></button>
+                <button type="button" class="rt-tab" data-rt="preview"><?= _h('whitelist.preview') ?></button>
+                <span class="rt-counter" id="pm-body-count"></span>
+                <?php $pmFormats = function_exists('richtextFormats') ? richtextFormats($cfg, 'message') : ['bbcode']; ?>
+                <?php if (count($pmFormats) > 1): ?>
+                <select id="pm-body-format" class="rt-format" title="<?= _h('whitelist.format_title') ?>">
+                    <?php foreach ($pmFormats as $pmf): ?>
+                    <option value="<?= sanitize($pmf) ?>"><?= richtextFormatLabel($pmf) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <?php else: ?>
+                <input type="hidden" id="pm-body-format" value="<?= sanitize($pmFormats[0]) ?>">
+                <span class="rt-format-fixed"><?= richtextFormatLabel($pmFormats[0]) ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="rt-tools" id="pm-body-tools" data-rt-menus="insert para" role="toolbar" aria-label="<?= _h('rt.toolbar') ?>">
+                <span class="rt-tool-group">
+                    <button type="button" data-md="bold" title="<?= _h('rt.bold') ?>"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
+                    <button type="button" data-md="italic" title="<?= _h('rt.italic') ?>"><i class="bi bi-type-italic" aria-hidden="true"></i></button>
+                    <button type="button" data-md="underline" title="<?= _h('rt.underline') ?>"><i class="bi bi-type-underline" aria-hidden="true"></i></button>
+                    <button type="button" data-md="strike" title="<?= _h('rt.strike') ?>"><i class="bi bi-type-strikethrough" aria-hidden="true"></i></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="color" title="<?= _h('rt.color') ?>"><i class="bi bi-palette" aria-hidden="true"></i></button>
+                    <button type="button" data-md="size" title="<?= _h('rt.size') ?>"><i class="bi bi-fonts" aria-hidden="true"></i></button>
+                    <button type="button" data-md="highlight" title="<?= _h('rt.highlight') ?>"><i class="bi bi-highlighter" aria-hidden="true"></i></button>
+                    <button type="button" data-md="sub" title="<?= _h('rt.sub') ?>"><i class="bi bi-subscript" aria-hidden="true"></i></button>
+                    <button type="button" data-md="sup" title="<?= _h('rt.sup') ?>"><i class="bi bi-superscript" aria-hidden="true"></i></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="link" title="<?= _h('rt.link') ?>"><i class="bi bi-link-45deg" aria-hidden="true"></i></button>
+                    <button type="button" data-md="image" title="<?= _h('rt.image') ?>"><i class="bi bi-image" aria-hidden="true"></i></button>
+                    <button type="button" data-md="list" title="<?= _h('rt.list') ?>"><i class="bi bi-list-ul" aria-hidden="true"></i></button>
+                    <button type="button" data-md="olist" title="<?= _h('rt.olist') ?>"><i class="bi bi-list-ol" aria-hidden="true"></i></button>
+                </span>
+                <span class="rt-tool-group">
+                    <button type="button" data-md="quote" title="<?= _h('rt.quote') ?>"><i class="bi bi-quote" aria-hidden="true"></i></button>
+                    <button type="button" data-md="code" title="<?= _h('rt.code') ?>"><i class="bi bi-code-slash" aria-hidden="true"></i></button>
+                    <button type="button" data-md="table" title="<?= _h('rt.table') ?>"><i class="bi bi-table" aria-hidden="true"></i></button>
+                    <button type="button" data-md="spoiler" title="<?= _h('rt.spoiler') ?>"><i class="bi bi-eye-slash" aria-hidden="true"></i></button>
+                    <button type="button" data-md="center" title="<?= _h('rt.center') ?>"><i class="bi bi-text-center" aria-hidden="true"></i></button>
+                    <button type="button" data-md="hr" title="<?= _h('rt.hr') ?>"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
+                </span>
+                <?php /* The picker (1.70.0): emoji, emotes, and stickers at the room's own size. */ ?>
+                <?= function_exists('emojiPickerButton') ? emojiPickerButton($db, $cfg, $baseUrl, 'message', 'pm-body-emoji') : '' ?>
+            </div>
+            <textarea id="pm-body" class="pm-input" rows="6" maxlength="<?= (int)$accPeople['max_chars'] ?>" placeholder="<?= _h('js.pm.write_ph') ?>"></textarea>
+            <div class="rt-preview rt-body" id="pm-body-preview" hidden></div>
+        </div>
+        <?php /* The list of tags is a wall of brackets, and it was sitting under every conversation
+                 whether anybody wanted it or not. Folded away: open once, and the browser remembers
+                 nothing — which is right, because the person who needs it needs it once. */ ?>
+        <details class="rt-syntax-fold">
+            <summary><i class="bi bi-chevron-right disc-chev" aria-hidden="true"></i><?= _h('rt.syntax_help') ?></summary>
+            <div class="form-hint" id="pm-body-syntax"></div>
+        </details>
+        <div class="form-hint" id="pm-body-help"></div>
+    </template>
+</div>
+<?php endif; ?>
+
+<?php if ($accPeople['may_friend']): ?>
+<?php /* Friends, requests in both directions, and the block list — four views of one table, which
+         is what the endpoint serves and what the tab bar below switches between. */ ?>
+<div class="acc-pane" id="acc-pane-people" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_people') ?></h2>
+    <div id="account-people" class="profile-section">
+        <div class="rt-tabs pe-tabs" id="pe-tabs" role="tablist">
+            <button type="button" class="rt-tab active" data-view="friends"><?= _h('people.friends') ?></button>
+            <button type="button" class="rt-tab" data-view="incoming"><?= _h('people.incoming') ?></button>
+            <button type="button" class="rt-tab" data-view="pending"><?= _h('people.pending') ?></button>
+            <button type="button" class="rt-tab" data-view="blocks"><?= _h('people.blocks') ?></button>
+        </div>
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="pe-search" maxlength="60" placeholder="<?= _h('people.search_ph') ?>" autocomplete="off">
+        </div>
+        <div class="profile-list" id="pe-list"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accPeople['may_directory']): ?>
+<?php /* The member directory, as a tab rather than a page of its own: it is one more list of people
+         beside the reader's own, and ?action=members now lands here. */ ?>
+<div class="acc-pane" id="acc-pane-members" hidden>
+    <h2 class="section-heading-spaced"><?= _h('people.dir_h1') ?></h2>
+    <div id="member-directory" class="profile-section">
+        <p class="text-muted lists-intro"><?= __('people.dir_intro') ?></p>
+        <div class="profile-toolbar">
+            <input type="text" class="profile-search" id="dir-search" maxlength="60" placeholder="<?= _h('people.dir_search_ph') ?>" autocomplete="off">
+            <select id="dir-sort" title="<?= _h('profile.sort') ?>">
+                <option value="name:asc"><?= _h('people.dir_sort_name') ?></option>
+                <option value="name:desc"><?= _h('people.dir_sort_name_desc') ?></option>
+                <option value="since:desc"><?= _h('people.dir_sort_new') ?></option>
+                <option value="since:asc"><?= _h('people.dir_sort_old') ?></option>
+            </select>
+            <span class="profile-total" id="dir-total"></span>
+        </div>
+        <div class="profile-list" id="dir-list"></div>
+        <div class="trans-pagination" id="dir-pager"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($accSounds): ?>
+<?php /* Sounds: which noise answers what, for this reader. The library and the current choices travel
+         in a JSON block; assets/js/sounds.js draws the selects from it, plays the tests exactly as a
+         real event would sound (pre-roll first), and saves through user_sound_prefs. */ ?>
+<?php $sndLib = soundLibrary($db, $baseUrl); $sndPrefs = soundPrefsFor($db, $meUser, $sndLib); ?>
+<div class="acc-pane" id="acc-pane-sounds" hidden>
+    <h2 class="section-heading-spaced"><?= _h('account.tab_sounds') ?></h2>
+    <div id="account-sounds" class="profile-section">
+        <p class="text-muted lists-intro"><?= __('account.snd_intro') ?></p>
+        <script type="application/json" id="snd-data"<?= nonceAttr() ?>><?= json_encode([
+            'library' => soundLibraryForClient($sndLib), 'prefs' => $sndPrefs, 'defaults' => soundSiteDefaults($cfg, $sndLib),
+            'kinds' => soundEventKinds(),
+        ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
+        <form id="snd-form" class="snd-form">
+            <label class="search-check snd-on"><input type="checkbox" id="snd-on"><span class="search-check-box" aria-hidden="true"></span> <?= _h('account.snd_on') ?></label>
+            <div class="snd-row">
+                <label for="snd-vol"><?= _h('account.snd_volume') ?></label>
+                <?php /* One step is one percent (1.62.0), so the arrow keys move it by one and the
+                         number beside it is the exact volume that will play — steps of five made
+                         "the one between 20 and 25" a setting nobody could reach. */ ?>
+                <input type="range" id="snd-vol" min="0" max="100" step="1"> <output id="snd-vol-out" for="snd-vol"></output>
+            </div>
+            <div class="snd-row">
+                <label for="snd-pre"><?= _h('account.snd_pre') ?></label>
+                <select id="snd-pre">
+                    <?php foreach ([0, 500, 1000, 1500, 2000, 3000] as $sndMs): ?>
+                    <option value="<?= $sndMs ?>"><?= $sndMs === 0 ? _h('account.snd_pre_none') : number_format($sndMs / 1000, 1) . ' s' ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <select id="snd-pre-kind" aria-label="<?= _h('account.snd_pre_kind') ?>">
+                    <option value="silence"><?= _h('account.snd_pre_silence') ?></option>
+                    <option value="hum"><?= _h('account.snd_pre_hum') ?></option>
+                </select>
+            </div>
+            <p class="snd-hint"><?= __('account.snd_pre_hint') ?></p>
+            <?php foreach (soundEventKinds() as $sndKind): ?>
+            <div class="snd-row">
+                <label for="snd-ev-<?= $sndKind ?>"><?= _h('account.snd_ev_' . $sndKind) ?></label>
+                <select id="snd-ev-<?= $sndKind ?>" data-kind="<?= $sndKind ?>"></select>
+                <button type="button" class="btn btn-secondary btn-small snd-test" data-kind="<?= $sndKind ?>"><i class="bi bi-play-fill" aria-hidden="true"></i> <?= _h('account.snd_test') ?></button>
+            </div>
+            <?php endforeach; ?>
+            <p class="snd-hint"><?= __('account.snd_autoplay') ?></p>
+            <div class="snd-acts">
+                <button type="submit" class="btn" id="snd-save"><?= _h('account.snd_save') ?></button>
+                <span class="snd-status" id="snd-status" aria-live="polite"></span>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php /* The Info panel, so a row on these lists can answer "what IS this?" without sending the
+         reader back to the search page. Same markup, same script, same overlay — see the partial. */ ?>
+<?php include __DIR__ . '/../partials/info_overlay.php'; ?>

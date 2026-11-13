@@ -1,0 +1,546 @@
+/**
+ * The client-side half of the dictionary.
+ *
+ * The page names a bundle of every `js.*` string for the active language — since 1.74.0 a cached file of its own,
+ * loaded just before this script (see langJsBridge() in includes/lang.php); t() reads it. A miss returns the KEY, exactly like the
+ * PHP side: a blank label tells nobody what is missing, `js.wl.nothing_waiting` on the screen says
+ * where to look.
+ *
+ * Placeholders are `:name`, replaced from the second argument — the same convention as __().
+ * Loaded before every other script, so t() is a plain global.
+ *
+ * t() IS A PLAIN STRING; WHAT IS WRITTEN INTO THE PAGE CARRIES ITS KEY THERE (1.73.0). The live language switch
+ * (assets/js/lang-swap.js) rewrites what the server wrote from a fresh render of the page in the other language — and
+ * a node a script made has no counterpart in that render, so it kept the language it was made in: a conversation's
+ * tooltips (the owner's example), a password checklist, a table's labels, a toast. So where a script WRITES a word into
+ * the page it asks for t.key(key, params) instead of t(): the word that knows its key, which the writer stores ON THE
+ * ELEMENT — data-i18n (its text), data-i18n-a ("title=js.x aria-label=js.y"), data-i18n-p (the placeholders, JSON) —
+ * through textContent, title, placeholder, setAttribute() (data-tip, aria-label, …), or handed to append() /
+ * prepend() / replaceChildren() / before() / after() (as a <span> that says it), or put in markup by the templates'
+ * escapers (esc() in admin.js and admin-common.js, escHtml() in app.js: t.html()). A t.key() word goes INTO THE PAGE —
+ * directly, or through a helper that writes it (el(), showToast(), confirmAction() …) — and nowhere else: it is an
+ * object (a String that says itself in the language loaded now), so a comparison, a `typeof`, a `switch`, a Map key
+ * asks t(), which stays a primitive string for everything that is not the page. What does NOT keep a key: words glued
+ * into a longer string (`t('js.common.copied') + ': ' + n`, a template literal) — such a line hands the pieces over
+ * separately (`el.replaceChildren(t.key('js.common.copied'), ': ' + n)`) or, in markup, says t.html(key, params).
+ *
+ *   t(key, params)                   the words, a plain string (a miss gives the key)
+ *   t.key(key, params)               the word to WRITE into the page: it leaves its key on the element
+ *   t.words(key, params)             the same as t()
+ *   t.text(node, key, params)        the node's own words — beside an icon, the icon stays
+ *   t.attr(node, name, key, params)  one attribute
+ *   t.node(key, params) / t.html(key, params)   a <span> that says a key, as a node / as markup for a string template
+ *   t.child(x)                       what append() would make of x: a t.key() word a <span>, a string a text node
+ *   t.num(n)                         a count in the page's language ("2,251,367" / "2 251 367", 1.73.1), written like
+ *                                    a t.key() word and said again in the new language's grouping by a live switch;
+ *                                    t.num(n, 'compact'): a million or more compact ("100.82M" / "100,82 mln")
+ *   t.plural(n, base, params)        a counted word in the language's form ("2 pliki", "5 plików", 1.74.0) — and any
+ *                                    `X_many` asked with a count `n` takes it by itself (say())
+ *   t.bytes(n)                       a size in the page's language ("1,27 GiB" / "1.27 GiB", 1.74.0), keyed like t.num()
+ *
+ * The keys live on the node, so a node that is cloned, moved, or taken out and put back keeps them, and nothing has to
+ * be registered or forgotten. A plain word written later where a key was drops that key: the node no longer says it.
+ * A swap asks t.ours() — with the old bundle still loaded — which keyed words still say what the old dictionary says
+ * (a node whose script has written something else since is left alone), loads the new bundle, and t.say()s them.
+ * t.relabel(node) does the same later for a node that was out of the page while the language changed.
+ */
+(function () {
+    'use strict';
+    var strings = {}, prev = {}, lang = 'en', prevLang = 'en', swap = false, noFew = {}, prevNoFew = {};
+    /*
+     * THE STRINGS ARE A FILE OF THEIR OWN (1.74.0, includes/lang.php langJsBridge()): #i18n-data names the language,
+     * the swap flag and the dictionary's file — `id` (language and content hash) and `src` — and that file, loaded
+     * just before this one, has put the strings in window.I18N_DICT[id]. A page that carries the strings inline (an
+     * older render) is read as before. Should the file not have arrived, it is asked for once, here, before anything
+     * is said: a page of keys is worse than a page that waited a moment.
+     */
+    function dictFor(data) {
+        if (data.strings) return data.strings;
+        var all = window.I18N_DICT || {};
+        if (data.id && all[data.id]) return all[data.id];
+        if (data.src) {
+            try {
+                var x = new XMLHttpRequest();
+                x.open('GET', data.src, false);
+                x.send(null);
+                var body = x.status === 200 ? String(x.responseText || '') : '';
+                var at = body.indexOf(']=');
+                if (at > 0) {
+                    var json = body.slice(at + 2).replace(/;\s*$/, '');
+                    var got = JSON.parse(json);
+                    (window.I18N_DICT = window.I18N_DICT || {})[data.id] = got;
+                    return got;
+                }
+            } catch (e) { /* the keys, then */ }
+        }
+        return {};
+    }
+    // Read (or re-read) the bundle the page carries. assets/js/lang-swap.js replaces the contents
+    // of #i18n-data with the other language's bundle and calls this, so a string asked for after
+    // an in-place switch is answered in the language now on the screen. The bundle it replaces is
+    // kept as `prev`: t.relabel() recognises a word of the language the page has just left by it.
+    function load() {
+        try {
+            var node = document.getElementById('i18n-data');
+            if (!node) { lang = prevLang = String(document.documentElement.lang || 'en').toLowerCase(); return; }
+            var data = JSON.parse(node.textContent || '{}');
+            prev = strings;
+            prevLang = lang;
+            prevNoFew = noFew;
+            strings = dictFor(data);
+            lang = data.lang || String(document.documentElement.lang || 'en').toLowerCase();
+            swap = data.swap === true;
+            // The "2–4" forms this language did not write itself — the English fallback's in the bundle (say()).
+            noFew = {};
+            (Array.isArray(data.few) ? data.few : []).forEach(function (k) { noFew[k] = 1; });
+        } catch (e) { strings = {}; }
+    }
+    load();
+    prev = {};
+    prevLang = lang;
+    prevNoFew = noFew;
+
+    /*
+     * A COUNT IN THE PAGE'S LANGUAGE (1.73.1): "2,251,367" on an English page, "2 251 367" on a Polish one, from the
+     * language of the PAGE — the bundle's, which is <html lang> (the server writes both from langCurrent(), and the
+     * live switch changes both) — never from the browser's: a locale-less call wrote a Polish browser's grouping into
+     * the English page and English commas into a Polish page opened by an English browser.
+     * Intl.NumberFormat, so a four-digit Polish number stays whole ("1234", "12 345") and the separator is a no-break
+     * space — exactly what includes/lang.php langNumber() writes on the server, so the script's refresh of a number
+     * never changes how it looks. A count is whole: anything else is rounded (half away from zero, like PHP's round()).
+     * COMPACT (1.73.1, the owner: a row's "100 000 000 / 100 000 000" ran over the hash chip beside it — "convert it to
+     * 100.82 mln then"): a million or more in the page language's compact notation, up to two decimals — "100.82M",
+     * "100,82 mln" (a no-break space before "mln") — and anything below exactly as above: Intl's compact thousands
+     * are no shorter in Polish ("23,46 tys." for 23 456) and would lose the count.
+     */
+    var NUM = '#n', numFmt = {};
+    function fmtNum(n, code, compact) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v)) return '—';
+        code = String(code || 'en').toLowerCase();
+        var big = compact && Math.abs(v) >= 1e6;
+        if (!big) v = v < 0 ? -Math.round(-v) : Math.round(v);
+        var id = (big ? 'c:' : '') + code;
+        var f = numFmt[id];
+        if (!f) {
+            var opt = big ? { notation: 'compact', maximumFractionDigits: 2 } : { maximumFractionDigits: 0 };
+            try { f = new Intl.NumberFormat(code, opt); }
+            catch (e) { f = new Intl.NumberFormat('en', opt); }
+            numFmt[id] = f;
+        }
+        return f.format(v || 0);
+    }
+    /*
+     * A SIZE IN THE PAGE'S LANGUAGE (1.74.0). Three formatters (app.js, favourites.js, admin-common.js) wrote sizes with
+     * toFixed(): a decimal point on a Polish page beside counts in Polish ("1.27 GiB" next to "200 000"). One rule now:
+     * IEC units — torrent sizes are powers of 1024 — with 0, 1 or 2 decimals by size (100 and more, 10 and more, else),
+     * the page language's decimal separator ("1,27 GiB"), no grouping ("1000 MiB"), whole bytes. Like t.num() it is
+     * written as a keyed word (t.bytes()) the live switch says again in the new language.
+     */
+    var BYTES = '#b', byteFmt = {};
+    function fmtBytes(n, code) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v) || v <= 0) return '—';
+        var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'], i = 0;
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        var d = i === 0 ? 0 : (v >= 100 ? 0 : v >= 10 ? 1 : 2);
+        code = String(code || 'en').toLowerCase();
+        var id = code + ':' + d, f = byteFmt[id];
+        if (!f) {
+            var opt = { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false };
+            try { f = new Intl.NumberFormat(code, opt); } catch (e) { f = new Intl.NumberFormat('en', opt); }
+            byteFmt[id] = f;
+        }
+        return f.format(v) + ' ' + u[i];
+    }
+    /*
+     * THE FORM OF A WORD AFTER A NUMBER (1.74.0), as includes/lang.php langPluralKey() chooses it on the server: a
+     * key `X_many` asked with a count in `n` is said by the rule of the language of the dictionary it is said from —
+     * Intl.PluralRules, the same CLDR data PHP's intl carries — `X_few` for Polish 2–4, 22–24… ("2 pliki", never
+     * "2 plików"), `X_one` for a one that says its count; anything else as asked. Only a counted word's family (it
+     * has `X_one`), only a third form the language wrote itself (`few` in the bundle names the English fallback's),
+     * only a whole count: a number, digits, digits grouped ("2 251 367"), a t.num() word or its stored form. A word
+     * written with t.key('…_many', {n}) keeps that key on the element, so the live switch chooses again in the new
+     * language. t.plural(n, base) is the short way to ask.
+     */
+    var plRules = {};
+    function countOf(v) {
+        if (v instanceof Keyed) {
+            if (v.key === NUM && v.params) return Number(v.params['#']);
+            v = String(v);
+        } else if (v && typeof v === 'object' && v.$t === NUM && v.$p) return Number(v.$p['#']);
+        if (typeof v === 'number') return v;
+        if (typeof v !== 'string') return NaN;
+        var s = v.trim().replace(/[\s  ]/g, '').replace(/(\d),(?=\d{3}(?:,|$))/g, '$1');
+        return /^-?\d{1,15}$/.test(s) ? Number(s) : NaN;
+    }
+    function pluralCat(code, n) {
+        var r = plRules[code];
+        if (r === undefined) {
+            try { r = new Intl.PluralRules(code); } catch (e) { r = null; }
+            plRules[code] = r;
+        }
+        if (r) return r.select(n);
+        return n === 1 ? 'one' : 'other';
+    }
+    function pluralKey(from, key, params) {
+        var n = countOf(params.n);
+        if (!isFinite(n) || Math.floor(n) !== n) return key;
+        var base = key.slice(0, -5), has = function (k) { return Object.prototype.hasOwnProperty.call(from, k); };
+        if (!has(base + '_one')) return key;
+        var old = from === prev, cat = pluralCat(old ? prevLang : lang, Math.abs(n));
+        if ((cat === 'few' || cat === 'two') && has(base + '_few') && !(old ? prevNoFew : noFew)[base + '_few']) return base + '_few';
+        if (cat === 'one' && (Math.abs(n) === 1 || String(from[base + '_one']).indexOf(':n') !== -1)) return base + '_one';
+        return key;
+    }
+    function say(from, key, params) {
+        // A number written with t.num() is said in the language of the dictionary it is said from (the old one when
+        // a swap asks which words still say what the page says, the new one once it is loaded).
+        if (key === NUM) return fmtNum(params ? params['#'] : null, from === prev ? prevLang : lang, !!(params && params.c));
+        if (key === BYTES) return fmtBytes(params ? params['#'] : null, from === prev ? prevLang : lang);
+        if (params && typeof params === 'object' && params.n !== undefined && key.slice(-5) === '_many') key = pluralKey(from, key, params);
+        var s = Object.prototype.hasOwnProperty.call(from, key) ? from[key] : key;
+        if (params && typeof params === 'object') {
+            // Longest name first. ":page" is a prefix of ":pages", so replacing in the order the
+            // caller happened to write them turned "Page :page of :pages" into "Page 1 of 1s" — the
+            // pager on every list said "of 1s" whatever the count was. PHP's strtr() has always
+            // matched longest-first; this is the same rule, spelled out.
+            Object.keys(params).sort(function (a, b) { return b.length - a.length; }).forEach(function (k) {
+                var v = params[k];
+                // A placeholder that is itself a word with a key — a t() word (it says itself) or, read back
+                // from a node, its {$t, $p} (see enc() below) — is said from the same dictionary.
+                if (v && typeof v === 'object' && !(v instanceof String) && typeof v.$t === 'string') v = say(from, v.$t, v.$p);
+                s = s.split(':' + k).join(String(v));
+            });
+        }
+        return s;
+    }
+    function words(key, params) { return say(strings, key, params); }
+
+    var TEXT = 'data-i18n', ATTRS = 'data-i18n-a', ARGS = 'data-i18n-p', PHRASE = 'data-i18n-ph';
+    // A word that knows its key (t.key()): a String (an object one) that says itself in the language loaded NOW
+    // whenever it becomes text, and whose key (key, params) goes with it into the element it is written into, see
+    // below. One may be another's placeholder (`t.key('js.app.stars_mine_title', {stars: t.key('js.app.stars_one')})`):
+    // stored on a node, the placeholders are JSON, and there a t.key() word is its key, {$t, $p}.
+    class Keyed extends String {
+        constructor(key, params) { super(words(key, params)); this.key = key; this.params = params; }
+        toString() { return words(this.key, this.params); }
+        valueOf() { return words(this.key, this.params); }
+        toJSON() { return words(this.key, this.params); }
+    }
+    // The words: a primitive string, for everything (a comparison, a switch, a Map key, a payload).
+    function t(key, params) { return words(key, params); }
+    // The word to write into the page: it leaves its key on the element (see WHERE A SCRIPT WRITES WORDS below).
+    t.key = function (key, params) { return new Keyed(key, params); };
+    /**
+     * A count in the page's language (1.73.1, fmtNum() above) — THE way a script writes a number for people to read.
+     * Like a t.key() word it is written INTO the page (textContent, a placeholder of a t.key() word, a child, t.esc()
+     * in markup) and keeps the number on the element (data-i18n="#n", the number in data-i18n-p), so the live
+     * language switch writes it again in the new language's grouping. Where a plain string is needed — a library's
+     * formatter, a comparison — String(t.num(n)). Nothing to write ('—') for a missing or non-numeric value.
+     * t.num(n, 'compact'): a million or more compact ("100.82M" / "100,82 mln"), anything below as t.num(n) — for a
+     * place whose width is fixed (a row's swarm); give the exact count beside it (a title).
+     */
+    t.num = function (n, style) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v)) return '—';
+        var p = {};
+        p['#'] = v;
+        if (style === 'compact') p.c = 1;
+        return new Keyed(NUM, p);
+    };
+    /**
+     * A counted word in the page language's form (1.74.0): t.plural(3, 'js.app.files') says "3 pliki" on a Polish page
+     * and "3 files" on an English one — `base + '_one'` for 1, else `base + '_many'`, which say() refines to `_few` /
+     * `_one` by the language's rule (pluralKey()). `n` is the count written with t.num() unless the caller gives it.
+     * A t.key() word: written into the page, it keeps its key, and a live switch chooses the form again.
+     */
+    t.plural = function (n, base, params) {
+        var p = {}, k;
+        for (k in (params || {})) if (Object.prototype.hasOwnProperty.call(params, k)) p[k] = params[k];
+        if (p.n === undefined) p.n = t.num(n);
+        return new Keyed(base + (Number(n) === 1 ? '_one' : '_many'), p);
+    };
+    /** A size in the page's language (1.74.0, fmtBytes() above): "1,27 GiB" / "1.27 GiB", a keyed word; '—' for nothing. */
+    t.bytes = function (n) {
+        var v = Number(n);
+        if (n === null || n === undefined || n === '' || !isFinite(v) || v <= 0) return '—';
+        var p = {};
+        p['#'] = v;
+        return new Keyed(BYTES, p);
+    };
+    t.words = words;
+    t.isKey = function (v) { return v instanceof Keyed; };
+    /**
+     * A sentence a server answered with (an API's `error`, `message`), as the t() word of the entry under `prefix`
+     * that says exactly that — so it keeps its key and follows a language switch like a word the script wrote. The
+     * page's bundle must carry that prefix (langJsBridge()); anything else comes back as it was. Only for a
+     * server's answers, never for what people wrote.
+     */
+    t.find = function (text, prefix) {
+        if (text == null || text instanceof Keyed || typeof text !== 'string' || text === '') return text;
+        var found = null;
+        for (var k in strings) {
+            if (!Object.prototype.hasOwnProperty.call(strings, k) || (prefix && k.indexOf(prefix) !== 0)) continue;
+            var v = strings[k];
+            if (v === text) return new Keyed(k);
+            // A sentence with placeholders (":error", ":n"): its words as a pattern, each placeholder a group — the
+            // server's values come back as the word's placeholders. At least a few letters of its own, so a value
+            // that is a placeholder and little else does not claim every sentence.
+            if (found || v.indexOf(':') === -1 || v.replace(/:[a-z][a-z0-9_]*/gi, '').replace(/[^A-Za-z\u00C0-\u024F]/g, '').length < 4) continue;
+            var names = [];
+            var src = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/:([a-z][a-z0-9_]*)/gi, function (m, n) { names.push(n); return '([\\s\\S]*?)'; });
+            var m = new RegExp('^' + src + '$').exec(text);
+            if (m) { var p = {}; names.forEach(function (n, i) { p[n] = m[i + 1]; }); found = new Keyed(k, p); }
+        }
+        return found || text;
+    };
+    t.lang = lang;
+    t.swap = swap;      // the operator has switched the in-place language swap on
+    t.has = function (key) { return Object.prototype.hasOwnProperty.call(strings, key); };
+    t.reload = function () { load(); t.lang = lang; t.swap = swap; };
+
+    /* ── words a script writes, kept with their keys (1.73.0) ── */
+
+    // The browser's own writers, kept before they are taught about keys below: the helpers here write
+    // through these, so writing a key's words never drops the key it is writing.
+    var nativeText = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent').set;
+    var nativeSetAttr = Element.prototype.setAttribute;
+    // Placeholders as JSON, a t() word among them as its key ({$t, $p}) — never as its words.
+    function enc(params) {
+        return JSON.stringify(params, function (k, v) {
+            var o = this[k];
+            return o instanceof Keyed ? { $t: o.key, $p: o.params } : v;
+        });
+    }
+    function argsOf(node) {
+        var s = node.getAttribute(ARGS);
+        if (!s) return undefined;
+        try { return JSON.parse(s); } catch (e) { return undefined; }
+    }
+    // One set of placeholders per node, shared by its text and its attributes: a second key's placeholders are
+    // MERGED in (a button's text and its tooltip usually name the same thing), never written over the first's.
+    function setArgs(node, params) {
+        if (!params || typeof params !== 'object' || !Object.keys(params).length) return;
+        try { nativeSetAttr.call(node, ARGS, enc(Object.assign(argsOf(node) || {}, params))); } catch (e) { /* not JSON: kept as words */ }
+    }
+    function pairsOf(node) {
+        var s = node.getAttribute(ATTRS);
+        if (!s) return [];
+        return s.split(' ').map(function (p) { var at = p.indexOf('='); return at > 0 ? [p.slice(0, at), p.slice(at + 1)] : null; })
+            .filter(Boolean);
+    }
+    function setPair(node, name, key) {
+        var list = pairsOf(node).filter(function (p) { return p[0] !== name; });
+        if (key) list.push([name, key]);
+        if (list.length) nativeSetAttr.call(node, ATTRS, list.map(function (p) { return p[0] + '=' + p[1]; }).join(' '));
+        else node.removeAttribute(ATTRS);
+    }
+    /** A node's own words: all of its text when it holds nothing else, else its first text beside its icon. */
+    function ownTextOf(node) {
+        if (!node.firstElementChild) return node.textContent;
+        for (var c = node.firstChild; c; c = c.nextSibling) if (c.nodeType === 3 && c.nodeValue.trim()) return c.nodeValue;
+        return '';
+    }
+    function setOwnText(node, s) {
+        if (!node.firstElementChild) { if (node.textContent !== s) nativeText.call(node, s); return; }
+        var done = false;
+        for (var c = node.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType !== 3 || !c.nodeValue.trim()) continue;
+            if (done) { c.nodeValue = ''; continue; }
+            var v = c.nodeValue, lead = v.match(/^\s*/)[0], trail = v.match(/\s*$/)[0];
+            c.nodeValue = lead + s + trail;
+            done = true;
+        }
+        if (!done) node.appendChild(document.createTextNode((node.lastChild && node.lastChild.nodeType === 1 ? ' ' : '') + s));
+    }
+    function setAttr(node, name, s) {
+        if (name === 'value' && 'value' in node) node.value = s;
+        nativeSetAttr.call(node, name, s);
+    }
+    var norm = function (s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); };
+
+    t.text = function (node, key, params) {
+        if (!node) return node;
+        nativeSetAttr.call(node, TEXT, key);
+        setArgs(node, params);
+        setOwnText(node, words(key, argsOf(node)));
+        return node;
+    };
+    t.attr = function (node, name, key, params) {
+        if (!node) return node;
+        if (name && typeof name === 'object') {          // t.attr(node, { title: 'js.x', 'aria-label': 'js.y' }, params)
+            Object.keys(name).forEach(function (n) { t.attr(node, n, name[n], key); });
+            return node;
+        }
+        setPair(node, name, key);
+        if (params !== undefined) setArgs(node, params);
+        setAttr(node, name, words(key, argsOf(node)));
+        return node;
+    };
+    /** A <span> that says a key — what append() and its kin put in for a t() word. */
+    t.node = function (key, params) {
+        if (key instanceof Keyed) { params = key.params; key = key.key; }
+        return t.text(document.createElement('span'), key, params);
+    };
+    /** A child for appendChild(): a t() word becomes t.node(), any other string or number a text node, a node stays a node. */
+    t.child = function (c) {
+        if (c instanceof Keyed) return t.node(c);
+        return (typeof c === 'string' || typeof c === 'number' || c instanceof String) ? document.createTextNode(String(c)) : c;
+    };
+    var ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    var esc = function (s) { return String(s).replace(/[&<>"']/g, function (c) { return ESC[c]; }); };
+    /** Markup for a string template: a <span> that says the key (a t() word may stand for key + params). */
+    t.html = function (key, params) {
+        if (key instanceof Keyed) { params = key.params; key = key.key; }
+        var p = params && typeof params === 'object' && Object.keys(params).length ? params : null;
+        var s;
+        try { s = p ? enc(p) : ''; } catch (e) { s = ''; p = null; }
+        return '<span ' + TEXT + '="' + esc(key) + '"' + (p && s ? ' ' + ARGS + '="' + esc(s) + '"' : '') + '>'
+            + esc(words(key, params)) + '</span>';
+    };
+    /*
+     * A SENTENCE WITH PEOPLE IN IT (assets/js/avatar.js's userAvatarPhrase(): ":reporter reported :reported", "by
+     * :user" — a picture and a name in each person's place, wherever the language puts it). The words between the
+     * people are pieces of one sentence, not keys of their own, so the sentence's key goes on the element that holds
+     * it (data-i18n-ph, its placeholders in data-i18n-p — a person's place is \u0001<n>\u0001) and each person on
+     * its child (data-slot="<n>"): a swap writes the new sentence's pieces round the same people, in the new order.
+     */
+    var SLOT = /\u0001(\d+)\u0001/;
+    t.phraseMark = function (node, word) {
+        if (!node || !(word instanceof Keyed)) return node;
+        nativeSetAttr.call(node, PHRASE, word.key);
+        setArgs(node, word.params);
+        return node;
+    };
+    function phraseWords(node) {
+        var s = '';
+        for (var c = node.firstChild; c; c = c.nextSibling) if (c.nodeType === 3) s += c.nodeValue;
+        return s;
+    }
+    function sayPhrase(node, sentence) {
+        var who = {};
+        for (var c = node.firstElementChild; c; c = c.nextElementSibling) if (c.hasAttribute('data-slot')) who[c.getAttribute('data-slot')] = c;
+        var kids = [];
+        String(sentence).split(SLOT).forEach(function (part, i) {
+            if (i % 2 === 0) { if (part) kids.push(document.createTextNode(part)); } else if (who[part]) kids.push(who[part]);
+        });
+        while (node.firstChild) node.removeChild(node.firstChild);
+        kids.forEach(function (k) { node.appendChild(k); });
+    }
+
+    /** A template's text escaper that keeps a t() word's key (t.html()); anything else escaped as words. */
+    t.esc = function (v) { return v instanceof Keyed ? t.html(v) : esc(v == null ? '' : v); };
+    /**
+     * Keyed ATTRIBUTES for a string template: ` title="…" data-i18n-a="title=js.x"` (+ data-i18n-p), from
+     * t.ah('title', 'js.common.copied', params) or t.ah({ title: …, 'aria-label': … }, params) — one element's
+     * attributes in one call, since an element can carry each attribute once.
+     */
+    t.ah = function (name, key, params) {
+        var map = {};
+        if (name && typeof name === 'object') { map = name; params = key; } else map[name] = key;
+        var names = Object.keys(map), out = '';
+        names.forEach(function (n) { out += ' ' + n + '="' + esc(words(map[n], params)) + '"'; });
+        out += ' ' + ATTRS + '="' + esc(names.map(function (n) { return n + '=' + map[n]; }).join(' ')) + '"';
+        if (params && typeof params === 'object' && Object.keys(params).length) {
+            try { out += ' ' + ARGS + '="' + esc(enc(params)) + '"'; } catch (e) { /* words only */ }
+        }
+        return out;
+    };
+
+    /*
+     * WHERE A SCRIPT WRITES WORDS, taught to keep a t() word's key: a node's text (textContent), its title
+     * and placeholder, setAttribute() of any attribute, and the strings handed to append(), prepend(),
+     * replaceChildren(), before() and after() — a t() word among those becomes a <span> that says it
+     * (t.node()). Any other value is written exactly as the browser writes it — and a plain word written
+     * where a key was drops that key: the node no longer says it.
+     */
+    function teachSetter(proto, prop, slot) {
+        var d = proto && Object.getOwnPropertyDescriptor(proto, prop);
+        if (!d || !d.set || !d.configurable) return;
+        Object.defineProperty(proto, prop, {
+            configurable: true, enumerable: d.enumerable, get: d.get,
+            set: function (v) {
+                var keyed = v instanceof Keyed;
+                d.set.call(this, keyed ? String(v) : v);
+                if (this.nodeType !== 1) return;
+                if (slot === 'text') {
+                    if (keyed) { nativeSetAttr.call(this, TEXT, v.key); setArgs(this, v.params); }
+                    else if (this.hasAttribute(TEXT)) { this.removeAttribute(TEXT); bare(this); }
+                } else if (keyed) { setPair(this, slot, v.key); setArgs(this, v.params); }
+                else if (this.hasAttribute(ATTRS)) { setPair(this, slot, null); bare(this); }
+            },
+        });
+    }
+    // A node left with no key keeps no placeholders either: a label put back from a copy after a script's
+    // "Working… 12 left" is exactly that copy again (lang-swap.js knows a server button by its markup).
+    function bare(node) {
+        if (node.hasAttribute(ARGS) && !node.hasAttribute(TEXT) && !node.hasAttribute(ATTRS) && !node.hasAttribute(PHRASE)) node.removeAttribute(ARGS);
+    }
+    teachSetter(Node.prototype, 'textContent', 'text');
+    teachSetter(HTMLElement.prototype, 'innerText', 'text');
+    teachSetter(HTMLElement.prototype, 'title', 'title');
+    teachSetter(HTMLInputElement.prototype, 'placeholder', 'placeholder');
+    teachSetter(HTMLTextAreaElement.prototype, 'placeholder', 'placeholder');
+    Element.prototype.setAttribute = function (name, value) {
+        if (value instanceof Keyed) {
+            nativeSetAttr.call(this, name, String(value));
+            setPair(this, String(name).toLowerCase(), value.key);
+            setArgs(this, value.params);
+            return;
+        }
+        nativeSetAttr.call(this, name, value);
+        if (name !== ATTRS && name !== TEXT && name !== ARGS && this.hasAttribute(ATTRS)) { setPair(this, String(name).toLowerCase(), null); bare(this); }
+    };
+    ['append', 'prepend', 'replaceChildren', 'before', 'after'].forEach(function (m) {
+        [Element.prototype, DocumentFragment.prototype].forEach(function (proto) {
+            var orig = proto[m];
+            if (typeof orig !== 'function') return;
+            proto[m] = function () {
+                var args = Array.prototype.map.call(arguments, function (a) { return a instanceof Keyed ? t.node(a) : a; });
+                return orig.apply(this, args);
+            };
+        });
+    });
+
+    function keyed(root) {
+        var out = [];
+        if (!root) return out;
+        if (root.nodeType === 1 && (root.hasAttribute(TEXT) || root.hasAttribute(ATTRS) || root.hasAttribute(PHRASE))) out.push(root);
+        if (root.querySelectorAll) out.push.apply(out, root.querySelectorAll('[' + TEXT + '],[' + ATTRS + '],[' + PHRASE + ']'));
+        return out;
+    }
+    /**
+     * Which keyed words under `root` still say what `dict` (the language on the page) says — the ones a script wrote and
+     * has not written over since. Asked BEFORE a swap's walk, with the old bundle still loaded.
+     */
+    function mine(root, dict) {
+        var list = [];
+        keyed(root || document.body).forEach(function (n) {
+            var p = argsOf(n), e = { n: n, text: null, attrs: [], ph: null };
+            var k = n.getAttribute(TEXT);
+            if (k && norm(ownTextOf(n)) === norm(say(dict, k, p))) e.text = k;
+            pairsOf(n).forEach(function (pr) { if (n.getAttribute(pr[0]) === say(dict, pr[1], p)) e.attrs.push(pr); });
+            var ph = n.getAttribute(PHRASE);
+            if (ph && norm(phraseWords(n)) === norm(say(dict, ph, p).split(SLOT).filter(function (x, i) { return i % 2 === 0; }).join(''))) e.ph = ph;
+            if (e.text || e.attrs.length || e.ph) list.push(e);
+        });
+        return list;
+    }
+    function sayAll(list) {
+        (list || []).forEach(function (e) {
+            var p = argsOf(e.n);
+            if (e.text) setOwnText(e.n, words(e.text, p));
+            e.attrs.forEach(function (pr) { setAttr(e.n, pr[0], words(pr[1], p)); });
+            if (e.ph) sayPhrase(e.n, words(e.ph, p));
+        });
+    }
+    t.ours = function (root) { return mine(root, strings); };
+    t.say = sayAll;
+    /** A node (and what is in it) that was out of the page while the language changed: said again if it was ours. */
+    t.relabel = function (root) {
+        sayAll(mine(root, prev).concat(mine(root, strings)));
+        return root;
+    };
+    window.t = t;
+})();

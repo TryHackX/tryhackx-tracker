@@ -1,0 +1,448 @@
+<?php
+/**
+ * Test for includes/users.php (needs the local test database — see deploy/local_bootstrap.php):
+ *   php tests/users_test.php
+ * Prints PASS/FAIL lines and exits non-zero on failure. No sessions/cookies — session-bound paths
+ * (currentUser / remember-me) are covered indirectly via the pure helpers they build on.
+ */
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+$root = dirname(__DIR__);
+if (!is_file($root . '/config/database.php')) { fwrite(STDERR, "config/database.php missing — run the local bootstrap first\n"); exit(2); }
+require_once $root . '/config/app.php';   // ADMIN_PASSWORD_HASH: the owner's mirror row is re-seeded from it at the end
+require_once $root . '/config/database.php';
+require_once $root . '/includes/settings.php';
+require_once $root . '/includes/functions.php';
+require_once $root . '/includes/schema.php';
+require_once $root . '/includes/whitelist.php';
+require_once $root . '/includes/api_auth.php';
+require_once $root . '/includes/mail.php';
+require_once $root . '/includes/users.php';
+
+$fails = 0; $n = 0;
+function check(string $name, bool $ok, string $info = ''): void {
+    global $fails, $n; $n++;
+    echo ($ok ? 'PASS ' : 'FAIL ') . $name . ($ok || $info === '' ? '' : '  -> ' . $info) . "\n";
+    if (!$ok) $fails++;
+}
+
+$db = getDb(); $cfg = getSettings($db); ensureSchema($db, $cfg);
+
+// ── 1. schema v7 ──────────────────────────────────────────────────────────────
+check('schema version >= 7', (int)($cfg['schema_version'] ?? 0) >= 7, (string)($cfg['schema_version'] ?? 'none'));
+foreach (['users', 'user_groups', 'user_group_members', 'user_notifications', 'user_tokens', 'fed_peers'] as $t) {
+    $ok = true;
+    try { $db->query("SELECT 1 FROM `$t` LIMIT 1"); } catch (\Throwable $e) { $ok = false; }
+    check("table $t exists", $ok);
+}
+check('api_clients has scope column', schemaColumnExists($db, 'api_clients', 'scope'));
+check('index_hashes has meta_source column', schemaColumnExists($db, 'index_hashes', 'meta_source'));
+check('index_hashes has meta_fetched index', schemaIndexExists($db, 'index_hashes', 'idx_index_meta_fetched'));
+// deterministic start: restore the SEED permissions of the system groups (another tool/session may
+// have edited them in the shared test DB — e.g. a UI fixture granting guest everything) …
+// … and give them back when this suite is done. Whatever runs next — the next suite, the next
+// battery — starts from the MIGRATED groups, not from the seed this one needs: leaving the member
+// group stripped here is how hash_check_test once failed on a database whose migration was fine.
+$sysBefore = [];
+foreach (['guest', 'member'] as $slug) {
+    $st = $db->prepare("SELECT permissions FROM user_groups WHERE slug = ?");
+    $st->execute([$slug]);
+    $sysBefore[$slug] = (string)$st->fetchColumn();
+}
+register_shutdown_function(function () use ($db, $sysBefore) {
+    foreach ($sysBefore as $slug => $json) {
+        if ($json !== '') $db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = ?")->execute([$json, $slug]);
+    }
+    // This suite truncates `users`, which takes the owner's mirror row with it — and nothing puts
+    // that back until the next schema bump, so signing in as the owner stopped opening the panel
+    // for every suite after this one. The data migrations are idempotent; run them once more.
+    try { trackerSchemaDataMigrations($db, getSettings($db, true)); } catch (\Throwable $e) { /* best effort */ }
+});
+$db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'guest'");
+$db->exec("UPDATE user_groups SET permissions = '" . json_encode(['whitelist.view' => true, 'stats.view' => true, 'stats.timeline' => true, 'home.stats' => true]) . "' WHERE slug = 'member'");
+$guest = userGroupBySlug($db, 'guest');
+$member = userGroupBySlug($db, 'member');
+$adminG = userGroupBySlug($db, 'admin');
+check('guest group seeded (system)', $guest !== null && (int)$guest['is_system'] === 1);
+check('member group seeded (default)', $member !== null && (int)$member['is_default'] === 1);
+check('admin group seeded (system, v8)', $adminG !== null && (int)$adminG['is_system'] === 1);
+check('guest baseline keeps legacy public perms', ($p = userGroupPermissions($guest['permissions'])) && !empty($p['stats.view']) && !empty($p['whitelist.view']) && empty($p['index.view']), json_encode($p ?? null));
+check('whitelist.add is a known permission', array_key_exists('whitelist.add', userPermissionList()));
+
+// clean slate for the rest
+foreach (['users', 'user_group_members', 'user_notifications', 'user_tokens'] as $t) $db->exec("TRUNCATE TABLE `$t`");
+$db->exec("DELETE FROM user_groups WHERE is_system = 0");
+@unlink($root . '/config/users_state.json');
+
+$cfgOn = $cfg; $cfgOn['users_enabled'] = '1';
+$cfgOff = $cfg; $cfgOff['users_enabled'] = '0';
+
+// ── 2. create / authenticate ─────────────────────────────────────────────────
+$r = userCreate($db, $cfgOn, 'alice', 'alice@example.org', 'Password123!', '1.2.3.4');
+check('create user ok', isset($r['user']) && $r['user']['username'] === 'alice', json_encode($r));
+$alice = $r['user'];
+check('new user got the default member group', count(userGroups($db, (int)$alice['id'])) === 1
+    && userGroups($db, (int)$alice['id'])[0]['slug'] === 'member');
+check('create rejects bad username', (userCreate($db, $cfgOn, 'a b', '', 'Password123!')['error'] ?? '') === 'invalid_username');
+check('create rejects weak password', (userCreate($db, $cfgOn, 'bob', '', 'short')['error'] ?? '') === 'weak_password');
+// password policy (1.8.0): length + lower + upper + digit + special
+check('policy: all-lowercase rejected', (userCreate($db, $cfgOn, 'bob', '', 'password123!')['error'] ?? '') === 'weak_password');
+check('policy: no special char rejected', (userCreate($db, $cfgOn, 'bob', '', 'Password1234')['error'] ?? '') === 'weak_password');
+check('policy: issue codes reported', userPasswordIssues('abc') === ['length', 'upper', 'digit', 'special'], json_encode(userPasswordIssues('abc')));
+check('policy: compliant password passes', userValidPassword('Password123!'));
+check('create rejects duplicate username', (userCreate($db, $cfgOn, 'alice', '', 'Password123!')['error'] ?? '') === 'username_taken');
+check('create rejects duplicate email', (userCreate($db, $cfgOn, 'bob', 'alice@example.org', 'Password123!')['error'] ?? '') === 'email_taken');
+check('authenticate ok (by username)', userAuthenticate($db, 'alice', 'Password123!') !== null);
+check('authenticate ok (by email)', userAuthenticate($db, 'alice@example.org', 'Password123!') !== null);
+check('authenticate rejects wrong password', userAuthenticate($db, 'alice', 'wrong') === null);
+check('authenticate rejects unknown user', userAuthenticate($db, 'nobody', 'Password123!') === null);
+$r2 = userCreate($db, $cfgOn, 'bob', '', 'Password123!');
+$bob = $r2['user'];
+check('email is optional', isset($r2['user']) && $r2['user']['email'] === null);
+
+// ── 3. permissions ───────────────────────────────────────────────────────────
+check('legacy default: index gated, stats open', !userLegacyDefault('index.view') && userLegacyDefault('stats.view'));
+// userCan with users disabled = legacy behaviour (no session in CLI → anonymous)
+check('userCan(off): stats.view true', userCan($db, $cfgOff, 'stats.view'));
+check('userCan(off): index.view false', !userCan($db, $cfgOff, 'index.view'));
+// enabled: anonymous gets the guest group
+check('userCan(on, anon): stats.view true (guest)', userCan($db, $cfgOn, 'stats.view'));
+check('userCan(on, anon): index.view false (guest)', !userCan($db, $cfgOn, 'index.view'));
+// v8 semantics: a signed-in user gets EXACTLY the union of their own groups — guest is NOT
+// inherited, so a member whose groups lack stats.view does not see stats even though guests do
+$db->exec("UPDATE user_groups SET permissions = '{}' WHERE slug = 'member'");
+$db->prepare("INSERT INTO user_groups (slug, name, priority, permissions) VALUES ('vip', 'VIP', 10, ?)")
+   ->execute([json_encode(['index.view' => true, 'index.magnet' => true])]);
+$vip = userGroupBySlug($db, 'vip');
+userGrantGroup($db, (int)$alice['id'], (int)$vip['id'], null, 'test', '');
+$perms = userEffectivePermissions($db, (int)$alice['id']);
+check('signed-in perms = union of OWN groups only (no guest)', !empty($perms['index.view']) && !empty($perms['index.magnet'])
+    && empty($perms['stats.view']) && empty($perms['index.files']), json_encode($perms));
+// a permission granted on the member group itself works (bob has member only)
+$db->exec("UPDATE user_groups SET permissions = '" . json_encode(['stats.view' => true]) . "' WHERE slug = 'member'");
+$permsBob = userEffectivePermissions($db, (int)$bob['id']);
+check('member-group permission applies to its members', !empty($permsBob['stats.view']) && empty($permsBob['index.view']), json_encode($permsBob));
+// admin group = every permission, current and future
+$r3 = userCreate($db, $cfgOn, 'carol', '', 'Password123!');
+$carol = $r3['user'];
+userGrantGroup($db, (int)$carol['id'], (int)userGroupBySlug($db, 'admin')['id'], null, 'test', '', false);
+$permsCarol = userEffectivePermissions($db, (int)$carol['id']);
+check('admin group grants every permission', count(array_diff_key(userPermissionList(), $permsCarol)) === 0, json_encode($permsCarol));
+check('grant created a notification', userUnreadCount($db, (int)$alice['id']) >= 1);
+
+// ── 4. timed memberships ─────────────────────────────────────────────────────
+// expired membership → inactive
+userGrantGroup($db, (int)$bob['id'], (int)$vip['id'], date('Y-m-d H:i:s', time() - 60), 'test', '', false);
+check('expired membership is not active', count(userGroups($db, (int)$bob['id'])) === 1); // member only
+check('userGroupsAll shows it inactive', count(array_filter(userGroupsAll($db, (int)$bob['id']), fn($g) => !$g['active'])) === 1);
+// future granted_at → not active yet
+userGrantGroup($db, (int)$bob['id'], (int)$vip['id'], null, 'test', '', false, date('Y-m-d H:i:s', time() + 3600));
+check('future membership is not active yet', count(userGroups($db, (int)$bob['id'])) === 1);
+// duration extension: base = max(now, current expiry)
+$db->prepare("UPDATE user_group_members SET granted_at = NOW(), expires_at = DATE_ADD(NOW(), INTERVAL 10 DAY) WHERE user_id = ? AND group_id = ?")
+   ->execute([(int)$bob['id'], (int)$vip['id']]);
+$ext = userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], '7d');
+$expectMin = time() + 16 * 86400; $expectMax = time() + 18 * 86400;
+check('duration grant extends the current expiry', $ext !== null && $ext !== '' && strtotime($ext) > $expectMin && strtotime($ext) < $expectMax, (string)$ext);
+check('permanent duration maps to null', userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], 'permanent') === null);
+check('invalid duration maps to empty string', userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], '99x') === '');
+// regression: a PERMANENT membership (expires_at NULL) must never be downgraded by a duration grant
+userGrantGroup($db, (int)$bob['id'], (int)$vip['id'], null, 'test', '', false);
+check('duration grant keeps a PERMANENT membership permanent', userDurationExpiry($db, (int)$bob['id'], (int)$vip['id'], '1m') === null);
+check('revoke removes and notifies', userRevokeGroup($db, (int)$bob['id'], (int)$vip['id']) === true);
+
+// ── 5. usersTick: expiry + warning ───────────────────────────────────────────
+$db->exec("TRUNCATE TABLE user_notifications");
+userGrantGroup($db, (int)$alice['id'], (int)$vip['id'], date('Y-m-d H:i:s', time() - 30), 'test', '', false);   // expired
+userGrantGroup($db, (int)$bob['id'], (int)$vip['id'], date('Y-m-d H:i:s', time() + 86400), 'test', '', false); // expires in 1 d
+$tick = usersTick($db, $cfgOn);
+check('tick reaps the expired membership', $tick['expired'] === 1, json_encode($tick));
+check('tick warns about the soon-expiring one', $tick['warned'] === 1, json_encode($tick));
+check('expired membership row is gone', count(userGroupsAll($db, (int)$alice['id'])) === 1); // member only
+$warned = $db->query("SELECT warned_at FROM user_group_members WHERE user_id = " . (int)$bob['id'] . " AND group_id = " . (int)$vip['id'])->fetchColumn();
+check('warned_at recorded (no double warning)', $warned !== null && $warned !== false);
+$tick2 = usersTick($db, $cfgOn);
+check('second tick is quiet', $tick2['expired'] === 0 && $tick2['warned'] === 0, json_encode($tick2));
+check('tick disabled → no-op', usersTick($db, $cfgOff)['enabled'] === false);
+$types = $db->query("SELECT type FROM user_notifications ORDER BY id")->fetchAll(PDO::FETCH_COLUMN);
+check('tick left expiry + warning notifications', in_array('group-expired', $types, true) && in_array('group-expiring', $types, true), json_encode($types));
+
+// ── 6. reset tokens ──────────────────────────────────────────────────────────
+$tok = userResetCreate($db, (int)$alice['id']);
+check('reset token issued (64 hex)', (bool)preg_match('/^[a-f0-9]{64}$/', $tok));
+check('reset consume (peek) finds the user', userResetConsume($db, $tok, false) === (int)$alice['id']);
+check('reset consume (burn) works once', userResetConsume($db, $tok, true) === (int)$alice['id']);
+check('burned token is dead', userResetConsume($db, $tok, false) === null);
+check('garbage token rejected', userResetConsume($db, 'zz', false) === null);
+$tokOld = userResetCreate($db, (int)$alice['id']);
+$tokNew = userResetCreate($db, (int)$alice['id']);
+check('a new reset invalidates the previous one', userResetConsume($db, $tokOld, false) === null && userResetConsume($db, $tokNew, false) === (int)$alice['id']);
+
+// ── 7. api client scopes ─────────────────────────────────────────────────────
+$c1 = apiClientCreate($db, 'shop', 'users');
+$row = $db->query("SELECT scope FROM api_clients WHERE id = " . (int)$c1['id'])->fetchColumn();
+check('apiClientCreate stores the scope', $row === 'users', (string)$row);
+$c2 = apiClientCreate($db, 'legacy');
+$row2 = $db->query("SELECT scope FROM api_clients WHERE id = " . (int)$c2['id'])->fetchColumn();
+check('default scope is whitelist', $row2 === 'whitelist', (string)$row2);
+$c3 = apiClientCreate($db, 'bad', 'nonsense');
+$row3 = $db->query("SELECT scope FROM api_clients WHERE id = " . (int)$c3['id'])->fetchColumn();
+check('unknown scope falls back to whitelist', $row3 === 'whitelist', (string)$row3);
+$db->exec("DELETE FROM api_clients WHERE id IN (" . (int)$c1['id'] . ',' . (int)$c2['id'] . ',' . (int)$c3['id'] . ")");
+
+// ── 8. email verification tokens (v8) ────────────────────────────────────────
+$vt = userVerifyCreate($db, (int)$alice['id']);
+check('verify token issued (64 hex)', (bool)preg_match('/^[a-f0-9]{64}$/', $vt));
+check('user starts unverified', (int)userFindById($db, (int)$alice['id'])['email_verified'] === 0);
+check('verify consume marks the email verified', userVerifyConsume($db, $vt) === (int)$alice['id']
+    && (int)userFindById($db, (int)$alice['id'])['email_verified'] === 1);
+check('verify token is single use', userVerifyConsume($db, $vt) === null);
+check('garbage verify token rejected', userVerifyConsume($db, 'zz') === null);
+$vtOld = userVerifyCreate($db, (int)$alice['id']);
+$vtNew = userVerifyCreate($db, (int)$alice['id']);
+check('a new verify link invalidates the previous one', userVerifyConsume($db, $vtOld) === null && userVerifyConsume($db, $vtNew) === (int)$alice['id']);
+
+// ── 9. session choices + catalogue search (v8) ───────────────────────────────
+require_once $root . '/includes/index.php';
+check('session choices contain forever/1h/1d/30d', array_keys(userSessionChoices()) === ['forever', '1h', '1d', '30d']
+    && userSessionChoices()['forever'][0] === null && userSessionChoices()['1h'][0] === 3600);
+// relevance search across index + whitelist arms. Unique marker keeps this independent of other rows.
+$db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%'");
+$db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
+$mk = fn($i) => str_pad(dechex($i + 0xabc000), 40, 'e', STR_PAD_LEFT);
+$ins = $db->prepare("INSERT INTO index_hashes (info_hash, name, meta_status, last_seeders, total_size, files_count, last_seen) VALUES (?, ?, 'done', ?, 1000, 1, NOW())");
+$ins->execute([$mk(1), 'ZZQtest Body of Lies 2008 BluRay', 5]);     // matches body+lies+2008 → best
+$ins->execute([$mk(2), 'ZZQtest Something 2008', 50]);              // matches 2008 only
+$ins->execute([$mk(3), 'ZZQtest Body Lies extras', 100]);           // matches body+lies
+$ins->execute([$mk(4), 'YYQother unrelated torrent', 999]);         // matches nothing in the query
+$wlIns = $db->prepare("INSERT INTO whitelist (info_hash, name, meta_status, scrape_seeders, total_size, files_count) VALUES (?, ?, 'done', 7, 1000, 1)");
+$wlIns->execute([$mk(5), 'ZZQtest Body of Lies 2008 WL-Edition']);
+$res = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest Body of Lies (2008)', 'sort' => 'relevance:desc', 'include_whitelist' => false]);
+$names = array_column($res['rows'], 'name');
+check('relevance: multi-token match outranks single-token', count($names) >= 2 && str_contains($names[0], 'Body of Lies 2008 BluRay'), json_encode($names));
+check('relevance: unrelated row not returned', !in_array('YYQother unrelated torrent', $names, true), json_encode($names));
+$resWl = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest', 'sort' => 'seeders:desc', 'include_whitelist' => true]);
+$srcByHash = array_column($resWl['rows'], 'src', 'info_hash');
+check('whitelist arm folded in when permitted', ($srcByHash[$mk(5)] ?? '') === 'whitelist', json_encode($srcByHash));
+$resNoWl = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest', 'sort' => 'seeders:desc', 'include_whitelist' => false]);
+check('whitelist arm excluded without permission', !in_array($mk(5), array_column($resNoWl['rows'], 'info_hash'), true));
+// a bulk re-fetch flips done → pending: NAMED rows must stay searchable, and cancel restores them
+$db->prepare("UPDATE index_hashes SET meta_status = 'pending' WHERE info_hash = ?")->execute([$mk(1)]);
+$resPend = indexSearchCatalogue($db, $cfg, ['search' => 'ZZQtest Body of Lies (2008)', 'sort' => 'relevance:desc', 'include_whitelist' => false]);
+check('named row stays searchable while re-queued (pending)', in_array($mk(1), array_column($resPend['rows'], 'info_hash'), true));
+$cancel = indexMetaCancel($db);
+check('cancel restores resolved rows to done', $cancel['restored'] >= 1
+    && $db->query("SELECT meta_status FROM index_hashes WHERE info_hash = '" . $mk(1) . "'")->fetchColumn() === 'done', json_encode($cancel));
+// the Rebuild button: none/failed rows that still carry metadata go straight back to done
+$db->prepare("UPDATE index_hashes SET meta_status = 'none' WHERE info_hash = ?")->execute([$mk(2)]);
+$db->prepare("UPDATE index_hashes SET meta_status = 'failed', meta_error = 'timeout' WHERE info_hash = ?")->execute([$mk(3)]);
+$restored = indexMetaRestore($db);
+check('rebuild restores named none/failed rows to done', $restored >= 2
+    && $db->query("SELECT COUNT(*) FROM index_hashes WHERE info_hash IN ('" . $mk(2) . "','" . $mk(3) . "') AND meta_status = 'done' AND meta_error IS NULL")->fetchColumn() == 2, (string)$restored);
+$db->exec("DELETE FROM index_hashes WHERE name LIKE 'ZZQtest%' OR name LIKE 'YYQother%'");
+$db->exec("DELETE FROM whitelist WHERE name LIKE 'ZZQtest%'");
+
+// ── 9b. sender address (mail_from_email, 1.9.3) ──────────────────────────────
+$cfgMail = ['site_url' => 'https://tracker.example.com', 'site_email' => 'contact@example.com'];
+check('allowed From hosts = site host + parents', mailFromAllowedHosts($cfgMail) === ['tracker.example.com', 'example.com'], json_encode(mailFromAllowedHosts($cfgMail)));
+check('no site_url → no restriction', mailFromAllowedHosts(['site_url' => '']) === []);
+check('IP site_url → no restriction', mailFromAllowedHosts(['site_url' => 'http://192.0.2.10']) === []);   // RFC 5737 documentation range
+check('sender falls back to site_email', mailSenderAddress($cfgMail) === 'contact@example.com');
+check('sender uses mail_from_email when set', mailSenderAddress($cfgMail + ['mail_from_email' => 'noreply@example.com']) === 'noreply@example.com');
+check('invalid mail_from_email ignored', mailSenderAddress(['mail_from_email' => 'not-an-email', 'site_email' => 'c@example.com']) === 'c@example.com');
+
+// ── 10. verification gate + two-step email change (schema v9) ────────────────
+check('users has pending_email column (v9)', schemaColumnExists($db, 'users', 'pending_email'));
+check('users has email_changed_at column (v9)', schemaColumnExists($db, 'users', 'email_changed_at'));
+$cfgGate = $cfgOn; $cfgGate['users_require_email_verify'] = '1';
+$cfgNoGate = $cfgOn; $cfgNoGate['users_require_email_verify'] = '0';
+// self-contained fixture: alice gets VIP back (section 5 replaced her permanent grant with an
+// expired one on purpose) and starts UNVERIFIED
+userGrantGroup($db, (int)$alice['id'], (int)$vip['id'], null, 'test', '', false);
+$db->prepare("UPDATE users SET email = 'alice@example.org', email_verified = 0 WHERE id = ?")->execute([(int)$alice['id']]);
+$permsGate = userEffectivePermissions($db, (int)$alice['id'], $cfgGate);
+check('gate ON: unverified user drops to guest level', empty($permsGate['index.view']) && !empty($permsGate['stats.view']), json_encode($permsGate));
+$permsNoGate = userEffectivePermissions($db, (int)$alice['id'], $cfgNoGate);
+check('gate OFF: groups apply as usual', !empty($permsNoGate['index.view']), json_encode($permsNoGate));
+$db->prepare("UPDATE users SET email_verified = 1 WHERE id = ?")->execute([(int)$alice['id']]);
+check('gate ON + verified: groups apply', !empty(userEffectivePermissions($db, (int)$alice['id'], $cfgGate)['index.view']));
+// carol is in the admin group and has NO email — the gate must not lock the owner out
+check('gate ON: admin group is exempt', !empty(userEffectivePermissions($db, (int)$carol['id'], $cfgGate)['index.view']));
+
+// email change: alice (verified, alice@example.org) → new@example.org, cooldown off
+$cfgEc = $cfgOn; $cfgEc['users_email_change_cooldown_days'] = '0';
+$aliceRow = userFindById($db, (int)$alice['id']);
+$r = userEmailChangeStart($db, $cfgEc, $aliceRow, 'new@example.org');
+check('email change starts at the OLD-address step', ($r['stage'] ?? '') === 'old', json_encode($r));
+$state = userEmailChangeState($db, userFindById($db, (int)$alice['id']));
+check('pending state says stage=old', $state !== null && $state['stage'] === 'old' && $state['pending_email'] === 'new@example.org', json_encode($state));
+check('email unchanged until confirmations', userFindById($db, (int)$alice['id'])['email'] === 'alice@example.org');
+// grab the raw step-1 token by regenerating it deterministically? no — pull the hash path: simulate
+// by inserting our own token (the consume path only cares about a valid row)
+$tok1 = bin2hex(random_bytes(32));
+$db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([(int)$alice['id']]);
+$db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL 1 HOUR)")->execute([(int)$alice['id'], hash('sha256', $tok1)]);
+$c1 = userEmailChangeConsume($db, $cfgEc, $tok1);
+check('old-address confirmation advances to the NEW step', ($c1['stage'] ?? '') === 'old_ok' && ($c1['pending'] ?? '') === 'new@example.org', json_encode($c1));
+check('step-1 token is single use', ($e = userEmailChangeConsume($db, $cfgEc, $tok1)) && ($e['error'] ?? '') === 'invalid');
+$tok2 = bin2hex(random_bytes(32));
+$db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type = 'echange_new'")->execute([(int)$alice['id']]);
+$db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_new', ?, NOW() + INTERVAL 1 HOUR)")->execute([(int)$alice['id'], hash('sha256', $tok2)]);
+$c2 = userEmailChangeConsume($db, $cfgEc, $tok2);
+$aliceAfter = userFindById($db, (int)$alice['id']);
+check('new-address confirmation applies the change (verified)', ($c2['stage'] ?? '') === 'done' && $aliceAfter['email'] === 'new@example.org' && (int)$aliceAfter['email_verified'] === 1, json_encode($c2));
+check('cooldown stamp set', !empty($aliceAfter['email_changed_at']));
+// cooldown blocks the next change
+$cfgCd = $cfgOn; $cfgCd['users_email_change_cooldown_days'] = '30';
+$r2 = userEmailChangeStart($db, $cfgCd, $aliceAfter, 'third@example.org');
+check('cooldown blocks another change', ($r2['error'] ?? '') === 'cooldown' && !empty($r2['until']), json_encode($r2));
+// removal flow: pending '' + old confirm → email NULL
+$r3 = userEmailChangeStart($db, $cfgEc, $aliceAfter, '');
+check('removal also starts at the OLD step', ($r3['stage'] ?? '') === 'old', json_encode($r3));
+$tok3 = bin2hex(random_bytes(32));
+$db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([(int)$alice['id']]);
+$db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL 1 HOUR)")->execute([(int)$alice['id'], hash('sha256', $tok3)]);
+$c3 = userEmailChangeConsume($db, $cfgEc, $tok3);
+check('removal completes on the old-address confirmation', ($c3['stage'] ?? '') === 'removed' && userFindById($db, (int)$alice['id'])['email'] === null);
+// cancel clears pending + tokens
+$bobRow = userFindById($db, (int)$bob['id']);
+$db->prepare("UPDATE users SET email = 'bob@example.org', email_changed_at = NULL WHERE id = ?")->execute([(int)$bob['id']]);
+userEmailChangeStart($db, $cfgEc, userFindById($db, (int)$bob['id']), 'bobnew@example.org');
+userEmailChangeCancel($db, (int)$bob['id']);
+check('cancel clears the pending change', userEmailChangeState($db, userFindById($db, (int)$bob['id'])) === null
+    && userFindById($db, (int)$bob['id'])['pending_email'] === null);
+// no old address → direct set (standard verification covers it)
+$db->prepare("UPDATE users SET email = NULL, email_verified = 0, email_changed_at = NULL WHERE id = ?")->execute([(int)$carol['id']]);
+$r4 = userEmailChangeStart($db, $cfgEc, userFindById($db, (int)$carol['id']), 'carol@example.org');
+check('no old address → direct set', ($r4['stage'] ?? '') === 'done_direct' && userFindById($db, (int)$carol['id'])['email'] === 'carol@example.org');
+
+
+/* == every registered permission must have been GRANTED to somebody ======== */
+//
+// This exists because of a real failure, not a hypothetical one. v1.19.0 registered rating.vote,
+// content.submit and content.propose, and granted them to nobody. With the users feature on, an
+// absent key in a group's stored JSON means DENIED — so shipping the permission silently took the
+// feature away from every account that was not an admin, and the release notes said the opposite.
+//
+// The property: a permission is either granted in includes/schema.php (in a group seed or in a
+// schemaGrantOnce call) or it is deliberately admin-only and named below with a reason. Adding a
+// permission without deciding which of those it is now fails here.
+
+// Panel permissions are NOT seeded to guest or member, and must not be: they are opt-in, granted by
+// the operator in Users -> Groups, and the `moderator` group seeds only the queue-working subset.
+// The property below is about the PUBLIC-site permissions, where an ungranted id silently switches a
+// feature off for everybody — which is the failure that made this test necessary.
+$PANEL_ONLY = array_values(array_filter(array_keys(userPermissionList()), 'userIsPanelPermission'));
+check('panel permissions are deliberately ungranted by default',
+      count($PANEL_ONLY) > 0);
+
+$ADMIN_ONLY = [
+    // permission => why nobody but an admin should ever have it
+    //
+    // `shout.upload_emote` used to be here, with the reason "granted to nobody on purpose". From
+    // 1.65.0 it IS granted — to the seeded `premium` group, in its own INSERT IGNORE — so it is no
+    // longer admin-only and the check below finds it in schema.php like any other id. The rule it
+    // was protecting has not moved and is asserted by tests/shout_emotes_test.php: no MEMBER gets
+    // it, because adding pictures to a room everybody reads is not part of writing in one.
+    //
+    // And skipping the queue is a second decision on top of that one (1.61.0). `shout_emote_approval`
+    // ships ON, so a member's picture waits for a moderator; an id that walks past that is worth
+    // exactly as much as the queue it bypasses, and seeding it to anybody would quietly hand the
+    // room back to whoever uploads fastest. The operator grants it to people they already trust.
+    'shout.emote_auto' => 'granted to nobody on purpose: it walks past the approval queue, which is the point of the queue',
+];
+foreach ($PANEL_ONLY as $pp) $ADMIN_ONLY[$pp] = 'panel permission: granted by the operator, never seeded';
+
+$schemaSrc = (string)file_get_contents($root . '/includes/schema.php');
+
+// Scope to the places that actually GRANT something, so a permission merely named in a comment does
+// not count. If the scoping finds nothing the test fails rather than passing on an empty haystack --
+// this project has been bitten once by a grep test that went green when the code it checked was
+// deleted.
+$granting = '';
+if (preg_match_all('/INSERT IGNORE INTO `user_groups`.*?VALUES(.*?)"\s*\)/s', $schemaSrc, $m)) {
+    $granting .= implode(' ', $m[1]);
+}
+if (preg_match_all('/schemaGrantOnce\s*\(.*?\)\s*;/s', $schemaSrc, $m2)) {
+    $granting .= ' ' . implode(' ', $m2[0]);
+}
+check('the permission-granting statements in schema.php were found at all',
+      strlen($granting) > 200, 'found ' . strlen($granting) . ' chars');
+
+$publicPerms = array_diff(array_keys(userPermissionList()), $PANEL_ONLY);
+check('there are still public-site permissions to check', count($publicPerms) >= 8);
+foreach ($publicPerms as $perm) {
+    if (isset($ADMIN_ONLY[$perm])) {
+        check("permission $perm is deliberately admin-only", true);
+        continue;
+    }
+    check("permission $perm is granted somewhere in schema.php",
+          strpos($granting, $perm) !== false,
+          'register a permission and nobody has it: with users on, absent = denied');
+}
+
+/* == the grant must fire ONCE, not on every later migration =============== */
+//
+// trackerSchemaDataMigrations() runs on every version bump. A plain grant would resurrect a
+// permission the operator had removed on purpose, every time anything else in the schema changed.
+
+$marker = 'test_' . bin2hex(random_bytes(4));
+$db->prepare("INSERT INTO user_groups (slug, name, description, priority, is_default, is_system, permissions)
+              VALUES (?, 'Grant probe', 'temporary', 1, 0, 0, ?)")
+   ->execute(['grantprobe', json_encode(['stats.view' => true])]);
+
+$first = schemaGrantOnce($db, $marker, ['grantprobe' => ['rating.vote', 'content.submit']]);
+$after = userGroupPermissions(userGroupBySlug($db, 'grantprobe')['permissions']);
+check('a first grant adds the missing permissions',
+      $first === 1 && isset($after['rating.vote']) && isset($after['content.submit']));
+
+// the operator removes one on purpose
+$db->prepare("UPDATE user_groups SET permissions = ? WHERE slug = 'grantprobe'")
+   ->execute([json_encode(['stats.view' => true, 'rating.vote' => true])]);
+$second = schemaGrantOnce($db, $marker, ['grantprobe' => ['rating.vote', 'content.submit']]);
+$after2 = userGroupPermissions(userGroupBySlug($db, 'grantprobe')['permissions']);
+check('a second run changes nothing, so a removed permission stays removed',
+      $second === 0 && !isset($after2['content.submit']));
+
+// The moderator group is the one place panel permissions ARE seeded, so that is where to check them.
+$modSeed = userGroupBySlug($db, 'moderator');
+$modHas = $modSeed ? userGroupPermissions($modSeed['permissions']) : [];
+check('the moderator seed grants the queue-working panel permissions',
+      isset($modHas['panel.access'], $modHas['panel.reports.view'], $modHas['panel.whitelist.content']));
+check('and grants no permission that does not exist',
+      array_diff(array_keys($modHas), array_keys(userPermissionList())) === []);
+
+check('an unknown slug is skipped rather than fatal',
+      schemaGrantOnce($db, $marker . 'x', ['no-such-group' => ['rating.vote']]) === 0);
+
+$db->prepare("DELETE FROM user_groups WHERE slug = 'grantprobe'")->execute();
+$db->prepare("DELETE FROM settings WHERE `key` LIKE ?")->execute(['schema_grant_test_%']);
+
+
+// ── audit 1.27.1: two ways to take over the panel through a "user" permission ────────────────
+// Both were real, and both had the SAME shape: an endpoint that edits users, reachable by an actor
+// who is not the owner, with no check on what the TARGET carries. api/admin/user_grant.php had the
+// guard already; these two did not.
+$src = (string)file_get_contents(dirname(__DIR__) . '/api/admin/user_update.php');
+check('user_update refuses password/email changes against a panel-carrying target from a moderator',
+      str_contains($src, 'admin_via_user') && str_contains($src, 'userIsPanelPermission')
+      // the refusal's sentence is in the dictionary: the endpoint asks for the key, the key says it
+      && str_contains($src, "__('api.users.owner_only_credentials')")
+      && str_contains(__('api.users.owner_only_credentials'), 'carries panel access'));
+check('…and it checks what the target HOLDS, not just its group name',
+      str_contains($src, 'userEffectivePermissions') && str_contains($src, 'userIsRootAdmin'));
+
+foreach (['users_grant', 'users_provision'] as $f) {
+    $v = (string)file_get_contents(dirname(__DIR__) . "/api/v1/$f.php");
+    check("v1/$f refuses to grant a group that carries panel access",
+          str_contains($v, 'userIsPanelPermission') && str_contains($v, 'group_not_grantable'));
+    check("v1/$f names the admin slug explicitly too", str_contains($v, "'admin'"));
+}
+
+// The escalation only mattered because of this chain; if it ever stops being true the guards above
+// can be revisited, and if it stays true they must not be removed.
+check('signing in as an admin-group user still opens a panel session (the reason the guards exist)',
+      str_contains((string)file_get_contents(dirname(__DIR__) . '/includes/users.php'),
+                   "\$_SESSION['admin_via_user'] = (int)\$user['id'];"));
+
+echo "\n$n checks, $fails failed\n";
+exit($fails > 0 ? 1 : 0);

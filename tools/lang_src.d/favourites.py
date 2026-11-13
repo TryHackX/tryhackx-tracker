@@ -1,0 +1,160 @@
+# -*- coding: utf-8 -*-
+"""Favourites, public profiles and "my uploads"
+
+One area of the dictionary. Every string is an (English, Polish) pair and both lang/*.php files are
+generated from all of these together -- see tools/lang_src.py.
+"""
+
+S = {}
+
+
+def add(prefix, pairs):
+    for k, v in pairs.items():
+        key = prefix + '.' + k if prefix else k
+        assert key not in S, 'duplicate key ' + key
+        assert isinstance(v, tuple) and len(v) == 2, key
+        S[key] = v
+
+
+# ── the profile page ────────────────────────────────────────────────────────
+add('profile', {
+    'h1':             ('Profile', 'Profil'),
+    # One wording for every "no" — a wrong name, a hidden profile, a missing permission. Saying
+    # which would be a scriptable way to tell hidden from nonexistent.
+    'not_found':      ('There is nothing here to see.', 'Nie ma tu nic do obejrzenia.'),
+    'member_since':   ('member since :date', 'w serwisie od :date'),
+    # 1.69.0: "as others see it" stopped being true twice over — your own profile draws the description's
+    # edit box, which nobody else gets, and it always showed your favourites, likes, registered torrents
+    # and lists whether or not you had made them public. What stays true in every case, about as short.
+    'this_is_you':    ('this is your profile — others see only what you show',
+                       'to Twój profil — inni widzą tylko to, co pokazujesz'),
+    'nothing_shared': ('This account does not share anything publicly.',
+                       'To konto nie udostępnia niczego publicznie.'),
+    'favourites':     ('Favourites', 'Ulubione'),
+    'uploads':        ('Registered torrents', 'Zarejestrowane torrenty'),
+    'search_ph':      ('Filter by name or hash…', 'Filtruj po nazwie albo hashu…'),
+    'sort':           ('Sort', 'Sortowanie'),
+    'sort_added':     ('Newest first', 'Najnowsze'),
+    'sort_name':      ('By name', 'Po nazwie'),
+    'sort_size':      ('Largest first', 'Największe'),
+    'sort_seeders':   ('Most seeders', 'Najwięcej seederów'),
+    'status':         ('Status', 'Status'),
+    'status_any':     ('Any status', 'Dowolny status'),
+    # NOT "approved": nobody approved it. Either the operator's policy demanded a probe and it
+    # passed, or the policy never asked.
+    'status_live':    ('Served', 'Serwowane'),
+    'status_waiting': ('Being checked', 'Sprawdzane'),
+    'status_refused': ('Did not pass the check', 'Nie przeszło sprawdzenia'),
+    'status_blocked': ('Blocked', 'Zablokowane'),
+})
+
+# ── the account page's own tabs and controls ────────────────────────────────
+add('account', {
+    'tab_overview':   ('Overview', 'Przegląd'),
+    'tab_favourites': ('Favourites', 'Ulubione'),
+    'tab_uploads':    ('My torrents', 'Moje torrenty'),
+    'fav_heading':    ('Favourites', 'Ulubione'),
+    'fav_privacy':    ('Privacy', 'Prywatność'),
+    'fav_public_label': ('Show my favourites on my profile',
+                         'Pokazuj moje ulubione na moim profilu'),
+    'fav_public_hint': ('Your profile is at <code>?action=u&amp;name=:name</code>. Off, it shows nothing but your name.',
+                        'Twój profil jest pod <code>?action=u&amp;name=:name</code>. Wyłączone — widać na nim tylko Twoją nazwę.'),
+    'fav_listed_label': ('Let my name appear in “who has this in favourites”',
+                         'Pozwól, by moja nazwa pojawiała się na liście „kto ma to w ulubionych”'),
+    'fav_listed_hint': ('Off, you are not on that list and you are not in its count either — nobody can work out that somebody is missing.',
+                        'Wyłączone — nie ma Cię na tej liście ani w jej liczniku; nikt nie wywnioskuje, że kogoś brakuje.'),
+    # 1.72.1: the star stands beside a torrent wherever its actions are, not only in the search results.
+    'fav_none':       ('Nothing here yet. The star beside a torrent puts it here — in the search results, a list or on a profile.',
+                       'Na razie pusto. Gwiazdka przy torrencie dodaje go tutaj — w wynikach wyszukiwania, na liście albo na profilu.'),
+    'uploads_none':   ('You have not registered anything while signed in.',
+                       'Nie zarejestrowałeś niczego będąc zalogowanym.'),
+})
+
+# ── strings the browser scripts need ────────────────────────────────────────
+add('js.fav', {
+    # 1.73.1: a row's swarm with a count of a million or more is written compact ("100.82M"); its title says the pair
+    'sl_exact': ('Seeders / leechers: :s / :l', 'Seedery / leechery: :s / :l'),
+    'add':            ('Add to favourites', 'Dodaj do ulubionych'),
+    'remove':         ('Remove from favourites', 'Usuń z ulubionych'),
+    'added':          ('Added to favourites', 'Dodano do ulubionych'),
+    'removed':        ('Removed from favourites', 'Usunięto z ulubionych'),
+    'limit':          ('Your favourites list is full (:n). Remove something first.',
+                       'Lista ulubionych jest pełna (:n). Najpierw coś usuń.'),
+    'failed':         ('That did not go through.', 'Nie udało się.'),
+    'gone':           ('No longer in the catalogue', 'Już nie ma tego w katalogu'),
+    'gone_title':     ('The tracker has not seen this hash for a while. The magnet still works.',
+                       'Tracker nie widział tego hasha od dłuższego czasu. Magnet nadal działa.'),
+    'blocked':        ('Blocked on this tracker', 'Zablokowane na tym trackerze'),
+    'who':            ('Who has this', 'Kto ma to u siebie'),
+    # 1.70.0: the overlay has three sections (tools/lang_src.d/who.py has their words), so the button says so.
+    'who_title':      ('The people who keep this in their favourites, who liked or rated it, and the public lists it is on — those who agreed to be named',
+                       'Osoby, które mają to w ulubionych, które to polubiły lub oceniły, i publiczne listy, na których to jest — ci, którzy zgodzili się pokazywać nazwę'),
+    'nothing':        ('Nothing here.', 'Nic tu nie ma.'),
+    'load_failed':    ('Could not load the list.', 'Nie udało się wczytać listy.'),
+    'public_on':      ('Shown on your profile', 'Pokazywane na Twoim profilu'),
+    'public_off':     ('Not on your profile', 'Nie na Twoim profilu'),
+    'status_live':    ('Served', 'Serwowane'),
+    'status_waiting': ('Being checked', 'Sprawdzane'),
+    'status_refused': ('Did not pass the check', 'Nie przeszło sprawdzenia'),
+    'status_blocked': ('Blocked', 'Zablokowane'),
+    'content_none':   ('No description', 'Bez opisu'),
+    'content_pending': ('Description waiting for review', 'Opis czeka na przegląd'),
+    'content_approved': ('Description reviewed and published', 'Opis przejrzany i opublikowany'),
+    'content_rejected': ('Description turned down', 'Opis odrzucony'),
+})
+
+# ── the settings the operator sees ──────────────────────────────────────────
+add('settings', {
+    'fav_heading':    ('Favourites and profiles', 'Ulubione i profile'),
+    'fav_intro':      ('A member can keep a list of favourite torrents, and — if you allow it — show that list on a public profile at <code>?action=u&amp;name=…</code>. Everything here ships off; a list of what somebody likes is a list about them.',
+                       'Członek może prowadzić listę ulubionych torrentów i — jeśli na to pozwolisz — pokazywać ją na publicznym profilu pod <code>?action=u&amp;name=…</code>. Wszystko tutaj jest domyślnie wyłączone; lista tego, co ktoś lubi, jest listą o nim.'),
+    'fav_enabled':    ('Favourites', 'Ulubione'),
+    'fav_enabled_hint': ('The master switch. Off, the star does not appear and every endpoint answers as though the feature did not exist.',
+                         'Główny włącznik. Wyłączone — gwiazdka się nie pojawia, a każdy endpoint odpowiada tak, jakby funkcji nie było.'),
+    'fav_max':        ('Limit per account', 'Limit na konto'),
+    'fav_max_hint':   ('What makes the query strategy safe: one person’s list is always small enough to fetch whole. 10–5000.',
+                       'To, co czyni strategię zapytań bezpieczną: lista jednej osoby zawsze mieści się w całości. 10–5000.'),
+    'fav_public':     ('Public lists', 'Publiczne listy'),
+    'fav_public_hint': ('Whether a member may show their favourites on their profile at all. Each member still chooses for themselves, and the group needs <code>favourites.public</code>.',
+                        'Czy członek w ogóle może pokazać ulubione na swoim profilu. Każdy i tak decyduje sam, a grupa potrzebuje <code>favourites.public</code>.'),
+    'fav_who':        ('“Who has this in favourites”', '„Kto ma to w ulubionych”'),
+    'fav_who_hint':   ('A list on the Info panel of people who favourited a torrent. Only those who allowed it appear — and they are left out of the count as well, so the number cannot be differenced to find them.',
+                       'Lista w panelu Info z osobami, które dodały torrent do ulubionych. Pojawiają się tylko ci, którzy na to pozwolili — i są też pomijani w liczniku, żeby nie dało się ich wyliczyć z różnicy.'),
+    'profiles':       ('Public profiles', 'Publiczne profile'),
+    'profiles_hint':  ('Whether <code>?action=u&amp;name=…</code> is reachable. Its own switch, because registered torrents use it too. Only signed-in readers ever see a profile.',
+                       'Czy <code>?action=u&amp;name=…</code> jest osiągalne. Osobny włącznik, bo korzystają z niego też zarejestrowane torrenty. Profil widzi wyłącznie zalogowany czytelnik.'),
+    'wl_submitter':   ('Show who registered a torrent', 'Pokazuj, kto zarejestrował torrent'),
+    'wl_submitter_hint': ('Lets a member show their registered torrents on their profile, and pick per torrent. It decides whose profile a row appears on — never what the tracker serves and never what the search finds.',
+                          'Pozwala członkowi pokazywać zarejestrowane torrenty na profilu i wybierać osobno dla każdego. Decyduje o tym, na czyim profilu wiersz się pojawia — nigdy o tym, co serwuje tracker ani co znajduje wyszukiwarka.'),
+})
+
+# ── the submission form ────────────────────────────────────────────────────
+add('whitelist', {
+    'public_label': ('Show this on my profile',
+                     'Pokaż to na moim profilu'),
+    'public_hint':  ('Your profile is at <code>?action=u&amp;name=:name</code>. Applies to torrents this submission registers — one somebody else registered first stays theirs.',
+                     'Twój profil jest pod <code>?action=u&amp;name=:name</code>. Dotyczy torrentów, które to zgłoszenie rejestruje — te zarejestrowane wcześniej przez kogoś innego pozostają jego.'),
+})
+
+add('js.app', {
+    'wl_exists_not_yours': ('already registered — those will not appear on your profile',
+                            'już zarejestrowane — te nie pojawią się na Twoim profilu'),
+})
+
+# ── the page title ──────────────────────────────────────────────────────────
+add('title', {
+    'u': ('Profile', 'Profil'),
+})
+
+
+# ── recovered 2026-09-13 ────────────────────────────────────────────────────
+# These strings were added straight to lang/en.php and lang/pl.php between 1.43 and 1.50 and never to
+# these sources, so the first regeneration since then (1.50.1) dropped all of them. They are written
+# back here, where the generator reads from. tests/lang_test.php now checks that the generated files
+# match the sources, so a string added to the generated file alone fails the battery on the spot.
+add('', {
+    'profile.lists': ('Lists',
+        'Listy'),
+    'profile.share_title': ('Copy a link to this profile',
+        'Skopiuj link do tego profilu'),
+})

@@ -1,0 +1,100 @@
+<?php
+/**
+ * POST user_update — self-service profile changes; every change requires the CURRENT password.
+ * Body: {csrf_token, current_password, new_password?} and/or {email?} (empty = remove) and/or
+ * {cancel_email_change:1} and/or {timezone:'Europe/Warsaw'|''} — the last two need only the session.
+ *
+ * Email changes are TWO-STEP (schema v9): nothing is written immediately — a confirmation link
+ * goes to the OLD address, then one to the NEW address; only the second click applies the change
+ * (see userEmailChangeStart/Consume). A cooldown blocks another change for
+ * users_email_change_cooldown_days after the last completed one.
+ */
+requirePost();
+
+$input = readJsonBody();
+if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
+}
+if (!usersEnabled($cfg)) jsonResponse(['error' => 'accounts_disabled'], 400);
+$u = currentUser($db);
+if (!$u) jsonResponse(['error' => 'not_logged_in'], 401);
+
+// cancelling a pending email change only needs the session (nothing sensitive happens)
+if (!empty($input['cancel_email_change'])) {
+    userEmailChangeCancel($db, (int)$u['id']);
+    jsonResponse(['success' => true, 'changed' => ['email_change_cancelled']]);
+}
+
+// The display time zone (v68), and for the same reason: which clock somebody reads the room in says
+// nothing about who they are. A password asked for a preference teaches people the prompt means
+// nothing — the rule the privacy toggles on the same page already follow. '' = the site's zone.
+if (array_key_exists('timezone', $input)) {
+    if (!userSetTimezone($db, (int)$u['id'], (string)$input['timezone'])) {
+        jsonResponse(['error' => __('api.account.timezone_invalid')], 400);
+    }
+    // The zone now in force, said back the way the page prints it, so the answer can be checked
+    // against what the select shows rather than trusted.
+    $fresh = userFindById($db, (int)$u['id']) ?: $u;
+    $zone = userDisplayTimezone($fresh, $cfg);
+    jsonResponse(['success' => true, 'changed' => ['timezone'],
+                  'timezone' => $fresh['timezone'] ?? null,
+                  'zone' => $zone->getName(), 'offset' => tzOffsetLabel($zone)]);
+}
+
+// The same budget as the other password-checking account endpoints (user_2fa, user_sessions): this
+// one verifies a password too, so it is a guessing surface like the login form.
+if (!rateLimitAllow('user_update', ipBucket(getClientIp($cfg)), 20, 900)) {
+    jsonResponse(['error' => __('api.login.too_many')], 429);
+}
+if (!password_verify((string)($input['current_password'] ?? ''), (string)$u['pass_hash'])) {
+    jsonResponse(['error' => __('api.account.current_password_wrong')], 403);
+}
+
+$emailSet = array_key_exists('email', $input);
+$newPass = (string)($input['new_password'] ?? '');
+if ($newPass !== '' && !userValidPassword($newPass)) {
+    jsonResponse(['error' => __('api.account.new_password_rules', ['rules' => USER_PASSWORD_RULES])], 400);
+}
+if (!$emailSet && $newPass === '') jsonResponse(['error' => __('api.account.nothing_to_change')], 400);
+
+$changed = [];
+$emailStage = null;
+
+if ($emailSet) {
+    $r = userEmailChangeStart($db, $cfg, $u, (string)$input['email']);
+    if (isset($r['error'])) {
+        $msgs = [
+            'invalid_email' => __('api.users.invalid_email'),
+            'same_email'    => __('api.account.email_same_yours'),
+            'email_taken'   => __('api.users.email_taken'),
+            'cooldown'      => __('api.account.email_cooldown_2', ['until' => $r['until'] ?? '']),
+        ];
+        jsonResponse(['error' => $msgs[$r['error']] ?? $r['error']], 400);
+    }
+    $emailStage = $r['stage'];
+    $changed[] = $emailStage === 'done_direct' ? 'email' : 'email_change_started';
+}
+
+$verifySent = false;
+if ($newPass !== '') {
+    $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")
+       ->execute([password_hash($newPass, PASSWORD_DEFAULT), (int)$u['id']]);
+    // …and every session that is already open, wherever it is. Clearing the cookies was only half of
+    // it: a browser signed in without one went on being signed in with a password that had changed
+    // under it, which is precisely the browser somebody changes their password because of.
+    userSignOutOthers($db, (int)$u['id'], true);
+    // a password change invalidates every remember-me token (stolen-cookie hygiene)
+    $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([(int)$u['id']]);
+    $changed[] = 'password';
+    $uLang = recipientLang($cfg, $u);   // the account's language (1.74.0)
+    userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.password_changed'), langFor($uLang, 'notify.password_changed_body'));
+}
+if ($emailStage === 'done_direct') {
+    // first address on an account that had none — standard verification mail guards it
+    $fresh = userFindById($db, (int)$u['id']);
+    if ($fresh && trim((string)$fresh['email']) !== '') $verifySent = userVerifySend($db, $cfg, $fresh);
+    $uLang = recipientLang($cfg, $fresh ?? $u);
+    userNotify($db, (int)$u['id'], 'account', langFor($uLang, 'notify.email_set'), langFor($uLang, 'notify.email_set_body'));
+}
+
+jsonResponse(['success' => true, 'changed' => $changed, 'email_stage' => $emailStage, 'verify_sent' => $verifySent]);

@@ -1,0 +1,249 @@
+<?php
+/**
+ * Making a submission prove itself before it is served.
+ *
+ * ── the idea ────────────────────────────────────────────────────────────────
+ *
+ * Anybody can paste forty hex characters. Most of what a public whitelist accumulates is not abuse,
+ * it is *noise*: hashes nobody is seeding, hashes whose torrent never named this tracker, hashes
+ * typed from a page somebody was reading. Every one of them becomes a row the accesslist carries and
+ * the tracker answers for, for ever.
+ *
+ * So, optionally, a submission has to demonstrate two things before it counts:
+ *
+ *   1. **the metadata resolves** — somebody, somewhere, is actually sharing the torrent, and
+ *   2. **the scrape shows at least one peer** — and they are announcing to THIS tracker.
+ *
+ * Together those mean: this torrent exists, it is alive, and its trackers include us. A hash that
+ * cannot manage all three is not a registration, it is a wish.
+ *
+ * ── how, without a second queue ─────────────────────────────────────────────
+ *
+ * The row is inserted immediately, marked `probing`, and given priority in the metadata queue that
+ * already exists. The worker resolves it because it is an ordinary whitelist row; the janitor
+ * scrapes it and decides.
+ *
+ * ── served WHILE it proves itself, withdrawn when it fails (1.73.0) ─────────
+ *
+ * The second half of the proof is a peer announcing to THIS tracker, and a tracker in whitelist mode
+ * refuses the announces of a hash its accesslist does not carry: a probe whose hash is not served can
+ * never see a peer. So a row being probed IS served — for at most wl_probe_timeout_minutes — and the
+ * accesslist generator leaves out only the rows that FAILED. Written down because the code had it
+ * both ways: the add path appended the hash at once while the generator dropped 'probing' rows, so a
+ * full regeneration in the middle of a probe (another probe passing, a ban) withdrew it and the probe
+ * failed for a reason that was not the torrent's; and a failure was never withdrawn until some
+ * unrelated regeneration came along. wlProbeTick() now regenerates the moment anything fails.
+ * A row a PERSON must approve (a partner key's review) is a different promise: never served first.
+ *
+ * That is deliberately not a separate queue: a second queue would need its own worker, its own
+ * failure modes and its own way of getting stuck, to do a job the first one already does. What it
+ * does need is PRIORITY, so that a probe is not stuck behind a hundred thousand catalogue rows —
+ * which is the whole reason somebody would give up on this feature.
+ */
+
+function wlProbeEnabled(array $cfg): bool { return ($cfg['wl_probe_required'] ?? '0') === '1'; }
+
+/** How long a submission gets to prove itself before it is given up on. */
+function wlProbeTimeoutMinutes(array $cfg): int {
+    return max(1, min(1440, (int)($cfg['wl_probe_timeout_minutes'] ?? 10) ?: 10));
+}
+
+/** What happens to a submission that never proved itself: 'keep' (inactive) or 'delete'. */
+function wlProbeOnFail(array $cfg): string {
+    $v = (string)($cfg['wl_probe_on_fail'] ?? 'delete');
+    return in_array($v, ['keep', 'delete'], true) ? $v : 'delete';
+}
+
+/** worker/worker.py's own default for `concurrency` (its Config) — and the example config's and worker/README.md's. */
+const WL_PROBE_WORKER_DEFAULT_CONCURRENCY = 3;
+
+/**
+ * How many parallel fetches the metadata worker runs (1.74.0, QUAL-3): the panel's `meta_worker_concurrency` when
+ * set (the worker takes it over its config file), else what the worker's heartbeat says it runs with (`concurrency`,
+ * fresh within ten minutes), else the worker's own default. Until 1.74.0 this was `?? 8` — a fifth number beside the
+ * worker's 3, the example config's 4 and the README's [3] — so one submitter could hold 8 rows "probing" while the
+ * worker fetched 3.
+ */
+function wlProbeWorkerConcurrency(array $cfg): int {
+    $set = (int)($cfg['meta_worker_concurrency'] ?? 0);
+    if ($set > 0) return max(1, min(64, $set));
+    if (function_exists('whitelistWorkerHeartbeat')) {
+        $hb = whitelistWorkerHeartbeat($cfg);
+        $info = $hb['info'] ?? null;
+        if (is_array($info) && $hb['age'] !== null && $hb['age'] <= 600) {
+            $c = (int)($info['concurrency'] ?? 0);
+            if ($c > 0) return max(1, min(64, $c));
+        }
+    }
+    return WL_PROBE_WORKER_DEFAULT_CONCURRENCY;
+}
+
+/**
+ * How many may be probing at once, per submitter.
+ *
+ * The metadata worker's own ceiling is the real limit on parallel fetches; this is about not letting
+ * one person fill the priority lane. Kept at or below the worker's concurrency by default, because
+ * a queue of five hundred "probing" rows is not faster, it just makes everyone wait together.
+ */
+function wlProbeMaxPerSubmit(array $cfg): int {
+    $worker = wlProbeWorkerConcurrency($cfg);
+    return max(1, min($worker, (int)($cfg['wl_probe_max_batch'] ?? $worker) ?: $worker));
+}
+
+/** Mark freshly inserted rows as needing to prove themselves, and put them at the front of the queue. */
+function wlProbeStart(PDO $db, array $cfg, array $hashes): int {
+    $hashes = array_values(array_filter(array_map('strtolower', $hashes), 'isValidInfoHash'));
+    if (!$hashes) return 0;
+    $n = 0;
+    foreach (array_chunk($hashes, 500) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        // priority 10: ahead of ordinary whitelist work (5) and far ahead of the catalogue (-1).
+        // A person is waiting on this one, watching a spinner; nothing else in the queue is.
+        $st = $db->prepare(
+            "UPDATE whitelist
+                SET probe_status = 'probing', probe_started_at = NOW(), probe_error = NULL,
+                    meta_status = CASE WHEN meta_status = 'done' THEN 'done' ELSE 'pending' END,
+                    meta_priority = 10, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
+              WHERE info_hash IN ($ph) AND banned = 0");
+        $st->execute($chunk);
+        $n += $st->rowCount();
+    }
+    return $n;
+}
+
+/**
+ * Decide the fate of everything currently probing.
+ *
+ * Called from the janitor. Scrapes the rows whose metadata has arrived, and gives up on the ones
+ * that ran out of time — with a reason that says WHICH half failed, because "we could not find
+ * anybody sharing this" and "we could not read the torrent" send somebody to completely different
+ * places.
+ */
+function wlProbeTick(PDO $db, array $cfg): array {
+    $out = ['checked' => 0, 'passed' => 0, 'failed' => 0, 'deleted' => 0];
+    if (PHP_SAPI !== 'cli') return $out;
+    if (!wlProbeEnabled($cfg)) return $out;
+
+    $rows = $db->query(
+        "SELECT id, info_hash, meta_status, files_count, scrape_seeders, scrape_leechers,
+                scrape_completed, scraped_at, probe_started_at
+           FROM whitelist WHERE probe_status = 'probing' ORDER BY probe_started_at ASC LIMIT 200")
+        ->fetchAll();
+    if (!$rows) return $out;
+    $out['checked'] = count($rows);
+
+    $timeout = wlProbeTimeoutMinutes($cfg) * 60;
+    $now = time();
+    $pass = [];
+    $fail = [];
+
+    // A BUDGET, because this loop is up to 200 sequential HTTP requests inside the janitor's
+    // minute. Each scrape has its own 2 s timeout; nothing stopped the loop when the tracker went
+    // quiet, so a dead tracker turned one tick into 200 × 2 s. Twenty seconds of wall clock, and
+    // five unanswered scrapes in a row means the tracker is not answering — stop asking. Rows not
+    // reached stay 'probing' and, ordered by probe_started_at, are first in line next tick.
+    $deadline = microtime(true) + 20.0;
+    $quiet = 0;
+
+    foreach ($rows as $r) {
+        if (microtime(true) >= $deadline || $quiet >= 5) { $out['deferred'] = ($out['deferred'] ?? 0) + 1; continue; }
+        $age = $now - strtotime((string)$r['probe_started_at']);
+        $haveMeta = ($r['meta_status'] === 'done');
+
+        if ($haveMeta) {
+            // The metadata is in. Now: is anybody actually there, and announcing to us?
+            $sl = scrapeOpenTracker($db, $cfg, $r, true);
+            $quiet = is_array($sl) ? 0 : $quiet + 1;
+            $peers = is_array($sl) ? ((int)$sl['seeders'] + (int)$sl['leechers']) : -1;
+            if ($peers > 0) { $pass[] = (int)$r['id']; continue; }
+            if ($age >= $timeout) {
+                $fail[(int)$r['id']] = $peers === 0
+                    ? 'nobody is sharing this with our tracker in the torrent'
+                    : 'the tracker did not answer a scrape for it';
+            }
+            continue;
+        }
+
+        if ($r['meta_status'] === 'failed') {
+            $fail[(int)$r['id']] = 'the torrent metadata could not be fetched — nobody is sharing it';
+            continue;
+        }
+        if ($age >= $timeout) {
+            $fail[(int)$r['id']] = 'nobody answered in time — the torrent metadata never arrived';
+        }
+    }
+
+    foreach (array_chunk($pass, 200) as $chunk) {
+        if (!$chunk) continue;
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $db->prepare("UPDATE whitelist SET probe_status = 'passed', probe_error = NULL WHERE id IN ($ph)")
+           ->execute($chunk);
+        $out['passed'] += count($chunk);
+    }
+
+    foreach ($fail as $id => $why) {
+        $db->prepare("UPDATE whitelist SET probe_status = 'failed', probe_error = ? WHERE id = ?")
+           ->execute([mb_substr($why, 0, 255), $id]);
+        $out['failed']++;
+    }
+
+    if ($out['failed'] > 0 && wlProbeOnFail($cfg) === 'delete') {
+        $ids = array_keys($fail);
+        foreach (array_chunk($ids, 200) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $db->prepare("DELETE FROM whitelist_files WHERE whitelist_id IN ($ph)")->execute($chunk);
+            $db->prepare("DELETE f FROM forum_descs f JOIN whitelist w ON w.info_hash = f.info_hash
+                           WHERE w.id IN ($ph) AND w.probe_status = 'failed'")->execute($chunk);
+            $d = $db->prepare("DELETE FROM whitelist WHERE id IN ($ph) AND probe_status = 'failed'");
+            $d->execute($chunk);
+            $out['deleted'] += $d->rowCount();
+        }
+    }
+
+    // A row that FAILED leaves the accesslist now (1.73.0): it was served while it tried — see the header —
+    // and a failure that waited for some unrelated regeneration went on being served, deleted or kept. A
+    // pass changes nothing in the file (a row being probed is already in it), but it is regenerated then too:
+    // the file stays what the table says, whatever path wrote it.
+    if ($out['passed'] > 0 || $out['failed'] > 0) {
+        whitelistMarkDirty(true);
+        whitelistRegenerate($db, $cfg);
+        whitelistMaybeReload($cfg);
+    }
+    return $out;
+}
+
+/**
+ * The state of a set of submissions, for the form that is watching them.
+ *
+ * Returns one entry per hash with a state the page can show without translating: `probing`,
+ * `passed`, `failed` (with the reason), or `unknown` for a hash that is not there at all.
+ */
+function wlProbeStatus(PDO $db, array $hashes): array {
+    $hashes = array_values(array_filter(array_map('strtolower', $hashes), 'isValidInfoHash'));
+    if (!$hashes) return [];
+    $out = [];
+    foreach (array_chunk($hashes, 500) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $st = $db->prepare(
+            "SELECT info_hash, name, files_count, total_size, meta_status, probe_status, probe_error,
+                    scrape_seeders, scrape_leechers
+               FROM whitelist WHERE info_hash IN ($ph)");
+        $st->execute($chunk);
+        foreach ($st as $r) {
+            $out[$r['info_hash']] = [
+                'state'    => (string)($r['probe_status'] ?: 'none'),
+                'name'     => $r['name'],
+                'files'    => $r['files_count'] === null ? null : (int)$r['files_count'],
+                'size'     => $r['total_size'] === null ? null : (int)$r['total_size'],
+                'seeders'  => $r['scrape_seeders'] === null ? null : (int)$r['scrape_seeders'],
+                'leechers' => $r['scrape_leechers'] === null ? null : (int)$r['scrape_leechers'],
+                'meta'     => (string)$r['meta_status'],
+                'error'    => $r['probe_error'],
+            ];
+        }
+    }
+    foreach ($hashes as $h) {
+        if (!isset($out[$h])) $out[$h] = ['state' => 'unknown', 'error' => 'not registered'];
+    }
+    return $out;
+}

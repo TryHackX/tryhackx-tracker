@@ -1,0 +1,116 @@
+<?php
+// Admin edit of one user: status (active|banned), email, password, email_verified.
+// EVERY field is validated up front and the writes run in one transaction — a later validation
+// failure must never leave an earlier field (e.g. a ban + token wipe) silently committed.
+requirePost();
+$input = readJsonBody();
+$id = (int)($input['id'] ?? 0);
+$u = userFindById($db, $id);
+if (!$u) jsonResponse(['error' => __('api.users.not_found')], 404);
+
+// ── validate everything first ──
+$status = null;
+if (isset($input['status'])) {
+    $status = (string)$input['status'];
+    if (!in_array($status, ['active', 'banned'], true)) jsonResponse(['error' => __('api.users.invalid_status')], 400);
+    if ($status === 'banned' && userIsRootAdmin($u, $cfg)) jsonResponse(['error' => __('api.users.owner_cannot_ban')], 400);
+    // The status box is a CHANGE of status, not a field that is always saved (1.75.0): it used to be sent with every save of
+    // this window, and "banned" written over an account already banned for a few days made that ban dateless — an edit of the
+    // address ended a timed ban's end. Whatever the account already is, it stays; a ban's date is the Moderation page's.
+    if ($status === (string)$u['status']) $status = null;
+}
+$email = null; $emailSet = false;
+if (array_key_exists('email', $input)) {
+    $email = trim((string)$input['email']);
+    // Like the status, the address is a CHANGE (1.75.0): the window used to send it with every save, and writing it back
+    // marks it verified ("the admin vouches for it") — so setting only a password verified an address its owner had never
+    // confirmed. The address the account already has is left alone, verified or not; the flag's own switch is `email_verified`.
+    if ($email !== trim((string)($u['email'] ?? ''))) {
+        $emailSet = true;
+        if ($email !== '' && !userValidEmail($email)) jsonResponse(['error' => __('api.users.invalid_email_2')], 400);
+    } else {
+        $email = null;
+    }
+}
+$password = (string)($input['password'] ?? '');
+if ($password !== '' && !userValidPassword($password)) {
+    jsonResponse(['error' => __('api.users.password_rules', ['rules' => USER_PASSWORD_RULES])], 400);
+}
+
+// TAKING OVER AN ACCOUNT IS NOT "EDITING" IT.
+//
+// `panel.users.edit` is a grantable moderator permission whose promise is status and email
+// verification. Setting a PASSWORD or an EMAIL is a different act: the panel admin is mirrored into
+// `users` as a member of the admin group, and userMaybeOpenPanelSession() opens a full panel session
+// for anyone in that group at their next sign-in — where panelCan() is unconditionally true. So a
+// moderator who could set that account's password could sign in as it and own the panel, including
+// every sudo-backed helper. An email is the same door with one more step, through password reset.
+//
+// api/admin/user_grant.php already refuses to let a non-owner grant a group that CARRIES panel
+// access; this is the same sentence for the same reason. Written against what the target holds
+// rather than against its name, so a custom group with panel permissions in it is covered too.
+$viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
+$actorIsOwner = $viaUser <= 0 || userIsAdminGroup($db, $viaUser);
+$targetCarriesPanel = false;
+if (!$actorIsOwner) {
+    $targetCarriesPanel = userIsRootAdmin($u, $cfg) || userIsAdminGroup($db, $id);
+    if (!$targetCarriesPanel) {
+        foreach (array_keys(userEffectivePermissions($db, $id)) as $tp) {
+            if (userIsPanelPermission($tp)) { $targetCarriesPanel = true; break; }
+        }
+    }
+}
+if (!$actorIsOwner && $targetCarriesPanel && ($password !== '' || $emailSet || isset($input['email_verified']))) {
+    jsonResponse(['error' => __('api.users.owner_only_credentials')], 403);
+}
+// Banning a moderator or an administrator is the owner's call too. The report card refuses it for
+// the same reason, and this page is not a way around that.
+if (!$actorIsOwner && $targetCarriesPanel && $status === 'banned') {
+    jsonResponse(['error' => 'target_is_staff'], 403);
+}
+if ($status === null && !$emailSet && $password === '' && !isset($input['email_verified'])) {
+    jsonResponse(['error' => __('api.users.nothing_to_change')], 400);
+}
+
+// ── apply atomically ──
+$changed = [];
+$db->beginTransaction();
+try {
+    if ($status !== null) {
+        // A status set here has no date: a ban is until somebody lifts it, and a lift is a lift. The
+        // date a timed ban from the report card left behind would otherwise make the janitor undo a
+        // later permanent ban the moment that old date passed.
+        $db->prepare("UPDATE users SET status = ?, banned_until = NULL WHERE id = ?")->execute([$status, $id]);
+        if ($status === 'banned') {
+            // a banned user must not ride an existing remember-me cookie back in
+            $db->prepare("DELETE FROM user_tokens WHERE user_id = ?")->execute([$id]);
+        }
+        $changed[] = 'status';
+    }
+    if ($emailSet) {
+        // an admin-entered address counts as verified (the admin vouches for it)
+        $db->prepare("UPDATE users SET email = ?, email_verified = ? WHERE id = ?")
+           ->execute([$email !== '' ? $email : null, $email !== '' ? 1 : 0, $id]);
+        $changed[] = 'email';
+    }
+    if ($password !== '') {
+        $db->prepare("UPDATE users SET pass_hash = ? WHERE id = ?")->execute([password_hash($password, PASSWORD_DEFAULT), $id]);
+        $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ?")->execute([$id]);
+        $changed[] = 'password';
+    }
+    if (isset($input['email_verified'])) {
+        // "Verified" is said of an ADDRESS (1.74.0, QUAL-13): an account without one is never marked so. The flag
+        // alone used to let a member with no address pass the e-mail gate of "who has this" (includes/who.php)
+        // while its own profile, asking for an address too, refused it — one gate with two answers.
+        $db->prepare("UPDATE users SET email_verified = IF(TRIM(COALESCE(email, '')) <> '', ?, 0) WHERE id = ?")
+           ->execute([!empty($input['email_verified']) ? 1 : 0, $id]);
+        $changed[] = 'email_verified';
+    }
+    $db->commit();
+    userPermissionsForget($id);   // status, address and its verification are what its permissions are read by
+} catch (PDOException $e) {
+    if ($db->inTransaction()) $db->rollBack();
+    if ((int)$e->errorInfo[1] === 1062) jsonResponse(['error' => __('api.users.email_in_use')], 400);
+    throw $e;
+}
+jsonResponse(['success' => true, 'changed' => $changed]);

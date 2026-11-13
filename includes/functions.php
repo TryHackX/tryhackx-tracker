@@ -1,0 +1,2329 @@
+<?php
+
+// The dictionary, loaded with the functions: every include that sends a sentence to a person
+// (whitelist warnings, poll errors, backup replies) now goes through __(), and the entry points
+// that never chose a language — the janitor, the CLI, the tests — must still be able to call it.
+// __() returns English until langInit() picks a language (see langEnsure()).
+require_once __DIR__ . '/lang.php';
+
+// The Content-Security-Policy and, more to the point, nonceAttr(). It is required HERE rather than
+// from index.php/api.php because two functions in THIS file emit an inline <script> — pageRedirect()
+// below and captchaHeadTags() — and tests/admin_access_test.php requires only functions.php and
+// calls captchaHeadTags() directly. A nonce helper that is not loaded wherever a <script> is written
+// is a helper somebody will forget; loading it here means they cannot.
+require_once __DIR__ . '/csp.php';
+
+// The clock: which zone the database session writes its DATETIMEs in, and — from 1.62.0 — which
+// zone a READER sees a time in (siteTimezone(), userDisplayTimezone(), userDisplayTime()). Loaded
+// here because every entry point loads this file and a page that prints a time must not depend on
+// somebody remembering to include the thing that knows how to convert it.
+require_once __DIR__ . '/db_clock.php';
+
+// The icon library (1.68.0): iconFontTag(), which every page's <head> prints, and the name map that
+// lets Font Awesome draw icons written in Bootstrap Icons' markup. Loaded here for the reason csp.php
+// is: nine templates and the installer print the font, and a helper that is not loaded wherever a
+// <head> is written is a helper some entry point will be missing.
+require_once __DIR__ . '/icons.php';
+
+/**
+ * What this build calls itself.
+ *
+ * It used to exist in exactly two places, neither of which the running code could see: the heading
+ * of CHANGELOG.md and a git tag. So "which version is this server on?" had no answer from the
+ * server, and telling a deployed panel apart from a checkout meant reading file timestamps.
+ * One constant, bumped in the same commit as the changelog heading — tests/version_test.php is what
+ * keeps those two honest with each other.
+ */
+const TRACKER_VERSION = '1.94.2';
+
+/**
+ * Where the version line may appear: 'none', 'public', 'panel' (the default) or 'both'.
+ *
+ * An operator wants it in the panel and usually not on the front page — a version number tells a
+ * visitor which published bugs to try. So the default is the panel, and showing it publicly is a
+ * deliberate choice rather than something that arrives switched on.
+ */
+function versionShown(array $cfg, bool $inPanel): bool {
+    $mode = (string)($cfg['version_display'] ?? 'panel');
+    if (!in_array($mode, ['none', 'public', 'panel', 'both'], true)) $mode = 'panel';
+    if ($mode === 'none') return false;
+    if ($mode === 'both') return true;
+    return $mode === ($inPanel ? 'panel' : 'public');
+}
+
+/**
+ * The public Transparency page is on (`transparency_enabled`). ONE reader with the schema's default, ON (1.74.0,
+ * QUAL-2): its data endpoint and the Settings field said '0' for a missing row while the menu and the page-content
+ * conditions said '1' — a row deleted by hand left a menu link to a page whose data answered 403 (the 1.73.0 fix
+ * seeded the row; this makes every reader agree when there is none). The menu, the endpoint, the field and the
+ * page-content condition all ask here; includes/lang.php langSwapEnabled() is its twin for the language switch.
+ */
+function transparencyEnabled(array $cfg): bool { return (string)($cfg['transparency_enabled'] ?? '1') === '1'; }
+
+/**
+ * Redirect from inside a page template.
+ *
+ * The templates are included by the layout AFTER it has started writing the page, so a plain
+ * header('Location') there is a "headers already sent" warning printed into the half-built page
+ * instead of a redirect — which is what the stats page did whenever statistics were switched off.
+ * Send the header while it can still be sent; otherwise hand the browser a meta refresh and a
+ * script that do the same thing. The caller `return`s to end its template either way.
+ */
+function pageRedirect(string $url): void {
+    if (!headers_sent()) { header('Location: ' . $url); exit; }
+    $u = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+    // The <meta> refresh is what actually moves the browser under an enforcing CSP; the script is
+    // the faster path and carries the nonce so it runs too. Both, because neither alone covers
+    // every case: a meta refresh is ignored inside some embedded views, and the script is blocked
+    // if this ever renders on a page that did not send a policy.
+    echo '<meta http-equiv="refresh" content="0;url=' . $u . '"><script' . nonceAttr() . '>location.replace(' . json_encode($url) . ');</script>';
+}
+
+/**
+ * Escaped text for HTML. A value that is not a string or a number reads as '' (1.74.0): `name[]=x` in a request body
+ * is an ARRAY, and handing one to a `string` parameter is an uncaught TypeError — on production a blank 500 for
+ * whoever sends it, on every endpoint that sanitises a field.
+ */
+function sanitize(mixed $input): string {
+    if (!is_string($input)) $input = (is_int($input) || is_float($input)) ? (string)$input : '';
+    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * One field of a request ($_GET, $_POST, a decoded JSON body) as a string — or $default when it is missing or is not
+ * a string or a number (1.74.0). An array where a string belongs (`hash[]=x`, `{"email":["x"]}`) used to reach
+ * trim()/strtolower()/a `string` parameter as an array and end the request with an uncaught TypeError; read through
+ * this, it is simply not there, and the endpoint answers its own 400 or 404.
+ */
+function strInput(array $src, string $key, string $default = ''): string {
+    $v = $src[$key] ?? null;
+    if (is_string($v)) return $v;
+    if (is_int($v) || is_float($v)) return (string)$v;
+    return $default;
+}
+
+/**
+ * An absolute http(s) address, or '' (1.74.0, XSS-6). For a setting that becomes an href or a redirect: the scheme
+ * check is the point — `javascript:` in a settings field is a stored script with an operator's own hand on it, and a
+ * scheme-relative `//evil.example` reads as a path to a person and as a host to a browser. A host is required, and no
+ * control character or white space may be in it. includes/authbridge.php's authBridgeSafeUrl() is this.
+ */
+function safeHttpUrl(mixed $url, int $maxLen = 500): string {
+    if (!is_string($url)) return '';
+    $url = trim($url);
+    if ($url === '' || strlen($url) > $maxLen) return '';
+    if (!preg_match('#^https?://#i', $url) || preg_match('/[\x00-\x20\x7F]/', $url)) return '';
+    $p = parse_url($url);
+    if (!is_array($p) || empty($p['host'])) return '';
+    return $url;
+}
+
+/**
+ * Cache-busting query string for a local asset, based on its last-modified time.
+ * Usage: <link href="...style.css<?= assetVer('assets/css/style.css') ?>">
+ * Ensures browsers pull the new file after a deploy instead of a stale cached copy.
+ */
+function assetVer(string $relPath): string {
+    $full = __DIR__ . '/../' . ltrim($relPath, '/');
+    $mtime = @filemtime($full);
+    return '?v=' . ($mtime !== false ? $mtime : date('Ymd'));
+}
+
+/**
+ * Human-readable uptime from a raw second count. Computed straight from seconds — NOT via
+ * DateTime::diff(), whose ->d field is the day-of-month remainder and silently drops the
+ * month/year components, mangling any uptime of a month or more.
+ */
+function formatUptime(int $seconds): string {
+    if ($seconds <= 0) return '0 sec';
+    $days  = intdiv($seconds, 86400);
+    $hours = intdiv($seconds % 86400, 3600);
+    $mins  = intdiv($seconds % 3600, 60);
+    $secs  = $seconds % 60;
+    $parts = [];
+    if ($days  > 0) $parts[] = $days . ' d';
+    if ($hours > 0) $parts[] = $hours . ' h';
+    if ($mins  > 0) $parts[] = $mins . ' min';
+    if ($secs  > 0 || empty($parts)) $parts[] = $secs . ' sec';
+    return implode(', ', $parts);
+}
+
+/** Mask a person's name for public status output, keeping first/last letter of each word. */
+function maskName(string $name): string {
+    $words = preg_split('/\s+/', trim($name));
+    $masked = [];
+    foreach ($words as $w) {
+        if (mb_strlen($w) <= 2) {
+            $masked[] = mb_substr($w, 0, 1) . '...';
+        } else {
+            $masked[] = mb_substr($w, 0, 1) . '...' . mb_substr($w, -1);
+        }
+    }
+    return implode(' ', $masked);
+}
+
+/** Mask an email address for public status output. */
+function maskEmail(string $email): string {
+    $parts = explode('@', $email, 2);
+    if (count($parts) !== 2) return '***';
+    $user = $parts[0];
+    $domain = $parts[1];
+    $dotPos = strrpos($domain, '.');
+    if ($dotPos === false) return mb_substr($user, 0, 1) . '...@***';
+    $domName = substr($domain, 0, $dotPos);
+    $domExt = substr($domain, $dotPos);
+    $mUser = mb_strlen($user) <= 2 ? mb_substr($user, 0, 1) . '...' : mb_substr($user, 0, 1) . '...' . mb_substr($user, -1);
+    $mDom = mb_strlen($domName) <= 2 ? mb_substr($domName, 0, 1) . '...' : mb_substr($domName, 0, 1) . '...' . mb_substr($domName, -1);
+    return $mUser . '@' . $mDom . $domExt;
+}
+
+function generateCsrfToken(): string {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/** Is this the session's token? Anything that is not a string — `csrf_token[]=x` — is not (1.74.0: was a TypeError). */
+function verifyCsrfToken(mixed $token): bool {
+    return is_string($token) && $token !== '' && isset($_SESSION['csrf_token']) && is_string($_SESSION['csrf_token'])
+        && hash_equals($_SESSION['csrf_token'], $token);
+}
+
+/** Verify the CSRF token sent by admin AJAX calls in the X-CSRF-Token header. */
+function verifyCsrfHeader(): bool {
+    return verifyCsrfToken($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAPTCHA (provider-agnostic: reCAPTCHA v2 / v3, Cloudflare Turnstile or hCaptcha)
+// ─────────────────────────────────────────────────────────────────────────────
+// Setting `captcha_provider` selects the widget/verifier; `recaptcha_enabled` remains the master
+// "CAPTCHA enabled" switch and `recaptcha_on_<ctx>` the per-context toggles (legacy names kept so
+// existing installations keep working unchanged).
+//
+// Providers and their setting keys (each pair is <provider>_site_key / <provider>_secret):
+//   recaptcha     Google reCAPTCHA v2 checkbox      recaptcha_site_key / recaptcha_secret
+//   recaptcha_v3  Google reCAPTCHA v3 (invisible)   recaptcha_v3_site_key / recaptcha_v3_secret + recaptcha_v3_min_score
+//   turnstile     Cloudflare Turnstile              turnstile_site_key / turnstile_secret
+//   hcaptcha      hCaptcha checkbox                 hcaptcha_site_key / hcaptcha_secret
+// v3 shows no widget: the browser fetches a token silently (grecaptcha.execute) and the siteverify
+// answer carries a 0.0–1.0 score; anything below `recaptcha_v3_min_score` counts as a failed CAPTCHA.
+
+/** Every provider id understood here, in the order shown in Settings. */
+function captchaProviders(): array {
+    return ['recaptcha', 'recaptcha_v3', 'turnstile', 'hcaptcha'];
+}
+
+/** Active provider: 'recaptcha' (v2 checkbox, default), 'recaptcha_v3', 'turnstile' or 'hcaptcha'. */
+function captchaProvider(array $cfg): string {
+    $p = (string)($cfg['captcha_provider'] ?? 'recaptcha');
+    return in_array($p, captchaProviders(), true) ? $p : 'recaptcha';
+}
+
+/** Public site key of the active provider ('' when missing). */
+function captchaSiteKey(array $cfg): string {
+    return trim((string)($cfg[captchaProvider($cfg) . '_site_key'] ?? ''));
+}
+
+/** Secret of the active provider ('' when missing). */
+function captchaSecret(array $cfg): string {
+    return trim((string)($cfg[captchaProvider($cfg) . '_secret'] ?? ''));
+}
+
+/** reCAPTCHA v3 minimum score (0.0–1.0; default 0.5, Google's suggested starting point). */
+function recaptchaV3MinScore(array $cfg): float {
+    $raw = trim((string)($cfg['recaptcha_v3_min_score'] ?? '0.5'));
+    $score = is_numeric($raw) ? (float)$raw : 0.5;
+    return max(0.0, min(1.0, $score));
+}
+
+/** True when CAPTCHA is switched on AND the active provider has both a site key and a secret. */
+function captchaConfigured(array $cfg): bool {
+    if (($cfg['recaptcha_enabled'] ?? '0') !== '1') return false;
+    return captchaSiteKey($cfg) !== '' && captchaSecret($cfg) !== '';
+}
+
+/**
+ * One HTTP helper for the siteverify calls: form-encoded POST, TLS verification on, hard timeouts per attempt
+ * (connect 5 s, total 8 s — captchaHttpPostOnce()) and two attempts, so a verifier that cannot be reached holds
+ * the request for up to ~16 s before it is refused. Returns the decoded JSON object or null on any transport/parse
+ * error so callers fail closed. cURL is preferred; falls back to a stream context with the same total timeout.
+ * (1.74.0, QUAL-25: this said "connect 3 s, total 5 s" — the numbers of an earlier version.)
+ */
+function captchaHttpPost(string $url, array $fields): ?array {
+    // Two attempts: this host shares its uplink with a large BitTorrent swarm and measured 30-40 %
+    // packet loss during OPEN hours — a first-try connect timeout to the verifier was the #1 cause
+    // of "CAPTCHA verification failed" on a correct answer. A quick retry almost always lands.
+    for ($attempt = 1; $attempt <= 2; $attempt++) {
+        $json = captchaHttpPostOnce($url, $fields, $err);
+        if ($json !== null) {
+            if ($attempt > 1) error_log('[captcha] verifier reachable on retry ' . $attempt);
+            return $json;
+        }
+        error_log('[captcha] transport attempt ' . $attempt . ' failed: ' . ($err ?: 'unknown') . ' (' . parse_url($url, PHP_URL_HOST) . ')');
+    }
+    return null;
+}
+
+/** One verifier POST. $err receives the transport error for logging. */
+function captchaHttpPostOnce(string $url, array $fields, ?string &$err = null): ?array {
+    $err = null;
+    $body = http_build_query($fields);
+    $result = false;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) { $err = 'curl_init failed'; return null; }
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => 8,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded', 'Accept: application/json'],
+        ]);
+        $result = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+        if ($result === false) { $err = 'cURL: ' . $curlErr; return null; }
+        if ($code < 200 || $code >= 300) { $err = 'HTTP ' . $code; return null; }
+    } else {
+        $opts = ['http' => [
+            'method'  => 'POST',
+            'header'  => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n",
+            'content' => $body,
+            'timeout' => 8,
+            'ignore_errors' => false,
+        ], 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true]];
+        $result = @file_get_contents($url, false, stream_context_create($opts));
+        if ($result === false) { $err = 'stream request failed'; return null; }
+    }
+    $json = json_decode((string)$result, true);
+    if (!is_array($json)) { $err = 'invalid JSON reply'; return null; }
+    return $json;
+}
+
+/** Google reCAPTCHA v2 verification. Fail closed on missing secret / transport error. */
+function verifyRecaptcha(string $response, array $cfg): bool {
+    $secret = trim((string)($cfg['recaptcha_secret'] ?? ''));
+    // Fail closed: if asked to verify but no secret is configured, we cannot prove the
+    // token is valid, so reject. Whether CAPTCHA applies at all is decided upstream by
+    // isCaptchaEnabled()/isCaptchaRequired(), both of which require a configured secret.
+    if ($secret === '' || $response === '') return false;
+    $json = captchaHttpPost('https://www.google.com/recaptcha/api/siteverify', [
+        'secret'   => $secret,
+        'response' => $response,
+        'remoteip' => getClientIp($cfg),
+    ]);
+    return $json !== null && ($json['success'] ?? false) === true;
+}
+
+/** Cloudflare Turnstile verification. Fail closed on missing secret / transport error. */
+function verifyTurnstile(string $token, array $cfg): bool {
+    $secret = trim((string)($cfg['turnstile_secret'] ?? ''));
+    if ($secret === '' || $token === '') return false;
+    $json = captchaHttpPost('https://challenges.cloudflare.com/turnstile/v0/siteverify', [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => getClientIp($cfg),
+    ]);
+    return $json !== null && ($json['success'] ?? false) === true;
+}
+
+/**
+ * hCaptcha verification (https://docs.hcaptcha.com/#verify-the-user-response-server-side).
+ * Same request/answer shape as reCAPTCHA v2 — success plus optional error-codes. Fail closed.
+ */
+function verifyHcaptcha(string $token, array $cfg): bool {
+    $secret = trim((string)($cfg['hcaptcha_secret'] ?? ''));
+    if ($secret === '' || $token === '') return false;
+    $json = captchaHttpPost('https://api.hcaptcha.com/siteverify', [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => getClientIp($cfg),
+        'sitekey'  => trim((string)($cfg['hcaptcha_site_key'] ?? '')),
+    ]);
+    if ($json === null) return false;
+    if (($json['success'] ?? false) !== true) {
+        $codes = isset($json['error-codes']) && is_array($json['error-codes']) ? implode(',', $json['error-codes']) : '';
+        if ($codes !== '') error_log('[captcha] hcaptcha rejected: ' . $codes);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Google reCAPTCHA v3 verification (same siteverify endpoint as v2, but the answer is scored).
+ * Passes only when success === true AND score >= recaptcha_v3_min_score. When $expectedAction is
+ * given and the answer carries an `action`, it must match (callers without a context pass null and
+ * the action is not checked). Fail closed on missing secret / transport error / missing score.
+ */
+function verifyRecaptchaV3(string $token, array $cfg, ?string $expectedAction = null): bool {
+    $secret = trim((string)($cfg['recaptcha_v3_secret'] ?? ''));
+    if ($secret === '' || $token === '') return false;
+    $json = captchaHttpPost('https://www.google.com/recaptcha/api/siteverify', [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => getClientIp($cfg),
+    ]);
+    if ($json === null || ($json['success'] ?? false) !== true) return false;
+    // A v3 token always comes back with a score; no score means a v2 key was pasted under v3 — reject.
+    if (!isset($json['score']) || !is_numeric($json['score'])) return false;
+    if ((float)$json['score'] < recaptchaV3MinScore($cfg)) return false;
+    if ($expectedAction !== null && isset($json['action']) && (string)$json['action'] !== $expectedAction) return false;
+    return true;
+}
+
+/**
+ * Verify a token with whichever provider is active. Empty token → false. $expectedAction is only
+ * meaningful for reCAPTCHA v3 (the action name the page passed to grecaptcha.execute); null skips it.
+ */
+function verifyCaptcha(string $token, array $cfg, ?string $expectedAction = null): bool {
+    if ($token === '') return false;
+    switch (captchaProvider($cfg)) {
+        case 'turnstile':    return verifyTurnstile($token, $cfg);
+        case 'hcaptcha':     return verifyHcaptcha($token, $cfg);
+        case 'recaptcha_v3': return verifyRecaptchaV3($token, $cfg, $expectedAction);
+        default:             return verifyRecaptcha($token, $cfg);
+    }
+}
+
+/** Pull the CAPTCHA token out of a decoded request body (new generic name first, legacy names after). */
+function captchaTokenFromInput(array $input): string {
+    foreach (['captcha_token', 'g-recaptcha-response', 'cf-turnstile-response', 'h-captcha-response'] as $k) {
+        if (isset($input[$k]) && is_string($input[$k]) && $input[$k] !== '') return $input[$k];
+    }
+    return '';
+}
+
+/** CAPTCHA switched on, provider configured, and enabled for this context (recaptcha_on_<ctx>). */
+function isCaptchaEnabled(array $cfg, string $context = 'report'): bool {
+    if (!captchaConfigured($cfg)) return false;
+    $key = 'recaptcha_on_' . $context;
+    return !empty($cfg[$key]) && $cfg[$key] === '1';
+}
+
+/**
+ * <head> tags for the active provider: an inline script exposing CAPTCHA_PROVIDER / CAPTCHA_SITEKEY
+ * (and RECAPTCHA_SITEKEY for backwards compatibility) plus the loader callback to
+ * assets/js/captcha.js, followed by the widget script itself. Emits nothing when CAPTCHA is not
+ * configured. Every host used here must also be allowed by the policy — captchaCspHosts() directly
+ * below is that list, and it is directly below FOR THIS REASON: the two used to live in different
+ * files (this one and .htaccess) and a provider added to one and forgotten in the other loads no
+ * script at all, which reads as "CAPTCHA unavailable" on every protected form.
+ *
+ * The onCaptchaApiLoad callback is defined in the inline script ABOVE the async loader on purpose —
+ * defining it in captcha.js (which loads at the end of <body>) would race the vendor script and the
+ * "API ready" signal could be missed. hCaptcha in particular documents that its global appears
+ * before the SDK is set up, so the callback is the only reliable readiness signal.
+ */
+function captchaHeadTags(array $cfg): string {
+    if (!captchaConfigured($cfg)) return '';
+    $provider = captchaProvider($cfg);
+    $siteKey = captchaSiteKey($cfg);
+    switch ($provider) {
+        case 'turnstile':
+            $src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onCaptchaApiLoad&render=explicit';
+            break;
+        case 'hcaptcha':
+            // explicit render, same handshake as the other widget providers (assets/js/captcha.js)
+            $src = 'https://js.hcaptcha.com/1/api.js?onload=onCaptchaApiLoad&render=explicit';
+            break;
+        case 'recaptcha_v3':
+            // v3: no widget — the loader is bound to the site key and tokens come from grecaptcha.execute().
+            // (rawurlencode leaves only [A-Za-z0-9-_.~%], so the URL is safe to print raw in the attribute.)
+            $src = 'https://www.google.com/recaptcha/api.js?render=' . rawurlencode($siteKey);
+            break;
+        default:
+            $src = 'https://www.google.com/recaptcha/api.js?onload=onCaptchaApiLoad&render=explicit';
+    }
+    $keyJs = json_encode($siteKey, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    $html  = '<script' . nonceAttr() . ">\n";
+    $html .= "    const CAPTCHA_PROVIDER = '" . $provider . "';\n";
+    $html .= "    const CAPTCHA_SITEKEY = " . $keyJs . ";\n";
+    $html .= "    const RECAPTCHA_SITEKEY = CAPTCHA_SITEKEY;\n";
+    if ($provider !== 'recaptcha_v3') {
+        // widget providers only: they are loaded with ?onload=onCaptchaApiLoad. v3 has no widget to
+        // render and its own grecaptcha.ready() is the readiness signal, so it needs no callback.
+        $html .= "    window.captchaApiReady = false;\n";
+        $html .= "    window.onCaptchaApiLoad = function () { window.captchaApiReady = true; };\n";
+        $html .= "    window.onRecaptchaLoad = window.onCaptchaApiLoad;\n";
+    }
+    $html .= "    </script>\n";
+    $html .= '    <script src="' . $src . '" async defer></script>' . "\n";
+    return $html;
+}
+
+/**
+ * The CSP host lists the ACTIVE CAPTCHA provider needs, keyed script/style/connect/frame.
+ *
+ * One provider, not four. The old `.htaccess` policy allowed every provider's hosts on every
+ * request whatever was configured, because a static file cannot ask a setting — so a site using
+ * Turnstile was also telling every visitor's browser that Google and hCaptcha may run scripts on
+ * it. Building the policy in PHP is what makes narrowing possible, and this is where the narrowing
+ * happens. Empty arrays when CAPTCHA is not configured: no widget, no hosts.
+ *
+ * NO 'strict-dynamic'. It would make every host expression here be IGNORED, and all three widget
+ * vendors load further scripts from these hosts once their loader runs. The plain allow-list is
+ * what works today and what keeps working.
+ *
+ * GOOGLE'S TWO EXTRAS (1.74.0, from production's report-only policy, 10–29.09): reCAPTCHA's loader puts a
+ * stylesheet from www.gstatic.com into the page (style-src — reported on the account page, where a member's CAPTCHA
+ * is drawn on demand), and the code it runs in the page tries eval (script-src 'unsafe-eval' — the front page's
+ * reports, where the shoutbox asks for one). `eval` => true says so; includes/csp.php grants it only where a CAPTCHA
+ * can be drawn — every public page (assets/js/captcha.js draws one wherever an answer asks for it) and the panel's
+ * dashboard (its deletion CAPTCHA) — never on another panel page, and never for Turnstile or hCaptcha.
+ */
+function captchaCspHosts(array $cfg): array {
+    $empty = ['script' => [], 'style' => [], 'connect' => [], 'frame' => [], 'eval' => false];
+    if (!captchaConfigured($cfg)) return $empty;
+    switch (captchaProvider($cfg)) {
+        case 'turnstile':
+            $h = ['https://challenges.cloudflare.com'];
+            return ['script' => $h, 'style' => [], 'connect' => $h, 'frame' => $h, 'eval' => false];
+        case 'hcaptcha':
+            // The apex is listed next to the wildcard because a CSP wildcard does not match the
+            // bare domain — hcaptcha.com and *.hcaptcha.com are two different source expressions.
+            $h = ['https://hcaptcha.com', 'https://*.hcaptcha.com'];
+            return ['script' => array_merge(['https://js.hcaptcha.com'], $h), 'style' => $h,
+                    'connect' => $h, 'frame' => $h, 'eval' => false];
+        case 'recaptcha_v3':
+            // v3 renders no widget and needs no frame — but api.js still pulls its worker code from
+            // www.gstatic.com, which is the host people forget and then cannot explain the failure.
+            return ['script' => ['https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net'],
+                    'style' => ['https://www.gstatic.com'],
+                    'connect' => ['https://www.google.com', 'https://www.recaptcha.net'], 'frame' => [], 'eval' => true];
+        default:   // recaptcha v2 checkbox
+            return ['script' => ['https://www.google.com', 'https://www.gstatic.com', 'https://www.recaptcha.net'],
+                    'style' => ['https://www.gstatic.com'],
+                    'connect' => ['https://www.google.com', 'https://www.recaptcha.net'],
+                    'frame' => ['https://www.google.com', 'https://www.recaptcha.net'], 'eval' => true];
+    }
+}
+
+/**
+ * reCAPTCHA v3 terms notice. Google requires either the floating badge or this text (with links); the
+ * stylesheets hide the badge (.grecaptcha-badge) so the notice must be printed near every form that
+ * runs grecaptcha.execute(). Empty string for every other provider / when CAPTCHA is not configured.
+ */
+function captchaNoticeHtml(array $cfg, string $class = 'captcha-notice'): string {
+    if (!captchaConfigured($cfg) || captchaProvider($cfg) !== 'recaptcha_v3') return '';
+    // In the reader's language (1.73.0: it was English on every page): the sentence escaped, its two links put in
+    // at their placeholders (private-use characters survive the escaping and appear in no translation).
+    $links = [
+        "\u{E000}" => '<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">' . _h('captcha.v3_privacy') . '</a>',
+        "\u{E001}" => '<a href="https://policies.google.com/terms" target="_blank" rel="noopener">' . _h('captcha.v3_terms') . '</a>',
+    ];
+    return '<p class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '">'
+        . strtr(_h('captcha.v3_notice', ['privacy' => "\u{E000}", 'terms' => "\u{E001}"]), $links) . '</p>';
+}
+
+function isCaptchaRequired(array $cfg, string $context = 'report'): bool {
+    if (!isCaptchaEnabled($cfg, $context)) return false;
+    // First visit: CAPTCHA never solved in this session → always require
+    if (!isset($_SESSION['captcha_solved_at'])) return true;
+    // Grace period: if CAPTCHA was recently solved, skip
+    $grace = (int)($cfg['captcha_grace_minutes'] ?? 5);
+    if ((time() - $_SESSION['captcha_solved_at']) < $grace * 60) {
+        return false;
+    }
+    // Grace expired: check point threshold
+    $threshold = (int)($cfg['captcha_threshold'] ?? 6);
+    $points = (int)($_SESSION['captcha_points'] ?? 0);
+    return $points >= $threshold;
+}
+
+function addCaptchaPoints(array $cfg, string $context): void {
+    $key = 'captcha_pts_' . $context;
+    $pts = (int)($cfg[$key] ?? 0);
+    if ($pts > 0) {
+        $_SESSION['captcha_points'] = ($_SESSION['captcha_points'] ?? 0) + $pts;
+    }
+}
+
+function onCaptchaSolved(): void {
+    $_SESSION['captcha_solved_at'] = time();
+    $_SESSION['captcha_points'] = 0;
+    // Request-scoped flag so API response knows CAPTCHA was just solved
+    $GLOBALS['captcha_just_solved'] = true;
+}
+
+function wasCaptchaJustSolved(): bool {
+    return !empty($GLOBALS['captcha_just_solved']);
+}
+
+function resetCaptchaGrace(array $cfg): void {
+    unset($_SESSION['captcha_solved_at']);
+    $_SESSION['captcha_points'] = (int)($cfg['captcha_threshold'] ?? 6);
+}
+
+/**
+ * Resolve the real client IP.
+ *
+ * By default this returns REMOTE_ADDR only — the TCP peer, which cannot be spoofed. Behind a
+ * reverse proxy / CDN (Cloudflare, nginx) every request's REMOTE_ADDR is the proxy, so IP rate
+ * limiting and login lockout would treat all visitors as one host. To fix that WITHOUT opening
+ * a spoofing hole, an admin must explicitly:
+ *   - list the proxy addresses OR CIDR RANGES in `trusted_proxy_ips` (any of space, comma or
+ *     semicolon separates them), and
+ *   - name the header the proxy sets in `client_ip_header` (e.g. CF-Connecting-IP or X-Forwarded-For).
+ * The forwarded header is only trusted when REMOTE_ADDR is inside one of the configured entries.
+ */
+/** "::ffff:1.2.3.4" (IPv4-mapped, seen behind v4v6 sockets) → "1.2.3.4"; anything else unchanged. */
+function unmapIpv4(string $ip): string {
+    $ip = trim($ip);
+    if (str_contains($ip, ':') && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+            $v4 = @inet_ntop(substr($bin, 12));
+            if ($v4 !== false) return $v4;
+        }
+    }
+    return $ip;
+}
+
+/* ── Addresses, ranges, and what the transport really was ────────────────────
+ *
+ * ONE matcher and ONE list parser, here in functions.php because it is the only include every
+ * entry point already loads (index.php, api.php, tools/janitor.php and every tests/*.php; and
+ * install.php, which did NOT load it, now does).
+ *
+ * There were three near-identical CIDR matchers in the tree and NONE of them was reachable from
+ * this file, so `trusted_proxy_ips` compared with in_array() and a CIDR typed into that box
+ * matched nothing at all: the entry sat there looking configured while every visitor kept being
+ * counted as the proxy. Cloudflare publishes ~22 IPv4 and ~7 IPv6 RANGES and no single addresses,
+ * so the feature could not be configured for the one deployment it exists for.
+ *
+ * includes/api_auth.php's copy was also wrong rather than merely duplicated: it did
+ * `$bits = (int)$bits` with no range check, so an entry of "10.0.0.0/999" reached ord($bin[124])
+ * on a four-byte string. Here an out-of-range prefix is refused while the entry is still being
+ * parsed, so "10.0.0.0/33" matches NOTHING and never reads past the end of the packed address —
+ * and apiIpExempt() routes through this matcher instead of keeping its own loop.
+ */
+
+/** How many entries one address box may hold. The XFF walk multiplies by the number of hops. */
+const IP_PARSE_MAX_ENTRIES = 256;
+/**
+ * The widest block `trusted_proxy_ips` will honour. `0.0.0.0/0` there means "believe the client-IP
+ * header from anybody", which turns every rate limit, every login lockout, every API ban and the
+ * reputation bucket into a request header — the exact hole the doc comment above exists to keep
+ * shut, and CIDR support is what makes it typeable in one keystroke. Cloudflare's widest published
+ * blocks are a /12 (v4) and a /32 (v6), so nothing legitimate is refused.
+ */
+const TRUSTED_PROXY_MIN_BITS4 = 8;
+const TRUSTED_PROXY_MIN_BITS6 = 16;
+
+/**
+ * One entry — a bare address or a CIDR — as [packed address, prefix bits], or null when malformed.
+ *
+ * inet_pton gives raw bytes, the only representation that works for IPv6 without arbitrary-precision
+ * arithmetic: the comparison is then bytes and one masked bit rather than a number PHP cannot hold.
+ */
+function ipCidrPack(string $entry): ?array {
+    $entry = trim($entry);
+    if ($entry === '') return null;
+    $addr = $entry;
+    $bits = null;
+    if (str_contains($entry, '/')) {
+        [$addr, $b] = explode('/', $entry, 2);
+        $addr = trim($addr);
+        $b = trim($b);
+        if ($b === '' || !ctype_digit($b)) return null;
+        $bits = (int)$b;
+        // A CIDR's network address is deliberately NOT unmapped: `::ffff:10.0.0.0/104` unmapped to
+        // `10.0.0.0` would carry a prefix of 104, which means nothing in four bytes.
+    } else {
+        // A bare entry IS unmapped, so `::ffff:1.2.3.4` written by hand is the same host as
+        // `1.2.3.4` — the same normalisation getClientIp() applies to REMOTE_ADDR and to each hop.
+        $addr = unmapIpv4($addr);
+    }
+    $bin = @inet_pton($addr);
+    if ($bin === false) return null;
+    $max = strlen($bin) * 8;                        // 32 for IPv4, 128 for IPv6
+    if ($bits === null) $bits = $max;               // a bare address is a single host
+    if ($bits < 0 || $bits > $max) return null;     // "/33" on a v4 entry: matches nothing, reads nothing
+    return [$bin, $bits];
+}
+
+/** Is this one entry a syntactically valid address or CIDR? What save-time validation asks. */
+function ipCidrValid(string $entry): bool {
+    return ipCidrPack($entry) !== null;
+}
+
+/**
+ * Does $ip fall inside $entry? Families never cross — a v4 address can never match a v6 range and
+ * the reverse — and a malformed entry matches nothing rather than throwing.
+ */
+function ipMatchesCidr(string $ip, string $entry): bool {
+    $net = ipCidrPack($entry);
+    if ($net === null) return false;
+    $bin = @inet_pton(unmapIpv4(trim($ip)));
+    if ($bin === false) return false;
+    [$nb, $bits] = $net;
+    if (strlen($bin) !== strlen($nb)) return false;          // v4 never meets v6
+    if ($bits === 0) return true;                            // /0 contains its whole family
+    $whole = intdiv($bits, 8);
+    $rest  = $bits % 8;
+    // strncmp, not substr()!==: binary-safe on bytes that may contain NUL.
+    if ($whole > 0 && strncmp($bin, $nb, $whole) !== 0) return false;
+    if ($rest === 0) return true;
+    $mask = (0xFF << (8 - $rest)) & 0xFF;
+    return (ord($bin[$whole]) & $mask) === (ord($nb[$whole]) & $mask);
+}
+
+/** First match wins. An EMPTY list matches nothing — "trust nobody" is what no entries means. */
+function ipInCidrList(string $ip, array $entries): bool {
+    foreach ($entries as $entry) {
+        if (ipMatchesCidr($ip, (string)$entry)) return true;
+    }
+    return false;
+}
+
+/**
+ * One list parser for every address box. Splits on any run of whitespace, comma or semicolon, so a
+ * value arriving with newlines in it — from the JSON endpoint, a restored backup, or a row edited by
+ * hand in the shared MariaDB — parses the same way the field's own commas do. `explode(',')` alone
+ * left an entry with an embedded newline that matched nothing while looking perfectly correct.
+ * (The Settings control is a single-line input, so a browser paste never produces newlines there;
+ * it concatenates the lines instead, and the validity rule below is what reports that.)
+ */
+function ipParseList(string $raw, int $max = IP_PARSE_MAX_ENTRIES): array {
+    $out = [];
+    foreach (preg_split('/[\s,;]+/', $raw) ?: [] as $entry) {
+        $entry = trim($entry);
+        if ($entry === '') continue;
+        if (!in_array($entry, $out, true)) $out[] = $entry;
+        if (count($out) >= $max) break;
+    }
+    return $out;
+}
+
+/** Is one `trusted_proxy_ips` entry both well-formed AND narrow enough to be honoured? */
+function trustedProxyEntryOk(string $entry): bool {
+    $p = ipCidrPack($entry);
+    if ($p === null) return false;
+    return $p[1] >= (strlen($p[0]) === 4 ? TRUSTED_PROXY_MIN_BITS4 : TRUSTED_PROXY_MIN_BITS6);
+}
+
+/**
+ * The proxies whose forwarded headers this request may believe.
+ *
+ * The width rule is enforced HERE and not only at save time, and that is the whole answer to what
+ * happens to an installation that upgrades into CIDR support. `trusted_proxy_ips` had no validation
+ * whatsoever, and a CIDR in it was inert — so a box can already be holding `0.0.0.0/0`, typed once,
+ * saved happily and never honoured. The moment the matcher above starts reading that string it
+ * would mean "believe the client-IP header from anybody", on the FIRST request after the file copy,
+ * long before anybody opens Settings and therefore long before a save-time refusal could run. So
+ * the runtime drops what it will not honour; the 400 in save_settings is the MESSAGE, not the
+ * boundary. Everything narrower is honoured exactly as typed, which is the fix being shipped.
+ */
+function trustedProxyList(array $cfg): array {
+    $out = [];
+    foreach (ipParseList((string)($cfg['trusted_proxy_ips'] ?? '')) as $entry) {
+        if (trustedProxyEntryOk($entry)) $out[] = $entry;
+    }
+    return $out;
+}
+
+/** What the runtime is ignoring, so the panel can SAY so instead of dropping it in silence. */
+function trustedProxyRejected(array $cfg): array {
+    $raw = (string)($cfg['trusted_proxy_ips'] ?? '');
+    $out = [];
+    foreach (ipParseList($raw) as $entry) {
+        if (!trustedProxyEntryOk($entry)) $out[] = $entry;
+    }
+    // The parser stops at IP_PARSE_MAX_ENTRIES. Whatever it stopped short of is honoured by nothing
+    // and named by nothing, which is exactly the silent drop this function exists to prevent — so
+    // count the entries the raw value really holds and say how many never made it in.
+    $all = 0;
+    foreach (preg_split('/[\s,;]+/', $raw) ?: [] as $e) { if (trim($e) !== '') $all++; }
+    if ($all > IP_PARSE_MAX_ENTRIES) {
+        $out[] = '… +' . ($all - IP_PARSE_MAX_ENTRIES) . ' (over the ' . IP_PARSE_MAX_ENTRIES . '-entry limit)';
+    }
+    return $out;
+}
+
+/* ── Was THIS request's own connection HTTPS? ────────────────────────────────
+ *
+ * Five copies of `!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'` decided the Secure flag
+ * on every cookie the site sets (index.php:4, api.php:11, install.php:8, includes/lang.php:170,
+ * includes/users.php:325).
+ *
+ * MEASURED on the production host, 2026-09-08, before this function was written: PHP there sees
+ * HTTPS='on' and REQUEST_SCHEME='https' — Apache's mod_ssl sets both natively — and the live
+ * response already carried `Set-Cookie: PHPSESSID=...; secure`. The five copies were RIGHT on this
+ * deployment. They were right because of what a distribution's include file happens to contain,
+ * which is not a property anybody chose, and they stop being right the moment TLS is terminated one
+ * hop earlier: to that expression a Cloudflare or load-balancer deployment is a plain-HTTP site, and
+ * every cookie silently loses its Secure flag. This function is the one place that answers the
+ * question now, it can be told about a proxy, and the panel can show which signal answered.
+ *
+ * A SERVER_PORT === '443' heuristic was considered and deliberately left out. It is the one signal
+ * that could claim HTTPS for a plain-HTTP request, and the cost of a false positive here is an
+ * operator locked out of their own panel.
+ */
+
+/** Which signal said HTTPS: 'https' | 'request_scheme' | 'proxy_header' | 'none'. */
+function requestHttpsSignal(?array $cfg = null): string {
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
+    if (!is_array($cfg)) $cfg = [];
+
+    // 1. TLS terminated by this server: Apache mod_ssl, or nginx passing HTTPS to php-fpm.
+    $h = strtolower(trim((string)($_SERVER['HTTPS'] ?? '')));
+    if ($h !== '' && $h !== 'off' && $h !== '0') return 'https';
+    // 2. What the web server itself says the scheme was (nginx: fastcgi_param REQUEST_SCHEME).
+    if (strtolower(trim((string)($_SERVER['REQUEST_SCHEME'] ?? ''))) === 'https') return 'request_scheme';
+
+    // 3. A HEADER — and only from a peer inside trusted_proxy_ips, the same rule getClientIp()
+    // applies to the client-IP header. Reached only after 1 and 2 have said nothing, so this can
+    // ONLY EVER UPGRADE: a proxy sending `X-Forwarded-Proto: http` can never strip Secure from a
+    // connection that really is TLS.
+    $name = array_key_exists('client_proto_header', $cfg)
+        ? trim((string)$cfg['client_proto_header'])
+        : 'X-Forwarded-Proto';
+    if ($name === '') return 'none';              // empty is a real answer: no header path at all
+    $trusted = trustedProxyList($cfg);
+    if (!$trusted) return 'none';
+    $remote = unmapIpv4((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    if ($remote === '' || !ipInCidrList($remote, $trusted)) return 'none';
+
+    $v = strtolower(trim((string)($_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $name))] ?? '')));
+    if ($v !== '') {
+        // A proto list ("https, http") is read LEFT-most first: unlike X-Forwarded-For, the first
+        // entry is the hop nearest the visitor, which is the connection this question is about.
+        if (str_contains($v, ',')) $v = trim(explode(',', $v, 2)[0]);
+        if ($v === 'https' || $v === 'on') return 'proxy_header';
+    }
+    // What some proxies (and older mod_proxy setups) send instead of a proto header.
+    $ssl = strtolower(trim((string)($_SERVER['HTTP_X_FORWARDED_SSL'] ?? '')));
+    if ($ssl === 'on' || $ssl === '1') return 'proxy_header';
+    // RFC 7239, the standard one: `Forwarded: for=1.2.3.4;proto=https`. Only its FIRST element,
+    // for the same reason the proto list above is read left-most.
+    $fwd = (string)($_SERVER['HTTP_FORWARDED'] ?? '');
+    if ($fwd !== '' && preg_match('/(?:^|;)\s*proto\s*=\s*"?https"?\s*(?:;|$)/i', trim(explode(',', $fwd, 2)[0]))) {
+        return 'proxy_header';
+    }
+    return 'none';
+}
+
+function requestIsHttps(?array $cfg = null): bool {
+    return requestHttpsSignal($cfg) !== 'none';
+}
+
+/* ── One Secure policy, four cookies ─────────────────────────────────────────
+ *
+ * `always` is the only value here that can lock everybody out, including the owner: on a panel
+ * actually reached over plain HTTP the browser REFUSES to store PHPSESSID, so api/admin/login
+ * answers success and the next request arrives with no session — and because the CSRF token is
+ * minted into the session at sign-in, the one checked at submit can never match it. Recovery is one
+ * statement on the tracker's own schema:
+ *     UPDATE settings SET value = 'auto' WHERE `key` = 'cookie_secure_mode';
+ * Which is why save_settings refuses to STORE 'always' unless the saving request itself proves it
+ * is HTTPS, and why the key sits in $reauthKeys.
+ */
+const COOKIE_SECURE_MODES = ['auto', 'always', 'never'];
+
+function cookieSecureMode(?array $cfg = null): string {
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
+    if (!is_array($cfg)) $cfg = [];
+    $m = strtolower(trim((string)($cfg['cookie_secure_mode'] ?? 'auto')));
+    return in_array($m, COOKIE_SECURE_MODES, true) ? $m : 'auto';
+}
+
+function cookieSecureFlag(?array $cfg = null): bool {
+    // The $GLOBALS fallback is the pattern getClientIp() already uses, and it is here on purpose:
+    // threading a $cfg parameter through userRememberIssue() would have changed a call site that
+    // tests/audit_fixes_test.php pins by its exact source text, for no behavioural gain.
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? []);
+    if (!is_array($cfg)) $cfg = [];
+    return match (cookieSecureMode($cfg)) {
+        'always' => true,
+        'never'  => false,
+        default  => requestIsHttps($cfg),
+    };
+}
+
+/**
+ * setcookie()'s array form with this site's policy filled in. $overrides wins (PHP `+` semantics),
+ * so a caller can turn httponly off or add an expiry without restating the rest.
+ */
+function cookieBaseParams(?array $cfg = null, array $overrides = []): array {
+    return $overrides + [
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure'   => cookieSecureFlag($cfg),
+    ];
+}
+
+/**
+ * The options every session_start() of the site is given (index.php, api.php, install.php): the three cookie keys
+ * it was passed before — no cookie_path, so a php.ini that sets a non-'/' session.cookie_path keeps behaving the way
+ * it does today — and, from 1.74.0 (AUTH-9), strict mode: PHP refuses a session id it did not issue itself, instead of
+ * adopting one a visitor (or a page that planted a cookie) made up. php.ini ships it off, and production had it off.
+ */
+function sessionCookieParams(?array $cfg = null): array {
+    return [
+        'cookie_httponly' => true,
+        'cookie_samesite' => 'Lax',
+        'cookie_secure'   => cookieSecureFlag($cfg),
+        'use_strict_mode' => true,
+    ];
+}
+
+/* ── HSTS ────────────────────────────────────────────────────────────────────
+ *
+ * Off by default, and it never leaves over a plain-HTTP request. The pin lives in other people's
+ * browsers, runs to its own expiry, and switching the setting back off does NOT release a browser
+ * that already holds it — `max-age=0` WITH the switch still on is the retraction. That is why the
+ * shipped max-age is one day and not the year every guide recommends: a mistake costs a day.
+ */
+const HSTS_MAX_AGE_DEFAULT = 86400;
+const HSTS_MAX_AGE_CEILING = 63072000;   // two years
+/** hstspreload.org's own minimum; the token is a lie below it, so it is not printed. */
+const HSTS_PRELOAD_MIN_AGE = 31536000;
+
+function hstsHeaderValue(array $cfg): string {
+    if ((string)($cfg['hsts_enabled'] ?? '0') !== '1') return '';
+    // RFC 6797 §7.2: a host MUST NOT send this over a non-secure transport. Re-checked here rather
+    // than trusted from the save path, so a row edited by hand in the shared MariaDB cannot pin a
+    // hostname for a browser that reached it over plain HTTP.
+    if (!requestIsHttps($cfg)) return '';
+    // is_numeric first: (int)'abc' is 0, and 0 is not an absurd age here, it is the RETRACTION —
+    // a corrupted row would have published "forget this host is HTTPS" instead of the default.
+    $rawAge = $cfg['hsts_max_age'] ?? HSTS_MAX_AGE_DEFAULT;
+    $age = is_numeric($rawAge) ? (int)$rawAge : HSTS_MAX_AGE_DEFAULT;
+    if ($age < 0 || $age > HSTS_MAX_AGE_CEILING) $age = HSTS_MAX_AGE_DEFAULT;
+    $v = 'max-age=' . $age;
+    $sub = (string)($cfg['hsts_include_subdomains'] ?? '0') === '1';
+    if ($sub) $v .= '; includeSubDomains';
+    // Both preconditions re-checked at print time for the same reason: a preload claim the site does
+    // not satisfy is a claim submitted to a list that takes months to leave.
+    if ((string)($cfg['hsts_preload'] ?? '0') === '1' && $sub && $age >= HSTS_PRELOAD_MIN_AGE) $v .= '; preload';
+    return $v;
+}
+
+/**
+ * The response headers the PANEL owns.
+ *
+ * .htaccess ships a set of these too, and on this deployment it is READ: production is Apache
+ * 2.4.68 with mod_headers and AllowOverride All (measured 2026-09-08). The two do not fight —
+ * .htaccess uses `Header setifempty`, so anything PHP sends wins and the file only fills in the
+ * gap — but HSTS is managed from Settings regardless, precisely so it can be switched off from the
+ * same place it was switched on, without shell access to a file the panel cannot edit.
+ *
+ * $scope is the CSP scope: 'public' for a page, 'api' for a JSON response, 'panel' for the panel.
+ * index.php calls this before it knows which page it is about to render and sends 'public'; the
+ * panel branch calls cspSend($cfg, 'panel') afterwards and header() replaces the earlier one, so
+ * the response still carries exactly one policy.
+ */
+function sendSecurityHeaders(array $cfg, string $scope = 'public'): void {
+    if (headers_sent()) return;
+    $hsts = hstsHeaderValue($cfg);
+    if ($hsts !== '') header('Strict-Transport-Security: ' . $hsts);
+    cspSend($cfg, $scope);
+}
+
+function getClientIp(?array $cfg = null): string {
+    $remote = unmapIpv4($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0');
+    $cfg = $cfg ?? ($GLOBALS['cfg'] ?? null);
+    if (!is_array($cfg)) return $remote;
+
+    $trusted = trustedProxyList($cfg);
+    $header  = trim($cfg['client_ip_header'] ?? '');
+    if (empty($trusted) || $header === '' || !ipInCidrList($remote, $trusted)) {
+        return $remote;
+    }
+
+    // Header name (X-Forwarded-For) -> $_SERVER key (HTTP_X_FORWARDED_FOR)
+    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $header));
+    $value = $_SERVER[$serverKey] ?? '';
+    if ($value === '') return $remote;
+
+    // X-Forwarded-For is a list "client, proxy1, proxy2". Proxies APPEND, so the left-most entry is
+    // whatever the client sent (spoofable). Walk from the RIGHT and take the first hop that is not one
+    // of our trusted proxies — that is the address the trusted proxy actually talked to.
+    $hops = array_reverse(array_map('trim', explode(',', $value)));
+    foreach ($hops as $hop) {
+        if ($hop === '' || !filter_var($hop, FILTER_VALIDATE_IP)) return $remote;   // garbage → don't guess
+        $hop = unmapIpv4($hop);
+        if (ipInCidrList($hop, $trusted)) continue;   // a trusted RANGE skips the hop, not only an exact match
+        return $hop;
+    }
+    return $remote;
+}
+
+/** Rate-limit / ban key for an IP: IPv4 = exact address, IPv6 = its /64 prefix (SLAAC hosts rotate inside a /64). */
+function ipBucket(string $ip): string {
+    // Here, beside getClientIp(), since 1.74.0 (it was in includes/whitelist.php): every per-address limit and the
+    // panel's sign-in lockout key by it, and a helper that is not loaded wherever an address is counted is a
+    // helper some entry point counts without.
+    $ip = unmapIpv4($ip);
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $bin = @inet_pton($ip);
+        if ($bin !== false && strlen($bin) === 16) {
+            $prefix = substr($bin, 0, 8) . str_repeat("\0", 8);
+            $txt = @inet_ntop($prefix);
+            if ($txt !== false) return $txt . '/64';
+        }
+    }
+    return $ip;
+}
+
+/**
+ * The SQL that matches a stored address against a visitor's ADDRESS GROUP (ipBucket()): the address itself for IPv4,
+ * the first 64 bits for IPv6. ['sql' => …, 'arg' => …], for `WHERE <col>` (1.74.0, Temat L: the report and appeal
+ * hourly limits counted the full address, and a host rotating inside its /64 had a fresh count per address).
+ */
+function ipBucketSql(string $column, string $ip): array {
+    $ip = unmapIpv4($ip);
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        return ['sql' => "LEFT(INET6_ATON($column), 8) = LEFT(INET6_ATON(?), 8)", 'arg' => $ip];
+    }
+    return ['sql' => "$column = ?", 'arg' => $ip];
+}
+
+/** Reports from this address GROUP in the last hour below the limit? (the report form's own limit, `rate_limit`). */
+function checkRateLimit(PDO $db, string $ip, int $maxPerHour): bool {
+    $where = ipBucketSql('ip', $ip);   // a literal condition on the literal column; the address is bound
+    $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE " . $where['sql'] . " AND timestamp > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $stmt->execute([$where['arg']]);
+    return $stmt->fetchColumn() < $maxPerHour;
+}
+
+/* ── The file limiter (Temat L, 1.74.0) ───────────────────────────────────────────────────────────────────────────
+ *
+ * Every per-address limit of the site is one call: rateLimitAllow($action, <subject>, $max, $window) — true when the
+ * request may go on (and its hit is counted), false when the subject has used up this action's window. config/ is
+ * denied to the web. Until 1.74.0 every action shared ONE file, config/rate_limits.json, read, decoded and rewritten
+ * WHOLE under ONE lock on every call: the shoutbox's poll, the search and the sign-in queued on the same flock behind
+ * each other's addresses, and a flood of one action taxed all the others. Now:
+ *
+ *   · ONE FILE AND ONE LOCK PER ACTION — config/ratelimit/<action>.json (+ .lock), {"a": action, "g": generation,
+ *     "h": {subject: [unix times]}}. A poll reads and writes its own file and nobody else's.
+ *   · A HARD CAP per file: RATE_LIMIT_MAX_KEYS subjects and RATE_LIMIT_MAX_HITS times in all. Past either, the
+ *     subjects whose last hit is oldest go first — they are the ones furthest from their limit.
+ *   · config/rate_limits.json is the RESET HANDLE: {"<action>|*": [generation, minted at]}. A hit counts only in its
+ *     action's current generation, so deleting that file — or one action's line in it — forgets the hits at once.
+ *     It is what the README's troubleshooting, the tests and the browser checks already do for a clean slate, and it
+ *     keeps meaning exactly that.
+ *   · FAIL-OPEN STAYS THE CONTRACT: a disk problem must never lock legitimate visitors out, and ~45 call sites rely
+ *     on it. It is no longer silent: rateLimitHealth() puts a line on the panel's warning card and in healthReport()
+ *     while config/ or a state file cannot be written; an unreadable file is set aside as <file>.bad.<time> with an
+ *     error_log('[ratelimit] …') line; and a SIGN-IN whose count cannot be written pays a delay instead
+ *     (RATE_LIMIT_SIGNIN_ACTIONS — the owner's choice for AUTH-7; the panel's own sign-in, includes/auth.php, too).
+ *   · rateLimitPrune() (the janitor, every minute) walks the directory: hits past RATE_LIMIT_KEEP_SECONDS, files left
+ *     empty or of a forgotten generation, stale temporary files, set-aside files after a week.
+ *
+ * The subject is the caller's: ipBucket(getClientIp($cfg)) for an address — an IPv6 host is its /64, a host rotating
+ * inside it is one subject — or 'u<id>' / 'user:<id>' for an account.
+ */
+const RATE_LIMIT_MAX_KEYS = 5000;
+const RATE_LIMIT_MAX_HITS = 100000;
+/** The sign-in actions: a count that cannot be written costs a delay (adminReauthDelayUs()) rather than nothing. */
+const RATE_LIMIT_SIGNIN_ACTIONS = ['user_login'];
+/** Seconds rateLimitHealth()'s answer is reused: the warning card is polled by every open dashboard. */
+const RATE_LIMIT_HEALTH_TTL = 60;
+/** How long a set-aside (unreadable) state file is kept for somebody to look at — it holds addresses. */
+const RATE_LIMIT_BAD_KEEP_SECONDS = 604800;
+
+function rateLimitDir(): string { return __DIR__ . '/../config/ratelimit'; }
+function rateLimitIndexFile(): string { return __DIR__ . '/../config/rate_limits.json'; }
+
+/** config/ratelimit/<action>.json — the action's name where it is a plain slug, a hashed one otherwise. */
+function rateLimitFile(string $action): string {
+    $slug = trim((string)preg_replace('/[^a-z0-9_-]+/', '-', strtolower($action)), '-_');
+    if ($slug === '' || strlen($slug) > 64 || $slug !== $action) {
+        $slug = substr($slug !== '' ? $slug : 'action', 0, 40) . '-' . substr(sha1($action), 0, 12);
+    }
+    return rateLimitDir() . '/' . $slug . '.json';
+}
+
+/** config/ratelimit/ exists, or was just made. False when it cannot be had — the caller fails open. */
+function rateLimitEnsureDir(): bool {
+    $d = rateLimitDir();
+    if (is_dir($d)) return true;
+    if (file_exists($d)) return false;
+    return @mkdir($d, 0775, true) || is_dir($d);
+}
+
+/**
+ * A JSON state file of the limiter, read: ['ok' => bool, 'data' => array, 'bad' => bool]. 'ok' is false when it
+ * exists and cannot be read as a map. With the file's lock held ($locked), unparseable content is set aside as
+ * <file>.bad.<time> and an error_log line says so; either way the caller starts from an empty map (QUAL-20).
+ */
+function rateLimitReadJson(string $file, bool $locked): array {
+    if (!file_exists($file)) return ['ok' => true, 'data' => [], 'bad' => false];
+    if (!is_file($file)) return ['ok' => false, 'data' => [], 'bad' => false];
+    $raw = @file_get_contents($file);
+    if ($raw === false) return ['ok' => false, 'data' => [], 'bad' => false];
+    if (trim($raw) === '') return ['ok' => true, 'data' => [], 'bad' => false];
+    $d = json_decode($raw, true);
+    if (is_array($d)) return ['ok' => true, 'data' => $d, 'bad' => false];
+    if ($locked) rateLimitSetAside($file);
+    return ['ok' => false, 'data' => [], 'bad' => true];
+}
+
+/** Move an unreadable state file out of the way — kept for a week (rateLimitPrune()), logged once per request. */
+function rateLimitSetAside(string $file): void {
+    static $said = [];
+    $to = $file . '.bad.' . date('Ymd-His');
+    $moved = @rename($file, $to);
+    if (isset($said[$file])) return;
+    $said[$file] = true;
+    error_log('[ratelimit] ' . basename($file) . ' is not a JSON map — '
+        . ($moved ? 'set aside as ' . basename($to) . ', counting starts over' : 'it could not be set aside; counting starts over'));
+}
+
+/** The generation in an index value ([generation, minted at]), or ''. */
+function rateLimitGenOf(mixed $v): string {
+    $g = is_array($v) ? ($v[0] ?? null) : null;
+    return (is_string($g) && preg_match('/^[0-9a-f]{8,32}$/', $g)) ? $g : '';
+}
+
+/**
+ * This action's current generation, from config/rate_limits.json — minted (under that file's own lock) when the
+ * action has none, which is what a deleted file or a deleted line means: its hits are forgotten. A generation that
+ * cannot be written is still returned: every call then sees a new one, the count never builds up, and the limiter
+ * is open — the contract — while rateLimitHealth() says why.
+ */
+function rateLimitGeneration(string $action): string {
+    $idx = rateLimitIndexFile();
+    $key = $action . '|*';
+    $g = rateLimitGenOf(rateLimitReadJson($idx, false)['data'][$key] ?? null);
+    if ($g !== '') return $g;
+    $h = @fopen($idx . '.lock', 'c');
+    if ($h) @flock($h, LOCK_EX);
+    try {
+        $map = rateLimitReadJson($idx, true)['data'];
+        $g = rateLimitGenOf($map[$key] ?? null);
+        if ($g !== '') return $g;
+        $g = bin2hex(random_bytes(4));
+        $map[$key] = [$g, time()];
+        rateLimitWrite($idx, $map);
+        return $g;
+    } finally {
+        if ($h) { @flock($h, LOCK_UN); @fclose($h); }
+    }
+}
+
+function rateLimitAllow(string $action, string $ip, int $max, int $windowSec = 3600): bool {
+    if ($max <= 0) return true;
+    $now = time();
+    $gen = rateLimitGeneration($action);
+    if (!rateLimitEnsureDir()) { rateLimitWriteFailed($action, null); return true; }
+    $file = rateLimitFile($action);
+    // ONE LOCK AROUND THE READ AND THE WRITE, on a separate path, so two parallel hits cannot both read the same map
+    // and lose one — a burst of parallel requests is exactly what a limit is for — and so the rename()-based replace
+    // of the data file never pulls the lock's inode out from under a waiter (the shape loginAttemptsUpdate() uses).
+    $lockH = @fopen($file . '.lock', 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        return rateLimitAllowLocked($file, $gen, $ip, $action, $now, $max, $windowSec);
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
+}
+
+/**
+ * A sign-in whose count could not be written (AUTH-7): the time a wrong panel password costs, rather than nothing —
+ * by the hits this subject has in the window, at least one; three when they could not even be read. Every other
+ * action stays open and silent here (rateLimitHealth() is what speaks).
+ */
+function rateLimitWriteFailed(string $action, ?int $hits): void {
+    if (!in_array($action, RATE_LIMIT_SIGNIN_ACTIONS, true)) return;
+    $n = $hits === null ? 3 : min(5, max(1, $hits));
+    usleep(function_exists('adminReauthDelayUs') ? adminReauthDelayUs($n) : (int)(min(8.0, 0.25 * (2 ** $n)) * 1000000));
+}
+
+/**
+ * Would rateLimitAllow() let this through — WITHOUT spending a hit? (1.71.0)
+ *
+ * For a page that SHOWS whether an action is possible. Asking must not cost what doing costs: the Info
+ * panel asked twice per opening whether its reader could vote (api/index_info.php), each asking spent a
+ * vote from the hour's budget, and a member who opened fifteen panels could not vote at all. Reads the
+ * action's file as rateLimitAllow() leaves it — whole, since every write is a rename — and writes nothing.
+ */
+function rateLimitPeek(string $action, string $ip, int $max, int $windowSec = 3600): bool {
+    if ($max <= 0) return true;
+    $file = rateLimitFile($action);
+    if (!is_file($file)) return true;
+    $d = rateLimitReadJson($file, false)['data'];
+    $gen = rateLimitGenOf(rateLimitReadJson(rateLimitIndexFile(), false)['data'][$action . '|*'] ?? null);
+    if ($gen === '' || ($d['g'] ?? null) !== $gen || !is_array($d['h'] ?? null)) return true;
+    $now  = time();
+    $hits = array_filter((array)($d['h'][$ip] ?? []), fn($t) => ($now - (int)$t) < $windowSec);
+    return count($hits) < $max;
+}
+
+/**
+ * The body of rateLimitAllow(), run with the action's lock held. The window prunes this file only — every file is
+ * one action now, so a 60-second poller can no longer evict an hourly action's hits (the bug the old shared file
+ * had to guard against by key prefix).
+ */
+function rateLimitAllowLocked(string $file, string $gen, string $subject, string $action, int $now, int $max, int $windowSec): bool {
+    $r = rateLimitReadJson($file, true);
+    $d = $r['data'];
+    $same = ($d['g'] ?? null) === $gen && is_array($d['h'] ?? null);
+    $h = $same ? $d['h'] : [];
+    $changed = !$same && $d !== [];
+    foreach ($h as $k => $times) {
+        $keep = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < $windowSec));
+        if (count($keep) !== count((array)$times)) $changed = true;
+        if ($keep) $h[$k] = $keep;
+        else unset($h[$k]);
+    }
+    $hits = $h[$subject] ?? [];
+    if (count($hits) >= $max) {
+        if ($changed) rateLimitWrite($file, ['a' => $action, 'g' => $gen, 'h' => (object)$h]);
+        return false;
+    }
+    $hits[] = $now;
+    $h[$subject] = $hits;
+    rateLimitCap($h);
+    if (!rateLimitWrite($file, ['a' => $action, 'g' => $gen, 'h' => (object)$h])) {
+        rateLimitWriteFailed($action, $r['ok'] ? count($hits) : null);
+    }
+    return true;
+}
+
+/**
+ * The hard cap of one action's file: at most RATE_LIMIT_MAX_KEYS subjects and RATE_LIMIT_MAX_HITS times. Over
+ * either, the subjects whose last hit is the oldest go first. Returns how many subjects went.
+ */
+function rateLimitCap(array &$h): int {
+    $keys = count($h);
+    $total = 0;
+    foreach ($h as $t) $total += count((array)$t);
+    if ($keys <= RATE_LIMIT_MAX_KEYS && $total <= RATE_LIMIT_MAX_HITS) return 0;
+    $last = [];
+    foreach ($h as $k => $t) $last[$k] = $t ? (int)max((array)$t) : 0;
+    asort($last);
+    $dropped = 0;
+    foreach (array_keys($last) as $k) {
+        if ($keys <= RATE_LIMIT_MAX_KEYS && $total <= RATE_LIMIT_MAX_HITS) break;
+        $total -= count((array)$h[$k]);
+        $keys--;
+        unset($h[$k]);
+        $dropped++;
+    }
+    return $dropped;
+}
+
+/**
+ * The hits this action counts now, subject => [unix times] — its current generation only. For the tests, and for
+ * anything that must SHOW a count; nothing is written.
+ */
+function rateLimitHits(string $action): array {
+    $d = rateLimitReadJson(rateLimitFile($action), false)['data'];
+    $gen = rateLimitGenOf(rateLimitReadJson(rateLimitIndexFile(), false)['data'][$action . '|*'] ?? null);
+    if ($gen === '' || ($d['g'] ?? null) !== $gen || !is_array($d['h'] ?? null)) return [];
+    return $d['h'];
+}
+
+/**
+ * Forget this action's hits: every subject's (a new generation, the file gone), or — with $match — only the
+ * subjects $match(string $subject): bool says yes to. Returns how many subjects went (every one, when it is all).
+ * What a test uses to take back what it spent, and what an operator's "reset" would be.
+ */
+function rateLimitForget(string $action, ?callable $match = null): int {
+    $file = rateLimitFile($action);
+    $n = 0;
+    $lockH = @fopen($file . '.lock', 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        $d = rateLimitReadJson($file, true)['data'];
+        $h = is_array($d['h'] ?? null) ? $d['h'] : [];
+        if ($match === null) {
+            $n = count($h);
+            if (is_file($file)) @unlink($file);
+        } else {
+            foreach (array_keys($h) as $k) if ($match((string)$k)) { unset($h[$k]); $n++; }
+            if ($n > 0) rateLimitWrite($file, ['a' => $action, 'g' => (string)($d['g'] ?? ''), 'h' => (object)$h]);
+        }
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
+    if ($match === null) {
+        $idx = rateLimitIndexFile();
+        $ih = @fopen($idx . '.lock', 'c');
+        if ($ih) @flock($ih, LOCK_EX);
+        try {
+            $map = rateLimitReadJson($idx, true)['data'];
+            if (array_key_exists($action . '|*', $map)) { unset($map[$action . '|*']); rateLimitWrite($idx, $map); }
+        } finally {
+            if ($ih) { @flock($ih, LOCK_UN); @fclose($ih); }
+        }
+    }
+    return $n;
+}
+
+/**
+ * rateLimitForget() across every action's file: each subject $match(string $action, string $subject): bool says
+ * yes to goes. Returns how many went. For a test that spent hits under several actions from addresses of its own.
+ */
+function rateLimitForgetWhere(callable $match): int {
+    $n = 0;
+    foreach (glob(rateLimitDir() . '/*.json') ?: [] as $file) {
+        if (str_starts_with(basename($file), '_')) continue;
+        $d = rateLimitReadJson($file, false)['data'];
+        $action = (string)($d['a'] ?? '');
+        if ($action === '' || rateLimitFile($action) !== $file) continue;
+        $n += rateLimitForget($action, fn(string $s): bool => (bool)$match($action, $s));
+    }
+    return $n;
+}
+
+/**
+ * The longest window any rateLimitAllow() caller passes, in seconds — an hour (1.73.0). A hit older than this
+ * can no longer count against anything, so rateLimitPrune() drops it. A caller that needs a LONGER window must
+ * raise this as well, or the janitor would forget its hits early: tests/retention_test.php reads every call's
+ * window out of the code and fails on one that is longer.
+ */
+const RATE_LIMIT_KEEP_SECONDS = 3600;
+
+/**
+ * The janitor's half of the limiter's retention (1.73.0; one file per action since 1.74.0). rateLimitAllowLocked()
+ * prunes only the CALLED action's file, so an action nobody called again kept its addresses and times for ever.
+ * This walks every one, each under its own lock, and drops: every hit older than RATE_LIMIT_KEEP_SECONDS, a subject
+ * left with none, a file left empty or holding a forgotten generation; in config/rate_limits.json, every line that
+ * is not a generation (the pre-1.74.0 map's address keys) and the generation of an action with no file once it is
+ * older than the window; stale temporary files; a set-aside file after RATE_LIMIT_BAD_KEEP_SECONDS. Returns the
+ * number of hits dropped. $now is for the tests (a clock passed in).
+ */
+function rateLimitPrune(?int $now = null): int {
+    $now = $now ?? time();
+    $dropped = 0;
+    $idx = rateLimitIndexFile();
+    $dir = rateLimitDir();
+    if (is_file($idx)) {
+        $lockH = @fopen($idx . '.lock', 'c');
+        if ($lockH) @flock($lockH, LOCK_EX);
+        try {
+            $r = rateLimitReadJson($idx, true);
+            $map = $r['data'];
+            $changed = false;
+            foreach ($map as $k => $v) {
+                $k = (string)$k;
+                if (!str_ends_with($k, '|*') || rateLimitGenOf($v) === '') {
+                    // The old shared map's "<action>|<address>" => [times]: counted in no generation any more.
+                    foreach ((array)$v as $t) if (is_int($t) || (is_string($t) && ctype_digit($t))) $dropped++;
+                    unset($map[$k]);
+                    $changed = true;
+                    continue;
+                }
+                if (!is_file(rateLimitFile(substr($k, 0, -2))) && ($now - (int)($v[1] ?? 0)) >= RATE_LIMIT_KEEP_SECONDS) {
+                    unset($map[$k]);
+                    $changed = true;
+                }
+            }
+            if ($changed) rateLimitWrite($idx, $map);
+        } finally {
+            if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+        }
+    }
+    if (is_dir($dir)) {
+        foreach (glob($dir . '/*.json') ?: [] as $file) {
+            if (str_starts_with(basename($file), '_')) continue;
+            $lockH = @fopen($file . '.lock', 'c');
+            if ($lockH) @flock($lockH, LOCK_EX);
+            try {
+                $d = rateLimitReadJson($file, true)['data'];
+                $action = (string)($d['a'] ?? '');
+                if ($action === '' || rateLimitFile($action) !== $file) continue;   // not one of ours: left alone
+                $h = is_array($d['h'] ?? null) ? $d['h'] : [];
+                // The generation is asked again HERE, under this file's lock: a request that minted one a moment
+                // ago and has just written its first hit must not lose it to a list read before it existed.
+                $gen = rateLimitGenOf(rateLimitReadJson($idx, false)['data'][$action . '|*'] ?? null);
+                if ($gen === '' || ($d['g'] ?? null) !== $gen) {
+                    foreach ($h as $t) $dropped += count((array)$t);
+                    @unlink($file);
+                    continue;
+                }
+                $changed = false;
+                foreach ($h as $k => $times) {
+                    $keep = array_values(array_filter((array)$times, fn($t) => ($now - (int)$t) < RATE_LIMIT_KEEP_SECONDS));
+                    if (count($keep) === count((array)$times)) continue;
+                    $dropped += count((array)$times) - count($keep);
+                    $changed = true;
+                    if ($keep) $h[$k] = $keep;
+                    else unset($h[$k]);
+                }
+                if (!$h) @unlink($file);
+                elseif ($changed) rateLimitWrite($file, ['a' => $action, 'g' => $gen, 'h' => (object)$h]);
+            } finally {
+                if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+            }
+        }
+        // A lock whose file is gone and has been for the longest window: an action nobody calls (a test's own).
+        foreach (glob($dir . '/*.json.lock') ?: [] as $lock) {
+            if (is_file(substr($lock, 0, -5)) || ($now - (int)@filemtime($lock)) < RATE_LIMIT_KEEP_SECONDS) continue;
+            $lh = @fopen($lock, 'c');
+            if ($lh && @flock($lh, LOCK_EX | LOCK_NB)) {
+                @flock($lh, LOCK_UN);
+                @fclose($lh);
+                if (!is_file(substr($lock, 0, -5))) @unlink($lock);
+            } elseif ($lh) {
+                @fclose($lh);
+            }
+        }
+    }
+    $root = dirname($dir);
+    foreach (array_merge(glob($dir . '/*.tmp.*') ?: [], glob($root . '/rate_limits.json.tmp.*') ?: []) as $tmp) {
+        if (($now - (int)@filemtime($tmp)) >= 3600) @unlink($tmp);
+    }
+    foreach (rateLimitSetAsideFiles() as $bad) {
+        if (($now - (int)@filemtime($bad)) >= RATE_LIMIT_BAD_KEEP_SECONDS) @unlink($bad);
+    }
+    return $dropped;
+}
+
+/** Every set-aside (unreadable) state file of the limiter and of the panel's sign-in lockout. */
+function rateLimitSetAsideFiles(): array {
+    $dir = rateLimitDir();
+    $root = dirname($dir);
+    return array_merge(is_dir($dir) ? (glob($dir . '/*.bad.*') ?: []) : [],
+                       glob($root . '/rate_limits.json.bad.*') ?: [], glob($root . '/login_attempts.json.bad.*') ?: []);
+}
+
+/** tmp + rename, so a reader never sees a half-written map. Called with the lock held. True when it was written. */
+function rateLimitWrite(string $file, array $data): bool {
+    $json = json_encode($data, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) return false;
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, $json) === false) { @unlink($tmp); return false; }
+    if (@rename($tmp, $file)) return true;
+    @unlink($tmp);
+    return false;
+}
+
+/**
+ * What is wrong with the limiter's storage, if anything (QUAL-20): [['what' => 'dir'|'file'|'bad', 'path' => …]],
+ * [] when nothing is. 'dir' — config/ or config/ratelimit/ cannot be written; 'file' — a state file (the reset
+ * handle config/rate_limits.json, an action's file, the panel's config/login_attempts.json) cannot be read or
+ * written, or is not a file; 'bad' — one was unreadable and was set aside. Reused for RATE_LIMIT_HEALTH_TTL
+ * seconds (config/ratelimit/_health.json) unless $fresh: the warning card is polled by every open dashboard.
+ */
+function rateLimitHealth(bool $fresh = false): array {
+    $dir = rateLimitDir();
+    $root = dirname($dir);
+    $cache = $dir . '/_health.json';
+    $now = time();
+    if (!$fresh && is_file($cache) && ($now - (int)@filemtime($cache)) < RATE_LIMIT_HEALTH_TTL) {
+        $c = json_decode((string)@file_get_contents($cache), true);
+        if (is_array($c) && is_array($c['problems'] ?? null)) return $c['problems'];
+    }
+    $rel = fn(string $p): string => 'config/' . ltrim(str_replace('\\', '/', substr($p, strlen($root))), '/');
+    $problems = [];
+    if (!is_dir($root) || !is_writable($root)) $problems[] = ['what' => 'dir', 'path' => 'config/'];
+    if (file_exists($dir) && (!is_dir($dir) || !is_writable($dir))) $problems[] = ['what' => 'dir', 'path' => 'config/ratelimit/'];
+    $files = [rateLimitIndexFile(), function_exists('loginAttemptsFile') ? loginAttemptsFile() : $root . '/login_attempts.json'];
+    if (is_dir($dir)) foreach (glob($dir . '/*.json') ?: [] as $f) if (!str_starts_with(basename($f), '_')) $files[] = $f;
+    foreach ($files as $f) {
+        if (!file_exists($f)) continue;
+        if (!is_file($f) || !is_readable($f) || !is_writable($f)) $problems[] = ['what' => 'file', 'path' => $rel($f)];
+    }
+    foreach (rateLimitSetAsideFiles() as $b) $problems[] = ['what' => 'bad', 'path' => $rel($b)];
+    if (is_dir($dir) && is_writable($dir)) rateLimitWrite($cache, ['t' => $now, 'problems' => $problems]);
+    return $problems;
+}
+
+/** One rateLimitHealth() problem as a sentence for the warning card and the health endpoint (plain text). */
+function rateLimitHealthText(array $p): string {
+    $path = (string)($p['path'] ?? '');
+    return match ((string)($p['what'] ?? '')) {
+        'dir'   => __('api.ratelimit.health_dir', ['path' => $path]),
+        'bad'   => __('api.ratelimit.health_bad', ['path' => $path]),
+        default => __('api.ratelimit.health_file', ['path' => $path]),
+    };
+}
+
+/* ── The daily cap on confirmation mails (PUB-1, 1.74.0) ──────────────────────────────────────────────────────────
+ *
+ * A report or an appeal confirms itself by mail to the address typed into the form — an address nobody has
+ * verified. However the mail is worded (it carries none of the sender's own words, includes/mail.php), every send
+ * is one more mail from this site's domain to an address somebody else chose. So the whole site sends at most
+ * `confirm_mail_daily_cap` of them a day (default 200; 0 = none at all), counted in config/ratelimit/_confirm_mail.json
+ * under its own lock. FAIL-CLOSED, the opposite of the limiter above: a mail that cannot be counted is not sent —
+ * the report or appeal itself is still taken, and its status page works the same.
+ */
+const CONFIRM_MAIL_CAP_DEFAULT = 200;
+const CONFIRM_MAIL_CAP_MAX = 100000;
+
+function confirmMailDailyCap(array $cfg): int {
+    $v = $cfg['confirm_mail_daily_cap'] ?? CONFIRM_MAIL_CAP_DEFAULT;
+    $n = is_numeric($v) ? (int)$v : CONFIRM_MAIL_CAP_DEFAULT;
+    return max(0, min(CONFIRM_MAIL_CAP_MAX, $n));
+}
+
+function confirmMailFile(): string { return rateLimitDir() . '/_confirm_mail.json'; }
+
+/** May one more confirmation mail go out today? Counts it when it may. $now is for the tests. */
+function confirmMailAllow(array $cfg, ?int $now = null): bool {
+    $cap = confirmMailDailyCap($cfg);
+    if ($cap <= 0 || !rateLimitEnsureDir()) return false;
+    $day = date('Y-m-d', $now ?? time());
+    $file = confirmMailFile();
+    $h = @fopen($file . '.lock', 'c');
+    if (!$h) return false;
+    if (!@flock($h, LOCK_EX)) { @fclose($h); return false; }
+    try {
+        $r = rateLimitReadJson($file, true);
+        if (!$r['ok'] && !$r['bad']) return false;   // cannot be read: cannot be counted
+        $d = $r['data'];
+        $n = (($d['day'] ?? '') === $day) ? max(0, (int)($d['n'] ?? 0)) : 0;
+        if ($n >= $cap) return false;
+        return rateLimitWrite($file, ['day' => $day, 'n' => $n + 1]);
+    } finally {
+        @flock($h, LOCK_UN);
+        @fclose($h);
+    }
+}
+
+/** How many confirmation mails today's count holds (the Settings page shows it beside the cap). */
+function confirmMailSentToday(?int $now = null): int {
+    $d = rateLimitReadJson(confirmMailFile(), false)['data'];
+    return (($d['day'] ?? '') === date('Y-m-d', $now ?? time())) ? max(0, (int)($d['n'] ?? 0)) : 0;
+}
+
+function jsonResponse(array $data, int $code = 200): void {
+    // Every response leaves through here, which makes it the one place the audit log can be written
+    // without thirty endpoints each remembering to do it — and without a new endpoint being invisible
+    // because somebody forgot. What the endpoint knows that this does not (which setting changed,
+    // which hash was banned) is added by the endpoint itself through auditNote(); this fills in the
+    // rest and records whether it worked.
+    if (function_exists('auditFinish')) auditFinish($data, $code);
+
+    // Clean any stray output that might have been generated (e.g. PHP warnings)
+    while (ob_get_level()) ob_end_clean();
+    http_response_code($code);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/** Reject anything but POST with a 405. Call at the top of POST-only endpoints. */
+function requirePost(): void {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        jsonResponse(['error' => __('api.common.method_not_allowed')], 405);
+    }
+}
+
+/**
+ * Read and decode a request body. Endpoints are called with a JSON body by the frontend but some
+ * also accept form-encoded input, so by default we fall back to $_POST when the body isn't valid
+ * JSON. Always returns an array (never null) so callers can safely use `$input['x'] ?? default`.
+ * Pass $fallbackToPost=false for endpoints that must reject anything that isn't a JSON object.
+ */
+function readJsonBody(bool $fallbackToPost = true): array {
+    $raw  = file_get_contents('php://input');
+    $data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : null;
+    if (!is_array($data) || $data === []) {
+        $data = $fallbackToPost ? $_POST : [];
+    }
+    return is_array($data) ? $data : [];
+}
+
+/**
+ * Parse a date window from request input for date-scoped queue/scrape actions:
+ * either since_hours=N (last N hours) or from / to strings (Y-m-d or Y-m-d H:i[:s]; to empty = now,
+ * a date-only `to` covers the whole end day). Returns [fromSql, toSql] or null when absent/invalid.
+ */
+function parseDateRangeInput(array $input): ?array {
+    $since = (int)($input['since_hours'] ?? 0);
+    if ($since > 0) return [date('Y-m-d H:i:s', time() - min($since, 24 * 366) * 3600), date('Y-m-d H:i:s')];
+    $from = trim((string)($input['from'] ?? ''));
+    $to = trim((string)($input['to'] ?? ''));
+    if ($from === '') return null;
+    $f = strtotime($from);
+    if ($f === false) return null;
+    $t = $to === '' ? time() : (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) ? strtotime($to . ' 23:59:59') : strtotime($to));
+    if ($t === false || $t < $f) return null;
+    return [date('Y-m-d H:i:s', $f), date('Y-m-d H:i:s', $t)];
+}
+
+function generateUnsubscribeToken(string $email, string $secret): string {
+    return hash_hmac('sha256', $email, $secret);
+}
+
+/**
+ * Is this the link a mail to $email carried? Never with an empty secret (QUAL-21: an HMAC under '' is a token anybody
+ * can compute, so every address could be unsubscribed by a stranger), and never for a value that is not a string
+ * (PUB-3: `email[]=a` was an uncaught TypeError on the page and both endpoints).
+ */
+function verifyUnsubscribeToken(mixed $email, mixed $token, string $secret): bool {
+    if (!is_string($email) || !is_string($token) || $email === '' || $token === '') return false;
+    if (trim($secret) === '') return false;
+    return hash_equals(generateUnsubscribeToken($email, $secret), $token);
+}
+
+function getUnsubscribeUrl(string $email, array $cfg): string {
+    $token = generateUnsubscribeToken($email, $cfg['hmac_secret'] ?? '');
+    return ($cfg['site_url'] ?? '') . '?action=unsubscribe&email=' . urlencode($email) . '&token=' . $token;
+}
+
+function isValidInfoHash(string $hash): bool {
+    return preg_match('/^[a-fA-F0-9]{40}$/', $hash) === 1;
+}
+
+/**
+ * Decode a 32-char Base32 BitTorrent info hash to 40-char hex. Intentionally mirrored in JS
+ * (assets/js/app.js `base32ToHex`) so magnet links can be validated client-side before submit
+ * AND authoritatively server-side. Keep the two implementations in sync if either changes.
+ */
+function base32ToHex(string $base32): ?string {
+    $alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    $base32 = strtoupper($base32);
+    $bits = '';
+    for ($i = 0; $i < strlen($base32); $i++) {
+        $val = strpos($alphabet, $base32[$i]);
+        if ($val === false) return null;
+        $bits .= str_pad(decbin($val), 5, '0', STR_PAD_LEFT);
+    }
+    $hex = '';
+    for ($i = 0; $i + 4 <= strlen($bits); $i += 4) {
+        $hex .= dechex(bindec(substr($bits, $i, 4)));
+    }
+    return $hex;
+}
+
+function getBaseUrl(): string {
+    $script = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME']));
+    return rtrim($script, '/') . '/';
+}
+
+/**
+ * Every `?action=` the site answers on, and the template behind each one.
+ *
+ * It was written inline in index.php until 1.61.0 and moved here for one reason: `shout_page_action`
+ * lets an operator put the shoutbox at `?action=chat`, and a name they pick has to be refused when
+ * it already belongs to another page. A hand-written list of forbidden names inside that validator
+ * would be a second copy of this map — out of date the first time somebody adds a page, and wrong
+ * in the direction that hurts, because the room would quietly swallow an address the site needs.
+ * So the validator reads THIS, and a route added tomorrow protects itself without anybody
+ * remembering to go and say so.
+ *
+ * The room's chosen name is deliberately NOT in here: index.php adds it after asking the settings.
+ * This function knows nothing about $cfg, which is exactly what lets a settings validator ask it
+ * without asking itself.
+ */
+function siteRoutes(): array {
+    return [
+        'home'         => 'templates/pages/home.php',
+        'info'         => 'templates/pages/info.php',
+        'tos'          => 'templates/pages/tos.php',
+        'report'       => 'templates/pages/report.php',
+        'status'       => 'templates/pages/status.php',
+        'transparency' => 'templates/pages/transparency.php',
+        'unsubscribe'  => 'templates/pages/unsubscribe.php',
+        'stats'        => 'templates/pages/stats.php',
+        'whitelist'    => 'templates/pages/whitelist.php',
+        'login'        => 'templates/pages/login.php',
+        'register'     => 'templates/pages/register.php',
+        'account'      => 'templates/pages/account.php',
+        'reset'        => 'templates/pages/reset.php',
+        'verify'       => 'templates/pages/verify.php',
+        'emailchange'  => 'templates/pages/emailchange.php',
+        'search'       => 'templates/pages/search.php',
+        // The shoutbox as a page of its own. Whether this address answers with the box or with the
+        // not-found page is the template's decision (the setting, the placement, the permission) — the
+        // route exists either way, so a link to it never depends on a setting the linker cannot see.
+        'shoutbox'     => 'templates/pages/shoutbox.php',
+        // The emotes and stickers the shoutbox understands, with their codes. Same rule as above: the
+        // route exists whatever the settings say, and the template answers with the list or with the
+        // not-found page.
+        'emotes'       => 'templates/pages/emotes.php',
+        'tags'         => 'templates/pages/tags.php',
+        // A PROFILE'S ADDRESS PUTS THE NAME IN ITS OWN PARAMETER, and the reason is in index.php
+        // where $action is built: it is lower-cased and stripped of everything but [a-z0-9_-], while
+        // userValidUsername() allows a dot and both cases. A name can never be an action, so the
+        // collision problem does not arise — 'Bob.Smith' would have become 'bobsmith', a different
+        // person or nobody.
+        'u'            => 'templates/pages/profile.php',
+        // The member directory — a tab of the account page now (see the redirect in index.php), kept
+        // as an action so that links to it, and the nav entries of installs that were upgraded, still
+        // land somewhere. It was its own page first, on the reasoning that it is about other people;
+        // it sits better beside the reader's own friends and blocks, which are about other people too.
+        'members'      => 'templates/pages/members.php',
+        // The partner integration guide. Unlisted rather than locked: nothing on it is secret — it is
+        // the shape of a public API — and the key it documents travels separately, from a person. It
+        // reads its own configuration out of the query string, so the operator hands a partner an
+        // address that describes THEIR key rather than one page covering every combination.
+        'apidocs'      => 'templates/pages/apidocs.php',
+    ];
+}
+
+function checkBlacklistPermissions(string $path): array {
+    $result = ['ok' => false, 'errors' => [], 'suggestions' => []];
+    $isWindows = PHP_OS_FAMILY === 'Windows';
+
+    if (empty($path)) {
+        $result['errors'][] = 'Blacklist path is not configured.';
+        $result['suggestions'][] = 'Set the blacklist file path in Admin > Settings.';
+        return $result;
+    }
+
+    $dir = dirname($path);
+
+    if (!is_dir($dir)) {
+        $result['errors'][] = "Directory does not exist: $dir";
+        if ($isWindows) {
+            $result['suggestions'][] = "Create the directory manually or choose a path under your WAMP www folder.";
+        } else {
+            $result['suggestions'][] = "Create the directory: sudo mkdir -p $dir";
+            $result['suggestions'][] = "Set ownership: sudo chown www-data:www-data $dir";
+        }
+        return $result;
+    }
+
+    if (file_exists($path)) {
+        if (!is_readable($path)) {
+            $result['errors'][] = "Blacklist file exists but is not readable: $path";
+            if ($isWindows) {
+                $result['suggestions'][] = "Right-click the file > Properties > Security tab > ensure the Apache/WAMP user has Read permission.";
+            } else {
+                $result['suggestions'][] = "Fix permissions: sudo chmod 644 $path";
+                $result['suggestions'][] = "Fix ownership: sudo chown www-data:www-data $path";
+            }
+        }
+        if (!is_writable($path)) {
+            $result['errors'][] = "Blacklist file exists but is not writable: $path";
+            if ($isWindows) {
+                $result['suggestions'][] = "Right-click the file > Properties > Security tab > ensure the Apache/WAMP user has Write permission.";
+                $result['suggestions'][] = "Uncheck 'Read-only' in file Properties > General tab.";
+            } else {
+                $result['suggestions'][] = "Fix permissions: sudo chmod 664 $path";
+                $result['suggestions'][] = "Fix ownership: sudo chown www-data:www-data $path";
+                $result['suggestions'][] = "For Nginx: ensure the php-fpm user (usually www-data) owns the file.";
+            }
+        }
+    } else {
+        // File doesn't exist yet — check if directory is writable (to create the file)
+        if (!is_writable($dir)) {
+            $result['errors'][] = "Directory is not writable (cannot create blacklist file): $dir";
+            if ($isWindows) {
+                $result['suggestions'][] = "Right-click the folder > Properties > Security tab > ensure the Apache/WAMP user has Write permission.";
+            } else {
+                $result['suggestions'][] = "Fix directory permissions: sudo chmod 775 $dir";
+                $result['suggestions'][] = "Fix directory ownership: sudo chown www-data:www-data $dir";
+                $result['suggestions'][] = "For Nginx: ensure the php-fpm user (usually www-data) has write access.";
+            }
+        } else {
+            // Directory writable, file will be created on first block — that's fine
+            $result['suggestions'][] = "File does not exist yet but directory is writable. It will be created automatically on first hash block.";
+        }
+    }
+
+    if (empty($result['errors'])) {
+        $result['ok'] = true;
+    }
+
+    return $result;
+}
+
+/**
+ * Normalize a blacklist file path: strip null bytes and control characters that could be
+ * used for path trickery or to smuggle data. Applied by every blacklist file operation so
+ * all call sites are protected consistently (previously only delete_permanently did this).
+ */
+function normalizeBlacklistPath(string $path): string {
+    return preg_replace('/[\x00-\x1F\x7F]/', '', trim($path));
+}
+
+/**
+ * Check if a hash exists in the blacklist file.
+ */
+function isHashInBlacklist(string $hash, string $blacklistPath): bool {
+    $blacklistPath = normalizeBlacklistPath($blacklistPath);
+    if (empty($blacklistPath) || !file_exists($blacklistPath) || !is_readable($blacklistPath)) {
+        return false;
+    }
+    $hashLower = strtolower(trim($hash));
+    $lines = file($blacklistPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strtolower(trim($line)) === $hashLower) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Add a hash to the blacklist file (skip if already present).
+ * Returns true if written, false if already existed or error.
+ */
+/**
+ * Run $fn while holding an exclusive lock on the blacklist.
+ *
+ * WHY A SEPARATE LOCK FILE
+ * ------------------------
+ * Both writers below are read-modify-write: check whether the hash is there, then append or rewrite.
+ * `LOCK_EX` on the write alone does not make that atomic — two requests banning the same hash could
+ * both read "absent" and both append it, and a delete that rewrites the whole file could throw away
+ * an append that landed between its read and its rename. The lock has to span the read AND the write,
+ * so it cannot live on the file being replaced: rename() swaps the inode out from under it.
+ *
+ * If the directory cannot hold a lock file (the legacy layout where the file is writable and its
+ * directory is not), the work still runs — unlocked, exactly as before. A missing lock must not turn
+ * a ban into a failure.
+ */
+function withBlacklistLock(string $blacklistPath, callable $fn) {
+    $lock = @fopen($blacklistPath . '.lock', 'c');
+    if ($lock === false) return $fn();
+    try {
+        @flock($lock, LOCK_EX);
+        return $fn();
+    } finally {
+        @flock($lock, LOCK_UN);
+        @fclose($lock);
+    }
+}
+
+/**
+ * Add a hash to the blacklist file (skip if already present).
+ * Returns true if written, false if already existed or error.
+ */
+function addHashToBlacklist(string $hash, string $blacklistPath): bool {
+    $blacklistPath = normalizeBlacklistPath($blacklistPath);
+    if (empty($blacklistPath)) return false;
+    $hashLower = strtolower(trim($hash));
+    // Only ever write a valid 40-hex info hash — blocks line-injection via crafted input.
+    if (!isValidInfoHash($hashLower)) return false;
+    return withBlacklistLock($blacklistPath, static function () use ($blacklistPath, $hashLower): bool {
+    if (file_exists($blacklistPath)) {
+        if (!is_writable($blacklistPath)) return false;
+        $lines = file($blacklistPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            if (strtolower(trim($line)) === $hashLower) {
+                return true; // already present — no duplicate
+            }
+        }
+    } else {
+        if (!is_writable(dirname($blacklistPath))) return false;
+    }
+
+    file_put_contents($blacklistPath, $hashLower . "\n", FILE_APPEND | LOCK_EX);
+    // A brand-new hash actually reached the file. OpenTracker only reads the blacklist at startup,
+    // so record the change — the dashboard uses this to recommend a tracker restart.
+    recordBlacklistChange('add');
+    return true;
+    });
+}
+
+/**
+ * Remove ALL occurrences of a hash from the blacklist file (case-insensitive).
+ * Returns true if file was updated, false on error.
+ */
+function removeHashFromBlacklist(string $hash, string $blacklistPath): bool {
+    $blacklistPath = normalizeBlacklistPath($blacklistPath);
+    if (empty($blacklistPath) || !file_exists($blacklistPath) || !is_writable($blacklistPath)) {
+        return false;
+    }
+    $hashLower = strtolower(trim($hash));
+    return withBlacklistLock($blacklistPath, static function () use ($blacklistPath, $hashLower): bool {
+    $lines = file($blacklistPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $filtered = array_filter($lines, fn($line) => strtolower(trim($line)) !== $hashLower);
+
+    // Only write if something changed. Write a temp file in the same directory and rename() over the
+    // original: OpenTracker re-reads the file on SIGHUP and would treat a half-written or momentarily
+    // empty file as "no entries" — never let it observe an intermediate state.
+    if (count($filtered) !== count($lines)) {
+        $payload = $filtered ? implode("\n", $filtered) . "\n" : '';
+        $tmp = $blacklistPath . '.tmp.' . getmypid();
+        $written = false;
+        if (is_writable(dirname($blacklistPath)) && @file_put_contents($tmp, $payload, LOCK_EX) !== false) {
+            @chmod($tmp, 0664);
+            $written = @rename($tmp, $blacklistPath);
+            if (!$written) @unlink($tmp);
+        }
+        if (!$written) {
+            // Directory not writable (legacy layout: file writable, dir not) — fall back to in-place rewrite.
+            file_put_contents($blacklistPath, $payload, LOCK_EX);
+        }
+        // The file really changed — the tracker still holds the old copy until it restarts.
+        recordBlacklistChange('del');
+    }
+    return true;
+    });
+}
+
+// --- Tracker service: restart recommendations -------------------------------
+// OpenTracker (and similar) load the blacklist file only at startup and keep growing their uptime.
+// The helpers below let the admin dashboard surface "smart" restart recommendations: they track how
+// many blacklist changes have happened since the tracker last (re)started and how long it has been
+// up, then classify that into orange/red advice. All state is derived from files under config/
+// (web-denied) and the shared stats cache — no DB schema changes.
+
+/**
+ * Path to the append-only log of blacklist file changes (adds/removals). Lives under config/
+ * (web-denied) alongside the other runtime state files.
+ */
+function blacklistChangesFile(): string {
+    return __DIR__ . '/../config/blacklist_changes.json';
+}
+
+/** Record a single blacklist mutation ('add' or 'del') with a timestamp. Pruned + bounded. */
+function recordBlacklistChange(string $op): void {
+    $op   = ($op === 'del') ? 'del' : 'add';
+    $file = blacklistChangesFile();
+    $data = [];
+    if (is_file($file)) {
+        $raw  = @file_get_contents($file);
+        $data = $raw ? (json_decode($raw, true) ?: []) : [];
+    }
+    if (!is_array($data)) $data = [];
+    $data[] = ['t' => time(), 'op' => $op];
+    // Keep the log bounded: drop entries older than 90 days, then cap at the newest 1000.
+    $cutoff = time() - 90 * 86400;
+    $data = array_values(array_filter($data, fn($e) => is_array($e) && (int)($e['t'] ?? 0) >= $cutoff));
+    if (count($data) > 1000) $data = array_slice($data, -1000);
+    @file_put_contents($file, json_encode($data), LOCK_EX);
+}
+
+/** Clear the blacklist change log — called once the tracker is (re)started from the panel. */
+function resetBlacklistChanges(): void {
+    $file = blacklistChangesFile();
+    if (is_file($file)) @unlink($file);
+}
+
+/** Read the shared tracker stats cache. Returns the decoded array or null when unavailable. */
+function readTrackerStatsCache(): ?array {
+    $file = __DIR__ . '/../config/stats_cache.json';
+    if (!is_file($file)) return null;
+    $raw = @file_get_contents($file);
+    if ($raw === false || $raw === '') return null;
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : null;
+}
+
+/**
+ * Best-effort tracker boot time (unix ts), derived from the cached stats as "when the cache was
+ * written minus the uptime reported then". It stays stable across refreshes and jumps forward the
+ * moment the tracker restarts — exactly the reference we need to tell whether pending blacklist
+ * changes and the current uptime still warrant a restart. Returns null when stats are unavailable.
+ */
+function trackerBootTime(): ?int {
+    $cache = readTrackerStatsCache();
+    if (!$cache || empty($cache['success'])) return null;
+    $fetchedAt = (int)($cache['fetched_at'] ?? 0);
+    $uptime    = (int)($cache['uptime_seconds'] ?? 0);
+    if ($fetchedAt <= 0 || $uptime <= 0) return null;
+    return $fetchedAt - $uptime;
+}
+
+/** Is a string a safe systemd unit name we are willing to hand to systemctl? */
+function isServiceNameValid(string $name): bool {
+    return preg_match('/^[A-Za-z0-9._@-]{1,128}$/', $name) === 1;
+}
+
+/**
+ * Pure classifier (no I/O, unit-tested): given the pending blacklist adds/removals since the
+ * tracker booted and the current uptime in seconds (or null if unknown), plus the configured
+ * thresholds, decide the overall severity ('none'|'warn'|'danger') and the list of individual
+ * recommendation items. Warnings can stack, so the returned level is the highest of them all.
+ */
+function classifyTrackerWarnings(int $pendingAdds, int $pendingDels, ?int $uptimeSeconds, array $cfg): array {
+    $warnCount   = max(1, (int)($cfg['tracker_blacklist_warn_count'] ?? 1));
+    $dangerCount = max($warnCount, (int)($cfg['tracker_blacklist_danger_count'] ?? 5));
+    $warnDays    = max(1, (int)($cfg['tracker_uptime_warn_days'] ?? 14));
+    $dangerDays  = max($warnDays, (int)($cfg['tracker_uptime_danger_days'] ?? 30));
+
+    $rank  = ['none' => 0, 'warn' => 1, 'danger' => 2];
+    $level = 'none';
+    $items = [];
+    $bump  = function (string $l) use (&$level, $rank) {
+        if ($rank[$l] > $rank[$level]) $level = $l;
+    };
+
+    $pendingTotal = $pendingAdds + $pendingDels;
+    if ($pendingTotal > 0) {
+        $blLevel = $pendingTotal >= $dangerCount ? 'danger' : ($pendingTotal >= $warnCount ? 'warn' : 'none');
+        if ($blLevel !== 'none') {
+            $parts = [];
+            if ($pendingAdds > 0) $parts[] = __('api.restart.warn_added', ['n' => $pendingAdds]);
+            if ($pendingDels > 0) $parts[] = __('api.restart.warn_removed', ['n' => $pendingDels]);
+            $detail = implode(' · ', $parts);
+            $text = $blLevel === 'danger'
+                ? __('api.restart.warn_blacklist_danger', ['n' => $pendingTotal, 'detail' => $detail])
+                : __('api.restart.warn_blacklist_warn', ['detail' => $detail]);
+            $items[] = ['level' => $blLevel, 'text' => $text];
+            $bump($blLevel);
+        }
+    }
+
+    if ($uptimeSeconds !== null && $uptimeSeconds > 0) {
+        $days = intdiv($uptimeSeconds, 86400);
+        if ($days >= $dangerDays) {
+            $items[] = ['level' => 'danger', 'text' => __('api.restart.warn_uptime_danger', ['days' => $days])];
+            $bump('danger');
+        } elseif ($days >= $warnDays) {
+            $items[] = ['level' => 'warn', 'text' => __('api.restart.warn_uptime_warn', ['days' => $days])];
+            $bump('warn');
+        }
+    }
+
+    return ['level' => $level, 'count' => count($items), 'items' => $items];
+}
+
+/**
+ * Gather the live inputs (pending blacklist changes since boot, current uptime from the stats
+ * cache) and classify them into restart recommendations for the admin dashboard. Read-only: it
+ * self-corrects on any tracker restart because entries older than the boot reference are ignored.
+ */
+function getTrackerServiceWarnings(array $cfg): array {
+    $boot   = trackerBootTime();
+    $ref    = $boot ?? 0;                                   // 0 = no stats → count everything logged
+    $uptime = $boot !== null ? max(0, time() - $boot) : null;
+
+    $adds = 0;
+    $dels = 0;
+    $file = blacklistChangesFile();
+    if (is_file($file)) {
+        $raw = @file_get_contents($file);
+        $log = $raw ? (json_decode($raw, true) ?: []) : [];
+        if (is_array($log)) {
+            foreach ($log as $e) {
+                if (!is_array($e) || (int)($e['t'] ?? 0) <= $ref) continue;
+                if (($e['op'] ?? 'add') === 'del') $dels++; else $adds++;
+            }
+        }
+    }
+
+    // In whitelist mode the file-change log is irrelevant (the whitelist service reloads by itself);
+    // instead surface the whitelist file / reload / worker health as warnings.
+    if (function_exists('trackerMode') && trackerMode($cfg) === 'whitelist') {
+        $res = classifyTrackerWarnings(0, 0, $uptime, $cfg);
+        $db = $GLOBALS['db'] ?? null;
+        if ($db instanceof PDO && function_exists('whitelistStatus')) {
+            try {
+                $ws = whitelistStatus($db, $cfg);
+                foreach ($ws['warnings'] as $w) {
+                    $res['items'][] = $w;
+                    if ($w['level'] === 'danger') $res['level'] = 'danger';
+                    elseif ($w['level'] === 'warn' && $res['level'] === 'none') $res['level'] = 'warn';
+                }
+                $res['count'] = count($res['items']);
+                $res['whitelist'] = ['active' => $ws['counts']['active'], 'pending_reload' => (bool)$ws['state']['pending_reload'], 'regen_needed' => (bool)$ws['state']['regen_needed']];
+            } catch (\Throwable $e) {
+                // Said, not skipped (1.74.0, QUAL-26): without its part the card and ?action=health could read
+                // green while the whitelist's own warnings were exactly what could not be looked at.
+                error_log('[tracker] the whitelist\'s warnings could not be built: ' . $e->getMessage());
+                $res['items'][] = ['level' => 'warn', 'text' => __('api.wl.warn_status_failed')];
+                if ($res['level'] === 'none') $res['level'] = 'warn';
+                $res['count'] = count($res['items']);
+            }
+        }
+        $adds = 0; $dels = 0;
+    } else {
+        $res = classifyTrackerWarnings($adds, $dels, $uptime, $cfg);
+    }
+    // Extra instances, if any. Reads the CACHED roster only and never forks: this function is called
+    // from api/admin/tracker_service_status.php, which the dashboard polls, so anything expensive here
+    // would be paid on every poll by every open panel.
+    if (function_exists('otClusterWarnings')) {
+        foreach (otClusterWarnings($cfg) as $w) {
+            $res['items'][] = $w;
+            if ($w['level'] === 'danger') $res['level'] = 'danger';
+            elseif ($w['level'] === 'warning' && $res['level'] === 'none') $res['level'] = 'warn';
+        }
+        $res['count'] = count($res['items']);
+    }
+    // The limits and the panel's sign-in lockout (1.74.0, QUAL-20): they let everything through while their state
+    // cannot be written — the contract, so a disk problem locks nobody out — and this is where that stops being
+    // silent. Cached for a minute (rateLimitHealth()), because this function is polled.
+    foreach (rateLimitHealth() as $p) {
+        $res['items'][] = ['level' => 'warn', 'text' => rateLimitHealthText($p)];
+        if ($res['level'] === 'none') $res['level'] = 'warn';
+    }
+    $res['count'] = count($res['items']);
+    $res['mode']           = function_exists('trackerMode') ? trackerMode($cfg) : 'blacklist';
+    $res['pending_adds']   = $adds;
+    $res['pending_dels']   = $dels;
+    $res['uptime_seconds'] = $uptime;
+    $res['uptime_string']  = $uptime !== null ? formatUptime($uptime) : null;
+    return $res;
+}
+
+// --- Tracker service: execute restart / reload ------------------------------
+// Shared by the Restart/Reload endpoints, the permission Test, and the automatic post-change reload.
+// A "restart" bounces the whole service (brief downtime); a "reload" asks systemd to run the unit's
+// ExecReload — for a standard OpenTracker unit that is `/bin/kill -HUP $MAINPID`, i.e. the SIGHUP that
+// makes OpenTracker re-read its white/blacklist WITHOUT dropping connections. Both clear the pending
+// blacklist-change log on success, because the tracker then holds the current blacklist file.
+
+/** Is PHP's exec() usable (present and not listed in disable_functions)? System actions need it. */
+function trackerExecAvailable(): bool {
+    $disabled = array_map('trim', explode(',', strtolower((string)ini_get('disable_functions'))));
+    return function_exists('exec') && !in_array('exec', $disabled, true);
+}
+
+/**
+ * Build the shell command for `systemctl <verb> <service>` (verb = restart|reload) against the
+ * configured unit, honouring the "Run via sudo" setting. Returns null when the feature can't run
+ * (unknown verb, no/invalid service name, or exec() disabled). The service name is whitelisted AND
+ * passed through escapeshellarg, so it can never be used to inject a second command.
+ */
+function trackerServiceCommand(string $verb, array $cfg): ?string {
+    if ($verb !== 'restart' && $verb !== 'reload') return null;
+    $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+    if ($service === '' || !isServiceNameValid($service)) return null;
+    if (!trackerExecAvailable()) return null;
+    $useSudo = (($cfg['opentracker_restart_use_sudo'] ?? '1') === '1');
+    return ($useSudo ? 'sudo -n ' : '') . 'systemctl ' . $verb . ' ' . escapeshellarg($service) . ' 2>&1';
+}
+
+/**
+ * Run `systemctl <verb> <service>` and return ['ok','output','code','cmd']. ok is true only on a
+ * zero exit code. When the command cannot be built (see trackerServiceCommand) ok is false, code -1.
+ */
+function runTrackerServiceCommand(string $verb, array $cfg): array {
+    $cmd = trackerServiceCommand($verb, $cfg);
+    if ($cmd === null) {
+        return ['ok' => false, 'output' => '', 'code' => -1, 'cmd' => ''];
+    }
+    $output = [];
+    $ret    = null;
+    @exec($cmd, $output, $ret);
+    $ok = $ret === 0;
+    // `systemctl reload` returns 0 as soon as the signal is delivered. On an opentracker built
+    // without the SIGHUP-with-UDP-workers patch that signal can KILL the process a moment later, so a
+    // zero exit code alone would report a reload that emptied the swarm as a success -- and clear the
+    // pending-reload bookkeeping while it did. One cheap question closes a hole that predates the
+    // cluster work entirely.
+    if ($ok && $verb === 'reload') {
+        $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+        if ($service !== '' && isServiceNameValid($service)) {
+            $chk = []; $crc = null;
+            @exec('systemctl is-active --quiet ' . escapeshellarg($service) . ' 2>&1', $chk, $crc);
+            if ($crc !== 0) {
+                $ok = false;
+                $output[] = 'the unit is not active after the reload (a SIGHUP can kill an unpatched build)';
+            }
+        }
+    }
+    return ['ok' => $ok, 'output' => trim(implode("\n", $output)), 'code' => (int)$ret, 'cmd' => $cmd];
+}
+
+/**
+ * Best-effort: after the blacklist file has changed, ask the tracker to reload it (SIGHUP via
+ * `systemctl reload`) so the change applies immediately — no downtime, no manual restart. Only runs
+ * when auto-reload is enabled AND a valid service is configured AND exec() is available; otherwise it
+ * quietly does nothing and the dashboard's "restart recommended" hint remains as the fallback. On a
+ * successful reload the pending-change log is cleared. Never throws. Returns a small status array for
+ * the API response, or null when no reload was attempted.
+ */
+function autoReloadTrackerBlacklist(array $cfg): ?array {
+    if (($cfg['opentracker_auto_reload'] ?? '1') !== '1') return null;
+    $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+    if ($service === '' || !isServiceNameValid($service) || !trackerExecAvailable()) return null;
+
+    $res = runTrackerServiceCommand('reload', $cfg);
+    if (function_exists('whitelistNoteReloaded')) whitelistNoteReloaded($res['ok'], $res['output']);
+    if ($res['ok']) {
+        resetBlacklistChanges();
+        return ['attempted' => true, 'ok' => true];
+    }
+    return ['attempted' => true, 'ok' => false, 'output' => $res['output']];
+}
+
+/**
+ * Archive an appeal: move from appeals to appeal_archives.
+ */
+function archiveAppeal(PDO $db, array $appeal): bool {
+    try {
+        // The answer's format goes with it (v94, 1.75.0). A database whose migration has not run yet has no such
+        // column in either table: the archive then keeps the answer as it always did.
+        if (function_exists('schemaColumnExists') && schemaColumnExists($db, 'appeal_archives', 'admin_response_format')) {
+            $stmt = $db->prepare(
+                "INSERT INTO appeal_archives (id, infoHash, report_id, name, email, message, appeal_type, status, admin_response, admin_response_format, ip, timestamp, archived_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
+            );
+            $stmt->execute([
+                $appeal['id'], $appeal['infoHash'], $appeal['report_id'], $appeal['name'],
+                $appeal['email'], $appeal['message'], $appeal['appeal_type'] ?? 'unblock',
+                $appeal['status'], $appeal['admin_response'], (string)($appeal['admin_response_format'] ?? 'plain'),
+                $appeal['ip'], $appeal['timestamp']
+            ]);
+        } else {
+            $stmt = $db->prepare(
+                "INSERT INTO appeal_archives (id, infoHash, report_id, name, email, message, appeal_type, status, admin_response, ip, timestamp, archived_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
+            );
+            $stmt->execute([
+                $appeal['id'], $appeal['infoHash'], $appeal['report_id'], $appeal['name'],
+                $appeal['email'], $appeal['message'], $appeal['appeal_type'] ?? 'unblock',
+                $appeal['status'], $appeal['admin_response'], $appeal['ip'], $appeal['timestamp']
+            ]);
+        }
+        $db->prepare("DELETE FROM appeals WHERE id = ?")->execute([$appeal['id']]);
+        return true;
+    } catch (PDOException $e) {
+        return false;
+    }
+}
+
+/**
+ * Auto-close and archive all other pending appeals for the same hash and appeal type.
+ * Returns the count of closed appeals.
+ */
+function autoCloseRelatedAppeals(PDO $db, string $infoHash, string $appealType, int $excludeId, array $cfg): int {
+    $stmt = $db->prepare("SELECT * FROM appeals WHERE infoHash = ? AND appeal_type = ? AND status = 'pending' AND id != ?");
+    $stmt->execute([$infoHash, $appealType, $excludeId]);
+    $related = $stmt->fetchAll();
+    $count = 0;
+
+    foreach ($related as $rel) {
+        // Mark as closed with auto-response
+        $db->prepare("UPDATE appeals SET status = 'rejected', admin_response = ? WHERE id = ?")
+           ->execute(['Automatically closed: another appeal for this hash has been resolved.', $rel['id']]);
+
+        // Re-fetch updated record
+        $stmt2 = $db->prepare("SELECT * FROM appeals WHERE id = ?");
+        $stmt2->execute([$rel['id']]);
+        $updated = $stmt2->fetch();
+        if ($updated) {
+            archiveAppeal($db, $updated);
+        }
+
+        // Tell the appellant — through the dictionary, in the site's language (1.74.0, QUAL-18; includes/mail.php
+        // sendAppealDecision(), loaded by every page and endpoint that closes appeals). Logged on failure.
+        if (!empty($rel['email']) && function_exists('sendAppealDecision')) {
+            $obLevel = ob_get_level();
+            ob_start();
+            try {
+                sendAppealDecision($db, $rel, 'auto_closed', $cfg);
+            } catch (\Throwable $e) {
+                error_log('[appeal] the "closed" mail of appeal #' . (int)$rel['id'] . ' failed: ' . $e->getMessage());
+            }
+            while (ob_get_level() > $obLevel) ob_end_clean();
+        }
+        $count++;
+    }
+    return $count;
+}
+
+/**
+ * Move a single report row into the archives table and delete it from the reports table,
+ * atomically (transaction). Idempotent: if the id is already archived, the archive row is
+ * updated in place and the source row is still removed — a duplicate id can never abort the
+ * caller or leave a report half-processed. Returns true on success.
+ *
+ * Shared by block_hash, delete_all and autoArchiveOldReports so the archive logic lives in
+ * exactly one place.
+ */
+function archiveReport(PDO $db, array $r): bool {
+    try {
+        $db->beginTransaction();
+        // api_client_id travels with the row. Archiving is the moment the record becomes the
+        // permanent one, and dropping the partner here would lose who filed the report exactly then
+        // — the column list is explicit, so a new column is only carried across if it is named.
+        $ins = $db->prepare(
+            "INSERT INTO archives (id, name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, api_client_id, timestamp)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE checked = VALUES(checked), blocked = VALUES(blocked)"
+        );
+        $ins->execute([
+            $r['id'], $r['name'], $r['representative'], $r['company'], $r['email'],
+            $r['objectTitle'], $r['link'], $r['infoHash'], $r['magnet_link'] ?? null,
+            $r['ip'], $r['add_message'], $r['checked'], $r['blocked'],
+            isset($r['api_client_id']) && $r['api_client_id'] !== null ? (int)$r['api_client_id'] : null,
+            $r['timestamp']
+        ]);
+        $db->prepare("DELETE FROM reports WHERE id = ?")->execute([$r['id']]);
+        $db->commit();
+        return true;
+    } catch (PDOException $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        return false;
+    }
+}
+
+/**
+ * Throttle background janitor tasks that would otherwise run on every single request.
+ * Uses a small timestamp marker under config/ (that dir is web-denied). Returns true at
+ * most once per $intervalSec; the marker is updated up-front so concurrent requests only
+ * let one through.
+ */
+function autoArchiveDue(string $marker, array $cfg): bool {
+    $interval = max(30, (int)($cfg['auto_archive_throttle_seconds'] ?? 300));
+    $file = __DIR__ . '/../config/archive_' . preg_replace('/[^a-z0-9_]/', '', $marker) . '.marker';
+    $now = time();
+    if (is_file($file)) {
+        $last = (int)@file_get_contents($file);
+        if ($last > 0 && ($now - $last) < $interval) return false;
+    }
+    @file_put_contents($file, (string)$now, LOCK_EX);
+    return true;
+}
+
+/**
+ * Auto-archive reviewed (checked, not blocked) reports older than X days.
+ * Throttled so it runs at most once per interval, not on every request.
+ */
+function autoArchiveOldReports(PDO $db, array $cfg): int {
+    $days = (int)($cfg['auto_archive_days'] ?? 90);
+    if ($days <= 0) return 0;
+    if (!autoArchiveDue('reports', $cfg)) return 0;
+
+    $stmt = $db->prepare(
+        "SELECT * FROM reports WHERE checked = 1 AND blocked = 0 AND timestamp < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 50"
+    );
+    $stmt->execute([$days]);
+    $old = $stmt->fetchAll();
+    $count = 0;
+
+    foreach ($old as $r) {
+        if (archiveReport($db, $r)) $count++;
+    }
+    return $count;
+}
+
+/**
+ * Auto-archive resolved (accepted/rejected) appeals older than X days.
+ * Called on each request — lightweight query with LIMIT.
+ */
+function autoArchiveOldAppeals(PDO $db, array $cfg): int {
+    $days = (int)($cfg['auto_archive_appeal_days'] ?? 90);
+    if ($days <= 0) return 0;
+    if (!autoArchiveDue('appeals', $cfg)) return 0;
+
+    $stmt = $db->prepare(
+        "SELECT * FROM appeals WHERE status IN ('accepted', 'rejected') AND timestamp < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 50"
+    );
+    $stmt->execute([$days]);
+    $old = $stmt->fetchAll();
+    $count = 0;
+
+    foreach ($old as $a) {
+        if (archiveAppeal($db, $a)) {
+            $count++;
+        }
+    }
+    return $count;
+}
+
+/**
+ * Optional retention: delete sent_emails rows older than N days. Disabled by default
+ * (sent_emails_retention_days = 0) so existing behavior is unchanged. Throttled like the
+ * other janitors; $days is cast to int and inlined (never user-injectable).
+ */
+function pruneOldSentEmails(PDO $db, array $cfg): int {
+    $days = (int)($cfg['sent_emails_retention_days'] ?? 0);
+    if ($days <= 0) return 0;
+    if (!autoArchiveDue('sentemails', $cfg)) return 0;
+
+    $stmt = $db->query("DELETE FROM sent_emails WHERE timestamp < DATE_SUB(NOW(), INTERVAL $days DAY) LIMIT 500");
+    return $stmt ? $stmt->rowCount() : 0;
+}
+
+function obfuscateEmail(string $email): string {
+    $codes = [];
+    for ($i = 0; $i < strlen($email); $i++) {
+        $codes[] = ord($email[$i]);
+    }
+    return json_encode($codes);
+}

@@ -1,0 +1,169 @@
+<?php
+/**
+ * POST richtext_preview — what a description will look like, before it is submitted.
+ *
+ * The renderer stays on the SERVER. It is the only place that can guarantee what comes out, and
+ * shipping the raw text to the browser to be turned into HTML there would move that guarantee to
+ * the least trustworthy place in the system. So the preview is a round trip: the same function, the
+ * same settings, the same output the visitor would see.
+ *
+ * It is also a free parser for anyone who asks, so: rate-limited per address, length-capped before
+ * anything is parsed, and it writes nothing anywhere.
+ */
+requirePost();
+$input = readJsonBody();
+
+if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
+}
+
+/**
+ * WHAT is being previewed decides who may preview it.
+ *
+ * The same markup is written in two places now — a torrent's description and a private message —
+ * and they are not the same permission. Gating a message on "may submit content" told a member who
+ * may write to people but not upload that their own message could not be shown to them; gating it
+ * on the whitelist's description switch answered 404 on a tracker that has descriptions off and
+ * messages on. One renderer, one rate limit, and the gate that matches the text.
+ */
+$for = in_array($input['for'] ?? '', ['message', 'shout', 'list', 'comment'], true) ? (string)$input['for'] : 'description';
+if ($for === 'comment') {
+    // A comment (1.71.0): whoever may write one here — the account, or a guest where the operator allows
+    // guests (commentMayPost(), includes/comments.php). It previews through its OWN renderer below.
+    if (!function_exists('commentsEnabled') || !commentsEnabled($cfg)) jsonResponse(['error' => 'disabled'], 404);
+    if (!commentMayPost($db, $cfg, currentUser($db))['ok']) jsonResponse(['error' => __('api.content.access_required')], 403);
+} elseif ($for === 'list') {
+    // A list's description (1.70.0): the permission that writes one, like its save (api/user_lists.php).
+    if (!function_exists('listsEnabled') || !listsEnabled($cfg)) jsonResponse(['error' => 'lists_disabled'], 404);
+    if (!currentUser($db) || !userCan($db, $cfg, 'lists.use')) jsonResponse(['error' => __('api.content.access_required')], 403);
+} elseif ($for === 'message') {
+    if (!pmEnabled($cfg)) jsonResponse(['error' => 'pm_disabled'], 404);
+    if (!userCan($db, $cfg, 'pm.send')) jsonResponse(['error' => __('api.content.access_required')], 403);
+} elseif ($for === 'shout') {
+    // A third writer, a third gate (1.58.0). Same reasoning as the message one: the permission that
+    // matches the text, not the one that happens to be nearby.
+    if (!function_exists('shoutEnabled') || !shoutEnabled($cfg)) jsonResponse(['error' => 'disabled'], 404);
+    if (!userCan($db, $cfg, 'shout.post')) jsonResponse(['error' => __('api.content.access_required')], 403);
+} else {
+    if (($cfg['wl_allow_description'] ?? '0') !== '1') {
+        jsonResponse(['error' => __('api.content.descriptions_disabled')], 404);
+    }
+    // Same permission as writing one: a preview is a parser, and handing it to somebody who may not
+    // submit is handing out the parser for nothing. Writing one includes PROPOSING one (1.70.0): the
+    // Info panel's editor is also the "propose a rewrite" box, and a reader who may propose and not
+    // submit was refused the Preview tab of the very editor they were given.
+    if (!userCan($db, $cfg, 'content.submit') && !userCan($db, $cfg, 'content.propose')) {
+        jsonResponse(['error' => __('api.content.access_required')], 403);
+    }
+}
+
+$perMin = max(5, min(300, (int)($cfg['rate_limit_preview'] ?? 30) ?: 30));
+if (!rateLimitAllow('rtpreview', ipBucket(getClientIp($cfg)), $perMin, 60)) {
+    jsonResponse(['error' => __('api.content.too_many_previews')], 429);
+}
+
+$text = (string)($input['text'] ?? '');
+$fmt  = (string)($input['format'] ?? 'bbcode');
+
+if ($for === 'comment') {
+    // A COMMENT previews as its thread will draw it (commentRenderHtml(): the comment's own allow-list, the
+    // writer's right to link — a guest's links are text —, the @-names and the emotes) and is judged by
+    // exactly what its save refuses (commentProblem()). The counter counts what a READER sees against the
+    // comment's limit. The source is capped before anything is walked.
+    $me = currentUser($db);
+    $clean = commentClean($text);
+    $cap = commentSourceCap($cfg);
+    if (mb_strlen($clean) > $cap || strlen($clean) > COMMENT_SOURCE_BYTES) {
+        jsonResponse(['error' => __('api.comment.too_long_source', ['max' => $cap]), 'too_long' => true,
+                      'length' => mb_strlen($clean), 'limit' => $cap], 400);
+    }
+    $mayLink = commentWriterMayLink($cfg, $me);
+    $imgRules = commentImageRules($db, $cfg, $me);
+    $p = commentParse($clean, $cfg, $mayLink, $imgRules);
+    // A new account's links are drawn as text (1.71.0, includes/antispam.php) — the Preview shows them so.
+    $ctx = commentRenderContext($db, $cfg, $me, [$clean]) + ['links' => $mayLink && !antispamLinksTextNow($db, $cfg, $me), 'images' => $imgRules];
+    $bad = $clean === '' ? null : commentProblem($clean, $cfg, $mayLink, $imgRules);
+    jsonResponse([
+        'success' => true,
+        'html'    => commentRenderHtml($clean, 'bbcode', $cfg, $ctx),
+        'format'  => 'bbcode',
+        'length'  => (int)$p['chars'],
+        'limit'   => commentMax($cfg),
+        'images'  => ['used' => (int)$p['images'], 'limit' => $imgRules !== null ? (int)$imgRules['max'] : 0],
+        'links'   => ['used' => (int)$p['links'], 'limit' => $mayLink ? COMMENT_MAX_LINKS : 0],
+        'problem' => $bad !== null ? __('api.comment.' . $bad['code'], $bad['vars']) : null,
+    ]);
+}
+// The syntaxes THIS writer may choose from. A shout's are the room's (shoutFormatChoices(): its own, or
+// 'plain' when the room formats nothing) — not the description switches, which used to turn a
+// Markdown shout into BBCode here on a site that allows Markdown only in the room (1.67.0).
+$fmtChoices = $for === 'shout' ? shoutFormatChoices($cfg) : richtextFormats($cfg, $for);
+if (!in_array($fmt, $fmtChoices, true)) $fmt = $fmtChoices[0];
+
+// Cap before parsing, not after. A megabyte of nested tags is a CPU bill, and refusing it is
+// cheaper than rendering it and then deciding it was too long.
+// A message is capped by the message setting, a description by the description one — the counter
+// under the box has to say the number the send would actually be judged against.
+// A list's is capped by the text as typed (listDescSourceCap()) — its own limit is counted as a reader
+// sees it, below.
+$recHash = strtolower((string)($input['hash'] ?? ''));
+$recLim = $for === 'description' && preg_match('/^[0-9a-f]{40}$/', $recHash) && function_exists('forumDescLimits') ? forumDescLimits($db, $recHash) : null;
+$rcfg = $recLim !== null ? ['rt_record_limits' => $recLim] + $cfg : $cfg;
+$max = $for === 'message' ? pmMaxChars($cfg)
+     : ($for === 'shout' ? shoutMaxChars($cfg) : ($for === 'list' ? listDescSourceCap($cfg) : richtextRecordLimits($rcfg)['chars']));
+if ($max > 0 && mb_strlen($text) > $max) {
+    jsonResponse(['error' => __('api.content.description_too_long', ['length' => mb_strlen($text), 'limit' => $max]),
+                  'too_long' => true, 'length' => mb_strlen($text), 'limit' => $max], 400);
+}
+
+// The limits are reported rather than enforced here: somebody still typing should see "3 of 3
+// images" as they go, not have the preview refuse to draw. Counted in the syntax the text is written
+// in — counted as BBCode, a Markdown link was "0 links" (1.67.0).
+$counts = $fmt === 'plain' ? ['images' => 0, 'links' => 0] : richtextCount($text, $fmt, $cfg);
+if ($for === 'shout') {
+    // A SHOUT previews through the room's own pipeline and its own rules (1.67.0): shoutBodyHtml() is
+    // what every line in the room is drawn with — hidden blocks shown, pictures openable, mentions and
+    // emotes — and shoutBodyProblem() is exactly what shoutPost() would refuse it for. So whatever the
+    // room does not support comes out here the way it would come out once said, and the sentence
+    // under the box is the one pressing Enter would get, with the room's length limit in it.
+    $me = currentUser($db);
+    $html = shoutBodyHtml($text, $fmt, $cfg, shoutRenderContext($db, $cfg, is_array($me) ? $me : [], [$text])
+                                             + ['links_text' => antispamLinksTextNow($db, $cfg, is_array($me) ? $me : null)]);
+    $problem = shoutBodyProblem($cfg, $text, $fmt);
+} elseif ($for === 'list') {
+    // A LIST's description (1.70.0) previews as its window draws it (listDescRender(): the renderer, the
+    // room's emotes, no picture from elsewhere) and is judged by what its save refuses (listDescProblem()).
+    // Its counter counts what a reader sees (listDescVisible(), the twin of the one the editor counts
+    // with while typing) against its own limit, and no picture is allowed at all.
+    $clean = listDescClean($text);
+    $html = listDescRender($db, $cfg, $clean, $fmt, antispamLinksTextNow($db, $cfg, currentUser($db)));
+    $bad = listDescProblem($clean, $fmt, $cfg);
+    $problem = $bad !== null ? __('api.lists.' . $bad['code'], $bad['vars']) : null;
+    jsonResponse([
+        'success' => true,
+        'html'    => $html,
+        'format'  => $fmt,
+        'length'  => listDescVisible($clean, $fmt),
+        'limit'   => listsDescMax($cfg),
+        'images'  => ['used' => $counts['images'], 'limit' => 0],
+        'links'   => ['used' => $counts['links'], 'limit' => richtextMaxLinks($cfg)],
+        'problem' => $problem,
+    ]);
+} else {
+    // The author previewing their own text sees their own hidden block; that is the only way to
+    // check it before submitting. A message is judged against the message limit, as its send is.
+    // The site's emotes and stickers as the page that shows it will draw them (1.70.0) — and not
+    // counted as pictures: the counts above are the renderer's own.
+    $html = richtextRenderIn($for, $db, $text, $fmt, $cfg, richtextViewerSignedIn($db));
+    $problem = richtextValidate($text, $fmt, $for === 'message' ? array_merge($cfg, ['desc_max_chars' => (string)$max]) : $rcfg, $for);
+}
+jsonResponse([
+    'success' => true,
+    'html'    => $html,
+    'format'  => $fmt,
+    'length'  => mb_strlen($text),
+    'limit'   => $max,
+    'images'  => ['used' => $counts['images'], 'limit' => richtextRecordLimits($rcfg)['images']],
+    'links'   => ['used' => $counts['links'], 'limit' => richtextRecordLimits($rcfg)['links']],
+    'problem' => $problem,
+]);

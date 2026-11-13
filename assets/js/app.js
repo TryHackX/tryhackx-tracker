@@ -1,0 +1,6485 @@
+/**
+ * The number on the account link in the navigation.
+ *
+ * It is the sum of two different things that are read in two different places — notifications, on
+ * the Notifications tab, and unread messages, on the Messages tab — so neither owner can write the
+ * number on its own. Both hand their half here instead: whoever learns a fresh count sets it, and
+ * this adds them up. The tab badges beside them stay separate, because a reader who sees 5 in the
+ * navigation needs the two tabs to tell them which is which.
+ */
+window.NavUnread = {
+    notif: 0,
+    pm: 0,
+    // The shoutbox's own number (1.60.0), and it is deliberately NOT part of the total below: that
+    // total means "notifications and messages waiting", both of which are read on the account page,
+    // and lines in a room people are talking in are neither. Its own element beside the account
+    // badge, the way the sounds note already is.
+    shout: 0,
+    // The numbers the page was drawn with (1.75.2, templates/nav.php data-n-*): the badges no longer come hidden and
+    // appear a moment later — which moved the whole bar on every page — so the halves start from what is on screen
+    // and a later set() of one half adds it to the other half's real number, not to 0.
+    seed: function () {
+        var b = document.getElementById('nav-unread'), s = document.getElementById('nav-shout-unread');
+        if (b) { this.notif = Math.max(0, Number(b.dataset.nNotif) || 0); this.pm = Math.max(0, Number(b.dataset.nPm) || 0); }
+        if (s) this.shout = Math.max(0, Number(s.dataset.nShout) || 0);
+    },
+    set: function (kind, n) {
+        this[kind] = Math.max(0, Number(n) || 0);
+        this.render();
+    },
+    render: function () {
+        var b = document.getElementById('nav-unread');
+        if (b) {
+            var total = this.notif + this.pm;
+            b.textContent = total ? String(total) : '';
+            b.hidden = total <= 0;
+        }
+        // Looked up even when the account badge is not on the page at all: a guest the operator
+        // granted `shout.view` has a Shoutbox link and no account link to hang anything on.
+        var s = document.getElementById('nav-shout-unread');
+        if (s) {
+            s.textContent = this.shout ? String(this.shout) : '';
+            s.hidden = this.shout <= 0;
+        }
+    },
+};
+
+// The picture beside a name — window.userAvatarUrl(), window.userAvatarImg() and window.userAvatarSet(),
+// and the letter an unloadable one falls back to — lives in assets/js/avatar.js (1.63.0 phase B), which
+// templates/layout.php loads before this file: the panel draws pictures too, and never loads this one.
+
+// === CAPTCHA ===
+// The modal itself lives in assets/js/captcha.js (window.showCaptchaModal / window.captchaReset),
+// shared with the admin panel and provider-agnostic (reCAPTCHA v2 / v3, Turnstile, hCaptcha).
+// `action` is only used by reCAPTCHA v3 (invisible: no modal, a score token is fetched silently);
+// fetchWithCaptcha() derives it from the endpoint name (e.g. 'submit_report').
+function requestCaptchaToken(action) {
+    if (typeof window.showCaptchaModal !== 'function') return Promise.resolve(null);
+    return window.showCaptchaModal({ action: action || 'submit' });
+}
+
+/** True when the last prompt failed on the widget/loader instead of being cancelled by the user. */
+function captchaUnavailable() {
+    return typeof window.captchaWasUnavailable === 'function' && window.captchaWasUnavailable();
+}
+
+/**
+ * POST to an endpoint that may demand a CAPTCHA.
+ *
+ * The handshake is: post, and if the reply says `captcha_required`, solve one and post again. That
+ * has to stay — the requirement can appear between a page render and its submit (the smart CAPTCHA
+ * counts failures) and only the server knows. But when the page ALREADY knows the server will ask,
+ * the first post is a request that exists only to be rejected, and the browser writes the rejection
+ * into the console as an error on a sign-in that then works. `solveFirst` skips it.
+ */
+async function fetchWithCaptcha(endpoint, data, solveFirst) {
+    if (solveFirst && !data['captcha_token']) {
+        const pre = await requestCaptchaToken(endpoint);
+        if (!pre) return { error: captchaUnavailable() ? t.key('js.app.captcha_unavailable') : t.key('js.app.captcha_cancelled') };
+        data['captcha_token'] = pre;
+        data['g-recaptcha-response'] = pre;
+    }
+    const body = JSON.stringify(data);
+    let res, json;
+    try {
+        res = await fetch(APP_API + endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: body,
+        });
+        json = await res.json();
+    } catch {
+        return { error: t.key('js.app.invalid_response') };
+    }
+
+    if (json.captcha_required) {
+        const token = await requestCaptchaToken(endpoint);
+        // No token: either the visitor closed the box, or the widget itself failed (bad site key,
+        // domain not allow-listed, provider blocked) — those two need different advice.
+        if (!token) return { error: captchaUnavailable() ? t.key('js.app.captcha_unavailable') : t.key('js.app.captcha_cancelled') };
+        // Send under both names: `captcha_token` (generic) and the legacy reCAPTCHA field name.
+        data['captcha_token'] = token;
+        data['g-recaptcha-response'] = token;
+        // Up to 3 attempts, 1 s apart: the server's own verifier call can die on a congested
+        // uplink — retrying the SAME solved token usually succeeds a moment later, so the user
+        // is not bounced back to a fresh CAPTCHA for a network hiccup.
+        let last = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                const res2 = await fetch(APP_API + endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                last = await res2.json();
+            } catch {
+                last = { error: t.key('js.app.invalid_response_after_captcha') };
+            }
+            const failed = last && typeof last.error === 'string' && last.error.indexOf('CAPTCHA verification failed') !== -1;
+            if (!failed) return last;
+            if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+        }
+        return last;
+    }
+    return json;
+}
+
+// The seconds drawn over the button by the anti-spam layer's own rule (1.73.0: `as-waiting` + data-as-wait,
+// assets/css/style.css) — never written into the button: its label is the server's, and the live language switch
+// translates it in place, also during the wait (the label used to be captured and written back after it, in the
+// language the page had when the wait began).
+function startCooldown(btn, seconds) {
+    let remaining = seconds;
+    btn.disabled = true;
+    const draw = () => btn.setAttribute('data-as-wait', t.key('js.app.wait_seconds', {n: remaining}));
+    btn.classList.add('as-waiting');
+    draw();
+    document.addEventListener('langswap', draw);
+    const interval = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(interval);
+            document.removeEventListener('langswap', draw);
+            btn.classList.remove('as-waiting');
+            btn.removeAttribute('data-as-wait');
+            btn.disabled = false;
+        } else {
+            draw();
+        }
+    }, 1000);
+}
+
+// Shared handling for a failed form submission (report / appeal / status-appeal all behaved
+// identically here). `messages` maps error codes to friendly text; `rate_limit` has a default.
+// Highlights any `fields` the server flagged and starts the resubmit cooldown.
+function showFormSubmitError(form, alert, btn, json, messages = {}) {
+    const map = { rate_limit: t.key('js.app.rate_limit'), ...messages };
+    const code = json && json.error;
+    alert.className = 'alert alert-error show';
+    // A code this form has words for; else the sentence the server already wrote (the anti-spam layer's answers
+    // carry one, 1.71.0); else the code itself.
+    alert.textContent = (code && map[code]) ? map[code] : ((json && typeof json.message === 'string' && json.message) || code || t.key('js.app.error_occurred'));
+    if (json && Array.isArray(json.fields)) {
+        json.fields.forEach(f => {
+            const input = form.querySelector(`[name="${f}"]`);
+            if (input) input.closest('.form-group')?.classList.add('has-error');
+        });
+    }
+    startCooldown(btn, 5);
+}
+
+// Shared handling for a network/transport failure on form submit.
+function showFormNetworkError(alert, btn) {
+    alert.className = 'alert alert-error show';
+    alert.textContent = t.key('js.app.network_error_retry');
+    startCooldown(btn, 5);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const reportForm = document.getElementById('report-form');
+    if (reportForm) {
+        reportForm.addEventListener('submit', handleReportSubmit);
+    }
+
+    const statusForm = document.getElementById('status-form');
+    if (statusForm) {
+        statusForm.addEventListener('submit', handleStatusCheck);
+    }
+
+    // Clear validation errors on input
+    document.querySelectorAll('.form-group input, .form-group textarea').forEach(el => {
+        el.addEventListener('input', () => {
+            el.closest('.form-group')?.classList.remove('has-error');
+        });
+    });
+
+    // Real-time hex validation for infoHash
+    const hashInput = document.getElementById('infoHash');
+    const hashHint = document.getElementById('hash-hint');
+    if (hashInput && hashHint) {
+        hashInput.addEventListener('input', () => {
+            const v = hashInput.value;
+            if (!v) { hashHint.textContent = ''; hashHint.style.color = ''; return; }
+            const nonHex = v.replace(/[a-fA-F0-9]/g, '');
+            if (nonHex.length > 0) {
+                hashHint.textContent = t.key('js.app.hash_non_hex');
+                hashHint.style.color = 'var(--error)';
+            } else if (v.length < 40) {
+                hashHint.textContent = t.key('js.app.hash_length', {n: v.length});
+                hashHint.style.color = 'var(--warning)';
+            } else {
+                hashHint.textContent = t.key('js.app.hash_valid');
+                hashHint.style.color = 'var(--success)';
+            }
+            validateMagnetCross();
+        });
+    }
+
+    // Magnet link cross-validation
+    const magnetInput = document.getElementById('magnetLink');
+    const magnetHint = document.getElementById('magnet-hint');
+    if (magnetInput && magnetHint) {
+        magnetInput.addEventListener('input', () => {
+            validateMagnetCross();
+        });
+    }
+
+    // Block check form
+    const blockCheckForm = document.getElementById('block-check-form');
+    if (blockCheckForm) {
+        blockCheckForm.addEventListener('submit', handleBlockCheck);
+    }
+
+    // Appeal form
+    const appealForm = document.getElementById('appeal-form');
+    if (appealForm) {
+        appealForm.addEventListener('submit', handleAppealSubmit);
+    }
+
+    // Appeal character counter
+    const appealMsg = document.getElementById('appeal-message');
+    const appealCounter = document.getElementById('appeal-counter');
+    if (appealMsg && appealCounter) {
+        const max = parseInt(appealMsg.dataset.maxlength || '2000');
+        appealMsg.addEventListener('input', () => {
+            appealCounter.textContent = appealMsg.value.length + '/' + max;
+            appealCounter.style.color = appealMsg.value.length > max * 0.9 ? 'var(--warning)' : '';
+            if (appealMsg.value.length >= max) appealCounter.style.color = 'var(--error)';
+        });
+    }
+
+    // Status appeal form (Check Report Status page)
+    const statusAppealForm = document.getElementById('status-appeal-form');
+    if (statusAppealForm) {
+        statusAppealForm.addEventListener('submit', handleStatusAppealSubmit);
+    }
+
+    // Status appeal character counter
+    const statusAppealMsg = document.getElementById('status-appeal-message');
+    const statusAppealCounter = document.getElementById('status-appeal-counter');
+    if (statusAppealMsg && statusAppealCounter) {
+        const max = parseInt(statusAppealMsg.dataset.maxlength || '2000');
+        statusAppealMsg.addEventListener('input', () => {
+            statusAppealCounter.textContent = statusAppealMsg.value.length + '/' + max;
+            statusAppealCounter.style.color = statusAppealMsg.value.length > max * 0.9 ? 'var(--warning)' : '';
+            if (statusAppealMsg.value.length >= max) statusAppealCounter.style.color = 'var(--error)';
+        });
+    }
+
+    // Character counter for message textarea
+    const msgArea = document.getElementById('add_message');
+    const msgCounter = document.getElementById('msg-counter');
+    if (msgArea && msgCounter) {
+        const max = parseInt(msgArea.dataset.maxlength || '2000');
+        msgCounter.textContent = msgArea.value.length + '/' + max;
+        msgArea.addEventListener('input', () => {
+            msgCounter.textContent = msgArea.value.length + '/' + max;
+            msgCounter.style.color = msgArea.value.length > max * 0.9 ? 'var(--warning)' : '';
+            if (msgArea.value.length >= max) msgCounter.style.color = 'var(--error)';
+        });
+    }
+
+    // Transparency page — multi-sort via clickable headers
+    if (document.getElementById('trans-table')) {
+        updateTransSortIcons();
+        loadTransparency();
+        document.querySelectorAll('.trans-sortable').forEach(th => {
+            th.addEventListener('click', () => {
+                const col = th.dataset.sort;
+                const exclusive = th.dataset.exclusive;
+                const idx = transSortStack.findIndex(s => s.col === col);
+
+                // Remove mutually exclusive column if present
+                if (exclusive) {
+                    const exIdx = transSortStack.findIndex(s => s.col === exclusive);
+                    if (exIdx !== -1) transSortStack.splice(exIdx, 1);
+                }
+
+                if (idx === -1) {
+                    transSortStack.push({ col, dir: 'asc' });
+                } else if (transSortStack[idx].dir === 'asc') {
+                    transSortStack[idx].dir = 'desc';
+                } else {
+                    transSortStack.splice(idx, 1);
+                }
+                updateTransSortIcons();
+                loadTransparency(1);
+            });
+        });
+    }
+
+    // Public whitelist registration page (?action=whitelist)
+    initWhitelistPage();
+
+    // Initialize tracker stats page or homepage widget
+    initTrackerStats();
+
+    // ── Delegated handlers ───────────────────────────────────────────────────
+    //
+    // The three things below used to be onclick="" attributes: the announce/donation copy buttons
+    // (includes/homeblocks.php, templates/pages/whitelist.php), the "show e-mail" link, and the
+    // transparency pager this file builds. An on*= attribute is blocked by script-src unless the
+    // policy says 'unsafe-inline', and the per-request nonce does NOT cover it — the nonce
+    // whitelists <script> ELEMENTS, nothing else. Delegation on `document` because the pager is
+    // re-rendered on every page of results.
+    document.addEventListener('click', (e) => {
+        const copy = e.target.closest('[data-copy]');
+        if (copy) { copyText(copy, copy.dataset.copy); return; }
+        const mail = e.target.closest('[data-reveal-email]');
+        if (mail) { e.preventDefault(); revealEmail(mail); return; }
+        const page = e.target.closest('[data-trans-page]');
+        if (page && !page.disabled) loadTransparency(parseInt(page.dataset.transPage, 10));
+        const pic = e.target.closest('.rt-body img.rt-img');
+        if (pic && !pic.closest('a') && window.SiteLightbox && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+            const all = [...pic.closest('.rt-body').querySelectorAll('img.rt-img')].filter((im) => !im.closest('a'));
+            e.preventDefault();
+            window.SiteLightbox.show(all.map((im) => ({ src: im.dataset.full || im.currentSrc || im.src, alt: im.alt })), all.indexOf(pic), pic);
+        }
+    });
+});
+
+// Copy text helper: the announce and donation copy buttons (includes/homeblocks.php, the whitelist page).
+// Since 1.71.0 their glyph is the icon library's (an inline drawing of its own ignored the library the
+// site draws with), and a copy swaps it for the library's tick — the class, so Font Awesome's observer
+// maps it too — and says "Copied!" in the site's tooltip, which takes the place of the button's name.
+function copyText(btn, sourceId) {
+    const el = document.getElementById(sourceId);
+    const text = el ? el.textContent.trim() : '';
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const i = btn.querySelector(':scope > .bi');
+        if (i) {
+            if (!btn.dataset.glyph) btn.dataset.glyph = [...i.classList].filter((c) => !c.startsWith('fa-')).join(' ');
+            i.className = 'bi bi-check-lg';
+        }
+        btn.classList.add('copied');
+        if (typeof window.pubTip === 'function') window.pubTip(btn, t.key('js.common.copied'));
+        clearTimeout(btn.__copyTimer);
+        btn.__copyTimer = setTimeout(() => {
+            const j = btn.querySelector(':scope > .bi');
+            if (j && btn.dataset.glyph) j.className = btn.dataset.glyph;
+            delete btn.dataset.glyph;
+            btn.classList.remove('copied');
+        }, 1500);
+    });
+}
+
+// Extract hash from magnet link
+function extractHashFromMagnet(magnet) {
+    const m = magnet.match(/urn:btih:([a-fA-F0-9]{40})/i);
+    if (m) return m[1].toLowerCase();
+    // Base32 encoded hash (32 chars)
+    const b32 = magnet.match(/urn:btih:([A-Z2-7]{32})/i);
+    if (b32) {
+        try {
+            const decoded = base32ToHex(b32[1].toUpperCase());
+            if (decoded && decoded.length === 40) return decoded.toLowerCase();
+        } catch {}
+    }
+    return null;
+}
+
+// Mirror of PHP `base32ToHex()` in includes/functions.php — client-side magnet validation only;
+// the server re-validates authoritatively. Keep both in sync if the decoding logic changes.
+function base32ToHex(base32) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let bits = '';
+    for (const c of base32) {
+        const val = alphabet.indexOf(c);
+        if (val === -1) return null;
+        bits += val.toString(2).padStart(5, '0');
+    }
+    let hex = '';
+    for (let i = 0; i + 4 <= bits.length; i += 4) {
+        hex += parseInt(bits.substr(i, 4), 2).toString(16);
+    }
+    return hex;
+}
+
+function validateMagnetCross() {
+    const magnetInput = document.getElementById('magnetLink');
+    const magnetHint = document.getElementById('magnet-hint');
+    const hashInput = document.getElementById('infoHash');
+    if (!magnetInput || !magnetHint || !hashInput) return;
+
+    const magnet = magnetInput.value.trim();
+    if (!magnet) {
+        magnetHint.textContent = '';
+        magnetHint.style.color = '';
+        magnetInput.closest('.form-group')?.classList.remove('has-error');
+        return;
+    }
+
+    if (!magnet.startsWith('magnet:?')) {
+        magnetHint.textContent = t.key('js.app.magnet_prefix');
+        magnetHint.style.color = 'var(--error)';
+        return;
+    }
+
+    if (!/[?&]xt=urn:btih:/i.test(magnet)) {
+        magnetHint.textContent = t.key('js.app.magnet_missing_xt');
+        magnetHint.style.color = 'var(--error)';
+        return;
+    }
+
+    const extractedHash = extractHashFromMagnet(magnet);
+    if (!extractedHash) {
+        magnetHint.textContent = t.key('js.app.magnet_invalid_hash');
+        magnetHint.style.color = 'var(--error)';
+        return;
+    }
+
+    const currentHash = hashInput.value.trim().toLowerCase();
+    if (currentHash && currentHash.length === 40 && /^[a-f0-9]{40}$/.test(currentHash)) {
+        if (extractedHash === currentHash) {
+            magnetHint.textContent = t.key('js.app.magnet_hash_matches');
+            magnetHint.style.color = 'var(--success)';
+        } else {
+            magnetHint.textContent = t.key('js.app.magnet_hash_mismatch');
+            magnetHint.style.color = 'var(--error)';
+        }
+    } else {
+        magnetHint.textContent = t.key('js.app.magnet_hash_extracted', {hash: extractedHash.substring(0, 8)});
+        magnetHint.style.color = 'var(--text-muted)';
+    }
+}
+
+// Email obfuscation reveal
+function revealEmail(el) {
+    if (typeof OBF_EMAIL === 'undefined') return;
+    const email = OBF_EMAIL.map(c => String.fromCharCode(c)).join('');
+    el.textContent = email;
+    el.href = 'mailto:' + email;
+    // Take the marker off rather than clearing el.onclick: the click is handled by the delegate on
+    // `document` now, and without this the delegate would keep preventDefault()ing the mailto:
+    // link it has just written — the address would be revealed and then refuse to open.
+    el.removeAttribute('data-reveal-email');
+}
+
+async function handleReportSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('report-alert');
+    const btn = document.getElementById('report-submit');
+
+    form.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+    alert.className = 'alert';
+    alert.textContent = '';
+
+    let valid = true;
+    ['name', 'representative', 'company', 'objectTitle'].forEach(f => {
+        const input = form.querySelector(`[name="${f}"]`);
+        if (!input.value.trim()) {
+            input.closest('.form-group').classList.add('has-error');
+            valid = false;
+        }
+    });
+
+    const emailInput = form.querySelector('[name="email"]');
+    if (!emailInput.value.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+        emailInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+
+    const linkInput = form.querySelector('[name="link"]');
+    try { new URL(linkInput.value); } catch {
+        linkInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+
+    const hashInput = form.querySelector('[name="infoHash"]');
+    if (!hashInput.value.match(/^[a-fA-F0-9]{40}$/)) {
+        hashInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+
+    // Magnet link cross-validation (optional field, but if filled must be valid)
+    const magnetInput = form.querySelector('[name="magnet_link"]');
+    if (magnetInput && magnetInput.value.trim()) {
+        const magnet = magnetInput.value.trim();
+        if (!magnet.startsWith('magnet:?') || !/[?&]xt=urn:btih:/i.test(magnet)) {
+            magnetInput.closest('.form-group').classList.add('has-error');
+            valid = false;
+        } else {
+            const extractedHash = extractHashFromMagnet(magnet);
+            if (!extractedHash) {
+                magnetInput.closest('.form-group').classList.add('has-error');
+                valid = false;
+            } else if (hashInput.value.match(/^[a-fA-F0-9]{40}$/) && extractedHash !== hashInput.value.toLowerCase()) {
+                magnetInput.closest('.form-group').classList.add('has-error');
+                valid = false;
+            }
+        }
+    }
+
+    if (!valid) return;
+
+    btn.disabled = true;
+
+    const data = {};
+    new FormData(form).forEach((v, k) => data[k] = v);
+
+    try {
+        const json = await fetchWithCaptcha('submit_report', data);
+
+        if (json.success) {
+            alert.className = 'alert alert-success show';
+            alert.textContent = t.key('js.app.report_submitted', {id: json.id});
+            // Whitelist mode: the reported hash may not even be registered here (nothing to serve).
+            if (json.whitelisted === false) {
+                alert.replaceChildren(t.key('js.app.report_submitted', {id: json.id}), ' ', t.key('js.app.report_not_registered_note'));
+            }
+            form.reset();
+            const mc = document.getElementById('msg-counter');
+            if (mc) {
+                const maxLen = document.getElementById('add_message')?.dataset.maxlength || '2000';
+                mc.textContent = '0/' + maxLen;
+                mc.style.color = '';
+            }
+            btn.disabled = false;
+        } else {
+            showFormSubmitError(form, alert, btn, json, {
+                duplicate: t.key('js.app.report_duplicate'),
+            });
+        }
+    } catch {
+        showFormNetworkError(alert, btn);
+    }
+}
+
+async function handleStatusCheck(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('status-alert');
+    const result = document.getElementById('status-result');
+
+    form.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+    alert.className = 'alert';
+    result.style.display = 'none';
+
+    let query = form.querySelector('[name="search_query"]').value.trim();
+    const email = form.querySelector('[name="email"]').value.trim();
+
+    if (!query) {
+        form.querySelector('[name="search_query"]').closest('.form-group').classList.add('has-error');
+        return;
+    }
+
+    // If it's a magnet link, extract the hash
+    if (query.startsWith('magnet:?')) {
+        const extracted = extractHashFromMagnet(query);
+        if (!extracted) {
+            form.querySelector('[name="search_query"]').closest('.form-group').classList.add('has-error');
+            alert.className = 'alert alert-error show';
+            alert.textContent = t.key('js.app.magnet_extract_failed');
+            return;
+        }
+        query = extracted;
+    }
+
+    // Email is always required
+    const emailField = form.querySelector('[name="email"]');
+    if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+        emailField.closest('.form-group').classList.add('has-error');
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.status_email_required');
+        return;
+    }
+
+    const body = {
+        search_query: query,
+        email: email,
+        csrf_token: csrfToken(form),
+    };
+
+    try {
+        const json = await fetchWithCaptcha('check_status', body);
+
+        if (json.success) {
+            document.getElementById('res-id').textContent = '#' + json.id;
+            document.getElementById('res-reporter').textContent = json.name || '—';
+            document.getElementById('res-email').textContent = json.email || '—';
+            document.getElementById('res-company').textContent = json.company || '—';
+            document.getElementById('res-representative').textContent = json.representative || '—';
+            const linkEl = document.getElementById('res-link');
+            if (json.link) {
+                // A URL a STRANGER submitted, on a public page. Escaping alone is not enough: it
+                // closes the attribute breakout but leaves `javascript:` intact, because a scheme
+                // is not markup. So the scheme is checked first and anything that is not http(s)
+                // is shown as text rather than made clickable — a reporter does not get to choose
+                // what a visitor's browser executes.
+                const ok = /^https?:\/\//i.test(String(json.link).trim());
+                if (ok) {
+                    linkEl.innerHTML = '<a href="' + escAttr(json.link) + '" rel="noopener noreferrer" target="_blank" class="status-link">' + escHtml(json.link) + '</a>';
+                } else {
+                    linkEl.textContent = json.link;
+                }
+            } else {
+                linkEl.textContent = '—';
+            }
+
+            document.getElementById('res-object').textContent = json.objectTitle || '—';
+            document.getElementById('res-hash').textContent = json.infoHash;
+            const magnetRow = document.getElementById('res-magnet-row');
+            if (json.magnet_link) {
+                document.getElementById('res-magnet').textContent = json.magnet_link;
+                magnetRow.style.display = '';
+            } else {
+                magnetRow.style.display = 'none';
+            }
+            document.getElementById('res-date').textContent = json.timestamp;
+
+            const statusLabels = { pending: 'js.app.status_pending', checked: 'js.app.status_checked', blocked: 'js.app.status_blocked', archived: 'js.app.status_archived' };
+            const statusEl = document.getElementById('res-status');
+            let badges = '';
+            if (json.blocked) {
+                badges += '<span class="status-badge blocked">' + t.html('js.app.status_blocked') + '</span> ';
+            }
+            if (json.checked && !json.blocked && json.archived) {
+                badges += '<span class="status-badge checked">' + t.html('js.app.status_checked') + '</span> ';
+            }
+            if (json.archived) {
+                badges += '<span class="status-badge archived">' + t.html('js.app.status_archived') + '</span>';
+            }
+            if (!badges) {
+                badges = '<span class="status-badge ' + escAttr(json.status) + '">'
+                    + (statusLabels[json.status] ? t.html(statusLabels[json.status]) : escHtml(json.status)) + '</span>';
+            }
+            statusEl.innerHTML = badges;
+
+            // Show appeal form only for archived-without-block (request blocking/re-examination)
+            const statusAppealSection = document.getElementById('status-appeal-section');
+            if (statusAppealSection) {
+                if (json.archived && !json.blocked) {
+                    statusAppealSection.style.display = '';
+                    document.getElementById('status-appeal-hash').value = json.infoHash;
+                    document.getElementById('status-appeal-type').value = 'block';
+                    document.getElementById('status-appeal-report-id').value = json.id;
+                    document.getElementById('status-appeal-desc').textContent = t.key('js.app.status_appeal_desc');
+                } else {
+                    statusAppealSection.style.display = 'none';
+                }
+            }
+
+            result.style.display = 'block';
+        } else {
+            alert.className = 'alert alert-error show';
+            alert.textContent = json.error === 'not_found' ? t.key('js.app.status_not_found') : (json.error || t.key('js.app.error'));
+        }
+    } catch {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.network_error');
+    }
+}
+
+// Block check
+async function handleBlockCheck(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('block-check-alert');
+    const result = document.getElementById('block-check-result');
+
+    form.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+    alert.className = 'alert';
+    alert.textContent = '';
+    result.style.display = 'none';
+
+    let query = form.querySelector('[name="block_query"]').value.trim();
+    if (!query) {
+        form.querySelector('[name="block_query"]').closest('.form-group').classList.add('has-error');
+        return;
+    }
+
+    // If it's a magnet link, extract the hash
+    let hash = query;
+    if (query.startsWith('magnet:?')) {
+        hash = extractHashFromMagnet(query);
+        if (!hash) {
+            alert.className = 'alert alert-error show';
+            alert.textContent = t.key('js.app.magnet_extract_failed');
+            return;
+        }
+    }
+
+    if (!/^[a-fA-F0-9]{40}$/.test(hash)) {
+        form.querySelector('[name="block_query"]').closest('.form-group').classList.add('has-error');
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.block_enter_valid_hash');
+        return;
+    }
+
+    try {
+        const json = await fetchWithCaptcha('check_block', { hash: hash.toLowerCase() });
+
+        if (json.success) {
+            document.getElementById('bc-hash').textContent = json.infoHash;
+            const statusEl = document.getElementById('bc-status');
+            if (json.blocked) {
+                statusEl.innerHTML = '<span class="status-badge blocked">' + t.html('js.app.status_blocked') + '</span>';
+            } else {
+                statusEl.innerHTML = '<span class="status-badge checked">' + t.html('js.app.status_not_blocked') + '</span>';
+            }
+            // Whitelist mode: a second badge — registered (served) / not registered — independent of blocks
+            const wlRow = document.getElementById('bc-row-whitelist');
+            if (wlRow) {
+                if (typeof json.whitelisted === 'boolean') {
+                    const wlEl = document.getElementById('bc-whitelist');
+                    wlEl.textContent = '';
+                    const badge = document.createElement('span');
+                    badge.className = 'status-badge ' + (json.whitelisted ? 'checked' : 'blocked');
+                    badge.textContent = json.whitelisted ? t.key('js.app.whitelisted') : t.key('js.app.not_whitelisted');
+                    wlEl.appendChild(badge);
+                    wlEl.append(json.whitelisted ? t.key('js.app.whitelisted_desc') : t.key('js.app.not_whitelisted_desc'));
+                    wlRow.style.display = '';
+                } else {
+                    wlRow.style.display = 'none';
+                }
+            }
+            document.getElementById('bc-row-company').style.display = json.blocked ? '' : 'none';
+            document.getElementById('bc-row-entity').style.display = json.blocked ? '' : 'none';
+            document.getElementById('bc-company').textContent = json.company || '—';
+            document.getElementById('bc-entity').textContent = json.representative || '—';
+            // Show appeal section only when blocked
+            const appealSection = document.getElementById('appeal-section');
+            if (appealSection) {
+                appealSection.style.display = json.blocked ? '' : 'none';
+                if (json.blocked) {
+                    document.getElementById('appeal-hash').value = json.infoHash;
+                }
+            }
+            result.style.display = 'block';
+        } else {
+            alert.className = 'alert alert-error show';
+            alert.textContent = json.error || t.key('js.app.error');
+        }
+    } catch {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.network_error');
+    }
+}
+
+// Appeal submission
+async function handleAppealSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('appeal-alert');
+    const btn = document.getElementById('appeal-submit');
+
+    form.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+    alert.className = 'alert';
+    alert.textContent = '';
+
+    let valid = true;
+    const nameInput = form.querySelector('[name="name"]');
+    if (!nameInput.value.trim()) {
+        nameInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+    const emailInput = form.querySelector('[name="email"]');
+    if (!emailInput.value.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+        emailInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+    const msgInput = form.querySelector('[name="message"]');
+    if (!msgInput.value.trim()) {
+        msgInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+
+    if (!valid) return;
+
+    btn.disabled = true;
+
+    const data = {};
+    new FormData(form).forEach((v, k) => data[k] = v);
+
+    try {
+        const json = await fetchWithCaptcha('submit_appeal', data);
+
+        if (json.success) {
+            alert.className = 'alert alert-success show';
+            alert.textContent = t.key('js.app.appeal_submitted');
+            form.reset();
+            document.getElementById('appeal-hash').value = document.getElementById('bc-hash').textContent;
+            const counter = document.getElementById('appeal-counter');
+            if (counter) counter.textContent = '0/' + (document.getElementById('appeal-message')?.dataset.maxlength || '2000');
+            btn.disabled = false;
+        } else {
+            showFormSubmitError(form, alert, btn, json);
+        }
+    } catch {
+        showFormNetworkError(alert, btn);
+    }
+}
+
+// Status page appeal submission (for archived-without-block or blocked+archived)
+async function handleStatusAppealSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('status-appeal-alert');
+    const btn = document.getElementById('status-appeal-submit');
+
+    form.querySelectorAll('.form-group').forEach(g => g.classList.remove('has-error'));
+    alert.className = 'alert';
+    alert.textContent = '';
+
+    let valid = true;
+    const nameInput = form.querySelector('[name="name"]');
+    if (!nameInput.value.trim()) {
+        nameInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+    const emailInput = form.querySelector('[name="email"]');
+    if (!emailInput.value.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
+        emailInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+    const msgInput = form.querySelector('[name="message"]');
+    if (!msgInput.value.trim()) {
+        msgInput.closest('.form-group').classList.add('has-error');
+        valid = false;
+    }
+
+    if (!valid) return;
+
+    btn.disabled = true;
+
+    const data = {};
+    new FormData(form).forEach((v, k) => data[k] = v);
+
+    try {
+        const json = await fetchWithCaptcha('submit_appeal', data);
+
+        if (json.success) {
+            alert.className = 'alert alert-success show';
+            alert.textContent = t.key('js.app.appeal_submitted');
+            form.querySelector('[name="name"]').value = '';
+            form.querySelector('[name="email"]').value = '';
+            form.querySelector('[name="message"]').value = '';
+            const counter = document.getElementById('status-appeal-counter');
+            if (counter) counter.textContent = '0/' + (document.getElementById('status-appeal-message')?.dataset.maxlength || '2000');
+            btn.disabled = false;
+        } else {
+            showFormSubmitError(form, alert, btn, json);
+        }
+    } catch {
+        showFormNetworkError(alert, btn);
+    }
+}
+
+// Transparency page — multi-sort
+let transCurrentPage = 1;
+let transSortStack = [{ col: 'total', dir: 'desc' }];
+
+async function loadTransparency(page) {
+    if (page) transCurrentPage = page;
+    const sortParam = transSortStack.length
+        ? transSortStack.map(s => s.col + ':' + s.dir).join(',')
+        : 'total:desc';
+    const params = new URLSearchParams({ page: transCurrentPage, sort: sortParam });
+
+    try {
+        const res = await fetch(APP_API + 'transparency&' + params.toString());
+        const json = await res.json();
+
+        document.getElementById('transparency-loading').style.display = 'none';
+        document.getElementById('transparency-content').style.display = 'block';
+
+        if (!json.success || !json.data.length) {
+            document.getElementById('trans-body').innerHTML = '<tr><td colspan="7" class="transparency-empty">' + t.html('js.app.trans_no_data') + '</td></tr>';
+            document.getElementById('trans-summary').innerHTML = '<p>' + t.html('js.app.trans_no_data_yet') + '</p>';
+            document.getElementById('trans-pagination').innerHTML = '';
+            return;
+        }
+
+        const a = json.aggregates || {};
+        const pct = (n) => a.total_requests ? ' (' + Math.round(n / a.total_requests * 100) + '%)' : '';
+        // The labels keep their keys (t.html, 1.73.0): the live language switch says them again in place.
+        document.getElementById('trans-summary').innerHTML =
+            '<div class="trans-stats">' +
+            '<div class="trans-stat-accent"><strong>' + (a.total_entities || 0) + '</strong><br><small>' + t.html('js.app.trans_organizations') + '</small></div>' +
+            '<div class="trans-stat-accent"><strong>' + (a.total_groups || json.total) + '</strong><br><small>' + t.html('js.app.trans_groups') + '</small></div>' +
+            '<div class="trans-stat-text"><strong>' + (a.total_requests || 0) + '</strong><br><small>' + t.html('js.app.trans_total_requests') + '</small></div>' +
+            '<div class="trans-stat-success"><strong>' + (a.total_reviewed || 0) + pct(a.total_reviewed || 0) + '</strong><br><small>' + t.html('js.app.trans_reviewed') + '</small></div>' +
+            '<div class="trans-stat-error"><strong>' + (a.total_blocked || 0) + pct(a.total_blocked || 0) + '</strong><br><small>' + t.html('js.app.trans_blocked') + '</small></div>' +
+            '<div class="trans-stat-warning"><strong>' + (a.total_pending || 0) + pct(a.total_pending || 0) + '</strong><br><small>' + t.html('js.app.trans_awaiting_review') + '</small></div>' +
+            '</div>';
+
+        // json.data.length is the size of THIS page, and the last page is short — using it
+        // made the final page start its numbering again from a smaller offset. The page SIZE
+        // is what the server paged by, and it is the same for every page.
+        const pageSize = Number(json.per_page) || Number(json.limit) || json.data.length;
+        const offset = (json.page - 1) * pageSize;
+        document.getElementById('trans-body').innerHTML = json.data.map((r, i) => `
+            <tr>
+                <td>${offset + i + 1}</td>
+                <td>${escHtml(r.company)}</td>
+                <td>${escHtml(r.representative)}</td>
+                <td>${r.total_requests}</td>
+                <td>${r.accepted}</td>
+                <td>${r.blocked}</td>
+                <td>${r.pending}</td>
+            </tr>
+        `).join('');
+
+        // Pagination
+        const pagEl = document.getElementById('trans-pagination');
+        if (json.pages <= 1) {
+            pagEl.innerHTML = '';
+        } else {
+            pagEl.innerHTML = `
+                <button ${json.page <= 1 ? 'disabled' : ''} data-trans-page="${json.page - 1}">${t.html('js.app.prev')}</button>
+                <span>${t.html('js.app.page_of', {page: json.page, pages: json.pages})}</span>
+                <button ${json.page >= json.pages ? 'disabled' : ''} data-trans-page="${json.page + 1}">${t.html('js.app.next')}</button>
+            `;
+        }
+    } catch {
+        document.getElementById('transparency-loading').textContent = t.key('js.app.load_failed');
+    }
+}
+
+/**
+ * The order said on the header too (1.74.0): `aria-sort` on the column that decides it — the first of the stack, as ARIA
+ * asks for one sorted header at a time; the others carry none. The headers' words are buttons (the templates).
+ */
+function sortMarkPub(th, dir, first) {
+    if (dir && first) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+    else th.removeAttribute('aria-sort');
+}
+
+function updateTransSortIcons() {
+    document.querySelectorAll('.trans-sortable').forEach(th => {
+        const icon = th.querySelector('.trans-sort-icon');
+        if (!icon) return;
+        const col = th.dataset.sort;
+        const idx = transSortStack.findIndex(s => s.col === col);
+        const oldBadge = th.querySelector('.trans-sort-priority');
+        if (oldBadge) oldBadge.remove();
+
+        if (idx !== -1) {
+            const s = transSortStack[idx];
+            icon.className = s.dir === 'asc' ? 'bi bi-arrow-up trans-sort-icon active' : 'bi bi-arrow-down trans-sort-icon active';
+            if (transSortStack.length > 1) {
+                const badge = document.createElement('sup');
+                badge.className = 'trans-sort-priority';
+                badge.setAttribute('aria-hidden', 'true');
+                badge.textContent = idx + 1;
+                icon.after(badge);
+            }
+            sortMarkPub(th, s.dir, idx === 0);
+        } else {
+            icon.className = 'bi bi-arrow-down-up trans-sort-icon';
+            sortMarkPub(th, null, false);
+        }
+    });
+}
+
+// A t.key() word comes out as markup that keeps its key (t.html(), assets/js/i18n.js, 1.73.0): the live language switch
+// says it again where a template put it. Text content only — an attribute takes escAttr(), which writes the words.
+function escHtml(str) {
+    if (t.isKey(str)) return t.html(str);
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+
+// Attribute-safe escaping (also escapes quotes) for values interpolated into HTML attributes
+// like data-tooltip="...". escHtml alone does NOT escape quotes and could break out of an attr.
+function escAttr(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// === Whitelist registration page (?action=whitelist) ===
+// Client-side pre-validation mirrors the server (parseHashInput): one magnet link or 40-hex hash per
+// token; the server is authoritative. Rendering uses textContent/escHtml only — inputs and names
+// come from the user / other people.
+function wlParseToken(tok) {
+    tok = tok.trim();
+    if (!tok) return null;
+    if (/^magnet:\?/i.test(tok)) return extractHashFromMagnet(tok);
+    if (/^(urn:btih:)?[a-f0-9]{40}$/i.test(tok)) return tok.replace(/^urn:btih:/i, '').toLowerCase();
+    if (/^(urn:btih:)?[a-z2-7]{32}$/i.test(tok)) {
+        try { const h = base32ToHex(tok.replace(/^urn:btih:/i, '').toUpperCase()); if (h && h.length === 40) return h; } catch {}
+    }
+    return '';
+}
+
+function wlCountInput(text) {
+    const seen = new Set();
+    let valid = 0, invalid = 0;
+    text.split(/[\s,;]+/).filter(Boolean).forEach(tok => {
+        const h = wlParseToken(tok);
+        if (h === null) return;
+        if (h) { if (!seen.has(h)) { seen.add(h); valid++; } } else invalid++;
+    });
+    return { valid, invalid };
+}
+
+function initWhitelistPage() {
+    const form = document.getElementById('wl-form');
+    const checkForm = document.getElementById('wl-check-form');
+    if (form) {
+        const ta = document.getElementById('wl-input');
+        const counter = document.getElementById('wl-counter');
+        const max = parseInt(ta.dataset.max || '20', 10);
+        const refresh = () => {
+            const c = wlCountInput(ta.value);
+            // Each part a word that keeps its key (1.73.0): the counter follows the live language switch.
+            const parts = [t.key('js.app.wl_count_valid', {n: c.valid})];
+            if (c.invalid) parts.push(' / ', t.key('js.app.wl_count_invalid', {n: c.invalid}));
+            if (c.valid > max) parts.push(' — ', t.key('js.app.wl_count_max', {n: max}));
+            counter.replaceChildren(...parts);
+            counter.style.color = (c.valid > max) ? 'var(--error)' : (c.invalid ? 'var(--warning)' : '');
+        };
+        ta.addEventListener('input', refresh);
+        refresh();
+        form.addEventListener('submit', handleWhitelistSubmit);
+    }
+    if (checkForm) checkForm.addEventListener('submit', handleWhitelistCheck);
+}
+
+async function handleWhitelistSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const alert = document.getElementById('wl-alert');
+    const btn = document.getElementById('wl-submit');
+    const ta = document.getElementById('wl-input');
+    const group = ta.closest('.form-group');
+    const max = parseInt(ta.dataset.max || '20', 10);
+    alert.className = 'alert';
+    group.classList.remove('has-error');
+
+    const c = wlCountInput(ta.value);
+    if (c.valid === 0) { group.classList.add('has-error'); return; }
+    if (c.valid > max) {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.wl_too_many', {n: max});
+        return;
+    }
+    const descBusy = document.getElementById('wl-desc');
+    if (descBusy && window.ImagesEditor && window.ImagesEditor.busy(descBusy)) {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.images.wait_uploads');
+        return;
+    }
+    btn.disabled = true;
+    // "Registering…" over the button, not in it (1.73.0): its own words are the server's and follow the live switch.
+    const busy = (on) => {
+        btn.classList.toggle('as-waiting', on);
+        if (on) btn.setAttribute('data-as-wait', t.key('js.app.wl_registering')); else btn.removeAttribute('data-as-wait');
+    };
+    busy(true);
+    try {
+        // The optional fields only make sense for a single torrent: one description cannot describe
+        // twelve of them, and silently attaching it to all twelve would be worse than refusing.
+        const srcEl = document.getElementById('wl-source');
+        const descEl = document.getElementById('wl-desc');
+        const fmtEl = document.getElementById('wl-desc-format');
+        const payload = { input: ta.value, csrf_token: csrfToken(form) };
+        if (srcEl && srcEl.value.trim()) payload.source_url = srcEl.value.trim();
+        if (descEl && descEl.value.trim()) {
+            payload.description = descEl.value;
+            payload.description_format = fmtEl ? fmtEl.value : 'bbcode';
+        }
+        const pubEl = document.getElementById('wl-public');
+        if (pubEl && pubEl.checked) payload.submitter_public = 1;
+        const json = await fetchWithCaptcha('whitelist_submit', payload);
+        if (json.success) {
+            alert.className = 'alert alert-success show';
+            const s = json.summary || {};
+            const parts = [];
+            if (s.added) parts.push(t.key('js.app.wl_sum_added', {n: s.added}));
+            if (s.exists) parts.push(t.key('js.app.wl_sum_exists', {n: s.exists}));
+            // The one sentence that settles the fairness question: the first person to register a
+            // hash owns it, so a duplicate does not move it onto the second person's profile.
+            if (s.exists && pubEl && pubEl.checked) parts.push(t.key('js.app.wl_exists_not_yours'));
+            if (s.banned) parts.push(t.key('js.app.wl_sum_banned', {n: s.banned}));
+            if (s.invalid) parts.push(t.key('js.app.wl_sum_invalid', {n: s.invalid}));
+            // The sentence as words that keep their keys (1.73.0), the punctuation between them as it was.
+            const msg = [];
+            parts.forEach((p, i) => { if (i) msg.push(', '); msg.push(p); });
+            msg.push('.');
+            if (s.added) {
+                const secs = parseInt(json.active_in_seconds || 0, 10);
+                msg.push(' ', secs > 0 ? t.key('js.app.wl_active_within', {n: secs}) : t.key('js.app.wl_active_now'));
+            }
+            if (json.file_ok === false) msg.push(' ', t.key('js.app.wl_file_warning'));
+            // When the tracker checks submissions, "registered" is not the end of the story yet.
+            if (json.probe && json.probe.on && (json.probe.hashes || []).length) {
+                msg.push(' ', t.key('js.app.wl_probe_checking'));
+                if (window.wlWatchProbe) window.wlWatchProbe(json.probe.hashes, json.probe.timeout_minutes);
+            }
+            if (json.content_proposed) {
+                msg.push(' ', t.key('js.app.wl_content_proposed'));
+            } else if (json.content_pending) {
+                msg.push(' ', t.key('js.app.wl_content_pending'));
+            }
+            alert.replaceChildren(...msg);
+            renderWhitelistResults(json);
+            ta.value = '';
+            document.getElementById('wl-counter').textContent = t.key('js.app.wl_count_valid', {n: 0});
+            busy(false);
+            startCooldown(btn, 10);
+        } else {
+            busy(false);
+            const messages = {
+                rate_limit: t.key('js.app.wl_err_rate_limit'),
+                daily_cap: t.key('js.app.wl_err_daily_cap'),
+                too_many: t.key('js.app.wl_too_many', {n: max}),
+                no_valid: t.key('js.app.wl_err_no_valid'),
+                registration_disabled: t.key('js.app.wl_err_disabled'),
+                registration_unavailable: t.key('js.app.wl_err_unavailable'),
+                'CAPTCHA cancelled': t.key('js.app.captcha_cancelled_2'),
+                'CAPTCHA verification failed': t.key('js.app.captcha_failed'),
+            };
+            showFormSubmitError(form, alert, btn, json, messages);
+            // The anti-spam layer's wait (1.71.0 — a description attached too soon after the last): the button
+            // counts down the time the server named, whole; the old hourly limits keep their two-minute cooldown.
+            if (json && json.antispam && window.Antispam && window.Antispam.waitSeconds(json) > 0) {
+                window.Antispam.countdown(btn, window.Antispam.waitSeconds(json), {});
+            } else if (json && json.retry_after) startCooldown(btn, Math.min(120, parseInt(json.retry_after, 10) || 60));
+            if (json && Array.isArray(json.results)) renderWhitelistResults(json);
+        }
+    } catch {
+        busy(false);
+        showFormNetworkError(alert, btn);
+    }
+}
+
+function renderWhitelistResults(json) {
+    const box = document.getElementById('wl-results');
+    const list = document.getElementById('wl-results-list');
+    const summary = document.getElementById('wl-results-summary');
+    if (!box || !list) return;
+    list.textContent = '';
+    const results = Array.isArray(json.results) ? json.results : [];
+    if (!results.length) { box.hidden = true; return; }
+    const labels = { added: t.key('js.app.wl_label_added'), exists: t.key('js.app.wl_label_exists'), banned: t.key('js.app.wl_label_banned'), invalid: t.key('js.app.wl_label_invalid') };
+    results.forEach(r => {
+        const row = document.createElement('div');
+        row.className = 'wl-row wl-' + (r.status || 'invalid');
+        const badge = document.createElement('span');
+        badge.className = 'wl-badge';
+        badge.textContent = labels[r.status] || r.status;
+        const main = document.createElement('div');
+        main.className = 'wl-row-main';
+        const hash = document.createElement('code');
+        hash.className = 'wl-hash';
+        hash.textContent = r.hash || (r.input || '').slice(0, 80);
+        main.appendChild(hash);
+        if (r.error) {
+            const err = document.createElement('div');
+            err.className = 'wl-error';
+            err.textContent = r.error;
+            main.appendChild(err);
+        }
+        const magnet = r.hash && json.magnets ? json.magnets[r.hash] : null;
+        if (magnet) {
+            const mrow = document.createElement('div');
+            mrow.className = 'wl-magnet';
+            const mcode = document.createElement('code');
+            mcode.textContent = magnet;
+            // The library's copy glyph (1.71.0), as the announce box above it has: named for a screen reader,
+            // explained in the site's tooltip, and the tick with "Copied!" once it has copied (copyText()).
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'copy-btn wl-copy ic-btn';
+            b.setAttribute('aria-label', t.key('js.app.copy_magnet'));
+            b.setAttribute('data-tip', t.key('js.app.copy_magnet'));
+            const bi = document.createElement('i');
+            bi.className = 'bi bi-copy';
+            bi.setAttribute('aria-hidden', 'true');
+            b.appendChild(bi);
+            b.addEventListener('click', () => {
+                navigator.clipboard.writeText(magnet).then(() => {
+                    bi.className = 'bi bi-check-lg';
+                    b.classList.add('copied');
+                    if (typeof window.pubTip === 'function') window.pubTip(b, t.key('js.common.copied'));
+                    setTimeout(() => { bi.className = 'bi bi-copy'; b.classList.remove('copied'); }, 1500);
+                });
+            });
+            mrow.appendChild(mcode);
+            mrow.appendChild(b);
+            main.appendChild(mrow);
+        }
+        row.appendChild(badge);
+        row.appendChild(main);
+        list.appendChild(row);
+    });
+    if (summary) summary.textContent = '';
+    box.hidden = false;
+}
+
+async function handleWhitelistCheck(e) {
+    e.preventDefault();
+    const input = document.getElementById('wl-check-input');
+    const alert = document.getElementById('wl-check-alert');
+    const btn = document.getElementById('wl-check-submit');
+    const raw = input.value.trim();
+    alert.className = 'alert';
+    const h = wlParseToken(raw);
+    if (!h) {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.wl_check_enter');
+        return;
+    }
+    btn.disabled = true;
+    try {
+        const res = await fetch(APP_API + 'whitelist_check&hash=' + encodeURIComponent(h), { headers: { 'Accept': 'application/json' } });
+        const json = await res.json();
+        if (json.success) {
+            if (json.banned) {
+                alert.className = 'alert alert-error show';
+                alert.textContent = t.key('js.app.wl_check_banned', {hash: json.hash});
+            } else if (json.whitelisted) {
+                alert.className = 'alert alert-success show';
+                alert.replaceChildren(...[t.key('js.app.wl_check_registered', {hash: json.hash})]
+                    .concat(json.added_at ? [' ', t.key('js.app.wl_check_since', {date: json.added_at})] : [], ['.']));
+            } else {
+                alert.className = 'alert alert-error show';
+                alert.textContent = json.mode === 'whitelist' ? t.key('js.app.wl_check_not_registered', {hash: json.hash}) : t.key('js.app.wl_check_open', {hash: json.hash});
+            }
+        } else {
+            alert.className = 'alert alert-error show';
+            alert.textContent = json.error || t.key('js.app.lookup_failed');
+        }
+    } catch {
+        alert.className = 'alert alert-error show';
+        alert.textContent = t.key('js.app.network_error_2');
+    } finally {
+        startCooldown(btn, 3);
+    }
+}
+
+// === Tracker Telemetry (Stats Page & Home Widget) ===
+//
+// State machine per surface (stats page / home widget):
+//   - FRESH        : countdown to next refresh, then trigger a non-blocking sync.
+//   - SYNC_NEEDED  : kick off a blocking fetch (only one in-flight at a time per surface).
+//   - SYNCING      : another request is fetching upstream; poll cache with backoff.
+//   - ERROR        : retry after a longer delay.
+//
+// Each surface owns its own timers and AbortController. Surfaces are independent and never
+// interfere with each other's polling. All paths go through scheduleNextPoll(...) which clears
+// any previous timer first, so we can't accidentally stack overlapping polls.
+let statsLoopInterval = null;
+let statsCountdownTimer = null;
+let statsPollTimer = null;
+let statsHomePollTimer = null;
+let statsAbortController = null;
+let statsHomeAbortController = null;
+let statsInFlight = false;       // stats page: a fetch is currently in flight
+let statsHomeInFlight = false;   // home widget: a fetch is currently in flight
+let statsSyncBackoff = 0;        // stats page: backoff iteration counter while syncing_in_background
+let statsHomeSyncBackoff = 0;    // home widget: same, for home
+let statsLastRenderedAt = 0;     // last fetched_at we actually rendered on stats page
+let statsHomeLastRenderedAt = 0; // last fetched_at we actually rendered on home widget
+let statsSyncingUiTimer = null;  // stats page: deferred "Syncing Swarms..." UI flip
+let statsHomeSyncingUiTimer = null; // home widget: same
+// Defer the "Syncing Swarms..." UI by this many ms. Fast fetches (fresh cache, ~30-100ms)
+// complete before the timer fires, so the user sees no flicker. Only genuinely slow upstream
+// syncs hold the timer long enough to trigger the syncing visual state.
+const SYNCING_UI_DEFER_MS = 400;
+// Honest, generic progress messages (cycled while genuinely waiting on the upstream fetch).
+// Kept accurate on purpose — they describe what's actually happening, not invented "steps".
+let statsLoadingTexts = [
+    { title: t.key('js.app.stats_load1_title'), sub: t.key('js.app.stats_load1_sub') },
+    { title: t.key('js.app.stats_load2_title'), sub: t.key('js.app.stats_load2_sub') },
+    { title: t.key('js.app.stats_load3_title'), sub: t.key('js.app.stats_load3_sub') },
+    { title: t.key('js.app.stats_load4_title'), sub: t.key('js.app.stats_load4_sub') }
+];
+let statsLoadingCycleIndex = 0;
+let statsLoadingCycleTimer = null;
+
+// Exponential-backoff delay (in ms) for polling while syncing_in_background.
+//
+// Why polling exists at all: the only way the browser can find out that a server-side fetch
+// has finished is to ask. There is no push channel. While the "Syncing Swarms..." banner is
+// up, JS is asking the server "is the cache fresh yet?" every N seconds — N grows after each
+// poll so we don't hammer the server.
+//
+// Sequence: 2s, 4s, 8s, 8s, 8s... (cap at 8 seconds)
+// Typical upstream fetch takes 1-3 seconds, so usually only 1-2 polls are needed before the
+// dashboard shows fresh data and the normal countdown takes over.
+function syncPollDelayMs(iteration) {
+    const base = 2000;
+    const cap = 8000;
+    return Math.min(cap, base * Math.pow(2, Math.max(0, iteration)));
+}
+
+function initTrackerStats() {
+    const statsContainer = document.getElementById('stats-page-container');
+    const homeWidget = document.getElementById('home-stats-widget');
+
+    if (statsContainer) {
+        const hasCache = statsContainer.dataset.hasCache === '1';
+        const cacheFresh = statsContainer.dataset.cacheFresh === '1';
+        const remainingSeconds = parseInt(statsContainer.dataset.remainingSeconds || '0');
+        // Remember what the server already rendered so subsequent polls can early-out if they
+        // return the same fetched_at.
+        statsLastRenderedAt = parseInt(statsContainer.dataset.fetchedAt || '0') || 0;
+
+        if (hasCache) {
+            // The server already pre-rendered the dashboard with cached data. NEVER flash the
+            // big loader over real data — that is what made "Loading..." vanish into a blank
+            // dashboard. Show the data immediately; decide only whether to refresh.
+            stopStatsLoadingAnimation();
+            document.getElementById('stats-loader')?.classList.add('hidden');
+            document.getElementById('stats-error')?.classList.add('hidden');
+            document.getElementById('stats-dashboard')?.classList.remove('hidden');
+            if (cacheFresh) {
+                // Cache still within its TTL: just resume the countdown locally. No fetch — the
+                // first real refresh happens when the countdown ends.
+                startStatsCountdown(Math.max(1, remainingSeconds));
+            } else {
+                // Data present but past its TTL: keep showing it and refresh in the background
+                // (non-blocking). The dashboard stays visible the entire time.
+                loadStatsFull(false, false);
+            }
+        } else {
+            // No data at all (first ever load) — show the loader and do a blocking fetch.
+            startStatsLoadingAnimation();
+            loadStatsFull(true, true);
+        }
+
+        const retryBtn = document.getElementById('btn-stats-retry');
+        if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+                document.getElementById('stats-error').classList.add('hidden');
+                document.getElementById('stats-loader').classList.remove('hidden');
+                startStatsLoadingAnimation();
+                statsSyncBackoff = 0;
+                loadStatsFull(true, true);
+            });
+        }
+    } else if (homeWidget) {
+        const hasCache = homeWidget.dataset.hasCache === '1';
+        const cacheFresh = homeWidget.dataset.cacheFresh === '1';
+        const remainingSeconds = parseInt(homeWidget.dataset.remainingSeconds || '0');
+        statsHomeLastRenderedAt = parseInt(homeWidget.dataset.fetchedAt || '0') || 0;
+
+        if (!hasCache || !cacheFresh) {
+            loadStatsHome(!hasCache);
+        } else {
+            // Server already pre-rendered fresh widget data — no need to fetch on page load.
+            const beacon = homeWidget.querySelector('.home-stat-beacon');
+            if (beacon) {
+                beacon.classList.remove('syncing');
+                beacon.title = t.key('js.app.stats_live');
+            }
+            clearTimeout(statsHomePollTimer);
+            statsHomePollTimer = setTimeout(() => {
+                loadStatsHome(false);
+            }, Math.max(1, remainingSeconds) * 1000);
+        }
+    }
+}
+
+function startStatsLoadingAnimation() {
+    clearInterval(statsLoadingCycleTimer);
+    statsLoadingCycleIndex = 0;
+    const titleEl = document.getElementById('stats-loader-title');
+    const subEl = document.getElementById('stats-loader-subtitle');
+    
+    if (titleEl && subEl) {
+        titleEl.textContent = statsLoadingTexts[0].title;
+        subEl.textContent = statsLoadingTexts[0].sub;
+        
+        statsLoadingCycleTimer = setInterval(() => {
+            statsLoadingCycleIndex = (statsLoadingCycleIndex + 1) % statsLoadingTexts.length;
+            titleEl.style.opacity = 0;
+            subEl.style.opacity = 0;
+            
+            setTimeout(() => {
+                titleEl.textContent = statsLoadingTexts[statsLoadingCycleIndex].title;
+                subEl.textContent = statsLoadingTexts[statsLoadingCycleIndex].sub;
+                titleEl.style.opacity = 1;
+                subEl.style.opacity = 1;
+            }, 300);
+        }, 2200);
+    }
+}
+
+function stopStatsLoadingAnimation() {
+    clearInterval(statsLoadingCycleTimer);
+}
+
+async function loadStatsFull(forceSync = false, isFirstLoad = false) {
+    const container = document.getElementById('stats-page-container');
+    if (!container) return;
+
+    // Guard against overlapping fetches on the same surface. The poller / countdown should
+    // be the only path that calls into this function while one is already in flight.
+    if (statsInFlight) return;
+
+    const intervalSec = parseInt(container.dataset.interval || '10');
+    const source = container.dataset.source || 'stats';
+    const badge = document.getElementById('stats-live-badge');
+    const beaconText = document.getElementById('stats-beacon-text');
+    const countdownBar = document.getElementById('countdown-bar');
+    const countdownText = document.getElementById('countdown-text');
+
+    // Stop any pending timers — we are about to take a network round trip.
+    clearInterval(statsCountdownTimer);
+    clearTimeout(statsPollTimer);
+    clearTimeout(statsSyncingUiTimer);
+
+    // Defer the "Syncing Swarms..." UI: if the fetch is fast (fresh cache, ~30-100ms) we
+    // don't want a visible flash. Only when the fetch genuinely takes time should the user
+    // see syncing feedback. The timer is cleared in every code path that runs after the
+    // fetch returns, so leftover timers can't accidentally flip the UI later.
+    statsSyncingUiTimer = setTimeout(() => {
+        if (countdownBar) {
+            countdownBar.style.transition = 'none';
+            countdownBar.style.width = '100%';
+            countdownBar.classList.add('syncing');
+        }
+        if (countdownText) countdownText.textContent = t.key('js.app.stats_syncing');
+        if (!isFirstLoad && badge) {
+            badge.classList.add('syncing');
+            if (beaconText) beaconText.textContent = t.key('js.app.stats_syncing');
+        }
+    }, SYNCING_UI_DEFER_MS);
+
+    if (statsAbortController) {
+        statsAbortController.abort();
+    }
+    statsAbortController = new AbortController();
+    const signal = statsAbortController.signal;
+
+    const fetchStartTime = Date.now();
+    const url = APP_BASE + 'api.php?endpoint=tracker_stats&source=' + encodeURIComponent(source)
+              + (forceSync ? '' : '&stale_ok=1');
+
+    statsInFlight = true;
+    let json = null;
+    try {
+        const res = await fetch(url, { signal });
+        json = await res.json();
+    } catch (e) {
+        statsInFlight = false;
+        clearTimeout(statsSyncingUiTimer);
+        if (e.name === 'AbortError') return;
+        stopStatsLoadingAnimation();
+        // Retry after a longer pause on transport-level errors.
+        showStatsError(t.key('js.app.stats_net_error'));
+        clearTimeout(statsPollTimer);
+        statsPollTimer = setTimeout(() => {
+            document.getElementById('stats-error')?.classList.add('hidden');
+            document.getElementById('stats-loader')?.classList.remove('hidden');
+            startStatsLoadingAnimation();
+            loadStatsFull(false, false);
+        }, 10000);
+        return;
+    }
+    statsInFlight = false;
+    clearTimeout(statsSyncingUiTimer);
+
+    const fetchElapsed = Date.now() - fetchStartTime;
+    const minLoadingMs = json && json.min_loading_ms !== undefined ? parseInt(json.min_loading_ms) : 1000;
+    const remainingDelay = isFirstLoad ? Math.max(0, minLoadingMs - fetchElapsed) : 0;
+
+    setTimeout(() => {
+        stopStatsLoadingAnimation();
+
+        if (!json || !json.success) {
+            // Server returned a non-success payload (e.g. 503 with no cache). Wait, then retry.
+            const errMsg = (json && json.error) ? json.error : t.key('js.app.stats_server_error');
+            if (json && (json.syncing_in_background || json.sync_required)) {
+                // The server is busy but answering — fall back to polling rather than an error UI.
+                const d = syncPollDelayMs(statsSyncBackoff);
+                statsSyncBackoff++;
+                clearTimeout(statsPollTimer);
+                statsPollTimer = setTimeout(() => loadStatsFull(false, false), d);
+            } else {
+                showStatsError(errMsg);
+                clearTimeout(statsPollTimer);
+                statsPollTimer = setTimeout(() => {
+                    document.getElementById('stats-error')?.classList.add('hidden');
+                    document.getElementById('stats-loader')?.classList.remove('hidden');
+                    startStatsLoadingAnimation();
+                    loadStatsFull(false, false);
+                }, 10000);
+            }
+            return;
+        }
+
+        // Success: render whatever cache the server gave us (may be stale).
+        document.getElementById('stats-loader').classList.add('hidden');
+        document.getElementById('stats-error').classList.add('hidden');
+        document.getElementById('stats-dashboard').classList.remove('hidden');
+        renderStatsDashboard(json);
+
+        if (json.syncing_in_background) {
+            // Another request is fetching upstream — show "Syncing", poll with backoff.
+            if (badge) {
+                badge.classList.remove('hidden');
+                badge.classList.add('syncing');
+                if (beaconText) beaconText.textContent = t.key('js.app.stats_syncing');
+            }
+            if (countdownBar) {
+                countdownBar.style.transition = 'none';
+                countdownBar.style.width = '100%';
+                countdownBar.classList.add('syncing');
+            }
+            if (countdownText) countdownText.textContent = t.key('js.app.stats_syncing');
+
+            const d = syncPollDelayMs(statsSyncBackoff);
+            statsSyncBackoff++;
+            clearTimeout(statsPollTimer);
+            statsPollTimer = setTimeout(() => loadStatsFull(false, false), d);
+        } else if (json.sync_required) {
+            // Cache is stale and nobody is fetching yet. WE will trigger the blocking fetch,
+            // but we keep displaying the stale cache while it runs. Reset backoff.
+            statsSyncBackoff = 0;
+            if (badge) {
+                badge.classList.remove('hidden');
+                badge.classList.add('syncing');
+                if (beaconText) beaconText.textContent = t.key('js.app.stats_syncing');
+            }
+            if (countdownBar) {
+                countdownBar.style.transition = 'none';
+                countdownBar.style.width = '100%';
+                countdownBar.classList.add('syncing');
+            }
+            if (countdownText) countdownText.textContent = t.key('js.app.stats_syncing');
+            // Fire a blocking sync. statsInFlight guard prevents re-entry; the call schedules
+            // its own next poll/countdown on completion.
+            loadStatsFull(true, false);
+        } else {
+            // Cache is fresh. Start countdown.
+            statsSyncBackoff = 0;
+            if (badge) {
+                badge.classList.remove('hidden');
+                badge.classList.remove('syncing');
+                if (beaconText) beaconText.textContent = t.key('js.app.stats_live');
+            }
+            const remainingSec = json.remaining_seconds !== undefined ? parseInt(json.remaining_seconds) : intervalSec;
+            startStatsCountdown(remainingSec);
+        }
+    }, remainingDelay);
+}
+
+function showStatsError(msg) {
+    document.getElementById('stats-loader').classList.add('hidden');
+    document.getElementById('stats-dashboard').classList.add('hidden');
+    document.getElementById('stats-live-badge')?.classList.add('hidden');
+    
+    const bar = document.getElementById('countdown-bar');
+    if (bar) {
+        bar.classList.remove('syncing');
+        bar.style.width = '0%';
+    }
+    
+    const errEl = document.getElementById('stats-error');
+    const msgEl = document.getElementById('stats-error-msg');
+    if (errEl && msgEl) {
+        msgEl.textContent = msg;
+        errEl.classList.remove('hidden');
+    }
+}
+
+function renderStatsDashboard(res) {
+    // Skip the entire render if we've already shown this exact data. Polling while a sync
+    // is in progress returns the same cached payload over and over — there is no reason to
+    // re-run animateNumber, recompute percentages, or touch any DOM nodes in that case.
+    // This is what previously made it *look* like the dashboard was updating every few
+    // seconds even though nothing had actually changed server-side.
+    const at = parseInt(res.fetched_at || 0) || 0;
+    if (at > 0 && at === statsLastRenderedAt) {
+        return;
+    }
+    if (at > 0) statsLastRenderedAt = at;
+
+    const container = document.getElementById('stats-page-container');
+    const peerStyle = (container && container.dataset.peerLabelStyle) || 'percent';
+
+    animateNumber('val-torrents', res.torrents);
+    animateNumber('val-seeds', res.seeds);
+    animateNumber('val-completed', res.completed);
+    // The 3rd card is either Leechers or a combined Peers total depending on the
+    // admin-selected style; only one of these elements exists in the DOM.
+    if (document.getElementById('val-leechers')) animateNumber('val-leechers', res.leechers);
+    if (document.getElementById('val-peers')) animateNumber('val-peers', res.peers);
+
+    const totalPeers = res.peers || 1;
+    const seedPct = Math.round((res.seeds / totalPeers) * 100);
+    const leechPct = Math.round((res.leechers / totalPeers) * 100);
+    // Counts in the PAGE's language (t.num(), 1.73.1) — what the server rendered (langNumber()), never the browser's.
+    const peersFmt = t.num(Number(res.peers));
+    const seedsFmt = t.num(Number(res.seeds));
+    const leechFmt = t.num(Number(res.leechers));
+
+    const subSeedsEl = document.getElementById('sub-seeds');
+    const subLeechEl = document.getElementById('sub-leechers');
+    const subPeersEl = document.getElementById('sub-peers');
+    if (peerStyle === 'percent') {
+        if (subSeedsEl) subSeedsEl.textContent = t.key('js.app.pct_of_total_peers', {pct: seedPct});
+        if (subLeechEl) subLeechEl.textContent = t.key('js.app.pct_of_total_peers', {pct: leechPct});
+    } else {
+        if (subSeedsEl) subSeedsEl.textContent = t.key('js.app.of_peers', {peers: peersFmt});
+        if (subLeechEl) subLeechEl.textContent = t.key('js.app.of_peers', {peers: peersFmt});
+    }
+    if (subPeersEl) subPeersEl.textContent = t.key('js.app.leech_seed_summary', {leechers: leechFmt, seeds: seedsFmt});
+    
+    document.getElementById('val-uptime').textContent = res.uptime_string;
+    const trackerIdEl = document.getElementById('val-tracker-id');
+    trackerIdEl.textContent = res.tracker_id || t.key('js.app.na');
+    trackerIdEl.closest('tr').hidden = !res.tracker_id;
+
+    const versionEl = document.getElementById('val-version');
+    versionEl.closest('tr').hidden = !res.version;
+    // res.version comes from the upstream tracker XML — treat it as untrusted. Only render it as
+    // a link when it is an explicit http(s) URL, and build the node via the DOM (href setter is
+    // scheme-checked above) so a crafted value can't inject markup or a javascript: URL.
+    versionEl.textContent = '';
+    if (res.version && /^https?:\/\//i.test(res.version)) {
+        const a = document.createElement('a');
+        a.href = res.version;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'status-link font-mono';
+        a.style.fontSize = '0.75rem';
+        a.innerHTML = t.html('js.app.git_commit') + ' <i class="bi bi-box-arrow-up-right"></i>';
+        versionEl.appendChild(a);
+    } else {
+        versionEl.textContent = res.version || t.key('js.app.na');
+    }
+    
+    const udpCount = res.connections.udp.connect + res.connections.udp.announce + res.connections.udp.scrape;
+    const tcpCount = res.connections.tcp.accept + res.connections.tcp.announce + res.connections.tcp.scrape;
+    const totalConns = (udpCount + tcpCount) || 1;
+    const udpPct = Math.round((udpCount / totalConns) * 100);
+    const tcpPct = 100 - udpPct;
+    
+    document.getElementById('val-udp-pct').textContent = udpPct + '%';
+    document.getElementById('val-tcp-pct').textContent = tcpPct + '%';
+    
+    const barUdp = document.getElementById('bar-udp');
+    const barTcp = document.getElementById('bar-tcp');
+    if (barUdp && barTcp) {
+        barUdp.style.width = udpPct + '%';
+        barTcp.style.width = tcpPct + '%';
+    }
+    
+    document.getElementById('val-udp-connect').textContent = t.num(res.connections.udp.connect);
+    document.getElementById('val-udp-announce').textContent = t.num(res.connections.udp.announce);
+    document.getElementById('val-udp-scrape').textContent = t.num(res.connections.udp.scrape);
+    document.getElementById('val-udp-mismatch').textContent = t.num(res.connections.udp.mismatch);
+
+    document.getElementById('val-tcp-accept').textContent = t.num(res.connections.tcp.accept);
+    document.getElementById('val-tcp-announce').textContent = t.num(res.connections.tcp.announce);
+    document.getElementById('val-tcp-scrape').textContent = t.num(res.connections.tcp.scrape);
+    document.getElementById('val-tcp-sync').textContent = t.num(res.connections.livesync);
+    
+    renderRenewHeatmap(res.renew_intervals || []);
+    
+    const debugPanel = document.getElementById('debug-diagnostics-panel');
+    const errorsBody = document.getElementById('http-errors-body');
+    if (debugPanel && errorsBody) {
+        if (res.http_errors && res.http_errors.length > 0) {
+            debugPanel.classList.remove('hidden');
+            errorsBody.innerHTML = res.http_errors.map(err => {
+                let badgeClass = 'status-badge-sm status-badge ';
+                let severity = 'js.app.severity_low';
+                if (err.code.startsWith('5')) {
+                    badgeClass += 'blocked';
+                    severity = 'js.app.severity_critical';
+                } else if (err.code.startsWith('400')) {
+                    badgeClass += 'pending';
+                    severity = 'js.app.severity_moderate';
+                } else {
+                    badgeClass += 'archived';
+                }
+                return `<tr>
+                    <td class="font-mono text-white">${escHtml(err.code)}</td>
+                    <td class="font-mono">${escHtml(t.num(err.count))}</td>
+                    <td><span class="${badgeClass}">${t.html(severity)}</span></td>
+                </tr>`;
+            }).join('');
+        } else {
+            debugPanel.classList.add('hidden');
+        }
+    }
+}
+
+function renderRenewHeatmap(intervals) {
+    const container = document.getElementById('renew-heatmap');
+    if (!container) return;
+    
+    if (intervals.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted w-100 py-3">' + t.html('js.app.no_heat_profile') + '</div>';
+        return;
+    }
+    
+    const maxCount = Math.max(...intervals.map(i => i.count)) || 1;
+    
+    container.innerHTML = intervals.map(item => {
+        let level = 0;
+        const ratio = item.count / maxCount;
+        if (item.count > 0) {
+            if (ratio < 0.1) level = 1;
+            else if (ratio < 0.4) level = 2;
+            else if (ratio < 0.75) level = 3;
+            else level = 4;
+        }
+        
+        // item.interval comes from upstream XML — escape before interpolating into markup.
+        const label = escHtml(item.interval);
+        // The tooltip keeps its key (t.ah(), 1.73.0), so the live language switch says it again.
+        return `<div class="heat-block level-${level}"${t.ah('data-tooltip', 'js.app.interval_tooltip', {interval: item.interval, count: t.num(item.count)})}>
+            <span>${label}</span>
+        </div>`;
+    }).join('');
+}
+
+function animateNumber(id, endVal) {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // Where it starts: every digit of what the card shows, whatever its language groups them with (1.73.1: a Polish
+    // card is "2 251 367" — taking only the commas out read that as 2, and the card counted up from 2).
+    const startVal = parseInt(el.textContent.replace(/\D/g, ''), 10) || 0;
+    if (startVal === endVal) {
+        el.textContent = t.num(endVal);
+        return;
+    }
+    
+    const duration = 800;
+    const startTime = performance.now();
+    
+    function update(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const ease = progress * (2 - progress);
+        const current = Math.floor(startVal + (endVal - startVal) * ease);
+        el.textContent = t.num(current);
+
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        } else {
+            el.textContent = t.num(endVal);
+        }
+    }
+    requestAnimationFrame(update);
+}
+
+function startStatsCountdown(seconds) {
+    clearInterval(statsCountdownTimer);
+    clearTimeout(statsLoopInterval);
+
+    const bar = document.getElementById('countdown-bar');
+    const text = document.getElementById('countdown-text');
+    const container = document.getElementById('stats-page-container');
+
+    // The full configured interval (e.g. tracker_stats_page_interval = 10). Used to compute
+    // where the bar should START. On a fresh sync, seconds === fullInterval so we start at
+    // 100%. On a mid-cycle page refresh (cache 4 sec old of 10 sec TTL), seconds=6 and
+    // fullInterval=10, so the bar starts at 60% and animates the rest of the way to 0%.
+    const fullInterval = container ? Math.max(1, parseInt(container.dataset.interval) || seconds) : seconds;
+
+    if (bar) {
+        bar.classList.remove('syncing');
+    }
+
+    if (seconds <= 0) {
+        if (text) text.textContent = t.key('js.app.syncing_swarms');
+        if (bar) {
+            bar.style.transition = 'none';
+            bar.style.width = '100%';
+            bar.classList.add('syncing');
+        }
+        loadStatsFull(true, false);
+        return;
+    }
+
+    // Smooth bar: one CSS transition over the remaining countdown — GPU-accelerated, no jitter.
+    if (bar) {
+        const startPct = Math.max(0, Math.min(100, (seconds / fullInterval) * 100));
+        bar.style.transition = 'none';
+        bar.style.width = startPct + '%';
+        // Force the browser to apply the reset before starting the new transition,
+        // otherwise the two style writes get coalesced and the bar appears to "jump".
+        void bar.offsetWidth;
+        bar.style.transition = `width ${seconds}s linear`;
+        bar.style.width = '0%';
+    }
+
+    if (text) text.textContent = t.key('js.app.next_update_in', {n: seconds});
+
+    // The TEXT label still ticks down — but it only changes the textContent, no layout work.
+    const totalTime = seconds * 1000;
+    const startTime = performance.now();
+
+    statsCountdownTimer = setInterval(() => {
+        const elapsed = performance.now() - startTime;
+        const currentRemaining = Math.max(0, Math.ceil(seconds - (elapsed / 1000)));
+        if (text) text.textContent = t.key('js.app.next_update_in', {n: currentRemaining});
+
+        if (elapsed >= totalTime) {
+            clearInterval(statsCountdownTimer);
+            if (bar) {
+                bar.style.transition = 'none';
+                bar.style.width = '100%';
+                bar.classList.add('syncing');
+            }
+            if (text) text.textContent = t.key('js.app.syncing_swarms');
+            loadStatsFull(true, false);
+        }
+    }, 250);
+}
+
+function renderHomeStats(json) {
+    const widget = document.getElementById('home-stats-widget');
+    if (!widget) return;
+
+    widget.querySelector('.home-stats-skeleton')?.classList.add('hidden');
+    widget.querySelector('.home-stats-content')?.classList.remove('hidden');
+
+    // Same dedup logic as renderStatsDashboard — don't touch DOM if data hasn't changed.
+    const at = parseInt(json.fetched_at || 0) || 0;
+    if (at > 0 && at === statsHomeLastRenderedAt) {
+        return;
+    }
+    if (at > 0) statsHomeLastRenderedAt = at;
+
+    // In the PAGE's language (t.num(), 1.73.1): the same characters the server rendered (langNumber()), so the
+    // refresh never changes how a number looks — a locale-less call wrote the BROWSER's grouping over them.
+    document.getElementById('home-val-torrents').textContent = t.num(json.torrents);
+    document.getElementById('home-val-seeds').textContent = t.num(json.seeds);
+    // 3rd figure is Leechers or Peers depending on the admin-selected style — only one exists.
+    const homeLe = document.getElementById('home-val-leechers');
+    if (homeLe) homeLe.textContent = t.num(json.leechers);
+    const homePe = document.getElementById('home-val-peers');
+    if (homePe) homePe.textContent = t.num(Number(json.peers));
+    document.getElementById('home-val-completed').textContent = t.num(json.completed);
+    document.getElementById('home-val-uptime').textContent = json.uptime_string;
+}
+
+async function loadStatsHome(forceSync = false) {
+    const widget = document.getElementById('home-stats-widget');
+    if (!widget) return;
+    if (statsHomeInFlight) return;
+
+    const intervalSec = parseInt(widget.dataset.interval || '10');
+    const source = widget.dataset.source || 'home';
+    const beacon = widget.querySelector('.home-stat-beacon');
+
+    clearTimeout(statsHomePollTimer);
+    clearTimeout(statsHomeSyncingUiTimer);
+
+    // Defer the beacon's syncing state by SYNCING_UI_DEFER_MS so quick fetches don't flicker.
+    statsHomeSyncingUiTimer = setTimeout(() => {
+        if (beacon) {
+            beacon.classList.add('syncing');
+            beacon.title = t.key('js.app.syncing_swarms');
+        }
+    }, SYNCING_UI_DEFER_MS);
+
+    if (statsHomeAbortController) {
+        statsHomeAbortController.abort();
+    }
+    statsHomeAbortController = new AbortController();
+    const signal = statsHomeAbortController.signal;
+
+    const url = APP_BASE + 'api.php?endpoint=tracker_stats&source=' + encodeURIComponent(source)
+              + (forceSync ? '' : '&stale_ok=1');
+
+    statsHomeInFlight = true;
+    let json = null;
+    try {
+        const res = await fetch(url, { signal });
+        json = await res.json();
+    } catch (e) {
+        statsHomeInFlight = false;
+        clearTimeout(statsHomeSyncingUiTimer);
+        if (e.name === 'AbortError') return;
+        if (beacon) { beacon.classList.remove('syncing'); beacon.title = t.key('js.app.sync_failed'); }
+        clearTimeout(statsHomePollTimer);
+        statsHomePollTimer = setTimeout(() => loadStatsHome(false), 15000);
+        return;
+    }
+    statsHomeInFlight = false;
+    clearTimeout(statsHomeSyncingUiTimer);
+
+    if (json && json.success) {
+        renderHomeStats(json);
+
+        if (json.syncing_in_background) {
+            // Wait for the existing sync to finish — exponential backoff, not fixed 2s.
+            if (beacon) { beacon.classList.add('syncing'); beacon.title = t.key('js.app.syncing_swarms'); }
+            const d = syncPollDelayMs(statsHomeSyncBackoff);
+            statsHomeSyncBackoff++;
+            statsHomePollTimer = setTimeout(() => loadStatsHome(false), d);
+        } else if (json.sync_required) {
+            // Trigger a blocking sync ourselves. Reset backoff.
+            statsHomeSyncBackoff = 0;
+            loadStatsHome(true);
+        } else {
+            // Fresh cache. Schedule the next poll at the home interval (not the server cache TTL).
+            statsHomeSyncBackoff = 0;
+            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t.key('js.app.live_syncing'); }
+            const remainingSec = json.remaining_seconds !== undefined ? parseInt(json.remaining_seconds) : intervalSec;
+            statsHomePollTimer = setTimeout(() => loadStatsHome(false), Math.max(1, remainingSec) * 1000);
+        }
+    } else {
+        // Non-success payload — either a transient 503 (busy) or a real error.
+        if (json && (json.syncing_in_background || json.sync_required)) {
+            const d = syncPollDelayMs(statsHomeSyncBackoff);
+            statsHomeSyncBackoff++;
+            statsHomePollTimer = setTimeout(() => loadStatsHome(false), d);
+        } else {
+            if (beacon) { beacon.classList.remove('syncing'); beacon.title = t.key('js.app.sync_failed'); }
+            statsHomePollTimer = setTimeout(() => loadStatsHome(false), 15000);
+        }
+    }
+}
+
+/* ── the CSRF token, for every public script (1.71.0) ───────────────────────────
+ *
+ * There is one token per session, but the pages published it under names of their own — #search-csrf,
+ * #account-csrf (the account page AND a profile), the shoutbox's #shout-csrf, a form's hidden field, the
+ * front page nothing — and each script read the one it knew. A script whose button turned up on another
+ * page posted an empty token and was answered "Invalid CSRF token": the shoutbox's Preview on the front
+ * page (1.67.0), then every vote from the Info panel opened on a profile or the account page (castVote()
+ * read only #search-csrf, and so did the panel's Refresh). Fixed one reader at a time, the next page that
+ * reuses a widget brings the bug back; so the layout publishes the token ONCE, on every page
+ * (<meta name="csrf-token">, templates/layout.php), and every public script asks HERE, nearest first:
+ *   · a widget that carries a token of its own says so with `data-csrf` on itself or an ancestor,
+ *     NAMING the element that holds it (the shoutbox: data-csrf="shout-csrf");
+ *   · a form that carries its own hidden `csrf_token` field (sign-in, registration, reset, report…);
+ *   · otherwise the page's.
+ * A `data-csrf` naming an element that is not there falls through to the page's rather than sending an
+ * empty token. The old ids stay in the templates: the checks and the tests read them.
+ */
+function csrfToken(el) {
+    const node = el && el.nodeType === 1 ? el : null;
+    const namer = node ? node.closest('[data-csrf]') : null;
+    const named = namer ? document.getElementById(namer.dataset.csrf) : null;
+    if (named && typeof named.value === 'string' && named.value !== '') return named.value;
+    const form = node ? node.closest('form') : null;
+    const own = form ? form.querySelector('input[name="csrf_token"]') : null;
+    if (own && own.value) return own.value;
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? (meta.getAttribute('content') || '') : '';
+}
+// On window as well: favourites.js, people.js, shoutbox.js and the account page's scripts are files of
+// their own, and name the dependency (the way they name window.askInPlace).
+window.csrfToken = csrfToken;
+
+/* ── the two request helpers, at FILE scope on purpose ───────────────────────
+ *
+ * These used to live inside the accounts IIFE below, and two later features called them from their
+ * own IIFEs: the description preview and the "watching a submission prove itself" list. Both threw
+ * ReferenceError on their first call — silently, because both call sites are async and neither was
+ * awaited, so the rejection went nowhere and the feature simply never did anything. The preview box
+ * opened empty; the probe list never appeared.
+ *
+ * A file-scope const is the fix rather than `window.postJson`: it keeps one definition, and the next
+ * IIFE that needs it gets it by lexical scope instead of by remembering to export.
+ */
+const postJson = async (endpoint, body) => {
+    try {
+        const res = await fetch(APP_API + endpoint, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        return await res.json();
+    } catch { return null; }
+};
+const getJson = async (endpoint) => {
+    try { return await (await fetch(APP_API + endpoint, { headers: { 'Accept': 'application/json' } })).json(); }
+    catch { return null; }
+};
+
+function wlRequestControl(st, hash, chips) {
+    const box = document.createElement('span');
+    box.className = 'info-wlreq';
+    chips.appendChild(box);
+    let form = null;
+    const paint = (s) => {
+        box.textContent = '';
+        if (form) { form.remove(); form = null; }
+        if (s.state === 'rejected' || (s.state === 'open' && s.mine)) {
+            const chip = document.createElement('span');
+            chip.className = 'info-chip' + (s.state === 'open' ? ' info-chip-wait' : '');
+            chip.textContent = s.state === 'open' ? t.plural(s.n, 'js.app.wlreq_waiting') : t.key('js.app.wlreq_again', { date: s.again_time || s.again || '' });
+            chip.title = t.key(s.state === 'open' ? 'js.app.wlreq_waiting_title' : 'js.app.wlreq_again_title');
+            box.appendChild(chip);
+            return;
+        }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary btn-small info-wlreq-btn';
+        btn.textContent = s.state === 'open' ? t.key('js.app.wlreq_support', { n: t.num(s.n) }) : t.key('js.app.wlreq_ask');
+        btn.title = t.key('js.app.wlreq_title');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.addEventListener('click', () => {
+            if (form) { form.remove(); form = null; btn.setAttribute('aria-expanded', 'false'); return; }
+            form = document.createElement('div');
+            form.className = 'info-wlreq-form';
+            let note = null;
+            if (s.note) {
+                note = document.createElement('input');
+                note.type = 'text';
+                note.className = 'profile-search info-wlreq-note';
+                note.maxLength = 300;
+                note.placeholder = t.key('js.app.wlreq_note_ph');
+                note.setAttribute('aria-label', t.key('js.app.wlreq_note_ph'));
+                note.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } });
+                form.appendChild(note);
+            }
+            const send = document.createElement('button');
+            send.type = 'button';
+            send.className = 'btn btn-small';
+            send.textContent = t.key(s.state === 'open' ? 'js.app.wlreq_send_support' : 'js.app.wlreq_send');
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'btn btn-secondary btn-small';
+            cancel.textContent = t.key('js.app.wlreq_cancel');
+            const say = document.createElement('span');
+            say.className = 'info-wlreq-say';
+            say.setAttribute('role', 'status');
+            cancel.addEventListener('click', () => { form.remove(); form = null; btn.setAttribute('aria-expanded', 'false'); btn.focus(); });
+            send.addEventListener('click', async () => {
+                send.disabled = true;
+                const r = await postJson('wl_request', { hash: hash, note: note ? note.value : '', csrf_token: csrfToken(send) });
+                send.disabled = false;
+                if (r && r.success && r.state) { paint(r.state); return; }
+                say.textContent = (r && (r.error || r.message)) || t.key('js.app.no_answer');
+            });
+            form.append(send, cancel, say);
+            chips.after(form);
+            btn.setAttribute('aria-expanded', 'true');
+            (note || send).focus();
+        });
+        box.appendChild(btn);
+    };
+    paint(st);
+}
+
+/**
+ * Close on the backdrop — but only when the press STARTED on the backdrop (1.64.0).
+ *
+ * A `click` is delivered to the nearest common ancestor of the press and the release, so a press
+ * that begins INSIDE the dialog and ends anywhere outside it raises a click on the BACKDROP. Every
+ * overlay on this site used to read that as "the reader clicked away" and shut — which is how
+ * dragging a long file list's own scrollbar and letting go past the edge of the window closed the
+ * window, losing a list that had taken thirty pages to load. The two-step is the one
+ * assets/js/media-editor.js has used since 1.63.0. Top level rather than inside one of the blocks
+ * below, because four of them have an overlay; the scripts that do not load this file
+ * (shoutbox.js, admin-common.js) carry their own four lines.
+ */
+const closeOnBackdrop = (box, close) => {
+    let fromBackdrop = false;
+    box.addEventListener('pointerdown', (e) => { fromBackdrop = e.target === box; });
+    box.addEventListener('click', (e) => { if (e.target === box && fromBackdrop) close(); });
+};
+
+/**
+ * One Esc closes one layer — the top one (1.70.0).
+ *
+ * These windows open on top of each other: a list's window, the Info panel from a row in it, "Who has this"
+ * or "Put this in a list" from the panel's head, and the "you are leaving" dialog from a link in any of them.
+ * Each heard Esc on the document, in the order they had opened, so one Esc closed the dialog AND everything
+ * under it. Now an open window listens on the WINDOW, in the capture phase — before anything on the page
+ * hears the key — and acts only while it is the top layer: no "you are leaving" dialog and no emoji picker
+ * open (each keeps its own Esc), and no other open window drawn over it (a higher z-index, or the same one
+ * later in the page). The one that acts takes the key, so nothing under it hears it. The list's Edit window
+ * (1.70.0) was the first to stand aside like this, and keeps its own listener.
+ *
+ * escLayer(box, close) → { on(), off() }: on() as the window opens, off() as it closes.
+ *
+ * A layer INSIDE a window (1.72.0): an element in the box marked `data-esc-layer` — open (not hidden, drawn, its
+ * `data-esc-at` set) — is closed before the window: the top window's Esc goes to the one opened last (it hears
+ * `esclayer:close` and puts itself away), and the window waits for the next Esc. The Info panel's comment composers
+ * are these: a reply's under its comment, and a correction in place (assets/js/comments.js). Inside, not over: a
+ * window opened over the panel ("Who has this", a list) is still the top layer and closes first.
+ */
+const escLayerZ = (n) => { const z = parseInt(getComputedStyle(n).zIndex, 10); return Number.isFinite(z) ? z : 0; };
+const escLayerTop = (box) => {
+    if (document.querySelector('.leave-modal')) return false;
+    // The CAPTCHA's box (1.71.0: a comment can ask for one inside the Info panel) keeps its own Esc too — and so
+    // do an open @ list (a comment's composer has the shoutbox's) and a moderator's reason box while it has the
+    // focus: Esc closes the list, or puts the reason away, not the window. So does a report's box (1.71.0, reports.js).
+    if (document.querySelector('.captcha-overlay.show, .shout-mention-pop, .cm-reason:focus-within, .report-box:focus-within')) return false;
+    if ([...document.querySelectorAll('.shout-picker')].some((p) => !p.hidden)) return false;
+    const mine = escLayerZ(box);
+    for (const o of document.querySelectorAll('.files-overlay')) {
+        if (o === box || o.hidden) continue;
+        const z = escLayerZ(o);
+        if (z > mine || (z === mine && (box.compareDocumentPosition(o) & Node.DOCUMENT_POSITION_FOLLOWING))) return false;
+    }
+    return true;
+};
+/*
+ * THE KEYBOARD IS IN THE WINDOW WHILE IT IS OPEN (1.74.0). The windows say role="dialog" aria-modal="true", but the
+ * focus stayed on the button UNDER the window (the Info panel, the file list, Block), Tab walked the page behind it — at
+ * forty results not one Tab of twenty reached the panel — and on Esc the focus fell to <body>. Now on() remembers what
+ * had the focus and puts it in the window: on its title (made focusable for this, tabindex -1) — a caller that knows
+ * better (the list picker's name box) moves it on after; Tab and Shift+Tab go round the window's controls ONLY while it
+ * is the top layer (escLayerTop()): a window opened over it — "Who has this", the list picker, "you are leaving", a
+ * CAPTCHA, an emoji picker — keeps its own focus; and off() gives the focus back to what had it, when the focus was in
+ * the window (or fell to <body> as it closed) — never when the reader has put it somewhere else since. The pattern is the
+ * list's Edit window's (1.70.0) and "Who has this"'s (favourites.js), which already did this by hand.
+ */
+const escLayerFocusables = (box) => [...box.querySelectorAll(
+    'a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]')]
+    .filter((n) => !n.disabled && n.getClientRects().length > 0 && !n.closest('[hidden], [inert]') && getComputedStyle(n).visibility !== 'hidden');
+const escLayerTitle = (box) => box.querySelector('[role="dialog"] .files-head h3, [role="dialog"] h3, [role="dialog"] h2');
+const escLayer = (box, close) => {
+    let from = null, active = false;
+    const onTab = (e) => {
+        if (!escLayerTop(box)) return;
+        const list = escLayerFocusables(box);
+        if (!list.length) { e.preventDefault(); return; }
+        const first = list[0], last = list[list.length - 1], a = document.activeElement;
+        if (!a || !box.contains(a)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+        const i = list.indexOf(a);
+        // Not one of the controls (the window's title, a cell somebody clicked): where it stands decides the wrap.
+        const before = i === -1 && !!(a.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING);
+        const after = i === -1 && !!(last.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING);
+        if (e.shiftKey && (i === 0 || before)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (i === list.length - 1 || after)) { e.preventDefault(); first.focus(); }
+    };
+    const onKey = (e) => {
+        if (e.isComposing || box.hidden) return;
+        if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) { onTab(e); return; }
+        if (e.key !== 'Escape' || !escLayerTop(box)) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const inner = [...box.querySelectorAll('[data-esc-layer][data-esc-at]')].filter((n) => !n.hidden && n.getClientRects().length > 0);
+        if (inner.length) {
+            inner.sort((a, b) => (Number(b.dataset.escAt) || 0) - (Number(a.dataset.escAt) || 0));
+            inner[0].dispatchEvent(new CustomEvent('esclayer:close'));
+            return;
+        }
+        close();
+    };
+    return {
+        on: () => {
+            window.addEventListener('keydown', onKey, true);
+            if (active) return;          // drawn again while open (the live language switch): the focus stays where it is
+            active = true;
+            const a = document.activeElement;
+            from = a && a !== document.body && !box.contains(a) ? a : null;
+            if (a && box.contains(a)) return;
+            const to = escLayerTitle(box) || escLayerFocusables(box)[0];
+            if (!to) return;
+            if (!to.matches('a[href], button, input, select, textarea, summary, [tabindex]')) to.setAttribute('tabindex', '-1');
+            try { to.focus({ preventScroll: true }); } catch (e) { to.focus(); }
+        },
+        off: () => {
+            window.removeEventListener('keydown', onKey, true);
+            if (!active) return;
+            active = false;
+            const back = from, a = document.activeElement;
+            from = null;
+            if (!back || !back.isConnected || !back.getClientRects().length) return;
+            if (a && a !== document.body && !box.contains(a)) return;
+            try { back.focus({ preventScroll: true }); } catch (e) { back.focus(); }
+        },
+    };
+};
+
+/**
+ * "Are you sure?", asked in the place the button was.
+ *
+ * A question with a yes and a no, IN the row it is about. window.confirm() would ask from outside
+ * the page, about a row it cannot show. Written for the shoutbox in 1.58.0, copied to the emote
+ * cards, and moved here in 1.64.0 when the inbox wanted it too: three copies of a dialog is three
+ * answers to "how does this site ask".
+ *
+ * Everything it learned in the shoutbox comes with it:
+ *   · WHILE IT IS OPEN the row's other controls are hidden (`opts.host` gets `shout-asking`) —
+ *     the shoutbox's pin button is drawn on hover exactly where "No" lands, so declining to delete
+ *     a line pinned it instead.
+ *   · IT EXPIRES: after `opts.life` (five seconds by default), on a press anywhere outside it and on
+ *     Esc. NOT when the language changes (1.73.0): the question and its Yes / No are written with
+ *     t.key() (assets/js/i18n.js), so the live switch says them in the other language where they
+ *     stand, and the button waits beside them, hidden — never out of the page, where the switch could
+ *     not reach it (it used to be swapped out, and the question closed itself on every switch).
+ *     So `question` is a t.key() word; a plain string still works and stays as it was written.
+ *   · ONE WAY OUT. finish() takes down the timer and both listeners whichever exit was taken.
+ *
+ * `onYes()` returns false to say "put the button back" — anything else means the caller has taken
+ * the row away itself. The timer stops the moment Yes is pressed; the request is asynchronous and
+ * nothing may pull the question out from under it.
+ *
+ * FOR THE KEYBOARD AND A SCREEN READER (1.74.0): the question is a group named by its words, and Yes and No say what
+ * they answer (aria-describedby) — a reader heard a bare "Yes, button"; the focus starts on NO, so a second Enter
+ * does not take the thing away; and when the five seconds run out under the reader's focus, the focus goes back to
+ * the button that asked, as Esc and No already did — it fell to <body>.
+ *
+ * opts: { host, life }   (`relabel`, which re-read the button's words on its way back, is no longer needed)
+ */
+let askSeq = 0;
+const askInPlace = (btn, question, onYes, opts) => {
+    opts = opts || {};
+    const mk = (tag, cls, text) => { const n = document.createElement(tag); n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+    const ask = mk('span', 'shout-confirm');
+    const q = mk('span', 'shout-confirm-q', question);
+    q.id = 'ask-q-' + (++askSeq);
+    ask.setAttribute('role', 'group');
+    ask.setAttribute('aria-labelledby', q.id);
+    ask.appendChild(q);
+    const yes = mk('button', 'shout-yes', t.key('js.shout.yes'));
+    const no = mk('button', 'shout-no', t.key('js.shout.no'));
+    yes.type = 'button'; no.type = 'button';
+    yes.setAttribute('aria-describedby', q.id);
+    no.setAttribute('aria-describedby', q.id);
+    let timer = 0, open = true;
+    const wasHidden = btn.hidden;
+
+    const finish = (putBack) => {
+        if (!open) return;
+        open = false;
+        clearTimeout(timer);
+        document.removeEventListener('pointerdown', onOutside, true);
+        document.removeEventListener('keydown', onEsc, true);
+        if (opts.host) opts.host.classList.remove('shout-asking');
+        if (putBack && ask.parentNode) {
+            ask.remove();
+            btn.hidden = wasHidden;
+        }
+    };
+    // Run out: put back, and the focus with it when the reader's focus was in the question.
+    const expire = () => {
+        const held = ask.contains(document.activeElement);
+        finish(true);
+        if (held && btn.isConnected) btn.focus();
+    };
+    // The language switcher translates the question where it stands (1.73.0): pressing it is not a "no".
+    function onOutside(e) { if (!ask.contains(e.target) && !(window.LangSwap && window.LangSwap.isSwitch(e.target))) finish(true); }
+    function onEsc(e) { if (e.key === 'Escape') { e.preventDefault(); finish(true); btn.focus(); } }
+
+    yes.addEventListener('click', async () => {
+        yes.disabled = true;
+        clearTimeout(timer);
+        timer = 0;
+        document.removeEventListener('pointerdown', onOutside, true);
+        const back = await onYes();
+        finish(back === false);
+    });
+    no.addEventListener('click', () => { finish(true); btn.focus(); });
+    ask.appendChild(yes);
+    ask.appendChild(no);
+    if (opts.host) opts.host.classList.add('shout-asking');
+    btn.after(ask);
+    btn.hidden = true;
+    no.focus();
+    // Capture, so a control that stops the press from travelling still closes the question.
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('keydown', onEsc, true);
+    timer = setTimeout(expire, Number(opts.life) > 0 ? Number(opts.life) : 5000);
+    return ask;
+};
+// On window as well as in scope: assets/js/shoutbox.js and assets/js/people.js are separate files
+// and a named dependency reads better in them than a bare identifier from somewhere else.
+window.askInPlace = askInPlace;
+
+/**
+ * "It is done — Undo", at the foot of the window (1.73.0).
+ *
+ * The site had no toast on its public pages (favourites.js has long called a `showToastPub` that never existed),
+ * and the messages' Archive and Trash needed one: the owner's "it vanishes at once and I cannot bring it back —
+ * give me three to five seconds to take it back". So a small one, for any page that wants it:
+ *
+ *   siteToast({ text, args, key, undo, life, home }) → { close() }
+ *     text   a dictionary KEY, never a sentence: the toast says it with t.key(), and says it again in the other
+ *            language when the live switch changes it (a script-made node has no counterpart in the fetched
+ *            page, so the switch itself cannot — assets/js/lang-swap.js); `args` are its placeholders
+ *     key    a toast with the same key takes the place of the one before it (the same thing moved twice)
+ *     undo   a function, called once when Undo is pressed; the toast goes then (the caller says how it went)
+ *     life   how long it stays, 5 s by default — PAUSED while the pointer rests on it or the reader's own focus
+ *            is in it, so somebody reading it or tabbing to Undo is never raced by the clock (WCAG 2.2.1)
+ *     home   where the keyboard's focus goes back to if the toast leaves while holding it (a function or a node)
+ *
+ * KEYBOARD: Undo and the × are ordinary buttons. When the thing that was pressed has gone from the page (a row
+ * that moved away, a conversation that closed) the focus would fall to <body>, so it lands on Undo instead — a
+ * focus the TOAST gave, which does not hold its clock (a mouse's click that took a row away would otherwise
+ * leave a toast that never went); Tab onwards, and it is the reader's. Esc inside a toast dismisses it. When a
+ * toast holding the focus goes, the focus goes `home`, or to the toast below it. STACKING: newest at the
+ * bottom, three at most — a fourth pushes the oldest out. A SCREEN READER hears each one from the region, which
+ * is made before the first line is put in it. Its words are `js.common.toast_*`, the bundle every public page has.
+ */
+const siteToast = (() => {
+    const MAX = 3;
+    let box = null;
+    const open = [];
+    const region = () => {
+        if (box && box.isConnected) return box;
+        box = document.createElement('div');
+        box.className = 'site-toasts';
+        box.setAttribute('role', 'region');
+        box.setAttribute('aria-live', 'polite');
+        box.setAttribute('aria-label', t.key('js.common.toast_region'));
+        document.body.appendChild(box);
+        return box;
+    };
+    const say = (entry) => {
+        entry.msg.textContent = t.key(entry.text, entry.args || undefined);
+        if (entry.undoBtn) entry.undoBtn.textContent = t.key('js.common.toast_undo');
+        entry.x.setAttribute('aria-label', t.key('js.common.toast_close'));
+        entry.x.setAttribute('data-tip', t.key('js.common.toast_close'));
+    };
+    document.addEventListener('langswap', () => {
+        if (box) box.setAttribute('aria-label', t.key('js.common.toast_region'));
+        open.forEach(say);
+    });
+    function show(opts) {
+        opts = opts || {};
+        if (opts.key) open.filter((e) => e.key === opts.key).forEach((e) => e.close(true));
+        while (open.length >= MAX) open[0].close(true);
+        const host = region();
+        const el = document.createElement('div');
+        el.className = 'site-toast';
+        const msg = document.createElement('span');
+        msg.className = 'site-toast-text';
+        el.appendChild(msg);
+        const entry = { el, msg, key: opts.key || null, text: String(opts.text || ''), args: opts.args || null,
+                        undoBtn: null, x: null, timer: 0, left: Math.max(1500, Number(opts.life) || 5000), since: 0,
+                        hover: false, focus: false, given: false, paused: false, gone: false };
+        if (typeof opts.undo === 'function') {
+            const u = document.createElement('button');
+            u.type = 'button';
+            u.className = 'site-toast-undo';
+            u.addEventListener('click', async () => {
+                if (u.disabled) return;
+                u.disabled = true;
+                entry.close(true);
+                try { await opts.undo(); } catch (e) { /* the caller's answer, or its silence */ }
+            });
+            entry.undoBtn = u;
+            el.appendChild(u);
+        }
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'site-toast-x ic-btn';
+        const xi = document.createElement('i');
+        xi.className = 'bi bi-x-lg';
+        xi.setAttribute('aria-hidden', 'true');
+        x.appendChild(xi);
+        x.addEventListener('click', () => entry.close());
+        entry.x = x;
+        el.appendChild(x);
+        say(entry);
+        const tick = () => {
+            clearTimeout(entry.timer);
+            if (entry.paused || entry.gone) return;
+            entry.since = Date.now();
+            entry.timer = setTimeout(() => entry.close(), entry.left);
+        };
+        // Paused while the pointer is on it OR the focus is in it; what was left of its time resumes after both go.
+        const sync = () => {
+            const held = entry.hover || entry.focus;
+            if (held && !entry.paused) {
+                entry.paused = true;
+                clearTimeout(entry.timer);
+                entry.left = Math.max(1500, entry.left - (Date.now() - entry.since));
+            } else if (!held && entry.paused) {
+                entry.paused = false;
+                tick();
+            }
+        };
+        el.addEventListener('pointerenter', () => { entry.hover = true; sync(); });
+        el.addEventListener('pointerleave', () => { entry.hover = false; sync(); });
+        // The focus the toast gave itself (below) is not the reader's hand on it; a focus they move holds it.
+        el.addEventListener('focusin', () => { if (entry.given) { entry.given = false; return; } entry.focus = true; sync(); });
+        el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget)) { entry.focus = false; sync(); } });
+        el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); entry.close(); } });
+        entry.close = (quiet) => {
+            if (entry.gone) return;
+            entry.gone = true;
+            clearTimeout(entry.timer);
+            const had = el.contains(document.activeElement);
+            const i = open.indexOf(entry);
+            if (i !== -1) open.splice(i, 1);
+            el.classList.remove('show');
+            // A toast taken away under the keyboard's focus hands it on — home, or the toast below it — never to <body>.
+            if (had && !quiet) {
+                const home = typeof opts.home === 'function' ? opts.home() : opts.home;
+                const next = open[open.length - 1];
+                if (home && home.isConnected && typeof home.focus === 'function') home.focus({ preventScroll: true });
+                else if (next) (next.undoBtn || next.x).focus({ preventScroll: true });
+            }
+            setTimeout(() => el.remove(), 200);
+        };
+        open.push(entry);
+        // Into the region on the next frame: a live region that received its first line in the same moment it was
+        // made is one some screen readers never read.
+        requestAnimationFrame(() => {
+            if (entry.gone) return;
+            host.appendChild(el);
+            requestAnimationFrame(() => el.classList.add('show'));
+            const a = document.activeElement;
+            if ((!a || a === document.body || !a.isConnected) && entry.undoBtn) {
+                entry.given = true;
+                entry.undoBtn.focus({ preventScroll: true });
+                entry.given = false;
+            }
+            tick();
+        });
+        return { close: () => entry.close(), el };
+    }
+    return show;
+})();
+window.siteToast = siteToast;
+
+// === The nav's separators at the edge of a wrapped line (1.73.2) ===
+// The links are one wrapping row with a "|" between each two. When it wraps — Polish at 1280px, any language on a
+// phone — a separator can end a line or begin the next one, where it separates nothing ("| EN PL" alone on the
+// second line). CSS cannot tell which item a line starts with, so the lines are measured: a separator whose
+// neighbour on either side sits on another line gets `sep-lead` (begins a line: out of the row) or `sep-trail`
+// (ends one: hidden in place) — style.css says why the two differ. Every measure starts from the row as it is
+// without the marks, so it settles at once. Again whenever a piece of the row changes size (the window, a live
+// language switch, a number appearing on a link) and when the fonts have arrived.
+(function () {
+    'use strict';
+    const row = document.querySelector('.main-nav .nav-links');
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const sameLine = (a, b) => { const x = a.getBoundingClientRect(), y = b.getBoundingClientRect(); return x.top < y.bottom && y.top < x.bottom; };
+    function mark() {
+        row.querySelectorAll(':scope > .sep').forEach((s) => s.classList.remove('sep-lead', 'sep-trail'));
+        const items = [...row.children].filter((n) => n.getClientRects().length > 0);
+        items.forEach((n, i) => {
+            if (!n.classList.contains('sep')) return;
+            const prev = items[i - 1], next = items[i + 1];
+            if (!prev || !sameLine(prev, n)) n.classList.add('sep-lead');
+            else if (!next || !sameLine(n, next)) n.classList.add('sep-trail');
+        });
+    }
+    let queued = false;
+    const later = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; mark(); }); };
+    const ro = new ResizeObserver(later);
+    ro.observe(row);
+    [...row.children].forEach((n) => ro.observe(n));
+    mark();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+    document.addEventListener('langswap', later);
+})();
+
+// === User accounts (?action=login / register / account / reset) + index search (?action=search) ===
+// All rendering uses textContent — usernames, group names, notification titles and torrent names
+// are untrusted. Endpoints: user_login/user_register/user_logout/user_me/user_update/
+// user_notifications/user_verify_send/user_reset_request/user_reset_confirm/index_search/index_files.
+(function () {
+    'use strict';
+    const $id = (x) => document.getElementById(x);
+    // The form's own token field, else the page's (csrfToken() above; it used to fall back to #account-csrf).
+    const csrfOf = (form) => csrfToken(form);
+    // An address is checked with its DOMAIN treated as a HOSTNAME. The old test was
+    //   /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    // which asked only "is there an @ and a dot after it", and therefore accepted
+    // dsaddsas@wp\/.pl — a backslash and a slash inside the domain. The server's
+    // filter_var(FILTER_VALIDATE_EMAIL) rejects that, so the form went green and the request came
+    // back 400: the live check was telling the user the opposite of what would happen.
+    //
+    // Verified against filter_var over 37 addresses: there is no input this accepts that the server
+    // refuses. It is stricter in five places, all of them things nobody can actually receive mail at
+    // (a bracketed IP literal, a one-letter TLD, a hyphenated or digit-suffixed TLD).
+    const EMAIL_LOCAL = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*";
+    const EMAIL_LABEL = '[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?';
+    const EMAIL_TLD = '(?:[A-Za-z]{2,}|xn--[A-Za-z0-9-]{2,})';   // xn-- keeps the IDN TLDs working
+    const EMAIL_RE = new RegExp('^' + EMAIL_LOCAL + '@' + EMAIL_LABEL
+                                + '(?:\\.' + EMAIL_LABEL + ')*\\.' + EMAIL_TLD + '$');
+    const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+    // An icon, in the one markup every icon on the site is written in (1.68.0): Bootstrap's classes,
+    // which Font Awesome is laid over when Settings chooses it. Pass the WHOLE class string — `bi
+    // bi-check-lg`, never a name glued on — so tests/icons_test.php can find every name that is used.
+    const iconEl = (cls) => { const i = document.createElement('i'); i.className = cls; i.setAttribute('aria-hidden', 'true'); return i; };
+
+
+    // `msg` a word, a t.key() word, or a list of them (1.73.0: sentences made of several keys keep every key).
+    // Said aloud as well as shown (1.74.0): an error as an alert, a success as a status (every form's alert box is a
+    // live region from the start — see the end of this file — and this says which kind the words are).
+    function showAlert(el, msg, ok) {
+        el.className = 'alert show ' + (ok ? 'alert-success' : 'alert-error');
+        el.setAttribute('role', ok ? 'status' : 'alert');
+        if (Array.isArray(msg)) el.replaceChildren(...msg);
+        else el.textContent = msg;
+    }
+    // torrent sizes are powers of 1024 — label them with the matching IEC units (KiB/MiB/GiB). The site's one size rule
+    // (1.74.0, t.bytes() in assets/js/i18n.js): the same digits, in the page language's decimal separator ("1,27 GiB").
+    function fmtBytesPub(n) {
+        return t.bytes(n);
+    }
+    // ── password policy (mirrors userPasswordIssues() server-side) + live checklist UI ──
+    const PW_REQS = [
+        [t.key('js.app.pw_min_len'), (p) => p.length >= 8 && p.length <= 200],
+        [t.key('js.app.pw_lower'), (p) => /[a-z]/.test(p)],
+        [t.key('js.app.pw_upper'), (p) => /[A-Z]/.test(p)],
+        [t.key('js.app.pw_special'), (p) => /[^a-zA-Z0-9]/.test(p)],
+        [t.key('js.app.pw_digit'), (p) => /[0-9]/.test(p)],
+    ];
+    const pwValid = (p) => PW_REQS.every(([, test]) => test(p));
+    /** Requirement checklist under a password box; optional=true hides it while the box is empty. */
+    function bindPwChecklist(input, box, optional) {
+        if (!input || !box) return;
+        const items = PW_REQS.map(([label]) => {
+            const li = document.createElement('div');
+            li.className = 'pw-req';
+            li.appendChild(iconEl('bi bi-x-lg pw-req-ic'));
+            li.append(' ', label);
+            box.appendChild(li);
+            return li;
+        });
+        const sync = () => {
+            const p = input.value;
+            if (optional) box.hidden = p === '';
+            PW_REQS.forEach(([, test], i) => {
+                const ok = test(p);
+                items[i].classList.toggle('ok', ok);
+                items[i].querySelector('.pw-req-ic').className = ok ? 'bi bi-check-lg pw-req-ic' : 'bi bi-x-lg pw-req-ic';
+            });
+        };
+        input.addEventListener('input', sync);
+        sync();
+    }
+    /**
+     * The site's one tooltip ("Marked 3 read", "Nothing new", "Copied!") — auto-fades, no library.
+     *
+     * PLACED, not styled into place (1.62.0). It used to be a child of the element with
+     * `left: 50%; translateX(-50%)`, which is centred only as long as nothing overrides it, and the
+     * shoutbox's refresh button did override it — hanging the tip from its right edge so it would
+     * not leave the box — which drew "Nothing new" off to the left of the button on every desktop.
+     * The two rules Popper.js calls preventOverflow and flip, written out here because every tooltip
+     * on the site comes through this function:
+     *
+     *   centred over the anchor, and moved sideways ONLY by as much as centring would put outside
+     *   the viewport (which is what a button at the edge of a phone needs);
+     *   above the anchor, and below it only when there is no room above.
+     *
+     * It lives on <body> with fixed coordinates rather than inside the anchor: a tooltip inside the
+     * element it is about inherits that element's clipping, and a <select> cannot hold one at all.
+     * Nothing is written onto the anchor any more — the old `position: relative` it set could move
+     * an absolutely positioned button. It follows the anchor if the page scrolls under it, and is
+     * announced to a screen reader, which is the only way somebody who cannot see it learns that
+     * the button did anything.
+     *
+     * `opts` (1.71.0), for the name of an icon button shown while it is pointed at or focused
+     * (tipOnHover() below): `hold` keeps it until the returned handle's drop() — no fade on a timer —
+     * and `quiet` leaves the role off, because that name is the button's aria-label already and a
+     * screen reader would otherwise hear it twice. A later tip for the same anchor replaces it, which
+     * is how "Copied!" takes the place of "Copy the magnet link" under the pointer that pressed it.
+     */
+    const pubTips = new WeakMap();
+    function pubTip(target, text, opts) {
+        if (!target || !document.body) return null;
+        opts = opts || {};
+        const old = pubTips.get(target);
+        if (old) old.drop();
+        const tip = document.createElement('span');
+        tip.className = 'pub-tip';
+        if (!opts.quiet) tip.setAttribute('role', 'status');
+        tip.textContent = text;
+        document.body.appendChild(tip);
+        const GAP = 6, EDGE = 8;
+        const place = () => {
+            if (!tip.isConnected) return;
+            if (!target.isConnected) { drop(); return; }   // its button is gone (a list drawn again): so is the tip
+            const a = target.getBoundingClientRect();
+            const vw = document.documentElement.clientWidth || window.innerWidth;
+            // Measured at the left edge first, where the whole viewport is available to it, so the
+            // width is its own and not whatever was left over at the last position.
+            tip.style.left = '0px'; tip.style.top = '0px';
+            tip.style.whiteSpace = ''; tip.style.width = '';
+            let w = tip.offsetWidth;
+            if (w > vw - 2 * EDGE) {          // a sentence wider than a phone wraps rather than escaping it
+                tip.style.whiteSpace = 'normal';
+                tip.style.width = (vw - 2 * EDGE) + 'px';
+                w = tip.offsetWidth;
+            }
+            const h = tip.offsetHeight;
+            // preventOverflow: centred, then pushed in by exactly what would have left the viewport.
+            let left = a.left + a.width / 2 - w / 2;
+            left = Math.max(EDGE, Math.min(left, vw - EDGE - w));
+            // flip: above when it fits there, below when it does not.
+            let top = a.top - GAP - h;
+            const below = top < EDGE;
+            if (below) top = a.bottom + GAP;
+            tip.style.left = Math.round(left) + 'px';
+            tip.style.top = Math.round(top) + 'px';
+            tip.classList.toggle('pub-tip-below', below);
+        };
+        const onMove = () => requestAnimationFrame(place);
+        let hideTimer = 0, goneTimer = 0;
+        const drop = () => {
+            clearTimeout(hideTimer); clearTimeout(goneTimer);
+            window.removeEventListener('scroll', onMove, true);
+            window.removeEventListener('resize', onMove);
+            document.removeEventListener('langswap', onMove);
+            tip.remove();
+            if (pubTips.get(target) === entry) pubTips.delete(target);
+        };
+        // say(): new words for a tip that is showing (the tooltip below, when the language changed under it).
+        const entry = { tip, drop, say: (s) => { tip.textContent = s; place(); } };
+        pubTips.set(target, entry);
+        place();
+        window.addEventListener('scroll', onMove, true);
+        window.addEventListener('resize', onMove);
+        // A tip written with t.key() is said again by the live language switch (assets/js/i18n.js) — at another width.
+        document.addEventListener('langswap', onMove);
+        requestAnimationFrame(() => tip.classList.add('show'));
+        if (!opts.hold) hideTimer = setTimeout(() => { tip.classList.remove('show'); goneTimer = setTimeout(drop, 250); }, 1800);
+        return entry;
+    }
+    // Exported in 1.61.0: the shoutbox's refresh button says "Nothing new" in exactly this shape,
+    // and a tooltip written a second time in assets/js/shoutbox.js would be a second set of timings,
+    // a second class name and a second thing to notice when this one changes.
+    window.pubTip = pubTip;
+
+    /**
+     * What an icon button is for, in the site's tooltip (1.71.0).
+     *
+     * A button that shows a glyph instead of a word — Magnet, Copy, Info, Share, "Who has this", the Info
+     * panel's description actions, a conversation's Back and Clear — carries its name in aria-label (what
+     * a screen reader says) and its explanation in `data-tip`. This shows that explanation in pubTip()'s
+     * box while a mouse or a pen rests on the button (after a short pause, so a pointer crossing a row
+     * does not flash one tip per button) and while the keyboard's focus is on it; it goes when the
+     * pointer or the focus leaves, when the button is pressed (the press's own answer — "Copied!" — takes
+     * its place) and on Esc. Not on touch: a tap is a press, and a tip that appears as the finger lands
+     * would only cover what it answers. One listener set for the whole page, so buttons drawn later —
+     * the Info panel, a search's rows, a conversation — need nothing of their own. `title` is not used
+     * for these: the browser would draw its own box as well, a second later.
+     */
+    function tipOnHover() {
+        let cur = null, timer = 0, waiting = null;
+        const textOf = (el) => el.getAttribute('data-tip') || el.getAttribute('aria-label') || '';
+        const tipEl = (t) => (t && t.closest ? t.closest('[data-tip]') : null);
+        const hide = () => {
+            clearTimeout(timer);
+            timer = 0; waiting = null;
+            if (cur) { if (cur.entry) cur.entry.drop(); cur = null; }
+        };
+        const show = (el) => {
+            const text = textOf(el);
+            if (!text || !el.isConnected) return;
+            hide();
+            cur = { el, entry: pubTip(el, text, { hold: true, quiet: true }) };
+        };
+        document.addEventListener('pointerover', (e) => {
+            if (e.pointerType === 'touch') return;
+            const el = tipEl(e.target);
+            // An armed button (a Delete waiting for its second press) holds its own tip until it disarms.
+            if (!el || (cur && cur.el === el) || waiting === el || el.dataset.armed === '1') return;
+            hide();
+            waiting = el;
+            timer = setTimeout(() => { timer = 0; waiting = null; show(el); }, 350);
+        });
+        document.addEventListener('pointerout', (e) => {
+            const el = tipEl(e.target);
+            if (!el || (e.relatedTarget && el.contains(e.relatedTarget))) return;
+            if ((cur && cur.el === el) || waiting === el) hide();
+        });
+        document.addEventListener('focusin', (e) => {
+            const el = tipEl(e.target);
+            if (!el || el.dataset.armed === '1') return;
+            let visible = true;
+            try { visible = el.matches(':focus-visible'); } catch (err) { /* an old engine: show it */ }
+            if (visible) show(el);
+        });
+        document.addEventListener('focusout', (e) => { if (cur && tipEl(e.target) === cur.el) hide(); });
+        document.addEventListener('pointerdown', hide, true);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') hide(); }, true);
+        // The language changed while a tip was showing (1.73.0): the button's data-tip has been said again by
+        // then (the server's by the walk, a script's by its key), so the tip reads it again — it used to stay in
+        // the language it was opened in.
+        document.addEventListener('langswap', () => {
+            if (!cur || !cur.entry) return;
+            // its button drawn again meanwhile (a search's rows re-run): the tip of a button that is gone goes too
+            if (!cur.el.isConnected) { hide(); return; }
+            const text = textOf(cur.el);
+            if (text) cur.entry.say(text);
+        });
+    }
+    tipOnHover();
+
+    /**
+     * An icon-only button (1.71.0): the library's glyph (Bootstrap's markup, mapped to Font Awesome when
+     * that is the site's library), its NAME for a screen reader and its EXPLANATION for the tooltip above
+     * (the name again when there is nothing more to say). `tag` 'a' for a link that looks like one.
+     * Both are t.key() words (1.73.0): they keep their keys and follow the live language switch.
+     */
+    function iconButton(tag, cls, icon, name, tip) {
+        const b = document.createElement(tag);
+        if (tag === 'button') b.type = 'button';
+        b.className = cls + ' ic-btn';
+        b.setAttribute('aria-label', name);
+        b.setAttribute('data-tip', tip || name);
+        b.appendChild(iconEl('bi ' + icon));
+        return b;
+    }
+    /** An icon button's glyph, swapped for a moment (a tick once something was copied) and put back. */
+    function swapGlyph(btn, icon, ms) {
+        const i = btn.querySelector(':scope > .bi');
+        if (!i) return;
+        // Bootstrap's classes only: Font Awesome's are the observer's (assets/js/icons.js), added again.
+        if (!btn.dataset.glyph) btn.dataset.glyph = [...i.classList].filter((c) => !c.startsWith('fa-')).join(' ');
+        i.className = 'bi ' + icon;
+        clearTimeout(btn.__glyphTimer);
+        btn.__glyphTimer = setTimeout(() => {
+            const j = btn.querySelector(':scope > .bi');
+            if (j && btn.dataset.glyph) j.className = btn.dataset.glyph;
+            delete btn.dataset.glyph;
+        }, ms || 1500);
+    }
+    /** Accelerating "held backspace" clear (same effect as the admin toolbars). */
+    function animatedClearPub(input, done) {
+        if (!input) { if (done) done(); return; }
+        if (input.__clearing) return;
+        input.__clearing = true;
+        if (input.value.length > 40) input.value = input.value.slice(-40);
+        let delay = 55;
+        const step = () => {
+            if (!input.value.length) { input.__clearing = false; if (done) done(); return; }
+            input.value = input.value.slice(0, -1);
+            delay = Math.max(7, delay * 0.82);
+            setTimeout(step, delay);
+        };
+        step();
+    }
+    /** Append `text` to `parent`, wrapping every occurrence of any of `tokens` in <mark>. */
+    function markInto(parent, text, tokens) {
+        text = String(text == null ? '' : text);
+        if (!tokens || !tokens.length) { parent.appendChild(document.createTextNode(text)); return; }
+        let rest = text;
+        while (rest) {
+            let best = -1, bestLen = 0;
+            const low = rest.toLowerCase();
+            for (const t of tokens) {
+                const i = low.indexOf(t);
+                if (i !== -1 && (best === -1 || i < best || (i === best && t.length > bestLen))) { best = i; bestLen = t.length; }
+            }
+            if (best === -1) { parent.appendChild(document.createTextNode(rest)); break; }
+            if (best > 0) parent.appendChild(document.createTextNode(rest.slice(0, best)));
+            const m = document.createElement('mark');
+            m.textContent = rest.slice(best, best + bestLen);
+            parent.appendChild(m);
+            rest = rest.slice(best + bestLen);
+        }
+    }
+    const queryTokens = (q) => [...new Set(String(q).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 2))];
+
+    /**
+     * Live per-field validation: `check` returns true when the CURRENT value is acceptable.
+     * The error only shows after the field was touched (blurred once) or a submit was attempted,
+     * so users are not yelled at while still typing their first character.
+     */
+    // A field that is wrong SAYS so to a screen reader too (1.74.0): aria-invalid, and its group's message (.error-msg)
+    // named as its description while it applies — the red edge and the line under it were all there was.
+    function liveValidate(input, check) {
+        if (!input) return () => true;
+        const group = input.closest('.form-group');
+        const msg = group ? group.querySelector('.error-msg') : null;
+        if (msg && !msg.id) msg.id = (input.id || 'field') + '-error';
+        let touched = false;
+        const apply = () => {
+            const bad = touched && !check();
+            if (group) group.classList.toggle('has-error', bad);
+            input.setAttribute('aria-invalid', bad ? 'true' : 'false');
+            if (msg) {
+                const ids = (input.getAttribute('aria-describedby') || '').split(/\s+/).filter((x) => x && x !== msg.id);
+                if (bad) ids.push(msg.id);
+                if (ids.length) input.setAttribute('aria-describedby', ids.join(' ')); else input.removeAttribute('aria-describedby');
+            }
+            return bad;
+        };
+        input.addEventListener('input', apply);
+        input.addEventListener('blur', () => { touched = true; apply(); });
+        return (forceTouch) => { if (forceTouch) touched = true; apply(); return check(); };
+    }
+    /** After a refused submit: the focus to the first field that is wrong (1.74.0) — it fell to <body> with the button. */
+    function focusFirstBad(form) {
+        const bad = form && form.querySelector('[aria-invalid="true"]');
+        if (bad) { try { bad.focus({ preventScroll: false }); } catch (e) { bad.focus(); } return true; }
+        return false;
+    }
+    // The site's one short date (1.74.0): "2026-10-05 18:00", as the inbox, the comments and the people lists write it —
+    // never the browser's ("10/05/2026, 04:00 PM" stood on a Polish page). A moment the server wrote for the reader
+    // (`*_time`, in their zone) is shown as it came; a raw DATETIME (the server's clock) is shortened, not reinterpreted:
+    // reading it as the browser's own time is what put "last seen" two hours off.
+    const fmtDatePub = (s, local) => {
+        if (local) return String(local);
+        if (!s) return '—';
+        const v = String(s);
+        return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(v) ? v.replace('T', ' ').slice(0, 16) : v;
+    };
+
+    // ── sign in ──
+    function initLogin() {
+        const form = $id('login-form');
+        if (!form) return;
+        const login = $id('login-login'), pass = $id('login-password');
+        const vLogin = liveValidate(login, () => login.value.trim() !== '');
+        const vPass = liveValidate(pass, () => pass.value !== '');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $id('login-alert'), btn = $id('login-submit');
+            const ok = [vLogin(true), vPass(true)].every(Boolean);
+            if (!ok) { focusFirstBad(form); return; }
+            btn.disabled = true;
+            const codeEl = $id('login-code');
+            const json = await fetchWithCaptcha('user_login', {
+                csrf_token: csrfOf(form),
+                login: login.value.trim(),
+                password: pass.value,
+                session: ($id('login-session') || { value: 'forever' }).value,
+                // Empty on the first attempt, which is what makes the server ask.
+                code: codeEl ? codeEl.value.trim() : '',
+            }, form.dataset.captchaFirst === '1');
+            if (json && json.success) {
+                showAlert(alert, t.key('js.app.signed_in_loading'), true);
+                window.location.href = APP_BASE + '?action=account';
+            } else if (json && json.twofa) {
+                // The password was right. Show the code field and say which of the two things
+                // happened — "wrong code" and "now I need a code" are different sentences.
+                const group = $id('login-2fa-group');
+                if (group) group.hidden = false;
+                showAlert(alert, t.key(json.error === 'twofa_invalid' ? 'js.app.twofa_bad' : 'js.app.twofa_ask'),
+                          json.error !== 'twofa_invalid');
+                if (codeEl) { codeEl.value = ''; codeEl.focus(); }
+                btn.disabled = false;
+            } else {
+                showAlert(alert, (json && json.error) || t.key('js.app.signin_failed'), false);
+                btn.disabled = false;
+                // The button was disabled for the request and the focus fell to <body>: back to the password, to try
+                // again — the alert above it has been said (1.74.0).
+                if (document.activeElement === document.body || document.activeElement === btn) { pass.focus(); pass.select(); }
+            }
+        });
+    }
+
+    // ── register ──
+    function initRegister() {
+        const form = $id('register-form');
+        if (!form) return;
+        const u = $id('reg-username'), em = $id('reg-email'), p1 = $id('reg-password'), p2 = $id('reg-password2');
+        // real-time validation: errors appear once a field was left (or on submit), then track typing
+        const emailRequired = form.dataset.emailRequired === '1';
+        const vUser = liveValidate(u, () => /^[A-Za-z0-9_.-]{3,32}$/.test(u.value.trim()));
+        const vMail = liveValidate(em, () => (emailRequired ? em.value.trim() !== '' : true) && (em.value.trim() === '' || EMAIL_RE.test(em.value.trim())));
+        bindPwChecklist(p1, $id('reg-pw-checklist'), false);
+        const vP1 = liveValidate(p1, () => pwValid(p1.value));
+        const vP2 = liveValidate(p2, () => p2.value === p1.value);
+        const terms = $id('reg-terms');
+        const vTerms = () => { const ok = terms.checked; terms.closest('.form-group').classList.toggle('has-error', !ok); return ok; };
+        terms.addEventListener('change', vTerms);
+        // custom terms (admin-pasted text) open in a modal instead of the tos page
+        if (form.dataset.termsCustom === '1') {
+            const overlay = $id('terms-overlay');
+            const close = () => { overlay.hidden = true; };
+            $id('reg-terms-link').addEventListener('click', (e) => { e.preventDefault(); overlay.hidden = false; });
+            $id('terms-close').addEventListener('click', close);
+            closeOnBackdrop(overlay, close);
+        }
+        p1.addEventListener('input', () => p2.dispatchEvent(new Event('input')));   // re-check the repeat too
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $id('register-alert'), btn = $id('register-submit');
+            const ok = [vUser(true), vMail(true), vP1(true), vP2(true), vTerms()].every(Boolean);
+            if (!ok) { if (!focusFirstBad(form) && !terms.checked) terms.focus(); return; }
+            btn.disabled = true;
+            const json = await fetchWithCaptcha('user_register', {
+                csrf_token: csrfOf(form),
+                username: u.value.trim(), email: em.value.trim(), password: p1.value,
+                terms_accepted: 1,
+            });
+            if (json && json.success) {
+                showAlert(alert, [t.key('js.app.account_created')].concat(json.verify_sent ? [' ', t.key('js.app.verify_link_sent')] : []), true);
+                window.location.href = APP_BASE + '?action=account';
+            } else {
+                showAlert(alert, (json && json.error) || t.key('js.app.register_failed'), false);
+                btn.disabled = false;
+            }
+        });
+    }
+
+    // ── account page ──
+    async function loadAccount() {
+        const groupsBox = $id('acc-groups');
+        const me = await getJson('user_me');
+        if (!me || !me.success) { groupsBox.textContent = t.key('js.app.groups_load_failed'); return; }
+        groupsBox.textContent = '';
+        if (!me.groups.length) {
+            const none = document.createElement('span');
+            none.className = 'text-muted';
+            none.textContent = t.key('js.app.no_groups');
+            groupsBox.appendChild(none);
+        } else {
+            me.groups.forEach(g => {
+                const div = document.createElement('div');
+                div.className = 'acc-group';
+                const name = document.createElement('strong');
+                name.textContent = g.name;
+                if (g.color && /^#[0-9a-fA-F]{3,8}$/.test(g.color)) name.style.color = g.color;
+                div.appendChild(name);
+                const until = document.createElement('span');
+                until.className = 'text-muted';
+                until.replaceChildren(' — ', g.expires_at ? t.key('js.app.group_until', {date: fmtDatePub(g.expires_at)}) : t.key('js.app.group_permanent'));
+                div.appendChild(until);
+                if (g.description) {
+                    const d = document.createElement('div');
+                    d.className = 'acc-group-desc text-muted';
+                    d.textContent = g.description;
+                    div.appendChild(d);
+                }
+                groupsBox.appendChild(div);
+            });
+        }
+        pulseFreshAt = Date.now();   // straight from the server, so no older lease may undo it
+        window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
+        window.NavUnread.shout = Math.max(0, Number(me.unread_shout) || 0);
+        window.NavUnread.set('pm', me.unread_pm);
+        if (window.Sounds) window.Sounds.observe(me);
+        const accBadge = $id('acc-unread-badge');
+        if (accBadge) { accBadge.textContent = t.key('js.app.unread_count', {n: me.unread}); accBadge.hidden = me.unread <= 0; }
+    }
+    /**
+     * The words of a notification that HAS a format (1.75.0, api/user_notifications.php): a moderator's reason or answer
+     * in BBCode / Markdown, a bulk message in BBCode / Markdown / HTML. The server renders them when they are read.
+     *   bbcode, markdown   `rich_html` is the site's own renderer's output on escaped input (includes/richtext.php) and goes
+     *                      into a contained box (.acc-notif-rich: scrolls, never wider than the card);
+     *   html               a campaign's HTML, cleaned by the sanitizer — and then NOT put into this page at all: `rich_doc` is
+     *                      a whole document for an <iframe sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+     *                      with NO allow-scripts, so a miss of the sanitizer would still run nothing. allow-same-origin is only
+     *                      so this page can read the frame's height (the frame has no script to say it); allow-popups, so a
+     *                      link's target=_blank opens a tab. The frame is sized to its content, and again when an image arrives.
+     *                      No frame document, no box: HTML never has a way into this page's own DOM, not even as a fallback.
+     */
+    function richNotifBox(n) {
+        if (n.rich_format === 'html') {
+            if (!n.rich_doc) return null;
+            const fr = document.createElement('iframe');
+            fr.className = 'acc-notif-frame';
+            fr.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+            fr.setAttribute('referrerpolicy', 'no-referrer');
+            t.attr(fr, 'title', 'js.app.notif_rich_frame');
+            const fit = () => {
+                try {
+                    const d = fr.contentDocument;
+                    if (d && d.documentElement) fr.style.height = Math.min(640, Math.max(40, d.documentElement.scrollHeight + 2)) + 'px';
+                } catch (e) { /* the height stays what it was */ }
+            };
+            fr.addEventListener('load', () => {
+                fit();
+                try { fr.contentDocument.querySelectorAll('img').forEach((im) => im.addEventListener('load', fit)); } catch (e) { /* none */ }
+                setTimeout(fit, 400);
+                setTimeout(fit, 1500);
+            });
+            fr.srcdoc = n.rich_doc;
+            return fr;
+        }
+        // Only the two markups that our own renderer wrote (escaped first) are ever put into the page as HTML.
+        if (n.rich_format !== 'bbcode' && n.rich_format !== 'markdown') return null;
+        const box = document.createElement('div');
+        box.className = 'acc-notif-rich rt-body';
+        box.innerHTML = n.rich_html || '';
+        return box;
+    }
+    let notifPage = 1;
+    async function loadNotifications(page) {
+        if (page) notifPage = page;
+        const box = $id('acc-notifications');
+        const pag = $id('acc-notif-pagination');
+        const json = await getJson('user_notifications&page=' + notifPage);
+        if (!json || !json.success) { box.textContent = t.key('js.app.notif_load_failed'); return; }
+        box.textContent = '';
+        if (pag) pag.textContent = '';
+        if (!json.notifications.length) {
+            const none = document.createElement('span');
+            none.className = 'text-muted';
+            none.textContent = t.key('js.common.nothing_here');
+            box.appendChild(none);
+            return;
+        }
+        json.notifications.forEach(n => {
+            const item = document.createElement('div');
+            // A WARNING (1.71.0, includes/reports.php) is marked as one: the moderator's words about something
+            // this member did. Here, and nowhere public.
+            const warning = n.type === 'warning';
+            item.className = 'acc-notif' + (n.read_at ? ' acc-notif-read' : '') + (warning ? ' acc-notif-warning' : '');
+            const head = document.createElement('div');
+            head.className = 'acc-notif-head';
+            const strongEl = document.createElement('strong');
+            if (warning) strongEl.append(iconEl('bi bi-exclamation-triangle'), ' ');
+            strongEl.append(n.title);
+            head.appendChild(strongEl);
+            const when = document.createElement('span');
+            when.className = 'text-muted acc-notif-time';
+            // On the reader's clock (1.73.0 part E): the server says it in the zone they chose (`created_time`);
+            // the raw DATETIME read by the browser was the database session's clock taken for the browser's own.
+            when.textContent = n.created_time || fmtDatePub(n.created_at);
+            head.appendChild(when);
+            item.appendChild(head);
+            if (n.body) {
+                const b = document.createElement('div');
+                b.className = 'acc-notif-body';
+                b.textContent = n.body;
+                item.appendChild(b);
+            }
+            // …and, when the notification has words with a FORMAT (1.75.0), those under it — see richNotifBox().
+            if (n.rich_format && (n.rich_html || n.rich_doc)) {
+                const rich = richNotifBox(n);
+                if (rich) item.appendChild(rich);
+            }
+            // Where this notification happened. A friend request that says somebody is waiting and
+            // then leaves the reader to find the tab themselves is a notification that has told
+            // them half of it. The hash is enough: assets/js/favourites.js listens for it.
+            const NOTIF_TAB = { friend_request: 'people', friend_accepted: 'people' };
+            const tab = NOTIF_TAB[n.type];
+            // One row for whatever can be done about it, with room between the buttons. Appended to
+            // the card one after the other they were two inline elements touching.
+            const acts = document.createElement('div');
+            acts.className = 'acc-notif-acts';
+            if (tab) {
+                const go = document.createElement('a');
+                go.className = 'btn btn-secondary btn-small acc-notif-go';
+                go.href = '#' + tab;
+                go.textContent = t.key('js.app.notif_go_' + tab);
+                acts.appendChild(go);
+            } else if (typeof n.link === 'string' && /^\?action=[A-Za-z0-9_-]+(?:&[A-Za-z0-9_-]+=[A-Za-z0-9_.%-]*)*(?:#[A-Za-z0-9_-]+)?$/.test(n.link)) {
+                // Where it happened (1.71.0, user_notifications.link — a comment, and where to read it): the
+                // server writes only a site-relative address, and this draws nothing else.
+                const go = document.createElement('a');
+                go.className = 'btn btn-secondary btn-small acc-notif-go acc-notif-link';
+                go.href = n.link;
+                go.textContent = t.key('js.app.notif_go_link');
+                // Going to read it is reading it: marked on the way out (keepalive, so the page leaving does not
+                // cancel the request), and the badge is not left counting what the reader went to see.
+                go.addEventListener('click', () => {
+                    if (n.read_at) return;
+                    try {
+                        fetch(APP_API + 'user_notifications', { method: 'POST', keepalive: true, credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                            body: JSON.stringify({ csrf_token: csrfToken(), ids: [n.id] }) });
+                    } catch (e) { /* the page goes on either way */ }
+                });
+                acts.appendChild(go);
+            }
+            if (!n.read_at) {
+                const mark = document.createElement('button');
+                mark.type = 'button';
+                mark.className = 'btn btn-secondary btn-small';
+                mark.textContent = t.key('js.app.mark_read');
+                mark.addEventListener('click', async () => {
+                    await postJson('user_notifications', { csrf_token: csrfToken(), ids: [n.id] });
+                    loadNotifications(); loadAccount();
+                });
+                acts.appendChild(mark);
+            }
+            if (acts.children.length) item.appendChild(acts);
+            box.appendChild(item);
+        });
+        if (pag && json.pages > 1) {
+            const mk = (parts, target, disabled) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.append(...parts);
+                b.disabled = !!disabled;
+                b.addEventListener('click', () => loadNotifications(target));
+                return b;
+            };
+            pag.appendChild(mk([iconEl('bi bi-chevron-left'), ' ', t.key('js.app.pg_prev')], json.page - 1, json.page <= 1));
+            const info = document.createElement('span');
+            info.textContent = t.key('js.app.page_of_total', {page: json.page, pages: json.pages, total: json.total});
+            pag.appendChild(info);
+            pag.appendChild(mk([t.key('js.app.pg_next'), ' ', iconEl('bi bi-chevron-right')], json.page + 1, json.page >= json.pages));
+        }
+    }
+    /**
+     * The number on the account link, kept current everywhere (1.55.0).
+     *
+     * Every page a signed-in reader has open asks api/user_pulse.php for the two counts, at the
+     * cadence the badge carries (data-pulse, from Settings; 0 = never). Four rules, each of which
+     * was learned the hard way on the conversation poll:
+     *   - a hidden tab asks for nothing, and asks the moment it is shown again;
+     *   - one flight at a time;
+     *   - numbers, never content — what arrived is read on the account page;
+     *   - ONE request per reader, not one per tab: a tab that fetched leaves the answer and its
+     *     time in localStorage, and any other tab whose turn comes inside that window uses the
+     *     stored answer instead of asking again. A `storage` event carries a fresh answer to the
+     *     other tabs at once.
+     */
+    // When this reader last heard a number from the SERVER, shared by the pulse and by the baseline
+    // below. A stored lease older than this is another tab's memory of a world that has since moved,
+    // and adopting it would undo what we just learned — see the guard in tick().
+    let pulseFreshAt = 0;
+
+    function initPulse() {
+        // Either badge carries the cadence and the account id. A guest the operator granted
+        // `shout.view` has the Shoutbox one and no account link at all, and gating on the account
+        // badge alone left their counter fetched once on load and then still for ever.
+        const badge = $id('nav-unread') || $id('nav-shout-unread');
+        if (!badge) return;
+        const every = Math.max(0, parseInt(badge.dataset.pulse || '0', 10) || 0);
+        if (every <= 0) return;
+        // Per account, and cleared on sign-out: a lease another account left behind on a shared
+        // machine was adopted for up to a minute, badge numbers included.
+        const KEY = 'thx_pulse:' + (badge.dataset.uid || '0');
+        let inFlight = false, stopped = false;
+        const apply = (v) => {
+            if (!v) return;
+            window.NavUnread.notif = Math.max(0, Number(v.unread) || 0);
+            // Absent from the answer when the room is off or this reader may not read it, which
+            // Number(undefined) turns into 0 — a badge that stays hidden rather than a stale one.
+            window.NavUnread.shout = Math.max(0, Number(v.unread_shout) || 0);
+            window.NavUnread.set('pm', v.unread_pm);
+        };
+        const stored = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { return null; } };
+        const tick = async () => {
+            if (stopped || inFlight) return;
+            // A hidden tab asks nothing — unless this reader wants to HEAR what arrives, which is
+            // exactly the tab they are not looking at. (Browsers slow a hidden tab's timers to about
+            // once a minute, so the cadence is a ceiling there, never a cost.)
+            if (document.hidden && !(window.Sounds && window.Sounds.wants())) return;
+            const s = stored();
+            // Another tab asked recently enough: its answer is this tab's answer — but only if it is
+            // NEWER than what this tab already heard. localStorage survives a reload, so without the
+            // second half the first tick after a page load adopted the lease this same tab wrote
+            // BEFORE the reload and put the pre-reload numbers back: the badge showed what the page
+            // had just fetched, then blanked a moment later and stayed blank until the lease aged
+            // out. Still skip the flight either way — the point of the lease is one request per
+            // reader, and a stale answer is a reason to keep ours, not a reason to ask again.
+            if (s && typeof s.at === 'number' && Date.now() - s.at < every * 1000 * 0.8) {
+                if (s.at > pulseFreshAt) apply(s);
+                return;
+            }
+            inFlight = true;
+            try {
+                const r = await getJson('user_pulse');
+                if (!r) return;
+                if (!r.success) { stopped = true; return; }          // signed out meanwhile: stop asking
+                pulseFreshAt = Date.now();
+                apply(r);
+                if (window.Sounds) window.Sounds.observe(r);   // this tab fetched it: this tab may play
+                try { localStorage.setItem(KEY, JSON.stringify({ at: Date.now(), unread: r.unread, unread_pm: r.unread_pm, unread_shout: r.unread_shout })); } catch (e) { /* private mode */ }
+                if (Number(r.live) <= 0) stopped = true;             // switched off in Settings since the page loaded
+            } finally { inFlight = false; }
+        };
+        // A write by another tab is by definition newer than anything this one knows, so it is
+        // adopted and becomes the new mark — the same rule the lease follows, from the other side.
+        window.addEventListener('storage', (e) => {
+            if (e.key !== KEY || !e.newValue) return;
+            try { const v = JSON.parse(e.newValue); pulseFreshAt = Date.now(); apply(v); } catch (err) { /* ignore */ }
+        });
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+        setInterval(tick, every * 1000);
+        window.PulseTick = tick;   // the browser check pokes it rather than waiting a minute
+    }
+
+    /**
+     * The card under the Overview's columns stands exactly 1.25rem below the lowest card (1.72.1).
+     *
+     * The columns are CSS columns the browser balances (.acc-flow), and when the two come out nearly equal the
+     * balancing leaves a strip of empty column under both — 7.6px measured, Polish with ratings on, 1 379 / 1 378px —
+     * so the security card stood that much further than the owner's 1.25rem. CSS cannot shorten a column box, so the
+     * strip is taken back as the flow's negative bottom margin, measured again whenever the flow or a card in it
+     * changes size (a tab shown, a picture loaded, the language swapped, the window resized). A single column has no
+     * strip and gets nothing.
+     */
+    function trimAccountFlow() {
+        const flow = document.querySelector('.acc-flow');
+        if (!flow || typeof ResizeObserver === 'undefined') return;
+        let queued = false;
+        const trim = () => {
+            queued = false;
+            const cards = [...flow.children].filter((c) => c.classList.contains('account-card') && c.getClientRects().length);
+            if (!cards.length) { flow.style.marginBottom = ''; return; }
+            const low = Math.max(...cards.map((c) => c.getBoundingClientRect().bottom));
+            const strip = flow.getBoundingClientRect().bottom - low;
+            flow.style.marginBottom = strip > 0.5 ? (-strip).toFixed(2) + 'px' : '';
+        };
+        const ro = new ResizeObserver(() => { if (!queued) { queued = true; requestAnimationFrame(trim); } });
+        ro.observe(flow);
+        [...flow.children].forEach((c) => ro.observe(c));
+        trim();
+    }
+
+    function initAccount() {
+        window.NavUnread.seed();
+        if (!$id('account-form')) {
+            // not on the account page — still light up the nav badge for signed-in users
+            // Either badge is reason enough to ask. A guest the operator granted `shout.view` has a
+            // Shoutbox link and no account link at all, and NavUnread.render() was written for
+            // exactly that reader — gating the fetch on the account badge alone left them with a
+            // counter that could never fill.
+            if ($id('nav-unread') || $id('nav-shout-unread')) {
+                getJson('user_me').then(me => {
+                    if (!me || !me.success) return;
+                    pulseFreshAt = Date.now();   // fresher than any lease written before this page load
+                    window.NavUnread.notif = Math.max(0, Number(me.unread) || 0);
+                    window.NavUnread.shout = Math.max(0, Number(me.unread_shout) || 0);
+                    window.NavUnread.set('pm', me.unread_pm);
+                    if (window.Sounds) window.Sounds.observe(me);   // the baseline: what was already waiting is not news
+                });
+            }
+            initPulse();
+            return;
+        }
+        initPulse();
+        trimAccountFlow();
+        loadAccount();
+        loadNotifications(1);
+        $id('acc-mark-all').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const r = await postJson('user_notifications', { csrf_token: csrfToken(), all: 1 });
+            pubTip(btn, r && r.success ? (r.marked > 0 ? t.key('js.app.marked_read', {n: r.marked}) : t.key('js.app.nothing_unread')) : t.key('js.app.failed'));
+            loadNotifications(); loadAccount();
+        });
+        const delRead = $id('acc-delete-read');
+        if (delRead) delRead.addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const r = await postJson('user_notifications', { csrf_token: csrfToken(), delete_read: 1 });
+            pubTip(btn, r && r.success ? (r.deleted > 0 ? t.key('js.app.deleted_n', {n: r.deleted}) : t.key('js.app.nothing_to_delete')) : t.key('js.app.failed'));
+            if (r && r.success) loadNotifications(1);
+        });
+        const cancelEc = $id('acc-cancel-echange');
+        if (cancelEc) cancelEc.addEventListener('click', async () => {
+            cancelEc.disabled = true;
+            const r = await postJson('user_update', { csrf_token: csrfToken(), cancel_email_change: 1 });
+            if (r && r.success) location.reload();
+            else cancelEc.disabled = false;
+        });
+        // Two preferences, one endpoint. Account mail and announcements are separate on purpose:
+        // somebody who wants no announcements still needs the password-reset message to arrive.
+        const mailPref = $id('acc-mail-pref');
+        const bulkPref = $id('acc-bulk-pref');
+        if (mailPref || bulkPref) {
+            const label = $id('acc-mail-pref-label');
+            const bulkLabel = $id('acc-bulk-pref-label');
+            getJson('user_email_prefs').then(r => {
+                if (!r || !r.success) {
+                    if (label) label.textContent = t.key('js.app.pref_unavailable');
+                    if (bulkLabel) bulkLabel.textContent = t.key('js.app.pref_unavailable');
+                    return;
+                }
+                if (mailPref) { mailPref.checked = !!r.enabled; label.textContent = r.enabled ? t.key('js.app.pref_enabled') : t.key('js.app.pref_disabled'); }
+                if (bulkPref) { bulkPref.checked = !!r.bulk_enabled; bulkLabel.textContent = r.bulk_enabled ? t.key('js.app.pref_enabled') : t.key('js.app.pref_disabled'); }
+            });
+            const bind = (box, lab, type) => {
+                if (!box) return;
+                box.addEventListener('change', async () => {
+                    const r = await postJson('user_email_prefs', {
+                        csrf_token: csrfToken(), enabled: box.checked ? 1 : 0, type });
+                    if (r && r.success) lab.textContent = r.enabled ? t.key('js.app.pref_enabled') : t.key('js.app.pref_disabled');
+                    else { box.checked = !box.checked; }
+                });
+            };
+            bind(mailPref, label, 'account');
+            bind(bulkPref, bulkLabel, 'bulk');
+        }
+        // The interface language. The whole UI is server-rendered, so the page is reloaded once the
+        // choice is stored -- swapping the strings in place would need a second copy of every one of
+        // them in JavaScript, and two copies of a translation is one that goes out of date.
+        const langSel = $id('acc-language');
+        if (langSel) langSel.addEventListener('change', async () => {
+            langSel.disabled = true;
+            const r = await postJson('user_language', {
+                csrf_token: csrfToken(), language: langSel.value });
+            if (r && r.success) { window.location.reload(); return; }
+            langSel.disabled = false;
+        });
+        // The display time zone (1.62.0). Saved the moment it is chosen, through the account's own
+        // update endpoint, and answered in the site's tooltip on the box — no reload, because
+        // nothing on THIS page prints a time in it; the shoutbox reads it on its next request.
+        // A refusal puts the select back where it was: a choice that did not save must not look
+        // as if it had.
+        const tzSel = $id('acc-timezone');
+        if (tzSel) {
+            let tzWas = tzSel.value;
+            tzSel.addEventListener('change', async () => {
+                const wrap = $id('acc-timezone-wrap') || tzSel.parentNode;
+                tzSel.disabled = true;
+                const r = await postJson('user_update', { csrf_token: csrfToken(), timezone: tzSel.value });
+                tzSel.disabled = false;
+                if (r && r.success) { tzWas = tzSel.value; pubTip(wrap, t.key('js.app.saved')); return; }
+                tzSel.value = tzWas;
+                pubTip(wrap, (r && r.error) || t.key('js.app.update_failed'));
+            });
+        }
+        const verifyBtn = $id('acc-verify-send');
+        if (verifyBtn) verifyBtn.addEventListener('click', async () => {
+            verifyBtn.disabled = true;
+            const r = await postJson('user_verify_send', { csrf_token: csrfToken() });
+            if (r && r.success && r.sent) verifyBtn.replaceChildren(t.key('js.app.verify_sent'), ' ', iconEl('bi bi-check-lg'));
+            else { verifyBtn.textContent = t.key('js.app.failed'); verifyBtn.title = (r && (r.message || r.error)) || t.key('js.app.verify_could_not_send'); setTimeout(() => { verifyBtn.textContent = t.key('js.app.verify_resend'); verifyBtn.disabled = false; }, 4000); }
+        });
+        $id('account-logout').addEventListener('click', async () => {
+            await postJson('user_logout', { csrf_token: csrfToken() });
+            try {   // the pulse lease is this account's; the next person at this browser gets none of it
+                Object.keys(localStorage).filter(k => k.startsWith('thx_pulse')).forEach(k => localStorage.removeItem(k));
+            } catch (e) { /* private mode */ }
+            window.location.href = APP_BASE;
+        });
+        // live validation: email format + repeat box when it changes; password policy + repeat box
+        const emailIn = $id('acc-new-email'), email2In = $id('acc-new-email2'), passIn = $id('acc-new-pass'), pass2In = $id('acc-new-pass2');
+        const pass2Group = $id('acc-new-pass2-group'), email2Group = $id('acc-new-email2-group');
+        const emailChanged = () => {
+            // `data-has-email`, not the visible word: the placeholder used to be the literal string
+            // "none" and this compared against it, so translating that one word would have made
+            // every account look like it had an address called "brak".
+            const box = $id('acc-email');
+            const had = box.dataset.hasEmail === '1';
+            return emailIn.value.trim() !== (had ? box.textContent.trim() : '');
+        };
+        bindPwChecklist(passIn, $id('acc-pw-checklist'), true);
+        const vMail = liveValidate(emailIn, () => emailIn.value.trim() === '' || EMAIL_RE.test(emailIn.value.trim()));
+        const vMail2 = liveValidate(email2In, () => !emailChanged() || emailIn.value.trim() === '' || email2In.value.trim() === emailIn.value.trim());
+        const vPass = liveValidate(passIn, () => passIn.value === '' || pwValid(passIn.value));
+        const vPass2 = liveValidate(pass2In, () => passIn.value === '' || pass2In.value === passIn.value);
+        emailIn.addEventListener('input', () => {
+            email2Group.hidden = !emailChanged() || emailIn.value.trim() === '';
+            if (email2In.value !== '') email2In.dispatchEvent(new Event('input'));
+        });
+        passIn.addEventListener('input', () => {
+            pass2Group.hidden = passIn.value === '';
+            if (pass2In.value !== '') pass2In.dispatchEvent(new Event('input'));
+        });
+        $id('account-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $id('account-alert'), btn = $id('account-save');
+            const curEmail = $id('acc-email').textContent.trim();
+            const hadEmail = curEmail !== '' && curEmail !== 'none';
+            const newEmail = emailIn.value.trim();
+            if (![vMail(true), vMail2(true), vPass(true), vPass2(true)].every(Boolean)) return;
+            const body = { csrf_token: csrfToken(), current_password: $id('acc-cur-pass').value };
+            // an emptied box removes the address; anything different from the current one changes it
+            if (newEmail !== (hadEmail ? curEmail : '')) body.email = newEmail;
+            if (passIn.value !== '') body.new_password = passIn.value;
+            if (body.email === undefined && body.new_password === undefined) { showAlert(alert, t.key('js.app.nothing_to_change'), false); return; }
+            btn.disabled = true;
+            const json = await postJson('user_update', body);
+            btn.disabled = false;
+            if (json && json.success) {
+                const msg = [t.key('js.app.saved')];
+                if (json.changed.includes('password')) msg.push(' ', t.key('js.app.acc_use_new_password'));
+                if (json.email_stage === 'old') msg.push(' ', t.key('js.app.acc_email_change_started'));
+                else if (json.email_stage === 'done_direct') msg.push(' ', json.verify_sent ? t.key('js.app.acc_verify_link_sent') : t.key('js.app.acc_email_saved'));
+                showAlert(alert, msg, true);
+                $id('acc-cur-pass').value = ''; passIn.value = ''; pass2In.value = ''; pass2Group.hidden = true;
+                email2In.value = ''; email2Group.hidden = true; $id('acc-pw-checklist').hidden = true;
+                if (json.email_stage === 'done_direct') {
+                    $id('acc-email').textContent = body.email || t.key('js.app.acc_email_none');
+                } else if (json.email_stage === 'old') {
+                    setTimeout(() => location.reload(), 2500);   // show the pending-change banner
+                }
+            } else {
+                showAlert(alert, (json && json.error) || t.key('js.app.update_failed'), false);
+            }
+        });
+    }
+
+    // ── password reset ──
+    function initReset() {
+        const reqForm = $id('reset-request-form');
+        if (reqForm) {
+            reqForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const alert = $id('reset-alert'), btn = $id('reset-submit');
+                btn.disabled = true;
+                const json = await fetchWithCaptcha('user_reset_request', {
+                    csrf_token: csrfOf(reqForm), login: $id('reset-login').value.trim(),
+                });
+                btn.disabled = false;
+                if (json && json.success) showAlert(alert, json.message || t.key('js.app.reset_check_inbox'), true);
+                else showAlert(alert, (json && json.error) || t.key('js.app.request_failed'), false);
+            });
+        }
+        const confForm = $id('reset-confirm-form');
+        if (confForm) {
+            bindPwChecklist($id('resetc-password'), $id('resetc-pw-checklist'), false);
+            confForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const alert = $id('resetc-alert'), btn = $id('resetc-submit');
+                const p1 = $id('resetc-password'), p2 = $id('resetc-password2');
+                if (!pwValid(p1.value)) { showAlert(alert, t.key('js.app.pw_requirements'), false); return; }
+                if (p1.value !== p2.value) { showAlert(alert, t.key('js.app.pw_mismatch'), false); return; }
+                btn.disabled = true;
+                const json = await postJson('user_reset_confirm', { csrf_token: csrfOf(confForm), token: $id('resetc-token').value, password: p1.value });
+                btn.disabled = false;
+                if (json && json.success) {
+                    showAlert(alert, t.key('js.app.pw_changed_sign_in'), true);
+                    setTimeout(() => { window.location.href = APP_BASE + '?action=login'; }, 1200);
+                } else showAlert(alert, (json && json.error) || t.key('js.app.reset_failed'), false);
+            });
+        }
+    }
+
+    // ── index search ──
+    // navigator.clipboard DOES NOT EXIST on plain HTTP — it is a secure-context API, and this
+    // panel has to work on an installation that has not got a certificate yet. A button that
+    // does nothing and says nothing is worse than no button, so the fallback is a read-only box
+    // with the link already selected: one Ctrl+C away, and visible proof of what would have been
+    // copied. The panel's copyToClipboard() lives in admin-common.js, which no public page
+    // loads, so this is its own small thing rather than a shared one.
+    // The fallback box is per BUTTON and is rebuilt from the label the caller passes, because the
+    // two buttons hand over different things: one a view, one a torrent. Announcing the panel's
+    // link as "Link to this view" would leave a screen-reader user with no way to tell them apart
+    // — and the whole point of the panel button is that it deliberately does NOT carry the view.
+    function shareFallbackFor(btn, label) {
+        let box = btn.nextElementSibling;
+        if (!box || !box.classList.contains('share-url')) {
+            box = document.createElement('input');
+            box.type = 'text';
+            box.className = 'share-url';
+            box.readOnly = true;
+            btn.after(box);
+        }
+        box.setAttribute('aria-label', label);
+        return box;
+    }
+    /** Take the visible link away — it describes a view the reader has since left. */
+    function dropShareBox(btn) {
+        const box = btn && btn.nextElementSibling;
+        if (box && box.classList.contains('share-url')) { box.hidden = true; box.value = ''; }
+    }
+    function dropAllShareBoxes() {
+        document.querySelectorAll('.share-url').forEach(box => { box.hidden = true; box.value = ''; });
+    }
+    // The button's own label is TAKEN OUT for the 1.5 s flash and put back afterwards — the very nodes the
+    // server wrote, never a copy of their words (a copy would be put back in the language it was taken in). A
+    // language swap that starts inside the flash puts them back at once, before its walk (`langswap:begin`), so
+    // the walk finds the server's words where the server wrote them and translates them (1.73.0; the flash used
+    // to write the captured text back and, on a swap, leave "Copied!" standing for good).
+    let flashTimer = 0;
+    function flashShared(btn) {
+        // An icon button (1.71.0 — the Info panel's Share and Copy) keeps its box: its glyph turns into the
+        // library's tick for the same second and a half, and "Copied!" is said in the site's tooltip, where
+        // the button's name was.
+        if (btn.classList.contains('ic-btn')) {
+            swapGlyph(btn, 'bi-check-lg', 1500);
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1500);
+            pubTip(btn, t.key('js.common.copied'));
+            return;
+        }
+        if (btn.dataset.flashing === '1') return;
+        const kept = [...btn.childNodes];
+        btn.dataset.flashing = '1';
+        btn.replaceChildren(t.key('js.app.copied'));
+        btn.classList.add('copied');
+        const restore = () => {
+            clearTimeout(flashTimer);
+            document.removeEventListener('langswap:begin', restore);
+            btn.replaceChildren(...kept);
+            btn.classList.remove('copied');
+            delete btn.dataset.flashing;
+        };
+        document.addEventListener('langswap:begin', restore);
+        flashTimer = setTimeout(restore, 1500);
+    }
+    function share(btn, url, label) {
+        const reveal = () => {
+            const box = shareFallbackFor(btn, label);
+            box.value = url;
+            box.hidden = false;
+            box.focus();
+            box.select();
+        };
+        if (!navigator.clipboard || !window.isSecureContext) { reveal(); return; }
+        navigator.clipboard.writeText(url).then(() => {
+            dropShareBox(btn);
+            flashShared(btn);
+        }).catch(reveal);
+    }
+    // The list cards in assets/js/favourites.js hand over a list's address through this too, so the
+    // site has one clipboard routine and one fallback rather than two that drift apart.
+    window.ShareLink = share;
+    /**
+     * A small Copy for a value in the Info panel — on its label's line since 1.72.0 (infoRow()). Same path,
+     * same fallback, same "Copied". An icon since 1.71.0 — the library's copy glyph, named for what it copies
+     * ("Copy the info hash"). The plain-HTTP box opens after it, on a line of its own under the label.
+     */
+    function copyButton(text, label) {
+        const b = iconButton('button', 'btn btn-secondary btn-small info-copy', 'bi-copy', label);
+        b.addEventListener('click', () => share(b, text, label));
+        return b;
+    }
+
+    let infoOverlay = null, infoHash = null;
+    // Read off the overlay's own markup, because the panel now opens on pages that have no
+    // search form to read them from — the account page's favourites and both lists on a profile.
+    let infoFilesMode = 'scroll', infoCanFav = false, infoCanFavWho = false;
+    let infoFilesObserver = null;   // the scroll sentinel's observer: one per open panel, dropped on close
+    // The search page rewrites its address when the panel opens and closes, so a link to a
+    // torrent is a link to the panel. Nowhere else has an address that means anything here.
+    let infoOnOpen = null;
+    // Esc closes the panel only while it is the top layer (escLayer(), 1.70.0): "Who has this", the list
+    // picker, an emoji picker or the "you are leaving" dialog over it take their Esc first.
+    let infoLayer = null;
+    let infoDescFold = 0;
+
+    function infoGallery(list) {
+        return window.InfoGallery(list);
+    }
+
+    function foldDescription(d) {
+        const wrap = document.createElement('div');
+        wrap.className = 'info-desc info-section';
+        d.classList.remove('info-section');
+        wrap.style.setProperty('--fold', infoDescFold + 'px');
+        wrap.appendChild(d);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary btn-small info-desc-toggle';
+        const show = (open) => {
+            wrap.classList.toggle('info-desc-open', open);
+            btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            btn.replaceChildren(iconEl('bi ' + (open ? 'bi-chevron-up' : 'bi-chevron-down')), t.child(t.key(open ? 'js.app.desc_fold' : 'js.app.desc_unfold')));
+        };
+        btn.addEventListener('click', () => {
+            const open = !wrap.classList.contains('info-desc-open');
+            show(open);
+            if (!open) wrap.scrollIntoView({ block: 'start' });
+        });
+        const measure = () => wrap.classList.toggle('info-desc-long', d.scrollHeight > infoDescFold + 96);
+        d.addEventListener('load', measure, true);
+        requestAnimationFrame(measure);
+        show(false);
+        wrap.appendChild(btn);
+        return wrap;
+    }
+
+    function initInfoResize(box, store) {
+        const key = store || 'thx-info-size';
+        const head = box.querySelector('.files-head');
+        const reset = iconButton('button', 'info-size-reset', 'bi-arrows-angle-contract', t.key('js.app.info_size_reset'), t.key('js.app.info_size_reset_tip'));
+        head.insertBefore(reset, head.querySelector('#info-share') || head.querySelector('.files-close'));
+        const stored = () => {
+            try {
+                const v = JSON.parse(localStorage.getItem(key) || 'null');
+                return v && v.w > 0 ? { w: Number(v.w), h: Number(v.h) || 0 } : null;
+            } catch (e) {
+                return null;
+            }
+        };
+        const fit = (v) => ({
+            w: Math.round(Math.min(Math.max(v.w, 420), window.innerWidth - 24)),
+            h: v.h ? Math.round(Math.min(Math.max(v.h, 280), window.innerHeight - 96)) : 0,
+        });
+        const apply = (v) => {
+            const f = v ? fit(v) : null;
+            box.classList.toggle('info-sized', !!f);
+            box.classList.toggle('info-sized-h', !!(f && f.h));
+            if (f) box.style.setProperty('--info-w', f.w + 'px'); else box.style.removeProperty('--info-w');
+            if (f && f.h) box.style.setProperty('--info-h', f.h + 'px'); else box.style.removeProperty('--info-h');
+            reset.hidden = !f;
+        };
+        const keep = (v) => {
+            try {
+                if (v) localStorage.setItem(key, JSON.stringify(v)); else localStorage.removeItem(key);
+            } catch (e) {
+                return;
+            }
+        };
+        const clear = () => { keep(null); apply(null); };
+        reset.addEventListener('click', clear);
+        ['e', 'w', 's', 'se', 'sw'].forEach(dir => {
+            const grip = document.createElement('span');
+            grip.className = 'info-grip info-grip-' + dir;
+            grip.setAttribute('aria-hidden', 'true');
+            grip.addEventListener('dblclick', clear);
+            grip.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                const r = box.getBoundingClientRect();
+                const x0 = e.clientX, y0 = e.clientY;
+                const before = stored();
+                let last = null;
+                grip.setPointerCapture(e.pointerId);
+                box.classList.add('info-resizing');
+                const move = (ev) => {
+                    const dx = ev.clientX - x0;
+                    const w = dir.includes('e') ? r.width + 2 * dx : (dir.includes('w') ? r.width - 2 * dx : r.width);
+                    const h = dir.includes('s') ? r.height + ev.clientY - y0 : (before ? before.h : 0);
+                    last = fit({ w, h });
+                    apply(last);
+                };
+                const up = () => {
+                    grip.removeEventListener('pointermove', move);
+                    grip.removeEventListener('pointerup', up);
+                    grip.removeEventListener('pointercancel', up);
+                    box.classList.remove('info-resizing');
+                    if (last) keep(last);
+                };
+                grip.addEventListener('pointermove', move);
+                grip.addEventListener('pointerup', up);
+                grip.addEventListener('pointercancel', up);
+            });
+            box.appendChild(grip);
+        });
+        apply(stored());
+        window.addEventListener('resize', () => apply(stored()));
+    }
+
+    function initRowOpen() {
+        const rowSel = '#search-body > tr, .pf-row, .pv-table tbody > tr';
+        const skip = 'a, button, input, select, textarea, label, summary, details, img, video, .fchip, .ts, .rep-chip, .search-files-chip, .pf-hash-copy, [role="button"], [contenteditable="true"]';
+        const onText = (node, x, y) => {
+            for (const n of node.childNodes) {
+                if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+                const range = document.createRange();
+                range.selectNodeContents(n);
+                for (const b of range.getClientRects()) {
+                    if (x >= b.left - 2 && x <= b.right + 2 && y >= b.top - 2 && y <= b.bottom + 2) return true;
+                }
+            }
+            return false;
+        };
+        const spot = (e) => {
+            const node = e.target instanceof Element ? e.target : null;
+            const row = node && node.closest(rowSel);
+            if (!row || node.closest(skip) || onText(node, e.clientX, e.clientY)) return null;
+            const btn = row.querySelector('.search-act-info, .pf-info');
+            return btn && !btn.disabled ? { row, btn } : null;
+        };
+        let lit = null;
+        document.addEventListener('mousemove', (e) => {
+            const hit = spot(e);
+            const row = hit ? hit.row : null;
+            if (row === lit) return;
+            if (lit) lit.classList.remove('row-open-spot');
+            lit = row;
+            if (lit) lit.classList.add('row-open-spot');
+        }, { passive: true });
+        document.addEventListener('click', (e) => {
+            if (e.button !== 0 || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+            if (window.getSelection && String(window.getSelection()).trim()) return;
+            const hit = spot(e);
+            if (hit) hit.btn.click();
+        });
+    }
+
+    function closeInfo() {
+        if (!infoOverlay) return;
+        infoOverlay.hidden = true;
+        infoHash = null;
+        // Every open panel used to leave an observer behind, holding its sentinel and its file list.
+        if (infoFilesObserver) { infoFilesObserver.disconnect(); infoFilesObserver = null; }
+        if (infoOnOpen) infoOnOpen();
+        if (infoLayer) infoLayer.off();
+    }
+
+    /**
+     * One fact of the record. `action` (1.72.0): a button that acts on the value — the Info hash's and the
+     * Magnet link's Copy — stands on the LABEL's line, at its right (.info-kv-head: the owner's markup, as a
+     * class), and the value under both. It stood after the hash and under the magnet's three lines.
+     */
+    function infoRow(label, value, cls, action) {
+        const d = document.createElement('div');
+        d.className = 'info-kv' + (cls ? ' ' + cls : '');
+        const l = document.createElement('span');
+        l.className = 'info-kv-label';
+        l.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'info-kv-value';
+        if (value instanceof Node) v.appendChild(value); else v.textContent = value == null ? '—' : (t.isKey(value) ? value : String(value));
+        if (action) {
+            const head = document.createElement('span');
+            head.className = 'info-kv-head';
+            head.appendChild(l); head.appendChild(action);
+            d.appendChild(head);
+        } else {
+            d.appendChild(l);
+        }
+        d.appendChild(v);
+        return d;
+    }
+
+    /**
+     * Five stars, half a star at a time.
+     *
+     * Ten clickable halves rather than five stars: the storage is in halves and the pointer has
+     * to be able to reach one, or "3.5" would be a value nobody can actually cast. Hovering
+     * previews what a click would set, which is the whole reason a star widget feels different
+     * from a number field — and leaving restores what is really stored, so a hover never lies
+     * about the current state.
+     *
+     * The half star at your own rating is PRESSED (1.71.0): aria-pressed, a mark under it, and a tooltip
+     * saying that pressing it again takes the rating back — which is what pressing it does.
+     */
+    function buildHist(hist, total) {
+        const box = document.createElement('div');
+        box.className = 'rep-hist';
+        [5, 4, 3, 2, 1].forEach(s => {
+            const n = Number(hist[s] || 0);
+            const lab = document.createElement('span');
+            lab.className = 'rep-hist-s';
+            lab.append(String(s), ' ', iconEl('bi bi-star-fill'));
+            const bar = document.createElement('span');
+            bar.className = 'rep-hist-bar';
+            bar.title = t.key('js.app.hist_row', { n: t.num(n), s: s });
+            const fill = document.createElement('span');
+            fill.style.width = (total > 0 ? Math.round(n * 100 / total) : 0) + '%';
+            bar.appendChild(fill);
+            const cnt = document.createElement('span');
+            cnt.className = 'rep-hist-n';
+            cnt.textContent = t.num(n);
+            box.append(lab, bar, cnt);
+        });
+        return box;
+    }
+
+    function rateOpenButton(r, json, hash) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn btn-secondary btn-small rep-open';
+        b.append(iconEl('bi bi-star'), ' ', t.key('js.app.rate_open'));
+        b.addEventListener('click', () => {
+            const dlg = document.createElement('dialog');
+            dlg.className = 'rep-dialog';
+            dlg.setAttribute('aria-label', t.key('js.app.rate_open'));
+            const head = document.createElement('div');
+            head.className = 'rep-dialog-head';
+            head.textContent = t.key('js.app.rate_open');
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.className = 'btn btn-secondary btn-small';
+            close.textContent = t.key('js.app.rate_close');
+            close.addEventListener('click', () => dlg.close());
+            dlg.append(head, buildStars(r, json, hash), close);
+            dlg.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('.star-hit')) setTimeout(() => dlg.close(), 60); });
+            dlg.addEventListener('close', () => dlg.remove());
+            document.body.appendChild(dlg);
+            if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+        });
+        return b;
+    }
+
+    function buildStars(r, json, hash) {
+        const wrap = document.createElement('div');
+        wrap.className = 'stars-wrap';
+
+        const row = document.createElement('div');
+        row.className = 'stars' + (json.can_vote ? ' stars-live' : '');
+        row.setAttribute('role', json.can_vote ? 'group' : 'img');
+
+        const shown = r.stars === null ? 0 : r.stars;
+        const mine = json.my_vote > 0 ? json.my_vote / 2 : 0;
+
+        // Paint to a value in stars (0..5), filling halves.
+        const paint = (value) => {
+            [...row.querySelectorAll('.star')].forEach((st, i) => {
+                const full = value >= i + 1;
+                const half = !full && value >= i + 0.5;
+                st.classList.toggle('star-full', full);
+                st.classList.toggle('star-half', half);
+            });
+        };
+
+        for (let i = 0; i < 5; i++) {
+            const st = document.createElement('span');
+            st.className = 'star';
+            st.setAttribute('aria-hidden', 'true');
+            // Two copies of the icon library's filled star (1.68.0 — it was a star character drawn by
+            // CSS): the dim one underneath, and a lit one in a box that shows none, half or all of
+            // it. Clipping the box, not the glyph, is what keeps half stars in either library.
+            const back = document.createElement('span');
+            back.className = 'star-layer star-back';
+            back.appendChild(iconEl('bi bi-star-fill'));
+            const front = document.createElement('span');
+            front.className = 'star-layer star-front';
+            front.appendChild(iconEl('bi bi-star-fill'));
+            st.append(back, front);
+            // Two hit areas per star: left half and right half.
+            if (json.can_vote) {
+                [0.5, 1].forEach(part => {
+                    const hit = document.createElement('button');
+                    hit.type = 'button';
+                    hit.className = 'star-hit star-hit-' + (part === 0.5 ? 'l' : 'r');
+                    const value = i + part;
+                    const words = value === 1 ? t.key('js.app.stars_one') : t.key('js.app.stars_many', {n: value});
+                    // Your own rating: pressed, and a second press takes it back (the server is asked to
+                    // remove it, not to cast the same value again).
+                    const pressed = value === mine;
+                    hit.title = pressed ? t.key('js.app.stars_mine_title', {stars: words}) : words;
+                    hit.setAttribute('aria-label', t.key('js.app.rate_aria', {n: value}));
+                    hit.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+                    if (pressed) hit.classList.add('star-hit-mine');
+                    hit.addEventListener('mouseenter', () => paint(value));
+                    hit.addEventListener('focus', () => paint(value));
+                    hit.addEventListener('click', () => castVote(hash, Math.round(value * 2), wrap, pressed));
+                    st.appendChild(hit);
+                });
+            }
+            row.appendChild(st);
+        }
+        // Leaving puts back what is actually stored — the visitor's own rating if they have one,
+        // otherwise the average. A widget that keeps the last hovered value is telling them
+        // something they never did.
+        row.addEventListener('mouseleave', () => paint(mine || shown));
+        paint(mine || shown);
+        wrap.appendChild(row);
+
+        const label = document.createElement('div');
+        label.className = 'rep-label';
+        if (r.stars === null) {
+            label.classList.add('text-muted');
+            label.textContent = r.total === 0
+                ? t.key('js.app.stars_nobody_yet')
+                : t.key('js.app.stars_needed', {n: r.total, min: r.min_votes});
+        } else {
+            label.replaceChildren(r.stars.toFixed(1) + ' / 5 · ',
+                r.total === 1 ? t.key('js.app.ratings_one') : t.key('js.app.ratings_many', {n: r.total}),
+                ...(mine ? [' · ', t.key('js.app.stars_yours', {n: mine})] : []));
+        }
+        wrap.appendChild(label);
+        row.title = r.stars === null
+            ? t.key('js.app.stars_so_far', {n: r.total, min: r.min_votes})
+            : (r.total === 1 ? t.key('js.app.rep_stars_title_one', {stars: r.stars.toFixed(1)}) : t.key('js.app.rep_stars_title_many', {stars: r.stars.toFixed(1), n: r.total}));
+        // Why this reader cannot rate is said under the stars (the Info panel's .rep-why line), in words that follow
+        // the language; the tooltip no longer repeats the server's sentence after the count (1.73.0).
+        return wrap;
+    }
+
+    /**
+     * A vote — or, since 1.71.0, taking one back: `pressed` is the button saying it is the vote already
+     * cast (the same thumb, the same half star), and then the server is asked to REMOVE this reader's vote
+     * ({op: 'remove'}), otherwise to cast `value`. The toggle lives in the button and the request says
+     * exactly what it wants, so a double click asks the same thing twice and the second changes nothing —
+     * it can never cast and take back in one go. The buttons stand still while the request is out.
+     *
+     * The token is the page's (csrfToken()): it read #search-csrf alone, which exists on the search page
+     * only, so a vote from the Info panel opened on a profile or the account page was refused.
+     */
+    async function castVote(hash, value, holder, pressed) {
+        if (holder.dataset.voting === '1') return;
+        holder.dataset.voting = '1';
+        const buttons = [...holder.querySelectorAll('button')];
+        buttons.forEach(b => { b.disabled = true; });
+        const body = pressed ? { hash, op: 'remove', csrf_token: csrfToken(holder) }
+                             : { hash, vote: value, csrf_token: csrfToken(holder) };
+        const whyLine = () => {
+            let why = holder.querySelector('.rep-why');
+            if (!why) {
+                why = document.createElement('div');
+                why.className = 'rep-label rep-why text-muted';
+                holder.appendChild(why);
+            }
+            return why;
+        };
+        // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a vote at the top of its ladder
+        // meets a CAPTCHA — solved in the site's box, drawn on demand here, and the same vote sent again (it used
+        // to say "solve the CAPTCHA on the page", and there was never one to solve).
+        const doPost = (extra) => postJson('rate_hash', Object.assign({}, body, extra || {}));
+        const r = window.Antispam ? await window.Antispam.send(doPost, { action: 'rate_hash' }) : await doPost({});
+        const release = () => { delete holder.dataset.voting; buttons.forEach(b => { b.disabled = false; }); };
+        const wait = window.Antispam ? window.Antispam.waitSeconds(r) : 0;
+        if (wait > 0) {
+            // Too fast: the buttons rest for the time the server named, the line under them counting it down.
+            const why = whyLine();
+            const until = Date.now() + wait * 1000;
+            const tick = () => {
+                const left = Math.ceil((until - Date.now()) / 1000);
+                if (left <= 0 || !holder.isConnected) { clearInterval(timer); release(); if (why.isConnected) why.textContent = ''; return; }
+                // The layer's sentence by its key (a t.key() word: it follows a language switch), else the server's template.
+                why.textContent = window.Antispam.sentence(r, left) || r.message || '';
+            };
+            const timer = setInterval(tick, 500);
+            tick();
+            return;
+        }
+        if (!r || !r.success) {
+            release();
+            whyLine().textContent = (r && (r.message || r.error)) || t.key('js.app.vote_failed');
+            return;
+        }
+        // Redraw from the server's answer, never from an optimistic guess: the whole value of a
+        // score is that it is the server's count and not the browser's.
+        openInfo(hash, null);
+        // …and tell whatever else on the page shows this vote: the likes / ratings table (1.69.0,
+        // assets/js/favourites.js) the panel may have been opened from asks for its page again, and
+        // "Who has this" its likes, where it is open on this torrent. `vote` is the reader's vote now
+        // (0 once it is taken back).
+        document.dispatchEvent(new CustomEvent('rating:changed',
+            { detail: { hash, vote: Number(r.my_vote) || 0, removed: !!pressed } }));
+    }
+
+    /**
+     * The review state of a description, as an icon beside the name.
+     *
+     * Inline SVG rather than an icon font. The shapes are the familiar ones — a clock, a tick in
+     * a circle, a cross in a circle — but pulling in a whole font (and another CDN host, past a
+     * CSP that currently allows none for fonts) to draw three 14-pixel glyphs is a lot of
+     * machinery for very little. This renders identically, costs nothing, inherits its colour
+     * from the class, and cannot fail to load.
+     *
+     * Colour alone is never the message: each icon carries a title, and the shapes differ, so it
+     * still reads for somebody who cannot tell the three colours apart.
+     */
+    function contentStatusIcon(status) {
+        const PATHS = {
+            // clock — waiting
+            pending: 'M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z',
+            // check
+            approved: 'M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.235.235 0 0 1 .02-.022z',
+            // cross
+            rejected: 'M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z',
+        };
+        const TITLES = {
+            pending:  t.key('js.app.cs_pending'),
+            approved: t.key('js.app.cs_approved'),
+            rejected: t.key('js.app.cs_rejected'),
+        };
+        const NS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('viewBox', '0 0 16 16');
+        svg.setAttribute('width', '13');
+        svg.setAttribute('height', '13');
+        svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', TITLES[status]);
+        const ring = document.createElementNS(NS, 'circle');
+        ring.setAttribute('cx', '8'); ring.setAttribute('cy', '8'); ring.setAttribute('r', '7');
+        ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', 'currentColor'); ring.setAttribute('stroke-width', '1.2');
+        const path = document.createElementNS(NS, 'path');
+        path.setAttribute('d', PATHS[status]);
+        path.setAttribute('fill', 'currentColor');
+        svg.appendChild(ring); svg.appendChild(path);
+        const wrap = document.createElement('span');
+        wrap.className = 'search-cs-icon search-cs-' + status;
+        wrap.title = TITLES[status];
+        wrap.appendChild(svg);
+        return wrap;
+    }
+
+    async function openInfo(hash, name) {
+        if (!infoOverlay) return;
+        const body = $id('info-body'), title = $id('info-title');
+        // The panel drawn again for the same torrent (the search page's live language switch) keeps its comments
+        // open if the reader had opened them (1.72.0: they open folded). Read before the body is emptied.
+        const csWas = document.getElementById('info-comments');
+        const csKeepOpen = !!(csWas && csWas.open && csWas.dataset.hash === hash && !infoOverlay.hidden);
+        infoHash = hash;
+        if (infoOnOpen) infoOnOpen();
+        title.textContent = name || t.key('js.app.details');
+        body.textContent = t.key('js.common.loading');
+        infoOverlay.hidden = false;
+        if (infoLayer) infoLayer.on();
+        const json = await getJson('index_info&hash=' + encodeURIComponent(hash));
+        if (infoOverlay.hidden || infoHash !== hash) return;
+        body.textContent = '';
+        if (!json || !json.success) {
+            body.textContent = (json && json.error) || t.key('js.app.details_load_failed');
+            return;
+        }
+        title.textContent = json.name || name || t.key('js.app.details');
+        // Registered here, not merely seen in the swarm. The search row has carried this badge since
+        // the catalogue and the whitelist were folded into one list; the panel that opens FROM that
+        // row did not, so the one place with room to say it said nothing.
+        if (json.whitelisted === true) {
+            const wl = document.createElement('span');
+            wl.className = 'search-wl-badge';
+            wl.title = t.key('js.app.wl_badge_title');
+            wl.textContent = t.key('js.app.wl_badge');
+            title.appendChild(document.createTextNode(' '));
+            title.appendChild(wl);
+        }
+
+        // The panel always has the hash, so the star is always available here even when the row
+        // could not carry one.
+        const infoActs = $id('info-acts');
+        if (infoActs) {
+            infoActs.textContent = '';
+            if (infoCanFav && window.Favourites) infoActs.appendChild(window.Favourites.makeStar(hash, !!json.fav));
+            // "Put this in a list", beside the star. app.js knows nothing about lists — it asks
+            // for a button and gets null where the feature is off or the reader may not use it.
+            if (window.Lists && typeof window.Lists.makeAddButton === "function") {
+                const lb = window.Lists.makeAddButton(hash, json.name || name || null);
+                if (lb) infoActs.appendChild(lb);
+            }
+            if (infoCanFavWho && typeof window.openWhoFavourited === 'function') {
+                // A class of its own: the panel's head now holds a star, a "+" and this, and
+                // "the first button that is not the star" stopped being a description of it.
+                // An icon since 1.71.0 — the people who have it — in a head of icons: the words took
+                // the width the torrent's name needs, three letters a line on a phone.
+                const w = iconButton('button', 'search-share fav-who-open', 'bi-people', t.key('js.fav.who'), t.key('js.fav.who_title'));
+                w.addEventListener('click', () => window.openWhoFavourited(hash));
+                infoActs.appendChild(w);
+            }
+        }
+
+        if (Array.isArray(json.gallery) && json.gallery.length) body.appendChild(infoGallery(json.gallery));
+
+        const st = json.stats || {};
+
+        // 1. the numbers people actually opened this for, before anything else.
+        //
+        // Seeders and leechers used to be one sentence three quarters of the way down a flat
+        // list, below "Times seen". Reading order is a claim about importance, and that one was
+        // wrong: whether anything is sharing it is the first question, and every other field is
+        // context for the answer.
+        const strip = document.createElement('div');
+        strip.className = 'info-strip';
+        const statCell = (value, label, cls) => {
+            const c = document.createElement('div');
+            c.className = 'info-stat' + (cls ? ' ' + cls : '');
+            const v = document.createElement('span');
+            v.className = 'info-stat-v';
+            if (value instanceof Node) v.appendChild(value); else v.textContent = value;
+            const l = document.createElement('span');
+            l.className = 'info-stat-l';
+            l.textContent = label;
+            c.appendChild(v); c.appendChild(l);
+            return c;
+        };
+        const seedV = document.createElement('span');
+        seedV.id = 'info-sl-seed';
+        seedV.textContent = st.seeders == null ? '—' : t.num(st.seeders);
+        const leechV = document.createElement('span');
+        leechV.id = 'info-sl-leech';
+        leechV.textContent = st.leechers == null ? '—' : t.num(st.leechers);
+        strip.appendChild(statCell(seedV, t.key('js.app.stat_seeders'), 'info-stat-seed'));
+        strip.appendChild(statCell(leechV, t.key('js.app.stat_leechers'), 'info-stat-leech'));
+        if (st.completed != null) strip.appendChild(statCell(t.num(st.completed), t.key('js.app.stat_completed')));
+        if (st.total_size != null) strip.appendChild(statCell(fmtBytesPub(st.total_size), t.key('js.app.stat_size')));
+        // The word under the count in the language's form (1.74.0): "2 pliki", "5 plików" — never "2 plików".
+        if (st.files_count != null) strip.appendChild(statCell(t.num(st.files_count), t.plural(st.files_count, 'js.app.stat_files')));
+        body.appendChild(strip);
+
+        // 2. the two chips that qualify those numbers, on one line with the refresh control.
+        const chips = document.createElement('div');
+        chips.className = 'info-chips';
+        if (json.whitelisted) {
+            const chip = document.createElement('span');
+            chip.className = 'info-chip info-chip-ok';
+            chip.textContent = t.key('js.app.chip_registered');
+            chip.title = t.key('js.app.chip_registered_title');
+            chips.appendChild(chip);
+        }
+        if (st.last_seen) {
+            const chip = document.createElement('span');
+            chip.className = 'info-chip';
+            chip.textContent = t.key('js.app.last_seen', {date: fmtDatePub(st.last_seen, st.last_seen_time)});
+            chips.appendChild(chip);
+        }
+        if (json.can_refresh) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-secondary btn-small info-refresh';
+            btn.textContent = t.key('js.app.refresh');
+            btn.title = t.key('js.app.refresh_title');
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = t.key('js.app.asking');
+                // The page's token, whichever page the panel is on (it read #search-csrf alone, and
+                // on a profile or the account page the refresh was refused like the votes were).
+                const r = await postJson('index_info&hash=' + encodeURIComponent(hash), {
+                    op: 'refresh', csrf_token: csrfToken(btn) });
+                if (r && r.success) {
+                    seedV.textContent = t.num(Number(r.seeders));
+                    leechV.textContent = t.num(Number(r.leechers));
+                    btn.textContent = r.cached && r.message ? String(r.message) : t.key('js.app.refreshed');
+                } else {
+                    btn.textContent = (r && r.error) || t.key('js.app.no_answer');
+                }
+                setTimeout(() => { btn.textContent = t.key('js.app.refresh'); btn.disabled = false; }, 4000);
+            });
+            chips.appendChild(btn);
+        }
+        if (chips.children.length || json.wl_request || json.torrent_report) body.appendChild(chips);
+        if (json.wl_request) wlRequestControl(json.wl_request, hash, chips);
+        if (json.torrent_report && window.Reports && typeof window.Reports.button === 'function') {
+            chips.appendChild(window.Reports.button({ kind: 'torrent', hash }, !!json.torrent_report.reported, 'info-torrent-report', body, chips));
+        }
+
+        // 3. where it came from
+        if (json.source_url) {
+            const row = document.createElement('div');
+            row.className = 'rt-src-row info-section';
+            const lab = document.createElement('strong');
+            lab.textContent = t.key('js.app.source_label');
+            // A link only when it is one (1.74.0): http or https, as the status page checks the report's link. The server
+            // allows nothing else when a source is written (richtextValidateSourceUrl()), but a row from before that check,
+            // restored from an old backup or typed into the database would otherwise be a clickable `javascript:` here —
+            // anything else is shown as text.
+            const safe = /^https?:\/\//i.test(String(json.source_url));
+            const a = document.createElement(safe ? 'a' : 'span');
+            a.className = 'rt-src-url';
+            if (safe) a.href = json.source_url;
+            a.textContent = json.source_url;
+            if (safe) {
+                a.rel = 'nofollow noopener noreferrer ugc';
+                a.target = '_blank';
+            }
+            // Not our link. Off-site ones get the confirmation; the operator's own trusted
+            // domains do not, because warning about your own site teaches people to click through.
+            if (safe && !json.source_trusted) a.setAttribute('data-external', '1');
+            if (json.source_auto) {
+                // Added by the importer, not typed into the form. Saying so is the difference
+                // between "the uploader vouched for this link" and "this is where we found it".
+                const tag = document.createElement('span');
+                tag.className = 'info-chip info-chip-auto';
+                tag.textContent = t.key('js.app.source_auto');
+                // The server's sentence, found back in the page's bundle (api.index.source_auto_*) so it keeps its key.
+                tag.title = t.find(json.source_auto_note, 'api.index.source_auto_') || t.key('js.app.source_auto_title');
+                row.appendChild(lab); row.appendChild(a); row.appendChild(tag);
+            } else {
+                row.appendChild(lab); row.appendChild(a);
+            }
+            body.appendChild(row);
+        }
+
+        if ((json.facts || json.tag_edit) && window.FactChips) {
+            const pick = typeof window.SearchFiltersPick === 'function' ? window.SearchFiltersPick : null;
+            if (json.tag_edit && window.TagEditor) {
+                const tagBox = document.createElement('div');
+                tagBox.className = 'info-section info-facts info-tags';
+                body.appendChild(tagBox);
+                window.TagEditor.mount(tagBox, json, pick);
+            } else {
+                const chips = window.FactChips.render(json.facts, pick);
+                if (chips) { chips.classList.add('info-section', 'info-facts'); body.appendChild(chips); }
+            }
+        }
+        // 2. what it is
+        if (json.description_html) {
+            const d = document.createElement('div');
+            d.className = 'rt-body info-section';
+            // Built on the server by includes/richtext.php out of fully escaped input with a
+            // fixed tag whitelist. This is the only assignment of innerHTML on the public pages.
+            d.innerHTML = json.description_html;
+            body.appendChild(infoDescFold > 0 ? foldDescription(d) : d);
+        } else if (!json.source_url && !json.content_hidden && !(json.content_forum && json.content_forum.state === 'too_long')) {
+            const none = document.createElement('p');
+            none.className = 'text-muted info-section';
+            none.textContent = t.key('js.app.no_description');
+            body.appendChild(none);
+        }
+        // 2b. who wrote it, whether the reader is being kept from it, and what they may do about it
+        renderContentExtras(json, body, hash);
+
+        // 3. what people think of it
+        //
+        // Two modes share this block. Whichever it is, the COUNT is always shown next to the
+        // score: "5 stars" and "5 stars from one vote" are different claims, and a widget that
+        // renders them identically is making the stronger one on no evidence.
+        if (json.rating && (json.rating.total > 0 || json.can_vote)) {
+            const rep = document.createElement('div');
+            rep.className = 'rep-block info-section';
+            const r = json.rating;
+
+            if (r.mode === 'stars') {
+                rep.appendChild(buildStars(r, json, hash));
+                if (json.can_vote && window.matchMedia && window.matchMedia('(max-width: 576px)').matches) rep.appendChild(rateOpenButton(r, json, hash));
+                if (json.rating_hist && r.total > 0) rep.appendChild(buildHist(json.rating_hist, r.total));
+            } else if (r.percent !== null) {
+                const bar = document.createElement('div');
+                bar.className = 'rep-bar';
+                bar.setAttribute('role', 'img');
+                bar.setAttribute('aria-label', t.key('js.app.rating_aria', {percent: r.percent, total: r.total}));
+                const up = document.createElement('span');
+                up.className = 'rep-bar-up';
+                up.style.width = r.percent + '%';
+                bar.appendChild(up);
+                rep.appendChild(bar);
+                const label = document.createElement('div');
+                label.className = 'rep-label';
+                label.textContent = t.key('js.app.rating_label', {percent: r.percent, up: r.up, down: r.down});
+                rep.appendChild(label);
+            } else {
+                const label = document.createElement('div');
+                label.className = 'rep-label text-muted';
+                label.textContent = r.total === 0
+                    ? t.key('js.app.no_ratings')
+                    : t.key('js.app.ratings_needed', {total: r.total, min: r.min_votes});
+                rep.appendChild(label);
+            }
+
+            if (json.can_vote && r.mode !== 'stars') {
+                const acts = document.createElement('div');
+                acts.className = 'rep-acts';
+                // The thumb already cast is PRESSED (1.71.0): its glyph filled — the likes table's and
+                // "Who has this" draw a cast vote so — the button in the thumb's colour, aria-pressed,
+                // and its tooltip says a second press takes the vote back, which is what it does.
+                const mk = (dir, icon, label, title) => {
+                    const mine = json.my_vote === dir;
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'btn btn-secondary btn-small rep-btn rep-btn-' + (dir > 0 ? 'up' : 'down') + (mine ? ' rep-mine' : '');
+                    b.setAttribute('aria-pressed', mine ? 'true' : 'false');
+                    b.append(iconEl(mine ? icon + '-fill' : icon), ' ', label);
+                    b.title = mine ? t.key('js.app.vote_mine_title') : title;
+                    b.addEventListener('click', () => castVote(hash, dir, rep, mine));
+                    return b;
+                };
+                acts.appendChild(mk(1, 'bi bi-hand-thumbs-up', t.key('js.app.vote_good'), t.key('js.app.vote_good_title')));
+                acts.appendChild(mk(-1, 'bi bi-hand-thumbs-down', t.key('js.app.vote_bad'), t.key('js.app.vote_bad_title')));
+                rep.appendChild(acts);
+            } else if (!json.can_vote && json.vote_refusal) {
+                const why = document.createElement('div');
+                why.className = 'rep-label text-muted';
+                // The server's sentence (repVoteRefusal()), found back in the page's bundle (api.rep.*): it keeps its key.
+                why.textContent = t.find(json.vote_refusal, 'api.rep.');
+                rep.appendChild(why);
+            }
+            if (json.rated_at && r.total > 0) {
+                const ratedAt = document.createElement('div');
+                ratedAt.className = 'rep-label text-muted rep-at';
+                ratedAt.textContent = t.key('js.app.rated_at', { date: json.rated_at });
+                rep.appendChild(ratedAt);
+            }
+            body.appendChild(rep);
+        }
+
+        // 3b. what people say about it (1.71.0, assets/js/comments.js): the section, with the count this answer
+        //     carries; the thread itself is asked for when the section is open (at once when it opens unfolded, on
+        //     the click that opens it when folded — comments.js). WHERE it stands is
+        //     Settings' answer since 1.72.0 (json.comments.position): here, after the rating — 1.71.0's place —, or
+        //     before the files, or after them — the panel's very end, the default: a long thread pushed the
+        //     torrent's own record and its files down.
+        let cs = null, csAt = 'after_files';
+        if (json.comments && window.Comments && typeof window.Comments.section === 'function') {
+            cs = window.Comments.section(json, hash, { open: csKeepOpen });
+            if (['after_rating', 'before_files', 'after_files'].includes(json.comments.position)) csAt = json.comments.position;
+            if (cs && csAt === 'after_rating') body.appendChild(cs);
+        }
+
+        // 4. the rest: provenance and identity, under a heading so it reads as a footnote to the
+        //    strip above rather than as another list of equally important facts.
+        const grid = document.createElement('div');
+        grid.className = 'info-grid';
+        if (st.peak_seeders != null) grid.appendChild(infoRow(t.key('js.app.row_peak_seeders'), t.num(st.peak_seeders)));
+        if (st.first_seen) grid.appendChild(infoRow(t.key('js.app.row_first_seen'), fmtDatePub(st.first_seen, st.first_seen_time)));
+        if (st.seen_count != null) grid.appendChild(infoRow(t.key('js.app.row_times_seen'), t.num(st.seen_count)));
+        const hashEl = document.createElement('code');
+        hashEl.className = 'info-hash';
+        hashEl.textContent = json.info_hash;
+        // Full width, label above value: forty characters have nowhere to go in half a grid column. Its Copy on the
+        // label's line, at the right (1.72.0).
+        const hashWrap = document.createElement('span');
+        hashWrap.className = 'info-copyable';
+        hashWrap.appendChild(hashEl);
+        grid.appendChild(infoRow(t.key('js.app.row_info_hash'), hashWrap, 'info-kv-wide', copyButton(json.info_hash, t.key('js.app.copy_hash'))));
+        // The magnet is built by the server out of its own announce URLs (buildMagnet() in
+        // includes/whitelist.php — the same function the panel's rows use) and sent only to a reader
+        // with index.magnet, the gate the search rows already obey. Nothing here assembles a URL of
+        // its own.
+        if (json.magnet) {
+            const mWrap = document.createElement('span');
+            mWrap.className = 'info-copyable';
+            const mLink = document.createElement('a');
+            mLink.className = 'info-magnet';
+            mLink.href = json.magnet;
+            mLink.textContent = json.magnet;
+            mWrap.appendChild(mLink);
+            grid.appendChild(infoRow(t.key('js.app.row_magnet'), mWrap, 'info-kv-wide', copyButton(json.magnet, t.key('js.app.copy_magnet'))));
+        }
+        const det = document.createElement('div');
+        det.className = 'info-section';
+        const detH = document.createElement('div');
+        detH.className = 'info-sub';
+        detH.textContent = t.key('js.app.record_heading');
+        det.appendChild(detH);
+        det.appendChild(grid);
+        body.appendChild(det);
+
+        // 4b. the comments before the files — or at the end where there are no files to come after (1.72.0).
+        const filesShown = !!(json.can_files && st.files_count);
+        if (cs && (csAt === 'before_files' || (csAt === 'after_files' && !filesShown))) body.appendChild(cs);
+
+        // 5. the files, last, because the panel is about the torrent and this is the long part
+        if (filesShown) {
+            const det = document.createElement('details');
+            det.className = 'rt-collapse info-section';
+            det.open = true;
+            const sum = document.createElement('summary');
+            // The torrent's OWN file count, which is not the length of the list below it: the
+            // catalogue stores only the first few thousand paths of a huge torrent, so an
+            // 18 000-file torrent has 5 000 rows here. The heading is rewritten with both
+            // numbers as pages arrive rather than promising a count nothing can deliver.
+            const totalFiles = Number(st.files_count) || 0;
+            const sumText = document.createElement('span');
+            sumText.textContent = t.key('js.app.files_count', {n: t.num(totalFiles)});
+            sum.append(iconEl('bi bi-chevron-right disc-chev'), sumText);
+            det.appendChild(sum);
+            const holder = document.createElement('div');
+            holder.className = 'rt-body';
+            holder.textContent = t.key('js.common.loading');
+            det.appendChild(holder);
+            body.appendChild(det);
+            // 6. the comments after the files — the panel's very end (1.72.0, the default): placed now, before the
+            //    first page of files is waited for, so the section is there from the start.
+            if (cs && csAt === 'after_files') body.appendChild(cs);
+            // Paged: the first slice now, and the next one when the mode says so — on reaching
+            // the end of the list (an IntersectionObserver on a sentinel), on the button, or
+            // straight away until the server stops answering with more. The tree is rebuilt from
+            // everything loaded so far — cheap next to the fetch, and it keeps one code path for
+            // the folder structure — with a leaf cap so the rebuild stays cheap at a high total.
+            const allFiles = [];
+            // `stalled` is set by a failed page and stops the AUTOMATIC asking only — the button
+            // stays live. Without it a 429 from the shared search bucket met an observer that
+            // re-fires whenever the sentinel is on screen, and the answer to being rate-limited
+            // was another request.
+            let next = 0, more = false, loading = false, stalled = false;
+            const tree = document.createElement('div');
+            const notes = document.createElement('div');
+            const note = (text) => {
+                const p = document.createElement('p');
+                p.className = 'text-muted';
+                p.textContent = text;
+                notes.appendChild(p);
+            };
+            const foot = document.createElement('div');
+            foot.className = 'files-more';
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
+            const sentinel = document.createElement('div');
+            sentinel.className = 'files-sentinel';
+            foot.appendChild(btn); foot.appendChild(sentinel);
+            // The folders this reader has opened, kept across the rebuilds (1.64.0).
+            const opened = treeOpenState(tree);
+            // Split in two (1.64.0): the HEADING and the button are cheap and change on every
+            // state, the TREE is thousands of nodes and must only be rebuilt when the files it is
+            // drawn from have actually changed. Relabelling the button to "Loading…" used to
+            // rebuild the whole tree — so a folder the reader opened was folded again at the START
+            // of every page as well as at the end of it.
+            const chrome = () => {
+                sumText.textContent = (totalFiles && allFiles.length < totalFiles)
+                    ? t.key('js.app.files_count_of', {n: t.num(allFiles.length), total: t.num(totalFiles)})
+                    : t.key('js.app.files_count', {n: t.num(totalFiles || allFiles.length)});
+                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: t.num(allFiles.length)});
+                btn.disabled = loading;
+                foot.hidden = !more;
+            };
+            const render = () => {
+                tree.replaceChildren(buildTreePub(allFiles, [], undefined, opened));
+                chrome();
+            };
+            const loadMore = async () => {
+                if (loading || (!more && next > 0)) return false;
+                loading = true; if (next > 0) chrome();
+                const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
+                loading = false;
+                if (infoOverlay.hidden || infoHash !== hash) return false;
+                if (!fj || !fj.success) {
+                    if (next === 0) { holder.textContent = t.key('js.app.no_file_list'); return false; }
+                    // Leave `more` alone: the reader may still press the button. It is the
+                    // unattended asking that stops, and render() puts the button back to
+                    // "Load more" instead of leaving it stuck on "Loading…" for ever.
+                    stalled = true; chrome();
+                    return false;
+                }
+                stalled = false;
+                (fj.files || []).forEach(f => allFiles.push(f));
+                next = typeof fj.next === 'number' ? fj.next : allFiles.length;
+                // More pages exist AND this visitor may ask for them (index.files_all); without
+                // the grant the list stops here and says so. A capped reply never claims
+                // truncation, so this is already false when the site's own total ended the list.
+                more = !!fj.truncated && !!fj.can_more;
+                if (next === 0 || !allFiles.length) { holder.textContent = t.key('js.app.no_file_list'); return false; }
+                // The notes hang below the tree and are written AFTER the holder is emptied of
+                // its "Loading…". They used to be appended before that line, so the one message
+                // the reader needed was wiped by the same call that attached the list.
+                if (!tree.parentNode) { holder.textContent = ''; holder.appendChild(tree); holder.appendChild(foot); holder.appendChild(notes); }
+                if (fj.truncated && !fj.can_more) note(t.key('js.app.files_truncated'));
+                // Not an error and not a permission: the list simply ends short of the count in
+                // the heading, because that is all the catalogue ever stored for this torrent.
+                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: t.num(fj.stored_total || allFiles.length)}));
+                // The site's own ceiling, not a permission and not the worker's storage cap:
+                // there are more rows and this page is not going to fetch them.
+                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: t.num(fj.max || allFiles.length)}));
+                render();
+                return true;
+            };
+            // One request at a time, and a failure ends the chain rather than retrying it: every
+            // page spends a token from the per-IP bucket this endpoint shares with the search box.
+            const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
+            btn.addEventListener('click', loadMore);
+            if (infoFilesMode === 'scroll' && 'IntersectionObserver' in window) {
+                if (infoFilesObserver) infoFilesObserver.disconnect();
+                // The panel is what scrolls, not the window, so IT is the root (1.64.0) — and an
+                // observer only ever reports a CHANGE, so a page that lands with the end of the
+                // list still on the screen raises nothing and the chain stops there. Asking to
+                // watch the same element again is what makes it say where the sentinel is NOW.
+                const infoScroller = holder.closest('.files-body') || null;
+                const again = () => {
+                    if (!infoFilesObserver || !more || stalled) return;
+                    infoFilesObserver.unobserve(sentinel);
+                    infoFilesObserver.observe(sentinel);
+                };
+                infoFilesObserver = new IntersectionObserver((entries) => {
+                    if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore().then((got) => { if (got) again(); });
+                }, { root: infoScroller, rootMargin: '200px' });
+                infoFilesObserver.observe(sentinel);
+            }
+            await loadMore();
+            if (infoFilesMode === 'all') await loadAll();
+        }
+    }
+
+    if (infoOverlay) {
+        closeOnBackdrop(infoOverlay, closeInfo);
+        const ic = $id('info-close');
+        if (ic) ic.addEventListener('click', closeInfo);
+    }
+    /**
+     * The folder tree of a file list.
+     *
+     * `extra` (1.62.0) is { matches: [{path, size}], total } for a list opened from a hit of a search
+     * that looked inside file names. EVERY match is shown, whatever the caps say: its folder chain
+     * from the root, opened, and the file inside it, marked. A match the loaded pages already hold
+     * is simply that file, found and opened up to; one they do not hold is added to the tree where
+     * its path puts it — once, however many times it arrives — and every folder on its chain gets
+     * an explicit "…" row, because the folder's other files were cut and a folder showing one file
+     * must not look like a folder that holds one file. Its count says "at least" for the same reason.
+     * When the torrent's own count shows nothing else is missing, nothing is marked cut.
+     *
+     * The tree says how many it added (`dataset.extra`) so the list can say so in words.
+     */
+    function buildTreePub(files, tokens, extra, openMap) {
+        const newDir = () => ({ dirs: new Map(), files: [], hit: false, cut: false, skipped: false });
+        const root = newDir();
+        const put = (f, mark) => {
+            const parts = String(f.path).split('/').filter(Boolean);
+            let node = root;
+            const chain = [root];
+            for (let i = 0; i < parts.length - 1; i++) {
+                if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], newDir());
+                node = node.dirs.get(parts[i]);
+                chain.push(node);
+            }
+            node.files.push({ name: parts[parts.length - 1] || String(f.path), size: f.size,
+                              hit: !!mark, extra: mark === 'extra' });
+            return chain;
+        };
+        // The matches, by path: a torrent cannot hold two files at one path, so the path IS the file.
+        const matchList = (extra && Array.isArray(extra.matches)) ? extra.matches : [];
+        const loaded = new Set(files.map(f => String(f.path)));
+        const hitPaths = new Set();
+        const beyond = [];
+        matchList.forEach(m => {
+            const p = String(m && m.path || '');
+            if (!p || hitPaths.has(p)) return;
+            hitPaths.add(p);
+            if (!loaded.has(p)) beyond.push(m);
+        });
+        const total = extra ? Number(extra.total) || 0 : 0;
+        // Nothing is cut if the torrent's own count is already on the screen.
+        const cutAround = beyond.length > 0 && !(total && files.length + beyond.length >= total);
+        files.forEach(f => {
+            const isHit = hitPaths.has(String(f.path));
+            const chain = put(f, isHit ? 'page' : null);
+            if (isHit) chain.forEach(n => { n.hit = true; });
+        });
+        beyond.forEach(m => {
+            put(m, 'extra').forEach(n => { n.hit = true; if (cutAround) n.cut = true; });
+        });
+        const container = document.createElement('div');
+        container.className = 'ftree';
+        container.dataset.extra = String(beyond.length);
+        let drawn = 0, skipped = 0;
+        const countFiles = (n) => { let c = n.files.length; n.dirs.forEach(d => { c += countFiles(d); }); return c; };
+        const nameEl = (cls, text) => {
+            const sp = document.createElement('span');
+            sp.className = cls;
+            sp.title = text;
+            if (tokens && tokens.length) markInto(sp, text, tokens);
+            else sp.textContent = text;
+            return sp;
+        };
+        const cutRow = () => {
+            const d = document.createElement('div');
+            d.className = 'ftree-file ftree-cut';
+            d.title = t.key('js.app.files_cut_title');
+            d.textContent = '…';
+            return d;
+        };
+        (function render(node, parent, depth, path) {
+            [...node.dirs.keys()].sort().forEach(name => {
+                const subNode = node.dirs.get(name);
+                const det = document.createElement('details');
+                // The folder's own address inside this torrent, so the reader's open folders can be
+                // carried from one render to the next (1.64.0). A tree that is rebuilt every time a
+                // page of files lands is a tree nobody can open a folder in.
+                const here = path ? path + '/' + name : name;
+                det.dataset.path = here;
+                // What the reader did with THIS folder wins over what the tree would have guessed.
+                // Otherwise: open at the top, and all the way down to anything the search matched.
+                const said = openMap && typeof openMap.get === 'function' ? openMap.get(here) : undefined;
+                if (said === undefined) { if (depth === 0 || subNode.hit) det.open = true; }
+                else det.open = !!said;
+                const sum = document.createElement('summary');
+                sum.appendChild(iconEl('bi bi-chevron-right disc-chev'));
+                sum.appendChild(nameEl('ftree-dir', name));
+                const cnt = document.createElement('span');
+                cnt.className = 'text-muted ftree-count';
+                cnt.textContent = ' (' + countFiles(subNode) + (subNode.cut ? '+' : '') + ')';
+                sum.appendChild(cnt);
+                // A match is somewhere below this folder: a dot the reader can steer by, in the
+                // manner of the site's .pulse-dot and in the accent blue. It matters most on the
+                // folder the reader has just shut, which is the one thing the highlight cannot say.
+                if (subNode.hit) {
+                    const dot = document.createElement('span');
+                    dot.className = 'ftree-dot';
+                    dot.title = t.key('js.app.files_folder_hit');
+                    dot.setAttribute('aria-hidden', 'true');
+                    sum.appendChild(dot);
+                }
+                det.appendChild(sum);
+                const inner = document.createElement('div');
+                inner.className = 'ftree-children';
+                render(subNode, inner, depth + 1, here);
+                det.appendChild(inner);
+                parent.appendChild(det);
+            });
+            node.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
+                // A match is drawn past the leaf cap as well: it is the one line this list is for.
+                if (!f.hit && drawn >= PUB_TREE_LEAVES) { skipped++; node.skipped = true; return; }
+                drawn++;
+                const line = document.createElement('div');
+                line.className = 'ftree-file' + (f.hit ? ' ftree-hit' : '') + (f.extra ? ' ftree-extra' : '');
+                line.appendChild(nameEl('ftree-name', f.name));
+                const sz = document.createElement('span');
+                sz.className = 'ftree-size text-muted';
+                sz.textContent = fmtBytesPub(f.size);
+                line.appendChild(sz);
+                parent.appendChild(line);
+            });
+            // Where siblings were cut around a match, say so in the place they would have been.
+            if (node.cut || (node.hit && node.skipped)) parent.appendChild(cutRow());
+        })(root, container, 0, '');
+        if (skipped) {
+            const cut = document.createElement('p');
+            cut.className = 'text-muted';
+            cut.textContent = t.key('js.app.files_tree_cap', {n: t.num(drawn), rest: t.num(skipped)});
+            container.appendChild(cut);
+        }
+        return container;
+    }
+    // For the browser check: the tree a list would draw, without having to seed a torrent with
+    // twenty thousand files to get one.
+    window.FileTreePub = { build: buildTreePub };
+
+    /**
+     * Which folders of a file tree the reader has open, kept across renders (1.64.0).
+     *
+     * A tree of thousands of paths is still rebuilt when a page of files lands — the folder
+     * structure is worked out from everything loaded so far and a `<details>` cannot be moved into
+     * a tree it was not built in. What CAN be carried is the answer to "was this folder open", and
+     * this is where that answer is kept: the map buildTreePub() reads back.
+     *
+     * `toggle` does not bubble, so the listener is a capture-phase one on the holder — which sees
+     * the event on its way down whatever the element is. One listener for a whole tree, and it
+     * survives the tree being replaced underneath it because it is bound to the holder.
+     */
+    function treeOpenState(holder) {
+        const map = new Map();
+        holder.addEventListener('toggle', (e) => {
+            const d = e.target;
+            if (d && d.tagName === 'DETAILS' && typeof d.dataset.path === 'string') map.set(d.dataset.path, d.open);
+        }, true);
+        return map;
+    }
+
+    const PUB_TREE_LEAVES = 5000;
+    // The query parameters the search page owns. Named here rather than inside initSearch()
+    // because the panel's own Share button strips them: a link to ONE torrent must not carry the
+    // sender's query, filter and page number with it.
+    const OWNED = ['search', 'search_files', 'in_desc', 'desc', 'content', 'sort', 'page', 'per_page', 'hash',
+                   'type', 'tags', 'notags', 'pics', 'size', 'filecount', 'year', 'seeders', 'imdb', 'filmweb', 'vbitrate',
+                   'duration', 'seasons', 'episodes', 'rating', 'votes', 'steam', 'seen'];
+    const FACT_SORT = /^(year|imdb|filmweb|rating|votes|steam|desc):(asc|desc)$/;
+
+    /** The CSRF token of whichever page this panel is on (csrfToken(): the layout's, since 1.71.0 on every page). */
+    function csrfForContent() {
+        return csrfToken(infoOverlay);
+    }
+
+    /** The address of a member's profile, built from this page's own (the panel runs on several pages). */
+    function profileHref(name) {
+        try {
+            const u = new URL(location.href);
+            u.search = ''; u.hash = '';
+            u.searchParams.set('action', 'u');
+            u.searchParams.set('name', name);
+            return u.href;
+        } catch (e) { return '#'; }
+    }
+
+    /**
+     * "Description by TryHackX (first) → dominikk26 (25% edit) → Majkel (6% edit)" (1.70.0): the credit
+     * chain the server sent (content_credits, api/index_info.php), entry by entry — a name with its picture
+     * (a link where the profile opens), "a member" where its owner hid it (their own reader is told it is
+     * them), "a deleted account". "(first)" only when somebody edited it after; more than four entries fold
+     * to the first and the last three around a "+N" that opens the rest in place. The arrows are the icon
+     * library's, not a character.
+     */
+    function creditLine(credits, tail) {
+        const by = document.createElement('p');
+        by.className = 'info-desc-by text-muted info-section';
+        const many = credits.length > 1;
+        // The head ("Description by") and the space after it stay; draw() redraws what follows them.
+        const headEnd = document.createTextNode(' ');
+        by.append(t.key(many ? 'js.app.desc_by_many' : 'js.app.desc_by'), headEnd);
+        const entry = (c) => {
+            const shown = c.state === 'shown' && c.name;
+            const forum = c.state === 'forum' && c.name;
+            // `.av-who`: the picture and the name are one unit that a line never breaks inside.
+            const who = document.createElement(shown && c.profile ? 'a' : 'span');
+            who.className = 'av-who info-credit-who' + (shown ? '' : forum ? ' info-credit-forum' : ' info-credit-' + (c.state === 'hidden' ? 'hidden' : 'deleted'));
+            if (shown) {
+                if (c.profile) who.href = profileHref(c.name);
+                const pic = typeof window.userAvatarImg === 'function'
+                    ? window.userAvatarImg({ username: c.name, avatar: String(c.avatar || '') }, 20, 'avatar info-av') : null;
+                if (pic) who.appendChild(pic);
+                who.appendChild(document.createTextNode(c.name));
+            } else if (forum) {
+                who.appendChild(document.createTextNode(c.name));
+            } else {
+                who.append(c.state === 'hidden'
+                    ? t.key(c.you ? 'js.app.credit_hidden_you' : 'js.app.credit_hidden') : t.key('js.app.credit_deleted'));
+            }
+            const one = document.createElement('span');
+            one.className = 'info-credit';
+            one.appendChild(who);
+            const role = c.kind === 'edit' ? t.key('js.app.credit_edit', { pct: c.pct }) : (many ? t.key('js.app.credit_first') : '');
+            if (role) one.append(' (', role, ')');
+            return one;
+        };
+        const sep = () => {
+            const s = document.createElement('span');
+            s.className = 'info-credit-sep';
+            const i = document.createElement('i');
+            i.className = 'bi bi-arrow-right';
+            i.setAttribute('aria-hidden', 'true');
+            s.appendChild(i);
+            // What a screen reader says where the eye sees an arrow.
+            const sr = document.createElement('span');
+            sr.className = 'pv-sr';
+            sr.textContent = ', ';
+            s.appendChild(sr);
+            return s;
+        };
+        const draw = (all) => {
+            while (by.lastChild && by.lastChild !== headEnd) by.removeChild(by.lastChild);
+            const fold = !all && credits.length > 4;
+            const list = fold ? [credits[0], null].concat(credits.slice(-3)) : credits;
+            list.forEach((c, k) => {
+                if (k) by.appendChild(sep());
+                if (c) { by.appendChild(entry(c)); return; }
+                const more = document.createElement('button');
+                more.type = 'button';
+                more.className = 'info-credit-more';
+                more.textContent = '+' + (credits.length - 4);
+                more.title = t.key('js.app.credit_more_title');
+                more.addEventListener('click', () => draw(true));
+                by.appendChild(more);
+            });
+            if (tail) by.append(' ', tail);
+        };
+        draw(false);
+        return by;
+    }
+
+    function forumChip(forum) {
+        const a = document.createElement(forum.url ? 'a' : 'span');
+        a.className = 'info-chip info-chip-forum';
+        a.append(t.key('js.app.from_forum'));
+        const at = forum.shown_at || forum.at;
+        a.title = at ? t.key('js.app.from_forum_title_at', { at: at }) : t.key('js.app.from_forum_title');
+        if (forum.url) {
+            a.href = forum.url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            if (!forum.trusted) a.setAttribute('data-external', '1');
+            const i = document.createElement('i');
+            i.className = 'bi bi-box-arrow-up-right';
+            i.setAttribute('aria-hidden', 'true');
+            a.append(' ', i);
+        }
+        return a;
+    }
+
+    function forumNote(forum, older) {
+        const keys = { too_long: older ? 'js.app.forum_too_long_newer' : 'js.app.forum_too_long', drift: 'js.app.forum_drift', proposed: 'js.app.forum_proposed',
+                       invalid: 'js.app.forum_invalid', removed: 'js.app.forum_removed', declined: 'js.app.forum_declined',
+                       withdrawn: 'js.app.forum_withdrawn' };
+        const p = document.createElement('p');
+        p.className = 'info-desc-note info-section text-muted';
+        p.append(t.key(keys[forum.state] || 'js.app.forum_drift', { chars: t.num(Number(forum.chars || 0)),
+            max: t.num(Number(forum.max || 0)), at: forum.at || '', note: forum.note || '' }));
+        if (forum.url) {
+            const a = document.createElement('a');
+            a.href = forum.url;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            if (!forum.trusted) a.setAttribute('data-external', '1');
+            a.textContent = t.key('js.app.forum_open');
+            p.append(' ', a);
+        }
+        return p;
+    }
+
+    /**
+     * Under the description: who wrote it, a note when the reader may not see the words, what became of
+     * the reader's own words, and what they may do about it — add, propose a rewrite, edit, delete. The
+     * server decided all of that (api/index_info.php); this only draws it.
+     */
+    function renderContentExtras(json, body, hash) {
+        const credits = Array.isArray(json.content_credits) ? json.content_credits : [];
+        const forum = json.content_forum || null;
+        const chip = forum && forum.shown ? forumChip(forum) : null;
+        if (credits.length) {
+            body.appendChild(creditLine(credits, chip));
+        } else if (json.content_author) {
+            // An answer without the chain (what the panel was sent before 1.70.0): the author alone.
+            body.appendChild(creditLine([{ kind: 'first', state: 'shown', name: json.content_author,
+                                           avatar: json.content_author_avatar || '', profile: !!json.content_author_profile }], chip));
+        } else if (chip) {
+            const p = document.createElement('p');
+            p.className = 'info-desc-by text-muted info-section';
+            p.appendChild(chip);
+            body.appendChild(p);
+        }
+        if (forum && forum.state) body.appendChild(forumNote(forum, !!json.description_html));
+        const note = (key, vars, cls) => {
+            const p = document.createElement('p');
+            p.className = 'info-desc-note info-section ' + (cls || 'text-muted');
+            p.textContent = t.key(key, vars);
+            body.appendChild(p);
+        };
+        if (json.content_hidden) note('js.app.content_hidden');
+        if (json.content_mine === 'pending') note('js.app.content_mine_pending');
+        if (json.content_mine === 'rejected') note(json.content_mine_note ? 'js.app.content_mine_rejected_note' : 'js.app.content_mine_rejected', {note: json.content_mine_note || ''});
+        if (!csrfForContent()) return;
+        const canAdd = !!json.can_content_submit, canPropose = !!json.can_content_propose;
+        const canEdit = !!json.can_content_edit && !!json.content_edit;
+        const del = json.can_content_delete === 'own' || json.can_content_delete === 'any' ? json.can_content_delete : null;
+        const tpl = $id('info-desc-tpl');
+        const row = document.createElement('div');
+        row.className = 'info-desc-acts info-section';
+        // Icon buttons (1.71.0), one glyph for each action: a pen writes the first words, a pen's nib a
+        // new version (a rewrite), the pen on a square edits the text as it stands, the bin deletes it. The
+        // action's name is what a screen reader says (aria-label), its explanation the site's tooltip.
+        const button = (cls, icon, name, tip) => {
+            const b = iconButton('button', 'btn btn-secondary btn-small ' + cls, icon, name, tip);
+            row.appendChild(b);
+            return b;
+        };
+        if ((canAdd || canPropose) && tpl) {
+            button('info-desc-open', canAdd ? 'bi-pen' : 'bi-vector-pen', canAdd ? t.key('js.app.desc_add') : t.key('js.app.desc_propose'),
+                   canAdd ? t.key('js.app.desc_add_title') : t.key('js.app.desc_propose_title'))
+                .addEventListener('click', () => openContentEditor(json, row, hash, canAdd ? 'add' : 'rewrite'));
+        }
+        // Edit (1.70.0), beside Propose a rewrite: the same editor, opened with the text as it stands.
+        if (canEdit && tpl) {
+            button('info-desc-edit', 'bi-pencil-square', t.key('js.app.desc_edit'), t.key('js.app.desc_edit_title'))
+                .addEventListener('click', () => openContentEditor(json, row, hash, 'edit'));
+        }
+        // Delete (1.70.0): two clicks, no dialog — the second is the confirmation, and the button says so in
+        // between, as a list's Delete does. As an icon (1.71.0) it says so with the filled bin, in the error
+        // colour, and with "Click again to delete" in the site's tooltip for as long as it stays armed — its
+        // name for a screen reader turns into the same words.
+        if (del) {
+            const delName = t.key('js.app.desc_delete'), delTip = t.key(del === 'own' ? 'js.app.desc_delete_title_own' : 'js.app.desc_delete_title_any');
+            const d = button('info-desc-delete', 'bi-trash', delName, delTip);
+            const say = document.createElement('span');
+            say.className = 'text-muted info-desc-msg info-desc-delete-msg';
+            say.setAttribute('aria-live', 'polite');
+            let armTimer = 0, armTip = null;
+            const glyph = (icon) => { const i = d.querySelector(':scope > .bi'); if (i) i.className = 'bi ' + icon; };
+            const disarm = () => {
+                clearTimeout(armTimer);
+                d.dataset.armed = '0';
+                d.classList.remove('is-armed');
+                glyph('bi-trash');
+                d.setAttribute('aria-label', delName);
+                d.setAttribute('data-tip', delTip);
+                if (armTip) { armTip.drop(); armTip = null; }
+            };
+            d.addEventListener('click', async () => {
+                if (d.dataset.armed !== '1') {
+                    d.dataset.armed = '1';
+                    d.classList.add('is-armed');
+                    glyph('bi-trash-fill');
+                    d.setAttribute('aria-label', t.key('js.app.desc_delete_sure'));
+                    d.setAttribute('data-tip', t.key('js.app.desc_delete_sure'));
+                    armTip = pubTip(d, t.key('js.app.desc_delete_sure'), { hold: true });
+                    armTimer = setTimeout(disarm, 4000);
+                    return;
+                }
+                clearTimeout(armTimer);
+                if (armTip) { armTip.drop(); armTip = null; }
+                d.disabled = true;
+                const r = await postJson('content_delete', { csrf_token: csrfForContent(), hash });
+                if (!r || !r.success) {
+                    d.disabled = false;
+                    disarm();
+                    say.textContent = !r ? t.key('js.app.desc_failed') : (r.error === 'rate_limit' ? t.key('js.app.desc_rate_limited') : (r.error || t.key('js.app.desc_failed')));
+                    return;
+                }
+                say.textContent = r.message || t.key('js.app.desc_deleted');
+                // The words are gone: draw the panel again as it is now.
+                setTimeout(() => openInfo(hash, json.name), 900);
+            });
+            row.appendChild(say);
+        }
+        // Report (1.71.0, includes/reports.php): somebody else's published words, for a reader who may report them
+        // (the server's `can_content_report`) — the flag and its box are assets/js/reports.js's; pressed after it
+        // was sent (`content_reported`), it only says so. Before the delete's words, beside the other actions.
+        if (json.can_content_report && window.Reports && typeof window.Reports.button === 'function') {
+            const rb = window.Reports.button({ kind: 'description', hash }, !!json.content_reported, 'info-desc-report', body, row);
+            const sayEl = row.querySelector('.info-desc-delete-msg');
+            if (sayEl) row.insertBefore(rb, sayEl); else row.appendChild(rb);
+        }
+        if (row.children.length) body.appendChild(row);
+    }
+
+    /**
+     * The whitelist form's editor, cloned into the panel, mounted by the same code, sent to content_submit.
+     * `mode`: 'add' (first words), 'rewrite' (a proposal that replaces the author) or 'edit' (1.70.0: the
+     * editor opened with the current text, format and source link, filed as an edit — the author stays).
+     */
+    function openContentEditor(json, host, hash, mode) {
+        if ($id('info-desc') || $id('info-desc-editor')) return;   // one at a time
+        const tpl = $id('info-desc-tpl');
+        if (!tpl) return;
+        // The row's buttons step aside while the editor is open, and come back with Cancel.
+        const opened = Array.prototype.filter.call(host.children, (n) => n.tagName === 'BUTTON' && !n.hidden);
+        const copy = tpl.content.cloneNode(true);
+        const copied = [...copy.childNodes];
+        host.appendChild(copy);
+        // The copy follows its template through the live language switch (assets/js/lang-swap.js, 1.73.0): its
+        // labels, options and placeholders are the template's — the server's words — until a script writes there.
+        if (window.LangSwap) window.LangSwap.adopt(copied, 'info-desc-tpl');
+        opened.forEach((b) => { b.hidden = true; });
+        const ta = $id('info-desc');
+        const src = $id('info-desc-source');
+        const fmtEl = $id('info-desc-format');
+        const editor = $id('info-desc-editor');
+        if (editor) editor.dataset.mode = mode;
+        if (ta && json.content_max) ta.dataset.limit = json.content_max;
+        const pre = mode === 'edit' ? json.content_edit : null;
+        if (pre) {
+            if (ta) ta.value = String(pre.description || '');
+            if (src) src.value = String(pre.source_url || '');
+            // A format that is still offered; one switched off since stays what the select can say.
+            if (fmtEl && pre.description_format && (fmtEl.tagName !== 'SELECT'
+                || Array.prototype.some.call(fmtEl.options, (o) => o.value === pre.description_format))) {
+                fmtEl.value = pre.description_format;
+            }
+        }
+        if (ta && window.RichText && typeof window.RichText.mount === 'function') {
+            window.RichText.mount('info-desc', { previewFor: 'description', hash });
+            // The toolbar and the counter follow the text and the format put in above.
+            if (pre && fmtEl && fmtEl.tagName === 'SELECT') fmtEl.dispatchEvent(new Event('change'));
+            if (pre) ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const send = $id('info-desc-send'), cancel = $id('info-desc-cancel'), msg = $id('info-desc-msg');
+        cancel.addEventListener('click', () => { editor.remove(); opened.forEach((b) => { b.hidden = false; }); });
+        send.addEventListener('click', async () => {
+            if (send.disabled) return;
+            if (ta && window.ImagesEditor && window.ImagesEditor.busy(ta)) { msg.textContent = t.key('js.images.wait_uploads'); return; }
+            const text = ta ? ta.value.trim() : '';
+            const sUrl = src ? src.value.trim() : '';
+            if (!text && !sUrl) { msg.textContent = t.key('js.app.desc_empty'); return; }
+            send.disabled = true;
+            // Through the anti-spam layer's helper (1.71.0, assets/js/antispam.js): a CAPTCHA it asks for — a
+            // guest's every time — is solved in the site's box and the same words sent again; a wait counts down
+            // on this button with the server's sentence beside it.
+            const payload = { csrf_token: csrfForContent(), hash,
+                description: text, description_format: fmtEl ? fmtEl.value : 'bbcode', source_url: sUrl,
+                kind: mode === 'edit' ? 'edit' : 'rewrite' };
+            const doPost = (extra) => postJson('content_submit', Object.assign({}, payload, extra || {}));
+            const r = window.Antispam
+                ? await window.Antispam.send(doPost, { button: send, note: (s) => { msg.textContent = s || ''; }, action: 'content_submit' })
+                : await doPost({});
+            if (!(window.Antispam && window.Antispam.waiting(send))) send.disabled = false;
+            if (!r || !r.success) {
+                if (r && (r.antispam || r.error === 'captcha_cancelled')) {
+                    if (!(window.Antispam && window.Antispam.waiting(send))) msg.textContent = r.message || t.key('js.app.desc_failed');
+                    return;
+                }
+                msg.textContent = !r ? t.key('js.app.desc_failed') : (r.error === 'rate_limit' ? t.key('js.app.desc_rate_limited') : (r.error || t.key('js.app.desc_failed')));
+                return;
+            }
+            msg.textContent = r.message || (r.proposed ? t.key('js.app.desc_sent_proposed') : (r.pending ? t.key('js.app.desc_sent_pending') : t.key('js.app.desc_sent_published')));
+            send.hidden = true; cancel.hidden = true;
+            if (ta) ta.readOnly = true;
+            // Published at once: draw the panel again with the words on it.
+            if (r.saved && !r.pending) setTimeout(() => openInfo(hash, json.name), 1200);
+        });
+        if (ta) {
+            ta.focus();
+            // An edit starts where the text ends, not above it.
+            if (pre) { try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) { /* not a text box */ } }
+        }
+    }
+
+    /** Wire the panel up wherever its markup is on the page, and hand it to whoever needs it. */
+    function initInfoPanel() {
+        infoOverlay = $id('info-overlay');
+        if (!infoOverlay) return;
+        const d = infoOverlay.dataset;
+        infoFilesMode = ['scroll', 'button', 'all'].includes(d.filesMode) ? d.filesMode : 'scroll';
+        infoCanFav = d.fav === '1';
+        // "Who has this" (1.70.0): drawn when ANY of its sections — favourites, likes / ratings, lists — is
+        // open to this reader (templates/partials/info_overlay.php asks includes/who.php).
+        infoCanFavWho = d.favWho === '1';
+        infoDescFold = Math.max(0, parseInt(d.fold || '0', 10) || 0);
+        infoLayer = escLayer(infoOverlay, closeInfo);
+        closeOnBackdrop(infoOverlay, closeInfo);
+        const infoBox = infoOverlay.querySelector('.info-box');
+        if (d.resize === '1' && infoBox) initInfoResize(infoBox);
+        const listBox = document.querySelector('#list-overlay .lo-box');
+        if (d.resize === '1' && listBox) initInfoResize(listBox, 'thx-list-size');
+        if (d.rows === '1') initRowOpen();
+        const ic = $id('info-close');
+        if (ic) ic.addEventListener('click', closeInfo);
+        const shareOneBtn = $id('info-share');
+        if (shareOneBtn) shareOneBtn.addEventListener('click', () => {
+            // Built from the hash, not from location.href: the panel is a link to ONE torrent, and
+            // carrying the sender's query and page number into it would share their search as well.
+            let u;
+            try { u = new URL(location.href); } catch (e) { return; }
+            OWNED.forEach(k => u.searchParams.delete(k));
+            if (infoHash) u.searchParams.set('hash', infoHash);
+            u.hash = '';
+            share(shareOneBtn, u.href, t.key('js.app.share_link_one'));
+        });
+        // The panel is the answer to "what IS this?", and that question is asked from the search
+        // results, from a favourites list and from a profile's lists. One implementation, one
+        // overlay, and the caller only needs a hash.
+        window.TorrentInfo = {
+            open: openInfo,
+            close: closeInfo,
+            current: () => infoHash,
+            setOnOpen: (fn) => { infoOnOpen = typeof fn === 'function' ? fn : null; },
+        };
+    }
+
+    function initSearch() {
+        const form = $id('search-form');
+        if (!form) return;
+        const canMagnet = form.dataset.canMagnet === '1';
+        const canFiles = form.dataset.canFiles === '1';
+        // How the file list fills up (index_files_mode): 'scroll' keeps asking as the reader reaches
+        // the end, 'button' never asks unprompted, 'all' chains pages until the server says stop.
+        // Only the mode comes from the page — how big a page is and how many of them are allowed are
+        // the server's business, and api/index_files.php answers `capped` when the total is reached.
+        // Both file overlays are inside this closure, so one read serves them both.
+        const filesMode = ['scroll', 'button', 'all'].includes(form.dataset.filesMode) ? form.dataset.filesMode : 'scroll';
+        // The star appears where the row carries a hash — api/index_search.php sends info_hash only
+        // with index.magnet, so on a page without it there is nothing to favourite BY. That is a
+        // real limitation and it is written down rather than worked around: the Info panel always
+        // has the hash, so the star is always available there.
+        // Opening the panel is a change of view here, and the address says so — nowhere else does.
+        if (window.TorrentInfo) window.TorrentInfo.setOnOpen(() => writeUrl(curPage, 'push'));
+        const canFav = form.dataset.fav === '1';
+        // Every port, not just the first. Extra opentracker instances listen on their own ports and
+        // share nothing between them, so a magnet that names one port is only ever answered by one
+        // process. The attribute is empty without the cluster, which leaves this unchanged.
+        const announces = [form.dataset.announce, form.dataset.announceHttps]
+            .concat((form.dataset.announceExtra || '').split(/\s+/))
+            .filter(Boolean);
+        const input = $id('search-input'), clearBtn = $id('search-clear');
+        const bestBox = $id('search-best'), filesBox = $id('search-files');
+        const descBox = $id('search-desc'), inDescBox = $id('search-in-desc');
+        // Mirrors indexSearchTooShort() in includes/index.php, same regex and same floor. A one- or
+        // two-character term cannot use the fulltext index and scans the whole catalogue twice, and
+        // the 400 ms debounce below sends exactly that on the first keystroke of every search — so it
+        // is not sent at all, and the sentence the server would answer with is shown under the box
+        // instead. [...q] counts characters the way mb_strlen does; "ąę".length would say 2 as well,
+        // but an emoji would come out as 2 for one character.
+        const hint = $id('search-hint');
+        // The hash-prefix rule is indexIsHashPrefix()'s too (1.75.0): hex, six to forty, and a digit among the characters or
+        // twelve of them — "decade" is a word. (It can never matter for the floor below, a prefix being longer than it.)
+        const HASH_PREFIX_RE = /^[a-f0-9]{6,40}$/i;
+        const isHashPrefix = (q) => HASH_PREFIX_RE.test(q) && (q.length >= 12 || /\d/.test(q));
+        const tooShort = (q) => q !== '' && [...q].length < 3 && !isHashPrefix(q);
+        const showHint = (msg) => { if (!hint) return; hint.textContent = msg || ''; hint.hidden = !msg; };
+        const magnetFor = (hash, name) => {
+            let m = 'magnet:?xt=urn:btih:' + hash;
+            if (name) m += '&dn=' + encodeURIComponent(name);
+            announces.forEach(u => { m += '&tr=' + encodeURIComponent(u); });
+            return m;
+        };
+        // ── multi-column sort stack on the table headers (desc → asc → off, priority badges) ──
+        const headers = [...document.querySelectorAll('#search-table th.search-sortable')];
+        const sortStack = [];
+        const sortBy = $id('search-sortby');
+        function serializeSort() {
+            if (sortBy && FACT_SORT.test(sortBy.value)) return sortBy.value;
+            const parts = [];
+            if (!bestBox || bestBox.checked) parts.push('relevance:desc');
+            sortStack.forEach(x => parts.push(x.col + ':' + x.dir));
+            if (!parts.length) parts.push('seeders:desc');
+            return parts.join(',');
+        }
+        function updateSortIcons() {
+            headers.forEach(th => {
+                const icon = th.querySelector('.search-sort-icon');
+                const idx = sortStack.findIndex(x => x.col === th.dataset.sort);
+                const old = th.querySelector('.search-sort-priority');
+                if (old) old.remove();
+                // The arrows are icons now (1.68.0), the same three the transparency table uses.
+                if (idx === -1) { icon.className = 'bi bi-arrow-down-up search-sort-icon'; sortMarkPub(th, null, false); return; }
+                icon.className = sortStack[idx].dir === 'asc' ? 'bi bi-arrow-up search-sort-icon active' : 'bi bi-arrow-down search-sort-icon active';
+                // aria-sort on the column that decides the order (1.74.0) — not while "best match first" decides it.
+                sortMarkPub(th, sortStack[idx].dir, idx === 0 && !(bestBox && bestBox.checked));
+                if (sortStack.length > 1) {
+                    const sup = document.createElement('sup');
+                    sup.className = 'search-sort-priority';
+                    sup.setAttribute('aria-hidden', 'true');
+                    sup.textContent = String(idx + 1);
+                    icon.after(sup);
+                }
+            });
+        }
+        if (sortBy) sortBy.addEventListener('change', () => {
+            sortStack.length = 0;
+            updateSortIcons();
+            run(1, 'push');
+        });
+        headers.forEach(th => th.addEventListener('click', () => {
+            if (sortBy) sortBy.value = '';
+            const col = th.dataset.sort;
+            const idx = sortStack.findIndex(x => x.col === col);
+            if (idx === -1) sortStack.push({ col, dir: 'desc' });
+            else if (sortStack[idx].dir === 'desc') sortStack[idx].dir = 'asc';
+            else sortStack.splice(idx, 1);
+            updateSortIcons();
+            runSortDebounced();
+        }));
+        // A sort change, like the column headers — but a sort BY RELEVANCE, which only a search has: with
+        // nothing in the box the rows come back in the same order either way (includes/index.php leaves
+        // the score out of an unscored query), so ticking it with an empty box asks nothing new. The
+        // address still takes the box's state, so a reload or a shared link keeps it (1.70.0, see
+        // searchOptionChanged() below).
+        if (bestBox) bestBox.addEventListener('change', () => searchOptionChanged('push'));
+        const perPageSel = $id('search-perpage');
+        try { const saved = localStorage.getItem('thx_search_perpage'); if (saved && perPageSel && [...perPageSel.options].some(o => o.value === saved)) perPageSel.value = saved; } catch (e) {}
+        if (perPageSel) perPageSel.addEventListener('change', () => { try { localStorage.setItem('thx_search_perpage', perPageSel.value); } catch (e) {} run(1); });
+        let curPage = 1, seq = 0;
+        // ── the address bar holds the view ──────────────────────────────────
+        //
+        // Until now the whole state of this page lived in this closure: the query, the sort stack,
+        // the page number, whether the Info panel was open. Reloading lost all of it, and there was
+        // no way to send anyone what you were looking at.
+        //
+        // The parameter names are the API's own (api/index_search.php), so an address from here can
+        // be pasted straight onto api.php when something needs debugging. A parameter equal to its
+        // default is left out — that is what keeps an ordinary search short enough to read.
+        //
+        // `per_page` is the one exception to that rule: whenever `page` is written, `per_page` is
+        // written with it. Without that, a link to "page 3" shows a different set of rows to a
+        // reader whose page size is not the sender's, which is the same address meaning two things.
+        // A `per_page` that ARRIVES in the address governs this load only and never overwrites the
+        // reader's saved preference.
+        const contentSel = $id('search-content');
+        const contentDefault = contentSel ? contentSel.value : '';
+        const filtersHost = $id('search-filters');
+        let filters = null;
+        let lastFilterQ = null;
+        if (filtersHost && window.SearchFilters) {
+            let catalog = [];
+            try { catalog = JSON.parse(filtersHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
+            let favs = [];
+            try { favs = JSON.parse(filtersHost.dataset.favs || '[]'); } catch (e) { favs = []; }
+            filters = window.SearchFilters.mount(filtersHost, { catalog, favs, rep: filtersHost.dataset.rep === '1', facts: filtersHost.dataset.facts === '1', desc: filtersHost.dataset.desc === '1', wl: filtersHost.dataset.wl === '1',
+                moveRight: [$id('search-total'), $id('search-share')], onChange: () => run(1, 'push') });
+            window.SearchFiltersPick = (id) => { if (infoHash) closeInfo(); filters.addTag(id); };
+        }
+        const SORT_COLS = headers.map(th => th.dataset.sort);
+        const DEFAULT_SORT = 'relevance:desc';
+        let urlHeld = 0;        // > 0 while we are applying an address, so nothing writes one back
+
+        function viewState(page) {
+            const st = {};
+            const q = input.value.trim();
+            if (q) st.search = q;
+            if (filesBox && filesBox.checked) st.search_files = '1';
+            if (inDescBox && inDescBox.checked) st.in_desc = '1';
+            if (descBox && descBox.checked) st.desc = '1';
+            if (contentSel && contentSel.value !== contentDefault) st.content = contentSel.value;
+            // serializeSort() answers the API, and for "no relevance, no column" its answer is the
+            // request-level fallback `seeders:desc`. Writing that into the address would read back as
+            // an explicit Seeders sort, arrow and all — a different UI state from the one that wrote
+            // it. `none` is the address's own word for that state and nothing else uses it.
+            const sort = (sortBy && FACT_SORT.test(sortBy.value)) ? sortBy.value : ((!sortStack.length && bestBox && !bestBox.checked) ? 'none' : serializeSort());
+            if (sort !== DEFAULT_SORT) st.sort = sort;
+            if (page > 1) {
+                st.page = String(page);
+                if (perPageSel) st.per_page = perPageSel.value;
+            }
+            if (infoHash) st.hash = infoHash;
+            if (filters) Object.assign(st, filters.params());
+            return st;
+        }
+
+        // Rebuilt from the CURRENT address rather than from scratch: `action` has to survive, and so
+        // does a `lang=` somebody arrived with.
+        function writeUrl(page, mode) {
+            if (urlHeld > 0) return;
+            let u;
+            try { u = new URL(location.href); } catch (e) { return; }
+            OWNED.forEach(k => u.searchParams.delete(k));
+            const st = viewState(page);
+            Object.keys(st).forEach(k => u.searchParams.set(k, st[k]));
+            const qs = u.searchParams.toString();
+            const next = u.pathname + (qs ? '?' + qs : '') + u.hash;
+            if (next === location.pathname + location.search + location.hash) return;
+            // The address has moved, so any revealed link box is now describing somewhere the reader
+            // has left. On plain HTTP that box is the only way this feature works, and it stays
+            // pre-selected until something takes it away — inviting a Ctrl+C that copies the wrong
+            // page, or a different torrent entirely.
+            dropAllShareBoxes();
+            try {
+                if (mode === 'push') history.pushState(null, '', next);
+                else history.replaceState(null, '', next);
+            } catch (e) { /* opaque origin: the view is simply not addressable here */ }
+        }
+
+        /**
+         * A sort we do not recognise is not half-applied.
+         *
+         * An address typed by hand, or written by an older version of this page, either means
+         * exactly what it says or it means nothing — applying the part we understood would leave the
+         * table sorted one way while the address claims another.
+         */
+        function parseSort(raw) {
+            if (!raw) return null;
+            if (raw === 'none') return { best: false, stack: [] };
+            if (FACT_SORT.test(String(raw))) return { best: false, stack: [], fact: String(raw) };
+            const parts = String(raw).split(',').filter(Boolean);
+            if (!parts.length || parts.length > SORT_COLS.length + 1) return null;
+            const out = { best: false, stack: [] };
+            for (let i = 0; i < parts.length; i++) {
+                const bits = parts[i].split(':');
+                if (bits.length !== 2 || (bits[1] !== 'asc' && bits[1] !== 'desc')) return null;
+                if (bits[0] === 'relevance') {
+                    if (i !== 0 || bits[1] !== 'desc') return null;
+                    out.best = true;
+                    continue;
+                }
+                if (!SORT_COLS.includes(bits[0])) return null;
+                if (out.stack.some(x => x.col === bits[0])) return null;
+                out.stack.push({ col: bits[0], dir: bits[1] });
+            }
+            return out;
+        }
+
+        function readUrl() {
+            let p;
+            try { p = new URL(location.href).searchParams; } catch (e) { p = new URLSearchParams(); }
+            const per = p.get('per_page');
+            const pg = parseInt(p.get('page') || '1', 10);
+            const h = String(p.get('hash') || '').toLowerCase();
+            const c = p.get('content');
+            return {
+                search: String(p.get('search') || '').slice(0, 200),
+                files: p.get('search_files') === '1',
+                inDesc: p.get('in_desc') === '1',
+                desc: p.get('desc') === '1',
+                content: (contentSel && c && [...contentSel.options].some(o => o.value === c)) ? c : contentDefault,
+                sort: parseSort(p.get('sort')),
+                perPage: (perPageSel && per && [...perPageSel.options].some(o => o.value === per)) ? per : null,
+                page: (isFinite(pg) && pg >= 1) ? Math.min(pg, 1000000) : 1,
+                hash: /^[0-9a-f]{40}$/.test(h) ? h : null,
+                params: p,
+            };
+        }
+
+        function applyUrlState(st) {
+            urlHeld++;
+            try {
+                input.value = st.search;
+                if (filesBox) filesBox.checked = st.files;
+                if (inDescBox) inDescBox.checked = st.inDesc;
+                if (descBox) descBox.checked = st.desc;
+                if (contentSel) contentSel.value = st.content;
+                if (filters) filters.fromParams(st.params || new URLSearchParams());
+                // This load only. The `change` listener is what saves the preference, and setting
+                // .value from script does not fire it — which is exactly the behaviour wanted here.
+                if (perPageSel && st.perPage) perPageSel.value = st.perPage;
+                sortStack.length = 0;
+                if (sortBy) sortBy.value = st.sort && st.sort.fact && [...sortBy.options].some(o => o.value === st.sort.fact) ? st.sort.fact : '';
+                if (st.sort) {
+                    if (bestBox) bestBox.checked = st.sort.best || !!st.sort.fact;
+                    st.sort.stack.forEach(x => sortStack.push({ col: x.col, dir: x.dir }));
+                } else if (bestBox) {
+                    bestBox.checked = true;
+                }
+                updateSortIcons();
+            } finally { urlHeld--; }
+        }
+
+        // Back and Forward move between views, because pushState was used for the moves that are
+        // worth going back from: turning a page, changing the sort, opening and closing Info.
+        window.addEventListener('popstate', () => {
+            // Our own history.back(), taking back the entry the file list added when it opened
+            // (1.64.0). Nothing about the view has changed, so there is nothing to re-run.
+            if (filesPopping) { filesPopping = false; return; }
+            // Back, with the file list open: it is the list that goes, not the view behind it.
+            if (overlay && !overlay.hidden) { filesOwned = Math.max(0, filesOwned - 1); closeFiles(true); return; }
+            const st = readUrl();
+            // Back and Forward move the address without going through writeUrl(), so the box that
+            // writeUrl() would have cleared has to be cleared here as well. Its lifetime is tied to
+            // the address, not to who changed it.
+            dropAllShareBoxes();
+            urlHeld++;
+            try {
+                applyUrlState(st);
+                if (st.hash !== infoHash) {
+                    if (st.hash) openInfo(st.hash, null);
+                    else closeInfo();
+                }
+            } finally { urlHeld--; }
+            run(st.page, 'none');
+        });
+        // `lastQuery` is the term exactly as the search sent it (1.62.0): a file list opened from one
+        // of its hits asks the server with the same words, so the files it adds are the files that
+        // made the row a hit rather than the browser's own guess at them.
+        let lastTokens = [], lastFilesSearch = false, lastQuery = '';
+        function setLoading(on) {
+            const table = $id('search-table');
+            table.classList.toggle('search-loading', on);
+            const tot = $id('search-total');
+            // (It kept the old count in data-prev, which nothing read back: words in an attribute no switch translates.)
+            if (on) tot.textContent = t.key('js.app.searching');
+        }
+        async function run(page, urlMode) {
+            curPage = page;
+            // The address is written from the state the run STARTS with, not from the reply: a
+            // request that fails still leaves an address that describes what was asked for.
+            if (urlMode !== 'none') writeUrl(page, urlMode || 'replace');
+            const my = ++seq;   // stale responses (fast typing) must not overwrite newer ones
+            const alert = $id('search-alert'), table = $id('search-table'), body = $id('search-body'), note = $id('search-note');
+            // "There is a result set worth pointing at" is what the Share button claims, so it goes
+            // away on every path that leaves no result set — not only on the one that draws rows.
+            const shareBtn = $id('search-share');
+            alert.className = 'alert';
+            const q = input.value.trim();
+            if (tooShort(q)) {
+                // The counter was still bumped above: a reply to "abc" that lands after the user
+                // deleted a letter must not repaint the table under a term that is not being searched.
+                setLoading(false);
+                table.hidden = true;
+                note.hidden = true;
+                if (shareBtn) shareBtn.hidden = true;
+                $id('search-total').textContent = '';
+                renderPager(1, 1, 0);
+                showHint(t.key('js.app.search_too_short'));
+                return;
+            }
+            showHint('');
+            setLoading(true);
+            const qs = new URLSearchParams({ page: String(page), sort: serializeSort() });
+            if (perPageSel) qs.set('per_page', perPageSel.value);
+            if (q) qs.set('search', q);
+            const filesOn = !!(filesBox && filesBox.checked);
+            // Only with something to look for (1.70.0): without a term the answer is the same, and the
+            // flag alone kept the server from reusing its cached count of the whole catalogue.
+            if (filesOn && q) qs.set('search_files', '1');
+            if (inDescBox && inDescBox.checked && q) qs.set('in_desc', '1');
+            if (descBox && descBox.checked) qs.set('desc', '1');
+            if (contentSel && contentSel.value) qs.set('content', contentSel.value);
+            if (filters) {
+                const fp = filters.params();
+                Object.keys(fp).forEach(k => qs.set(k, fp[k]));
+                if (lastFilterQ === q) qs.set('refine', '1');
+                lastFilterQ = q;
+            }
+            const json = await getJson('index_search&' + qs.toString());
+            if (my !== seq) return;
+            setLoading(false);
+            if (!json || !json.success) {
+                table.hidden = true;
+                note.hidden = true;
+                if (shareBtn) shareBtn.hidden = true;
+                $id('search-total').textContent = '';
+                renderPager(1, 1, 0);
+                // The server applying the same rule (a stale page, or a hex floor that moved on one
+                // side first) is the hint line, not a red alert: the message is the one the box
+                // would have shown before sending, in the language the server rendered it in.
+                if (json && json.code === 'search_too_short') { showHint(json.error || t.key('js.app.search_too_short')); return; }
+                const code = json && json.error;
+                showAlert(alert, code === 'rate_limit' ? t.key('js.app.search_rate_limit')
+                    : code === 'login_required' ? t.key('js.app.search_login_required')
+                    : code || t.key('js.app.search_failed'), false);
+                return;
+            }
+            lastTokens = q ? queryTokens(q) : [];
+            lastFilesSearch = filesOn && !!q;
+            lastQuery = lastFilesSearch ? q : '';
+            body.textContent = '';
+            json.rows.forEach(r => {
+                const tr = document.createElement('tr');
+                const nameTd = document.createElement('td');
+                nameTd.className = 'search-name';
+                const nameSpan = document.createElement('span');
+                nameSpan.title = r.name || '';
+                if (!r.name) nameSpan.textContent = t.key('js.app.no_name');
+                else if (lastTokens.length) markInto(nameSpan, r.name, lastTokens);
+                else nameSpan.textContent = r.name;
+                nameTd.appendChild(nameSpan);
+                if (r.src === 'whitelist') {
+                    const wb = document.createElement('span');
+                    wb.className = 'search-wl-badge';
+                    wb.title = t.key('js.app.wl_badge_title');
+                    wb.textContent = 'WL';
+                    nameTd.appendChild(wb);
+                }
+                // The state of the words attached to it, not of the torrent. Only shown when there
+                // is a state to show: an index row nobody has written about has none.
+                if ((r.content_status === 'approved' && !r.desc) || r.content_status === 'rejected' || r.content_status === 'pending') {
+                    nameTd.appendChild(contentStatusIcon(r.content_status));
+                }
+                if (r.desc) {
+                    const marks = document.createElement('span');
+                    marks.className = 'search-desc-marks';
+                    [[1, 'bi-file-earmark-text', 'js.app.desc_has_text'], [2, 'bi-image', 'js.app.desc_has_pics'], [4, 'bi-play-circle', 'js.app.desc_has_video']].forEach(([bit, glyph, key]) => {
+                        if (!(r.desc & bit)) return;
+                        const i = document.createElement('i');
+                        i.className = 'bi ' + glyph;
+                        i.setAttribute('role', 'img');
+                        i.title = t.key(key);
+                        i.setAttribute('aria-label', t.key(key));
+                        marks.appendChild(i);
+                    });
+                    nameTd.appendChild(marks);
+                }
+                if (r.files_count) {
+                    const fc = document.createElement(canFiles && r.info_hash ? 'button' : 'span');
+                    fc.className = 'search-files-chip' + (lastFilesSearch ? ' chip-hit' : '');
+                    fc.textContent = r.files_count === 1 ? t.key('js.app.files_one') : t.key('js.app.files_many', {n: r.files_count});
+                    if (canFiles && r.info_hash) {
+                        fc.type = 'button';
+                        fc.title = lastFilesSearch ? t.key('js.app.show_files_matched') : t.key('js.app.show_files');
+                        fc.addEventListener('click', () => openFiles(r.info_hash, r.name));
+                    }
+                    nameTd.appendChild(fc);
+                }
+                if (json.rep_chip && r.rep && window.RepChip) {
+                    const rc = window.RepChip(r.rep);
+                    if (rc) nameTd.appendChild(rc);
+                }
+                if (r.facts && window.FactChips) {
+                    const chips = window.FactChips.render(r.facts, filters ? (id) => filters.addTag(id) : null);
+                    if (chips) nameTd.appendChild(chips);
+                }
+                if (r.thumb && window.ThumbSlider) {
+                    const thumbBox = document.createElement('div');
+                    thumbBox.className = 'search-thumb';
+                    if (window.ThumbSlider.mount(thumbBox, r.thumb)) {
+                        const nameBody = document.createElement('div');
+                        nameBody.className = 'search-name-body';
+                        nameBody.append(...nameTd.childNodes);
+                        const nameWrap = document.createElement('div');
+                        nameWrap.className = 'search-name-wrap';
+                        nameWrap.append(thumbBox, nameBody);
+                        nameTd.appendChild(nameWrap);
+                    }
+                }
+                tr.appendChild(nameTd);
+                const sizeTd = document.createElement('td');
+                sizeTd.className = 'search-num';
+                sizeTd.textContent = fmtBytesPub(r.size);
+                tr.appendChild(sizeTd);
+                const slTd = document.createElement('td');
+                slTd.className = 'search-num';
+                slTd.textContent = (r.seeders == null ? '—' : r.seeders) + ' / ' + (r.leechers == null ? '—' : r.leechers);
+                tr.appendChild(slTd);
+                if (json.rep_in_results) {
+                    const repTd = document.createElement('td');
+                    repTd.className = 'search-num search-rep';
+                    if (r.rep && r.rep.mode === 'stars') {
+                        // Compact in a table cell: the number, then one star. Five drawn stars in
+                        // every row of a fifty-row table is noise, and the tooltip carries the count.
+                        repTd.className += ' search-rep-stars';
+                        repTd.textContent = r.rep.stars.toFixed(1) + ' ';
+                        repTd.appendChild(iconEl('bi bi-star-fill'));
+                        repTd.title = r.rep.total === 1 ? t.key('js.app.rep_stars_title_one', {stars: r.rep.stars.toFixed(1)})
+                                    : t.key('js.app.rep_stars_title_many', {stars: r.rep.stars.toFixed(1), n: r.rep.total});
+                    } else if (r.rep) {
+                        // The count comes with the percentage, always. A column that shows only
+                        // "100%" makes one vote look like four hundred.
+                        repTd.className += r.rep.pct >= 50 ? ' search-rep-up' : ' search-rep-down';
+                        repTd.textContent = r.rep.pct + '%';
+                        repTd.title = r.rep.total === 1 ? t.key('js.app.ratings_one') : t.key('js.app.ratings_many', {n: r.rep.total});
+                    } else {
+                        repTd.textContent = '—';
+                        repTd.title = t.key('js.app.rep_too_few');
+                    }
+                    tr.appendChild(repTd);
+                }
+                const seenTd = document.createElement('td');
+                // search-seen: on a phone the date and its time may take a line each — see style.css
+                seenTd.className = 'search-num search-seen';
+                seenTd.textContent = fmtDatePub(r.last_seen, r.last_seen_time);
+                tr.appendChild(seenTd);
+                if (canMagnet) {
+                    const magTd = document.createElement('td');
+                    magTd.className = 'search-actions search-c-actions-cell';
+                    // the flex lives on a wrapper, not on the <td> — see .search-c-actions-cell
+                    const actWrap = document.createElement('div');
+                    actWrap.className = 'search-c-actions-inner';
+                    if (r.info_hash) {
+                        // Icons (1.71.0): the magnet, a copy, the "i" — words only because the public
+                        // pages had no icon font until 1.68.0. Magnet stays the primary one: the filled
+                        // accent box, the other two the quiet secondary ones. Each is named for a screen
+                        // reader and explained in the site's tooltip (iconButton()).
+                        const a = iconButton('a', 'btn btn-small search-act-btn search-act-magnet', 'bi-magnet', t.key('js.app.magnet'), t.key('js.app.magnet_title'));
+                        a.href = magnetFor(r.info_hash, r.name);
+                        actWrap.appendChild(a);
+                        const copy = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-copy', 'bi-copy', t.key('js.app.copy'), t.key('js.app.copy_magnet_title'));
+                        copy.addEventListener('click', () => {
+                            if (!navigator.clipboard) return;
+                            navigator.clipboard.writeText(magnetFor(r.info_hash, r.name))
+                                .then(() => {
+                                    swapGlyph(copy, 'bi-check-lg', 1200);
+                                    copy.classList.add('copied');
+                                    setTimeout(() => copy.classList.remove('copied'), 1200);
+                                    pubTip(copy, t.key('js.common.copied'));
+                                })
+                                .catch(() => {});
+                        });
+                        actWrap.appendChild(copy);
+                        const info = iconButton('button', 'btn btn-secondary btn-small search-act-btn search-act-info', 'bi-info-circle', t.key('js.app.info'), t.key('js.app.info_title'));
+                        info.addEventListener('click', () => openInfo(r.info_hash, r.name));
+                        actWrap.appendChild(info);
+                        if (canFav && window.Favourites) actWrap.appendChild(window.Favourites.makeStar(r.info_hash, !!r.fav));
+                    }
+                    magTd.appendChild(actWrap);
+                    tr.appendChild(magTd);
+                }
+                body.appendChild(tr);
+            });
+            // A ?page= past the end — a stale link, or a link written when the catalogue was bigger —
+            // used to render an empty table under a result count, with no message and an address that
+            // never corrected itself. Land on the last page that exists and say so in the address.
+            if (json.rows.length === 0 && json.total > 0 && json.page > json.pages) { run(json.pages, 'replace'); return; }
+            table.hidden = json.rows.length === 0;
+            if (shareBtn) shareBtn.hidden = json.rows.length === 0;
+            // total_capped (1.74.0, PERF-2): the server counted a search only as far as it had to, so the number is a
+            // floor — "1,000+ results", and the pager's last page grows as the reader goes deeper. The "+" is the
+            // dictionary's (js.app.results_capped), so the count stays a t.num() word a live switch says again.
+            const capped = !!json.total_capped;
+            $id('search-total').textContent = json.total === 0 ? ''
+                : (capped ? t.key('js.app.results_capped', {n: t.num(json.total)})
+                    : (json.total === 1 ? t.key('js.app.results_one') : t.key('js.app.results_many', {n: t.num(json.total)})));
+            note.hidden = json.total !== 0;
+            note.textContent = json.total === 0 ? t.key('js.app.nothing_found') : '';
+            renderPager(json.page, json.pages, json.total, !!json.total_capped);
+            showHint(json.sort_limited ? t.key('js.app.sort_limited') : '');
+        }
+        // First / Prev / Page [n] of M · X rows / Next / Last — same pattern as the admin tables, and the
+        // chevrons are icons beside the words the way admin-common.js draws them (1.68.0; they used to
+        // be angle-quote characters inside the dictionary strings).
+        function renderPager(page, pages, total, capped) {
+            const box = $id('search-pagination');
+            box.textContent = '';
+            if (pages <= 1) return;
+            const go = (p) => { p = Math.min(pages, Math.max(1, Math.round(p))); if (p !== page) run(p, 'push'); };
+            const mk = (parts, target, disabled, cls) => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.append(...parts);
+                b.disabled = !!disabled;
+                if (cls) b.className = cls;
+                b.addEventListener('click', () => go(target));
+                return b;
+            };
+            box.appendChild(mk([iconEl('bi bi-chevron-double-left'), ' ', t.key('js.app.pg_first')], 1, page <= 1, 'pg-edge'));
+            box.appendChild(mk([iconEl('bi bi-chevron-left'), ' ', t.key('js.app.pg_prev')], page - 1, page <= 1));
+            const jump = document.createElement('span');
+            jump.className = 'pg-jump';
+            jump.append(t.key('js.app.pg_page'), ' ');
+            const inp = document.createElement('input');
+            inp.type = 'number'; inp.min = '1'; inp.max = String(pages); inp.value = String(page);
+            inp.className = 'pg-input'; inp.title = t.key('js.app.pg_goto');
+            const jumpTo = () => { const n = Number(String(inp.value).trim()); if (isFinite(n) && n >= 1) go(n); else inp.value = String(page); };
+            inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); jumpTo(); } });
+            inp.addEventListener('change', jumpTo);
+            inp.addEventListener('focus', () => inp.select());
+            jump.appendChild(inp);
+            jump.append(' ', t.key('js.app.pg_of', {pages: pages + (capped ? '+' : '')}));
+            box.appendChild(jump);
+            if (total) {
+                const tot = document.createElement('span');
+                tot.className = 'pg-total';
+                tot.append('· ', capped ? t.key('js.app.pg_rows_capped', {n: t.num(total)}) : t.key('js.app.pg_rows', {n: t.num(total)}));
+                box.appendChild(tot);
+            }
+            box.appendChild(mk([t.key('js.app.pg_next'), ' ', iconEl('bi bi-chevron-right')], page + 1, page >= pages));
+            box.appendChild(mk([t.key('js.app.pg_last'), ' ', iconEl('bi bi-chevron-double-right')], pages, page >= pages, 'pg-edge'));
+        }
+        // ── file-list modal: collapsible folder tree; matches marked when searching file names ──
+        const overlay = $id('files-overlay');
+        // One number per opening (1.64.0). `overlay.hidden` was the only guard on a reply, and it
+        // says nothing about WHICH list is open: closing a slow list and opening another straight
+        // away let the first one's answer draw its tree into the second one's window. Every await
+        // below is followed by "is this still my opening", the way run() does it for the search.
+        let filesSeq = 0;
+        let filesObserver = null;
+        // The list adds a history entry when it opens, so Back closes it instead of re-running the
+        // search behind it (which is what "closing it refreshes the list" turned out to be). This
+        // counts the entries we own; `filesPopping` keeps our own history.back() from being read
+        // as the reader pressing Back.
+        let filesOwned = 0, filesPopping = false;
+        // Its Esc, its Tab and its focus are the windows' own (escLayer(), 1.74.0): the focus goes into the list as it
+        // opens and back to its "N files" chip as it closes — it used to stay on the chip under the window.
+        const filesLayer = overlay ? escLayer(overlay, () => closeFiles()) : null;
+        function closeFiles(fromHistory) {
+            if (!overlay || overlay.hidden) return;
+            overlay.hidden = true;
+            filesSeq++;                                  // an answer still in the air is not ours
+            if (filesObserver) { filesObserver.disconnect(); filesObserver = null; }
+            if (filesLayer) filesLayer.off();
+            if (!fromHistory && filesOwned > 0) {
+                filesOwned--;
+                filesPopping = true;
+                try { history.back(); } catch (e) { filesPopping = false; }
+            }
+        }
+        // One DOM node per file, and this tree is rebuilt from scratch on every page that arrives —
+        // so ten pages of 2 000 is ten rebuilds of a tree growing to 20 000 lines. The panel's tree
+        // has had a cap since it was written (AdminCommon.buildFileTree); this one had none, which
+        // was survivable only while a stored list could not be longer than a few thousand paths.
+        // 5 000 is that number: the per-torrent storage cap the worker ships with, so every list
+        // that draws in full today still draws in full. Past it the leaves are not created at all
+        // (the panel's version creates them and only hides them — not a model to copy at this size)
+        // and one line says how many are missing. Folder counts stay true; they are counted, not
+        // drawn.
+
+        // ── the Info panel ──────────────────────────────────────────────────
+        //
+        // Everything about one hash in one place: the source link (behind the leaving-the-site
+        // confirmation, because it is not our link), the description as its author wrote it, the
+        // numbers, and the file list at the bottom. The "N files" chip beside a result still opens
+        // the plain tree on its own — somebody who only wants the file names should not have to read
+        // an essay to reach them.
+
+        // ── Share ───────────────────────────────────────────────────────────
+        //
+        // Two buttons, one job: hand over the address of what is on the screen. The one on the
+        // toolbar shares the list as it stands (query, filter, sort, page); the one in the Info
+        // panel's head shares that one torrent, which is `?action=search&hash=…` and opens the same
+        // panel for whoever follows it.
+        //
+        // Share: the address bar already holds the whole view, so the button hands over what the
+        // reader is looking at. The helpers themselves live at the top of this file — the profile
+        // page has a Share button too, and initSearch() returns before its first line.
+        const shareViewBtn = $id('search-share');
+        if (shareViewBtn) shareViewBtn.addEventListener('click', () => share(shareViewBtn, location.href, t.key('js.app.share_link')));
+
+        async function openFiles(hash, name) {
+            if (!overlay) return;
+            const body = $id('files-body'), title = $id('files-title');
+            const mine = ++filesSeq;
+            const ours = () => mine === filesSeq && !overlay.hidden;
+            if (filesObserver) { filesObserver.disconnect(); filesObserver = null; }
+            title.textContent = name || t.key('js.app.files');
+            body.textContent = t.key('js.common.loading');
+            overlay.hidden = false;
+            if (filesLayer) filesLayer.on();
+            // An entry of its own, so Back shuts the list (1.64.0). The address does not change —
+            // the list is not a view of this page, it is a window over it — and popstate below
+            // takes it away again. Without this, Back went to the search's previous view and ran
+            // it, with the window still sitting on top: "closing it refreshes the list".
+            try { history.pushState({ filesModal: 1 }, '', location.href); filesOwned++; }
+            catch (e) { /* opaque origin: Esc and the cross still close it */ }
+            // Opened from a hit of a search that looked inside file names: the first page names the
+            // term, and the server answers with the matching files beside the ordinary page (1.62.0).
+            // Captured NOW, because the reader can type a new search while this list is open.
+            const term = lastFilesSearch ? lastQuery : '';
+            const json = await getJson('index_files&hash=' + encodeURIComponent(hash)
+                                       + (term ? '&search=' + encodeURIComponent(term) : ''));
+            if (!ours()) return;
+            body.textContent = '';
+            if (!json || !json.success) {
+                body.textContent = (json && json.error) || t.key('js.app.files_load_failed');
+                return;
+            }
+            if (!json.files.length) { title.textContent = (json.name || name || t.key('js.app.files')); body.textContent = t.key('js.app.no_file_list'); return; }
+            // The same paging as the info overlay: the first page now, the next when the reader
+            // reaches the end of the list or presses the button — only with index.files_all.
+            const allFiles = json.files.slice();
+            let next = typeof json.next === 'number' ? json.next : allFiles.length;
+            let more = !!json.truncated && !!json.can_more, loading = false, stalled = false;
+            // What the torrent says it holds, against what the catalogue actually stored. The two
+            // differ for every torrent bigger than the worker's per-torrent cap, and the title said
+            // only the second number while the search row said the first.
+            const totalFiles = Number(json.files_count) || 0;
+            // The files that matched the term, from the FIRST reply only — the pages after it do not
+            // carry them. Kept as the server sent them and merged on every render, so a match that a
+            // later page brings in for real is drawn once, where it belongs, and stops being an extra.
+            const matches = Array.isArray(json.matches) ? json.matches : [];
+            const tokens = term ? lastTokens : [];
+            const tree = document.createElement('div');
+            const notes = document.createElement('div');
+            const note = (text) => { const p = document.createElement('p'); p.className = 'text-muted'; p.textContent = text; notes.appendChild(p); };
+            // Rewritten on every render rather than appended once: how many matches sit beyond the
+            // loaded part changes as pages arrive.
+            const matchNote = document.createElement('p');
+            matchNote.className = 'text-muted files-match-note';
+            matchNote.hidden = true;
+            const foot = document.createElement('div'); foot.className = 'files-more';
+            const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-secondary btn-small';
+            const sentinel = document.createElement('div'); sentinel.className = 'files-sentinel';
+            foot.appendChild(btn); foot.appendChild(sentinel);
+            // The folders this reader has opened, kept across the rebuilds (1.64.0).
+            const opened = treeOpenState(tree);
+            let beyond = 0;
+            // Split in two (1.64.0). The chrome is a heading and a button; the tree is up to five
+            // thousand lines. render() used to be both, and was called at the START of a load as
+            // well — only to put the word "Loading…" on the button — so on a torrent of any size
+            // the folder somebody had just opened folded itself twice per page.
+            const chrome = () => {
+                const head = (totalFiles && allFiles.length < totalFiles)
+                    ? t.key('js.app.files_n_of', {n: t.num(allFiles.length), total: t.num(totalFiles)})
+                    // "1,234+ files" is a sentence of its own (1.73.1): the number keeps its key, a "+" glued to it would not.
+                    // The whole count is a counted word in the language's form (1.74.0, t.plural(): "3 pliki", "5 plików").
+                    : ((more || (json.truncated && !json.can_more)) ? t.key('js.app.files_n_more', {n: t.num(allFiles.length)})
+                                                                     : t.plural(allFiles.length, 'js.app.files'));
+                title.replaceChildren(json.name || name || t.key('js.app.files'), ' — ', head);
+                matchNote.hidden = !beyond && !json.matches_more;
+                const bits = [];
+                if (beyond) bits.push(t.key('js.app.files_matches_beyond', {n: t.num(beyond)}));
+                if (json.matches_more) bits.push(...(bits.length ? [' '] : []), t.key('js.app.files_matches_more', {n: t.num(matches.length)}));
+                matchNote.replaceChildren(...bits);
+                btn.textContent = loading ? t.key('js.common.loading') : t.key('js.app.files_load_more', {n: t.num(allFiles.length)});
+                btn.disabled = loading; foot.hidden = !more;
+            };
+            const render = () => {
+                const built = buildTreePub(allFiles, tokens, { matches, total: totalFiles }, opened);
+                tree.replaceChildren(built);
+                beyond = Number(built.dataset.extra || 0);
+                chrome();
+            };
+            const loadMore = async () => {
+                if (loading || !more) return false;
+                loading = true; chrome();
+                const fj = await getJson('index_files&hash=' + encodeURIComponent(hash) + '&offset=' + next);
+                loading = false;
+                if (!ours()) return false;
+                if (!fj || !fj.success) {
+                    // The button stays live; only the observer and the 'all' chain give up. This
+                    // used to set more=false, which removed the reader's only way to try again.
+                    stalled = true; chrome();
+                    return false;
+                }
+                stalled = false;
+                (fj.files || []).forEach(f => allFiles.push(f)); next = typeof fj.next === 'number' ? fj.next : allFiles.length; more = !!fj.truncated && !!fj.can_more;
+                if (fj.stored_short) note(t.key('js.app.files_stored_cap', {n: t.num(fj.stored_total || allFiles.length)}));
+                if (fj.capped) note(t.key('js.app.files_cap_reached', {n: t.num(fj.max || allFiles.length)}));
+                render();
+                return true;
+            };
+            const loadAll = async () => { while (more && !stalled) { if (!await loadMore()) break; } };
+            btn.addEventListener('click', loadMore);
+            if (filesMode === 'scroll' && 'IntersectionObserver' in window) {
+                // THE WINDOW'S OWN BODY is what scrolls, not the page, so it is the root (1.64.0).
+                // And an observer only ever reports a CHANGE: with a page of two thousand files
+                // landing under a sentinel that was already on the screen, nothing changed, nothing
+                // fired, and the loading stopped with a "Load more" button in the middle of a list
+                // the reader thought was still coming. Asking to watch the same element again is
+                // what makes it say where the sentinel is NOW.
+                const again = () => {
+                    if (!filesObserver || !more || stalled) return;
+                    filesObserver.unobserve(sentinel);
+                    filesObserver.observe(sentinel);
+                };
+                filesObserver = new IntersectionObserver((entries) => {
+                    if (entries.some(e => e.isIntersecting) && more && !stalled) loadMore().then((got) => { if (got) again(); });
+                }, { root: body, rootMargin: '200px' });
+                filesObserver.observe(sentinel);
+            }
+            body.appendChild(tree); body.appendChild(foot); body.appendChild(matchNote); body.appendChild(notes);
+            if (json.truncated && !json.can_more) note(t.key('js.app.files_truncated'));
+            // The list ends here and ends short: the rest was never written, so there is nothing to
+            // load and nothing wrong — say it once, quietly, under the tree.
+            if (json.stored_short) note(t.key('js.app.files_stored_cap', {n: t.num(json.stored_total || allFiles.length)}));
+            // The first page can already stand on the site's total when the two numbers are equal.
+            if (json.capped) note(t.key('js.app.files_cap_reached', {n: t.num(json.max || allFiles.length)}));
+            render();
+            if (filesMode === 'all') await loadAll();
+        }
+        if (overlay) {
+            closeOnBackdrop(overlay, closeFiles);
+            $id('files-close').addEventListener('click', () => closeFiles());
+        }
+        // ── wiring: live search (debounced), accelerating clear-X, checkboxes, Enter = immediate ──
+        // The same two waits as the panel's lists (AdminCommon.DEBOUNCE in admin-common.js, which the
+        // public site does not load): a sort click redraws the arrows at once and fetches when the
+        // decision is made; typing waits the shorter one.
+        const runDebounced = debounce(() => run(1), 400);
+        const runSortDebounced = debounce(() => run(1, 'push'), 1200);
+        const syncClear = () => { if (clearBtn) clearBtn.hidden = input.value === ''; };
+        input.addEventListener('input', () => { syncClear(); runDebounced(); });
+        if (clearBtn) clearBtn.addEventListener('click', () => animatedClearPub(input, () => { syncClear(); input.focus(); run(1); }));
+        form.addEventListener('submit', (e) => { e.preventDefault(); run(1); });
+        /**
+         * "Also search file names" and "Best match" are options of a SEARCH (1.70.0). With nothing in
+         * the box there is nothing for either to change — the catalogue's first page comes back row
+         * for row — and running it again only dimmed the table and drew it back. So with an empty box
+         * a tick is remembered (in the box, and in the address, so a reload or a shared link keeps it)
+         * and acts on the next search; with words in the box it runs the search, as it always did.
+         */
+        function searchOptionChanged(urlMode) {
+            if (input.value.trim() === '') { writeUrl(curPage, 'replace'); return; }
+            run(1, urlMode);
+        }
+        if (filesBox) filesBox.addEventListener('change', () => searchOptionChanged());
+        if (inDescBox) inDescBox.addEventListener('change', () => searchOptionChanged());
+        if (descBox) descBox.addEventListener('change', () => run(1));
+        if (contentSel) contentSel.addEventListener('change', () => run(1));
+        updateSortIcons();
+        // Whatever the address says, before the first request — so a link into a sorted page 3 of a
+        // filtered search asks for that, rather than asking for page 1 and then correcting itself.
+        const startState = readUrl();
+        applyUrlState(startState);
+        syncClear();
+        run(startState.page, 'none');
+        // A link to one torrent opens the panel on top of the results it belongs to. If the hash is
+        // not in the catalogue, or the reader may not see it, openInfo() says so in the panel — the
+        // one thing it must not do is show an empty box and no reason.
+        if (startState.hash) openInfo(startState.hash, null);
+
+        // The live language switch needs nothing from this page (1.73.0). It used to run the search again
+        // and open the Info panel again on `langswap` — two requests more per switch, and an open description
+        // editor, its typed words, a comment being written and a report box were thrown away with the panel.
+        // Every word drawn here is written with t.key() now and keeps its key (assets/js/i18n.js), so the
+        // switch says the results, the total, the pager and the panel again where they stand.
+    }
+
+    /**
+     * The Share button on a public profile.
+     *
+     * Built from the NAME rather than from location.href, for the reason the Info panel's button
+     * gives: an address can carry a tab, an anchor and whatever else the reader arrived with, and
+     * none of that is part of "here is somebody's profile".
+     */
+    function initProfileShare() {
+        // Every button that hands over a profile address, wherever it sits: the profile's own head
+        // and the account page, where the reader is when they think "where IS my profile".
+        document.querySelectorAll('.js-profile-share').forEach(btn => {
+            const name = btn.dataset.user || '';
+            if (!name) return;
+            btn.addEventListener('click', () => {
+                let u;
+                try { u = new URL(location.href); } catch (e) { return; }
+                u.search = '';
+                u.hash = '';
+                u.searchParams.set('action', 'u');
+                u.searchParams.set('name', name);
+                share(btn, u.href, t.key('js.app.share_link_profile'));
+            });
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initLogin();
+        initRegister();
+        initAccount();
+        initReset();
+        initInfoPanel();   // before initSearch(): the search page hands it a hook once it is wired
+        initSearch();
+        initProfileShare();
+    });
+})();
+
+/* Keeping the reader's place across a language switch used to live here as well, with its own
+ * storage key, and it restored by scroll pixel at DOMContentLoaded. Both copies now live in
+ * assets/js/lang-swap.js, which the i18n bridge loads on every page: two of them listening for the
+ * same click meant two restores fighting, and the pixel one always won because it ran last. */
+
+/* ── leaving the site ───────────────────────────────────────────────────────
+ *
+ * Any link a SUBMITTER wrote carries data-external unless its domain is on the operator's trusted
+ * list. Following one is a decision the visitor should get to make knowingly: this site exists to be
+ * careful about what it points at, and a link in a description is not something it has checked.
+ *
+ * One delegated listener, on the document. Descriptions are rendered into the page at all sorts of
+ * moments — a search result, a detail panel, a modal opened from another modal — and binding at
+ * render time would mean every one of those places having to remember. Whoever adds the next place
+ * gets this for free, which is the only way a rule like this survives.
+ */
+(function () {
+    'use strict';
+
+    function closeLeave(box) {
+        if (box && box.parentNode) box.parentNode.removeChild(box);
+        document.removeEventListener('keydown', onEsc, true);
+    }
+    let openBox = null;
+    // The dialog is always the top layer, and its Esc is its own (1.70.0): it closes the dialog and goes no
+    // further — the window it was opened from (the Info panel, a list's window) stays open, and a second Esc
+    // closes that. The windows that hear keys before the document (escLayer() and the list's Edit window)
+    // stand aside while it is open.
+    function onEsc(e) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeLeave(openBox);
+        openBox = null;
+    }
+
+    function askBeforeLeaving(url) {
+        const box = document.createElement('div');
+        box.className = 'leave-modal';
+        box.setAttribute('role', 'dialog');
+        box.setAttribute('aria-modal', 'true');
+
+        const inner = document.createElement('div');
+        inner.className = 'leave-box';
+
+        const h = document.createElement('h3');
+        h.textContent = t.key('js.app.leave_title');
+        inner.appendChild(h);
+
+        const p1 = document.createElement('p');
+        p1.textContent = t.key('js.app.leave_body');
+        inner.appendChild(p1);
+
+        // textContent, never innerHTML: the URL is the untrusted part of this dialog, and a dialog
+        // warning about an untrusted link would be an absurd place to inject one.
+        const u = document.createElement('code');
+        u.className = 'leave-url';
+        u.textContent = url;
+        inner.appendChild(u);
+
+        const acts = document.createElement('div');
+        acts.className = 'leave-acts';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'btn btn-secondary';
+        cancel.textContent = t.key('js.app.leave_stay');
+        cancel.addEventListener('click', () => { closeLeave(box); openBox = null; });
+        const go = document.createElement('a');
+        go.className = 'btn';
+        go.href = url;
+        go.target = '_blank';
+        go.rel = 'nofollow noopener noreferrer ugc';
+        go.textContent = t.key('js.app.leave_open');
+        go.addEventListener('click', () => { closeLeave(box); openBox = null; });
+        acts.appendChild(cancel);
+        acts.appendChild(go);
+        inner.appendChild(acts);
+
+        box.appendChild(inner);
+        closeOnBackdrop(box, () => { closeLeave(box); openBox = null; });
+        document.body.appendChild(box);
+        document.addEventListener('keydown', onEsc, true);
+        openBox = box;
+        cancel.focus();
+    }
+
+    document.addEventListener('click', function (e) {
+        const a = e.target && e.target.closest ? e.target.closest('a[data-external]') : null;
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!/^https?:\/\//i.test(href)) return;
+        e.preventDefault();
+        askBeforeLeaving(href);
+    }, true);
+
+    window.askBeforeLeaving = askBeforeLeaving;
+})();
+
+/* ── the description editor ─────────────────────────────────────────────────
+ *
+ * The renderer lives on the server, and this does not change that. Turning the text into HTML in
+ * the browser would put the one guarantee this feature rests on — that the output contains only tags
+ * the server itself wrote — in the least trustworthy place in the system. So the preview is a round
+ * trip to the same function the visitor's page will use. Slower, and correct.
+ *
+ * The toolbar is the same idea as the admin bulk-mail composer: a <textarea> gets no Ctrl+B from the
+ * browser, so the keys and the buttons run one wrapper that inserts whichever syntax the selected
+ * format uses. A contenteditable box would give Ctrl+B for free and cost a second renderer, a paste
+ * sanitiser and a tag whitelist to police — for text typed by strangers, that is the wrong trade.
+ *
+ * Debounced, because it is somebody typing, and the endpoint is a parser anybody can call.
+ */
+(function () {
+    'use strict';
+
+    /**
+     * Mount the editor on one textarea.
+     *
+     * It used to be hard-wired to `#wl-desc`, which is why the private-message composer arrived as a
+     * bare box: the only editor on the site could not be pointed at a second textarea. The elements
+     * are found by convention around the id — `<id>-preview`, `-count`, `-help`, `-syntax`, `-tools`,
+     * `-format` — and the tabs are looked for INSIDE the editor rather than in the document, because
+     * `.rt-tab` is also the account page's tab bar and a global query grabbed those too.
+     */
+    function mountRichtext(id, opts) {
+    opts = opts || {};
+    const previewFor = opts.previewFor || 'description';
+    // What the counter counts while somebody types (1.70.0). By default the characters in the box against
+    // its maxlength; an editor whose limit is counted another way hands in `measure(text, format)` →
+    // {used, limit} — a list's description counts what a READER will see (assets/js/favourites.js), the
+    // same number its Preview and its save give.
+    const measure = typeof opts.measure === 'function' ? opts.measure : null;
+    const ta = document.getElementById(id);
+    if (!ta || ta.dataset.rtMounted === '1') return;
+    ta.dataset.rtMounted = '1';
+    const box = document.getElementById(id + '-preview');
+    const counter = document.getElementById(id + '-count');
+    const help = document.getElementById(id + '-help');
+    const syntax = document.getElementById(id + '-syntax');
+    const tools = document.getElementById(id + '-tools');
+    const editor = ta.closest('.rt-editor') || document;
+    const tabs = [...editor.querySelectorAll('.rt-tab')];
+    const fmtEl = document.getElementById(id + '-format');
+    // THE TOKEN THAT BELONGS TO THIS EDITOR (1.67.0). It was a list of page-wide places — the
+    // whitelist form's field, #account-csrf, #search-csrf, any name="csrf_token" — and every page that
+    // mounted the editor somewhere new had to be added to it. The shoutbox never was: its token is
+    // #shout-csrf, the list did not know that id, and on the front page the Preview tab posted an
+    // empty token and was answered "Invalid CSRF token". So the editor asked its own surroundings,
+    // nearest first — and since 1.71.0 that is the site's one rule for every script, csrfToken() at
+    // the top of this file: a `data-csrf` on the textarea or an ancestor NAMING the element that holds
+    // its token (the shoutbox's root says data-csrf="shout-csrf", which covers the composer and every
+    // line's in-place editor alike), else the textarea's own form's field, else the page's token.
+    const csrfOfEditor = () => csrfToken(ta);
+    let timer = null;
+    let lastShown = null;          // {key, ok} — what the box is currently displaying
+    // The emoji, the emotes and the stickers (1.70.0, assets/js/emoji-picker.js): the picker on the
+    // toolbar's `<id>-emoji` button, which the template draws with what this reader may use here
+    // (emojiPickerButton() in includes/emoji.php). What it picks goes in at the caret as text and fires
+    // `input`, so the counter and the preview below follow it like a keystroke.
+    const emojiBtn = document.getElementById(id + '-emoji');
+    const picker = emojiBtn && window.EmojiPicker && typeof window.EmojiPicker.attach === 'function'
+        ? window.EmojiPicker.attach({ textarea: ta, button: emojiBtn }) : null;
+
+    // What each button inserts, per format. A kind missing from a format's table means the format
+    // cannot express it, and the button hides — Markdown has no colour and no font size, and a
+    // button that writes markup the renderer will not honour teaches the wrong thing.
+    //
+    // A third element, when present, means "this is a whole block": it is inserted on its own lines
+    // rather than wrapped around the caret.
+    const SYNTAX = {
+        markdown: {
+            bold: ['**', '**'], italic: ['*', '*'], strike: ['~~', '~~'], code: ['`', '`'],
+            highlight: ['==', '=='], sub: ['~', '~'], sup: ['^', '^'],
+            link: ['[', '](https://example.org)'], image: ['![](', ')'],
+            quote: ['> ', ''], list: ['- ', ''], olist: ['1. ', ''],
+            spoiler: ['||', '||'],
+            table: ['| A | B |\n|---|---|\n| 1 | 2 |', '', true],
+            hr: ['\n---\n', '', true],
+            magnet: ['[magnet]', '[/magnet]'], hide: ['[hide]', '[/hide]'],
+            h1: ['# ', ''], h2: ['## ', ''], h3: ['### ', ''],
+        },
+        bbcode: {
+            bold: ['[b]', '[/b]'], italic: ['[i]', '[/i]'], underline: ['[u]', '[/u]'],
+            strike: ['[s]', '[/s]'], code: ['[code]', '[/code]'],
+            color: ['[color=#e74c3c]', '[/color]'], size: ['[size=18]', '[/size]'],
+            highlight: ['[highlight=yellow]', '[/highlight]'],
+            sub: ['[sub]', '[/sub]'], sup: ['[sup]', '[/sup]'],
+            link: ['[url=https://example.org]', '[/url]'], image: ['[img]', '[/img]'],
+            quote: ['[quote]', '[/quote]'],
+            list: ['[list]\n[*] ', '\n[/list]'], olist: ['[list=1]\n[*] ', '\n[/list]'],
+            spoiler: ['[spoiler=Title]', '[/spoiler]'], center: ['[center]', '[/center]'],
+            table: ['[table]\n[tr][th]A[/th][th]B[/th][/tr]\n[tr][td]1[/td][td]2[/td][/tr]\n[/table]', '', true],
+            hr: ['\n[hr]\n', '', true],
+            magnet: ['[magnet]', '[/magnet]'], youtube: ['[youtube]', '[/youtube]'], hide: ['[hide]', '[/hide]'],
+            left: ['[left]', '[/left]'], right: ['[right]', '[/right]'], quote_author: ['[quote=Name]', '[/quote]'],
+            alist: ['[list=a]\n[*] ', '\n[/list]'], rlist: ['[list=i]\n[*] ', '\n[/list]'],
+        },
+    };
+    SYNTAX.flarum = Object.assign({}, SYNTAX.bbcode, { h1: ['# ', ''], h2: ['## ', ''], h3: ['### ', ''] });
+    const rtGlyph = (cls) => { const i = document.createElement('i'); i.className = cls; i.setAttribute('aria-hidden', 'true'); return i; };
+    const MENUS = {
+        insert: ['bi-plus-lg', 'js.app.rt_menu_insert', [['magnet', 'bi-magnet', 'js.app.rt_magnet'], ['youtube', 'bi-youtube', 'js.app.rt_youtube'],
+                                                         ['hide', 'bi-lock', 'js.app.rt_hide']]],
+        para: ['bi-text-paragraph', 'js.app.rt_menu_para', [['h1', 'bi-type-h1', 'js.app.rt_h1'], ['h2', 'bi-type-h2', 'js.app.rt_h2'],
+                                                            ['h3', 'bi-type-h3', 'js.app.rt_h3'], ['left', 'bi-text-left', 'js.app.rt_left'],
+                                                            ['right', 'bi-text-right', 'js.app.rt_right'], ['quote_author', 'bi-quote', 'js.app.rt_quote_author'],
+                                                            ['alist', 'bi-list-ol', 'js.app.rt_alist'], ['rlist', 'bi-list-ol', 'js.app.rt_rlist']]],
+    };
+    const closeMenus = () => {
+        if (!tools) return;
+        tools.querySelectorAll('.rt-menu').forEach(m => {
+            m.hidden = true;
+            m.classList.remove('rt-menu-up');
+            m.style.left = '';
+            if (m.previousElementSibling) m.previousElementSibling.setAttribute('aria-expanded', 'false');
+        });
+    };
+    const placeMenu = (menu) => {
+        let bounds = { left: 0, top: 0, right: document.documentElement.clientWidth, bottom: window.innerHeight };
+        for (let el = menu.parentElement ? menu.parentElement.parentElement : null; el && el !== document.body; el = el.parentElement) {
+            if (el.classList.contains('rt-editor')) continue;
+            const cs = getComputedStyle(el);
+            if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+            const b = el.getBoundingClientRect();
+            bounds = { left: Math.max(bounds.left, b.left), top: Math.max(bounds.top, b.top),
+                       right: Math.min(bounds.right, b.right), bottom: Math.min(bounds.bottom, b.bottom) };
+            break;
+        }
+        const r = menu.getBoundingClientRect();
+        const over = r.right - (bounds.right - 8);
+        if (over > 0) menu.style.left = Math.round(Math.max(-over, bounds.left + 8 - r.left)) + 'px';
+        const btnH = menu.previousElementSibling ? menu.previousElementSibling.getBoundingClientRect().height : 0;
+        if (r.bottom > bounds.bottom - 8 && r.top - btnH - bounds.top > r.height + 8) menu.classList.add('rt-menu-up');
+    };
+    if (tools && tools.dataset.rtMenus) {
+        const group = document.createElement('span');
+        group.className = 'rt-tool-group rt-menus';
+        tools.dataset.rtMenus.split(/\s+/).forEach(name => {
+            const def = MENUS[name];
+            if (!def) return;
+            const wrap = document.createElement('span');
+            wrap.className = 'rt-menu-wrap';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'rt-menu-btn';
+            btn.setAttribute('aria-haspopup', 'true');
+            btn.setAttribute('aria-expanded', 'false');
+            btn.append(rtGlyph('bi ' + def[0]), ' ', t.key(def[1]), ' ', rtGlyph('bi bi-chevron-down rt-menu-caret'));
+            const menu = document.createElement('div');
+            menu.className = 'rt-menu';
+            menu.setAttribute('role', 'menu');
+            menu.hidden = true;
+            def[2].forEach(([kind, ic, label]) => {
+                const it = document.createElement('button');
+                it.type = 'button';
+                it.dataset.md = kind;
+                it.setAttribute('role', 'menuitem');
+                it.append(rtGlyph('bi ' + ic), ' ', t.key(label));
+                menu.append(it);
+            });
+            btn.addEventListener('click', () => {
+                const open = menu.hidden;
+                closeMenus();
+                if (!open) return;
+                menu.hidden = false;
+                placeMenu(menu);
+                btn.setAttribute('aria-expanded', 'true');
+                const first = menu.querySelector('[data-md]:not([hidden])');
+                if (first) first.focus();
+            });
+            wrap.append(btn, menu);
+            group.append(wrap);
+        });
+        tools.insertBefore(group, tools.querySelector('.rt-tool-emoji'));
+        document.addEventListener('click', (e) => { if (!tools.contains(e.target)) closeMenus(); });
+        tools.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+    }
+    const HINT = {
+        markdown: t.key('js.app.hint_markdown'),
+        bbcode:   t.key('js.app.hint_bbcode'),
+        flarum:   t.key('js.app.hint_flarum'),
+    };
+    const fmt = () => (fmtEl && (fmtEl.value === 'markdown' || fmtEl.value === 'flarum')) ? fmtEl.value : 'bbcode';
+    const looksLikeFlarum = (s) => /\[(?:thxlabels|thxrow|upl-[a-z-]+)\b/i.test(s)
+        || (/\[(?:b|i|u|s|center|img|url|code|quote|spoiler|size|color|list)\b[^\]]*\]/i.test(s)
+            && /^(?:#{1,6} \S|_{3,}[ \t]*$|-{3,}[ \t]*$|> )/m.test(s));
+
+    /** Wrap the selection, or drop a stub at the caret and select it so typing replaces it. */
+    function wrap(kind) {
+        const syn = SYNTAX[fmt()];
+        if (!syn || !syn[kind]) return;
+        const [open, close, block] = syn[kind];
+        const start = ta.selectionStart, end = ta.selectionEnd;
+        const sel = ta.value.slice(start, end);
+        if (block) {
+            // A whole construct, dropped in as-is. Wrapping the selection in a table skeleton would
+            // produce a table with the author's sentence in its header, which nobody wants.
+            const pre = start > 0 && ta.value[start - 1] !== '\n' ? '\n' : '';
+            ta.setRangeText(pre + open + '\n', start, end, 'end');
+            ta.focus();
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            return;
+        }
+        // A line-prefix mark (quote, and a Markdown list) belongs at the start of EVERY selected
+        // line: wrapping the block instead would quote only its first line.
+        const linewise = close === '';
+        const inserted = linewise
+            ? (sel || 'text').split('\n').map(l => open + l).join('\n')
+            : open + (sel || 'text') + close;
+        ta.setRangeText(inserted, start, end, 'end');
+        if (!sel) ta.setSelectionRange(start + open.length, start + open.length + 4);
+        ta.focus();
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function show(which) {
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.rt === which));
+        ta.hidden = which !== 'write';
+        if (tools) tools.hidden = which !== 'write';
+        box.hidden = which !== 'preview';
+        // The picker belongs to the box being written in: the Preview tab puts it away with the toolbar.
+        if (which !== 'write' && picker) picker.close();
+        if (which === 'preview') render();
+    }
+
+    async function render() {
+        const text = ta.value;
+        const f = fmt();
+        const key = f + String.fromCharCode(31) + text;
+        // Only skip the round trip when the box already holds a GOOD render of this exact text. The
+        // previous version recorded the key before asking and never cleared it on failure, so one
+        // 403, one rate-limited 429 or one dropped connection wedged the preview for that text for
+        // good — the retry the visitor pressed did nothing at all.
+        if (lastShown && lastShown.ok && lastShown.key === key) return;
+        if (!text.trim()) {
+            box.textContent = '';
+            box.appendChild(Object.assign(document.createElement('p'), {
+                className: 'text-muted', textContent: t.key('js.app.nothing_to_preview') }));
+            lastShown = { key, ok: true };
+            return;
+        }
+        box.textContent = t.key('js.app.rendering');
+        const r = await postJson('richtext_preview', {
+            text, format: f, for: previewFor, hash: opts.hash || undefined, csrf_token: csrfOfEditor() });
+        if (!r) { box.textContent = t.key('js.app.server_unreachable'); lastShown = { key, ok: false }; return; }
+        if (!r.success) { box.textContent = r.error || t.key('js.app.render_failed'); lastShown = { key, ok: false }; return; }
+        // The server built this from fully escaped input with a fixed tag whitelist
+        // (includes/richtext.php). It is the same string the public page will show.
+        box.innerHTML = r.html;
+        lastShown = { key, ok: true };
+        if (counter) {
+            const bits = [t.key('js.app.count_characters', {used: r.length, limit: r.limit})];
+            if (r.images.limit > 0 || r.images.used) bits.push(' · ', t.key('js.app.count_images', {used: r.images.used, limit: r.images.limit}));
+            if (r.links.limit > 0 || r.links.used) bits.push(' · ', t.key('js.app.count_links', {used: r.links.used, limit: r.links.limit}));
+            counter.replaceChildren(...bits);
+            counter.classList.toggle('rt-counter-over', r.limit > 0 && r.length > r.limit);
+        }
+        if (help) {
+            help.textContent = r.problem || '';
+            help.classList.toggle('form-hint-bad', !!r.problem);
+        }
+    }
+
+    /** The counter while writing: measure() when the editor has one, else the box against its maxlength. */
+    function countTyping() {
+        if (!counter) return;
+        if (measure) {
+            const m = measure(ta.value, fmt()) || {};
+            counter.textContent = t.key('js.app.count_characters', {used: Number(m.used) || 0, limit: Number(m.limit) || 0});
+        } else if (ta.maxLength > 0 || Number(ta.dataset.limit) > 0) {
+            const limit = ta.maxLength > 0 ? ta.maxLength : Number(ta.dataset.limit);
+            counter.textContent = t.key('js.app.count_characters', {used: ta.value.length, limit: limit});
+            counter.classList.toggle('rt-counter-over', ta.value.length > limit);
+        }
+    }
+
+    function syncFormat() {
+        if (syntax) syntax.textContent = HINT[fmt()];
+        // Hide the buttons this format has no syntax for, and the group that empties with them. A group
+        // with no syntax buttons at all — the picker's (1.70.0) — is the same in every format and stays.
+        if (tools) {
+            const syn = SYNTAX[fmt()] || {};
+            tools.querySelectorAll('[data-md]').forEach(b => { b.hidden = !syn[b.dataset.md]; });
+            tools.querySelectorAll('.rt-tool-group').forEach(g => {
+                const marks = [...g.querySelectorAll('[data-md]')];
+                if (marks.length) g.hidden = !marks.some(b => !b.hidden);
+            });
+        }
+        lastShown = null;                       // the same text renders differently in the other syntax
+        // …and a measured count may differ too: a tag of one syntax is words in the other.
+        if (measure) countTyping();
+        if (!box.hidden) render();
+    }
+
+    tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.rt)));
+    if (tools) tools.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-md]');
+        if (!b) return;
+        if (b.closest('.rt-menu')) closeMenus();
+        wrap(b.dataset.md);
+    });
+    ta.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        const kind = { b: 'bold', i: 'italic', k: 'link' }[e.key.toLowerCase()];
+        if (!kind) return;
+        e.preventDefault();
+        wrap(kind);
+    });
+    ta.addEventListener('input', () => {
+        clearTimeout(timer);
+        // The counter is worth having while WRITING too, not only after a preview — it is the only
+        // thing that tells somebody they are near the character limit before the form refuses them.
+        countTyping();
+        if (!box.hidden) timer = setTimeout(render, 400);
+    });
+    ta.addEventListener('paste', (e) => {
+        if (!fmtEl || fmtEl.tagName !== 'SELECT' || fmtEl.value === 'flarum') return;
+        if (![...fmtEl.options].some(o => o.value === 'flarum')) return;
+        if (!looksLikeFlarum(e.clipboardData ? e.clipboardData.getData('text/plain') : '')) return;
+        fmtEl.value = 'flarum';
+        fmtEl.dispatchEvent(new Event('change', { bubbles: true }));
+        if (help) {
+            help.textContent = t.key('js.app.switched_flarum');
+            help.classList.remove('form-hint-bad');
+        }
+    });
+    if (fmtEl && fmtEl.tagName === 'SELECT') fmtEl.addEventListener('change', syncFormat);
+    syncFormat();
+    countTyping();
+    if (window.ImagesEditor && typeof window.ImagesEditor.attach === 'function') window.ImagesEditor.attach({ id, textarea: ta, format: fmt });
+    if (opts.images && tools && !document.getElementById(id + '-images') && window.ImagesEditor && typeof window.ImagesEditor.mini === 'function') {
+        window.ImagesEditor.mini({ textarea: ta, place: opts.images, format: fmt, host: tools });
+    }
+    }
+
+    mountRichtext('wl-desc');
+    // The message composer is drawn by assets/js/people.js after a conversation loads, so it asks
+    // for this rather than being found by it.
+    window.RichText = { mount: mountRichtext };
+
+    /**
+     * The format select keeps no ring after a MOUSE choice (1.62.0).
+     *
+     * :focus-visible was meant to settle this and does not, for this control: Chrome counts a
+     * <select> as something that takes keyboard input, so it matches :focus-visible after a click
+     * as well, and the accent ring stayed round the box until somebody clicked elsewhere. Picking
+     * the option that was already chosen fires no `change` at all, so blurring on change alone
+     * leaves exactly that case glowing.
+     *
+     * So the pointer is remembered: pointerdown on the select marks it, ANY key pressed anywhere
+     * clears the mark, and the stylesheet hides the ring while the mark is on (.rt-pointer). A
+     * mouse user never sees it; somebody arriving with Tab — a key — always does. A change made
+     * with the pointer also gives the focus back to the page, but a change made with the arrow keys
+     * does not: taking the focus away from somebody stepping through the options with the keyboard
+     * would leave them nowhere.
+     *
+     * Delegated from the document, because these selects are drawn by more than one script (the
+     * shoutbox, the message composer cloned per conversation, the description forms).
+     */
+    const RT_FMT = 'select.rt-format';
+    document.addEventListener('pointerdown', (e) => {
+        const sel = e.target && e.target.closest ? e.target.closest(RT_FMT) : null;
+        if (sel) sel.classList.add('rt-pointer');
+    }, true);
+    document.addEventListener('keydown', () => {
+        document.querySelectorAll(RT_FMT + '.rt-pointer').forEach((s) => s.classList.remove('rt-pointer'));
+    }, true);
+    document.addEventListener('change', (e) => {
+        const sel = e.target;
+        if (sel && sel.matches && sel.matches(RT_FMT + '.rt-pointer')) sel.blur();
+    }, true);
+})();
+
+/* ── watching a submission prove itself ─────────────────────────────────────
+ *
+ * When the tracker checks submissions, registering stops being instant: the metadata has to arrive
+ * from the DHT and a scrape has to find somebody actually sharing it. That is a wait of seconds to
+ * minutes, and a form that just sits there during it looks broken.
+ *
+ * So each hash gets its own line and its own state, and the states say WHICH half failed. "Nobody is
+ * sharing this" and "we could not read the torrent" send somebody to completely different places,
+ * and folding them into "failed" throws away the only useful part of the answer.
+ */
+(function () {
+    'use strict';
+    const box = document.getElementById('wl-probe');
+    if (!box) return;
+    const list = document.getElementById('wl-probe-list');
+    const note = document.getElementById('wl-probe-note');
+    let timer = null;
+    let started = 0;
+
+    const LABEL = {
+        probing: [t.key('js.app.probe_checking'), 'wl-probe-wait'],
+        passed:  [t.key('js.app.probe_passed'), 'wl-probe-ok'],
+        failed:  [t.key('js.app.probe_failed'), 'wl-probe-bad'],
+        none:    [t.key('js.app.chip_registered'), 'wl-probe-ok'],
+        unknown: [t.key('js.app.probe_failed'), 'wl-probe-bad'],
+    };
+
+    function draw(items) {
+        list.textContent = '';
+        Object.keys(items).forEach(hash => {
+            const it = items[hash];
+            const li = document.createElement('li');
+            const [text, cls] = LABEL[it.state] || LABEL.unknown;
+            li.className = 'wl-probe-item ' + cls;
+
+            const head = document.createElement('div');
+            head.className = 'wl-probe-head';
+            const name = document.createElement('strong');
+            name.textContent = it.name || hash.slice(0, 16) + '…';
+            head.appendChild(name);
+            const st = document.createElement('span');
+            st.className = 'wl-probe-state';
+            st.textContent = text;
+            head.appendChild(st);
+            li.appendChild(head);
+
+            const detail = document.createElement('div');
+            detail.className = 'wl-probe-detail';
+            if (it.state === 'passed' || it.state === 'none') {
+                const bits = [];
+                if (it.seeders != null) bits.push(t.key('js.app.probe_swarm', {seeders: it.seeders, leechers: it.leechers || 0}));
+                if (it.files != null) bits.push(...(bits.length ? [' · '] : []), it.files === 1 ? t.key('js.app.probe_one_file') : t.key('js.app.probe_files', {n: it.files}));
+                detail.replaceChildren(...bits);
+            } else if (it.state === 'failed' || it.state === 'unknown') {
+                // The reason, verbatim from the server. It is the whole point of the line.
+                detail.textContent = it.error || t.key('js.app.probe_not_passed');
+            } else {
+                detail.textContent = it.meta === 'done'
+                    ? t.key('js.app.probe_meta_done')
+                    : t.key('js.app.probe_meta_wait');
+            }
+            li.appendChild(detail);
+            list.appendChild(li);
+        });
+    }
+
+    async function poll(hashes, timeoutMinutes) {
+        // A hidden tab asks every fifteen seconds rather than three: nobody is reading the answer.
+        if (document.hidden) { timer = setTimeout(() => poll(hashes, timeoutMinutes), 15000); return; }
+        // The timeout in the sentence is the timeout of the loop too. A hash that stays "probing"
+        // past it (a stalled worker) used to keep this tab asking every three seconds for ever.
+        if (timeoutMinutes > 0 && Date.now() - started > (timeoutMinutes + 1) * 60000) {
+            note.textContent = t.key('js.app.probe_timed_out', {timeout: timeoutMinutes});
+            return;
+        }
+        const r = await getJson('whitelist_probe&hashes=' + encodeURIComponent(hashes.join(',')));
+        if (!r || !r.success) {
+            note.textContent = (r && r.error) || t.key('js.app.probe_progress_failed');
+            return;
+        }
+        draw(r.items);
+        const waiting = Object.keys(r.items).filter(h => r.items[h].state === 'probing').length;
+        if (waiting === 0) {
+            note.textContent = t.key('js.app.done');
+            clearTimeout(timer);
+            return;
+        }
+        const mins = Math.round((Date.now() - started) / 60000);
+        note.replaceChildren(t.key('js.app.probe_waiting', {n: waiting, timeout: timeoutMinutes}),
+            ...(mins >= 1 ? [' ', t.key('js.app.probe_so_far', {mins: mins})] : []));
+        // Every three seconds. Faster tells nobody anything: the worker polls its queue on its own
+        // schedule and the answer cannot change in between.
+        timer = setTimeout(() => poll(hashes, timeoutMinutes), 3000);
+    }
+
+    window.wlWatchProbe = function (hashes, timeoutMinutes) {
+        if (!hashes || !hashes.length) return;
+        started = Date.now();
+        box.hidden = false;
+        note.textContent = hashes.length === 1 ? t.key('js.app.probe_start_one') : t.key('js.app.probe_start_many', {n: hashes.length});
+        clearTimeout(timer);
+        poll(hashes, timeoutMinutes || 10);
+    };
+})();
+
+// === Status page: what does this tracker know about a hash? (?action=status, 1.52.0) ===
+// One GET, one card of answers, every value from the server; nothing is decided here beyond which
+// sentence to show for which state. Rendering is textContent throughout: the name is a torrent's.
+(function () {
+    'use strict';
+    const form = document.getElementById('hc-form');
+    if (!form) return;
+    const input = document.getElementById('hc-input');
+    const alertBox = document.getElementById('hc-alert');
+    const out = document.getElementById('hc-result');
+    const btn = document.getElementById('hc-go');
+
+    const when = (s) => s ? String(s).slice(0, 16) : '';
+    function row(label, value, cls) {
+        const r = document.createElement('div');
+        r.className = 'hc-row';
+        const k = document.createElement('span');
+        k.className = 'hc-key';
+        k.textContent = label;
+        const v = document.createElement('span');
+        v.className = 'hc-val' + (cls ? ' ' + cls : '');
+        if (value instanceof Node) v.appendChild(value); else v.textContent = value;
+        r.appendChild(k); r.appendChild(v);
+        return r;
+    }
+
+    function render(j) {
+        out.textContent = '';
+        const hash = document.createElement('code');
+        hash.className = 'hc-hash';
+        hash.textContent = j.hash;
+        out.appendChild(row(t.key('js.app.hc_hash'), hash));
+        if (!j.known) {
+            const p = document.createElement('p');
+            p.className = 'hc-unknown';
+            p.textContent = t.key('js.app.hc_unknown');
+            out.appendChild(p);
+            out.hidden = false;
+            return;
+        }
+        const name = (j.meta && j.meta.name) || (j.seen && j.seen.name) || (j.registered && j.registered.name) || '';
+        if (name) out.appendChild(row(t.key('js.app.hc_name'), name));
+
+        // A section the reader may not be told about (no index.view, no whitelist.view, no
+        // content.view) arrives withheld — and a withheld section is not a "no", so its row is not drawn.
+        const off = new Set(j.withheld || []);
+        // registered here, and in what state
+        const reg = j.registered;
+        if (!off.has('registered')) {
+        const regText = !reg ? t.key('js.app.hc_reg_no')
+            : t.key('js.app.hc_reg_' + (['live', 'review', 'probing', 'rejected', 'failed', 'banned'].includes(reg.state) ? reg.state : 'live'),
+                {date: when(reg.since)});
+        out.appendChild(row(t.key('js.app.hc_registered'), regText, !reg ? 'hc-no' : (reg.state === 'live' ? 'hc-yes' : (reg.state === 'banned' || reg.state === 'rejected' ? 'hc-bad' : 'hc-wait'))));
+        }
+        // the words about it, from either home: published, waiting, or turned down
+        if (j.content && j.content.status && j.content.status !== 'none') {
+            const cs = j.content.status;
+            out.appendChild(row(t.key('js.app.hc_description'),
+                t.key(cs === 'approved' ? 'js.app.hc_description_yes' : (cs === 'pending' ? 'js.app.hc_description_pending' : 'js.app.hc_description_rejected')),
+                cs === 'approved' ? 'hc-yes' : (cs === 'pending' ? 'hc-wait' : 'hc-no')));
+        }
+
+        // banned — the ban list is the accesslist in blacklist mode, a veto on top of it in whitelist mode
+        const banLabel = j.mode === 'blacklist' ? t.key('js.app.hc_blacklisted') : t.key('js.app.hc_banned');
+        out.appendChild(row(banLabel, j.banned ? t.key('js.app.hc_banned_yes', {date: when(j.banned.since)}) : t.key('js.app.hc_banned_no'),
+                            j.banned ? 'hc-bad' : 'hc-no'));
+
+        // seen in the swarm
+        const seen = j.seen;
+        if (!off.has('seen')) out.appendChild(row(t.key('js.app.hc_seen'), seen
+            ? t.key('js.app.hc_seen_yes', {first: when(seen.first), last: when(seen.last), n: t.num(Number(seen.times)),
+                                       s: t.num(Number(seen.seeders)), l: t.num(Number(seen.leechers))})
+            : t.key('js.app.hc_seen_no'), seen ? 'hc-yes' : 'hc-no'));
+
+        // metadata and files
+        const ms = (j.meta && j.meta.status) || 'none';
+        const mKey = ['done', 'pending', 'fetching', 'failed'].includes(ms) ? ms : 'none';
+        out.appendChild(row(t.key('js.app.hc_meta'), t.key('js.app.hc_meta_' + mKey), mKey === 'done' ? 'hc-yes' : (mKey === 'failed' ? 'hc-bad' : 'hc-no')));
+        const f = j.files || {};
+        const fetched = Number(f.fetched) || 0;
+        const total = f.total === null || f.total === undefined ? null : Number(f.total);
+        let filesText;
+        if (!fetched) filesText = total ? t.key('js.app.hc_files_known_only', {total: t.num(total)}) : t.key('js.app.hc_files_none');
+        else if (total && total > fetched) filesText = t.key('js.app.hc_files_partial', {n: t.num(fetched), total: t.num(total)});
+        else filesText = t.key('js.app.hc_files_all', {n: t.num(fetched)});
+        out.appendChild(row(t.key('js.app.hc_files'), filesText, fetched ? 'hc-yes' : 'hc-no'));
+        out.hidden = false;
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const q = input.value.trim();
+        const group = form.querySelector('.form-group');
+        group.classList.toggle('has-error', !q);
+        alertBox.className = 'alert';
+        out.hidden = true;
+        if (!q) return;
+        btn.disabled = true;
+        const j = await getJson('hash_check&hash=' + encodeURIComponent(q));
+        btn.disabled = false;
+        if (!j || !j.success) {
+            alertBox.className = 'alert alert-error show';
+            alertBox.textContent = !j ? t.key('js.app.hc_failed')
+                : (j.error === 'rate_limit' ? t.key('js.app.hc_rate_limited') : (j.error || t.key('js.app.hc_failed')));
+            return;
+        }
+        render(j);
+    });
+    input.addEventListener('input', () => form.querySelector('.form-group').classList.remove('has-error'));
+})();
+
+/*
+ * EVERY FORM'S ALERT IS SAID ALOUD (1.74.0). The pages write their answers — "Invalid credentials", a refused report,
+ * a status not found — into a `<div class="alert">` above the form (twelve of them: sign-in, register, report, the
+ * two resets, search, the four status forms, account, the whitelist's), and a screen reader heard nothing: none was
+ * a live region. Each is made one now, before anything is written into it (a region that appears together with its
+ * first words is one some readers never read); showAlert() says whether the words are an alert or a status.
+ */
+(function () {
+    const mark = () => document.querySelectorAll('div.alert[id]:not([role])').forEach((a) => a.setAttribute('role', 'alert'));
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mark); else mark();
+})();

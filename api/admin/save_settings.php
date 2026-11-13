@@ -1,0 +1,1141 @@
+<?php
+requirePost();
+
+$input = readJsonBody();
+if (!$input || !is_array($input)) {
+    jsonResponse(['error' => __('api.settings.invalid_input')], 400);
+}
+
+// Whitelist of allowed setting keys
+$allowed = [
+    'site_name', 'site_url', 'site_email', 'mail_from_email',
+    'announce_url', 'announce_url_https', 'github_url',
+    // schema v68: the zone this site shows times in (includes/db_clock.php)
+    'site_timezone',
+    // schema v73: which library draws every icon on the site (includes/icons.php)
+    'icon_library',
+    // schema v76: which Font Awesome — Free 6/7 from jsDelivr or an installed package — and its styles
+    'fa_source', 'fa_pack', 'fa_pack_styles', 'fa_style',
+    'contact_visible', 'contact_obfuscate', 'hmac_secret',
+    'recaptcha_enabled', 'recaptcha_site_key', 'recaptcha_secret',
+    'recaptcha_on_report', 'recaptcha_on_login', 'recaptcha_on_status',
+    'recaptcha_on_appeal', 'recaptcha_on_block_check',
+    'captcha_threshold', 'captcha_grace_minutes',
+    'captcha_pts_report', 'captcha_pts_status', 'captcha_pts_appeal',
+    'captcha_pts_block_check',
+    'delete_captcha_attempts', 'delete_lockout_attempts', 'delete_lockout_minutes',
+    'login_lockout_attempts', 'login_lockout_minutes', 'admin_reauth_max_attempts',
+    'rate_limit', 'rate_limit_status', 'rate_limit_block_check', 'rate_limit_appeal',
+    'admin_session_idle_minutes', 'admin_session_absolute_hours',
+    // where the panel lives (includes/auth.php)
+    'admin_login_path', 'admin_hidden_behavior',
+    'trusted_proxy_ips', 'client_ip_header',
+    // schema v45: transport security (includes/functions.php)
+    'cookie_secure_mode', 'client_proto_header',
+    'hsts_enabled', 'hsts_max_age', 'hsts_include_subdomains', 'hsts_preload',
+    // schema v46: Content-Security-Policy (includes/csp.php)
+    'csp_mode', 'csp_report_enabled', 'csp_report_keep_rows', 'csp_extra_hosts',
+    // the in-place language switch (assets/js/lang-swap.js, read through langJsBundle())
+    'lang_swap_enabled',
+    // the Share buttons on the search page (templates/pages/search.php), and whether the search counts "the", "tv" … (1.75.1)
+    'search_share_enabled', 'search_count_common_words', 'facts_source',
+    'facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_max', 'thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_panel', 'thumbs_width', 'thumbs_speed', 'thumbs_max', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts',
+    'tags_enabled', 'tags_review', 'tags_max_per_torrent', 'tags_name_max', 'tags_create_per_day', 'tags_forum', 'tags_forum_review', 'tags_add_review', 'tags_popular_max', 'tags_prune_unused', 'wl_req_enabled', 'wl_req_days', 'wl_req_per_day', 'wl_req_note',
+    // where the version line appears (templates/footer.php) and how long a search may run
+    'version_display', 'search_time_budget',
+    // schema v47: favourites, public profiles and "my torrents" (includes/favourites.php)
+    'fav_enabled', 'fav_max_per_user', 'fav_public_enabled', 'fav_who_enabled', 'profiles_enabled',
+    'lists_enabled', 'lists_public_enabled', 'lists_max_per_user', 'lists_max_items',
+    // a list's description, in characters a reader sees (1.70.0, includes/lists.php)
+    'lists_desc_max',
+    'index_keep_saved', 'index_keep_saved_days',
+    'digest_enabled', 'digest_to', 'digest_hours', 'digest_min', 'health_token',
+    // the daily cap on report and appeal confirmation mails (1.74.0, PUB-1, confirmMailAllow())
+    'confirm_mail_daily_cap',
+    'user_2fa_enabled', 'user_2fa_required',
+    'pm_live_seconds', 'pm_typing_enabled', 'site_live_seconds',
+    'sounds_enabled', 'sound_default_notification', 'sound_default_message_friend', 'sound_default_message',
+    'sound_default_shout_friend', 'sound_default_shout', 'sound_default_mention',
+    // the comments' two sounds (1.71.0, includes/comments.php), and the replies' (1.72.0)
+    'sound_default_comment', 'sound_default_comment_mention', 'sound_default_comment_reply',
+    // comments on a torrent (1.71.0, includes/comments.php)
+    'comments_enabled', 'comment_max_chars', 'comment_links', 'comment_edit_minutes', 'comment_delete_own_minutes',
+    'comments_per_page', 'comment_rate_per_hour', 'captcha_pts_comment', 'comments_guest_review',
+    // where the Info panel's comments stand and whether they open unfolded (1.72.0)
+    'comments_position', 'comments_expanded',
+    // how deep a thread of replies may go (1.72.0)
+    'comments_reply_depth',
+    // one anti-spam layer for everything people write (1.71.0, includes/antispam.php) — the switches, the new
+    // account's rules, the messages' conversation limits, the duplicate window, and a ladder per context
+    'antispam_enabled', 'antispam_captcha_after', 'antispam_guest_captcha', 'antispam_staff_exempt',
+    'antispam_new_days', 'antispam_new_factor', 'antispam_new_links', 'antispam_dup_seconds',
+    'antispam_pm_new_hour', 'antispam_pm_new_day', 'antispam_pm_new_hour_new', 'antispam_pm_new_day_new', 'antispam_pm_spread',
+    'antispam_shout_burst', 'antispam_shout_steps', 'antispam_shout_reset',
+    'antispam_message_burst', 'antispam_message_steps', 'antispam_message_reset',
+    'antispam_comment_burst', 'antispam_comment_steps', 'antispam_comment_reset',
+    'antispam_description_burst', 'antispam_description_steps', 'antispam_description_reset',
+    'antispam_report_burst', 'antispam_report_steps', 'antispam_report_reset',
+    'antispam_list_burst', 'antispam_list_steps', 'antispam_list_reset',
+    'antispam_bio_burst', 'antispam_bio_steps', 'antispam_bio_reset',
+    'antispam_emote_burst', 'antispam_emote_steps', 'antispam_emote_reset',
+    'antispam_vote_burst', 'antispam_vote_steps', 'antispam_vote_reset',
+    // messages' own address ceiling (1.71.0; the send read `rate_limit_favourites`, a key no setting defined)
+    'rate_limit_pm',
+    // the shoutbox (1.58.0, includes/shout.php)
+    'shout_enabled', 'shout_placement', 'shout_order', 'shout_widget_rows', 'shout_page_rows', 'shout_max_chars',
+    'shout_flood_seconds', 'shout_live_seconds', 'shout_keep_rows', 'shout_keep_days',
+    'shout_format', 'shout_rules',
+    // the two windows on a member's own line (1.66.0)
+    'shout_edit_minutes', 'shout_delete_own_minutes',
+    // its emotes and stickers (1.59.0), and the same emotes in messages and descriptions (1.70.0)
+    'shout_emotes_enabled', 'shout_emote_max_kb', 'shout_emote_max_px', 'shout_emote_per_user',
+    'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
+    // Font Awesome's faces in its picker, and the style they are drawn in (1.69.0, includes/emoji.php),
+    // and how much more of the package the picker offers (1.70.0)
+    'shout_emoji_fa', 'shout_emoji_fa_style', 'shout_emoji_fa_scope',
+    // in the navigation, a cadence of its own for guests, and the site's own lines (1.60.0)
+    'shout_nav', 'shout_live_seconds_guest', 'shout_system_lines',
+    // the action name the room answers on (1.61.0)
+    'shout_page_action',
+    // pictures and profile covers (1.63.0, includes/usermedia.php). The default picture and cover
+    // themselves are NOT here: they are stored bytes, written by admin/user_media, never typed.
+    'avatars_enabled', 'covers_enabled', 'avatar_max_kb', 'avatar_max_mp',
+    // Which card of the account page each block is in (1.66.0 — `account_media_side` moved both
+    // together until then, and is gone: a key nothing reads must not be saveable either).
+    'cover_height', 'cover_height_mobile', 'cover_overlay', 'avatar_default', 'account_picture_side', 'account_cover_side',
+    // the description on a profile (1.69.0, includes/profilebio.php)
+    'profile_bio_enabled', 'profile_bio_max',
+    // a member's likes or ratings on the profile (1.69.0, includes/profilevotes.php)
+    'profile_votes_enabled',
+    // the descriptions a member wrote, on the profile (1.70.0, includes/profiledescs.php)
+    'profile_descriptions_enabled',
+    // "who has this": its likes / ratings and its lists sections (1.70.0, includes/who.php)
+    'who_votes_enabled', 'who_lists_enabled',
+    'pm_enabled', 'pm_who', 'pm_max_per_day', 'pm_max_chars', 'friends_enabled', 'directory_enabled',
+    // the messages' Archive and Trash (1.73.0, includes/people.php): does a new message bring an archived
+    // conversation back, and how many days the Trash keeps one (0 = no Trash)
+    'pm_archive_returns', 'pm_trash_days',
+    // The sign-in bridge (v49). auth_bridge_enabled is the strongest switch on this page: it lets a
+    // key holder assert who somebody is. It is here so an operator can turn it OFF again from the
+    // same screen they turned it on from.
+    'auth_bridge_enabled', 'auth_bridge_create', 'auth_bridge_merge', 'auth_bridge_ttl',
+    'auth_bridge_return_url', 'auth_bridge_login_url', 'auth_bridge_logout',
+    'wl_submitter_public',
+    'items_per_page', 'admin_near_pages', 'blacklist_path',
+    'max_magnet_link_length',
+    'donations_enabled', 'wallet_btc', 'wallet_eth', 'wallet_xmr', 'donation_fields',
+    'transparency_enabled', 'transparency_per_page',
+    'tracker_stats_enabled', 'tracker_stats_url', 'tracker_stats_interval', 'tracker_stats_page_interval', 'tracker_stats_cache_ttl', 'tracker_stats_show_home', 'tracker_stats_timeout', 'tracker_stats_min_loading', 'tracker_stats_max_loading', 'tracker_stats_peer_label_style', 'tracker_stats_livesync_mode',
+    // statistics timeline (includes/stats_timeline.php)
+    'stats_timeline_enabled', 'stats_timeline_interval', 'stats_timeline_raw_days', 'stats_timeline_keep_days', 'stats_timeline_public',
+    'stats_timeline_ranges', 'stats_timeline_default_range', 'stats_timeline_custom_range',
+    // observed-hash index (includes/index.php)
+    'index_enabled', 'index_source_url', 'index_poll_minutes', 'index_min_seeders', 'index_max_rows', 'index_block_on', 'index_block_words', 'index_block_minor',
+    'index_grace_days', 'index_protect_days', 'index_meta_daily_budget', 'index_keep_files', 'index_poll_budget',
+    'index_meta_auto_queue',
+    // schema v44: how a file list loads — the public search page, then the panel modals
+    'index_files_mode', 'index_files_batch', 'index_files_max',
+    'index_files_admin_mode', 'index_files_admin_batch', 'index_files_admin_max',
+    'opentracker_service_name', 'opentracker_restart_use_sudo', 'opentracker_auto_reload',
+    'tracker_uptime_warn_days', 'tracker_uptime_danger_days',
+    'tracker_blacklist_warn_count', 'tracker_blacklist_danger_count',
+    'auto_archive_days', 'auto_archive_appeal_days', 'sent_emails_retention_days',
+    'max_message_length', 'max_appeal_message_length',
+    'footer_start_year',
+    'footer_brand_name', 'footer_brand_url', 'footer_brand_enabled',
+    'footer_tracker_name', 'footer_tracker_url', 'footer_tracker_author', 'footer_tracker_author_url', 'footer_tracker_enabled',
+    'footer_os_name', 'footer_os_url', 'footer_os_enabled', 'footer_os_since_year',
+    // whitelist mode
+    'tracker_mode', 'whitelist_path', 'whitelist_public_enabled', 'whitelist_max_per_submission',
+    'rate_limit_whitelist', 'whitelist_ip_daily_max', 'whitelist_daily_cap', 'whitelist_reload_min_interval',
+    'whitelist_scrape_url', 'whitelist_require_tracker', 'whitelist_tracker_hosts',
+    // scheduled tracker mode (includes/schedule.php)
+    'tracker_schedule_enabled', 'tracker_schedule', 'tracker_schedule_tz', 'tracker_mode_switch_cmd',
+    // schema v11: inbound UDP monitor + rate limit (includes/netlimit.php). Changing the limit
+    // itself does NOT touch the firewall here — that goes through admin/net_apply, which asks for
+    // the admin password; saving only records what the panel should load.
+    'net_monitor_enabled', 'net_sample_seconds', 'net_keep_days',
+    'net_limit_enabled', 'net_limit_pps', 'net_limit_burst', 'net_limit_port', 'net_limit_cmd',
+    'net_auto_enabled', 'net_auto_min', 'net_auto_max', 'net_auto_target', 'net_auto_target_cpu',
+    'net_lists_enabled', 'net_lists_ttl_default',
+    'index_poll_keep_days',
+    // schema v11: panel-driven backups (includes/backup.php). Running, restoring and downloading
+    // all live behind the admin password in admin/backup_action — saving only records the policy.
+    'backup_enabled', 'backup_dir', 'backup_profile', 'backup_items', 'backup_schedule',
+    'backup_schedule_tz', 'backup_keep', 'backup_keep_days', 'backup_max_size_gb',
+    'backup_gpg_recipient', 'backup_nice', 'backup_verify_after', 'backup_cmd',
+    'backup_script_path', 'backup_db_name',
+    // captcha provider (reCAPTCHA v2 keys are the legacy recaptcha_* entries above)
+    'captcha_provider', 'turnstile_site_key', 'turnstile_secret',
+    'recaptcha_v3_site_key', 'recaptcha_v3_secret', 'recaptcha_v3_min_score',
+    'hcaptcha_site_key', 'hcaptcha_secret',
+    // server-to-server API
+    'api_enabled', 'api_ban_days', 'api_ban_exempt_ips',
+    // user accounts (includes/users.php)
+    'users_enabled', 'users_registration_enabled', 'users_links_visible', 'users_default_group',
+    'users_notify_expiry_days', 'rate_limit_user_login', 'rate_limit_user_register', 'rate_limit_index_search',
+    'rate_limit_hash_check',
+    'rate_limit_preview',
+    'wl_content_autopublish', 'wl_edit_max_pending',
+    'wl_scrape_every_hours', 'wl_scrape_batch', 'wl_dead_after_days', 'wl_dead_action', 'wl_dead_every_days',
+    'wl_probe_required', 'wl_probe_timeout_minutes', 'wl_probe_on_fail', 'wl_probe_max_batch',
+    'audit_enabled', 'audit_keep_days',
+    'tuner_enabled', 'tuner_python',
+    'rep_enabled', 'rep_mode', 'rep_who_can_vote', 'rep_show_in_results', 'rep_min_votes', 'rep_anon_weight', 'rep_rate_per_hour', 'captcha_pts_vote',
+    'bulk_mail_enabled', 'bulk_mail_per_minute', 'bulk_mail_max_attempts',
+    // 1.75.0 (schema 94): the day's ceiling on bulk mail (0 = none) and the sender's identity for its footer
+    'bulk_mail_daily_cap', 'mail_sender_address', 'auto_penalties_enabled',
+    'wl_allow_source_url', 'wl_allow_description', 'wl_content_review',
+    'livesync_enabled', 'livesync_cmd', 'livesync_bind_ip', 'livesync_peer_ip', 'livesync_port', 'desc_allow_bbcode', 'desc_allow_markdown', 'desc_allow_flarum', 'rt_formats_message', 'rt_formats_list', 'rt_formats_shout', 'rt_formats_report', 'rt_formats_page', 'rt_formats_mail', 'rate_limit_sl_refresh', 'desc_max_chars', 'desc_max_images', 'desc_max_links', 'link_trusted_domains', 'rt_youtube', 'rt_video_files', 'rt_magnet_self_show', 'torrent_reports_enabled', 'search_allow_sl_refresh', 'search_sl_refresh_seconds',
+    'images_max_mb', 'images_max_edge', 'images_max_mpx', 'images_webp_quality', 'images_per_day', 'images_per_day_mb', 'images_quota_mb', 'images_unused_hours', 'images_in_pm', 'images_in_shout', 'images_in_bio', 'images_in_list', 'images_in_mod',
+    'comment_images_upload', 'comment_images_links', 'comment_images_max', 'comment_image_max_mb', 'comment_thumb_h', 'comment_thumb_w',
+    'images_gallery_enabled',
+    'forum_desc_conflict', 'info_resize', 'info_desc_fold', 'rows_open_info', 'rep_chip',
+    // whitelist registration audience + metadata worker concurrency (schema v8)
+    'whitelist_submit_mode', 'meta_worker_concurrency',
+    // schema v43: stored file paths per torrent, the second live worker override
+    'meta_max_files',
+    'meta_order_mode', 'meta_order_mix_oldest', 'meta_order_mix_newest',
+    'meta_order_mix_seeders', 'meta_order_mix_random', 'meta_order_mix_whitelist',
+    'meta_order_mix_seen', 'meta_order_mix_completed', 'net_limit_trusted', 'net_limit_blocked', 'tuner_load_headroom', 'tuner_load_hard',
+    // the stability probe's view outside the machine (1.73.3, includes/tuner.php): what it pings, and the two thresholds
+    'tuner_loss_targets', 'tuner_retrans_max', 'tuner_ping_loss_max',
+    // schema v9: verification gate, terms, email-change cooldown, member-search switches
+    'users_require_email_verify', 'users_terms_text', 'users_email_change_cooldown_days',
+    'index_search_enabled', 'index_search_include_whitelist',
+    // federation (includes/federation.php + worker/federation.py)
+    'api_rate_limit_per_min', 'api_rate_limit_bytes_day',
+    'ot_perf_cmd', 'ot_nice', 'ot_cpu_weight', 'ot_cpu_affinity', 'ot_limit_nofile', 'ot_udp_workers',
+    'fed_enabled', 'fed_node_name', 'fed_export_enabled', 'fed_export_files', 'fed_export_max_batch',
+    'fed_export_max_bytes', 'fed_export_max_files',
+    'fed_import_batch_rows', 'fed_import_batch_bytes', 'fed_import_max_seconds', 'fed_worker_mem_mb',
+    'fed_import_new', 'fed_import_mode', 'fed_pull_minutes',
+    // Kernel network buffers: the plumbing only. The eight VALUES are written by
+    // api/admin/sysctl_apply.php after the armed protocol, never by a form post, and there is
+    // deliberately no key here that could rewrite the record of what the machine looked like
+    // before the panel first touched it.
+    'sysctl_cmd', 'sysctl_enabled', 'sysctl_confirm_seconds',
+    'dbmem_cmd', 'dbmem_enabled',
+    'ot_cluster_cmd', 'ot_cluster_enabled', 'ot_cluster_port_base',
+];
+
+// The settings that decide what www-data EXECUTES, or whom the panel BELIEVES, are not ordinary
+// settings either. A helper command is handed to the shell on every schedule tick, backup run and
+// firewall change; the interpreter path is exec()ed; the service name and the sudo switch are the
+// command line systemctl gets; the proxy pair decides which header names the client for every rate
+// limit and lockout in the panel; the HMAC key signs the unsubscribe links. Every dangerous ACTION
+// asks for the password again — but until now the setting that told the action what to run saved
+// with a session cookie alone, and an admin-group account reaches this endpoint on that cookie. So
+// the definition is put behind the same gate as the deed: any of these arriving with a value other
+// than the stored one needs the OWNER's password, the same way the deletion limits below do.
+//
+// key => what the form shows when nothing is stored yet. The comparison must use the same
+// fallback the template prints, or an untouched field on a fresh install would read as a change
+// and the password would be asked for every save.
+$reauthKeys = [
+    'tracker_mode_switch_cmd'      => SCHEDULE_DEFAULT_CMD,   // includes/schedule.php
+    'net_limit_cmd'                => NET_DEFAULT_CMD,        // includes/netlimit.php
+    'backup_cmd'                   => BACKUP_DEFAULT_CMD,     // includes/backup.php
+    'backup_script_path'           => BACKUP_DEFAULT_SCRIPT,
+    'livesync_cmd'                 => '',                     // includes/livesync.php
+    'ot_perf_cmd'                  => '',                     // includes/opentracker.php
+    'sysctl_cmd'                   => '',                     // includes/sysctl.php
+    'dbmem_cmd'                    => '',                     // includes/dbmem.php
+    'ot_cluster_cmd'               => '',                     // includes/cluster.php
+    'tuner_python'                 => 'python3',              // includes/tuner.php
+    'opentracker_service_name'     => '',                     // restart/reload_tracker, functions.php
+    'opentracker_restart_use_sudo' => '1',
+    'trusted_proxy_ips'            => '',                     // getClientIp()
+    'client_ip_header'             => '',
+    'hmac_secret'                  => '',                     // generateUnsubscribeToken()
+    // The two transport settings whose consequence is not undoable from this page. 'always' on a
+    // panel really served over plain HTTP means nobody can sign in again — the browser refuses the
+    // session cookie, so the CSRF token minted at login is never the one checked at submit — and
+    // the way back is a SQL statement, not a click. `preload` is worse in kind: once the host is
+    // accepted onto the browser preload list it is compiled into releases and removal takes months,
+    // and nothing in this panel can accelerate it.
+    'cookie_secure_mode'           => 'auto',                 // cookieSecureFlag(), functions.php
+    'hsts_preload'                 => '0',                    // hstsHeaderValue()
+    // A host in this box may RUN SCRIPTS on every page of this site, in every visitor's session.
+    // That is a change to whom the site trusts, which is the one thing this array is for.
+    'csp_extra_hosts'              => '',                     // cspPolicy(), includes/csp.php
+    // The switches whose consequence the JANITOR carries out (1.74.0, PANEL-2): arming the schedule runs the mode
+    // switch command, the limit and its automatic band the firewall helper, the monitor its sampler, backups the
+    // backup helper — as root, on the next minute. Each of those deeds asks for the password where it is done by
+    // hand (admin/tracker_mode, admin/net_apply, admin/backup_action); arming it to happen by itself did not.
+    'tracker_schedule_enabled'     => '0',                    // includes/schedule.php
+    'net_limit_enabled'            => '0',                    // includes/netlimit.php
+    'net_auto_enabled'             => '0',
+    'net_monitor_enabled'          => '0',
+    'backup_enabled'               => '0',                    // includes/backup.php
+];
+
+// The secrets this page never prints (1.74.0, PANEL-1; templates/admin/settings.php): each field arrives EMPTY
+// unless somebody typed a new value, and empty means "keep what is stored" — or every save would blank them, and
+// the HMAC key's empty value would ask for the password on every save besides. The health token is never printed
+// either, but an empty one is a real answer — the endpoint switched off — so it keeps that meaning here, and it is
+// the PAGE that leaves an untouched token field out of its save (and sends it empty when "switch off" is ticked).
+$secretKeys = ['hmac_secret', 'recaptcha_secret', 'recaptcha_v3_secret', 'turnstile_secret', 'hcaptcha_secret'];
+
+$data = [];
+foreach ($allowed as $key) {
+    if (array_key_exists($key, $input)) {
+        // A value that is not a string or a number is not a setting (1.74.0): `x[]=…` used to be stored as "Array".
+        if (!is_scalar($input[$key]) && $input[$key] !== null) continue;
+        $data[$key] = trim((string)$input[$key]);
+    }
+}
+foreach ($secretKeys as $key) {
+    if (array_key_exists($key, $data) && $data[$key] === '') unset($data[$key]);
+}
+
+if (empty($data)) {
+    jsonResponse(['error' => __('api.settings.no_valid_settings')], 400);
+}
+
+// ── Whitelist / API / CAPTCHA settings validation ──
+if (isset($data['tracker_mode']) && !in_array($data['tracker_mode'], ['blacklist', 'whitelist'], true)) {
+    jsonResponse(['error' => __('api.settings.invalid_tracker_mode')], 400);
+}
+if (isset($data['whitelist_path'])) {
+    $data['whitelist_path'] = normalizeListPath($data['whitelist_path']);
+    if ($data['whitelist_path'] !== '') {
+        $v = validateWhitelistPath($data['whitelist_path']);
+        if (!$v['ok']) jsonResponse(['error' => __('api.settings.whitelist_path_rejected', ['error' => $v['error']])], 400);
+    }
+}
+if (isset($data['captcha_provider']) && !in_array($data['captcha_provider'], captchaProviders(), true)) {
+    jsonResponse(['error' => __('api.settings.invalid_captcha_provider')], 400);
+}
+// ── Where the admin panel lives ──
+if (isset($data['admin_login_path'])) {
+    $path = preg_replace('/[^a-z0-9_-]/', '', strtolower(trim($data['admin_login_path'])));
+    if ($path === '' || $path === null) $path = 'admin';
+    if (strlen($path) > 64) jsonResponse(['error' => __('api.settings.login_path_too_long')], 400);
+    if ($path !== 'admin' && in_array($path, adminReservedActions(), true)) {
+        jsonResponse(['error' => __('api.settings.login_path_taken')], 400);
+    }
+    $data['admin_login_path'] = $path;
+}
+if (isset($data['admin_hidden_behavior']) && !in_array($data['admin_hidden_behavior'], ['home', 'login', '404'], true)) {
+    $data['admin_hidden_behavior'] = 'home';
+}
+// ── Content-Security-Policy ──
+// Coerced rather than refused, and coerced to 'report': an unknown value is a bug in the form, and
+// the answer to a bug in the form is the setting that cannot break a page for a visitor.
+foreach (['facts_chips_search', 'facts_chips_info', 'facts_chips_panel', 'facts_chips_lists', 'facts_chips_rates', 'facts_chips_ratings', 'facts_filter_counts'] as $fk) {
+    if (isset($data[$fk])) $data[$fk] = in_array($data[$fk], ['0', 0, false], true) ? '0' : '1';
+}
+if (isset($data['facts_chips_max'])) $data['facts_chips_max'] = (string)max(1, min((int)$data['facts_chips_max'] ?: 6, 20));
+foreach (['thumbs_search', 'thumbs_lists', 'thumbs_info', 'thumbs_panel'] as $tk) {
+    if (isset($data[$tk])) $data[$tk] = in_array($data[$tk], ['0', 0, false], true) ? '0' : '1';
+}
+if (isset($data['thumbs_width'])) $data['thumbs_width'] = (string)max(40, min((int)$data['thumbs_width'] ?: 64, 160));
+if (isset($data['thumbs_speed'])) $data['thumbs_speed'] = (string)max(2, min((int)$data['thumbs_speed'] ?: 4, 15));
+if (isset($data['thumbs_max'])) $data['thumbs_max'] = (string)max(1, min((int)$data['thumbs_max'] ?: 10, 10));
+if (isset($data['tags_enabled'])) $data['tags_enabled'] = in_array($data['tags_enabled'], ['0', 0, false], true) ? '0' : '1';
+if (isset($data['tags_review'])) $data['tags_review'] = $data['tags_review'] === 'open' ? 'open' : 'approve';
+if (isset($data['tags_max_per_torrent'])) $data['tags_max_per_torrent'] = (string)max(1, min((int)$data['tags_max_per_torrent'] ?: 40, 100));
+if (isset($data['tags_name_max'])) $data['tags_name_max'] = (string)max(2, min((int)$data['tags_name_max'] ?: 32, 40));
+if (isset($data['tags_create_per_day'])) $data['tags_create_per_day'] = (string)max(0, min((int)$data['tags_create_per_day'], 500));
+if (isset($data['tags_popular_max'])) $data['tags_popular_max'] = (string)max(0, min((int)$data['tags_popular_max'], 500));
+if (isset($data['wl_req_days'])) $data['wl_req_days'] = (string)max(0, min((int)$data['wl_req_days'], 365));
+if (isset($data['wl_req_per_day'])) $data['wl_req_per_day'] = (string)max(1, min((int)$data['wl_req_per_day'] ?: 5, 100));
+if (isset($data['tags_forum'])) $data['tags_forum'] = in_array($data['tags_forum'], ['0', 0, false], true) ? '0' : '1';
+if (isset($data['tags_forum_review'])) $data['tags_forum_review'] = $data['tags_forum_review'] === 'queue' ? 'queue' : 'bypass';
+if (isset($data['tags_add_review'])) $data['tags_add_review'] = $data['tags_add_review'] === 'approve' ? 'approve' : 'open';
+if (isset($data['facts_source']) && !in_array($data['facts_source'], ['desc', 'desc_name'], true)) {
+    $data['facts_source'] = 'desc';
+}
+if (isset($data['facts_source']) && $data['facts_source'] === 'desc_name' && ($cfg['facts_source'] ?? 'desc') !== 'desc_name') {
+    $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('name_facts_cursor', '')")->execute();
+}
+if (isset($data['csp_mode']) && !in_array($data['csp_mode'], CSP_MODES, true)) {
+    $data['csp_mode'] = 'report';
+}
+// ── The icon library ──
+// Coerced like csp_mode, and to the library every icon is written in: an unknown value is a bug in
+// the form, and the answer to that is the choice that draws every icon, not a guess.
+if (isset($data['icon_library']) && !in_array($data['icon_library'], ICON_LIBRARIES, true)) {
+    $data['icon_library'] = 'bootstrap';
+}
+// ── Which Font Awesome ──
+// Checked against what is INSTALLED, not against a list of words: a package id is only a value when
+// that package is in config/iconpacks and its manifest reads, a style file only when the package has
+// it, a style only when it loads (iconSettingsNormalise(), includes/icons.php — the CLI's check too).
+// The source is coerced like csp_mode; asking for a package that is not there is refused.
+$faCheck = iconSettingsNormalise($data, $cfg);
+if ($faCheck['error'] !== null) {
+    jsonResponse(['error' => __($faCheck['error'], $faCheck['vars'])], 400);
+}
+$data = $faCheck['data'];
+if (isset($data['csp_extra_hosts'])) {
+    // This value is written VERBATIM into a response header, so the validation is the whole security
+    // boundary of the feature — and it lives in includes/csp.php, called from here AND from
+    // cspPolicy(), because the settings table sits in a MariaDB three other applications can reach
+    // and this endpoint is not the only way a row can be written.
+    // The ceiling is checked INSIDE the loop. Checked after it, a body carrying a hundred thousand
+    // syntactically valid hostnames is an O(n^2) walk (in_array over a list that keeps growing)
+    // before anything refuses it, and readJsonBody() caps nothing but post_max_size.
+    $keep = [];
+    foreach (preg_split('/[\s,;]+/', (string)$data['csp_extra_hosts']) ?: [] as $h) {
+        $h = trim($h);
+        if ($h === '') continue;
+        if (count($keep) >= CSP_EXTRA_HOSTS_MAX) {
+            jsonResponse(['error' => __('api.settings.csp_hosts_too_many', ['max' => CSP_EXTRA_HOSTS_MAX])], 400);
+        }
+        if (!cspHostOk($h)) jsonResponse(['error' => __('api.settings.csp_host_invalid', ['entry' => $h])], 400);
+        if (!in_array($h, $keep, true)) $keep[] = $h;
+    }
+    $data['csp_extra_hosts'] = implode(' ', $keep);
+}
+// ── How a file list loads: the two modes ──
+// Each falls back to what its own audience did before 1.38.0, which is not the same value — the
+// search page has always scrolled, the modals have always waited for a button. Falling back to one
+// shared 'scroll' would have taken the panel out of its behaviour-preserving mode on a typo, and
+// left the coercion here disagreeing with indexFilesAdminMode() in includes/index.php.
+foreach (['index_files_mode' => 'scroll', 'index_files_admin_mode' => 'button'] as $k => $def) {
+    if (isset($data[$k]) && !in_array($data[$k], IDX_FILES_MODES, true)) $data[$k] = $def;
+}
+// ── Timeline range buttons ──
+if (isset($data['stats_timeline_ranges'])) {
+    $known = array_keys(statsTimelineRangeButtons());
+    $want = array_filter(array_map('trim', explode(',', strtolower($data['stats_timeline_ranges']))));
+    $keep = array_values(array_intersect($known, $want));   // intersect keeps the display order
+    $data['stats_timeline_ranges'] = implode(',', $keep ?: $known);
+}
+foreach (richtextPlaces() as $rtfPlace) {
+    if (!isset($data['rt_formats_' . $rtfPlace])) continue;
+    $want = array_filter(array_map('trim', explode(',', strtolower((string)$data['rt_formats_' . $rtfPlace]))));
+    $keep = array_values(array_intersect(richtextRichFormats(), $want));
+    $data['rt_formats_' . $rtfPlace] = implode(',', $keep ?: ['bbcode']);
+}
+if (isset($data['rt_youtube']) && !in_array($data['rt_youtube'], ['link', 'click', 'thumb'], true)) {
+    $data['rt_youtube'] = 'link';
+}
+if (isset($data['rt_video_files'])) $data['rt_video_files'] = (string)$data['rt_video_files'] === '1' ? '1' : '0';
+if (isset($data['forum_desc_conflict']) && !in_array($data['forum_desc_conflict'], FORUM_DESC_CONFLICTS, true)) {
+    $data['forum_desc_conflict'] = 'proposal';
+}
+if (isset($data['stats_timeline_default_range'])) {
+    $known = array_keys(statsTimelineRangeButtons());
+    $def = strtolower(trim($data['stats_timeline_default_range']));
+    $data['stats_timeline_default_range'] = in_array($def, $known, true) ? $def : '24h';
+}
+if (isset($data['recaptcha_v3_min_score'])) {
+    // 0.0–1.0, one decimal; blank/garbage falls back to Google's suggested 0.5
+    $raw = str_replace(',', '.', $data['recaptcha_v3_min_score']);
+    $score = is_numeric($raw) ? (float)$raw : 0.5;
+    $data['recaptcha_v3_min_score'] = number_format(max(0.0, min(1.0, $score)), 1, '.', '');
+}
+if (isset($data['whitelist_scrape_url']) && $data['whitelist_scrape_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['whitelist_scrape_url'])) {
+    jsonResponse(['error' => __('api.settings.scrape_url_invalid')], 400);
+}
+// ── The footer's addresses (1.74.0, XSS-6) ──
+// Each becomes an href on every page, so it is an http(s) address or nothing — `javascript:` was stored as typed and
+// printed into the link. Judged only when it CHANGED (the page posts every control on every save — the rule of
+// trusted_proxy_ips below): a row written elsewhere must not make the whole page unsavable, and the footer drops what
+// is not http(s) on its own way out (templates/footer.php, safeHttpUrl()).
+foreach (['footer_brand_url', 'footer_tracker_url', 'footer_tracker_author_url', 'footer_os_url', 'github_url'] as $k) {
+    if (isset($data[$k]) && $data[$k] !== '' && $data[$k] !== (string)($cfg[$k] ?? '') && safeHttpUrl($data[$k]) === '') {
+        jsonResponse(['error' => __('api.settings.footer_url_invalid', ['entry' => $data[$k]])], 400);
+    }
+}
+$intClamp = [
+    'whitelist_max_per_submission' => [1, 500, 20], 'rate_limit_whitelist' => [0, 1000, 10],
+    'whitelist_ip_daily_max' => [0, 100000, 50], 'whitelist_daily_cap' => [0, 10000000, 2000],
+    'whitelist_reload_min_interval' => [10, 3600, 45], 'api_ban_days' => [1, 3650, 30],
+    'stats_timeline_interval' => [ST_INTERVAL_MIN, ST_INTERVAL_MAX, 60], 'stats_timeline_raw_days' => [1, 30, 7],
+    'stats_timeline_keep_days' => [7, 3650, 60],
+    'index_poll_minutes' => [5, 1440, 30], 'index_min_seeders' => [0, 100000, 1], 'index_max_rows' => [1000, 10000000, 200000],
+    'index_grace_days' => [1, 90, 3], 'index_protect_days' => [1, 365, 10], 'index_meta_daily_budget' => [0, 1000000, 500],
+    'index_poll_budget' => [IDX_POLL_BUDGET_MIN, IDX_POLL_BUDGET_MAX, 45],
+    // The ceilings are read from includes/index.php, never retyped: the same numbers bound the
+    // endpoint, the clamp-on-read helpers and the fields' max= attributes. A max BELOW its own batch
+    // is legal here and repaired on read (indexFilesMax() floors it at one batch) rather than
+    // refused — one bad number must not reject a save of every other setting on the page.
+    'index_files_batch' => [IDX_FILES_BATCH_MIN, IDX_FILES_BATCH_MAX, 2000],
+    'index_files_max' => [IDX_FILES_BATCH_MIN, IDX_FILES_MAX_HARD, 20000],
+    'index_files_admin_batch' => [IDX_FILES_BATCH_MIN, IDX_FILES_ADMIN_BATCH_MAX, 5000],
+    'index_files_admin_max' => [IDX_FILES_BATCH_MIN, IDX_FILES_ADMIN_MAX_HARD, IDX_FILES_ADMIN_MAX_HARD],
+    'admin_near_pages' => [1, 20, 2],
+    // Clamped, never rejected, and 0 must survive the clamp: `max-age=0` with the switch still ON is
+    // the documented way to WITHDRAW the pin from browsers that already hold it. Turning the switch
+    // off only stops sending the header and leaves every existing pin running to its own expiry.
+    'hsts_max_age' => [0, HSTS_MAX_AGE_CEILING, HSTS_MAX_AGE_DEFAULT],
+    // Rows are already aggregated (one per KIND of violation), so this bounds how many DISTINCT
+    // problems the panel will remember, not how many were seen. 0 means keep none, and the report
+    // endpoint then refuses every write rather than merely letting the janitor undo it a minute later.
+    'csp_report_keep_rows' => [0, CSP_ROWS_MAX, CSP_ROWS_DEFAULT],
+    'users_notify_expiry_days' => [0, 30, 3], 'users_email_change_cooldown_days' => [0, 365, 30],
+    'bulk_mail_per_minute' => [1, 500, 20], 'bulk_mail_max_attempts' => [1, 10, 3], 'bulk_mail_daily_cap' => [0, 1000000, 0],
+    'desc_max_chars' => [200, 500000, 4000], 'desc_max_images' => [0, 100, 3],
+    'livesync_port' => [1024, 65535, 9696],
+    'desc_max_links' => [0, 100, 10], 'search_sl_refresh_seconds' => [10, 3600, 120], 'rate_limit_sl_refresh' => [0, 100000, 30],
+    'images_max_mb' => [1, 20, 8], 'images_max_edge' => [640, 4096, 2048], 'images_max_mpx' => [4, 40, 24], 'images_webp_quality' => [50, 95, 82],
+    'images_per_day' => [0, 1000, 60], 'images_per_day_mb' => [0, 100000, 100], 'images_quota_mb' => [0, 100000, 250], 'images_unused_hours' => [1, 720, 48],
+    'images_in_pm' => [0, 10, 4], 'images_in_shout' => [0, 10, 1], 'images_in_bio' => [0, 10, 2], 'images_in_list' => [0, 10, 4], 'images_in_mod' => [0, 10, 4],
+    'comment_images_max' => [0, 50, 18], 'comment_image_max_mb' => [1, 20, 4], 'comment_thumb_h' => [80, 600, 240], 'comment_thumb_w' => [80, 800, 360],
+    'info_desc_fold' => [0, 5000, 640],
+    'rate_limit_user_login' => [0, 1000, 10],
+    'rate_limit_user_register' => [0, 1000, 5], 'rate_limit_index_search' => [0, 100000, 120],
+    'rate_limit_hash_check' => [0, 100000, 120],
+    'rate_limit_preview' => [5, 300, 30],
+    'rep_min_votes' => [1, 1000, 3], 'rep_anon_weight' => [0, 100, 25],
+    // Lists (v51). The same shape as fav_max_per_user: a ceiling that keeps one person's collection
+    // from becoming everybody's query cost, clamped rather than refused.
+    'lists_max_per_user' => [1, 200, 20], 'lists_max_items' => [10, 5000, 500],
+    // A list's description, counted as a reader sees it (1.70.0) — the ceilings are includes/lists.php's.
+    'lists_desc_max' => [LIST_DESC_MAX_MIN, LIST_DESC_MAX_MAX, LIST_DESC_MAX_DEFAULT],
+    'fav_max_per_user' => [10, 5000, 500], 'auth_bridge_ttl' => [30, 900, 120],
+    'pm_max_per_day' => [1, 1000, 50], 'pm_max_chars' => [200, 20000, 4000],
+    // The Trash's days (1.73.0): 0 is a real answer — no Trash, Delete deletes at once — and a year the ceiling.
+    'pm_trash_days' => [0, 365, 30],
+    'index_keep_saved_days' => [1, 3650, 90],
+    // 0 is a real answer here — it means "do not poll at all" — so the floor is 0 and
+    // pmLiveSeconds() is what raises anything between 1 and 2 to the two-second floor on read.
+    'pm_live_seconds' => [0, 60, 0],
+    'site_live_seconds' => [0, 300, 60],
+    // The shoutbox. 0 is a real answer for the two cadences — "do not poll", "no flood interval" —
+    // so the floor is 0 and shoutLiveSeconds() is what raises anything between 1 and 3 on read.
+    'shout_widget_rows' => [5, 100, 25], 'shout_page_rows' => [20, 500, 100],
+    'shout_max_chars' => [1, 2000, 500], 'shout_flood_seconds' => [0, 300, 5],
+    'shout_live_seconds' => [0, 120, 10],
+    // A guest reads and never writes, so their cadence is its own number — and 0 there means a
+    // visitor does not poll at all, which on a public tracker is most of the traffic.
+    'shout_live_seconds_guest' => [0, 300, 30],
+    'shout_keep_rows' => [100, 100000, 2000], 'shout_keep_days' => [1, 3650, 30],
+    // The two windows (1.66.0), in minutes. 0 is a real answer for both and means OPPOSITE things:
+    // no editing at all, and no limit on deleting your own. A day at most — past that a correction is
+    // rewriting yesterday's conversation, which is a moderator's decision, not a window's.
+    'shout_edit_minutes' => [0, 1440, 10], 'shout_delete_own_minutes' => [0, 1440, 10],
+    // Its pictures. No 0 anywhere: an emote of no kilobytes, no pixels or a person allowed none of
+    // them is not a setting, it is the feature switch beside it spelled badly.
+    'shout_emote_max_kb' => [8, 512, 64], 'shout_emote_max_px' => [32, 512, 128],
+    'shout_emote_per_user' => [1, 200, 20],
+    // Pictures and covers: the ceilings are read from includes/usermedia.php, never retyped. No 0:
+    // an upload of no kilobytes or a band no pixels tall is the feature switch spelled badly.
+    'avatar_max_kb' => [USER_MEDIA_KB_MIN, USER_MEDIA_KB_MAX, USER_MEDIA_KB_DEFAULT],
+    'avatar_max_mp' => [USER_MEDIA_MP_MIN, USER_MEDIA_MP_MAX, USER_MEDIA_MP_DEFAULT],
+    'cover_height' => [USER_COVER_H_MIN, USER_COVER_H_MAX, 220],
+    'cover_height_mobile' => [USER_COVER_H_MIN, USER_COVER_H_MAX, 160],
+    // The description's visible characters, from includes/profilebio.php like the ceilings above. No 0:
+    // a description of no characters is the feature switch beside it spelled badly.
+    'profile_bio_max' => [PROFILE_BIO_MAX_MIN, PROFILE_BIO_MAX_MAX, PROFILE_BIO_MAX_DEFAULT],
+    // Comments (1.71.0, includes/comments.php): the length a reader sees and the page from there, like the
+    // description above. The two windows are the shoutbox's kind — 0 is a real answer for both, meaning
+    // opposite things (no correcting at all; no limit on taking your own back) — and a day at most.
+    'comment_max_chars' => [COMMENT_MAX_MIN, COMMENT_MAX_MAX, COMMENT_MAX_DEFAULT],
+    'comment_edit_minutes' => [0, 1440, 15], 'comment_delete_own_minutes' => [0, 1440, 60],
+    'comments_per_page' => [COMMENT_PAGE_MIN, COMMENT_PAGE_MAX, COMMENT_PAGE_DEFAULT],
+    'comment_rate_per_hour' => [1, 1000, 30], 'captcha_pts_comment' => [0, 100, 1],
+    // The deepest reply level (1.72.0): 0 is a real answer — no replies at all — and 8 the ceiling.
+    'comments_reply_depth' => [0, COMMENT_REPLY_DEPTH_MAX, COMMENT_REPLY_DEPTH_DEFAULT],
+    // The anti-spam layer (1.71.0, includes/antispam.php) — the same ceilings its readers clamp to. 0 is a real
+    // answer where it means "no such rule" (the escalation, the new-account period, the duplicate window, a
+    // conversation limit, the spread) and where it means "no free burst"; a factor of 1 is "no stricter".
+    'antispam_captcha_after' => [0, 50, 3], 'antispam_new_days' => [0, 90, 3], 'antispam_new_factor' => [1, 10, 2],
+    'antispam_dup_seconds' => [0, 86400, 600],
+    'antispam_pm_new_hour' => [0, 1000, 8], 'antispam_pm_new_day' => [0, 10000, 20],
+    'antispam_pm_new_hour_new' => [0, 1000, 2], 'antispam_pm_new_day_new' => [0, 10000, 4], 'antispam_pm_spread' => [0, 50, 2],
+    'antispam_shout_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_shout_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 120],
+    'antispam_message_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_message_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 600],
+    'antispam_comment_burst' => [0, ANTISPAM_BURST_MAX, 2], 'antispam_comment_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 300],
+    'antispam_description_burst' => [0, ANTISPAM_BURST_MAX, 2], 'antispam_description_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 3600],
+    'antispam_report_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_report_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 1800],
+    'antispam_list_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_list_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 600],
+    'antispam_bio_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_bio_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 900],
+    'antispam_emote_burst' => [0, ANTISPAM_BURST_MAX, 3], 'antispam_emote_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 1800],
+    'antispam_vote_burst' => [0, ANTISPAM_BURST_MAX, 10], 'antispam_vote_reset' => [ANTISPAM_RESET_MIN, ANTISPAM_RESET_MAX, 120],
+    'rate_limit_pm' => [1, 100000, 240],
+    'digest_hours' => [1, 168, 24], 'digest_min' => [0, 10000, 1],
+    'wl_edit_max_pending' => [0, 50, 3],
+    'wl_scrape_every_hours' => [0, 8760, 0], 'wl_scrape_batch' => [1, 2000, 200],
+    'wl_dead_after_days' => [0, 3650, 0], 'wl_dead_every_days' => [1, 365, 30],
+    'wl_probe_timeout_minutes' => [1, 1440, 10], 'wl_probe_max_batch' => [1, 64, 8],
+    'rep_rate_per_hour' => [1, 1000, 30], 'captcha_pts_vote' => [0, 100, 2],
+    'fed_export_max_batch' => [100, 20000, 2000], 'fed_pull_minutes' => [5, 1440, 60],
+    // 0 on either budget switches that half off; the ceilings are only a guard against typos
+    'api_rate_limit_per_min' => [0, 100000, 60],
+    'ot_nice' => [-20, 19, -2], 'ot_cpu_weight' => [1, 10000, 100], 'ot_limit_nofile' => [1024, 1048576, 65536],
+    // Clamped here and rounded to whole minutes in sysctlConfirmSeconds(): the janitor is the
+    // coarsest watchdog and it ticks once a minute, so a 30-second promise it cannot keep would
+    // read as a guarantee to whoever is watching the countdown.
+    'sysctl_confirm_seconds' => [60, 900, 120],
+    'fed_export_max_bytes' => [0, 1073741824, 8388608], 'fed_export_max_files' => [0, 50000000, 200000],
+    'fed_import_batch_rows' => [25, 5000, 500], 'fed_import_batch_bytes' => [1048576, 268435456, 33554432],
+    'fed_import_max_seconds' => [30, 21600, 600], 'fed_worker_mem_mb' => [64, 4096, 256],
+    // UDP monitor + rate limit (includes/netlimit.php)
+    'net_sample_seconds' => [NET_SAMPLE_MIN, NET_SAMPLE_MAX, 60], 'net_keep_days' => [NET_KEEP_MIN, NET_KEEP_MAX, 14],
+    'net_limit_pps' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_limit_burst' => [NET_BURST_MIN, NET_BURST_MAX, 100],
+    'net_limit_port' => [1, 65535, 6969],
+    'net_auto_min' => [NET_PPS_MIN, NET_PPS_MAX, 10000], 'net_auto_max' => [NET_PPS_MIN, NET_PPS_MAX, 80000],
+    'net_auto_target' => [NET_PPS_MIN, NET_PPS_MAX, 30000], 'net_auto_target_cpu' => [10, 100, 70],
+    'net_lists_ttl_default' => [IPLIST_TTL_MIN, IPLIST_TTL_MAX, IPLIST_TTL_DEFAULT],
+    'index_poll_keep_days' => [1, 3650, 90],
+    // The day's report and appeal confirmations (1.74.0, includes/functions.php): 0 is a real answer — none sent.
+    'confirm_mail_daily_cap' => [0, CONFIRM_MAIL_CAP_MAX, CONFIRM_MAIL_CAP_DEFAULT],
+    // backups (includes/backup.php)
+    'backup_keep' => [0, BACKUP_KEEP_MAX, 7], 'backup_keep_days' => [0, BACKUP_DAYS_MAX, 30],
+    'backup_max_size_gb' => [0, BACKUP_GB_MAX, 20], 'backup_nice' => [0, 19, 15],
+];
+foreach ($intClamp as $k => [$min, $max, $def]) {
+    if (isset($data[$k])) {
+        $n = is_numeric($data[$k]) ? (int)$data[$k] : $def;
+        $data[$k] = (string)max($min, min($max, $n));
+    }
+}
+if (isset($data['whitelist_tracker_hosts'])) {
+    // keep only plausible hostnames / IPs (with optional port); the helper strips schemes/ports on read
+    $clean = [];
+    foreach (preg_split('/[\s,;]+/', (string)$data['whitelist_tracker_hosts']) ?: [] as $h) {
+        $h = trim($h);
+        if ($h !== '' && strlen($h) <= 253 && preg_match('#^([a-z]+://)?[A-Za-z0-9.:\[\]-]+(/.*)?$#', $h)) $clean[] = $h;
+    }
+    $data['whitelist_tracker_hosts'] = implode(', ', array_unique($clean));
+}
+if (isset($data['fed_import_mode'])) $data['fed_import_mode'] = $data['fed_import_mode'] === 'review' ? 'review' : 'fill';
+if (isset($data['ot_cluster_cmd']) && !otClusterValidCommand((string)$data['ot_cluster_cmd'])) {
+    jsonResponse(['error' => __('api.settings.cluster_cmd_invalid')], 400);
+}
+if (isset($data['ot_cluster_port_base']) && trim((string)$data['ot_cluster_port_base']) !== ''
+    && ((int)$data['ot_cluster_port_base'] < 1024 || (int)$data['ot_cluster_port_base'] > 65500)) {
+    jsonResponse(['error' => __('api.settings.cluster_port_base_invalid')], 400);
+}
+if (isset($data['dbmem_cmd']) && !dbmemValidCommand((string)$data['dbmem_cmd'])) {
+    jsonResponse(['error' => __('api.settings.dbmem_cmd_invalid')], 400);
+}
+if (isset($data['sysctl_cmd']) && !sysctlValidCommand((string)$data['sysctl_cmd'])) {
+    jsonResponse(['error' => __('api.settings.sysctl_cmd_invalid')], 400);
+}
+foreach (['whitelist_public_enabled', 'api_enabled', 'whitelist_require_tracker', 'tracker_schedule_enabled', 'stats_timeline_enabled', 'stats_timeline_public', 'stats_timeline_custom_range', 'index_enabled', 'index_keep_files', 'index_meta_auto_queue', 'index_block_on', 'rt_magnet_self_show', 'tags_prune_unused', 'torrent_reports_enabled', 'wl_req_enabled', 'wl_req_note',
+          'users_enabled', 'users_registration_enabled', 'users_links_visible',
+          'users_require_email_verify', 'index_search_enabled', 'index_search_include_whitelist', 'search_count_common_words',
+          'fed_enabled', 'fed_export_enabled', 'fed_export_files', 'fed_import_new', 'sysctl_enabled', 'ot_cluster_enabled',
+          'net_monitor_enabled', 'net_limit_enabled', 'net_auto_enabled',
+          'hsts_enabled', 'hsts_include_subdomains', 'hsts_preload', 'csp_report_enabled',
+          'backup_enabled', 'backup_verify_after', 'sounds_enabled', 'shout_enabled',
+          'pm_archive_returns', 'auto_penalties_enabled',
+          'info_resize', 'images_gallery_enabled', 'rows_open_info', 'rep_chip',
+          'antispam_enabled', 'antispam_guest_captcha', 'antispam_staff_exempt', 'antispam_new_links',
+          'who_votes_enabled', 'who_lists_enabled',
+          'shout_emotes_enabled', 'shout_stickers_enabled', 'shout_emote_approval', 'emotes_everywhere',
+          'comment_images_upload', 'comment_images_links',
+          'comments_enabled', 'comment_links', 'comments_guest_review', 'comments_expanded',
+          'profile_descriptions_enabled', 'shout_nav', 'shout_system_lines', 'profile_votes_enabled', 'avatars_enabled', 'covers_enabled', 'profile_bio_enabled'] as $k) {
+    if (isset($data[$k])) $data[$k] = $data[$k] === '1' ? '1' : '0';
+}
+// Where the Info panel's comments stand (1.72.0): a closed set, coerced like the others on this page — an unknown
+// value is the default, the panel's very end.
+if (isset($data['comments_position']) && !in_array($data['comments_position'], COMMENT_POSITIONS, true)) {
+    $data['comments_position'] = COMMENT_POSITION_DEFAULT;
+}
+// ── The anti-spam layer's ladders (1.71.0, includes/antispam.php) ──
+// A ladder's pauses are typed as a list ("5, 15, 30, 60"): kept as its readers parse it — whole seconds, each
+// 1 s to a day, at most eight, the order as typed — so what is stored is exactly what antispamLadder() reads.
+// An empty list is a real answer: that context is never paced (its duplicate rule and its CAPTCHA still hold).
+foreach (ANTISPAM_CONTEXTS as $asCtx) {
+    $k = 'antispam_' . $asCtx . '_steps';
+    if (isset($data[$k])) $data[$k] = implode(',', antispamParseSteps((string)$data[$k]));
+}
+// ── The shoutbox ──
+// Coerced rather than refused, like every other closed set on this page: an unknown value is a bug
+// in the form, and the answer to a bug in the form is the setting that cannot break a page.
+if (isset($data['shout_placement']) && !in_array($data['shout_placement'], ['home', 'page', 'both'], true)) {
+    $data['shout_placement'] = 'home';
+}
+if (isset($data['shout_format']) && !in_array($data['shout_format'], array_merge(['plain'], richtextRichFormats()), true)) {
+    $data['shout_format'] = 'bbcode';
+}
+// Which end of the room the newest line is at (1.64.0). 'bottom' is the shipped answer again from
+// 1.66.0, so it is also what an unknown value becomes.
+if (isset($data['shout_order']) && !in_array($data['shout_order'], ['top', 'bottom'], true)) {
+    $data['shout_order'] = 'bottom';
+}
+// Font Awesome's faces in the picker (1.69.0). The mode is coerced like the room's other closed sets.
+// The style must be one that LOADS with the Font Awesome settings this very save leaves behind (judged
+// above by iconSettingsNormalise()), brands never; anything else is '' — the site's own style.
+if (isset($data['shout_emoji_fa']) && !in_array($data['shout_emoji_fa'], EMOJI_FA_MODES, true)) {
+    $data['shout_emoji_fa'] = 'off';
+}
+// How much of the package the picker offers (1.70.0): the same kind of closed set; anything else is
+// the faces alone, which is what the picker had before it.
+if (isset($data['shout_emoji_fa_scope']) && !in_array($data['shout_emoji_fa_scope'], EMOJI_FA_SCOPES, true)) {
+    $data['shout_emoji_fa_scope'] = 'faces';
+}
+if (isset($data['shout_emoji_fa_style'])) {
+    $v = (string)$data['shout_emoji_fa_style'];
+    if ($v !== '') {
+        $eff = $data + $cfg;
+        $loads = iconSetup(['icon_library' => 'fontawesome', 'fa_source' => (string)($eff['fa_source'] ?? 'cdn6'), 'fa_pack' => (string)($eff['fa_pack'] ?? ''),
+                            'fa_pack_styles' => (string)($eff['fa_pack_styles'] ?? '[]'), 'fa_style' => (string)($eff['fa_style'] ?? 'solid')])['styles'];
+        if ($v === 'brands' || !isset($loads[$v])) $v = '';
+    }
+    $data['shout_emoji_fa_style'] = $v;
+}
+// The address the room answers on. Coerced to the literal when it is not a legal action name, or
+// when it is already another page's — asked of siteRoutes() rather than of a list written out here,
+// so a route added next year defends itself. shoutPageAction() asks the same question on read; this
+// asks it once more on the way in, so a value that could take `?action=login` off the site is never
+// stored rather than merely never obeyed.
+if (isset($data['shout_page_action'])) {
+    $v = strtolower(trim((string)$data['shout_page_action']));
+    if (!preg_match('/^[a-z0-9_-]{2,32}$/', $v)
+        || ($v !== 'shoutbox' && function_exists('siteRoutes') && isset(siteRoutes()[$v]))) {
+        $v = 'shoutbox';
+    }
+    $data['shout_page_action'] = $v;
+}
+// ── Pictures and covers ──
+// Closed sets, coerced like the shoutbox's: 'gradient' is the overlay that keeps a name readable, and
+// 'generated' is the default that can never point at a picture that is not there.
+if (isset($data['cover_overlay']) && !in_array($data['cover_overlay'], ['gradient', 'darken', 'none'], true)) {
+    $data['cover_overlay'] = 'gradient';
+}
+if (isset($data['avatar_default']) && !in_array($data['avatar_default'], ['generated', 'image'], true)) {
+    $data['avatar_default'] = 'generated';
+}
+// Which card of the account page each block is drawn in (1.66.0): an unknown value becomes the
+// block's own shipped side — the picture on the left, the cover on the right.
+if (isset($data['account_picture_side']) && !in_array($data['account_picture_side'], ['left', 'right'], true)) {
+    $data['account_picture_side'] = 'left';
+}
+if (isset($data['account_cover_side']) && !in_array($data['account_cover_side'], ['left', 'right'], true)) {
+    $data['account_cover_side'] = 'right';
+}
+// The sender's identity in the footer of a bulk message (1.75.0): text, written into HTML escaped by the footer — only
+// bounded here and stripped of control characters (a line break becomes a space: the footer shows one line).
+if (isset($data['mail_sender_address'])) {
+    $data['mail_sender_address'] = mb_substr(trim((string)preg_replace('/[\x00-\x1f\x7f]+/u', ' ', (string)$data['mail_sender_address'])), 0, 300);
+}
+// House rules are a line of TEXT above the box — no markup is rendered from it, so it is only
+// bounded and stripped of control characters.
+if (isset($data['shout_rules'])) {
+    $data['shout_rules'] = mb_substr(trim(preg_replace('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]+/u', ' ', $data['shout_rules']) ?? ''), 0, 500);
+}
+// A site-default sound must be one the library has; anything else is "nothing" (includes/sounds.php). The
+// comments' kinds are judged whether or not comments are on right now (1.71.0; the reply's, 1.72.0): the select
+// is only drawn while they are, but a key that can be saved is a key that is checked.
+foreach (array_unique(array_merge(soundEventKinds(), ['comment', 'comment_mention', 'comment_reply'])) as $k) {
+    $key = 'sound_default_' . $k;
+    if (isset($data[$key]) && (string)$data[$key] !== '' && !isset(soundLibrary($db)[(string)$data[$key]])) $data[$key] = '';
+}
+// ── UDP rate limit ──
+// The helper command is handed to the shell, so it gets the same treatment as the mode switch
+// command: a strict character class here, escapeshellarg() on every argument in includes/netlimit.php.
+if (isset($data['net_limit_cmd']) && !netlimitValidCommand($data['net_limit_cmd'])) {
+    jsonResponse(['error' => __('api.settings.net_limit_cmd_invalid')], 400);
+}
+// An upside-down automatic band would let one save lock the limit at a single value.
+if (isset($data['net_auto_min']) || isset($data['net_auto_max'])) {
+    $min = (int)($data['net_auto_min'] ?? netlimitAutoMin($cfg));
+    $max = (int)($data['net_auto_max'] ?? netlimitAutoMax($cfg));
+    if ($max < $min) jsonResponse(['error' => __('api.settings.net_auto_band_inverted', ['max' => langNumber($max), 'min' => langNumber($min)])], 400);
+}
+// ── The stability probe, outside the machine (1.73.3, includes/tuner.php) ──
+// The targets are handed to `ping` (argv, no shell): a bad entry is refused BY NAME rather than dropped, so what is
+// saved is what the probe pings. Empty is a real answer — no pings, the TCP reading alone. Judged only when it CHANGED
+// (the page posts every control on every save — trusted_proxy_ips' rule above): a row edited elsewhere must not make
+// the whole page unsavable, and the probe drops what it cannot ping anyway. The two thresholds are clamped like the
+// numbers above; one decimal for the resent share, a whole per cent for the pings.
+if (isset($data['tuner_loss_targets']) && $data['tuner_loss_targets'] !== (string)($cfg['tuner_loss_targets'] ?? TUNER_TARGETS_DEFAULT)) {
+    $tg = tunerParseTargets((string)$data['tuner_loss_targets']);
+    if ($tg['bad']) jsonResponse(['error' => __('api.settings.tuner_target_invalid', ['entry' => $tg['bad'][0]])], 400);
+    if ($tg['too_many']) jsonResponse(['error' => __('api.settings.tuner_targets_too_many', ['max' => TUNER_TARGETS_MAX])], 400);
+    $data['tuner_loss_targets'] = implode(' ', $tg['targets']);
+}
+if (isset($data['tuner_retrans_max'])) {
+    $raw = str_replace(',', '.', (string)$data['tuner_retrans_max']);
+    $v = is_numeric($raw) ? (float)$raw : TUNER_RETRANS_MAX_DEFAULT;
+    $data['tuner_retrans_max'] = number_format(max(TUNER_RETRANS_MAX_MIN, min(TUNER_RETRANS_MAX_MAX, $v)), 1, '.', '');
+}
+if (isset($data['tuner_ping_loss_max'])) {
+    $raw = str_replace(',', '.', (string)$data['tuner_ping_loss_max']);
+    $v = is_numeric($raw) ? (int)round((float)$raw) : TUNER_PING_LOSS_MAX_DEFAULT;
+    $data['tuner_ping_loss_max'] = (string)max(TUNER_PING_LOSS_MAX_MIN, min(TUNER_PING_LOSS_MAX_MAX, $v));
+}
+// ── Backups ──
+// The directory is where archives full of database passwords land, so it is checked here as well as
+// in the helper — a save must never be able to point it at the web root.
+if (isset($data['backup_dir']) && $data['backup_dir'] !== '') {
+    $v = backupValidateDir($data['backup_dir']);
+    if (!$v['ok']) jsonResponse(['error' => __('api.settings.backup_dir_rejected', ['error' => $v['error'], 'hint' => ($v['hint'] ? ' ' . $v['hint'] : '')])], 400);
+    $data['backup_dir'] = rtrim(preg_replace('/[\x00-\x1F\x7F]/', '', trim($data['backup_dir'])), '/');
+}
+if (isset($data['backup_cmd']) && !backupValidCommand($data['backup_cmd'])) {
+    jsonResponse(['error' => __('api.settings.backup_cmd_invalid')], 400);
+}
+if (isset($data['backup_script_path']) && $data['backup_script_path'] !== ''
+    && !preg_match('#^/[A-Za-z0-9 _./-]{1,255}$#', $data['backup_script_path'])) {
+    jsonResponse(['error' => __('api.settings.backup_script_path_invalid')], 400);
+}
+if (isset($data['backup_profile']) && !in_array($data['backup_profile'], BACKUP_PROFILES, true)) {
+    jsonResponse(['error' => __('api.settings.backup_profile_unknown')], 400);
+}
+if (isset($data['backup_items'])) {
+    $data['backup_items'] = backupSanitizeItems($data['backup_items']);
+}
+if (isset($data['backup_schedule']) && trim($data['backup_schedule']) !== ''
+    && backupParseSchedule($data['backup_schedule']) === null) {
+    jsonResponse(['error' => __('api.settings.backup_schedule_invalid')], 400);
+}
+if (isset($data['backup_schedule_tz']) && $data['backup_schedule_tz'] !== ''
+    && !in_array($data['backup_schedule_tz'], timezone_identifiers_list(), true)) {
+    jsonResponse(['error' => __('api.settings.backup_tz_invalid')], 400);
+}
+if (isset($data['backup_gpg_recipient']) && $data['backup_gpg_recipient'] !== ''
+    && !preg_match('/^[A-Za-z0-9@._+-]{1,128}$/', $data['backup_gpg_recipient'])) {
+    jsonResponse(['error' => __('api.settings.backup_gpg_invalid')], 400);
+}
+if (isset($data['backup_db_name']) && $data['backup_db_name'] !== ''
+    && !preg_match('/^[A-Za-z0-9_]{1,64}$/', $data['backup_db_name'])) {
+    jsonResponse(['error' => __('api.settings.backup_db_name_invalid')], 400);
+}
+if (isset($data['users_default_group'])) {
+    $data['users_default_group'] = strtolower(trim((string)$data['users_default_group']));
+    if (!preg_match('/^[a-z0-9_-]{2,64}$/', $data['users_default_group'])) $data['users_default_group'] = 'member';
+    // A group that does not exist is not a default, it is a typo with a settings row. The page now
+    // offers a select of the groups that exist, so anything else arrived from a stale form or from
+    // somebody's script — and the honest answer to both is to refuse rather than to save a setting
+    // that will quietly grant nothing to every account made afterwards.
+    $sgChk = $db->prepare("SELECT 1 FROM user_groups WHERE slug = ? LIMIT 1");
+    $sgChk->execute([$data['users_default_group']]);
+    if (!$sgChk->fetchColumn()) jsonResponse(['error' => __('api.settings.default_group_missing')], 400);
+}
+if (isset($data['pm_who']) && !in_array($data['pm_who'], ['all', 'friends', 'nobody'], true)) {
+    $data['pm_who'] = 'friends';
+}
+if (isset($data['index_keep_saved']) && !in_array($data['index_keep_saved'], ['off', 'forever', 'extend'], true)) {
+    $data['index_keep_saved'] = 'off';
+}
+if (isset($data['user_2fa_required']) && !in_array($data['user_2fa_required'], ['off', 'panel', 'all'], true)) {
+    $data['user_2fa_required'] = 'off';
+}
+if (isset($data['whitelist_submit_mode']) && !in_array($data['whitelist_submit_mode'], ['public', 'users'], true)) {
+    jsonResponse(['error' => __('api.settings.whitelist_submit_mode_invalid')], 400);
+}
+foreach (['index_block_words', 'index_block_minor'] as $k) {
+    if (isset($data[$k])) $data[$k] = mb_substr(implode("\n", array_filter(array_map('trim', preg_split('/[\r\n]+/', (string)$data[$k]) ?: []), fn($w) => $w !== '' && mb_strlen($w) <= 60)), 0, 4000);
+}
+if (isset($data['users_terms_text'])) {
+    $data['users_terms_text'] = mb_substr($data['users_terms_text'], 0, 10000);
+}
+if (isset($data['mail_from_email']) && $data['mail_from_email'] !== '') {
+    if (!filter_var($data['mail_from_email'], FILTER_VALIDATE_EMAIL)) {
+        jsonResponse(['error' => __('api.settings.mail_from_invalid')], 400);
+    }
+    // From must live on the site's own domain (or a parent of it) — anything else breaks
+    // SPF/DKIM/DMARC alignment and lands in spam. The check uses the site_url being saved
+    // alongside, falling back to the stored one.
+    $allowed = mailFromAllowedHosts(['site_url' => $data['site_url'] ?? ($cfg['site_url'] ?? '')]);
+    $fromHost = strtolower(substr(strrchr($data['mail_from_email'], '@'), 1));
+    if ($allowed && !in_array($fromHost, $allowed, true)) {
+        jsonResponse(['error' => __('api.settings.mail_from_domain', ['hosts' => implode(', ', $allowed)])], 400);
+    }
+}
+// ── the metadata fetch order ─────────────────────────────────────────────────
+// Normalised, not merely validated: the worker acts on these every few seconds, and a queue is not
+// a good place to discover that four numbers add up to 97. The rules live in includes/meta_order.php
+// next to the list of selectors, so the form, the save path and the worker cannot drift apart.
+if (isset($data['meta_order_mode'])) {
+    require_once __DIR__ . '/../../includes/meta_order.php';
+    $shIn = [];
+    foreach (metaOrderMixKeys() as $nm) $shIn[$nm] = $data['meta_order_mix_' . $nm] ?? 0;
+    [$mOrder, $mShares] = metaOrderNormalise((string)$data['meta_order_mode'], $shIn);
+    $data['meta_order_mode'] = $mOrder;
+    foreach ($mShares as $nm => $v) $data['meta_order_mix_' . $nm] = (string)$v;
+}
+
+if (isset($data['meta_worker_concurrency']) && $data['meta_worker_concurrency'] !== '') {
+    // Empty means "use the worker's own config file"; a number is clamped to 1..64.
+    //
+    // The comment here used to say 1..16 while the code said 64 — the ceiling was raised and only
+    // half the line was updated. And 0 or a negative number was silently rewritten to '', which reads
+    // in the panel as "accepted" and means "ignore me": the operator sees their entry vanish into the
+    // worker's default. Below one is now clamped to one, which is what asking for 0 can only mean.
+    $n = is_numeric($data['meta_worker_concurrency']) ? (int)$data['meta_worker_concurrency'] : 1;
+    $data['meta_worker_concurrency'] = (string)max(1, min(64, $n));
+}
+if (isset($data['meta_max_files']) && $data['meta_max_files'] !== '') {
+    // Same contract as the concurrency field above, deliberately: empty stays empty and means "use
+    // the worker's own config file", a number is clamped rather than rejected. Kept OUT of the
+    // $intClamp loop for the one reason that loop cannot serve here — it rewrites a non-numeric
+    // entry to the DEFAULT, and the default is '', so a typo would silently become "worker config"
+    // while the operator believes they set a cap. Clamping below one to one is what asking for
+    // "store 0 files" can only mean, and it never has to write the ceiling as a literal.
+    // A typo is NOT "store one path per torrent". Both readers of this value — indexMetaMaxFiles()
+    // here and effective_max_files() in the worker — treat anything non-numeric as "use the
+    // worker's own config file", so the save has to mean the same thing or the panel would show a
+    // cap of 1 that the worker never applies.
+    if (!ctype_digit(trim((string)$data['meta_max_files']))) {
+        $data['meta_max_files'] = '';
+    } else {
+        $data['meta_max_files'] = (string)max(1, min(META_MAX_FILES_MAX, (int)trim((string)$data['meta_max_files'])));
+    }
+}
+if (isset($data['ot_perf_cmd']) && $data['ot_perf_cmd'] !== '' && !otValidCommand($data['ot_perf_cmd'])) {
+    jsonResponse(['error' => __('api.settings.ot_perf_cmd_invalid')], 400);
+}
+if (isset($data['ot_cpu_affinity'])) {
+    // systemd refuses to START a unit whose CPUAffinity it cannot parse, so a typo saved here would
+    // take the tracker down at the next restart rather than at the moment of the mistake.
+    $data['ot_cpu_affinity'] = trim((string)$data['ot_cpu_affinity']);
+    if ($data['ot_cpu_affinity'] !== '' && !otValidAffinity($data['ot_cpu_affinity'])) {
+        jsonResponse(['error' => __('api.settings.ot_cpu_affinity_invalid')], 400);
+    }
+}
+if (isset($data['ot_udp_workers'])) {
+    // Empty is a real answer: it means "do not touch opentracker's own config".
+    $v = trim((string)$data['ot_udp_workers']);
+    if ($v !== '') {
+        if (!ctype_digit($v) || (int)$v < 1 || (int)$v > OT_WORKERS_MAX) {
+            jsonResponse(['error' => __('api.settings.ot_udp_workers_invalid', ['max' => OT_WORKERS_MAX])], 400);
+        }
+        $v = (string)(int)$v;
+    }
+    $data['ot_udp_workers'] = $v;
+}
+if (isset($data['api_rate_limit_bytes_day'])) {
+    // A day's transfer budget is measured in gigabytes, so it does not belong in the shared small-int
+    // clamp. 0 = no limit; the 1 TB ceiling only catches a slipped keyboard.
+    $v = $data['api_rate_limit_bytes_day'];
+    $n = is_numeric($v) ? (int)$v : -1;
+    if ($n < 0 || $n > 1099511627776) {
+        jsonResponse(['error' => __('api.settings.api_bytes_budget_invalid')], 400);
+    }
+    $data['api_rate_limit_bytes_day'] = (string)$n;
+}
+if (isset($data['fed_node_name'])) {
+    $data['fed_node_name'] = mb_substr(preg_replace('/[^\w .\-]/u', '', $data['fed_node_name']) ?? '', 0, 64);
+}
+if (isset($data['index_source_url']) && $data['index_source_url'] !== '' && !preg_match('#^https?://[^\s]+$#i', $data['index_source_url'])) {
+    jsonResponse(['error' => __('api.settings.index_source_url_invalid')], 400);
+}
+// ── Scheduled tracker mode ──
+if (isset($data['tracker_schedule'])) {
+    $sched = scheduleParseJson($data['tracker_schedule']);
+    if ($sched === null) jsonResponse(['error' => __('api.settings.schedule_invalid')], 400);
+    $data['tracker_schedule'] = json_encode($sched);   // normalised, all 7 keys
+}
+if (isset($data['tracker_schedule_tz']) && !scheduleValidTimezone($data['tracker_schedule_tz'])) {
+    jsonResponse(['error' => __('api.settings.schedule_tz_invalid')], 400);
+}
+// The site's display zone (v68). A name PHP knows, or empty — empty being "follow the schedule's
+// zone, then PHP's", which is what siteTimezone() reads it as. The same test users.timezone passes
+// (tzValidName()), so the Settings page and the account page cannot accept different words for a
+// zone. Refused rather than coerced: a zone saved as something else would move every reader's clock
+// to a place the operator never chose.
+if (isset($data['site_timezone']) && $data['site_timezone'] !== '' && !tzValidName($data['site_timezone'])) {
+    jsonResponse(['error' => __('api.settings.site_tz_invalid')], 400);
+}
+if (isset($data['tracker_mode_switch_cmd']) && !scheduleValidSwitchCommand($data['tracker_mode_switch_cmd'])) {
+    jsonResponse(['error' => __('api.settings.mode_switch_cmd_invalid')], 400);
+}
+if (isset($data['api_ban_exempt_ips'])) {
+    $clean = [];
+    foreach (apiParseIpList($data['api_ban_exempt_ips']) as $e) {
+        $ipPart = explode('/', $e, 2)[0];
+        if (filter_var($ipPart, FILTER_VALIDATE_IP)) $clean[] = $e;
+    }
+    $data['api_ban_exempt_ips'] = implode(', ', $clean);
+}
+
+/* ── Transport security: whose header we believe, Secure on the cookies, HSTS ──
+ *
+ * EVERY refusal below fires on a CHANGE, never on a value. The settings page posts every named
+ * control in #settings-form on every save, so `$data` always carries all six of these keys — and a
+ * guard shaped "if the value is X and this request is not HTTPS, refuse" would refuse saves of
+ * completely unrelated fields for as long as the condition held. Set Secure to `always` while TLS
+ * detection works, have it break later (a vhost edit, a proxy moved), and the entire Settings page
+ * would become unsavable with an error about cookies. So the comparison is the same one the
+ * $reauthKeys loop makes further down: is this key arriving with a different value than the stored one.
+ *
+ * And the HTTPS questions are asked of `$data + $cfg`, never of $cfg alone. $cfg is not refreshed
+ * until setSettings() at the bottom of this file, so judging by $cfg would judge the save that FIXES
+ * detection by the configuration it is replacing: listing the proxy and switching Secure on in one
+ * click is exactly the save that would be refused.
+ */
+if (array_key_exists('trusted_proxy_ips', $data)) {
+    // The box had no validation whatsoever, which is how a CIDR came to sit in it doing nothing at
+    // all. Normalising and checking only when the value actually CHANGED has a second purpose
+    // besides the guard rule above: an untouched field is passed through byte-identical, so the
+    // first save after this upgrade cannot open the password modal for a field nobody touched, and
+    // an installation already holding an over-wide entry can still save everything else on the page.
+    // The runtime ignores such an entry regardless — see trustedProxyList() in includes/functions.php.
+    if ($data['trusted_proxy_ips'] !== (string)($cfg['trusted_proxy_ips'] ?? '')) {
+        $clean = [];
+        foreach (ipParseList((string)$data['trusted_proxy_ips']) as $entry) {
+            // Named, not merely counted: an error that says only "invalid" makes an operator retype
+            // the whole list instead of fixing the one entry that is wrong.
+            if (!ipCidrValid($entry)) {
+                jsonResponse(['error' => __('api.settings.trusted_proxy_invalid', ['entry' => $entry])], 400);
+            }
+            if (!trustedProxyEntryOk($entry)) {
+                // ':four' / ':six' and not ':v4' / ':v6': the dictionary's placeholder syntax is
+                // `:name` and tests/lang_test.php extracts them with /:[a-z_]+/, so a digit ends the
+                // name — ':v4' would be read as the placeholder ':v' and never substituted.
+                jsonResponse(['error' => __('api.settings.trusted_proxy_too_wide', ['entry' => $entry,
+                              'four' => TRUSTED_PROXY_MIN_BITS4, 'six' => TRUSTED_PROXY_MIN_BITS6])], 400);
+            }
+            $clean[] = $entry;
+        }
+        $data['trusted_proxy_ips'] = implode(', ', $clean);
+    }
+}
+if (isset($data['cookie_secure_mode'])) {
+    $mode = strtolower(trim((string)$data['cookie_secure_mode']));
+    if (!in_array($mode, COOKIE_SECURE_MODES, true)) {
+        jsonResponse(['error' => __('api.settings.cookie_secure_mode_invalid')], 400);
+    }
+    $data['cookie_secure_mode'] = $mode;
+}
+if (isset($data['client_proto_header'])) {
+    // Empty is a real answer: it switches the proxy-header path off completely.
+    $ph = trim((string)$data['client_proto_header']);
+    if ($ph !== '' && !preg_match('/^[A-Za-z0-9-]{1,64}$/', $ph)) {
+        jsonResponse(['error' => __('api.settings.proto_header_invalid')], 400);
+    }
+    $data['client_proto_header'] = $ph;
+}
+
+$transportChanged = function (string $k, string $default) use ($data, $cfg): bool {
+    return array_key_exists($k, $data) && $data[$k] !== (string)($cfg[$k] ?? $default);
+};
+$effCfg   = $data + $cfg;                 // what the site looks like AFTER this save
+$effHttps = requestIsHttps($effCfg);
+
+if ($transportChanged('cookie_secure_mode', 'auto') && $data['cookie_secure_mode'] === 'always' && !$effHttps) {
+    jsonResponse(['error' => __('api.settings.cookie_secure_needs_https')], 400);
+}
+if ($transportChanged('hsts_enabled', '0') && $data['hsts_enabled'] === '1' && !$effHttps) {
+    jsonResponse(['error' => __('api.settings.hsts_needs_https')], 400);
+}
+// preload is the one setting here nothing on this server can undo, so its two preconditions — the
+// preload list's OWN requirements — are checked against the values this save would leave behind,
+// not against the field alone. hstsHeaderValue() checks them a second time before printing the
+// token, so a row edited by hand cannot publish a claim the site does not satisfy either.
+if ($transportChanged('hsts_preload', '0') && $data['hsts_preload'] === '1'
+    && ((string)($effCfg['hsts_include_subdomains'] ?? '0') !== '1'
+        || (int)($effCfg['hsts_max_age'] ?? HSTS_MAX_AGE_DEFAULT) < HSTS_PRELOAD_MIN_AGE)) {
+    jsonResponse(['error' => __('api.settings.hsts_preload_requires', ['age' => HSTS_PRELOAD_MIN_AGE])], 400);
+}
+
+// Validate and sanitize donation_fields JSON
+if (isset($data['donation_fields'])) {
+    $fields = json_decode($data['donation_fields'], true);
+    if (!is_array($fields)) $fields = [];
+    $fields = array_slice($fields, 0, 15);
+    $clean = [];
+    foreach ($fields as $f) {
+        $label = trim($f['label'] ?? '');
+        $value = trim($f['value'] ?? '');
+        if ($label !== '' && $value !== '') {
+            $clean[] = ['label' => mb_substr($label, 0, 100), 'value' => mb_substr($value, 0, 500)];
+        }
+    }
+    $data['donation_fields'] = json_encode($clean, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+}
+
+// Guard the tracker service name: it is later handed to systemctl, so reject anything that isn't a
+// plain systemd unit name (letters, digits and . _ @ -). Empty is allowed — it disables the feature.
+if (isset($data['opentracker_service_name']) && $data['opentracker_service_name'] !== ''
+    && !isServiceNameValid($data['opentracker_service_name'])) {
+    jsonResponse(['error' => __('api.settings.service_name_invalid')], 400);
+}
+
+// Password confirmation when changing deletion limits
+$deleteCaptchaAttempts = trim((string)($input['delete_captcha_attempts'] ?? '2'));
+$deleteLockoutAttempts = trim((string)($input['delete_lockout_attempts'] ?? '5'));
+$deleteLockoutMinutes = trim((string)($input['delete_lockout_minutes'] ?? '60'));
+
+$currentDeleteCaptcha = $cfg['delete_captcha_attempts'] ?? '2';
+$currentDeleteLockout = $cfg['delete_lockout_attempts'] ?? '5';
+$currentDeleteLockoutMin = $cfg['delete_lockout_minutes'] ?? '60';
+
+$limitsChanged = $deleteCaptchaAttempts !== $currentDeleteCaptcha ||
+                 $deleteLockoutAttempts !== $currentDeleteLockout ||
+                 $deleteLockoutMinutes !== $currentDeleteLockoutMin;
+
+if ($limitsChanged) {
+    $confirmPassword = $input['confirm_password'] ?? '';
+    if (empty($confirmPassword)) {
+        jsonResponse(['error' => __('api.settings.reauth_required_limits'),
+                      'reauth_required' => true], 403);
+    }
+    requireAdminReauth($confirmPassword, $cfg);
+}
+
+// Password confirmation when changing what the server runs or whom it trusts ($reauthKeys above).
+// Checked AFTER validation so the prompt is only ever shown for a save that would otherwise go
+// through, and against the normalised value, so a cosmetic difference (trailing space) is not a
+// change. `reauth_required` is what the settings page keys the password modal on: the page does
+// not carry a copy of the list, it asks, gets this, and asks the operator.
+$reauthChanged = [];
+foreach ($reauthKeys as $k => $fallback) {
+    if (array_key_exists($k, $data) && $data[$k] !== (string)($cfg[$k] ?? $fallback)) $reauthChanged[] = $k;
+}
+// A Font Awesome PACKAGE is a stylesheet and fonts the operator brought, served to every visitor —
+// switching the site to one, or to another one, is the same kind of decision as a CSP host. Moving
+// between the two jsDelivr builds is not (both pinned, both with SRI), and neither are its styles.
+$faPackNow = ($data['fa_source'] ?? ($cfg['fa_source'] ?? 'cdn6')) === 'pack' ? (string)($data['fa_pack'] ?? ($cfg['fa_pack'] ?? '')) : '';
+$faPackWas = ($cfg['fa_source'] ?? 'cdn6') === 'pack' ? (string)($cfg['fa_pack'] ?? '') : '';
+if ($faPackNow !== '' && $faPackNow !== $faPackWas) $reauthChanged[] = 'fa_pack';
+if ($reauthChanged) {
+    $confirmPassword = (string)($input['confirm_password'] ?? '');
+    if ($confirmPassword === '') {
+        jsonResponse(['error' => __('api.settings.reauth_required', ['keys' => implode(', ', $reauthChanged)]),
+                      'reauth_required' => true, 'reauth_keys' => $reauthChanged], 403);
+    }
+    requireAdminReauth($confirmPassword, $cfg);
+}
+
+// The tracker mode is not an ordinary setting: it describes something OUTSIDE the database.
+//
+// Writing this row tells the panel which list to generate and what the public pages promise; it does
+// not move the symlinks or restart the service, and until now nothing said so. An operator could
+// select "whitelist", watch a whitelist file appear, and be served by the blacklist build — with
+// every status card agreeing, because they all read the row that had just been written.
+//
+// Saving still writes it (it really does govern the panel), but the answer now carries the truth,
+// and it is asked of the helper AFTER the write so it describes the state the admin is now in.
+$modeWasChanged = array_key_exists('tracker_mode', $data)
+    && (string)$data['tracker_mode'] !== (string)($cfg['tracker_mode'] ?? 'blacklist');
+
+// The BEFORE snapshot has to be taken while $cfg still holds it — after setSettings() there is
+// nothing left to compare against, and "what did this change" is the only question anybody asks of a
+// settings log.
+$auditDiff = function_exists('auditSettingsDiff') ? auditSettingsDiff($cfg, $data) : [];
+
+setSettings($db, $data);
+
+if (array_key_exists('rep_mode', $data) && (string)$data['rep_mode'] !== (string)($cfg['rep_mode'] ?? 'thumbs') && function_exists('repRecountAll')) {
+    repRecountAll($db, $data + $cfg);
+}
+
+if ($auditDiff) {
+    auditNote([
+        'summary' => count($auditDiff) . ' setting' . (count($auditDiff) === 1 ? '' : 's') . ' changed: '
+                   . mb_substr(implode(', ', array_keys($auditDiff)), 0, 180),
+        'detail'  => $auditDiff,
+    ]);
+}
+
+// The panel bakes the sign-in address into <body data-login-path> at render time and the Logout
+// buttons read it from there; saving is pure AJAX, so hand the applied value back and let the page
+// refresh it — otherwise Logout would keep pointing at the address that was just replaced.
+$applied = [];
+if (array_key_exists('admin_login_path', $data)) $applied['admin_login_path'] = adminLoginPath($data + $cfg);
+
+$warning = null;
+if ($modeWasChanged) {
+    $cfg['tracker_mode'] = (string)$data['tracker_mode'];
+    $agree = function_exists('scheduleModeAgreement') ? scheduleModeAgreement($cfg, true) : ['known' => false];
+    if (!empty($agree['known']) && $agree['match'] === false) {
+        $warning = __('api.settings.saved_tracker_not_switched', ['actual' => $agree['actual'], 'panel' => $agree['panel']]);
+    } elseif (empty($agree['known'])) {
+        $warning = __('api.settings.saved_mode_unconfirmed', ['detail' => (!empty($agree['error']) ? ' (' . $agree['error'] . ')' : '')]);
+    }
+}
+
+jsonResponse(['success' => true] + ($applied ? ['applied' => $applied] : [])
+             + ($warning !== null ? ['warning' => $warning] : []));

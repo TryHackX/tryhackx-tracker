@@ -1,0 +1,1402 @@
+<?php
+/**
+ * Whitelist service.
+ *
+ * Design (see README "Whitelist mode"):
+ *  - The `whitelist` table is the source of truth. The OpenTracker accesslist file is a DERIVED
+ *    artefact: regenerated atomically (write temp file in the same directory, chmod, rename) and
+ *    appended for plain additions. PHP never parses the whole file on a request.
+ *  - OpenTracker WHITE mode is fail-closed: an empty/unreadable file at start rejects every
+ *    announce, so we refuse to write an empty file and surface the condition in the panel.
+ *  - Reloads (SIGHUP via `systemctl reload`) are debounced: OpenTracker keeps superseded list
+ *    generations for 5 minutes (20 B/entry each), so we coalesce. Additions are lazy (>= N seconds
+ *    between reloads), removals/bans are urgent (short coalescing window + a cap per 5 minutes).
+ *  - Appends and regenerations are serialised on one lock file (LOCK_SH for append, LOCK_EX for
+ *    regen) so an append can never be lost under a concurrent regeneration.
+ *  - All state lives in config/whitelist_state.json (web-denied dir), read-modify-written under
+ *    LOCK_EX. No settings-table churn on every add.
+ *
+ * Canonical hash form everywhere: lowercase 40-hex. Base32 is decoded on input.
+ */
+
+const WL_REGEN_EVERY_APPENDS   = 2000;   // full regeneration after this many appends (bounds file drift)
+const WL_RELOAD_URGENT_INTERVAL = 15;    // seconds between "urgent" reloads (removals/bans)
+const WL_RELOAD_MAX_PER_5MIN   = 12;     // hard cap of SIGHUPs per 5-minute window (memory: old generations)
+const WL_RELOAD_FAIL_BACKOFF   = [45, 90, 180, 300]; // seconds after 1st, 2nd, 3rd, 4th+ consecutive failure
+const WL_SCRAPE_TTL            = 60;     // seconds to cache seeders/leechers from OpenTracker
+const WL_TMP_MAX_AGE           = 3600;   // stale *.tmp.* files older than this are removed by the janitor
+const WL_REGEN_LOCK_TIMEOUT    = 10;     // seconds to wait for the regen lock before reporting busy
+const WL_META_AUTO_SOURCES     = ['api', 'forum', 'admin']; // sources whose hashes get metadata fetched automatically
+const WL_SQL_IN_CHUNK          = 5000;   // max placeholders per IN (...) — MySQL caps native prepares at 65 535
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Small helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ipBucket() — the address group every per-address limit keys by — is in includes/functions.php since 1.74.0.
+
+function trackerMode(array $cfg): string {
+    return (($cfg['tracker_mode'] ?? 'blacklist') === 'whitelist') ? 'whitelist' : 'blacklist';
+}
+
+function whitelistPath(array $cfg): string {
+    return normalizeListPath((string)($cfg['whitelist_path'] ?? ''));
+}
+
+/** Strip NUL/control characters from a configured list-file path (shared by black/whitelist). */
+function normalizeListPath(string $path): string {
+    return preg_replace('/[\x00-\x1F\x7F]/', '', trim($path));
+}
+
+/**
+ * The whitelist file is REPLACED by rename() as the web user, so unlike the append-only blacklist a
+ * misconfigured path could clobber files the web user owns. Only accept an absolute path outside the
+ * application/document root whose target is not a symlink and does not look like web-executable.
+ * Returns ['ok'=>bool,'error'=>?string].
+ */
+function validateWhitelistPath(string $path): array {
+    $path = normalizeListPath($path);
+    if ($path === '') return ['ok' => false, 'error' => __('api.wl.path_empty')];
+    $isWindows = PHP_OS_FAMILY === 'Windows';
+    if (!$isWindows && $path[0] !== '/') return ['ok' => false, 'error' => __('api.wl.path_not_absolute')];
+    $base = strtolower(basename($path));
+    if (preg_match('/\.(php\d*|phtml|phar|htaccess|htpasswd)$/i', $base) || $base === '.htaccess') {
+        return ['ok' => false, 'error' => __('api.wl.path_web_executable')];
+    }
+    $dir = dirname($path);
+    $realDir = @realpath($dir);
+    if ($realDir === false) return ['ok' => false, 'error' => __('api.wl.path_dir_missing', ['dir' => $dir])];
+    $appRoot = @realpath(__DIR__ . '/..');
+    $dr = (string)($_SERVER['DOCUMENT_ROOT'] ?? '');
+    $docRoot = $dr !== '' ? @realpath($dr) : false;   // CLI: realpath('') would be the cwd
+    foreach (array_filter([$appRoot, $docRoot]) as $root) {
+        $root = rtrim($root, '/\\');
+        if ($root !== '' && ($realDir === $root || str_starts_with($realDir . DIRECTORY_SEPARATOR, $root . DIRECTORY_SEPARATOR))) {
+            return ['ok' => false, 'error' => __('api.wl.path_inside_app', ['root' => $root])];
+        }
+    }
+    if (is_link($path)) return ['ok' => false, 'error' => __('api.wl.path_symlink')];
+    return ['ok' => true, 'error' => null];
+}
+
+/**
+ * Permission diagnostics for a list file. For the whitelist the DIRECTORY must be writable (temp
+ * file + rename) and the file, if present, readable; the file itself need not be writable (a
+ * non-writable file simply forces a regeneration, which takes ownership). For the blacklist the
+ * legacy in-place semantics apply (file writable or dir writable when absent).
+ * Returns ['ok','errors','suggestions'] — the same shape the JS already renders.
+ */
+function checkListFilePermissions(string $path, string $label = 'whitelist', bool $needDirWritable = true): array {
+    $result = ['ok' => false, 'errors' => [], 'suggestions' => []];
+    $path = normalizeListPath($path);
+    $isWindows = PHP_OS_FAMILY === 'Windows';
+    if ($path === '') {
+        $result['errors'][] = ucfirst($label) . ' path is not configured.';
+        $result['suggestions'][] = 'Set the ' . $label . ' file path in Admin > Settings.';
+        return $result;
+    }
+    if ($label === 'whitelist') {
+        $v = validateWhitelistPath($path);
+        if (!$v['ok']) { $result['errors'][] = $v['error']; return $result; }
+    }
+    $dir = dirname($path);
+    if (!is_dir($dir)) {
+        $result['errors'][] = "Directory does not exist: $dir";
+        $result['suggestions'][] = $isWindows
+            ? 'Create the directory manually or choose a path under your WAMP www folder.'
+            : "Create it: sudo install -d -o tracker -g www-data -m 2770 $dir";
+        return $result;
+    }
+    $phpUser = function_exists('posix_geteuid') && function_exists('posix_getpwuid') ? (posix_getpwuid(posix_geteuid())['name'] ?? 'www-data') : 'www-data';
+    if (file_exists($path)) {
+        if (!is_readable($path)) {
+            $result['errors'][] = ucfirst($label) . " file exists but is not readable: $path";
+            $result['suggestions'][] = $isWindows ? 'Grant the Apache/WAMP user Read permission on the file.' : "Fix permissions: sudo chmod 644 $path";
+        }
+        if (!$needDirWritable && !is_writable($path)) {
+            $result['errors'][] = ucfirst($label) . " file exists but is not writable: $path";
+            $result['suggestions'][] = $isWindows ? 'Grant the Apache/WAMP user Write permission on the file.' : "Fix permissions: sudo chmod 664 $path && sudo chgrp $phpUser $path";
+        }
+        if (is_link($path)) {
+            $result['errors'][] = "$path is a symlink — refusing to replace it.";
+        }
+    } elseif (!$needDirWritable && !is_writable($dir)) {
+        $result['errors'][] = "Directory is not writable (cannot create $label file): $dir";
+        $result['suggestions'][] = $isWindows ? 'Grant the Apache/WAMP user Write permission on the folder.' : "Fix directory permissions: sudo chown $phpUser:$phpUser $dir && sudo chmod 775 $dir";
+    }
+    if ($needDirWritable && !is_writable($dir)) {
+        $result['errors'][] = "Directory is not writable by the web user ($phpUser) — the $label is written as a temp file and renamed, so the directory must be writable: $dir";
+        $result['suggestions'][] = $isWindows
+            ? 'Grant the Apache/WAMP user Write permission on the folder.'
+            : "Recommended layout: sudo install -d -o tracker -g $phpUser -m 2770 $dir   (setgid dir; the tracker user reads, PHP writes)";
+    }
+    if (empty($result['errors'])) {
+        $result['ok'] = true;
+        if (!file_exists($path)) {
+            $result['suggestions'][] = 'File does not exist yet — it will be created by "Regenerate file" (or on the first addition).';
+        }
+    }
+    return $result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State file (config/whitelist_state.json)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function whitelistStateFile(): string { return __DIR__ . '/../config/whitelist_state.json'; }
+function whitelistRegenLockFile(): string { return __DIR__ . '/../config/whitelist_regen.lock'; }
+function whitelistStateLockFile(): string { return __DIR__ . '/../config/whitelist_state.lock'; }
+
+function whitelistStateDefaults(): array {
+    return [
+        'generated_at' => 0, 'count' => 0, 'bytes' => 0, 'appended_since_regen' => 0,
+        'regen_needed' => false, 'regen_needed_since' => 0, 'last_error' => null, 'last_error_at' => 0,
+        'pending_reload' => false, 'urgent' => false, 'dirty_since' => 0,
+        'last_reload_at' => 0, 'last_reload_ok' => null, 'last_reload_attempt_at' => 0,
+        'last_reload_output' => '', 'fail_count' => 0, 'reloads' => [],
+    ];
+}
+
+function whitelistStateRead(): array {
+    $f = whitelistStateFile();
+    $data = [];
+    if (is_file($f)) {
+        $raw = @file_get_contents($f);
+        $data = $raw ? (json_decode($raw, true) ?: []) : [];
+    }
+    return array_merge(whitelistStateDefaults(), is_array($data) ? $data : []);
+}
+
+/**
+ * Atomic read-modify-write of the state file. $fn receives the current state array by reference
+ * and may return false to abort without writing. Returns the (possibly updated) state.
+ */
+function whitelistStateUpdate(callable $fn): array {
+    $lockH = @fopen(whitelistStateLockFile(), 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        $state = whitelistStateRead();
+        $r = $fn($state);
+        if ($r !== false) {
+            $tmp = whitelistStateFile() . '.tmp.' . getmypid();
+            @file_put_contents($tmp, json_encode($state), LOCK_EX);
+            @rename($tmp, whitelistStateFile());
+        }
+        return $state;
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File generation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Acquire the regeneration lock. Exclusive for a regen, shared for an append. Waits up to
+ * $timeout seconds (0 = non-blocking). Returns the handle (keep it until done) or null.
+ */
+function whitelistRegenLock(bool $exclusive, int $timeout = WL_REGEN_LOCK_TIMEOUT) {
+    $h = @fopen(whitelistRegenLockFile(), 'c');
+    if (!$h) return null;
+    $flag = ($exclusive ? LOCK_EX : LOCK_SH) | LOCK_NB;
+    $deadline = microtime(true) + $timeout;
+    while (true) {
+        if (@flock($h, $flag)) return $h;
+        if (microtime(true) >= $deadline) { @fclose($h); return null; }
+        usleep(100000);
+    }
+}
+
+function whitelistRegenUnlock($h): void {
+    if ($h) { @flock($h, LOCK_UN); @fclose($h); }
+}
+
+/**
+ * Rewrite the whitelist file from the database, atomically. Refuses to install an EMPTY file
+ * (OpenTracker WHITE mode would then reject everything). Returns
+ * ['ok'=>bool,'count'=>int,'bytes'=>int,'ms'=>int,'error'=>?string,'busy'=>bool].
+ */
+function whitelistRegenerate(PDO $db, array $cfg): array {
+    $t0 = microtime(true);
+    $path = whitelistPath($cfg);
+    $perm = checkListFilePermissions($path, 'whitelist', true);
+    if (!$perm['ok']) {
+        $err = implode(' ', $perm['errors']);
+        whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
+        return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => 0, 'error' => $err, 'busy' => false, 'errors' => $perm['errors'], 'suggestions' => $perm['suggestions']];
+    }
+    $lock = whitelistRegenLock(true);
+    if (!$lock) {
+        whitelistStateUpdate(function (&$s) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); });
+        return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => 0, 'error' => 'busy', 'busy' => true];
+    }
+    $tmp = $path . '.tmp.' . getmypid();
+    $fh = null;
+    try {
+        $fh = @fopen($tmp, 'wb');
+        if (!$fh) {
+            $err = __('api.wl.regen_tmp_failed', ['dir' => dirname($path)]);
+            whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; $s['last_error'] = $err; $s['last_error_at'] = time(); });
+            return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => 0, 'error' => $err, 'busy' => false];
+        }
+        // Keyset pagination keeps memory flat and avoids unbuffered-query pitfalls on the shared PDO.
+        $count = 0; $bytes = 0; $last = ''; $writeFailed = false;
+        // a short/failed write must never be renamed into place: OpenTracker would silently lose the tail
+        $put = function (string $buf) use (&$fh, &$bytes, &$writeFailed): bool {
+            $n = @fwrite($fh, $buf);
+            if ($n === false || $n !== strlen($buf)) { $writeFailed = true; return false; }
+            $bytes += $n; return true;
+        };
+        // probe_status: a submission that FAILED to prove itself is not served. One that is still proving
+        // itself ('probing') IS (1.73.0): its proof is a peer announcing to THIS tracker, and in whitelist
+        // mode opentracker refuses the announces of a hash its list does not carry — so a probe whose hash
+        // is not served can never pass. The add path always appended it; this query used to drop it, so any
+        // full regeneration in the probe's minutes (another probe passing, a ban, the append threshold)
+        // withdrew it and the probe then failed for a reason that was not the torrent's. 'none' covers every
+        // row registered before the feature existed, and every row when it is switched off — so turning it on
+        // never retroactively unpublishes anything.
+        // review_status: a partner submission waiting for a person, or one a person turned down, is
+        // not served. 'none' covers every row registered before this column existed and every row
+        // from a key allowed to publish directly — so switching the feature on never retroactively
+        // unpublishes anything, which is the same promise probe_status makes on the line above.
+        //
+        // THIS IS THE MOST DANGEROUS QUERY IN THE FILE. It decides what the tracker answers for.
+        // The guard against a zero-row result further down is why: a WHERE that accidentally matches
+        // nothing must not be written out as an empty accesslist.
+        $stmt = $db->prepare("SELECT info_hash FROM whitelist
+                               WHERE banned = 0 AND probe_status IN ('none','probing','passed')
+                                 AND review_status IN ('none','approved') AND info_hash > ?
+                               ORDER BY info_hash LIMIT 50000");
+        while (!$writeFailed) {
+            $stmt->execute([$last]);
+            $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            if (!$rows) break;
+            $buf = '';
+            foreach ($rows as $h) {
+                $h = strtolower($h);
+                if (strlen($h) !== 40) continue;
+                $buf .= $h . "\n";
+                $count++;
+                if (strlen($buf) >= 65536) { if (!$put($buf)) break; $buf = ''; }
+            }
+            if (!$writeFailed && $buf !== '') $put($buf);
+            $last = end($rows);
+            if (count($rows) < 50000) break;
+        }
+        if (!$writeFailed && @fflush($fh) === false) $writeFailed = true;
+        if (@fclose($fh) === false) $writeFailed = true;
+        $fh = null;
+        clearstatcache(true, $tmp);
+        if ($writeFailed || $bytes !== $count * 41 || @filesize($tmp) !== $bytes) {
+            @unlink($tmp);
+            $err = __('api.wl.regen_write_failed');
+            whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
+            return ['ok' => false, 'count' => $count, 'bytes' => $bytes, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
+        }
+        if ($count === 0) {
+            @unlink($tmp);
+            $err = __('api.wl.regen_empty_refused');
+            whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
+            return ['ok' => false, 'count' => 0, 'bytes' => 0, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
+        }
+        @chmod($tmp, 0644);
+        if (!@rename($tmp, $path)) {
+            @unlink($tmp);
+            $err = __('api.wl.regen_rename_failed', ['path' => $path]);
+            whitelistStateUpdate(function (&$s) use ($err) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); $s['last_error'] = $err; $s['last_error_at'] = time(); });
+            return ['ok' => false, 'count' => $count, 'bytes' => $bytes, 'ms' => (int)((microtime(true) - $t0) * 1000), 'error' => $err, 'busy' => false];
+        }
+        $ms = (int)((microtime(true) - $t0) * 1000);
+        whitelistStateUpdate(function (&$s) use ($count, $bytes) {
+            $s['generated_at'] = time(); $s['count'] = $count; $s['bytes'] = $bytes;
+            $s['appended_since_regen'] = 0; $s['regen_needed'] = false; $s['regen_needed_since'] = 0;
+            $s['last_error'] = null;
+        });
+        return ['ok' => true, 'count' => $count, 'bytes' => $bytes, 'ms' => $ms, 'error' => null, 'busy' => false];
+    } finally {
+        if ($fh) { @fclose($fh); @unlink($tmp); }
+        whitelistRegenUnlock($lock);
+    }
+}
+
+/**
+ * Fast path for additions: append lines under a SHARED regen lock (so a concurrent regeneration
+ * cannot swallow them). Falls back to a full regeneration when the file is missing, empty or not
+ * writable by the web user. Returns ['ok'=>bool,'mode'=>'append'|'regen'|'skipped','error'=>?string].
+ */
+function whitelistAppendHashes(PDO $db, array $cfg, array $hashes): array {
+    $hashes = array_values(array_unique(array_filter(array_map('strtolower', $hashes), 'isValidInfoHash')));
+    if (!$hashes) return ['ok' => true, 'mode' => 'skipped', 'error' => null];
+    $path = whitelistPath($cfg);
+    if ($path === '') return ['ok' => false, 'mode' => 'skipped', 'error' => __('api.wl.path_not_configured')];
+    $needRegen = !is_file($path) || @filesize($path) === 0 || !is_writable($path);
+    if (!$needRegen) {
+        $lock = whitelistRegenLock(false, 5);
+        if ($lock) {
+            try {
+                $fh = @fopen($path, 'ab');
+                if ($fh) {
+                    @flock($fh, LOCK_EX);
+                    $ok = fwrite($fh, implode("\n", $hashes) . "\n") !== false;
+                    fflush($fh); @flock($fh, LOCK_UN); fclose($fh);
+                    if ($ok) {
+                        $n = count($hashes);
+                        $state = whitelistStateUpdate(function (&$s) use ($n) {
+                            $s['appended_since_regen'] = (int)$s['appended_since_regen'] + $n;
+                            $s['count'] = (int)$s['count'] + $n;
+                            if ($s['appended_since_regen'] >= WL_REGEN_EVERY_APPENDS) { $s['regen_needed'] = true; if (!$s['regen_needed_since']) $s['regen_needed_since'] = time(); }
+                        });
+                        whitelistRegenUnlock($lock); $lock = null;
+                        if (!empty($state['regen_needed'])) whitelistRegenerate($db, $cfg);
+                        return ['ok' => true, 'mode' => 'append', 'error' => null];
+                    }
+                }
+            } finally {
+                if ($lock) whitelistRegenUnlock($lock);
+            }
+        }
+    }
+    $r = whitelistRegenerate($db, $cfg);
+    return ['ok' => $r['ok'], 'mode' => 'regen', 'error' => $r['error']];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reload (SIGHUP) policy
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Mark the tracker's in-memory list as stale. Urgent = a hash was REMOVED/banned (still served until reload). */
+function whitelistMarkDirty(bool $urgent = false): void {
+    whitelistStateUpdate(function (&$s) use ($urgent) {
+        $s['pending_reload'] = true;
+        if ($urgent) $s['urgent'] = true;
+        if (!$s['dirty_since']) $s['dirty_since'] = time();
+    });
+}
+
+/** Seconds until the next lazy reload may fire (0 = now). Used to tell public submitters when they become active. */
+function whitelistSecondsToNextReload(array $cfg): int {
+    $s = whitelistStateRead();
+    $min = max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45));
+    $next = (int)$s['last_reload_at'] + $min;
+    return max(0, $next - time());
+}
+
+/**
+ * Fire `systemctl reload` if policy allows. Returns null when nothing was attempted, otherwise
+ * ['attempted'=>true,'ok'=>bool,'output'=>string]. Never throws.
+ */
+function whitelistMaybeReload(array $cfg, bool $force = false): ?array {
+    if (($cfg['opentracker_auto_reload'] ?? '1') !== '1' && !$force) return null;
+    $service = trim((string)($cfg['opentracker_service_name'] ?? ''));
+    if ($service === '' || !isServiceNameValid($service) || !trackerExecAvailable()) return null;
+
+    $now = time();
+    $min = max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45));
+    $go = false;
+    whitelistStateUpdate(function (&$s) use (&$go, $now, $min, $force) {
+        if (!$force && !$s['pending_reload']) return false;
+        // prune reload history to the last 5 minutes
+        $s['reloads'] = array_values(array_filter((array)$s['reloads'], fn($t) => ($now - (int)$t) < 300));
+        if (!$force) {
+            // failure backoff
+            if ($s['fail_count'] > 0) {
+                $idx = min((int)$s['fail_count'], count(WL_RELOAD_FAIL_BACKOFF)) - 1;
+                if (($now - (int)$s['last_reload_attempt_at']) < WL_RELOAD_FAIL_BACKOFF[$idx]) return false;
+            }
+            $since = $now - (int)$s['last_reload_at'];
+            if ($s['urgent']) {
+                if ($since < WL_RELOAD_URGENT_INTERVAL) return false;
+                if (count($s['reloads']) >= WL_RELOAD_MAX_PER_5MIN) return false;
+            } else {
+                if ($since < $min) return false;
+            }
+        }
+        $go = true;
+        $s['last_reload_attempt_at'] = $now;
+        return true;
+    });
+    if (!$go) return null;
+
+    $res = runTrackerServiceCommand('reload', $cfg);
+    whitelistNoteReloaded($res['ok'], $res['output']);
+    if ($res['ok'] && function_exists('resetBlacklistChanges')) resetBlacklistChanges();
+    return ['attempted' => true, 'ok' => $res['ok'], 'output' => $res['output']];
+}
+
+/** Record the outcome of a reload/restart (called by the panel endpoints too). */
+function whitelistNoteReloaded(bool $ok, string $output = ''): void {
+    whitelistStateUpdate(function (&$s) use ($ok, $output) {
+        $now = time();
+        $s['last_reload_attempt_at'] = $now;
+        $s['last_reload_ok'] = $ok;
+        $s['last_reload_output'] = mb_substr($output, 0, 500);
+        if ($ok) {
+            $s['last_reload_at'] = $now;
+            $s['pending_reload'] = false; $s['urgent'] = false; $s['dirty_since'] = 0; $s['fail_count'] = 0;
+            $r = array_values(array_filter((array)$s['reloads'], fn($t) => ($now - (int)$t) < 300));
+            $r[] = $now; $s['reloads'] = $r;
+        } else {
+            $s['fail_count'] = (int)$s['fail_count'] + 1;
+        }
+    });
+}
+
+/**
+ * Per-request janitor: fire due reloads/regens, clean stale temp files. Cheap when idle (one small
+ * JSON read). Safe to call on every request including pollers. Also called by tools/janitor.php
+ * from a systemd timer so pending work completes even without web traffic.
+ */
+function whitelistJanitor(PDO $db, array $cfg): void {
+    if (trackerMode($cfg) !== 'whitelist') return;
+    static $done = false;
+    if ($done) return;
+    $done = true;
+    try {
+        $s = whitelistStateRead();
+        if (!empty($s['regen_needed'])) {
+            $r = whitelistRegenerate($db, $cfg);
+            if ($r['ok']) whitelistMarkDirty(true);
+            $s = whitelistStateRead();
+        }
+        if (!empty($s['pending_reload'])) whitelistMaybeReload($cfg);
+        // stale temp files (a fatal between fopen and rename)
+        $path = whitelistPath($cfg);
+        if ($path !== '' && is_dir(dirname($path)) && mt_rand(1, 20) === 1) {
+            foreach ((array)@glob($path . '.tmp.*') as $tmp) {
+                if (@filemtime($tmp) < time() - WL_TMP_MAX_AGE) @unlink($tmp);
+            }
+        }
+        // The expired API bans' retention moved to the janitor in 1.73.0 (includes/retention.php → apiBansPrune()):
+        // here it ran only in whitelist mode and on one request in fifty.
+    } catch (\Throwable $e) {
+        error_log('[whitelist janitor] ' . $e->getMessage());
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Clean a PLAIN display name (API/admin/metadata): strip control chars, collapse whitespace, cap length. */
+function cleanTorrentName(?string $name): ?string {
+    if ($name === null) return null;
+    $name = preg_replace('/[\x00-\x1F\x7F]/u', ' ', $name) ?? '';
+    $name = trim(preg_replace('/\s+/u', ' ', $name) ?? '');
+    if ($name === '') return null;
+    if (!mb_check_encoding($name, 'UTF-8')) $name = mb_convert_encoding($name, 'UTF-8', 'UTF-8');
+    return mb_substr($name, 0, 255);
+}
+
+/**
+ * Parse one token: a magnet link (hex or base32 btih) or a bare 40-hex / 32-base32 hash.
+ * Returns ['input','hash'=>?string,'name'=>?string,'magnet'=>?string,'error'=>?string].
+ */
+function parseMagnetOrHash(string $token): array {
+    $token = trim($token);
+    $out = ['input' => mb_substr($token, 0, 2048), 'hash' => null, 'name' => null, 'magnet' => null, 'error' => null];
+    if ($token === '') { $out['error'] = 'empty'; return $out; }
+    if (preg_match('/^magnet:\?/i', $token)) {
+        if (!preg_match('/[?&]xt=urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})(?![a-zA-Z0-9])/i', $token, $m)) {
+            $out['error'] = __('api.wl.magnet_no_btih');
+            return $out;
+        }
+        $raw = $m[1];
+        $hash = strlen($raw) === 40 ? strtolower($raw) : (base32ToHex(strtoupper($raw)) ?? null);
+        if (!$hash || !isValidInfoHash($hash)) { $out['error'] = __('api.wl.invalid_base32'); return $out; }
+        $out['hash'] = strtolower($hash);
+        // dn= is percent-encoded (and '+' means space in practice) — decode HERE only, never for plain names
+        if (preg_match('/[?&]dn=([^&]+)/i', $token, $dn)) $out['name'] = cleanTorrentName(rawurldecode(str_replace('+', ' ', $dn[1])));
+        $out['magnet'] = mb_substr($token, 0, 2048);
+        return $out;
+    }
+    if (preg_match('/^(?:urn:btih:)?([a-fA-F0-9]{40})$/i', $token, $m)) { $out['hash'] = strtolower($m[1]); return $out; }
+    if (preg_match('/^(?:urn:btih:)?([a-zA-Z2-7]{32})$/i', $token, $m)) {
+        $hash = base32ToHex(strtoupper($m[1]));
+        if ($hash && isValidInfoHash($hash)) { $out['hash'] = strtolower($hash); return $out; }
+        $out['error'] = __('api.wl.invalid_base32'); return $out;
+    }
+    $out['error'] = __('api.wl.not_magnet_or_hash');
+    return $out;
+}
+
+/**
+ * Parse free text (one magnet/hash per line, commas/whitespace also accepted between magnets).
+ * Deduplicates by hash (first occurrence wins). Returns ['items'=>[...], 'too_many'=>bool].
+ */
+function parseHashInput(string $text, int $max): array {
+    $text = str_replace(["\r\n", "\r", "\xEF\xBB\xBF"], ["\n", "\n", ''], $text); // normalise EOL, drop UTF-8 BOMs
+    // split on newlines and on whitespace/commas that separate tokens; magnets contain no whitespace
+    $tokens = preg_split('/[\s,;]+/', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $items = []; $seen = []; $tooMany = false;
+    foreach ($tokens as $tok) {
+        if (count($items) >= $max) { $tooMany = true; break; }
+        $p = parseMagnetOrHash($tok);
+        if ($p['hash'] !== null) {
+            if (isset($seen[$p['hash']])) continue;
+            $seen[$p['hash']] = true;
+        }
+        $items[] = $p;
+    }
+    return ['items' => $items, 'too_many' => $tooMany];
+}
+
+/**
+ * Hosts (lowercase, no port) that count as "our tracker" for the require-our-tracker filter:
+ * the configured `whitelist_tracker_hosts` list plus, always, the hosts of the announce URLs.
+ */
+function whitelistTrackerHosts(array $cfg): array {
+    $hosts = [];
+    foreach (preg_split('/[\s,;]+/', (string)($cfg['whitelist_tracker_hosts'] ?? '')) ?: [] as $h) {
+        $h = strtolower(trim($h, " \t\r\n/."));
+        if ($h === '') continue;
+        if (preg_match('#^[a-z]+://#', $h)) $h = (string)(parse_url($h, PHP_URL_HOST) ?? '');
+        elseif (preg_match('/^(.+):\d{1,5}$/', $h, $m) && !preg_match('/^[0-9a-f:]+$/i', $h)) $h = $m[1]; // host:port (not a bare IPv6)
+        $h = trim($h, '[]');
+        if ($h !== '') $hosts[$h] = true;
+    }
+    foreach (['announce_url', 'announce_url_https'] as $k) {
+        $u = trim((string)($cfg[$k] ?? ''));
+        $h = $u !== '' ? strtolower((string)(parse_url($u, PHP_URL_HOST) ?? '')) : '';
+        if ($h !== '') $hosts[trim($h, '[]')] = true;
+    }
+    return array_keys($hosts);
+}
+
+/** Hosts (lowercase, no port, no brackets) of every tr= parameter of a magnet URI. */
+function magnetTrackerHosts(string $magnet): array {
+    $out = [];
+    if (!preg_match_all('/[?&]tr=([^&#]+)/i', $magnet, $mm)) return $out;
+    foreach ($mm[1] as $enc) {
+        $u = rawurldecode(str_replace('+', '%20', $enc));
+        $h = (string)(parse_url(trim($u), PHP_URL_HOST) ?? '');
+        if ($h !== '') $out[strtolower(trim($h, '[]'))] = true;
+    }
+    return array_keys($out);
+}
+
+/** True when the magnet announces to at least one of the given hosts. */
+function magnetHasTrackerHost(string $magnet, array $hosts): bool {
+    if (!$hosts) return false;
+    $set = array_fill_keys(array_map('strtolower', $hosts), true);
+    foreach (magnetTrackerHosts($magnet) as $h) if (isset($set[$h])) return true;
+    return false;
+}
+
+/** Build a magnet link for a hash using this tracker's configured announce URLs. */
+function buildMagnet(string $hash, ?string $name, array $cfg): string {
+    $m = 'magnet:?xt=urn:btih:' . strtolower($hash);
+    if ($name !== null && $name !== '') $m .= '&dn=' . rawurlencode($name);
+    foreach (announceUrls($cfg) as $u) {
+        if (preg_match('#^(udp|https?|wss?)://#i', $u)) $m .= '&tr=' . rawurlencode($u);
+    }
+    return $m;
+}
+
+/**
+ * Every announce URL a client should be handed, in one place.
+ *
+ * Extra opentracker instances listen on their OWN ports and share nothing between them. So an extra
+ * instance receives exactly the announces whose magnet names its port,
+ * and nothing else. Which makes this function, unglamorous as it is, the thing that decides whether
+ * running more than one is worth anything at all.
+ *
+ * With the cluster off it returns the two URLs the panel has always rendered, byte for byte, and
+ * reads nothing from disk -- so an install that never enabled it pays nothing and changes nothing.
+ */
+function announceUrls(array $cfg): array {
+    if (function_exists('otClusterAnnounceUrls')) return otClusterAnnounceUrls($cfg);
+    $urls = [];
+    foreach (['announce_url', 'announce_url_https'] as $k) {
+        $u = trim((string)($cfg[$k] ?? ''));
+        if ($u !== '') $urls[] = $u;
+    }
+    return $urls;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Database operations
+// ─────────────────────────────────────────────────────────────────────────────
+
+function isHashBanned(PDO $db, string $hash): bool {
+    $st = $db->prepare("SELECT 1 FROM banned_hashes WHERE info_hash = ? LIMIT 1");
+    $st->execute([strtolower($hash)]);
+    return (bool)$st->fetchColumn();
+}
+
+function isHashWhitelisted(PDO $db, string $hash): ?array {
+    $st = $db->prepare("SELECT id, info_hash, name, source, banned, created_at FROM whitelist WHERE info_hash = ? LIMIT 1");
+    $st->execute([strtolower($hash)]);
+    $r = $st->fetch();
+    return $r ?: null;
+}
+
+/**
+ * Shared "add hashes" for the public form, the S2S API and the admin panel.
+ * $items = parseHashInput()['items']; $ctx = ['source'=>web|api|admin|forum, 'ip'=>string,
+ * 'api_client_id'=>?int, 'ref'=>?array, 'auto_meta'=>?bool].
+ * Returns ['results'=>[{input,hash,status,error}], 'summary'=>{added,exists,banned,invalid},
+ *          'added_hashes'=>[], 'file'=>{ok,mode,error}, 'reload'=>?array, 'active_in_seconds'=>int].
+ */
+function whitelistAddHashes(PDO $db, array $cfg, array $items, array $ctx): array {
+    $source = in_array($ctx['source'] ?? '', ['web', 'api', 'admin', 'forum'], true) ? $ctx['source'] : 'web';
+    $ip = (string)($ctx['ip'] ?? '');
+    $bucket = $ip !== '' ? ipBucket($ip) : '';
+    $apiClientId = isset($ctx['api_client_id']) ? (int)$ctx['api_client_id'] : null;
+    $ref = isset($ctx['ref']) && is_array($ctx['ref']) ? json_encode($ctx['ref'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE) : null;
+    if ($ref !== null && strlen($ref) > 512) $ref = mb_strcut($ref, 0, 512);
+    $autoMeta = $ctx['auto_meta'] ?? in_array($source, WL_META_AUTO_SOURCES, true);
+    // v47: who registered it, and whether they want it on their profile.
+    //
+    // Through $ctx with a NULL default, because this function is shared by the public form, the S2S
+    // API and the panel — a new required argument would break the two that never have a submitter.
+    // NULL means nobody's, and it stays that way: an anonymous submission has no owner and there is
+    // no "claim this as mine" anywhere. The only artefact that could support such a claim is the ip
+    // bucket, which is not evidence, and comparing it against a signed-in reader's address would be
+    // the privacy problem, not the answer to one.
+    $submitterId = isset($ctx['submitter_id']) && (int)$ctx['submitter_id'] > 0 ? (int)$ctx['submitter_id'] : null;
+    $submitterPublic = ($submitterId !== null && !empty($ctx['submitter_public'])) ? 1 : 0;
+    // v48: 'pending' holds the row out of the accesslist until a person says otherwise. Default
+    // 'none' — the caller has to ask for a review, so every existing path keeps publishing directly.
+    $review = ($ctx['review'] ?? '') === 'pending' ? 'pending' : 'none';
+
+    $results = []; $summary = ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0];
+    $valid = [];
+    foreach ($items as $i => $it) {
+        if (empty($it['hash'])) {
+            $results[$i] = ['index' => $i, 'input' => $it['input'] ?? '', 'hash' => null, 'status' => 'invalid', 'error' => $it['error'] ?? 'invalid'];
+            $summary['invalid']++;
+        } else {
+            $valid[$i] = $it;
+        }
+    }
+    $addedHashes = [];
+    if ($valid) {
+        $hashes = array_values(array_unique(array_map(fn($it) => $it['hash'], $valid)));
+        // chunked IN() lists: native prepares are capped at 65 535 placeholders (CLI bulk add can exceed it)
+        $banned = []; $existing = [];
+        foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
+            $ph = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $db->prepare("SELECT info_hash FROM banned_hashes WHERE info_hash IN ($ph)");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $h) $banned[$h] = true;
+            $st = $db->prepare("SELECT info_hash, banned FROM whitelist WHERE info_hash IN ($ph)");
+            $st->execute($chunk);
+            foreach ($st->fetchAll() as $row) $existing[$row['info_hash']] = (int)$row['banned'];
+        }
+
+        $ins = $db->prepare("INSERT IGNORE INTO whitelist (info_hash, name, magnet_link, source, source_ref, api_client_id, ip, ip_bucket, meta_status, meta_requested_at, submitter_id, submitter_public, review_status)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        // WHAT A SUBMITTED MAGNET MAY CARRY INTO THE TABLE (1.74.0, SRV-1). Its tr=, xs=, ws= and x.pe= are addresses
+        // the metadata worker announces to and fetches from — chosen by whoever submitted the link: a visitor on the
+        // public form, or a partner key whose submissions queue metadata by themselves (WL_META_AUTO_SOURCES). A
+        // tracker at 127.0.0.1 or at the cloud's metadata address is a request from this machine to wherever the
+        // submitter liked. So a magnet from anybody but the panel keeps its hash and its name and nothing else: it is
+        // rebuilt from this tracker's own announce URLs (buildMagnet()), which is all the worker needs. The panel's
+        // own additions stay as typed. (The worker filters what it announces to as well — worker/worker.py.)
+        $storedMagnet = static function (array $it) use ($source, $cfg): ?string {
+            $m = $it['magnet'] ?? null;
+            if (!is_string($m) || $m === '') return null;
+            return $source === 'admin' ? $m : buildMagnet((string)$it['hash'], $it['name'] ?? null, $cfg);
+        };
+        foreach ($valid as $i => $it) {
+            $h = $it['hash'];
+            if (isset($banned[$h]) || (isset($existing[$h]) && $existing[$h] === 1)) {
+                $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'banned', 'error' => __('api.wl.hash_banned')];
+                $summary['banned']++;
+                continue;
+            }
+            if (isset($existing[$h])) {
+                $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'exists', 'error' => null];
+                $summary['exists']++;
+                continue;
+            }
+            // THE FIRST SUBMITTER OWNS IT. INSERT IGNORE writes nothing for a hash somebody has
+            // already registered, so a second person submitting the same torrent does not take it
+            // over — and does not get it on their profile either. api/whitelist_submit.php already
+            // distinguishes `added` from `exists`, so the form says so in one sentence rather than
+            // leaving somebody to wonder why their torrent never appeared.
+            $ins->execute([$h, $it['name'] ?? null, $storedMagnet($it), $source, $ref, $apiClientId, $ip, $bucket,
+                           $autoMeta ? 'pending' : 'none', $autoMeta ? date('Y-m-d H:i:s') : null,
+                           $submitterId, $submitterPublic, $review]);
+            if ($ins->rowCount() > 0) {
+                $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'added', 'error' => null];
+                $summary['added']++;
+                $addedHashes[] = $h;
+                $existing[$h] = 0; // duplicates later in the same batch → exists
+            } else {
+                $results[$i] = ['index' => $i, 'input' => $it['input'], 'hash' => $h, 'status' => 'exists', 'error' => null];
+                $summary['exists']++;
+            }
+        }
+    }
+    ksort($results);
+    $file = ['ok' => true, 'mode' => 'skipped', 'error' => null];
+    $reload = null;
+    // Whitelist mode: append + lazy reload. Blacklist mode under a SCHEDULE: keep the (unserved) file
+    // current too, but never mark dirty / reload — the switch to whitelist regenerates and restarts.
+    //
+    // ONLY WHAT THE GENERATOR WOULD WRITE (1.73.0). A row held for a person (`review_status = 'pending'`, a
+    // partner key that does not publish directly) is not served — whitelistRegenerate() leaves it out — but
+    // this fast path appended every added hash, so a held submission was served from the second it arrived
+    // until the next full regeneration: the opposite of what the review queue promises. A batch shares one
+    // review state, so it is all or nothing here. (A submission that has to PROVE itself is appended: it is
+    // served while it proves itself — see includes/wlprobe.php for why it has to be.)
+    $wlLive = trackerMode($cfg) === 'whitelist';
+    $serveNow = $review === 'pending' ? [] : $addedHashes;
+    if ($serveNow && ($wlLive || (function_exists('scheduleEnabled') && scheduleEnabled($cfg)))) {
+        $file = whitelistAppendHashes($db, $cfg, $serveNow);
+        if ($wlLive) {
+            whitelistMarkDirty(false);
+            $reload = whitelistMaybeReload($cfg);
+        }
+    }
+    // v66: one line in the shoutbox per batch that actually registered something, when the operator
+    // asked for the site's own lines (`shout_system_lines`, off as shipped). ONE for the batch and
+    // not one per hash — somebody registering forty torrents is one thing that happened.
+    //
+    // It names the submitter only where the submitter is PUBLIC, and `$submitterPublic` above is
+    // already exactly that decision (`wl_submitter_public`, the grant and the person's own choice,
+    // all three). Guarded on the function because the CLI and the metadata worker reach this file
+    // without loading includes/shout.php, and a batch of hashes has to land either way.
+    if ($addedHashes && function_exists('shoutSystemWhitelistAdded')) {
+        shoutSystemWhitelistAdded($db, $cfg, count($addedHashes), $submitterPublic === 1 ? $submitterId : null);
+    }
+    return [
+        'results' => array_values($results),
+        'summary' => $summary,
+        'added_hashes' => $addedHashes,
+        'file' => $file,
+        'reload' => $reload,
+        'active_in_seconds' => whitelistSecondsToNextReload($cfg),
+    ];
+}
+
+/** Hard-delete rows (by id). Regenerates the file and requests an urgent reload. Returns rows removed. */
+function whitelistRemove(PDO $db, array $cfg, array $ids): int {
+    $ids = array_values(array_filter(array_map('intval', $ids), fn($v) => $v > 0));
+    if (!$ids) return 0;
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $db->prepare("DELETE FROM whitelist_files WHERE whitelist_id IN ($ph)")->execute($ids);
+    $db->prepare("DELETE f FROM forum_descs f JOIN whitelist w ON w.info_hash = f.info_hash WHERE w.id IN ($ph)")->execute($ids);
+    $st = $db->prepare("DELETE FROM whitelist WHERE id IN ($ph)");
+    $st->execute($ids);
+    $n = $st->rowCount();
+    if ($n > 0 && trackerMode($cfg) === 'whitelist') {
+        $r = whitelistRegenerate($db, $cfg);
+        whitelistMarkDirty(true);
+        whitelistMaybeReload($cfg);
+    }
+    return $n;
+}
+
+/**
+ * Ban hashes: upsert banned_hashes + flag whitelist rows. Regenerates + urgent reload when an active
+ * row was affected. $ctx = ['reason','source'=>report|appeal|admin|import,'source_id'].
+ * Returns ['banned'=>int (new ban rows), 'affected'=>int (active whitelist rows flagged)].
+ */
+function whitelistBan(PDO $db, array $cfg, array $hashes, array $ctx = []): array {
+    $hashes = array_values(array_unique(array_filter(array_map('strtolower', $hashes), 'isValidInfoHash')));
+    if (!$hashes) return ['banned' => 0, 'affected' => 0];
+    $reason = mb_substr((string)($ctx['reason'] ?? ''), 0, 255) ?: null;
+    $src = in_array($ctx['source'] ?? '', ['report', 'appeal', 'admin', 'import'], true) ? $ctx['source'] : 'admin';
+    $srcId = isset($ctx['source_id']) ? (int)$ctx['source_id'] : null;
+    // ONE statement per chunk, not one per hash.
+    //
+    // A ban is usually one hash typed by a moderator, and for that the loop this replaces was fine.
+    // But the same function serves the import path, where a list of tens of thousands is ordinary —
+    // and there it was tens of thousands of round-trips to MariaDB, on a server that shares that
+    // MariaDB with the mail, the forum and the file service.
+    //
+    // The count of NEW bans cannot come from rowCount() on a multi-row INSERT … ON DUPLICATE KEY:
+    // MySQL reports 1 per insert and 2 per update, and 0 for an update that changed nothing, so the
+    // three cases are not separable from the total. Asking first is one extra query per chunk and is
+    // exact.
+    $newBans = 0;
+    foreach (array_chunk($hashes, 1000) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $have = $db->prepare("SELECT COUNT(*) FROM banned_hashes WHERE info_hash IN ($ph)");
+        $have->execute($chunk);
+        $newBans += count($chunk) - (int)$have->fetchColumn();
+
+        $rows = implode(',', array_fill(0, count($chunk), '(?, ?, ?, ?)'));
+        $args = [];
+        foreach ($chunk as $h) { $args[] = $h; $args[] = $reason; $args[] = $src; $args[] = $srcId; }
+        $db->prepare("INSERT INTO banned_hashes (info_hash, reason, source, source_id) VALUES $rows
+                      ON DUPLICATE KEY UPDATE reason = COALESCE(VALUES(reason), reason),
+                                              source = VALUES(source), source_id = VALUES(source_id)")
+           ->execute($args);
+    }
+    $affected = 0;
+    foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        $st = $db->prepare("UPDATE whitelist SET banned = 1 WHERE banned = 0 AND info_hash IN ($ph)");
+        $st->execute($chunk);
+        $affected += $st->rowCount();
+        if ($st->rowCount() > 0 && function_exists('imagesRefsTouch')) {
+            $ids = $db->prepare("SELECT id FROM whitelist WHERE info_hash IN ($ph) AND description IS NOT NULL");
+            $ids->execute($chunk);
+            foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $wid) imagesRefsTouch($db, $cfg, 'wl', (string)$wid);
+        }
+    }
+    // A banned hash has no business in a moderation queue. Whatever a moderator was going to decide
+    // about its description, the ban decided something larger — and leaving the item there means
+    // somebody works through a queue full of things that are already gone. Done HERE, in the one
+    // function every ban path goes through, rather than in each of the three callers.
+    foreach (array_chunk($hashes, WL_SQL_IN_CHUNK) as $chunk) {
+        $ph = implode(',', array_fill(0, count($chunk), '?'));
+        try {
+            $db->prepare("UPDATE whitelist SET content_status = 'rejected',
+                                 content_rejected_note = 'the hash was banned', content_reviewed_at = NOW()
+                           WHERE content_status = 'pending' AND info_hash IN ($ph)")->execute($chunk);
+            // The second home (hash_content, 1.53.0) goes the same way — and the PUBLISHED words with
+            // it, which is where it differs from the whitelist above. A whitelist row carries
+            // `banned = 1` on itself, so every reader of that row can see the ban; a hash_content row
+            // has no such column and the ban list is the only witness. Withholding therefore rests on
+            // each reader remembering to ask it, and one that forgets publishes a banned torrent's
+            // description. The text is kept, as contentReject() keeps it — only its status changes.
+            $db->prepare("UPDATE hash_content SET content_status = 'rejected',
+                                 content_rejected_note = ?, content_reviewed_at = NOW()
+                           WHERE content_status IN ('pending', 'approved') AND info_hash IN ($ph)")
+               ->execute(array_merge(['the hash was banned'], $chunk));
+            $db->prepare("UPDATE wl_content_edits SET status = 'rejected', reviewed_at = NOW(),
+                                 note = 'the hash was banned'
+                           WHERE status = 'pending' AND info_hash IN ($ph)")->execute($chunk);
+            // And the ratings go with it: a score left behind on a banned hash is a number about
+            // something nobody can reach any more.
+            //
+            // ASK WHICH ONES HAVE VOTES FIRST. repClear() is three statements for a hash that has
+            // votes and one wasted DELETE for a hash that does not, and almost none of them do —
+            // hash_votes holds the handful of things people bothered to rate, while a ban can carry
+            // a whole imported blocklist. One SELECT replaces thousands of no-op deletes.
+            if (function_exists('repClear')) {
+                $voted = $db->prepare("SELECT DISTINCT info_hash FROM hash_votes WHERE info_hash IN ($ph)");
+                $voted->execute($chunk);
+                foreach ($voted->fetchAll(PDO::FETCH_COLUMN) as $h) repClear($db, $cfg, (string)$h);
+            }
+        } catch (\Throwable $e) {
+            // Older schema without these tables: the ban itself is what matters and must not fail.
+        }
+    }
+
+    if ($affected > 0 && trackerMode($cfg) === 'whitelist') {
+        whitelistRegenerate($db, $cfg);
+        whitelistMarkDirty(true);
+        whitelistMaybeReload($cfg);
+    }
+    return ['banned' => $newBans, 'affected' => $affected];
+}
+
+/**
+ * Lift a ban. If a whitelist row exists it becomes active again (append + lazy reload). Under a
+ * SCHEDULE the hash is also removed from the blacklist file, otherwise the next switch to blacklist
+ * mode would block it again and the switch back would re-import it as a ban.
+ */
+function whitelistUnban(PDO $db, array $cfg, string $hash, bool $touchBlacklist = true): bool {
+    $hash = strtolower($hash);
+    if (!isValidInfoHash($hash)) return false;
+    $db->prepare("DELETE FROM banned_hashes WHERE info_hash = ?")->execute([$hash]);
+    $st = $db->prepare("UPDATE whitelist SET banned = 0 WHERE banned = 1 AND info_hash = ?");
+    $st->execute([$hash]);
+    if ($st->rowCount() > 0 && function_exists('imagesRefsTouch')) {
+        $ids = $db->prepare("SELECT id FROM whitelist WHERE info_hash = ? AND description IS NOT NULL");
+        $ids->execute([$hash]);
+        foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $wid) imagesRefsTouch($db, $cfg, 'wl', (string)$wid);
+    }
+    if ($st->rowCount() > 0 && trackerMode($cfg) === 'whitelist') {
+        whitelistAppendHashes($db, $cfg, [$hash]);
+        whitelistMarkDirty(false);
+        whitelistMaybeReload($cfg);
+    }
+    if ($touchBlacklist && function_exists('scheduleEnabled') && scheduleEnabled($cfg)) {
+        $bl = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
+        if ($bl !== '' && is_file($bl) && isHashInBlacklist($hash, $bl)) {
+            removeHashFromBlacklist($hash, $bl);
+            if (trackerMode($cfg) !== 'whitelist') autoReloadTrackerBlacklist($cfg);
+        }
+    }
+    return true;
+}
+
+/** Queue metadata fetching for rows (ignored when already pending/fetching). Returns rows queued. */
+function whitelistRequestMeta(PDO $db, array $ids, int $priority = 5, bool $refresh = false): int {
+    $ids = array_values(array_filter(array_map('intval', $ids), fn($v) => $v > 0));
+    if (!$ids) return 0;
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    $cond = $refresh ? "meta_status NOT IN ('pending','fetching')" : "meta_status IN ('none','failed')";
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'pending', meta_priority = ?, meta_requested_at = NOW(), meta_error = NULL WHERE id IN ($ph) AND $cond");
+    $st->execute(array_merge([$priority], $ids));
+    return $st->rowCount();
+}
+
+/**
+ * Ask OpenTracker for seeders/leechers/completed of one hash (HTTP scrape, 2 s timeout), cached in
+ * the row for WL_SCRAPE_TTL seconds. Returns ['seeders','leechers','completed','scraped_at','cached'] or null.
+ */
+function scrapeOpenTracker(PDO $db, array $cfg, array $row, bool $force = false): ?array {
+    $hash = strtolower((string)($row['info_hash'] ?? ''));
+    if (!isValidInfoHash($hash)) return null;
+    if (!$force && !empty($row['scraped_at']) && (time() - strtotime($row['scraped_at'])) < WL_SCRAPE_TTL) {
+        return ['seeders' => (int)$row['scrape_seeders'], 'leechers' => (int)$row['scrape_leechers'], 'completed' => (int)$row['scrape_completed'], 'scraped_at' => $row['scraped_at'], 'cached' => true];
+    }
+    $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
+    if ($base === '' || !preg_match('#^https?://#i', $base)) return null;
+    $bin = hex2bin($hash);
+    $url = $base . (str_contains($base, '?') ? '&' : '?') . 'info_hash=' . rawurlencode($bin);
+    $body = null;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 2, CURLOPT_CONNECTTIMEOUT => 2, CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'tryhackx-tracker/1.2 scrape']);
+        $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($body === false || $code !== 200) $body = null;
+    } else {
+        $ctx = stream_context_create(['http' => ['timeout' => 2, 'ignore_errors' => true]]);
+        $body = @file_get_contents($url, false, $ctx) ?: null;
+    }
+    if ($body === null) return null;
+    // d5:filesd20:<hash>d8:completei12e10:downloadedi30e10:incompletei4eeee
+    if (!preg_match('/8:completei(\d+)e10:downloadedi(\d+)e10:incompletei(\d+)e/', $body, $m)) return null;
+    $res = ['seeders' => (int)$m[1], 'leechers' => (int)$m[3], 'completed' => (int)$m[2], 'scraped_at' => date('Y-m-d H:i:s'), 'cached' => false];
+    if (!empty($row['id'])) {
+        $db->prepare("UPDATE whitelist SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?, scraped_at = NOW() WHERE id = ?")
+           ->execute([$res['seeders'], $res['leechers'], $res['completed'], (int)$row['id']]);
+    }
+    return $res;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bulk scrape / bulk metadata queue (admin "Refresh S/L" and "Fetch metadata" tools)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WL_SCRAPE_BATCH         = 50;    // info_hash= parameters per bulk /scrape request (OpenTracker accepts many)
+const WL_SCRAPE_BULK_MAX_ROWS = 2000;  // hard cap of rows one bulk-scrape call may touch
+const WL_SCRAPE_BULK_BUDGET   = 20.0;  // seconds of wall time per bulk-scrape call (the UI calls again while truncated)
+const WL_SCRAPE_STALE_AFTER   = 600;   // "stale" scope: scraped_at NULL or older than this many seconds
+
+/**
+ * Minimal binary-safe bencode decoder. Returns int|string|array, or null on malformed input
+ * (bencode has no null value, so null is unambiguous). Dict keys are kept as the RAW strings —
+ * a scrape reply keys `files` by the 20-byte binary info hash, never assume ASCII.
+ */
+function bdecode(string $s, int &$pos = 0, int $depth = 0) {
+    $len = strlen($s);
+    if ($depth > 32 || $pos >= $len) return null;
+    $c = $s[$pos];
+    if ($c === 'i') {
+        $end = strpos($s, 'e', $pos + 1);
+        if ($end === false) return null;
+        $num = substr($s, $pos + 1, $end - $pos - 1);
+        if (!preg_match('/^-?\d+$/', $num)) return null;
+        $pos = $end + 1;
+        return (int)$num;
+    }
+    if ($c === 'l' || $c === 'd') {
+        $isDict = ($c === 'd');
+        $pos++;
+        $out = [];
+        while (true) {
+            if ($pos >= $len) return null;
+            if ($s[$pos] === 'e') { $pos++; return $out; }
+            if ($isDict) {
+                $k = bdecode($s, $pos, $depth + 1);
+                if (!is_string($k)) return null;
+                $v = bdecode($s, $pos, $depth + 1);
+                if ($v === null) return null;
+                $out[$k] = $v;
+            } else {
+                $v = bdecode($s, $pos, $depth + 1);
+                if ($v === null) return null;
+                $out[] = $v;
+            }
+        }
+    }
+    if (ctype_digit($c)) {
+        $colon = strpos($s, ':', $pos);
+        if ($colon === false) return null;
+        $n = substr($s, $pos, $colon - $pos);
+        if (!ctype_digit($n) || strlen($n) > 12) return null;
+        $n = (int)$n;
+        if ($colon + 1 + $n > $len) return null;
+        $pos = $colon + 1 + $n;
+        return substr($s, $colon + 1, $n);
+    }
+    return null;
+}
+
+/**
+ * Parse a tracker /scrape reply (`d5:filesd20:<20 raw bytes>d8:completei..e10:downloadedi..e10:incompletei..ee...ee`).
+ * Returns [hex_hash => ['seeders','leechers','completed']] — an empty array when the tracker knows none of the
+ * hashes (valid reply, all zero) — or null when the body is not a scrape reply (error page, failure reason...).
+ */
+function parseScrapeReply(string $body): ?array {
+    $pos = 0;
+    $dec = bdecode($body, $pos);
+    if (!is_array($dec) || !array_key_exists('files', $dec) || !is_array($dec['files'])) return null;
+    $out = [];
+    foreach ($dec['files'] as $key => $stats) {
+        $key = (string)$key; // PHP turns canonical-integer keys into ints; (string) restores the exact bytes
+        if (strlen($key) !== 20 || !is_array($stats)) continue;
+        $out[bin2hex($key)] = [
+            'seeders'   => max(0, (int)($stats['complete'] ?? 0)),
+            'leechers'  => max(0, (int)($stats['incomplete'] ?? 0)),
+            'completed' => max(0, (int)($stats['downloaded'] ?? 0)),
+        ];
+    }
+    return $out;
+}
+
+/** Small HTTP GET for tracker scrapes (curl when available, streams otherwise). Returns the body or null. */
+function whitelistHttpGet(string $url, int $timeout = 4): ?string {
+    $body = null;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => min(2, $timeout), CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'tryhackx-tracker/1.2 scrape']);
+        $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($body === false || $code !== 200) $body = null;
+    } else {
+        $ctx = stream_context_create(['http' => ['timeout' => $timeout, 'ignore_errors' => true]]);
+        $body = @file_get_contents($url, false, $ctx);
+        if ($body === false || $body === '') $body = null;
+    }
+    return is_string($body) ? $body : null;
+}
+
+/**
+ * Bulk scrape: fetch seeders/leechers for many rows with as few HTTP requests as possible — OpenTracker
+ * accepts several info_hash= parameters per /scrape, so hashes go WL_SCRAPE_BATCH per request. Every row of an
+ * answered batch gets scrape_* + scraped_at updated (hashes the tracker omits are unknown to it → 0/0/0);
+ * rows of a batch that got no usable answer are left untouched. Batches are processed in the given order and
+ * the loop stops between batches once $budget seconds are used up (or after two dead requests without a single
+ * answer). $rows = [['id'=>int,'info_hash'=>hex], ...].
+ * Returns ['scraped'=>rows updated, 'requests'=>int, 'failed'=>requests without a usable answer, 'processed'=>rows
+ *          attempted (answered or not), 'truncated'=>bool (budget ran out, rows remain), 'last_id'=>?int (last row
+ *          attempted — cursor for the caller), 'error'=>?string].
+ */
+function scrapeOpenTrackerMany(PDO $db, array $cfg, array $rows, float $budget = WL_SCRAPE_BULK_BUDGET): array {
+    $out = ['scraped' => 0, 'requests' => 0, 'failed' => 0, 'processed' => 0, 'truncated' => false, 'last_id' => null, 'error' => null];
+    $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
+    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = __('api.wl.scrape_url_missing'); return $out; }
+    $items = [];
+    foreach ($rows as $r) {
+        $h = strtolower((string)($r['info_hash'] ?? ''));
+        $id = (int)($r['id'] ?? 0);
+        if ($id < 1 || !isValidInfoHash($h)) continue;
+        $items[] = ['id' => $id, 'hash' => $h];
+    }
+    if (!$items) return $out;
+    $deadline = microtime(true) + max(1.0, $budget);
+    $sep = str_contains($base, '?') ? '&' : '?';
+    $upd = $db->prepare("UPDATE whitelist SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?, scraped_at = NOW() WHERE id = ?");
+    $batches = array_chunk($items, WL_SCRAPE_BATCH);
+    foreach ($batches as $i => $batch) {
+        if (microtime(true) >= $deadline) { $out['truncated'] = true; break; }
+        $qs = [];
+        foreach ($batch as $it) $qs[] = 'info_hash=' . rawurlencode(hex2bin($it['hash']));
+        $out['requests']++;
+        $out['processed'] += count($batch);
+        $out['last_id'] = $batch[count($batch) - 1]['id'];
+        $body = whitelistHttpGet($base . $sep . implode('&', $qs), 4);
+        $files = $body !== null ? parseScrapeReply($body) : null;
+        if ($files === null) {
+            $out['failed']++;
+            // a dead tracker: do not burn the whole budget on connect timeouts
+            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = __('api.wl.tracker_no_answer'); break; }
+            continue;
+        }
+        $db->beginTransaction();
+        try {
+            foreach ($batch as $it) {
+                $f = $files[$it['hash']] ?? ['seeders' => 0, 'leechers' => 0, 'completed' => 0];
+                $upd->execute([$f['seeders'], $f['leechers'], $f['completed'], $it['id']]);
+                $out['scraped']++;
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+    }
+    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = __('api.wl.tracker_no_answer');
+    return $out;
+}
+
+/**
+ * Bulk (re)queue metadata fetching by scope — ONE UPDATE, no per-row loop; the worker drains the queue at its
+ * own pace. Scopes: 'missing' (never fetched), 'failed', 'missing_failed', 'all' (every active row, done ones
+ * included; rows already pending or being fetched right now are left alone so a worker claim is never
+ * clobbered). Non-banned rows only, priority 0 (below manual per-row requests). Returns rows queued, or null
+ * for an unknown scope.
+ */
+function whitelistQueueMetaByScope(PDO $db, string $scope): ?int {
+    $conds = [
+        'missing'        => "meta_status = 'none'",
+        'failed'         => "meta_status = 'failed'",
+        'missing_failed' => "meta_status IN ('none','failed')",
+        'all'            => "meta_status NOT IN ('pending','fetching')",
+    ];
+    if (!isset($conds[$scope])) return null;
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL WHERE banned = 0 AND " . $conds[$scope]);
+    $st->execute();
+    return $st->rowCount();
+}
+
+/**
+ * Queue metadata for rows ADDED within [$from, $to] (Y-m-d H:i:s). Only never-fetched / failed rows —
+ * "fetch what came in during this window" should not re-fetch finished ones. Returns rows queued.
+ */
+function whitelistQueueMetaByDate(PDO $db, string $from, string $to): int {
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
+                        WHERE banned = 0 AND meta_status IN ('none','failed') AND created_at >= ? AND created_at <= ?");
+    $st->execute([$from, $to]);
+    return $st->rowCount();
+}
+
+/**
+ * Cancel the metadata queue: every 'pending' row goes back to 'none' (rows currently 'fetching' finish
+ * on their own — the worker holds at most its concurrency count). Returns rows reset.
+ */
+/**
+ * Empty the metadata queue. A queued row that ALREADY carries resolved metadata (name+size — a
+ * re-fetch victim) is RESTORED to 'done'; never-resolved rows go back to 'none'.
+ * Returns ['cancelled'=>total, 'restored'=>back-to-done].
+ */
+function whitelistMetaCancel(PDO $db): array {
+    $restore = $db->prepare("UPDATE whitelist SET meta_status = 'done', meta_requested_at = NULL, meta_priority = 0
+                             WHERE meta_status = 'pending' AND name IS NOT NULL AND total_size IS NOT NULL");
+    $restore->execute();
+    $restored = $restore->rowCount();
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'none', meta_requested_at = NULL, meta_priority = 0 WHERE meta_status = 'pending'");
+    $st->execute();
+    return ['cancelled' => $restored + $st->rowCount(), 'restored' => $restored];
+}
+
+/**
+ * Rebuild button: every row that HAS resolved metadata (name+size) but lost its 'done' status to a
+ * bulk re-fetch / cancel goes straight back to 'done' — nothing is fetched, nothing is deleted.
+ * Returns rows restored.
+ */
+function whitelistMetaRestore(PDO $db): int {
+    $st = $db->prepare("UPDATE whitelist SET meta_status = 'done', meta_requested_at = NULL, meta_priority = 0, meta_error = NULL
+                        WHERE meta_status IN ('none', 'pending', 'failed') AND name IS NOT NULL AND total_size IS NOT NULL");
+    $st->execute();
+    return $st->rowCount();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mode-aware block / unblock (used by the report / appeal / archive endpoints)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Block a hash on the tracker. Whitelist mode: ban it (banned_hashes + remove from the served
+ * file). Blacklist mode: append to the blacklist file (legacy). $ctx = ['source','source_id','reason'].
+ * Returns ['file_ok'=>bool,'errors'=>[],'suggestions'=>[],'reload'=>?array,'mode'=>string].
+ */
+function trackerBlockHash(PDO $db, array $cfg, string $hash, array $ctx = []): array {
+    $hash = strtolower(trim($hash));
+    $out = ['file_ok' => false, 'errors' => [], 'suggestions' => [], 'reload' => null, 'mode' => trackerMode($cfg)];
+    if (!isValidInfoHash($hash)) { $out['errors'][] = 'Invalid info hash.'; return $out; }
+    if ($out['mode'] === 'whitelist') {
+        $r = whitelistBan($db, $cfg, [$hash], $ctx);
+        $s = whitelistStateRead();
+        $out['file_ok'] = empty($s['last_error']) || $r['affected'] === 0;
+        if (!$out['file_ok']) $out['errors'][] = (string)$s['last_error'];
+        $out['reload'] = $r['affected'] > 0 ? ['attempted' => true, 'ok' => (bool)($s['last_reload_ok'] ?? false)] : null;
+        return $out;
+    }
+    // Under a SCHEDULE the ban is recorded in banned_hashes as well (DB-only in blacklist mode), so the
+    // hash stays blocked after the next switch to whitelist mode without waiting for the import.
+    if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)) {
+        try { whitelistBan($db, $cfg, [$hash], $ctx); } catch (\Throwable $e) { error_log('[schedule] ban mirror failed: ' . $e->getMessage()); }
+    }
+    $blacklistPath = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
+    if ($blacklistPath === '') return $out; // not configured — same as before (DB-only block)
+    $perm = checkBlacklistPermissions($blacklistPath);
+    if (!$perm['ok']) { $out['errors'] = $perm['errors']; $out['suggestions'] = $perm['suggestions']; return $out; }
+    $written = addHashToBlacklist($hash, $blacklistPath);
+    $out['file_ok'] = $written;
+    if ($written) $out['reload'] = autoReloadTrackerBlacklist($cfg);
+    return $out;
+}
+
+/** Unblock a hash: whitelist mode lifts the ban; blacklist mode removes it from the blacklist file. */
+function trackerUnblockHash(PDO $db, array $cfg, string $hash, array $ctx = []): array {
+    $hash = strtolower(trim($hash));
+    $out = ['file_ok' => false, 'errors' => [], 'suggestions' => [], 'reload' => null, 'mode' => trackerMode($cfg)];
+    if (!isValidInfoHash($hash)) { $out['errors'][] = 'Invalid info hash.'; return $out; }
+    if ($out['mode'] === 'whitelist') {
+        whitelistUnban($db, $cfg, $hash);   // under a schedule this also drops it from the blacklist file
+        $out['file_ok'] = true;
+        return $out;
+    }
+    // Under a SCHEDULE lift the DB ban too, otherwise the next switch would re-block the hash
+    // (the blacklist file itself is handled right below, once).
+    if (function_exists('scheduleEnabled') && scheduleEnabled($cfg)) {
+        try { whitelistUnban($db, $cfg, $hash, false); } catch (\Throwable $e) { error_log('[schedule] unban mirror failed: ' . $e->getMessage()); }
+    }
+    $blacklistPath = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
+    if ($blacklistPath === '') return $out;
+    $out['file_ok'] = removeHashFromBlacklist($hash, $blacklistPath);
+    if ($out['file_ok']) $out['reload'] = autoReloadTrackerBlacklist($cfg);
+    return $out;
+}
+
+/** Is this hash currently blocked on the tracker (banned in whitelist mode / listed in blacklist mode)? */
+function isHashBlocked(PDO $db, array $cfg, string $hash): bool {
+    if (trackerMode($cfg) === 'whitelist') return isHashBanned($db, $hash);
+    return isHashInBlacklist($hash, (string)($cfg['blacklist_path'] ?? ''));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status / diagnostics
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The metadata worker's heartbeat: how old it is, and what the worker says it is doing.
+ *
+ * The file used to be empty — its mtime was the entire message — so the panel could say "alive" and
+ * nothing more. That is how a worker can sit at 4 parallel fetches for a day while the panel proudly
+ * displays the 32 somebody typed into Settings: with nothing to ask, the panel reported the setting
+ * back to the operator and called it status. Worker 3 writes one JSON line instead; an older worker
+ * still just touches the file, so `info` is simply null and everything else behaves as before.
+ *
+ * Returns ['age' => ?int seconds, 'info' => ?array, 'file' => ?string].
+ */
+function whitelistWorkerHeartbeat(array $cfg): array {
+    $candidates = [(string)($cfg['worker_heartbeat_file'] ?? ''), '/home/tracker/metadata_worker/heartbeat'];
+    foreach ($candidates as $f) {
+        if ($f === '' || !is_file($f)) continue;
+        $m = @filemtime($f);
+        if (!$m) continue;
+        $info = null;
+        // Bounded read: this file is written by another process and a panel poll must not depend on
+        // its good behaviour.
+        $raw = @file_get_contents($f, false, null, 0, 4096);
+        if (is_string($raw) && $raw !== '') {
+            $d = json_decode(trim($raw), true);
+            if (is_array($d)) $info = $d;
+        }
+        return ['age' => max(0, time() - $m), 'info' => $info, 'file' => $f];
+    }
+    return ['age' => null, 'info' => null, 'file' => null];
+}
+
+/** Age in seconds of the metadata worker heartbeat file, or null when absent. */
+function whitelistWorkerHeartbeatAge(array $cfg): ?int {
+    return whitelistWorkerHeartbeat($cfg)['age'];
+}
+
+/** Everything the admin status card needs, plus a list of warnings for the dashboard. */
+function whitelistStatus(PDO $db, array $cfg): array {
+    $mode = trackerMode($cfg);
+    $path = whitelistPath($cfg);
+    $state = whitelistStateRead();
+    $perm = $path !== '' ? checkListFilePermissions($path, 'whitelist', true) : ['ok' => false, 'errors' => ['Whitelist path is not configured.'], 'suggestions' => []];
+    $file = ['exists' => false, 'size' => 0, 'mtime' => null, 'readable' => false, 'lines_estimate' => (int)$state['count']];
+    if ($path !== '' && is_file($path)) {
+        $file['exists'] = true; $file['size'] = (int)@filesize($path); $file['mtime'] = @filemtime($path) ?: null; $file['readable'] = is_readable($path);
+        $file['lines_estimate'] = (int)floor($file['size'] / 41);
+    }
+    $counts = ['active' => 0, 'banned_rows' => 0, 'banned_hashes' => 0, 'pending_meta' => 0, 'fetching_meta' => 0];
+    try {
+        $counts['active'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 0")->fetchColumn();
+        $counts['banned_rows'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE banned = 1")->fetchColumn();
+        $counts['banned_hashes'] = (int)$db->query("SELECT COUNT(*) FROM banned_hashes")->fetchColumn();
+        $counts['pending_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status = 'pending'")->fetchColumn();
+        $counts['fetching_meta'] = (int)$db->query("SELECT COUNT(*) FROM whitelist WHERE meta_status = 'fetching'")->fetchColumn();
+        $countsFailed = false;
+    } catch (\Throwable $e) {
+        // The card's numbers stay 0 — but the card SAYS they could not be read (1.74.0, QUAL-26), and the log why.
+        error_log('[whitelist] the status counts failed: ' . $e->getMessage());
+        $countsFailed = true;
+    }
+    $workerHb = whitelistWorkerHeartbeat($cfg);
+    $hb = $workerHb['age'];
+    $warnings = [];
+    if ($countsFailed) $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_counts_failed')];
+    if ($mode === 'whitelist') {
+        if (!$perm['ok']) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_file_problem', ['errors' => implode(' ', $perm['errors'])])];
+        elseif (!$file['exists'] || $file['size'] === 0) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_file_empty')];
+        if (!empty($state['last_error'])) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_last_write_failed', ['error' => $state['last_error']])];
+        if (!empty($state['regen_needed'])) $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_regen_pending')];
+        $min = max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45));
+        if (!empty($state['pending_reload']) && $state['dirty_since'] && (time() - (int)$state['dirty_since']) > 2 * $min) {
+            $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_reload_pending', ['age' => formatUptime(time() - (int)$state['dirty_since'])])];
+        }
+        if ((int)$state['fail_count'] >= 2) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_reloads_failed', ['n' => (int)$state['fail_count'], 'output' => ($state['last_reload_output'] ?: __('api.wl.unknown_error'))])];
+        if ($counts['pending_meta'] > 0 && ($hb === null || $hb > 300)) $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_meta_heartbeat', ['age' => ($hb === null ? __('api.wl.hb_missing') : __('api.wl.hb_old', ['age' => formatUptime($hb)])), 'n' => $counts['pending_meta']])];
+        // What the worker RUNS versus what Settings asked for. A worker started before the file was
+        // last updated keeps running the old code, which is how "set 32, gets 4" happens with every
+        // number in the panel looking right.
+        $asked = trim((string)($cfg['meta_worker_concurrency'] ?? ''));
+        $wi = $workerHb['info'];
+        if ($asked !== '' && is_array($wi) && isset($wi['concurrency'])) {
+            $running = (int)$wi['concurrency'];
+            if ($running !== (int)$asked) {
+                $warnings[] = ['level' => 'warn', 'text' => (isset($wi['concurrency_max']) && (int)$asked > (int)$wi['concurrency_max']
+                        ? __('api.wl.warn_meta_concurrency_max', ['running' => $running, 'asked' => (int)$asked, 'max' => (int)$wi['concurrency_max']])
+                        : __('api.wl.warn_meta_concurrency', ['running' => $running, 'asked' => (int)$asked]))];
+            }
+        }
+        // Same question for the fetch order, and the same reason for asking it: an order changed in
+        // Settings reaches a worker that is running the code that knows about orders at all. One
+        // started from an older worker.py ignores the setting entirely and nothing would say so —
+        // the panel would show the operator their own choice and call it status.
+        $wantOrder = strtolower(trim((string)($cfg['meta_order_mode'] ?? 'oldest')));
+        if (is_array($wi) && $wantOrder !== '' && $wantOrder !== 'oldest') {
+            $runOrder = isset($wi['order']) ? strtolower((string)$wi['order']) : null;
+            if ($runOrder === null) {
+                $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_meta_order_unsupported', ['want' => htmlspecialchars($wantOrder, ENT_QUOTES)])];
+            } elseif ($runOrder !== $wantOrder) {
+                $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_meta_order_mismatch', ['run' => htmlspecialchars($runOrder, ENT_QUOTES), 'want' => htmlspecialchars($wantOrder, ENT_QUOTES)])];
+            }
+        }
+    }
+    // scheduled mode (includes/schedule.php): surface a failed / overdue switch in both modes
+    $schedule = null;
+    if (function_exists('scheduleStatus')) {
+        $schedule = scheduleStatus($cfg);
+        if ($schedule['enabled']) {
+            if (!$schedule['valid']) $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_schedule_invalid')];
+            elseif ($schedule['desired'] !== null && $schedule['desired'] !== $mode) {
+                // out of sync: a failed switch is an error right away; otherwise give the minute timer a
+                // grace period, then suspect the timer itself (tools/janitor.php not running)
+                if ($schedule['last_result'] === 'failed') {
+                    $warnings[] = ['level' => 'danger', 'text' => __('api.wl.warn_schedule_switch_failed', ['desired' => strtoupper($schedule['desired']), 'mode' => strtoupper($mode), 'error' => ($schedule['last_error'] ?: __('api.wl.unknown_error'))])];
+                } elseif ((time() - (int)$schedule['last_check_at']) > 180) {
+                    $warnings[] = ['level' => 'warn', 'text' => __('api.wl.warn_schedule_overdue', ['desired' => strtoupper($schedule['desired']), 'mode' => strtoupper($mode)])];
+                }
+            }
+        }
+    }
+    return [
+        'mode' => $mode, 'path' => $path, 'permissions' => $perm, 'file' => $file, 'state' => $state, 'counts' => $counts,
+        'worker_heartbeat_age' => $hb, 'worker' => $workerHb['info'],
+        'reload_min_interval' => max(10, (int)($cfg['whitelist_reload_min_interval'] ?? 45)),
+        'next_reload_in' => whitelistSecondsToNextReload($cfg), 'warnings' => $warnings,
+        'service' => ['name' => (string)($cfg['opentracker_service_name'] ?? ''), 'auto_reload' => (($cfg['opentracker_auto_reload'] ?? '1') === '1'), 'exec' => trackerExecAvailable()],
+        'schedule' => $schedule,
+    ];
+}
+
+/** Import the legacy blacklist file into banned_hashes (one-off at mode switch). Returns ['imported','skipped','invalid']. */
+function whitelistImportBlacklist(PDO $db, array $cfg): array {
+    $out = ['imported' => 0, 'skipped' => 0, 'invalid' => 0, 'error' => null];
+    $path = normalizeListPath((string)($cfg['blacklist_path'] ?? ''));
+    if ($path === '' || !is_file($path) || !is_readable($path)) { $out['error'] = __('api.wl.blacklist_unreadable'); return $out; }
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+    $hashes = [];
+    foreach ($lines as $l) {
+        $l = strtolower(trim($l));
+        if (isValidInfoHash($l)) $hashes[$l] = true; else $out['invalid']++;
+    }
+    if ($hashes) {
+        $r = whitelistBan($db, $cfg, array_keys($hashes), ['source' => 'import', 'reason' => 'Imported from blacklist file']);
+        $out['imported'] = $r['banned'];
+        $out['skipped'] = count($hashes) - $r['banned'];
+    }
+    return $out;
+}

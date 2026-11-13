@@ -1,0 +1,248 @@
+/**
+ * The stability probe's card.
+ *
+ * Three states and nothing in between: idle (with the last report, if there is one), running (a live
+ * step list), and finished (the report, with an Apply that only offers values the run actually held).
+ *
+ * The Apply is deliberately narrow. A report whose buttons could set any number would be decoration —
+ * the entire value of this feature is that the figure it offers was applied to the real machine for
+ * three minutes while somebody watched what else broke.
+ */
+(function () {
+    'use strict';
+    const card = document.getElementById('tn-card');
+    if (!card || typeof window.AdminCommon === 'undefined') return;
+    const { apiCall, el, showToast, confirmAction, promptPassword, fmtAgo } = window.AdminCommon;
+    const $ = (id) => document.getElementById(id);
+
+    const POLL_IDLE = 15000;
+    const POLL_RUNNING = 5000;
+    let timer = null;
+    let state = {};
+
+    const num = (v) => (v === null || v === undefined ? '—' : t.num(Number(v)));   // a count in the page's language (1.73.1)
+
+    async function load() {
+        const r = await apiCall('admin/tuner', 'POST', { op: 'status' });
+        if (!r || !r.success) return;
+        state = r;
+        render();
+        clearTimeout(timer);
+        timer = setTimeout(load, r.running ? POLL_RUNNING : POLL_IDLE);
+    }
+
+    function kv(label, value, cls) {
+        return el('div', { className: 'wl-kv-item' }, [
+            el('div', { className: 'wl-kv-label', text: label }),
+            el('div', { className: 'wl-kv-value ' + (cls || '') }, value),
+        ]);
+    }
+
+    function render() {
+        card.classList.toggle('d-hidden', !state.enabled);
+        if (!state.enabled) return;
+
+        $('tn-updated').textContent = state.updated_at
+            ? t.key('js.tuner.updated_ago', {ago: fmtAgo(Math.max(0, state.server_time - state.updated_at))}) : '';
+        $('tn-cancel').classList.toggle('d-hidden', !state.running);
+        // No helper, no probe: every measurement it takes comes through tracker-netlimit.sh, and so
+        // does the start itself (see "Runs as" below).
+        const canStart = state.available && state.helper !== false;
+        $('tn-start').disabled = state.running || !canStart;
+        $('tn-dry').disabled = state.running || !canStart;
+
+        const g = $('tn-grid');
+        g.textContent = '';
+        g.appendChild(kv(t.key('js.tuner.moving'), [el('span', { text: {
+            inbound: t.key('js.tuner.what_inbound'), outbound: t.key('js.tuner.what_outbound'), both: t.key('js.tuner.what_both'),
+        }[state.what] || t.key('js.tuner.what_inbound') })]));
+        g.appendChild(kv(t.key('js.tuner.state'), [
+            el('span', { className: 'wl-badge ' + (state.running ? 'wl-b-warn' : 'wl-b-muted'),
+                         text: state.running ? (state.phase || t.key('js.tuner.phase_running')) : (state.phase || t.key('js.tuner.phase_idle')) }),
+            state.dry_run ? el('span', { className: 'wl-badge wl-b-muted', text: t.key('js.tuner.test_run') }) : '',
+        ]));
+        if (state.baseline && state.baseline.arriving_pps) {
+            g.appendChild(kv(t.key('js.tuner.arriving_at_start'), t.key('js.tuner.pps', {n: num(Math.round(state.baseline.arriving_pps))})));
+        }
+        // What was already lost OUTSIDE the machine before anything moved (1.73.3) — context, never a reason to stop.
+        const bo = state.baseline && state.baseline.outside;
+        if (bo && (typeof bo.retrans_pct === 'number' || typeof bo.ping_loss_pct === 'number')) {
+            g.appendChild(kv(t.key('js.tuner.outside_at_start'), [retransWord(bo.retrans_pct), ' · ', pingWord(bo.ping_loss_pct)]));
+        }
+        if (state.plan && state.plan.length) {
+            g.appendChild(kv(t.key('js.tuner.plan'), t.key('js.tuner.pps', {n: state.plan.map(p => num(p)).join(' → ')})));
+        }
+        if (state.running && state.eta_s) {
+            const left = Math.max(0, state.started_at + state.eta_s - state.server_time);
+            g.appendChild(kv(t.key('js.tuner.about'), t.key('js.tuner.time_left', {t: fmtAgo(left)})));
+        }
+        // How the process was started. It matters: a background child of the janitor's oneshot
+        // service is killed the moment the janitor exits, and that was a week of "stopped without
+        // finishing". A unit of its own survives, and can be stopped with `systemctl stop`.
+        if (state.launch && state.launch.via) {
+            g.appendChild(kv(t.key('js.tuner.runs_as'), state.launch.via === 'unit'
+                ? t.key('js.tuner.via_unit', {unit: state.unit || 'tracker-probe'})
+                : t.key('js.tuner.via_background')));
+        }
+        // The one fact that makes this safe to press, said on the card rather than only in the docs.
+        g.appendChild(kv(t.key('js.tuner.way_back'), state.has_restore
+            ? [el('span', { className: 'wl-badge wl-b-ok', text: t.key('js.tuner.restore_recorded') }),
+               el('div', { className: 'wl-small text-muted', text: t.key('js.tuner.restore_note') })]
+            : [el('span', { className: 'wl-badge wl-b-muted', text: t.key('js.tuner.nothing_to_restore') })]));
+
+        renderProgress();
+        renderReport();
+
+        const note = $('tn-note');
+        if (state.stale) {
+            note.className = 'nl-note nl-note-warn';
+            note.textContent = t.key('js.tuner.note_stale');
+        } else if (state.requested) {
+            note.className = 'nl-note nl-note-info';
+            note.textContent = t.key('js.tuner.note_requested');
+        } else if (state.error) {
+            note.className = 'nl-note nl-note-bad';
+            note.textContent = t.key('js.tuner.note_failed', {error: state.error});
+        } else if (!state.available) {
+            note.className = 'nl-note nl-note-warn';
+            note.textContent = t.key('js.tuner.note_unavailable');
+        } else if (state.helper === false) {
+            note.className = 'nl-note nl-note-warn';
+            note.textContent = t.key('js.tuner.note_no_helper');
+        } else {
+            note.className = 'nl-note nl-note-info';
+            note.textContent = t.key('js.tuner.note_idle');
+        }
+    }
+
+    function renderProgress() {
+        const box = $('tn-progress');
+        const steps = state.steps || [];
+        box.classList.toggle('d-hidden', !steps.length);
+        if (!steps.length) return;
+        box.textContent = '';
+        steps.forEach(s => {
+            const row = el('div', { className: 'tn-step' + (s.ok ? '' : ' tn-step-bad') });
+            row.appendChild(el('span', { className: 'tn-step-pps', text: t.key('js.tuner.pps', {n: num(s.limit_pps)}) }));
+            row.appendChild(el('span', { className: 'tn-step-fig',
+                text: t.key('js.tuner.step_served', {n: s.served_pps === null ? '—' : num(Math.round(s.served_pps))}) }));
+            row.appendChild(el('span', { className: 'tn-step-fig',
+                text: t.key('js.tuner.step_dropped', {n: s.dropped_pps === null ? '—' : num(Math.round(s.dropped_pps))}) }));
+            row.appendChild(el('span', { className: 'tn-step-fig',
+                text: s.load_per_core === null ? t.key('js.tuner.step_load_none') : t.key('js.tuner.step_load', {n: s.load_per_core.toFixed(2)}) }));
+            // Outside the machine (1.73.3): TCP segments resent and pings lost over the step — "—" where there was
+            // nothing to read (no /proc/net/snmp, no ping, too few segments, a report from before 1.73.3).
+            row.appendChild(el('span', { className: 'tn-step-fig tn-step-retrans', title: t.key('js.tuner.step_retrans_title'),
+                text: retransWord(s.retrans_pct) }));
+            row.appendChild(el('span', { className: 'tn-step-fig tn-step-ping', title: t.key('js.tuner.step_ping_title'),
+                text: pingWord(s.ping_loss_pct) }));
+            // A step the loss outside stopped says so in the reader's language; the other reasons are the probe's own.
+            row.appendChild(el('span', { className: 'tn-step-verdict', text: s.ok ? t.key('js.tuner.no_harm')
+                : (s.harm_kind === 'outside' ? t.key('js.tuner.harm_outside') : s.harm) }));
+            box.appendChild(row);
+        });
+    }
+
+    /** "TCP resent 15.6 %" / "TCP resent —" — a share the probe read, one decimal, as the card writes the load. */
+    function retransWord(v) {
+        return typeof v === 'number' ? t.key('js.tuner.step_retrans', {n: v.toFixed(1)}) : t.key('js.tuner.step_retrans_none');
+    }
+    /** "pings lost 70 %" / "pings lost —". */
+    function pingWord(v) {
+        return typeof v === 'number' ? t.key('js.tuner.step_ping', {n: Math.round(v)}) : t.key('js.tuner.step_ping_none');
+    }
+
+    function renderReport() {
+        const box = $('tn-report');
+        const rep = state.report;
+        box.classList.toggle('d-hidden', !rep || state.running);
+        if (!rep || state.running) return;
+        box.textContent = '';
+        box.appendChild(el('div', { className: 'tn-report-head', text: t.key('js.tuner.report_head') }));
+        // A run whose limits changed nothing is not a quiet result, it is a broken one — and it is
+        // the shape that already produced a confident recommendation nobody should have followed.
+        // It gets a warning of its own rather than a sentence buried in the summary.
+        if (rep.inconclusive) {
+            box.appendChild(el('div', { className: 'alert alert-warning py-2 wl-small mb-2',
+                text: rep.inconclusive }));
+        }
+        // The first step already lost packets OUTSIDE the machine (1.73.3): the provider's limit is below the whole
+        // plan, and the answer is a lower limit than anything the run held — said first, in the reader's language.
+        const outsideFirst = rep.outside_dry
+            ? (rep.outside_first ? t.key('js.tuner.outside_first_dry', {n: num(rep.outside_first)}) : t.key('js.tuner.outside_first_dry_none'))
+            : (rep.outside_first ? t.key('js.tuner.outside_first', {n: num(rep.outside_first)}) : null);
+        if (outsideFirst) {
+            box.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small mb-2 tn-outside-first', text: outsideFirst }));
+        }
+        box.appendChild(el('div', { className: 'tn-report-summary', text: rep.summary || '' }));
+        if (typeof rep.retrans_max === 'number' && typeof rep.ping_loss_max === 'number') {
+            box.appendChild(el('div', { className: 'wl-small text-muted mt-1 tn-outside-rule',
+                text: t.key('js.tuner.outside_rule', {r: rep.retrans_max.toFixed(1), p: Math.round(rep.ping_loss_max)}) }));
+        }
+
+        const acts = el('div', { className: 'tn-report-acts' });
+        // Only the values the run held. A suggestion the machine never actually ran at would be a
+        // guess wearing a measurement's clothes.
+        // The label names what the button will move. An outbound run's values go to the reply budget,
+        // and calling that "the limit" was how the same number could be applied to the wrong one.
+        const outbound = state.what === 'outbound';
+        [['suggested_safe', outbound ? t.key('js.tuner.apply_safe_outbound') : t.key('js.tuner.apply_safe')],
+         ['suggested_minimum', outbound ? t.key('js.tuner.apply_minimum_outbound') : t.key('js.tuner.apply_minimum')]]
+            .forEach(([key, label]) => {
+                const v = rep[key];
+                if (!v) return;
+                const b = el('button', { type: 'button', className: 'btn btn-sm btn-outline-success' },
+                    [label, ' (', t.key('js.tuner.pps', {n: num(v)}), ')']);   // pieces keep their keys (1.73.0)
+                b.addEventListener('click', () => applyLimit(v));
+                acts.appendChild(b);
+            });
+        if (!acts.children.length) {
+            acts.appendChild(el('span', { className: 'wl-small text-muted',
+                text: rep.inconclusive
+                    ? t.key('js.tuner.no_value_inconclusive')
+                    : (outsideFirst ? t.key('js.tuner.no_value_outside') : t.key('js.tuner.no_value_short')) }));
+        }
+        box.appendChild(acts);
+    }
+
+    async function applyLimit(pps) {
+        if (!await confirmAction(t.key('js.tuner.apply_title', {n: t.num(Number(pps))}),
+            t.key('js.tuner.apply_body'),
+            { after: t.key('js.tuner.apply_after'),
+              okLabel: t.key('js.tuner.apply_ok') })) return;
+        const pw = await promptPassword(t.key('js.tuner.apply_limit'), t.key('js.tuner.confirm_password'));
+        if (!pw) return;
+        const r = await apiCall('admin/tuner', 'POST', { op: 'apply', pps, password: pw });
+        showToast((r && (r.message || r.error)) || t.key('js.tuner.failed'), r && r.success ? 'success' : 'error');
+        load();
+    }
+
+    async function start(dry) {
+        const what = dry
+            ? t.key('js.tuner.start_dry_body')
+            : t.key('js.tuner.start_real_body');
+        if (!await confirmAction(dry ? t.key('js.tuner.start_dry_title') : t.key('js.tuner.start_real_title'), what, {
+            after: dry ? '' : t.key('js.tuner.start_real_after'),
+            okLabel: dry ? t.key('js.tuner.start_dry_ok') : t.key('js.tuner.start_real_ok'), danger: !dry })) return;
+        const pw = await promptPassword(t.key('js.tuner.probe_title'), t.key('js.tuner.confirm_password'));
+        if (!pw) return;
+        const r = await apiCall('admin/tuner', 'POST',
+            { op: 'start', dry_run: !!dry, steps: 6, dwell: dry ? 30 : 180,
+              what: $('tn-what').value, password: pw });
+        showToast((r && (r.message || r.error)) || t.key('js.tuner.failed'), r && r.success ? 'success' : 'error');
+        load();
+    }
+
+    async function cancel() {
+        const pw = await promptPassword(t.key('js.tuner.stop_title'), t.key('js.tuner.confirm_password'));
+        if (!pw) return;
+        const r = await apiCall('admin/tuner', 'POST', { op: 'cancel', password: pw });
+        showToast((r && (r.message || r.error)) || t.key('js.tuner.failed'), r && r.success ? 'success' : 'error');
+        load();
+    }
+
+    $('tn-start').addEventListener('click', () => start(false));
+    $('tn-dry').addEventListener('click', () => start(true));
+    $('tn-cancel').addEventListener('click', cancel);
+    load();
+})();

@@ -1,0 +1,3481 @@
+<?php
+/**
+ * Observed-hash index.
+ *
+ * A catalogue of info hashes SEEN on the tracker (mostly during OPEN hours, when the whole swarm is
+ * served) — NOT a whitelist: nothing here is ever served or written to the accesslist. It exists so an
+ * admin can browse what people carry, look up metadata (via the existing worker) and, if wanted, promote
+ * a hash into the real whitelist.
+ *
+ * Pipeline (all off unless index_enabled=1):
+ *   - Poll  : GET index_source_url (OpenTracker full scrape, gzip). A streaming parser (bounded memory)
+ *             keeps only complete >= index_min_seeders and upserts in batches under a wall-clock budget.
+ *             Rows that are whitelisted or banned are dropped after each poll (they have their own tables).
+ *   - Meta  : the janitor promotes up to index_meta_daily_budget rows/day from 'none' to 'pending' with a
+ *             randomised meta_requested_at spread across the next 24 h, so the metadata worker (second
+ *             queue, priority below the whitelist) drains them without flooding the DHT.
+ *   - Life  : a new row lives until grace_until (index_grace_days) unless its metadata resolves; a 'done'
+ *             row lives until protected_until (index_protect_days), extended on every poll where it still
+ *             has >= 1 seeder. The hourly pruner drops expired rows and caps the table at index_max_rows.
+ *
+ * The metadata columns mirror `whitelist` so worker.py drains both queues with one code path; index_files
+ * is keyed by info_hash (no numeric row id).
+ */
+
+// A transfer that dies part-way is still worth what arrived — but only if what arrived is a
+// meaningful slice rather than a few kilobytes of a handshake. One MiB of gzipped scrape is roughly
+// twenty thousand torrents; below that the resume cursor would inch forward for nothing.
+const IDX_PARTIAL_MIN_BYTES = 1048576;
+const IDX_BATCH            = 2000;    // rows per upsert (batch size barely affects throughput; ~18k rows/s)
+const IDX_ENTRY_RE         = '/20:(.{20})d8:completei(\d+)e10:downloadedi(\d+)e10:incompletei(\d+)ee/s';
+const IDX_PRUNE_EVERY      = 3600;    // seconds between prune runs
+const IDX_FETCH_MAX_BYTES  = 268435456; // 256 MB hard cap on the downloaded scrape (safety)
+
+function indexEnabled(array $cfg): bool { return (($cfg['index_enabled'] ?? '0') === '1'); }
+function indexSourceUrl(array $cfg): string { return trim((string)($cfg['index_source_url'] ?? 'http://127.0.0.1:6969/scrape')); }
+/**
+ * COUNT(*) over the whole catalogue, remembered for thirty seconds — or for as long as the caller
+ * asks, which one caller does: the statistics timeline passes ST_INDEX_ROWS_TTL (five minutes),
+ * because its samples are a minute apart and a TTL under the interval expires before every one of
+ * them. The stored entry carries its own timestamp and not a TTL, so a long-lived write cannot make
+ * a short-lived reader stale: each caller judges the age it is willing to accept.
+ *
+ * This is the ONE query on the Index page worth caching, and it took measuring to know that. The
+ * listing itself ran at 1 747 ms until v19 added the composite index; it is 0.8 ms now, and a cache
+ * in front of THAT would have been pure liability — staleness bought with nothing. The count is a
+ * different animal: InnoDB keeps no row counter, so an unfiltered COUNT(*) walks an index over the
+ * whole table every time, and no index changes that. MEASURED on production 2026-09-08: EXPLAIN
+ * says `index` over idx_index_seeders, 3 368 887 entries, "Using index", 939 ms per execution. The
+ * 557 ms this comment used to quote was the same query on a 2.7 M-row table — the query did not get
+ * slower, the catalogue got bigger, and it will keep doing that.
+ *
+ * What it draws is a pager. A pager does not need an exact number, it needs one that is right to the
+ * page — and thirty seconds of drift on a table that gains rows in half-hourly batches cannot be
+ * seen. Filtered counts deliberately do NOT come through here: the filters are indexed and cheap,
+ * and there are enough distinct ones that a cache would miss more often than it hit.
+ *
+ * WHAT MUST NOT COME THROUGH HERE, and tests/index_test.php section 14 fails if it ever does: the
+ * prune's own count (it sizes a DELETE), indexTick()'s over-the-cap gate (it stands one call away
+ * from that DELETE, and it is cheap for a different reason — see there), and the `index_rows`
+ * written into index_polls (that column is defined as the total AFTER the poll, and this cache is
+ * warm from before it).
+ */
+function indexTotalCacheFile(): string { return __DIR__ . '/../config/index_count.json'; }
+
+/**
+ * Forget the cached total.
+ *
+ * Called wherever the row count really changes — a poll, a prune, a delete. Thirty seconds of drift
+ * is invisible while nothing is happening and glaring the moment something does: a poll that has
+ * just added six hundred thousand rows, followed by a page still showing the old number, reads as a
+ * broken poll. The saving is for the quiet minutes in between, which is nearly all of them.
+ */
+function indexTotalCacheDrop(): void { @unlink(indexTotalCacheFile()); }
+
+function indexTotalCached(PDO $db, int $ttl = 30): int {
+    $file = indexTotalCacheFile();
+    if (is_file($file)) {
+        $c = json_decode((string)@file_get_contents($file), true);
+        if (is_array($c) && isset($c['at'], $c['total']) && (time() - (int)$c['at']) < $ttl) {
+            return (int)$c['total'];
+        }
+    }
+    try {
+        $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
+    } catch (\Throwable $e) {
+        return 0;
+    }
+    @file_put_contents($file, json_encode(['at' => time(), 'total' => $total]), LOCK_EX);
+    return $total;
+}
+
+/**
+ * The status card's counts, cached for a few seconds.
+ *
+ * MEASURED on production before this existed, one poll of the Index page:
+ *
+ *     in_grace      1 060 ms      by_status     1 287 ms
+ *     protected        82 ms      files         9 593 ms   (COUNT(*) over 6.1 M rows)
+ *     promoted          1 ms      expiring_24h  1 432 ms
+ *                                 resolved_24h    468 ms
+ *     ---------------------------------------------------
+ *     TOTAL        13 921 ms, on a database shared with the mail, the forum and the file service
+ *
+ * Every one of these is a full-table aggregate on a 2 M-row table, and the admin page polls them.
+ * This project's own rule is to measure before caching and never to cache a number that DECIDES
+ * something — the prune's row count is deliberately left uncached for exactly that reason. These
+ * are display: what the card shows a few seconds late is still true, and thirteen seconds of a
+ * shared database is not.
+ */
+// KEYED, because there is more than one block cached here and a shared file would have the second
+// caller read back the first one's array. That is the kind of bug a cache is supposed to not have.
+function indexStatusCacheFile(string $key = 'counts'): string {
+    return __DIR__ . '/../config/index_' . preg_replace('/[^a-z0-9_]/', '', $key) . '_cache.json';
+}
+
+function indexStatusCached(PDO $db, string $key, callable $compute, int $ttl = 30): array {
+    $file = indexStatusCacheFile($key);
+    if (is_file($file)) {
+        $c = json_decode((string)@file_get_contents($file), true);
+        if (is_array($c) && isset($c['at'], $c['v']) && (time() - (int)$c['at']) < $ttl) return $c['v'];
+    }
+    $v = $compute();
+    indexStatusCacheWrite($key, $v);
+    return $v;
+}
+
+function indexStatusCacheWrite(string $key, array $v, bool $stale = false, ?int $at = null): void {
+    $file = indexStatusCacheFile($key);
+    // A tmp+rename so a reader never sees half a file; a failed write just means the next caller
+    // recomputes, which is the correct way for a cache to fail.
+    $tmp = $file . '.tmp.' . getmypid();
+    if (@file_put_contents($tmp, json_encode(['at' => $at ?? time(), 'v' => $v, 'stale' => $stale])) !== false) @rename($tmp, $file);
+}
+
+function indexStatusCacheDrop(): void {
+    foreach (['counts', 'flow'] as $k) {
+        $c = is_file(indexStatusCacheFile($k)) ? json_decode((string)@file_get_contents(indexStatusCacheFile($k)), true) : null;
+        if (is_array($c) && isset($c['at'], $c['v']) && is_array($c['v']) && empty($c['stale'])) indexStatusCacheWrite($k, $c['v'], true, (int)$c['at']);
+    }
+}
+
+const IDX_COUNTS_INLINE_ROWS = 200000;
+const IDX_COUNTS_SEEN_WINDOW = 900;
+
+function indexCountsSeenFile(): string { return __DIR__ . '/../config/index_counts_seen'; }
+
+function indexRowsEstimate(PDO $db): int {
+    static $est = null;
+    if ($est === null) {
+        try {
+            $est = (int)$db->query("SELECT COALESCE(TABLE_ROWS, 0) FROM information_schema.TABLES
+                                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'index_hashes'")->fetchColumn();
+        } catch (\Throwable $e) {
+            $est = 0;
+        }
+    }
+    return $est;
+}
+
+function indexSharedCounts(PDO $db, string $key, callable $compute): array {
+    $seen = indexCountsSeenFile();
+    if (!is_file($seen) || time() - (int)@filemtime($seen) >= 30) @touch($seen);
+    $c = is_file(indexStatusCacheFile($key)) ? json_decode((string)@file_get_contents(indexStatusCacheFile($key)), true) : null;
+    $have = is_array($c) && isset($c['at'], $c['v']) && is_array($c['v']);
+    $stale = !$have || !empty($c['stale']) || time() - (int)$c['at'] >= IDX_STATUS_TTL;
+    if ($stale && indexRowsEstimate($db) < IDX_COUNTS_INLINE_ROWS) {
+        $v = $compute($db);
+        indexStatusCacheWrite($key, $v);
+        return [$v, false, time()];
+    }
+    if ($have) return [$c['v'], $stale, (int)$c['at']];
+    throw new RuntimeException('the index counts are not computed yet');
+}
+
+function indexSharedCount(PDO $db, string $key): ?int {
+    try {
+        $v = indexSharedCounts($db, 'counts', 'indexCountsCompute')[0];
+        return isset($v[$key]) ? (int)$v[$key] : null;
+    } catch (\Throwable $e) {
+        return null;
+    }
+}
+
+function indexCountsTick(PDO $db): bool {
+    $seen = indexCountsSeenFile();
+    if (!is_file($seen) || time() - (int)@filemtime($seen) > IDX_COUNTS_SEEN_WINDOW) return false;
+    $ran = false;
+    foreach (['counts' => 'indexCountsCompute', 'flow' => 'indexFlowCompute'] as $key => $fn) {
+        $c = is_file(indexStatusCacheFile($key)) ? json_decode((string)@file_get_contents(indexStatusCacheFile($key)), true) : null;
+        if (is_array($c) && isset($c['at'], $c['v']) && empty($c['stale']) && time() - (int)$c['at'] < IDX_STATUS_TTL) continue;
+        try {
+            indexStatusCacheWrite($key, $fn($db));
+            $ran = true;
+        } catch (\Throwable $e) {
+            error_log('[index] the shared counts were not refreshed: ' . $e->getMessage());
+        }
+    }
+    return $ran;
+}
+
+function indexPollMinutes(array $cfg): int { return max(5, min(1440, (int)($cfg['index_poll_minutes'] ?? 30) ?: 30)); }
+function indexMinSeeders(array $cfg): int { return max(0, min(100000, (int)($cfg['index_min_seeders'] ?? 1))); }
+function indexMaxRows(array $cfg): int { return max(10, min(10000000, (int)($cfg['index_max_rows'] ?? 200000) ?: 200000)); }
+function indexGraceDays(array $cfg): int { return max(1, min(90, (int)($cfg['index_grace_days'] ?? 3) ?: 3)); }
+function indexProtectDays(array $cfg): int { return max(1, min(365, (int)($cfg['index_protect_days'] ?? 10) ?: 10)); }
+
+/**
+ * What the janitor does with a hash SOMEBODY HAS KEPT — starred, or put on a list.
+ *
+ *   'off'     — nothing; the ordinary lifecycle decides, as it always has.
+ *   'forever' — never pruned while anybody has it.
+ *   'extend'  — it gets `index_keep_saved_days` on top of whatever protection it already had.
+ *
+ * ── why 'extend' resets by itself ──────────────────────────────────────────────────────────────
+ * `protected_until` is pushed forward on every poll where the swarm still has the hash. The extra
+ * window is measured FROM that column, so a hash that reappears has both clocks restarted at once —
+ * there is no second timestamp to keep in step, and none to forget to update.
+ */
+function indexKeepSavedMode(array $cfg): string
+{
+    $v = (string)($cfg['index_keep_saved'] ?? 'off');
+    return in_array($v, ['off', 'forever', 'extend'], true) ? $v : 'off';
+}
+
+function indexKeepSavedDays(array $cfg): int
+{
+    return max(1, min(3650, (int)($cfg['index_keep_saved_days'] ?? 90) ?: 90));
+}
+
+/**
+ * The WHERE fragment that spares kept hashes, for one expiry column.
+ *
+ * Returns '' when the feature is off, so the queries below read exactly as they did before an
+ * operator turned it on. Two EXISTS over two indexed columns (`idx_fav_hash`, `idx_item_hash`) —
+ * the prune deletes in batches of 5 000, so this is 10 000 index lookups per batch and no scan.
+ *
+ * The favourites and the lists are asked SEPARATELY rather than through a UNION: they are two
+ * features with two tables, either may be switched off, and a UNION would make a missing table on
+ * an old install fail the whole prune instead of one half of one clause.
+ */
+function indexKeepSavedClause(array $cfg, string $expiryCol): string
+{
+    $mode = indexKeepSavedMode($cfg);
+    if ($mode === 'off') return '';
+    $kept = "(EXISTS (SELECT 1 FROM user_favourites kf WHERE kf.info_hash = index_hashes.info_hash)
+           OR EXISTS (SELECT 1 FROM user_list_items kl WHERE kl.info_hash = index_hashes.info_hash))";
+    if ($mode === 'forever') return " AND NOT $kept";
+    $days = indexKeepSavedDays($cfg);
+    // Kept rows die later, by exactly that many days, measured from the same column everything else
+    // is measured from.
+    return " AND (NOT $kept OR $expiryCol < NOW() - INTERVAL $days DAY)";
+}
+function indexMetaDailyBudget(array $cfg): int { return max(0, min(1000000, (int)($cfg['index_meta_daily_budget'] ?? 500))); }
+function indexMetaAutoQueue(array $cfg): bool { return (($cfg['index_meta_auto_queue'] ?? '0') === '1'); }
+// `index_keep_files` is read where file lists are written — worker/federation.py (the setting) and worker/worker.py
+// (its config's twin); nothing in PHP reads it.
+
+/**
+ * The poll's time budget: how long one poll may walk the scrape before it is cut and the next poll
+ * continues where it stopped. Read by the clamp below, the save's clamp (api/admin/save_settings.php)
+ * and the field's max= (templates/admin/settings.php) — one number, never retyped.
+ *
+ * 300, not 120 (1.72.0). At 120 a scrape of 1.95 M torrents no longer fitted: every other poll was cut
+ * at the budget and the next one finished the rest, so a pass took two polls and an hour. The poll runs
+ * in its own unit (tracker-janitor-heavy, tools/janitor.php janitorHeavy()), so a longer budget holds up
+ * nothing else — the minute tick samples the charts regardless. The download keeps its own ceiling
+ * (min(90, budget) in indexPoll()): the budget bounds the WALK, which starts once the file is here.
+ */
+const IDX_POLL_BUDGET_MIN = 5;
+const IDX_POLL_BUDGET_MAX = 300;
+function indexPollBudget(array $cfg): int {
+    return max(IDX_POLL_BUDGET_MIN, min(IDX_POLL_BUDGET_MAX, (int)($cfg['index_poll_budget'] ?? 45) ?: 45));
+}
+
+/**
+ * The stored-files-per-torrent ceiling, for everything on the PHP side: the save clamp, the field's
+ * max=, the status card. It is written twice in this repository and cannot be written once — the
+ * enforcing half is Python (MAX_FILES_MAX in worker/worker.py) and neither language can read the
+ * other's constant. So: exactly two, both named, and tests/worker_settings_test.py fails if they
+ * ever disagree. What must not happen again is the CONCURRENCY_MAX story, where the same number was
+ * typed as a literal in four files and a panel offering 64 met a worker enforcing 16.
+ */
+const META_MAX_FILES_MAX = 50000;
+
+/**
+ * The panel's stored-files-per-torrent override, or null for "use the worker's own config file".
+ *
+ * Null is a real answer, not a missing one: empty is the default and means the worker keeps the
+ * `max_files` in /etc/tracker-metadata.conf. Anything non-numeric reads as empty here for the same
+ * reason the worker ignores it — a typo must not silently become a cap of 1.
+ */
+function indexMetaMaxFiles(array $cfg): ?int {
+    $v = trim((string)($cfg['meta_max_files'] ?? ''));
+    if ($v === '' || !ctype_digit($v)) return null;
+    return max(1, min(META_MAX_FILES_MAX, (int)$v));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// How a file list LOADS — the ceilings, then the six settings that live under them
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Three questions, asked twice. How does the browser ask for the next slice (mode), how much does
+// one slice carry (batch), how much may one page ever accumulate (max). Twice, because the public
+// reader and the operator are not the same visitor: the reader arrives over the internet, anonymous
+// or a member, and every page they ask for spends a token from the per-IP `idxsearch` bucket that
+// api/index_search.php shares — a bucket whose accounting rewrites the whole of
+// config/rate_limits.json under an exclusive lock on every call. The operator is past
+// panel.whitelist.view on a page that is theirs to wait on and is not rate-limited at all. One
+// number for both would mean an operator raising the panel's batch also raising it for every
+// stranger at the same moment.
+//
+// The MODE is a client behaviour; the SIZE is a server rule. Mode only decides WHEN the browser
+// asks again. A reply is bounded by the batch whatever the mode says, and the running total is
+// enforced by the endpoint refusing to serve past the ceiling — never by the browser stopping
+// politely.
+
+/** The whole vocabulary, in one place: the two helpers, the save coercion and the two <select>s. */
+const IDX_FILES_MODES = ['scroll', 'button', 'all'];
+
+// A floor rather than a minimum worth having: below ~100 the per-request overhead (a session-less
+// GET, a rate-limit token, a JSON envelope) costs more than the rows do.
+const IDX_FILES_BATCH_MIN = 100;
+// Unchanged from what api/index_files.php accepted as a hand-typed ?limit= before 1.38.0. 5 000
+// paths and sizes is already close to a megabyte of JSON out of a database shared with the mail
+// server, the forum and the file host.
+const IDX_FILES_BATCH_MAX = 5000;
+// The public total, and deliberately equal to its own default: this ceiling can be LOWERED from the
+// panel and not raised. Paging is LIMIT/OFFSET, and it stays that way because both permission gates
+// in api/index_files.php are expressed as tests on $offset — a keyset cursor would walk straight
+// past index.files_all. That makes the last page of the deepest allowed list ~20 000 primary-key
+// lookups for path/size (index_files carries idx_if_hash, which InnoDB extends with the PK, so the
+// walk is an index scan and not a filesort — but it is still 20 000 rows fetched to answer one
+// request). Raising it is a code change on purpose, so that the cost is measured and not typed.
+const IDX_FILES_MAX_HARD = 20000;
+// The panel's batch may be four times the public one: the operator is the person paying for the
+// wait, and nobody else is queued behind them.
+const IDX_FILES_ADMIN_BATCH_MAX = 20000;
+// Unchanged from the literal at api/admin/index_item.php:30 before 1.38.0, and kept only because
+// lowering a default silently shrinks what an operator's existing "Load the whole file list" button
+// does. It is a fetchAll of up to a million rows followed by a json_encode, in php-fpm, on the same
+// box as MariaDB — the field's hint says so and recommends lowering it.
+const IDX_FILES_ADMIN_MAX_HARD = 1000000;
+
+// Clamp-on-read, the same shape as indexPollMinutes() above and for the same reason, only more so:
+// these six rows can also arrive from install.php, a restored backup, or somebody with a MySQL
+// client on a database that three other applications also use. This is the clamp that actually
+// holds — the one in save_settings.php only governs what the form is allowed to write.
+function indexFilesMode(array $cfg): string {
+    $m = (string)($cfg['index_files_mode'] ?? 'scroll');
+    return in_array($m, IDX_FILES_MODES, true) ? $m : 'scroll';
+}
+function indexFilesBatch(array $cfg): int { return max(IDX_FILES_BATCH_MIN, min(IDX_FILES_BATCH_MAX, (int)($cfg['index_files_batch'] ?? 2000) ?: 2000)); }
+function indexFilesAdminMode(array $cfg): string {
+    // Falls back to 'button', not to 'scroll': 'button' is what the panel has always done, and a
+    // garbage value must not flip the modals into fetching whole file lists unasked.
+    $m = (string)($cfg['index_files_admin_mode'] ?? 'button');
+    return in_array($m, IDX_FILES_MODES, true) ? $m : 'button';
+}
+function indexFilesAdminBatch(array $cfg): int { return max(IDX_FILES_BATCH_MIN, min(IDX_FILES_ADMIN_BATCH_MAX, (int)($cfg['index_files_admin_batch'] ?? 5000) ?: 5000)); }
+
+// Floored at one batch, so the first page can never already be over the ceiling — a max below a
+// batch would otherwise answer the very first request with "capped, nothing here". The repair is
+// silent and on read rather than a refusal on save, because the panel prints the helper's output
+// as the field's value: what the operator sees in the box is what is in force.
+function indexFilesMax(array $cfg): int { return max(indexFilesBatch($cfg), min(IDX_FILES_MAX_HARD, (int)($cfg['index_files_max'] ?? 20000) ?: 20000)); }
+function indexFilesAdminMax(array $cfg): int { return max(indexFilesAdminBatch($cfg), min(IDX_FILES_ADMIN_MAX_HARD, (int)($cfg['index_files_admin_max'] ?? 1000000) ?: 1000000)); }
+
+/**
+ * The exact number of catalogue rows.
+ *
+ * Deliberately NOT indexTotalCached(): the caller at the prune site uses this to decide whether to
+ * start deleting, and the same rule applies here as there — a pager may be approximate, a delete may
+ * not. Cards and status panels use the cached one; anything that acts on the number uses this.
+ */
+function indexRowsCount(PDO $db): int {
+    try { return (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn(); } catch (\Throwable $e) { return 0; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// State file (config/index_state.json)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function indexStateFile(): string { return __DIR__ . '/../config/index_state.json'; }
+function indexStateLockFile(): string { return __DIR__ . '/../config/index_state.lock'; }
+function indexPollLockFile(): string { return __DIR__ . '/../config/index_poll.lock'; }
+function indexPruneLockFile(): string { return __DIR__ . '/../config/index_prune.lock'; }
+
+function indexStateDefaults(): array {
+    return [
+        'last_poll_at' => 0, 'last_poll' => null, 'last_error' => null, 'last_error_at' => 0,
+        // set when a transfer ended early but enough arrived to parse; cleared by the next clean poll
+        'last_partial' => null,
+        'meta_budget_day' => '', 'meta_budget_used' => 0, 'poll_skip' => 0,
+        'last_prune_at' => 0, 'last_prune' => null, 'last_tick_at' => 0,
+        // when the protection backfill last ran — it only needs to look at rows resolved since
+        'protect_backfill_at' => 0,
+        // The cap as the last tick saw it. Zero on a fresh state file, which differs from any legal
+        // index_max_rows and therefore makes the first tick count once — the safe direction.
+        'max_rows_seen' => 0,
+        // 1.74.0 — the narrow catalogue (indexCatalogWalk() / indexCatalogSyncRecent()): where the rolling walk
+        // stopped and how many rows this pass has walked so far; when the last whole pass ended and how many rows it
+        // walked (the search's gate, indexCatalogReady()); the DB clock of the last look at what Python resolved.
+        // A fresh state file starts the walk from the beginning and keeps the search off the catalogue until then.
+        'catalog_cursor' => '', 'catalog_pass_count' => 0, 'catalog_pass_at' => 0, 'catalog_pass_rows' => 0,
+        'catalog_recent_from' => '',
+        // the last daily sweep for file rows whose torrent is gone (indexPrune(), PERF-5)
+        'orphan_sweep_at' => 0,
+    ];
+}
+
+function indexStateRead(): array {
+    $f = indexStateFile();
+    $data = [];
+    if (is_file($f)) { $raw = @file_get_contents($f); $data = $raw ? (json_decode($raw, true) ?: []) : []; }
+    return array_merge(indexStateDefaults(), is_array($data) ? $data : []);
+}
+
+function indexStateUpdate(callable $fn): array {
+    $lockH = @fopen(indexStateLockFile(), 'c');
+    if ($lockH) @flock($lockH, LOCK_EX);
+    try {
+        $state = indexStateRead();
+        $r = $fn($state);
+        if ($r !== false) {
+            $tmp = indexStateFile() . '.tmp.' . getmypid();
+            @file_put_contents($tmp, json_encode($state), LOCK_EX);
+            @rename($tmp, indexStateFile());
+        }
+        return $state;
+    } finally {
+        if ($lockH) { @flock($lockH, LOCK_UN); @fclose($lockH); }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-scrape download + streaming parse
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Download the full scrape to a temp file (gzip kept on disk — smaller). Returns
+ * ['file'=>?path,'gzip'=>bool,'bytes'=>int,'ms'=>int,'error'=>?string]. Caller unlinks the file.
+ */
+function indexFetchFullScrape(string $url, int $timeout, string $tmpDir): array {
+    $t0 = microtime(true);
+    $out = ['file' => null, 'gzip' => false, 'bytes' => 0, 'ms' => 0, 'error' => null, 'partial' => null];
+    if ($url === '' || !preg_match('#^https?://#i', $url)) { $out['error'] = __('api.index.invalid_source_url'); return $out; }
+    if (!function_exists('curl_init')) { $out['error'] = __('api.index.curl_required'); return $out; }
+    $tmp = rtrim($tmpDir, '/\\') . '/index_scrape_' . getmypid() . '_' . bin2hex(random_bytes(4)) . '.bin';
+    $fh = @fopen($tmp, 'wb');
+    if (!$fh) { $out['error'] = __('api.index.temp_file'); return $out; }
+    $ch = curl_init();
+    $tooBig = false;
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url, CURLOPT_FILE => $fh, CURLOPT_TIMEOUT => max(5, $timeout), CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_USERAGENT => 'tryhackx-tracker/1.5 index', CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_HTTPHEADER => ['Accept-Encoding: gzip'],   // keep gzip on the wire; do NOT auto-decode
+        CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_NOPROGRESS => false,
+        CURLOPT_PROGRESSFUNCTION => function ($ch, $dltotal, $dlnow) use (&$tooBig) {
+            if ($dlnow > IDX_FETCH_MAX_BYTES) { $tooBig = true; return 1; }
+            return 0;
+        },
+    ]);
+    $ok = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    $errno = curl_errno($ch);
+    curl_close($ch);
+    fclose($fh);
+    $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
+    if ($tooBig) { @unlink($tmp); $out['error'] = __('api.index.scrape_too_big', ['n' => IDX_FETCH_MAX_BYTES]); return $out; }
+    if ($ok === false) {
+        // KEEP WHAT ARRIVED. A full scrape that dies at 90 % is 90 % of the catalogue, and this
+        // parser is built for partial passes already — the poll-time budget stops it mid-file every
+        // time the scrape is big, records how far it got, and resumes there on the next poll. A
+        // transfer that ends early is the same situation arriving by a different route, so throwing
+        // the file away would discard good data for no reason other than how the reading stopped.
+        //
+        // The floor matters: this only applies when enough arrived to be worth a pass. Anything
+        // smaller, or a body that does not start like a scrape, is a failure and is treated as one.
+        $have = (int)@filesize($tmp);
+        $head = '';
+        if ($have > 0 && ($hf = @fopen($tmp, 'rb'))) { $head = (string)fread($hf, 8); fclose($hf); }
+        $looksReal = (strncmp($head, "\x1f\x8b", 2) === 0) || (strncmp($head, 'd5:files', 8) === 0);
+        if ($have >= IDX_PARTIAL_MIN_BYTES && $looksReal && $code === 200) {
+            $out['bytes'] = $have;
+            $out['gzip'] = strncmp($head, "\x1f\x8b", 2) === 0;
+            $out['file'] = $tmp;
+            $out['partial'] = $err !== '' ? $err : __('api.index.transfer_ended_early');
+            return $out;
+        }
+        @unlink($tmp);
+        // "chunk hex-length char not a hex digit" reads like a broken panel and is not one. The full
+        // scrape is tens of megabytes of gzip that opentracker sends with Transfer-Encoding: chunked,
+        // announcing each chunk's length before writing it; if the tracker gets out of step with its
+        // own framing mid-transfer — which is what a busy tracker rewriting its torrent list while
+        // serving a 30 MB snapshot can do — the client lands mid-body and reads a data byte where a
+        // length should be. Nothing was written, and the source is not corrupt.
+        //
+        // An immediate retry is worse than useless here: opentracker rate-limits FULL scrapes and
+        // answers the next one with 402 (see below), so it would spend the allowance and report a
+        // second, different-looking failure. The next poll gets a clean snapshot.
+        $out['error'] = ($errno === 56 && stripos($err, 'chunk') !== false)
+            ? __('api.index.chunked_framing_lost', ['err' => $err])
+            : __('api.index.curl_error', ['err' => $err]);
+        return $out;
+    }
+    if ($code !== 200) {
+        @unlink($tmp);
+        // 402 is not a payment and not our firewall: it is opentracker's own refusal of a FULL
+        // scrape asked for too soon after the last one. It clears itself on the next poll, and a
+        // bare "HTTP 402" sends whoever reads it hunting through rate limits that have nothing to
+        // do with it -- the throttle on this machine is UDP-only and this request is HTTP.
+        $out['error'] = $code === 402
+            ? __('api.index.http_402')
+            : __('api.index.http_code', ['code' => $code]);
+        return $out;
+    }
+    $out['bytes'] = (int)@filesize($tmp);
+    if ($out['bytes'] < 9) { @unlink($tmp); $out['error'] = __('api.index.empty_reply'); return $out; }
+    // gzip magic
+    $magic = '';
+    if ($m = @fopen($tmp, 'rb')) { $magic = fread($m, 2); fclose($m); }
+    $out['gzip'] = (substr($magic, 0, 2) === "\x1f\x8b");
+    $out['file'] = $tmp;
+    return $out;
+}
+
+/**
+ * Stream-parse a scrape file (gzip or plain), keeping entries with complete >= $minSeeders. Calls
+ * $onBatch(array $rows) every IDX_BATCH kept rows ($rows = [[hash_hex, seeders, leechers, completed], ...]).
+ * Skips the first $skip entries (resume cursor — see indexPoll), stops early once $deadline (microtime)
+ * passes. Returns ['entries'=>int (total seen incl. skipped),'kept'=>int,'truncated'=>bool].
+ * Rejects a body that does not begin like a bencoded scrape reply (`d5:files…`).
+ */
+function indexParseScrapeFile(string $file, bool $gzip, int $minSeeders, callable $onBatch, float $deadline, int $skip = 0): array {
+    $out = ['entries' => 0, 'kept' => 0, 'truncated' => false];
+    $fh = $gzip ? @gzopen($file, 'rb') : @fopen($file, 'rb');
+    if (!$fh) { $out['error'] = __('api.index.open_scrape_file'); return $out; }
+    $read = $gzip ? 'gzread' : 'fread';
+    $eof = $gzip ? 'gzeof' : 'feof';
+    $close = $gzip ? 'gzclose' : 'fclose';
+    $carry = '';
+    $batch = [];
+    $first = true;
+    try {
+        while (!$eof($fh)) {
+            // @: a gzip stream that ends mid-member is now an ordinary case (a transfer kept after
+            // it was cut short), and PHP's warning about it says nothing the return value does not.
+            $chunk = @$read($fh, 1 << 20);
+            if ($chunk === false || $chunk === '') break;
+            $buf = $carry . $chunk;
+            if ($first) {
+                $first = false;
+                // a real scrape reply starts with d5:filesd… — reject an HTML error page / wrong endpoint
+                if (strncmp($buf, 'd5:files', 8) !== 0) { $out['error'] = __('api.index.not_scrape_reply'); break; }
+            }
+            $last = 0;
+            if (preg_match_all(IDX_ENTRY_RE, $buf, $mm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+                foreach ($mm as $e) {
+                    $out['entries']++;
+                    $last = $e[0][1] + strlen($e[0][0]);
+                    if ($out['entries'] <= $skip) continue;   // resume cursor: already processed in a prior pass
+                    $c = (int)$e[2][0];
+                    if ($c >= $minSeeders) {
+                        $batch[] = [bin2hex($e[1][0]), $c, (int)$e[4][0], (int)$e[3][0]];
+                        if (count($batch) >= IDX_BATCH) { $onBatch($batch); $out['kept'] += count($batch); $batch = []; }
+                    }
+                }
+            }
+            $carry = substr($buf, $last);
+            // keep the carry bounded: an entry is < 100 bytes, so a buffer with no complete entry can only
+            // hold a partial one — never let it grow without bound if the source is malformed
+            if (strlen($carry) > 4096) $carry = substr($carry, -128);
+            if (microtime(true) >= $deadline) { $out['truncated'] = true; break; }
+        }
+        if ($batch) { $onBatch($batch); $out['kept'] += count($batch); }
+    } finally {
+        $close($fh);
+    }
+    return $out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Poll
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Is a poll due? */
+function indexPollDue(array $state, array $cfg, int $now): bool {
+    return $now - (int)$state['last_poll_at'] >= indexPollMinutes($cfg) * 60;
+}
+
+/**
+ * A row is stamped "seen" at most once per this many seconds. See indexUpsertBatch().
+ *
+ * Six hours against a 30-minute poll: eleven polls in twelve leave an unchanged row untouched, and
+ * `last_seen` on the catalogue page is at most six hours behind the truth for a row nobody joined
+ * or left — which is also what "last seen" means to the person reading it.
+ */
+const IDX_SEEN_WINDOW_SEC = 21600;
+
+/**
+ * Upsert one batch of scrape rows into index_hashes. A 'done' row that still has >= 1 seeder gets its
+ * protection extended. $rows = [[hash, seeders, leechers, completed], ...].
+ *
+ * A ROW THAT DID NOT CHANGE IS NOT WRITTEN. Measured on production (1.5 M rows, 621 k kept per
+ * poll): the download takes 6 s and the parse 3 s, and the upsert took 82 s — 96 % of the poll,
+ * and the reason every other poll ran out of its time budget. Of those rows 99 % already existed
+ * and 78 % carried exactly the same seeders/leechers/completed as the poll before; the old
+ * statement still rewrote every one of them (last_seen = NOW(), seen_count + 1), and with it four
+ * secondary indexes per row. InnoDB skips a row whose assignments all resolve to its current
+ * values, so the statement is arranged to make that the common case:
+ *   - the counters only change when they changed on the tracker;
+ *   - last_seen and seen_count move at most once per IDX_SEEN_WINDOW_SEC (assignment order matters:
+ *     MySQL evaluates ON DUPLICATE KEY UPDATE left to right and later expressions see the new
+ *     values, so the seen_count test runs before last_seen is rewritten);
+ *   - the protection window is pushed forward at most once a day, not on every poll.
+ * Same reproducer, conditional statement: 43 s for the full pass — inside the budget with room.
+ * seen_count therefore counts the six-hour windows a hash was seen in, not the polls; the
+ * catalogue sorts by it the same way and the number stays monotonic.
+ */
+function indexUpsertBatch(PDO $db, array $rows, int $graceDays, int $protectDays): void {
+    if (!$rows) return;
+    $w = (int)IDX_SEEN_WINDOW_SEC;
+    $ph = rtrim(str_repeat('(?, NOW(), NOW(), 1, ?, ?, ?, ?, NOW() + INTERVAL ' . $graceDays . ' DAY),', count($rows)), ',');
+    $sql = "INSERT INTO index_hashes (info_hash, first_seen, last_seen, seen_count, last_seeders, last_leechers, last_completed, peak_seeders, grace_until)
+            VALUES $ph
+            ON DUPLICATE KEY UPDATE
+                seen_count = IF(last_seen <= NOW() - INTERVAL $w SECOND, seen_count + 1, seen_count),
+                last_seen  = IF(last_seen <= NOW() - INTERVAL $w SECOND, NOW(), last_seen),
+                protected_until = IF(meta_status = 'done' AND VALUES(last_seeders) >= 1
+                                     AND (protected_until IS NULL OR protected_until < NOW() + INTERVAL " . max(0, $protectDays - 1) . " DAY),
+                                     GREATEST(COALESCE(protected_until, NOW()), NOW() + INTERVAL " . $protectDays . " DAY),
+                                     protected_until),
+                last_seeders = VALUES(last_seeders), last_leechers = VALUES(last_leechers), last_completed = VALUES(last_completed),
+                peak_seeders = GREATEST(peak_seeders, VALUES(last_seeders))";
+    $args = [];
+    foreach ($rows as $r) { $args[] = $r[0]; $args[] = $r[1]; $args[] = $r[2]; $args[] = $r[3]; $args[] = $r[1]; }
+    $db->prepare($sql)->execute($args);
+}
+
+/**
+ * One poll: fetch the full scrape, stream-parse it, upsert kept rows, then drop rows that are whitelisted
+ * or banned. $fetcher (tests): fn(): array{file:string, gzip:bool} replaces the HTTP download.
+ * Returns a summary array; never throws (errors recorded in state).
+ */
+function indexPoll(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = null, ?string $tmpDir = null): array {
+    $now = $now ?? time();
+    $out = ['ok' => false, 'entries' => 0, 'kept' => 0, 'truncated' => false, 'removed_wl' => 0,
+            'removed_ban' => 0, 'bytes' => 0, 'ms' => 0, 'error' => null, 'partial' => null];
+    // one poll at a time across processes (janitor CLI + web "Poll now" + a double click). Non-blocking:
+    // a second caller returns immediately instead of starting a duplicate full scrape.
+    $lockH = @fopen(indexPollLockFile(), 'c');
+    if (!$lockH || !@flock($lockH, LOCK_EX | LOCK_NB)) {
+        if ($lockH) @fclose($lockH);
+        $out['error'] = 'already polling';
+        return $out;
+    }
+    try {
+        $tmpDir = $tmpDir ?? sys_get_temp_dir();
+        $graceDays = indexGraceDays($cfg); $protectDays = indexProtectDays($cfg); $minSeeders = indexMinSeeders($cfg);
+        $stateSkip = max(0, (int)indexStateRead()['poll_skip']);  // resume cursor from the previous truncated pass
+        $skip = $stateSkip;
+        $ownFile = false;
+        if ($fetcher !== null) {
+            $f = $fetcher();
+            $file = $f['file'] ?? null; $gzip = (bool)($f['gzip'] ?? false); $out['bytes'] = (int)($f['bytes'] ?? (($file && is_file($file)) ? filesize($file) : 0));
+            if (!$file || !is_file($file)) { $out['error'] = $f['error'] ?? 'fetch failed'; }
+            // the stub speaks the same language as the real fetch, or the tests cannot exercise the
+            // path that matters most here
+            $out['partial'] = $f['partial'] ?? null;
+        } else {
+            $fetched = indexFetchFullScrape(indexSourceUrl($cfg), min(90, max(5, indexPollBudget($cfg))), $tmpDir);
+            $file = $fetched['file']; $gzip = $fetched['gzip']; $out['bytes'] = $fetched['bytes']; $out['ms'] = $fetched['ms'];
+            $ownFile = $file !== null;
+            $out['partial'] = $fetched['partial'] ?? null;
+            // a fatal (execution-time limit, OOM) skips finally blocks — make sure the temp scrape
+            // is removed at shutdown regardless (unlink of an already-removed file is a no-op)
+            if ($ownFile) register_shutdown_function(static function () use ($file) { @unlink($file); });
+            if ($fetched['error']) $out['error'] = $fetched['error'];
+        }
+        if ($out['partial'] !== null) {
+            // A SHORT FILE IS NOT THE SAME FILE, so the resume cursor does not apply to it.
+            //
+            // The cursor counts entries into the COMPLETE scrape, and a truncated download cannot
+            // contain anything past the point where it stopped. Carrying the cursor over means every
+            // entry in the short file falls below it and the poll keeps nothing. That is not
+            // hypothetical: production did exactly this twice in a row — 386 870 entries seen,
+            // 0 kept, and not one row in the index refreshed for two hours.
+            //
+            // So read all of what arrived. Coverage is reconciled below, where the cursor moves to
+            // the FURTHER of the two: it must never walk backwards onto ground already covered.
+            $skip = 0;
+        }
+        if ($out['error'] !== null || !$file) {
+            indexStateUpdate(function (array &$s) use ($out, $now) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; return true; });
+            return $out;
+        }
+        $t0 = microtime(true);
+        $deadline = $t0 + indexPollBudget($cfg);
+        try {
+            $onBatch = function (array $rows) use ($db, $graceDays, $protectDays) {
+                $db->beginTransaction();
+                try {
+                    indexUpsertBatch($db, $rows, $graceDays, $protectDays);
+                    // The catalogue's numbers move with the batch, in the same transaction (1.74.0): its named
+                    // rows' seeders, leechers and last-seen. A poll never names a row or un-names one, so nothing
+                    // leaves here — and an unchanged row is not written.
+                    indexCatalogSync($db, array_column($rows, 0), false);
+                    $db->commit();
+                }
+                catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+            };
+            $p = indexParseScrapeFile($file, $gzip, $minSeeders, $onBatch, $deadline, $skip);
+            $out['entries'] = $p['entries']; $out['kept'] = $p['kept'];
+            // A file that arrived incomplete is a truncated pass by definition, whatever the parser
+            // thought: it ran out of file rather than out of time, and the tail is still unread.
+            $out['truncated'] = $p['truncated'] || $out['partial'] !== null;
+            if (isset($p['error'])) $out['error'] = $p['error'];
+            // drop anything that lives in the whitelist or the ban list — those have their own tables
+            $out['removed_wl'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN whitelist w ON w.info_hash = i.info_hash");
+            $out['removed_ban'] = (int)$db->exec("DELETE i FROM index_hashes i JOIN banned_hashes b ON b.info_hash = i.info_hash");
+            // … and out of the catalogue with them (1.74.0).
+            if (indexCatalogExists($db)) {
+                $db->exec("DELETE c FROM index_catalog c JOIN whitelist w ON w.info_hash = c.info_hash");
+                $db->exec("DELETE c FROM index_catalog c JOIN banned_hashes b ON b.info_hash = c.info_hash");
+            }
+            $out['ok'] = $out['error'] === null;
+        } catch (\Throwable $e) {
+            $out['error'] = __('api.index.poll_exception', ['msg' => $e->getMessage()]);
+            error_log('[index poll] ' . $e->getMessage());
+        } finally {
+            if ($ownFile) @unlink($file);
+        }
+        $out['ms'] = $out['ms'] + (int)round((microtime(true) - $t0) * 1000);
+        // Resume at the tail next time; reset once the whole file was covered. After a truncated
+        // DOWNLOAD the cursor takes the further of the two, because this pass restarted at zero and
+        // an earlier pass may well have reached further into the scrape than this short file goes.
+        $skipNext = 0;
+        if ($out['ok'] && $out['truncated']) {
+            $skipNext = $out['partial'] !== null ? max($stateSkip, $out['entries']) : $out['entries'];
+        }
+        // ONE ROW PER POLL, kept.
+        //
+        // `skip_from` is the cursor this pass began at, and it is the difference between "this poll
+        // delivered 386 870 entries" and the truth, which is that it walked past 386 870 and only the
+        // ones beyond the cursor were new. Written before the state file so a crash between the two
+        // leaves a recorded poll rather than a silent one.
+        try {
+            // The tracker's own torrent count, from the same reading the swarm timeline took. Not
+            // fetched here: a poll must not depend on a second network call, and a number from a few
+            // minutes ago is the right denominator for a scrape that took minutes to walk.
+            $rowsTotal = null;
+            if (function_exists('statsTimelineStateRead')) {
+                $ls = statsTimelineStateRead()['last_sample'] ?? null;
+                if (is_array($ls) && !empty($ls['torrents'])) $rowsTotal = (int)$ls['torrents'];
+            }
+            $db->prepare("INSERT INTO index_polls
+                          (ts, entries, skip_from, kept, bytes, ms, truncated, partial,
+                           removed_wl, removed_ban, rows_total, index_rows, error)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                          ON DUPLICATE KEY UPDATE entries = VALUES(entries), kept = VALUES(kept)")
+               // THE CURSOR THAT WAS ACTUALLY APPLIED, not the one that was stored.
+               //
+               // A truncated download resets $skip to 0 above and reads the short file from the
+               // start, while the stored cursor stays where a longer earlier pass left it. Recording
+               // the stored one made the first two live rows read "delivered 0" beside "kept
+               // 189 434" — a poll that plainly delivered something, reported as having delivered
+               // nothing, and a coverage of 0 % on the chart to go with it.
+               // index_rows is the EXACT count, deliberately, and the only exact one on this path.
+               //
+               // The column is defined as what the catalogue held AFTERWARDS (includes/schema.php,
+               // index_polls) and the coverage page divides by it. The 30 s cache is warm here
+               // almost by construction: the statistics timeline fills it a second or two earlier in
+               // the same janitor tick (tools/janitor.php samples before it polls), so a cached read
+               // would record the PRE-poll total as the post-poll figure — every poll, for ever,
+               // with nothing in the history to show it was wrong. One 939 ms count per poll (every
+               // 30 minutes by default) buys a number that is true.
+               ->execute([$now, $out['entries'], $skip, $out['kept'], $out['bytes'], $out['ms'],
+                          $out['truncated'] ? 1 : 0, $out['partial'] !== null ? mb_substr((string)$out['partial'], 0, 64) : null,
+                          $out['removed_wl'], $out['removed_ban'], $rowsTotal, indexRowsCount($db),
+                          $out['error'] !== null ? mb_substr((string)$out['error'], 0, 190) : null]);
+            // Pruned here rather than on a timer: this is the only thing that writes the table, so it
+            // is the only place that can leave it too big.
+            $keep = max(1, min(3650, (int)($cfg['index_poll_keep_days'] ?? 90)));
+            $db->prepare("DELETE FROM index_polls WHERE ts < ?")->execute([$now - $keep * 86400]);
+        } catch (\Throwable $e) {
+            // A poll that ran must not fail because its bookkeeping did.
+            error_log('[index poll history] ' . $e->getMessage());
+        }
+
+        indexStateUpdate(function (array &$s) use ($out, $now, $skipNext) {
+            $s['last_poll_at'] = $now;
+            $s['poll_skip'] = $skipNext;
+            $s['last_poll'] = ['at' => $now, 'entries' => $out['entries'], 'kept' => $out['kept'], 'truncated' => $out['truncated'],
+                               'removed_wl' => $out['removed_wl'], 'removed_ban' => $out['removed_ban'], 'bytes' => $out['bytes'], 'ms' => $out['ms']];
+            $s['last_partial'] = $out['partial'] === null ? null
+                : ['at' => $now, 'bytes' => $out['bytes'], 'entries' => $out['entries'], 'reason' => $out['partial']];
+            if ($out['error'] !== null) { $s['last_error'] = $out['error']; $s['last_error_at'] = $now; }
+            elseif ($out['ok']) { $s['last_error'] = null; }
+            return true;
+        });
+        // The row count has just changed, probably by a lot. Anything that shows a total must ask
+        // again rather than answering from a cache filled before the poll ran.
+        indexTotalCacheDrop();
+        indexStatusCacheDrop();
+        return $out;
+    } finally {
+        @flock($lockH, LOCK_UN); @fclose($lockH);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Poll history, read as PASSES (the coverage card, the budget's estimate)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// THE QUESTION THE COVERAGE CARD ANSWERS IS "DID WE SEE THE WHOLE TRACKER?", AND ONE POLL DOES NOT
+// ANSWER IT. When the scrape takes longer to walk than the time budget allows, a poll is cut at the
+// budget and the next one continues from the cursor; the two together are the whole scrape. Judged
+// one at a time (1.29.0 – 1.71.0: `coverage = delivered / rows_total` per poll) the continuing half of
+// every such pair read as a collapse — production 2026-09-28/29: "worst poll 0.1 %", the 1 453-entry
+// tail of a pass that had covered everything — and each cut was counted as "arrived truncated", the
+// words for a broken download, while `partial` was NULL on every one of those rows: nothing arrived
+// short. So the unit here is the PASS: a poll that starts at the beginning, plus the polls that
+// continue it, until one ends un-cut.
+
+/** Rows a history reply reads (newest first), and rows it may look back for the start of the first pass. */
+const IDX_POLL_HISTORY_MAX = 4000;
+const IDX_POLL_LOOKBACK = 200;
+/** How recent a short download, a failed poll or the worst pass must be to be said as a warning (1.72.1). */
+const IDX_POLL_RECENT = 86400;
+
+/** The coverage card's ranges → seconds ('all' = the whole retention, index_poll_keep_days). */
+function indexPollRanges(): array {
+    return ['1h' => 3600, '6h' => 21600, '24h' => 86400, '7d' => 604800, '2w' => 1209600, '1m' => 2592000];
+}
+
+/**
+ * One index_polls row, read.
+ *
+ * `entries` is a FILE POSITION, not a delivery count: the parser counts every entry it walks past, the
+ * ones below the resume cursor included. What a poll contributed is what lies past the point it
+ * STARTED from — `delivered`.
+ *
+ * Where it started: `skip_from` is the cursor the poll applied (since 1.29.1), and a poll reads from
+ * entry 0 when that is 0 — or when its download ended early (`partial` set). A short file is not the
+ * same file, so indexPoll() reads every short download from the start; rows written by 1.29.0 recorded
+ * the STORED cursor there instead, which is why such a row can carry a `skip_from` above its entries.
+ * That is the old rule this keeps readable (the 1.29.1 fix: 31.2 % and 59 %, not 0 %), and `partial` is
+ * what tells it apart from the one other way `skip_from` can exceed `entries`: a poll that resumed on a
+ * scrape which had SHRUNK below the cursor walked the whole shorter file, found nothing past the
+ * cursor, and delivered nothing — it did not restart, and reading it as a restart (the rule before
+ * 1.72.0) credited it with the whole file.
+ */
+function indexPollPoint(array $r): array {
+    $entries = (int)$r['entries'];
+    $skip = (int)$r['skip_from'];
+    $partial = isset($r['partial']) ? (string)$r['partial'] : null;
+    $error = isset($r['error']) ? (string)$r['error'] : null;
+    $restart = $skip === 0 || $partial !== null;
+    $start = $restart ? 0 : $skip;
+    $truncated = (int)$r['truncated'] === 1;
+    return [
+        'ts'         => (int)$r['ts'],
+        'entries'    => $entries,
+        'skip_from'  => $skip,
+        'start'      => $start,
+        'delivered'  => max(0, $entries - $start),
+        'kept'       => (int)$r['kept'],
+        'bytes'      => (int)$r['bytes'],
+        'ms'         => (int)$r['ms'],
+        'truncated'  => $truncated,
+        // CUT BY THE TIME BUDGET: the walk ran out of time, and the next poll continues where it
+        // stopped. Not a fault — and never the words for one: a download that really ended early
+        // carries `partial`, and a failed poll `error`.
+        'cut'        => $truncated && $partial === null && $error === null,
+        'partial'    => $partial,
+        'restart'    => $restart,
+        // start = read from entry 0; resume = continued from a cursor; short = the download ended
+        // early (read from 0); error = the poll failed
+        'kind'       => $error !== null ? 'error' : ($partial !== null ? 'short' : ($restart ? 'start' : 'resume')),
+        'rows_total' => $r['rows_total'] !== null ? (int)$r['rows_total'] : null,
+        'index_rows' => $r['index_rows'] !== null ? (int)$r['index_rows'] : null,
+        'error'      => $error,
+    ];
+}
+
+/**
+ * Polls (indexPollPoint() rows, oldest first) grouped into passes.
+ *
+ *   · a poll that starts at the beginning opens a pass — except a SHORT download while a pass is open:
+ *     indexPoll() leaves the cursor at the further of the pass's reach and the short file's end, so the
+ *     next poll goes on with that same pass, and so does this one;
+ *   · a poll that continues from a cursor joins the open pass; with none open, its pass began before the
+ *     rows given (`began_before`: its coverage is not known, and it is never counted);
+ *   · a pass ends with a poll that is not cut (complete), with a failed poll (error: indexPoll() resets
+ *     the cursor), or with a fresh start while it was still open (abandoned: the cursor was lost);
+ *   · the newest pass, if its newest poll was cut, is IN PROGRESS: the next poll continues it. It is
+ *     never a low number — what it has walked so far is not a coverage.
+ *
+ * Per pass: polls, walked (the furthest entry reached — the scrape's length when it completed),
+ * delivered (the sum over its polls), kept, seconds (the polls' own time, download included),
+ * duration (first start → last end), coverage (walked against the newest tracker count the pass
+ * recorded, the last poll's when it has one), and whether it counts in a summary.
+ *
+ * THE NEW GROUND (1.72.1). `delivered` is what a poll walked past its OWN start, and a short download
+ * that joins an open pass starts at 0 — so it walks again what the pass had already walked. Stacked,
+ * those parts made a bar the SUM of overlapping walks: production's 04.09 09:29 pass, thirteen short
+ * downloads and the poll that finished it, stood at 5 017 793 over a scrape of 1 468 888, and the y axis
+ * followed it (0 – 6M on the month, everything else squashed under 2.3M). So each poll also carries
+ * what was NEW in it: `new_from` = the further of its start and what the pass had reached before it,
+ * `new` = what it walked past that, `again` = the old ground it walked a second time, `kept_new` = its
+ * kept share of the new ground (kept × new / delivered — an estimate for a re-read, where the row does
+ * not say which of the kept were new). A pass's `ground` = the sum of `new` — its walked for a pass seen
+ * from its start — and never more than the scrape.
+ * Returns ['passes' => [...], 'points' => $points each with 'pass' (its index), 'pos' (1-based) and 'of'].
+ */
+function indexPollPasses(array $points): array {
+    $passes = [];
+    $open = null;
+    foreach ($points as $i => $p) {
+        $join = null;
+        if (!$p['restart']) {
+            $join = $open;                       // null: the pass began before these rows
+        } elseif ($p['partial'] !== null && $open !== null) {
+            $join = $open;
+        } elseif ($open !== null) {
+            $passes[$open]['status'] = 'abandoned';
+            $open = null;
+        }
+        if ($join === null) {
+            $passes[] = ['first_ts' => $p['ts'], 'last_ts' => $p['ts'], 'end_ts' => $p['ts'], 'polls' => 0,
+                         'walked' => 0, 'ground' => 0, 'delivered' => 0, 'kept' => 0, 'kept_new' => 0, 'ms' => 0, 'cut' => 0,
+                         'short' => 0, 'failed' => 0, 'rows_total' => null, 'began_before' => !$p['restart'], 'status' => 'open'];
+            $join = count($passes) - 1;
+        }
+        $x = &$passes[$join];
+        $reachBefore = $x['walked'];
+        $newFrom = max($p['start'], $reachBefore);
+        $new = max(0, $p['entries'] - $newFrom);
+        $points[$i]['new_from'] = $newFrom;
+        $points[$i]['new'] = $new;
+        $points[$i]['again'] = max(0, min($p['entries'], $reachBefore) - $p['start']);
+        $points[$i]['kept_new'] = $p['delivered'] > 0 ? (int)round($p['kept'] * $new / $p['delivered']) : 0;
+        $x['polls']++;
+        $x['walked'] = max($x['walked'], $p['entries']);
+        $x['ground'] += $new;
+        $x['delivered'] += $p['delivered'];
+        $x['kept'] += $p['kept'];
+        $x['kept_new'] += $points[$i]['kept_new'];
+        $x['ms'] += $p['ms'];
+        if ($p['cut']) $x['cut']++;
+        if ($p['partial'] !== null) $x['short']++;
+        if ($p['error'] !== null) $x['failed']++;
+        if ($p['rows_total'] !== null) $x['rows_total'] = $p['rows_total'];
+        $x['last_ts'] = $p['ts'];
+        $x['end_ts'] = $p['ts'] + (int)ceil($p['ms'] / 1000);
+        if ($p['error'] !== null)  { $x['status'] = 'error'; $open = null; }
+        elseif ($p['truncated'])   { $x['status'] = 'open'; $open = $join; }
+        else                       { $x['status'] = 'complete'; $open = null; }
+        $points[$i]['pass'] = $join;
+        $points[$i]['pos'] = $x['polls'];
+        unset($x);
+    }
+    foreach ($passes as $k => $x) {
+        if ($x['status'] === 'open') $x['status'] = 'in_progress';      // only the newest can still be open
+        $x['coverage'] = ($x['rows_total'] !== null && $x['rows_total'] > 0)
+            ? min(100.0, round(100 * $x['walked'] / $x['rows_total'], 2)) : null;
+        $x['seconds'] = round($x['ms'] / 1000, 1);
+        $x['duration'] = $x['end_ts'] - $x['first_ts'];
+        $x['counted'] = !$x['began_before'] && $x['status'] !== 'in_progress';
+        $passes[$k] = $x;
+    }
+    foreach ($points as $i => $p) $points[$i]['of'] = $passes[$p['pass']]['polls'];
+    return ['passes' => $passes, 'points' => $points];
+}
+
+/**
+ * The coverage card's reply for one range: the polls in it (`points`), the passes they make, and a
+ * summary per PASS. api/admin/index_polls.php is this and nothing else.
+ *
+ * A window's first poll may continue a pass that began before it, so the rows just before the window
+ * are read back (up to IDX_POLL_LOOKBACK) while they kept a pass open — until its start. They count in
+ * that pass and are not points of their own: the chart draws the window that was asked for.
+ */
+function indexPollHistory(PDO $db, array $cfg, string $range = '24h', ?int $now = null): array {
+    $now = $now ?? time();
+    $ranges = indexPollRanges();
+    $key = $range;
+    if ($key === 'all') {
+        $from = $now - max(1, min(3650, (int)($cfg['index_poll_keep_days'] ?? 90))) * 86400;
+    } else {
+        if (!isset($ranges[$key])) $key = '24h';
+        $from = $now - $ranges[$key];
+    }
+    $cols = 'ts, entries, skip_from, kept, bytes, ms, truncated, partial, removed_wl, removed_ban, rows_total, index_rows, error';
+    // Newest first with a cap, then flipped: a window wider than the cap must lose its OLDEST points,
+    // not its most recent ones. A plain LIMIT on an ascending scan does the opposite.
+    // Bounded above too: `$now` is the moment the window ends (a test passes its own), and a row is
+    // stamped when its poll STARTED, so nothing real lies past it.
+    $st = $db->prepare("SELECT $cols FROM index_polls WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT " . IDX_POLL_HISTORY_MAX);
+    $st->execute([$from, $now]);
+    $rows = array_reverse($st->fetchAll(PDO::FETCH_ASSOC));
+    $window = array_map('indexPollPoint', $rows);
+    $back = [];
+    if ($window && !($window[0]['restart'] && $window[0]['partial'] === null)) {
+        $st = $db->prepare("SELECT $cols FROM index_polls WHERE ts < ? ORDER BY ts DESC LIMIT " . IDX_POLL_LOOKBACK);
+        $st->execute([$window[0]['ts']]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $p = indexPollPoint($r);
+            // only a poll that left the pass open can belong to it
+            if (!$p['truncated'] || $p['error'] !== null) break;
+            array_unshift($back, $p);
+            if ($p['restart'] && $p['partial'] === null) break;          // its start
+        }
+    }
+    $g = indexPollPasses(array_merge($back, $window));
+    $passes = $g['passes'];
+    $points = array_slice($g['points'], count($back));
+    $counted = array_values(array_filter($passes, static fn($x) => $x['counted'] && $x['coverage'] !== null));
+    $cov = array_column($counted, 'coverage');
+    $lastPass = $passes ? $passes[count($passes) - 1] : null;
+    $complete = array_values(array_filter($passes, static fn($x) => $x['status'] === 'complete' && !$x['began_before']));
+    $scrape = null;
+    foreach (array_reverse($points) as $p) { if ($p['rows_total'] !== null) { $scrape = $p['rows_total']; break; } }
+    $budget = indexPollBudget($cfg);
+    // WHEN, not only how many (1.72.1). A month's window counted production's 52 short downloads of
+    // 04.09 – 05.09 — every one of them before the tracker's fix on 05.09 12:48, none since — and said
+    // them as a current warning, "if it keeps happening, look at the tracker's side of it", three weeks
+    // on. The newest of each kind, and how many fell in the last IDX_POLL_RECENT seconds of the window,
+    // let the card say "the last on 05.09 — none since" and keep the warning for what is happening now.
+    $recentFrom = $now - IDX_POLL_RECENT;
+    $shortTs = array_values(array_map(static fn($p) => $p['ts'], array_filter($points, static fn($p) => $p['partial'] !== null)));
+    $failTs = array_values(array_map(static fn($p) => $p['ts'], array_filter($points, static fn($p) => $p['error'] !== null)));
+    $worst = null;                                   // the worst counted pass; of equals, the newest
+    foreach ($counted as $x) { if ($worst === null || $x['coverage'] <= $worst['coverage']) $worst = $x; }
+    $summary = [
+        'polls'        => count($points),
+        'passes'       => count($passes),
+        'counted'      => count($counted),
+        'failed'       => count(array_filter($points, static fn($p) => $p['error'] !== null)),
+        'cut'          => count(array_filter($points, static fn($p) => $p['cut'])),
+        'short'        => count(array_filter($points, static fn($p) => $p['partial'] !== null)),
+        'truncated'    => count(array_filter($points, static fn($p) => $p['truncated'])),
+        'avg_coverage' => $cov ? round(array_sum($cov) / count($cov), 1) : null,
+        'min_coverage' => $cov ? min($cov) : null,
+        // how many polls a finished pass took: 1 everywhere = the budget is enough
+        'min_polls'    => $counted ? min(array_column($counted, 'polls')) : null,
+        'max_polls'    => $counted ? max(array_column($counted, 'polls')) : null,
+        'last'         => $points ? $points[count($points) - 1] : null,
+        'last_pass'    => $lastPass,
+        'in_progress'  => ($lastPass !== null && $lastPass['status'] === 'in_progress') ? $lastPass : null,
+        'budget'       => $budget,
+        'budget_max'   => IDX_POLL_BUDGET_MAX,
+        'estimate'     => indexPollEstimate($complete ? $complete[count($complete) - 1] : null, $scrape, $budget),
+        'recent_s'     => IDX_POLL_RECENT,
+        'short_last'   => $shortTs ? max($shortTs) : null,
+        'short_recent' => count(array_filter($shortTs, static fn($t) => $t >= $recentFrom)),
+        'failed_last'  => $failTs ? max($failTs) : null,
+        'failed_recent'=> count(array_filter($failTs, static fn($t) => $t >= $recentFrom)),
+        'worst_ts'     => $worst !== null ? $worst['first_ts'] : null,
+        'worst_recent' => $worst !== null && $worst['last_ts'] >= $recentFrom,
+    ];
+    // `lead`: the polls before the window that belong to its first pass — drawn as the lower parts of
+    // that pass's bar, never counted in the summary above. `now`: the moment the window ends, which the
+    // card measures "the last … ago" from.
+    return ['success' => true, 'range' => $key, 'from' => $from, 'now' => $now, 'points' => $points,
+            'lead' => array_slice($g['points'], 0, count($back)), 'passes' => $passes, 'summary' => $summary];
+}
+
+/**
+ * How long the current scrape takes to walk, from the newest COMPLETE pass: it walked `walked` entries
+ * in `seconds` of its polls' own time (downloads included), so the scrape of `$scrape` torrents needs
+ * about scrape / rate seconds — and with the budget at `$budget` that is ceil(needs / budget) polls.
+ * An estimate, and says so: a pass's rate moves with the machine's load and with what the upsert
+ * finds changed. Null without a complete pass to measure from. `$scrape` null = the pass's own length.
+ */
+function indexPollEstimate(?array $pass, ?int $scrape, int $budget): ?array {
+    if ($pass === null || ($pass['status'] ?? '') !== 'complete' || !empty($pass['began_before'])) return null;
+    $walked = (int)($pass['walked'] ?? 0);
+    // the polls' own milliseconds when the pass carries them: `seconds` is rounded for display
+    $seconds = isset($pass['ms']) ? (int)$pass['ms'] / 1000 : (float)($pass['seconds'] ?? 0);
+    if ($walked <= 0 || $seconds <= 0) return null;
+    $rate = $walked / $seconds;
+    $scrape = ($scrape !== null && $scrape > 0) ? $scrape : $walked;
+    $needs = max(1, (int)ceil($scrape / $rate));
+    $budget = max(1, $budget);
+    return ['rate' => (int)round($rate), 'scrape' => $scrape, 'needs' => $needs, 'budget' => $budget,
+            'polls' => max(1, (int)ceil($needs / $budget)), 'pass_ts' => (int)$pass['first_ts'], 'pass_polls' => (int)$pass['polls']];
+}
+
+/**
+ * The estimate for the Settings page: the newest complete pass of the last week, against the newest
+ * tracker count on record (the statistics timeline's last sample when no poll recorded one).
+ */
+function indexPollEstimateNow(PDO $db, array $cfg, ?int $now = null): ?array {
+    try {
+        $h = indexPollHistory($db, $cfg, '7d', $now);
+    } catch (\Throwable $e) {
+        return null;
+    }
+    $pass = null;
+    foreach (array_reverse($h['passes']) as $x) {
+        if ($x['status'] === 'complete' && !$x['began_before']) { $pass = $x; break; }
+    }
+    $scrape = null;
+    foreach (array_reverse($h['points']) as $p) { if ($p['rows_total'] !== null) { $scrape = $p['rows_total']; break; } }
+    if ($scrape === null && function_exists('statsTimelineStateRead')) {
+        $ls = statsTimelineStateRead()['last_sample'] ?? null;
+        if (is_array($ls) && !empty($ls['torrents'])) $scrape = (int)$ls['torrents'];
+    }
+    return indexPollEstimate($pass, $scrape, indexPollBudget($cfg));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Metadata budget + prune (janitor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Promote up to the remaining daily budget of 'none' rows to 'pending', highest last_seeders first, with a
+ * randomised meta_requested_at spread across the next 24 h so the worker (second queue) doesn't flood the
+ * DHT. The daily counter resets on date change. Returns rows queued.
+ */
+function indexQueueMetaBudget(PDO $db, array $cfg, ?int $now = null): int {
+    $budget = indexMetaDailyBudget($cfg);
+    if ($budget <= 0) return 0;
+    $now = $now ?? time();
+    $today = date('Y-m-d', $now);
+    $queued = 0;
+    indexStateUpdate(function (array &$s) use ($db, $budget, $today, &$queued) {
+        if (($s['meta_budget_day'] ?? '') !== $today) { $s['meta_budget_day'] = $today; $s['meta_budget_used'] = 0; }
+        $remaining = $budget - (int)$s['meta_budget_used'];
+        if ($remaining <= 0) return false;
+        $remaining = min($remaining, 5000);   // never queue more than 5000 in one tick
+        $st = $db->prepare("UPDATE index_hashes SET meta_status = 'pending', meta_priority = -1,
+                                meta_requested_at = NOW() + INTERVAL FLOOR(RAND() * 86400) SECOND, meta_error = NULL, meta_claim = NULL
+                            WHERE meta_status = 'none' ORDER BY last_seeders DESC, last_seen DESC LIMIT " . (int)$remaining);
+        $st->execute();
+        $queued = $st->rowCount();
+        if ($queued > 0) $s['meta_budget_used'] = (int)$s['meta_budget_used'] + $queued;
+        return $queued > 0;
+    });
+    return $queued;
+}
+
+/**
+ * Auto-queue mode (index_meta_auto_queue=1): EVERY 'none' row goes to 'pending' — no daily budget.
+ * Bounded per tick and spread over the next hour so a huge poll doesn't hand the worker (and the DHT)
+ * everything at once; the janitor tick keeps draining until no 'none' rows remain. Returns rows queued.
+ */
+function indexQueueMetaAuto(PDO $db): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'pending', meta_priority = -1,
+                            meta_requested_at = NOW() + INTERVAL FLOOR(RAND() * 3600) SECOND, meta_error = NULL, meta_claim = NULL
+                        WHERE meta_status = 'none' ORDER BY last_seeders DESC, last_seen DESC LIMIT 5000");
+    $st->execute();
+    return $st->rowCount();
+}
+
+/**
+ * Hourly pruner: drop expired rows (grace elapsed without metadata, or protection elapsed for done rows),
+ * cap the table at index_max_rows (oldest last_seen without protection), and clean orphaned index_files.
+ * Returns ['expired'=>int,'capped'=>int,'orphan_files'=>int] or null when throttled.
+ */
+function indexPrune(PDO $db, array $cfg, ?int $now = null, bool $force = false): ?array {
+    $now = $now ?? time();
+    $st = indexStateRead();
+    if (!$force && $now - (int)$st['last_prune_at'] < IDX_PRUNE_EVERY) return null;
+    // one prune at a time across processes: a janitor tick and a manual/forced prune racing each other
+    // both compute "excess over the cap" from the same snapshot and together over-delete
+    $lockH = @fopen(indexPruneLockFile(), 'c');
+    if (!$lockH || !@flock($lockH, LOCK_EX | LOCK_NB)) { if ($lockH) @fclose($lockH); return null; }
+    try {
+    $res = ['expired' => 0, 'capped' => 0, 'orphan_files' => 0, 'protected_backfill' => 0];
+    // a row whose metadata resolved since the last poll has protected_until NULL until the next poll
+    // touches it — grant the protection window here FIRST so the cap-prune below can never eat a row
+    // the worker just resolved
+    //
+    // Bounded by WHEN the metadata arrived (idx_index_meta_fetched): every pass before this one
+    // already protected everything older, so only rows resolved since the last pass need looking
+    // at (a row done without a fetch time — a federation import — counts as new), a day of
+    // margin, and the first pass on an install looks at everything once. Unbounded,
+    // this was a scan of the whole catalogue every pass: four minutes on production, twice an hour,
+    // with the minute tick (and every chart's sample) waiting behind it.
+    $since = max(0, (int)($st['protect_backfill_at'] ?? 0) - 86400);
+    $bf = $db->prepare("UPDATE index_hashes SET protected_until = DATE_ADD(NOW(), INTERVAL " . indexProtectDays($cfg) . " DAY)
+                        WHERE meta_status = 'done' AND protected_until IS NULL
+                          AND (meta_fetched_at IS NULL OR meta_fetched_at >= FROM_UNIXTIME(?))");
+    $bf->execute([$since]);
+    $res['protected_backfill'] = $bf->rowCount();
+    // expired: never-resolved past grace, or done past protection. Batched with LIMIT so one prune never
+    // takes a huge row-lock set on a 200k table (each chunk autocommits — prune runs outside a transaction).
+    // A hash somebody has starred or put on a list can be spared here — see indexKeepSavedClause().
+    // The two branches carry their own clause because they expire on different columns, and an
+    // operator who says "keep what people kept" means both of them.
+    $keepGrace   = indexKeepSavedClause($cfg, 'grace_until');
+    $keepProtect = indexKeepSavedClause($cfg, 'protected_until');
+    // EVERY DELETE HERE SAYS WHAT IT DELETED (1.74.0, PERF-5): `RETURNING info_hash` (MariaDB, one table, with LIMIT),
+    // and the file rows and the catalogue rows of exactly those hashes go right behind them, by key. The file rows
+    // used to be found afterwards by an anti-join over the whole of index_files — 3.7 s warm, 11–12 s cold on a third
+    // of production's 25.9 M rows, every hour the prune removed anything. Not only `done` rows have files: a re-fetch
+    // flips done → pending and keeps them, and the expiry branch below takes that pending row.
+    do {
+        $gone = $db->query(
+            "DELETE FROM index_hashes WHERE
+                ((meta_status <> 'done' AND grace_until IS NOT NULL AND grace_until < NOW()$keepGrace)
+              OR (meta_status  = 'done' AND protected_until IS NOT NULL AND protected_until < NOW()$keepProtect))
+             LIMIT 5000 RETURNING info_hash")->fetchAll(PDO::FETCH_COLUMN);
+        $nd = count($gone);
+        $res['expired'] += $nd;
+        $res['orphan_files'] += indexDeleteFilesFor($db, $gone);
+        indexCatalogForget($db, $gone);
+    } while ($nd === 5000);
+    // cap: delete oldest unprotected rows over the limit — but not while a truncated poll awaits its
+    // resume: the un-reached tail still carries stale last_seen and would be evicted first, only to be
+    // re-inserted as brand-new rows (history reset) by the resume pass. poll_skip is non-zero only
+    // between a truncated pass and the pass that finishes the file, so the cap defers by one cycle at most.
+    $max = indexMaxRows($cfg);
+    // Deliberately NOT the cached count: this number decides how many rows get deleted, and pruning
+    // against a figure that is thirty seconds stale would delete thirty seconds' worth of the wrong
+    // rows. A pager can be approximate; a delete cannot.
+    $total = (int)$db->query("SELECT COUNT(*) FROM index_hashes")->fetchColumn();
+    if ($total > $max && (int)indexStateRead()['poll_skip'] === 0) {
+        $excess = $total - $max;
+        // Deleted in bounded passes rather than by materialising the whole excess first.
+        //
+        // The cap is 3 500 000 and the table has run at 2.9 M; a poll that overshoots by a wide
+        // margin — or an operator lowering the cap — makes `$excess` arbitrarily large, and the old
+        // shape pulled every one of those hashes into a single PHP array before deleting any of
+        // them. A million 40-character hashes is ~100 MB of PHP memory inside php-fpm, whose
+        // memory_limit is the thing that decides whether the prune finishes or the request dies
+        // half-way through. The work is identical; only the peak is bounded.
+        $left = $excess;
+        while ($left > 0) {
+            $batch = min(5000, $left);
+            // The cap spares kept rows too. It has to: a hash somebody starred that gets evicted for
+            // being old is exactly the row the setting exists to protect, and the eviction order is
+            // "oldest first", which is where those rows live.
+            $gone = $db->query("DELETE FROM index_hashes
+                                WHERE (protected_until IS NULL OR protected_until < NOW())$keepProtect
+                                ORDER BY last_seen ASC LIMIT " . (int)$batch . " RETURNING info_hash")->fetchAll(PDO::FETCH_COLUMN);
+            $n = count($gone);
+            $res['capped'] += $n;
+            $res['orphan_files'] += indexDeleteFilesFor($db, $gone);
+            indexCatalogForget($db, $gone);
+            $left -= $batch;
+            // Nothing matched: everything left over the cap is protected, and looping would spin.
+            if ($n < $batch) break;
+        }
+    }
+    // orphaned files (index_files has no FK cascade) — the safety net, ONCE A DAY (1.74.0, PERF-5).
+    //
+    // What the prune deletes takes its files with it above. What is left for this is what other paths
+    // leave behind — a row deleted by hand, a crash between two statements — and that does not need
+    // looking for every hour. In batches, because a multi-table DELETE takes no LIMIT: pick up to
+    // 2 000 orphaned hashes, delete their rows, repeat while the batch was full.
+    $sweep = $now - (int)($st['orphan_sweep_at'] ?? 0) >= 86400;
+    if ($sweep) {
+        do {
+            $orphans = $db->query("SELECT f.info_hash FROM index_files f LEFT JOIN index_hashes h ON h.info_hash = f.info_hash
+                                    WHERE h.info_hash IS NULL LIMIT 2000")->fetchAll(PDO::FETCH_COLUMN);
+            if (!$orphans) break;
+            $ph = implode(',', array_fill(0, count($orphans), '?'));
+            $del = $db->prepare("DELETE FROM index_files WHERE info_hash IN ($ph)");
+            $del->execute($orphans);
+            $res['orphan_files'] += (int)$del->rowCount();
+        } while (count($orphans) === 2000);
+    }
+    // #11 (b): a FORCED prune that could not trim anything must not be forced again a minute
+    // later — everything over the cap is protected and will stay so until the next poll changes
+    // something. Stand down for the ordinary interval.
+    $idle = ($force && $res['capped'] === 0 && $res['expired'] === 0) ? $now + IDX_PRUNE_EVERY : 0;
+    indexStateUpdate(function (array &$s) use ($now, $res, $idle, $sweep) {
+        $s['last_prune_at'] = $now; $s['last_prune'] = $res; $s['protect_backfill_at'] = $now;
+        if ($idle) $s['force_idle_until'] = $idle;
+        if ($sweep) $s['orphan_sweep_at'] = $now;
+        return true;
+    });
+    if ($res['expired'] > 0 || $res['capped'] > 0) { indexTotalCacheDrop(); indexStatusCacheDrop(); }
+    return $res;
+    } finally {
+        @flock($lockH, LOCK_UN); @fclose($lockH);
+    }
+}
+
+/**
+ * One janitor tick: poll if due, run the metadata budget, prune (hourly). $fetcher/$tmpDir for tests.
+ * Never throws. Returns a summary.
+ */
+function indexTick(PDO $db, array $cfg, ?callable $fetcher = null, ?int $now = null, ?string $tmpDir = null): array {
+    $now = $now ?? time();
+    $out = ['enabled' => indexEnabled($cfg), 'polled' => false, 'poll' => null, 'meta_queued' => 0, 'prune' => null, 'error' => null];
+    if (!$out['enabled']) return $out;
+    try {
+        $state = indexStateRead();
+        if (indexPollDue($state, $cfg, $now)) {
+            $out['poll'] = indexPoll($db, $cfg, $fetcher, $now, $tmpDir);
+            $out['polled'] = $out['poll']['ok'];
+            if ($out['poll']['error'] !== null) $out['error'] = $out['poll']['error'];
+        }
+        $out['meta_queued'] = indexMetaAutoQueue($cfg) ? indexQueueMetaAuto($db) : indexQueueMetaBudget($db, $cfg, $now);
+        // a big OPEN-hours poll can overshoot the cap by tens of thousands — don't wait for the hourly
+        // prune, trim right away when we're more than 5 % over
+        // … unless the last forced prune found nothing it could trim, in which case forcing again
+        // every minute only repeats the scan (see indexPrune()).
+        //
+        // THE CHEAP TESTS COME FIRST, AND THAT IS THE WHOLE POINT. PHP's && runs left to right, and
+        // the count on the right is an index scan of the entire catalogue: 939 ms over 3 368 887
+        // rows, measured on production 2026-09-08. The old shape paid it on every tick before
+        // anything had asked whether the answer could matter — including for the whole hour of the
+        // stand-down this very comment describes, where the answer is thrown away by construction.
+        // information_schema.INDEX_STATISTICS measured 6 737 774 rows read on idx_index_seeders in a
+        // clean 60 s window: exactly two full scans a minute, all day, on a database shared with the
+        // mail, the forum and the file service.
+        //
+        // Only two things can put this table over its cap, and both leave a mark that costs one
+        // already-open file to read: a poll (the only inserter on this side) and an operator lowering
+        // index_max_rows in Settings. So the count runs on the tick after one of those and not
+        // otherwise — roughly twice an hour instead of sixty times.
+        //
+        // It stays the EXACT count. The cached total is a pager's number and this one decides whether
+        // to start a prune; the rule that keeps includes/index.php honest is that nothing near a
+        // DELETE reads a cache, and it is cheaper to skip the count than to approximate it.
+        //
+        // Federation writes rows from Python (worker/federation.py) and cannot leave a mark here. It
+        // bounds its own batches, and the hourly prune enforces the cap regardless of this gate —
+        // what is lost in that case is the early trim, not the trim.
+        // Re-read, deliberately: $state above predates the poll that may just have run, and its
+        // last_poll_at is exactly the mark being tested here.
+        $post = indexStateRead();
+        $maxRows = indexMaxRows($cfg);
+        $mayHaveGrown = (int)$post['last_poll_at'] >= (int)$post['last_tick_at']
+                     || (int)($post['max_rows_seen'] ?? 0) !== $maxRows;
+        $force = $now >= (int)($post['force_idle_until'] ?? 0)
+              && $mayHaveGrown
+              && indexRowsCount($db) > (int)($maxRows * 1.05);
+        $out['prune'] = indexPrune($db, $cfg, $now, $force);
+        // max_rows_seen is remembered here and nowhere else: the tick is the only reader of the cap
+        // that runs on a timer, so this is the only place that can notice it moved.
+        indexStateUpdate(function (array &$s) use ($now, $maxRows) {
+            $s['last_tick_at'] = $now; $s['max_rows_seen'] = $maxRows; return true;
+        });
+    } catch (\Throwable $e) {
+        $out['error'] = $e->getMessage();
+        error_log('[index tick] ' . $e->getMessage());
+    }
+    return $out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Promote / delete / status
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Promote index rows into the real whitelist (source 'admin'), carrying the name so the entry is
+ * recognisable, and mark them promoted. Returns ['promoted'=>int,'summary'=>array|null,'error'=>?string].
+ * The next poll drops the now-whitelisted rows from the index automatically.
+ */
+function indexPromote(PDO $db, array $cfg, array $hashes): array {
+    $out = ['promoted' => 0, 'summary' => null, 'error' => null];
+    $clean = [];
+    foreach ($hashes as $h) { $h = strtolower(trim((string)$h)); if (isValidInfoHash($h)) $clean[$h] = true; }
+    $clean = array_keys($clean);
+    if (!$clean) { $out['error'] = __('api.index.no_valid_hashes'); return $out; }
+    $in = implode(',', array_fill(0, count($clean), '?'));
+    $rows = $db->prepare("SELECT info_hash, name FROM index_hashes WHERE info_hash IN ($in)");
+    $rows->execute($clean);
+    $items = [];
+    foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) $items[] = ['hash' => $r['info_hash'], 'name' => $r['name'], 'input' => $r['info_hash']];
+    if (!$items) { $out['error'] = __('api.index.no_matching_rows'); return $out; }
+    $res = whitelistAddHashes($db, $cfg, $items, ['source' => 'admin', 'ip' => '', 'auto_meta' => true]);
+    $out['summary'] = $res['summary'] ?? null;
+    $upd = $db->prepare("UPDATE index_hashes SET promoted_at = NOW() WHERE info_hash IN ($in)");
+    $upd->execute($clean);
+    $out['promoted'] = $upd->rowCount();
+    indexStatusCacheDrop();
+    return $out;
+}
+
+/** Delete the file rows of these hashes, by key, in chunks. Returns file rows deleted. */
+function indexDeleteFilesFor(PDO $db, array $hashes): int {
+    $n = 0;
+    foreach (array_chunk(array_values($hashes), 2000) as $chunk) {
+        $d = $db->prepare("DELETE FROM index_files WHERE info_hash IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")");
+        $d->execute($chunk);
+        $n += $d->rowCount();
+    }
+    return $n;
+}
+
+/** Delete index rows (and their files) by hash. Returns rows deleted. */
+function indexDelete(PDO $db, array $hashes): int {
+    $clean = [];
+    foreach ($hashes as $h) { $h = strtolower(trim((string)$h)); if (isValidInfoHash($h)) $clean[$h] = true; }
+    $clean = array_keys($clean);
+    if (!$clean) return 0;
+    $n = 0;
+    foreach (array_chunk($clean, 5000) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        $db->prepare("DELETE FROM index_files WHERE info_hash IN ($in)")->execute($chunk);
+        $d = $db->prepare("DELETE FROM index_hashes WHERE info_hash IN ($in)");
+        $d->execute($chunk);
+        $n += $d->rowCount();
+        indexCatalogForget($db, $chunk);
+    }
+    if ($n > 0) { indexTotalCacheDrop(); indexStatusCacheDrop(); }
+    return $n;
+}
+
+/**
+ * What a re-fetch does to a row's life (1.74.0, VPERF-1), as an SQL assignment — put it FIRST in the SET list,
+ * before meta_status: MariaDB evaluates the assignments left to right and the IF() must still see `done`.
+ *
+ * A resolved row lives by its protection; an unresolved one by its grace, which is set once, on insert, and was never
+ * moved. Asking for a resolved row again flips it to `pending` — and the prune's expiry branch, which takes every
+ * row that is not `done` past its grace, then deleted it at the next prune whenever that grace was long gone (it
+ * always is, for a row older than index_grace_days), however protected the row still was. So a row that WAS done
+ * gets, at the moment it is asked for again, a grace reaching at least as far as its protection and at least
+ * index_grace_days from now: the same time to resolve again as a new row, and never less life than it had.
+ */
+function indexRefetchGraceSql(array $cfg): string {
+    $g = indexGraceDays($cfg);
+    return "grace_until = IF(meta_status = 'done',
+                             GREATEST(COALESCE(grace_until, NOW()), COALESCE(protected_until, NOW()), NOW() + INTERVAL $g DAY),
+                             grace_until)";
+}
+
+/** Queue metadata for specific index rows (admin "Fetch metadata" on selected/one). Returns rows queued. */
+function indexRequestMeta(PDO $db, array $hashes, int $priority = 0, ?array $cfg = null): int {
+    $clean = [];
+    foreach ($hashes as $h) { $h = strtolower(trim((string)$h)); if (isValidInfoHash($h)) $clean[$h] = true; }
+    $clean = array_keys($clean);
+    if (!$clean) return 0;
+    $in = implode(',', array_fill(0, count($clean), '?'));
+    $grace = indexRefetchGraceSql($cfg ?? ($GLOBALS['cfg'] ?? []));
+    $st = $db->prepare("UPDATE index_hashes SET {$grace},
+                               meta_status = 'pending', meta_priority = ?, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
+                        WHERE info_hash IN ($in) AND meta_status NOT IN ('fetching')");
+    $st->execute(array_merge([$priority], $clean));
+    indexStatusCacheDrop();
+    return $st->rowCount();
+}
+
+/**
+ * Queue metadata for rows FIRST SEEN within [$from, $to] (Y-m-d H:i:s). Only never-fetched / failed rows.
+ * Manual date-scoped queueing uses priority 0 (above the janitor's budget rows at -1). Returns rows queued.
+ */
+function indexQueueMetaByDate(PDO $db, string $from, string $to): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL
+                        WHERE meta_status IN ('none','failed') AND first_seen >= ? AND first_seen <= ?");
+    $st->execute([$from, $to]);
+    indexStatusCacheDrop();   // the operator's own action: the card shows it at once (IDX_STATUS_TTL)
+    return $st->rowCount();
+}
+
+/**
+ * Cancel the index metadata queue ('fetching' rows finish on their own). A queued row that ALREADY
+ * carries resolved metadata (a re-fetch victim — name+size present) is RESTORED to 'done' so it
+ * reappears in search immediately; rows that never resolved go back to 'none'. The daily-budget
+ * counter is NOT refunded. Returns ['cancelled'=>total, 'restored'=>how many went back to done].
+ */
+function indexMetaCancel(PDO $db): array {
+    $restore = $db->prepare("UPDATE index_hashes SET meta_status = 'done', meta_requested_at = NULL, meta_priority = -1
+                             WHERE meta_status = 'pending' AND name IS NOT NULL AND total_size IS NOT NULL");
+    $restore->execute();
+    $restored = $restore->rowCount();
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'none', meta_requested_at = NULL, meta_priority = -1 WHERE meta_status = 'pending'");
+    $st->execute();
+    indexStatusCacheDrop();
+    return ['cancelled' => $restored + $st->rowCount(), 'restored' => $restored];
+}
+
+/**
+ * Rebuild button: every row that HAS resolved metadata (name+size) but lost its 'done' status to a
+ * bulk re-fetch / cancel goes straight back to 'done' — nothing is fetched, nothing is deleted.
+ * Returns rows restored.
+ */
+function indexMetaRestore(PDO $db): int {
+    $st = $db->prepare("UPDATE index_hashes SET meta_status = 'done', meta_requested_at = NULL, meta_priority = -1, meta_error = NULL
+                        WHERE meta_status IN ('none', 'pending', 'failed') AND name IS NOT NULL AND total_size IS NOT NULL");
+    $st->execute();
+    indexStatusCacheDrop();
+    return $st->rowCount();
+}
+
+/** Bulk (re)queue metadata by scope: 'missing' | 'failed' | 'missing_failed' | 'all'. Returns rows queued or null. */
+function indexQueueMetaByScope(PDO $db, string $scope, ?array $cfg = null): ?int {
+    $conds = [
+        'missing'        => "meta_status = 'none'",
+        'failed'         => "meta_status = 'failed'",
+        'missing_failed' => "meta_status IN ('none','failed')",
+        'all'            => "meta_status NOT IN ('pending','fetching')",
+    ];
+    if (!isset($conds[$scope])) return null;
+    // 'all' re-asks for resolved rows too — the same lease of life as indexRequestMeta() gives one (VPERF-1).
+    $grace = $scope === 'all' ? indexRefetchGraceSql($cfg ?? ($GLOBALS['cfg'] ?? [])) . ', ' : '';
+    $st = $db->prepare("UPDATE index_hashes SET {$grace}meta_status = 'pending', meta_priority = 0, meta_requested_at = NOW(), meta_error = NULL, meta_claim = NULL WHERE " . $conds[$scope]);
+    $st->execute();
+    indexStatusCacheDrop();
+    return $st->rowCount();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// On-demand seeders/leechers scrape (reuses whitelist.php's HTTP + bencode helpers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Scrape seeders/leechers for many index rows with as few tracker requests as possible (WL_SCRAPE_BATCH
+ * hashes per /scrape), writing scrape_* + scraped_at by info_hash. $rows = [['info_hash'=>hex], ...].
+ * Mirrors scrapeOpenTrackerMany() but targets index_hashes. Returns the same shape.
+ */
+function indexScrapeMany(PDO $db, array $cfg, array $rows, float $budget = WL_SCRAPE_BULK_BUDGET): array {
+    $out = ['scraped' => 0, 'requests' => 0, 'failed' => 0, 'processed' => 0, 'truncated' => false, 'last_id' => null, 'error' => null];
+    $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
+    if ($base === '' || !preg_match('#^https?://#i', $base)) { $out['error'] = __('api.index.scrape_url_missing'); return $out; }
+    $items = [];
+    foreach ($rows as $r) { $h = strtolower((string)($r['info_hash'] ?? '')); if (isValidInfoHash($h)) $items[] = $h; }
+    if (!$items) return $out;
+    $deadline = microtime(true) + max(1.0, $budget);
+    $sep = str_contains($base, '?') ? '&' : '?';
+    $upd = $db->prepare("UPDATE index_hashes SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?, scraped_at = NOW() WHERE info_hash = ?");
+    foreach (array_chunk($items, WL_SCRAPE_BATCH) as $batch) {
+        if (microtime(true) >= $deadline) { $out['truncated'] = true; break; }
+        $qs = [];
+        foreach ($batch as $h) $qs[] = 'info_hash=' . rawurlencode(hex2bin($h));
+        $out['requests']++; $out['processed'] += count($batch); $out['last_id'] = $batch[count($batch) - 1];
+        $body = whitelistHttpGet($base . $sep . implode('&', $qs), 4);
+        $files = $body !== null ? parseScrapeReply($body) : null;
+        if ($files === null) {
+            $out['failed']++;
+            if ($out['scraped'] === 0 && $out['failed'] >= 2) { $out['error'] = __('api.index.tracker_no_answer'); break; }
+            continue;
+        }
+        $db->beginTransaction();
+        try {
+            foreach ($batch as $h) {
+                $f = $files[$h] ?? ['seeders' => 0, 'leechers' => 0, 'completed' => 0];
+                $upd->execute([$f['seeders'], $f['leechers'], $f['completed'], $h]);
+                $out['scraped']++;
+            }
+            indexCatalogSync($db, $batch, false);   // the catalogue sorts by these numbers (1.74.0)
+            $db->commit();
+        } catch (\Throwable $e) { if ($db->inTransaction()) $db->rollBack(); throw $e; }
+    }
+    if ($out['error'] === null && $out['requests'] > 0 && $out['scraped'] === 0 && $out['failed'] === $out['requests']) $out['error'] = __('api.index.tracker_no_answer');
+    return $out;
+}
+
+/** Scrape one index hash now (force). Returns ['seeders','leechers','completed','scraped_at'] or null. */
+function indexScrapeOne(PDO $db, array $cfg, string $hash): ?array {
+    $hash = strtolower(trim($hash));
+    if (!isValidInfoHash($hash)) return null;
+    $base = trim((string)($cfg['whitelist_scrape_url'] ?? ''));
+    if ($base === '' || !preg_match('#^https?://#i', $base)) return null;
+    $url = $base . (str_contains($base, '?') ? '&' : '?') . 'info_hash=' . rawurlencode(hex2bin($hash));
+    $body = whitelistHttpGet($url, 3);
+    $files = $body !== null ? parseScrapeReply($body) : null;
+    if ($files === null) return null;
+    $f = $files[$hash] ?? ['seeders' => 0, 'leechers' => 0, 'completed' => 0];
+    $db->prepare("UPDATE index_hashes SET scrape_seeders = ?, scrape_leechers = ?, scrape_completed = ?, scraped_at = NOW() WHERE info_hash = ?")
+       ->execute([$f['seeders'], $f['leechers'], $f['completed'], $hash]);
+    indexCatalogSync($db, [$hash], false);
+    return ['seeders' => $f['seeders'], 'leechers' => $f['leechers'], 'completed' => $f['completed'], 'scraped_at' => date('Y-m-d H:i:s')];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File lists — what a reply is allowed to claim about one
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What the three file-list endpoints (api/index_files.php and the two admin item endpoints) may
+ * tell a reader about the slice they are handing over.
+ *
+ * $fetched is the raw row count of a `LIMIT $limit + 1` query, $before how many rows of the same
+ * list the caller already holds (the public list is paged, so it is the offset; the admin modals
+ * ask once, so it is 0), and $filesCount the torrent's OWN file count as the worker recorded it.
+ *
+ * Two different shortfalls come back separately because they need different words and different
+ * buttons:
+ *   'truncated' — the probe row came back, so more rows are waiting in the table and asking again
+ *                 gets them.
+ *   'short'     — the stored list ENDS here and is shorter than what the torrent itself claims.
+ *                 The metadata worker only ever writes the first max_files paths (worker.py:645,
+ *                 5 000 on this install) while files_count keeps libtorrent's real count
+ *                 (worker.py:669). Asking again changes nothing; the rest was never written.
+ *
+ * 'short' is precisely the case the +1 probe cannot see, and it is the reported bug: at exactly
+ * max_files stored rows a `LIMIT max_files + 1` comes back full but not over, which read as
+ * "nothing more to fetch", so the panel printed "Files (5000)" two lines under a heading saying
+ * 27 260 files and said nothing about the difference. 620 catalogue rows on production are in that
+ * state, every one of them with exactly 5 000 stored paths.
+ */
+function indexFilesShortfall(?int $filesCount, int $fetched, int $limit, int $before = 0): array {
+    $truncated = $fetched > $limit;
+    // `$before` is the caller's offset, and nothing bounds what a caller may ask for: a hand-made
+    // offset past the end of a 5 000-row list would otherwise report a stored total of 6 000 for
+    // rows that do not exist. The torrent's own count is the only honest ceiling on a number that
+    // claims to say how much was stored.
+    $stored = $before + min($fetched, $limit);
+    if ($filesCount !== null && $stored > $filesCount) $stored = $filesCount;
+    return [
+        'truncated' => $truncated,
+        'stored'    => $stored,
+        'short'     => !$truncated && $filesCount !== null && $filesCount > $stored,
+    ];
+}
+
+/**
+ * Whether a reply must say that THIS SITE ended the list — as opposed to the reader's permission
+ * (`truncated` without `can_more`) or the worker never having stored more (`short`). Called by all
+ * three file-list endpoints on the page they are about to answer with, `$rows` being the page as
+ * it will be sent and `$offset` how far in it starts (0 for the one-shot admin replies).
+ *
+ * The rule the callers must not lose is that this and `truncated` are never both true. The public
+ * page's loop condition is `truncated && can_more` and its IntersectionObserver re-fires whenever
+ * the sentinel is on screen, so a reply claiming both leaves an open tab asking for the same empty
+ * page for ever — against a rate-limit bucket keyed by IP address, whose accounting rewrites the
+ * whole of config/rate_limits.json under an exclusive lock on every single call. In the panel the
+ * same pair puts a Load-all button on a list that no request can extend.
+ */
+function indexFilesCapped(bool $truncated, int $offset, int $rows, int $max): bool {
+    return $truncated && ($offset + $rows) >= $max;
+}
+
+/**
+ * How many matching files a list opened from a search hit carries beside its page (1.62.0).
+ *
+ * Small on purpose. The point is that the file which made the torrent a hit can always be SEEN, not
+ * that the whole list becomes searchable: fifty is several screens of one folder tree, and a term
+ * that matches thousands of files in one torrent is a term the list's own highlighting already
+ * answers better than an appendix would.
+ */
+const INDEX_FILE_LIST_MATCHES = 50;
+
+/**
+ * The clause "search inside file names" matches a PATH with — [sql, params] — or null when the term
+ * does not search file names at all.
+ *
+ * The same decision indexSearchCatalogue() makes for its file half, written once so the list a
+ * reader opens from a hit and the search that produced the hit cannot disagree about what matched:
+ * fulltext over `path` in boolean mode with indexFulltextTerm()'s words when the term has any, a
+ * LIKE otherwise, and nothing for an empty term or a hash prefix (a hash is looked up, not searched
+ * for). The caller adds its own row condition — one torrent's rows — in front of this.
+ */
+function indexFilePathClause(string $search): ?array {
+    $search = trim($search);
+    if ($search === '' || indexIsHashPrefix($search)) return null;
+    $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
+    return $ft !== ''
+        ? ['MATCH(path) AGAINST(? IN BOOLEAN MODE)', [$ft]]
+        : ['path LIKE ?', ['%' . indexLikeEscape($search) . '%']];
+}
+
+/**
+ * The files of ONE torrent that match a search, for a list opened from that search (1.62.0).
+ *
+ * Returns ['rows' => [['path', 'size', 'in_page'], …], 'more' => bool]. `$pageLastId` is the id of the
+ * last file on the page the list opened with (0 when that page was empty): a match at or below it is
+ * already on the screen and comes back marked `in_page`, and one beyond it is the reason this exists —
+ * the capped page of a torrent with tens of thousands of files need not contain the file that made
+ * it a hit. The ones BEYOND the page are asked for first, so the cap can never be spent on matches
+ * the reader already has in front of them.
+ *
+ * One query, and it is the query the search itself ran: the file index's FULLTEXT answers "which
+ * paths match" (the search just paid for exactly that, over the whole table), and `info_hash = ?` /
+ * `whitelist_id = ?` keeps it to one torrent. Nothing walks the torrent's own file list to find them.
+ * A term too short for fulltext is a LIKE, as it is in the search — a scan of this one torrent's rows
+ * through its own index, and a term shorter than that was refused before it got here.
+ *
+ * `$kind` is 'index' or 'whitelist', and each has its literal statement: no table or column name is
+ * built from a string.
+ */
+function indexFileListMatches(PDO $db, string $kind, $owner, string $search, int $pageLastId, int $cap = INDEX_FILE_LIST_MATCHES): array {
+    $none = ['rows' => [], 'more' => false];
+    $found = indexFilePathClause($search);
+    if ($found === null || indexSearchTooShort($search)) return $none;
+    $cap = max(1, min(200, $cap));
+    // One of the two literal fragments indexFilePathClause() writes; the term itself is a parameter.
+    [$clause, $clauseParams] = $found;
+    $lim = $cap + 1;
+    $sql = match ($kind) {
+        'index'     => "SELECT id, path, size FROM index_files WHERE info_hash = ? AND $clause ORDER BY (id > ?) DESC, id ASC LIMIT $lim",
+        'whitelist' => "SELECT id, path, size FROM whitelist_files WHERE whitelist_id = ? AND $clause ORDER BY (id > ?) DESC, id ASC LIMIT $lim",
+        default     => '',
+    };
+    if ($sql === '') return $none;
+    try {
+        $st = $db->prepare($sql);
+        $i = 1;
+        $st->bindValue($i++, $kind === 'index' ? (string)$owner : (int)$owner, $kind === 'index' ? PDO::PARAM_STR : PDO::PARAM_INT);
+        foreach ($clauseParams as $p) $st->bindValue($i++, $p, PDO::PARAM_STR);
+        $st->bindValue($i, max(0, $pageLastId), PDO::PARAM_INT);
+        $st->execute();
+        $found = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        // A file index that is missing or mid-rebuild degrades to "no extra rows", which is what the
+        // list looked like before this existed — never to an error on a list that loaded fine.
+        return $none;
+    }
+    $more = count($found) > $cap;
+    if ($more) $found = array_slice($found, 0, $cap);
+    $rows = [];
+    foreach ($found as $f) {
+        $rows[] = ['path' => (string)$f['path'], 'size' => (int)$f['size'], 'in_page' => (int)$f['id'] <= $pageLastId];
+    }
+    return ['rows' => $rows, 'more' => $more];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The narrow catalogue (1.74.0, PERF-2 / PERF-3) — `index_catalog`, see schemaIndexCatalogDdl()
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The public search lists only named rows and sorts them six ways. Out of index_hashes every order
+// but seeders was a full scan and a filesort of the whole table (4.4 s warm and 7.6–8.4 s at a small
+// pool on production's size, one click of any signed-in member), and a common word read a wide row
+// per hit, twice (13 s). index_catalog holds the same rows with only what the search reads, an index
+// per order, and its own FULLTEXT; the page is an index walk that stops after a page, and the wide
+// rows are read for the page alone (indexSearchCatalogue()).
+//
+// WHO KEEPS IT. Every writer that can change what a member row shows, or whether a row is a member:
+//   - the poll, per batch, inside the batch's transaction (indexCatalogSync() in indexPoll());
+//   - the poll's removal of whitelisted and banned hashes, the prune, indexDelete() — the same rows out;
+//   - the scrapes (indexScrapeMany/One) — the seeders;
+//   - what the metadata worker and federation write from PYTHON (a name, done) — they stamp
+//     meta_fetched_at, and indexCatalogSyncRecent() follows that stamp every janitor tick;
+//   - federation's purges, which take a name away (includes/federation.php, worker/federation.py).
+// And the janitor's rolling walk (indexCatalogWalk()) fills it the first time and then goes round the
+// whole table again and again, a chunk a tick, putting right anything that drifted (a row somebody
+// wrote by hand, a crash between two statements). No triggers: production's binary-log settings decide
+// whether the site's database user may create them, TRUNCATE fires none, and nothing else here uses them.
+//
+// WHEN THE SEARCH USES IT (indexCatalogReady()): once the walk has gone round the whole table at least
+// once, and the table it went round was big enough to need it (IDX_CATALOG_MIN_ROWS). Below that the
+// wide table answers in milliseconds, and the suites — which write index_hashes directly and search it
+// a line later — keep testing the path they were written for; tests/index_catalog_test.php forces the
+// catalogue on the same rows and compares the two answers.
+
+/** Which index_hashes rows the public catalogue lists — THE rule, over that table's own columns. */
+const IDX_CATALOG_MEMBER = "(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))";
+
+/** A catalogue row as index_hashes computes it (the order of IDX_CATALOG_COLS). */
+const IDX_CATALOG_FROM_HASHES = "info_hash, COALESCE(name, '') AS name, COALESCE(scrape_seeders, last_seeders) AS eff_seeders,
+    COALESCE(scrape_leechers, last_leechers) AS eff_leechers, total_size, files_count, last_seen";
+const IDX_CATALOG_COLS = ['info_hash', 'name', 'eff_seeders', 'eff_leechers', 'total_size', 'files_count', 'last_seen'];
+
+/**
+ * Below this many rows in index_hashes the search does not use the catalogue: the wide table is fast at that size, and
+ * every suite that writes index_hashes directly keeps meaning what it says. Production has 4.75 million.
+ */
+const IDX_CATALOG_MIN_ROWS = 250000;
+
+/** The rolling walk: index_hashes rows per chunk; seconds a tick may spend while the first pass is being made; rows a tick walks after it. */
+const IDX_CATALOG_CHUNK = 5000;
+const IDX_CATALOG_FILL_SECONDS = 20;
+const IDX_CATALOG_KEEP_ROWS = 10000;
+
+/**
+ * How far back the janitor re-reads what the Python writers resolved (meta_fetched_at), past its own last visit. An
+ * hour and a quarter: more than a slow commit, and more than the hour a clock change moves a stamp written in a zone
+ * that is an offset (config/database.php sets the session to date('P')).
+ */
+const IDX_CATALOG_RECENT_MARGIN_MIN = 75;
+
+/** Does the table exist yet (schema 93)? Asked once per process; every keeper below is a no-op until it does. */
+function indexCatalogExists(PDO $db, bool $fresh = false): bool {
+    static $known = null;
+    if ($known === null || $fresh) {
+        try { $known = function_exists('schemaTableExists') ? schemaTableExists($db, 'index_catalog')
+                     : (bool)$db->query("SHOW TABLES LIKE 'index_catalog'")->fetchColumn(); }
+        catch (\Throwable $e) { $known = false; }
+    }
+    return $known;
+}
+
+/** Write these catalogue rows (arrays keyed by IDX_CATALOG_COLS), new or changed; an unchanged row is left as it is. */
+function indexCatalogUpsertRows(PDO $db, array $rows, bool $names = false): int {
+    $n = 0;
+    foreach (array_chunk($rows, 1000) as $chunk) {
+        $args = [];
+        foreach ($chunk as $r) foreach (IDX_CATALOG_COLS as $c) $args[] = $r[$c] ?? null;
+        $tuple = '(' . implode(',', array_fill(0, count(IDX_CATALOG_COLS), '?')) . ')';
+        if ($names && function_exists('factsNameStore') && factsMode($GLOBALS['cfg'] ?? []) === 'desc_name') factsNameStore($db, $chunk);
+        $st = $db->prepare("INSERT INTO index_catalog (" . implode(', ', IDX_CATALOG_COLS) . ") VALUES "
+                         . implode(',', array_fill(0, count($chunk), $tuple))
+                         . " ON DUPLICATE KEY UPDATE name = VALUES(name), eff_seeders = VALUES(eff_seeders),
+                             eff_leechers = VALUES(eff_leechers), total_size = VALUES(total_size),
+                             files_count = VALUES(files_count), last_seen = VALUES(last_seen)");
+        $st->execute($args);
+        $n += count($chunk);
+    }
+    return $n;
+}
+
+/**
+ * Make the catalogue agree with index_hashes about these hashes: the members written, and — unless the caller knows
+ * membership cannot have changed ($mayLeave false: the poll and the scrapes move numbers, never a name) — every other
+ * one of them taken out. Plain reads of index_hashes then writes by key, so nothing of index_hashes is locked here
+ * beyond what the caller's own statement already holds.
+ */
+function indexCatalogSync(PDO $db, array $hashes, bool $mayLeave = true): void {
+    if (!$hashes || !indexCatalogExists($db)) return;
+    foreach (array_chunk(array_values(array_unique(array_map('strval', $hashes))), 2000) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        $st = $db->prepare("SELECT " . IDX_CATALOG_FROM_HASHES . " FROM index_hashes WHERE info_hash IN ($in) AND " . IDX_CATALOG_MEMBER);
+        $st->execute($chunk);
+        [$rows, $hid] = indexBlockSplit($db, $st->fetchAll(PDO::FETCH_ASSOC));
+        if ($rows) indexCatalogUpsertRows($db, $rows);
+        if ($mayLeave) {
+            $keep = array_flip(array_column($rows, 'info_hash'));
+            $gone = array_values(array_filter($chunk, fn($h) => !isset($keep[$h])));
+            if ($gone) indexCatalogForget($db, $gone);
+        } elseif ($hid) {
+            indexCatalogForget($db, $hid);
+        }
+    }
+}
+
+const IDX_BLOCK_WORDS = "pthc\nhussyfan\nr@ygold\njailbait\nchild porn\nkiddie porn\nkiddy porn\nunderage porn\npedo\npedophile\npaedophile\npedofil"
+    . "\nchristchurch shooting\nchristchurch mosque\nbrenton tarrant";
+const IDX_BLOCK_MINOR = "loli\nlolicon\nshota\nshotacon\npreteen\nunderage\nlittle girl\nlittle girls\nyoung girl\nchild\nchildren\nkid\nkids"
+    . "\n小学生\n中学生\n幼女\n萝莉\nロリ\n児童\n儿童\n未成年\nジュニアアイドル";
+const IDX_BLOCK_ADULT = '/(?<![a-z0-9])(?:xxx|porn\w*|sex\w*|nude\w*|naked|hentai|nsfw|r-?18|fuck\w*|cum|creampie|blowjob|onlyfans|erotic\w*|18\+)(?![a-z0-9])'
+    . '|エロ|成人|色情|無修正|无码|裸|做爱|性交|セックス/u';
+const IDX_BLOCK_AGE = '/(?<![0-9])(?:[1-9]|1[0-7])\s?(?:yo|y\/o|yrs?\s?old|years?\s?old)(?![a-z])/u';
+
+function indexBlockPattern(string $list): ?string {
+    $alts = [];
+    foreach (preg_split('/[\r\n,]+/', $list) ?: [] as $w) {
+        $w = trim(mb_strtolower($w));
+        if ($w === '' || mb_strlen($w) > 60) continue;
+        $q = str_replace(' ', '[\s._-]*', preg_quote($w, '/'));
+        $alts[] = preg_match('/[\p{Han}\p{Hiragana}\p{Katakana}]/u', $w) ? $q : '(?<![a-z0-9])' . $q . '(?![a-z0-9])';
+    }
+    return $alts ? '/' . implode('|', $alts) . '/u' : null;
+}
+
+function indexBlockMatch(array $cfg, string $name): ?string {
+    if (($cfg['index_block_on'] ?? '1') !== '1' || $name === '') return null;
+    static $memo = [];
+    $alone = (string)($cfg['index_block_words'] ?? IDX_BLOCK_WORDS);
+    $minor = (string)($cfg['index_block_minor'] ?? IDX_BLOCK_MINOR);
+    $key = md5($alone . "\0" . $minor);
+    $memo[$key] ??= [indexBlockPattern($alone), indexBlockPattern($minor)];
+    [$a, $m] = $memo[$key];
+    $n = mb_strtolower($name);
+    if ($a !== null && preg_match($a, $n, $hit)) return trim($hit[0]);
+    if ((($m !== null && preg_match($m, $n, $hit)) || preg_match(IDX_BLOCK_AGE, $n, $hit)) && preg_match(IDX_BLOCK_ADULT, $n)) return trim($hit[0]);
+    return null;
+}
+
+function indexBlockReady(PDO $db): bool {
+    static $ready = false;
+    if ($ready) return true;
+    try { $ready = (bool)$db->query("SHOW TABLES LIKE 'index_blocked'")->fetchColumn(); } catch (\Throwable $e) { $ready = false; }
+    return $ready;
+}
+
+function indexBlockSplit(PDO $db, array $rows): array {
+    $cfg = $GLOBALS['cfg'] ?? [];
+    if (!$rows || ($cfg['index_block_on'] ?? '1') !== '1' || !indexBlockReady($db)) return [$rows, []];
+    $hits = [];
+    foreach ($rows as $i => $r) {
+        $w = indexBlockMatch($cfg, (string)($r['name'] ?? ''));
+        if ($w !== null) $hits[$i] = $w;
+    }
+    if (!$hits) return [$rows, []];
+    $hashes = array_map(fn($i) => strtolower((string)$rows[$i]['info_hash']), array_keys($hits));
+    $st = $db->prepare("SELECT info_hash FROM index_blocked WHERE allowed = 1 AND info_hash IN (" . implode(',', array_fill(0, count($hashes), '?')) . ")");
+    $st->execute($hashes);
+    $ok = array_flip($st->fetchAll(PDO::FETCH_COLUMN));
+    $ins = $db->prepare("INSERT INTO index_blocked (info_hash, name, word, allowed, created_at) VALUES (?, ?, ?, 0, UTC_TIMESTAMP())
+                         ON DUPLICATE KEY UPDATE name = VALUES(name), word = VALUES(word)");
+    $kept = [];
+    $hid = [];
+    foreach ($rows as $i => $r) {
+        $h = strtolower((string)$r['info_hash']);
+        if (!isset($hits[$i]) || isset($ok[$h])) { $kept[] = $r; continue; }
+        $ins->execute([$h, mb_substr((string)$r['name'], 0, 500), mb_substr($hits[$i], 0, 100)]);
+        $hid[] = $h;
+    }
+    return [$kept, $hid];
+}
+
+function indexBlockedTick(PDO $db): void {
+    if (!indexBlockReady($db)) return;
+    $db->exec("DELETE b FROM index_blocked b LEFT JOIN index_hashes h ON h.info_hash = b.info_hash WHERE h.info_hash IS NULL");
+}
+
+function indexBlockedList(PDO $db, bool $allowed, int $page): array {
+    if (!indexBlockReady($db)) return ['rows' => [], 'total' => 0, 'other' => 0, 'page' => 1, 'pages' => 1];
+    $per = 50;
+    $st = $db->prepare("SELECT COUNT(*) FROM index_blocked WHERE allowed = ?");
+    $st->execute([$allowed ? 1 : 0]);
+    $total = (int)$st->fetchColumn();
+    $st->execute([$allowed ? 0 : 1]);
+    $other = (int)$st->fetchColumn();
+    $pages = max(1, (int)ceil($total / $per));
+    $page = max(1, min($pages, $page));
+    $st = $db->prepare("SELECT b.info_hash, b.name, b.word, b.created_at FROM index_blocked b WHERE b.allowed = ?
+                         ORDER BY b.created_at DESC, b.info_hash LIMIT $per OFFSET " . (($page - 1) * $per));
+    $st->execute([$allowed ? 1 : 0]);
+    return ['rows' => $st->fetchAll(PDO::FETCH_ASSOC), 'total' => $total, 'other' => $other, 'page' => $page, 'pages' => $pages];
+}
+
+function indexBlockedAction(PDO $db, array $cfg, string $op, array $hashes): array {
+    $hashes = array_values(array_unique(array_filter(array_map(fn($h) => strtolower(trim((string)$h)), $hashes), fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
+    if (!$hashes || count($hashes) > 200 || !indexBlockReady($db)) return ['ok' => false, 'error' => 'invalid'];
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    if ($op === 'allow') {
+        $db->prepare("UPDATE index_blocked SET allowed = 1 WHERE info_hash IN ($in)")->execute($hashes);
+        indexCatalogSync($db, $hashes, false);
+        if (function_exists('factsNameStore') && factsMode($cfg) === 'desc_name') {
+            $st = $db->prepare("SELECT info_hash, name FROM index_catalog WHERE info_hash IN ($in)");
+            $st->execute($hashes);
+            factsNameStore($db, $st->fetchAll(PDO::FETCH_ASSOC));
+        }
+        return ['ok' => true, 'n' => count($hashes)];
+    }
+    if ($op === 'unallow') {
+        $db->prepare("UPDATE index_blocked SET allowed = 0 WHERE info_hash IN ($in)")->execute($hashes);
+        indexCatalogForget($db, $hashes);
+        return ['ok' => true, 'n' => count($hashes)];
+    }
+    if ($op === 'ban') {
+        $st = $db->prepare("SELECT info_hash, word FROM index_blocked WHERE info_hash IN ($in)");
+        $st->execute($hashes);
+        $n = 0;
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            trackerBlockHash($db, $cfg, (string)$r['info_hash'], ['source' => 'admin', 'reason' => mb_substr('Hidden name: ' . $r['word'], 0, 255)]);
+            $n++;
+        }
+        $db->prepare("DELETE FROM index_blocked WHERE info_hash IN ($in)")->execute($hashes);
+        indexCatalogForget($db, $hashes);
+        return ['ok' => true, 'n' => $n];
+    }
+    return ['ok' => false, 'error' => 'invalid'];
+}
+
+/** Take these hashes out of the catalogue (they left index_hashes, or stopped being members). */
+function indexCatalogForget(PDO $db, array $hashes): void {
+    if (!$hashes || !indexCatalogExists($db)) return;
+    foreach (array_chunk(array_values($hashes), 2000) as $chunk) {
+        $db->prepare("DELETE FROM index_catalog WHERE info_hash IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")")
+           ->execute($chunk);
+        if (function_exists('factsNameReady') && factsNameReady($db)) {
+            $db->prepare("DELETE FROM name_facts WHERE info_hash IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")")->execute($chunk);
+        }
+    }
+}
+
+/**
+ * What the metadata worker and federation resolved since the last visit (they write from Python, and stamp
+ * meta_fetched_at = NOW() with every name they store): range on idx_index_meta_done_fetched, IDX_CATALOG_RECENT_MARGIN_MIN
+ * of overlap. The first call only sets the mark — the walk's first pass, starting at the same moment, covers what came
+ * before. Returns the rows written.
+ */
+function indexCatalogSyncRecent(PDO $db): int {
+    if (!indexCatalogExists($db)) return 0;
+    $since = (string)(indexStateRead()['catalog_recent_from'] ?? '');
+    $nowDb = (string)$db->query("SELECT NOW()")->fetchColumn();
+    $n = 0;
+    if ($since !== '') {
+        $st = $db->prepare("SELECT " . IDX_CATALOG_FROM_HASHES . " FROM index_hashes
+                             WHERE meta_status = 'done' AND meta_fetched_at >= ? - INTERVAL " . IDX_CATALOG_RECENT_MARGIN_MIN . " MINUTE
+                               AND " . IDX_CATALOG_MEMBER);
+        $st->execute([$since]);
+        [$rows, $hid] = indexBlockSplit($db, $st->fetchAll(PDO::FETCH_ASSOC));
+        if ($hid) indexCatalogForget($db, $hid);
+        if ($rows) $n = indexCatalogUpsertRows($db, $rows, true);
+    }
+    indexStateUpdate(function (array &$s) use ($nowDb) { $s['catalog_recent_from'] = $nowDb; return true; });
+    return $n;
+}
+
+/**
+ * The rolling walk: index_hashes in key order, a chunk at a time, from where the last tick stopped. In each chunk the
+ * members are written to the catalogue and the catalogue's rows in the same key range that are not members (gone, or
+ * no longer named) are taken out — so one pass over the table both fills the catalogue and puts it right. At the end
+ * of the table the pass is recorded (catalog_pass_at, and how many rows it walked) and the next one starts over.
+ *
+ * Until a first pass exists the walk takes up to $seconds a tick; after it, $maxRows a tick (a pass every few hours on
+ * production's size) — the safety net, not the keeper. Returns ['rows' => walked, 'written' => n, 'removed' => n,
+ * 'passed' => bool, 'ms' => n].
+ */
+function indexCatalogWalk(PDO $db, ?float $seconds = null, ?int $maxRows = null): array {
+    $out = ['rows' => 0, 'written' => 0, 'removed' => 0, 'passed' => false, 'ms' => 0];
+    if (!indexCatalogExists($db)) return $out;
+    $t0 = microtime(true);
+    $state = indexStateRead();
+    $filling = (int)($state['catalog_pass_at'] ?? 0) === 0;
+    $seconds = $seconds ?? ($filling ? (float)IDX_CATALOG_FILL_SECONDS : 3600.0);
+    $maxRows = $maxRows ?? ($filling ? PHP_INT_MAX : IDX_CATALOG_KEEP_ROWS);
+    $cursor = (string)($state['catalog_cursor'] ?? '');
+    $passRows = (int)($state['catalog_pass_count'] ?? 0);
+    $sel = $db->prepare("SELECT info_hash, " . IDX_CATALOG_MEMBER . " AS m,
+                                IF(" . IDX_CATALOG_MEMBER . ", COALESCE(name, ''), NULL) AS name,
+                                IF(" . IDX_CATALOG_MEMBER . ", COALESCE(scrape_seeders, last_seeders), NULL) AS eff_seeders,
+                                IF(" . IDX_CATALOG_MEMBER . ", COALESCE(scrape_leechers, last_leechers), NULL) AS eff_leechers,
+                                IF(" . IDX_CATALOG_MEMBER . ", total_size, NULL) AS total_size,
+                                IF(" . IDX_CATALOG_MEMBER . ", files_count, NULL) AS files_count,
+                                IF(" . IDX_CATALOG_MEMBER . ", last_seen, NULL) AS last_seen
+                           FROM index_hashes WHERE info_hash > ? ORDER BY info_hash LIMIT " . (int)IDX_CATALOG_CHUNK);
+    while (true) {
+        $sel->execute([$cursor]);
+        $rows = $sel->fetchAll(PDO::FETCH_ASSOC);
+        $sel->closeCursor();
+        $last = $rows ? (string)$rows[count($rows) - 1]['info_hash'] : null;
+        $end = count($rows) < IDX_CATALOG_CHUNK;
+        [$members, $hid] = indexBlockSplit($db, array_values(array_filter($rows, fn($r) => (int)$r['m'] === 1)));
+        if ($hid) indexCatalogForget($db, $hid);
+        if ($members) $out['written'] += indexCatalogUpsertRows($db, $members, $filling);
+        // The catalogue's rows in this stretch of keys that are not members of it any more. The upper end is open on
+        // the last chunk: anything the catalogue holds past the table's last key is gone from the table by definition.
+        $keys = array_column($members, 'info_hash');
+        $where = "info_hash > ?" . ($end ? '' : " AND info_hash <= ?")
+               . ($keys ? " AND info_hash NOT IN (" . implode(',', array_fill(0, count($keys), '?')) . ")" : '');
+        $del = $db->prepare("DELETE FROM index_catalog WHERE $where");
+        $del->execute(array_merge([$cursor], $end ? [] : [$last], $keys));
+        $out['removed'] += $del->rowCount();
+        $out['rows'] += count($rows);
+        $passRows += count($rows);
+        if ($end) {
+            $out['passed'] = true;
+            $cursor = '';
+            $done = $passRows;
+            $passRows = 0;
+            indexStateUpdate(function (array &$s) use ($done) {
+                $s['catalog_cursor'] = ''; $s['catalog_pass_count'] = 0;
+                $s['catalog_pass_at'] = time(); $s['catalog_pass_rows'] = $done;
+                return true;
+            });
+            break;
+        }
+        $cursor = (string)$last;
+        if ($out['rows'] >= $maxRows || (microtime(true) - $t0) >= $seconds) break;
+    }
+    if (!$out['passed']) {
+        indexStateUpdate(function (array &$s) use ($cursor, $passRows) {
+            $s['catalog_cursor'] = $cursor; $s['catalog_pass_count'] = $passRows; return true;
+        });
+    }
+    $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
+    return $out;
+}
+
+/**
+ * The janitor's share (from indexTick(), after the poll and the prune): what Python resolved since the last visit,
+ * then the walk. Never throws — a catalogue that could not be kept this minute is kept the next one, and the search
+ * does not depend on it until a whole pass has been made.
+ */
+function indexCatalogTick(PDO $db): array {
+    $out = ['recent' => 0, 'walk' => null, 'error' => null];
+    if (!indexCatalogExists($db)) return $out;
+    try {
+        $out['recent'] = indexCatalogSyncRecent($db);
+        $out['walk'] = indexCatalogWalk($db);
+        if (!empty($out['walk']['passed'])) indexBlockedTick($db);
+    } catch (\Throwable $e) {
+        $out['error'] = $e->getMessage();
+        error_log('[index catalogue] ' . $e->getMessage());
+    }
+    return $out;
+}
+
+/**
+ * May the search read the catalogue? A whole pass made over a table big enough to need it (see the section's head), and
+ * something in it. $force (tests, and the measurements): true = yes whenever the table has a pass, false = never.
+ */
+function indexCatalogReady(PDO $db, ?bool $force = null): bool {
+    if ($force === false || !indexCatalogExists($db)) return false;
+    $s = indexStateRead();
+    if ((int)($s['catalog_pass_at'] ?? 0) <= 0) return false;
+    if ($force !== true && (int)($s['catalog_pass_rows'] ?? 0) < IDX_CATALOG_MIN_ROWS) return false;
+    try { return (bool)$db->query("SELECT 1 FROM index_catalog LIMIT 1")->fetchColumn(); }
+    catch (\Throwable $e) { return false; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// List query — shared by the admin list (api/admin/fetch_index.php) and the public
+// search endpoint (api/index_search.php)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Sanitise a term for BOOLEAN MODE fulltext: strip operators, require 2+ char words, suffix *. */
+function indexFulltextTerm(string $term): string {
+    $clean = preg_replace('/[+\-><()~"@*]/u', ' ', $term) ?? '';
+    $words = preg_split('/\s+/u', trim($clean), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $out = [];
+    foreach ($words as $w) { if (mb_strlen($w) >= 2) $out[] = $w . '*'; }
+    return implode(' ', $out);
+}
+
+/**
+ * InnoDB's built-in stop-word list (INFORMATION_SCHEMA.INNODB_FT_DEFAULT_STOPWORD: 36 entries, "the" is on it twice).
+ * Production runs the default list and innodb_ft_min_token_size 3, so a word on it — or shorter than three characters —
+ * is never an index entry: `the*` matches "Theory" and never "the", `of*` matches "Office" and `tv*` nothing at all.
+ * indexRankWords() uses it to count only the words a name can be matched on. A server set up otherwise only changes
+ * which words count: a counted word the index does not hold leaves the fast path with no full page, and the full query
+ * answers — slower, never different.
+ */
+const INDEX_FT_STOPWORDS = ['a', 'about', 'an', 'are', 'as', 'at', 'be', 'by', 'com', 'de', 'en', 'for', 'from', 'how', 'i', 'in',
+    'is', 'it', 'la', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'was', 'what', 'when', 'where', 'who', 'will', 'with', 'und', 'www'];
+const INDEX_FT_MIN_TOKEN = 3;
+/** How many distinct words of a query take part in the ranking (the WHERE keeps all of them). */
+const INDEX_RANK_MAX_WORDS = 8;
+
+/**
+ * The words a search is RANKED by (1.75.0): ['w' => …, 'c' => …, 'x' => …].
+ *
+ * `w` — the query's words, split on anything that is not a letter or a digit, lower-cased, in the order typed, the
+ * first eight distinct ones. They feed the "in the query's order" test, which reads the name's text and so wants every
+ * word, "the" and "tv" included. `c` — the COUNTABLE ones among them (indexRankFtAgrees() permitting): at least three
+ * characters and not on the stop-word list, i.e. the words the fulltext index can hold. They feed words_hit, one MATCH
+ * each, and the all-words fast path.
+ *
+ * `x` (1.75.1) — the rest of them, the words the index cannot hold ("the", "tv", "uk"): empty when $common is false (the
+ * setting search_count_common_words) or the fulltext WHERE and the counts disagree about the query. They are counted too,
+ * by a REGEXP on the name with in_order's word-start anchor and prefix — a name with "The" in it has the word the reader
+ * typed whether or not the index can say so. The fulltext WHERE never gets them: it was never able to match them.
+ */
+function indexRankWords(string $search, bool $common = true): array {
+    $words = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($search), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $w = array_slice(array_values(array_unique($words)), 0, INDEX_RANK_MAX_WORDS);
+    $c = []; $x = [];
+    if (indexRankFtAgrees($search)) {
+        foreach ($w as $word) {
+            if (mb_strlen($word) >= INDEX_FT_MIN_TOKEN && !in_array($word, INDEX_FT_STOPWORDS, true)) $c[] = $word;
+            elseif ($common) $x[] = $word;
+        }
+    }
+    return ['w' => $w, 'c' => $c, 'x' => $x];
+}
+
+/**
+ * Does this query get a words_hit? At least one countable word (without one the fulltext index has nothing to say about
+ * the query and it keeps the order it always had) and two words in all — the countable ones plus, with the setting on,
+ * the common and short ones. The top group is then the rows with all of `indexRankTop()` of them.
+ */
+function indexRankHitActive(array $rw): bool {
+    $c = count($rw['c']);
+    return $c >= 1 && $c + count($rw['x'] ?? []) >= 2;
+}
+
+/** How many words a row has to have to stand in the top group: every counted word. */
+function indexRankTop(array $rw): int {
+    return count($rw['c']) + count($rw['x'] ?? []);
+}
+
+/**
+ * The REGEXP of one short or common word for the ranking: the WHOLE word (lookarounds, not \b — see indexRankSql). Not a
+ * prefix like the fulltext words: "of" as a prefix is in "Office" and "the" in "Theory", which would count them in names
+ * that do not have them (the owner's question, 1.75.1).
+ */
+function indexRankWordRe(string $word): string {
+    return '(?i)(?<![\p{L}\p{N}])' . preg_quote($word, '/') . '(?![\p{L}\p{N}])';
+}
+
+/**
+ * The all-words query's WHERE (1.75.0, extended in 1.75.1) as [sql, params]: MATCH('+c1* +c2*') for the countable words, and
+ * `name REGEXP ?` for each of the others — exactly the rows words_hit gives the top value.
+ */
+function indexRankAllWords(array $rw): array {
+    $sql = 'MATCH(name) AGAINST(? IN BOOLEAN MODE)';
+    $params = ['+' . implode('* +', $rw['c']) . '*'];
+    foreach ($rw['x'] ?? [] as $word) { $sql .= ' AND name REGEXP ?'; $params[] = indexRankWordRe($word); }
+    return [$sql, $params];
+}
+
+/**
+ * Do the fulltext WHERE and the per-word counts read this search as the same words?
+ *
+ * They do when each space-separated word of the query, less the punctuation at its edges, is ONE run of letters and
+ * digits: `rick,` and `wars:` are `rick*` and `wars*` to InnoDB too (checked on MariaDB 11.4). A delimiter INSIDE a word
+ * is another matter: `rick.and.morty*` stars the last token only, and `rick_and_morty*` is a single token, because
+ * InnoDB counts `_` as a letter and indexRankWords() does not. Counting `rick*`, `and*`, `morty*` against a WHERE that
+ * asked for something else would rank by words the search never looked for, and the all-words fast path would return
+ * rows the full query does not — so such a query is simply not counted (today's WHERE and order, plus the order test).
+ * Words indexFulltextTerm() drops (one character) are not part of the WHERE and are not looked at.
+ */
+function indexRankFtAgrees(string $search): bool {
+    $clean = preg_replace('/[+\-><()~"@*]/u', ' ', $search) ?? '';
+    foreach (preg_split('/\s+/u', trim($clean), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $w) {
+        if (mb_strlen($w) < 2) continue;
+        if (!preg_match('/^[^\p{L}\p{N}_\']*[\p{L}\p{N}]+[^\p{L}\p{N}_\']*$/u', $w)) return false;
+    }
+    return true;
+}
+
+/**
+ * The two ranking expressions of 1.75.0 as [sql, params] each, '' / [] where one is not asked for.
+ *
+ * words_hit — how many of the words the name has: one MATCH per countable word, the same prefix the WHERE searches with
+ * (`w*`). Per word and not a REGEXP, because the all-words fast path (a WHERE of `+w1* +w2* …`) has to select exactly
+ * the rows whose count is the number of words. The words the index cannot hold (1.75.1) are a REGEXP each, and the fast
+ * path's WHERE has the same REGEXPs — so it is still exactly the rows that have them all.
+ *
+ * in_order — 2: the words stand next to each other in the order typed with only separators between them (`Rick and
+ * Morty`, `Rick.and.Morty`, `rick_and_morty`), 1: they all appear in that order with anything between, 0: otherwise.
+ * `name NOT LIKE '%w1%w2%'` goes first and sends most rows to 0 without PCRE (and the LIKE passes everything the REGEXPs
+ * pass: it ignores case and accents, they do not). Both REGEXPs use `(?<![\p{L}\p{N}])` for the start of a word, not \b —
+ * PCRE counts `_` as a word character, so \bmorty misses rick_and_morty. REGEXP under utf8mb4_unicode_ci is
+ * case-insensitive only through the explicit (?i) and is accent-SENSITIVE: "pokemon" is not in "Pokémon" for in_order,
+ * while the fulltext index and the LIKE do match it (a ranking nicety lost, never a row).
+ */
+function indexRankSql(array $rw, bool $hit, bool $ord): array {
+    $out = ['hit' => ['', []], 'ord' => ['', []]];
+    if ($hit && indexRankHitActive($rw)) {
+        $parts = []; $params = [];
+        foreach ($rw['c'] as $c) { $parts[] = '(MATCH(name) AGAINST(? IN BOOLEAN MODE) > 0)'; $params[] = $c . '*'; }
+        // The words the index cannot hold (1.75.1): a REGEXP each, IFNULL because a name that is NULL (a row only its files
+        // found) must count 0, not turn the whole sum into NULL.
+        foreach ($rw['x'] ?? [] as $word) { $parts[] = 'IFNULL(name REGEXP ?, 0)'; $params[] = indexRankWordRe($word); }
+        $out['hit'] = [implode(' + ', $parts), $params];
+    }
+    if ($ord && count($rw['w']) >= 2) {
+        $like = '%' . implode('%', array_map(static fn(string $x): string => addcslashes($x, '%_\\'), $rw['w'])) . '%';
+        // A short or common word counted by words_hit (1.75.1) is a WHOLE word here too, as in indexRankWordRe(): "the" must
+        // not put "Theory of Breaking Bread" in order for "the breaking bread". The others stay prefixes, as the index reads them.
+        $whole = array_flip($rw['x'] ?? []);
+        $q = array_map(static fn(string $x): string => preg_quote($x, '/') . (isset($whole[$x]) ? '(?![\p{L}\p{N}])' : ''), $rw['w']);
+        $start = '(?<![\p{L}\p{N}])';
+        $adjacent = '(?i)' . $start . implode('[\p{L}\p{N}]*[^\p{L}\p{N}]+', $q);
+        $inOrder = '(?i)' . $start . implode('.*' . $start, $q);
+        $out['ord'] = ['CASE WHEN name NOT LIKE ? THEN 0 WHEN name REGEXP ? THEN 2 WHEN name REGEXP ? THEN 1 ELSE 0 END',
+                       [$like, $adjacent, $inOrder]];
+    }
+    return $out;
+}
+
+/**
+ * Is $s the start of an info hash? Hex, six to forty characters — and either a digit among them or twelve characters at
+ * least (1.75.0). A six-letter word made only of a–f ("decade", "facade", "deface", "efface") is hex too, and with
+ * `index.magnet` the reader's search took it for a hash prefix and found nothing. Six characters of a real hash have a digit
+ * among them 99.7 % of the time (1 − (6/16)^6), and the few that do not still work as soon as they are twelve long — no
+ * English word is that long and made of a–f only.
+ * ONE rule for the admin list, the public catalogue, the file clause and the too-short guard; app.js mirrors it.
+ */
+function indexIsHashPrefix(string $s): bool {
+    return preg_match(INDEX_HASH_PREFIX_RE, $s) === 1 && (strlen($s) >= 12 || preg_match('/\d/', $s) === 1);
+}
+
+/**
+ * A search term as the inside of a LIKE '%…%': `%`, `_` and the escape character itself taken literally (1.75.0). The
+ * fallback typed "50%" or "a_b" and got every name with a 50 or an "a" and any letter and a "b" — the wildcards of the
+ * LIKE the reader never wrote. MariaDB's default escape character is the backslash; no ESCAPE clause is added, so the
+ * statement's text is what it always was.
+ */
+function indexLikeEscape(string $s): string {
+    return addcslashes($s, '%_\\');
+}
+
+/**
+ * Filtered/sorted/paginated SELECT over index_hashes. $q keys (all optional): page, per_page,
+ * sort ('col:dir,col:dir' — keys of the map below), search, search_files (bool-ish), meta, life,
+ * min_seeders (int — public search may hide the dead tail). Fulltext is tried first for name
+ * searches with a LIKE fallback. Returns ['rows','total','page','pages','per_page']; rows carry
+ * int-cast numerics plus derived booleans `protected` and `promoted`.
+ */
+const INDEX_LIST_CATALOG_CAP = 10000;
+
+function indexListCatalogHits(PDO $db, array $clauses, int $limit): ?array {
+    foreach ($clauses as [$where, $args]) {
+        try {
+            $sql = "SELECT info_hash FROM index_catalog WHERE " . $where . " LIMIT " . $limit;
+            $st = $db->prepare($sql);
+            $st->execute($args);
+            return [$st->fetchAll(PDO::FETCH_COLUMN), [$where, $args]];
+        } catch (\Throwable $e) {
+            if (indexIsStatementTimeout($e)) throw new IndexSearchTimeout($e->getMessage(), 0, $e);
+        }
+    }
+    return null;
+}
+
+function indexListFromCatalog(PDO $db, array $clause, string $col, bool $desc, int $perPage, int $offset, string $columns): array {
+    $dir = $desc ? 'DESC' : 'ASC';
+    $sql = "SELECT info_hash FROM index_catalog WHERE " . $clause[0] . " ORDER BY " . $col . " " . $dir . ", info_hash " . $dir . " LIMIT ? OFFSET ?";
+    $st = $db->prepare($sql);
+    $i = 1;
+    foreach ($clause[1] as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
+    $st->bindValue($i++, $perPage, PDO::PARAM_INT);
+    $st->bindValue($i, $offset, PDO::PARAM_INT);
+    $st->execute();
+    $hashes = $st->fetchAll(PDO::FETCH_COLUMN);
+    if (!$hashes) return [];
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    $sql = "SELECT " . $columns . " FROM index_hashes WHERE info_hash IN (" . $in . ")";
+    $st = $db->prepare($sql);
+    $st->execute($hashes);
+    $byHash = [];
+    foreach ($st->fetchAll() as $r) $byHash[$r['info_hash']] = $r;
+    $rows = [];
+    foreach ($hashes as $h) if (isset($byHash[$h])) $rows[] = $byHash[$h];
+    return $rows;
+}
+
+function indexListByHashes(PDO $db, array $where, array $params, array $hashes, string $columns, string $orderClause, int $perPage, int $offset): array {
+    if (!$hashes) return [0, []];
+    $w = $where;
+    $w[] = 'info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')';
+    $p = array_merge($params, array_values($hashes));
+    $whereClause = 'WHERE ' . implode(' AND ', $w);
+    $st = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
+    $st->execute($p);
+    $total = (int)$st->fetchColumn();
+    $limit = count($hashes);
+    $stmt = $db->prepare("SELECT * FROM (SELECT $columns FROM index_hashes $whereClause LIMIT $limit) lst ORDER BY $orderClause LIMIT ? OFFSET ?");
+    $i = 1;
+    foreach ($p as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
+    $stmt->bindValue($i++, $perPage, PDO::PARAM_INT);
+    $stmt->bindValue($i, $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    return [$total, $stmt->fetchAll()];
+}
+
+function indexListSelect(PDO $db, array $cfg, array $q): array {
+    $page = max(1, (int)($q['page'] ?? 1));
+    $perPage = max(1, min(200, (int)($q['per_page'] ?? ($cfg['items_per_page'] ?? 25))));
+    $offset = ($page - 1) * $perPage;
+
+    $allowedSorts = [
+        'hash'      => 'info_hash', 'name' => 'name', 'size' => 'total_size',
+        'seeders'   => 'last_seeders', 'leechers' => 'last_leechers', 'seen' => 'seen_count',
+        'first'     => 'first_seen', 'last' => 'last_seen', 'meta' => 'meta_status',
+        'sseeders'  => 'scrape_seeders', 'peak' => 'peak_seeders', 'files' => 'files_count',
+    ];
+    $orderParts = [];
+    foreach (explode(',', trim((string)($q['sort'] ?? 'last:desc'))) as $part) {
+        $pieces = explode(':', trim($part));
+        $col = $allowedSorts[$pieces[0] ?? ''] ?? null;
+        if (!$col) continue;
+        $dir = (strtolower($pieces[1] ?? 'asc') === 'desc') ? 'DESC' : 'ASC';
+        $orderParts[] = "$col $dir";
+    }
+    if (!$orderParts) $orderParts[] = 'last_seen DESC';
+    // The tie-break takes the DIRECTION of the sort it is breaking ties for.
+    //
+    // InnoDB carries the primary key inside every secondary index, so `idx_index_last_seen` is really
+    // (last_seen, info_hash): ordering by both in the SAME direction is a plain backward scan, and
+    // mixing them is a sort no index can serve. Measured on the 2 M-row table:
+    //
+    //     last_seen DESC, info_hash ASC    2 327 ms   filesort
+    //     last_seen DESC, info_hash DESC     112 ms   no filesort
+    //
+    // Determinism is what the tie-break is for and it is unchanged — the order is still total.
+    $lastDir = str_ends_with(end($orderParts), 'DESC') ? 'DESC' : 'ASC';
+    $orderParts[] = 'info_hash ' . $lastDir;
+
+    $where = [];
+    $params = [];
+    $search = trim((string)($q['search'] ?? ''));
+    $searchFiles = !empty($q['search_files']) && $q['search_files'] !== '0';
+    $fulltextClause = null; $likeClause = null; $fileHashes = []; $nameClauses = [];
+    if ($search !== '') {
+        if (indexIsHashPrefix($search)) {
+            $where[] = "info_hash LIKE ?";
+            $params[] = strtolower($search) . '%';
+        } else {
+            $likeClause = ['sql' => "name LIKE ?", 'params' => ['%' . indexLikeEscape($search) . '%']];
+            $ft = mb_strlen($search) >= 3 ? indexFulltextTerm($search) : '';
+            $rw = $ft !== '' ? indexRankWords($search, ($cfg['search_count_common_words'] ?? '1') === '1') : ['c' => []];
+            $nameFt = $rw['c'] ? indexRankAllWords($rw) : ['MATCH(name) AGAINST(? IN BOOLEAN MODE)', [$ft]];
+            $nameClauses = $ft !== '' ? [['(' . $nameFt[0] . ')', $nameFt[1]], ['name LIKE ?', $likeClause['params']]]
+                                      : [['name LIKE ?', $likeClause['params']]];
+            // Resolve the file half into a bounded list of hashes first, exactly as the public
+            // catalogue search does, and for the same reason: `name … OR info_hash IN (SELECT …)`
+            // cannot be served from indexes, so MariaDB scans index_hashes end to end. That is what
+            // ran for twenty-four minutes and took every php-fpm child with it.
+            $fileHashes = [];
+            if ($searchFiles) {
+                try {
+                    if ($ft !== '') {
+                        $fs = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE MATCH(path) AGAINST(? IN BOOLEAN MODE) LIMIT " . INDEX_FILE_MATCH_CAP);
+                        $fs->execute([$ft]);
+                    } else {
+                        $fs = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE path LIKE ? LIMIT " . INDEX_FILE_MATCH_CAP);
+                        $fs->execute(['%' . indexLikeEscape($search) . '%']);
+                    }
+                    $fileHashes = $fs->fetchAll(PDO::FETCH_COLUMN);
+                    $fs->closeCursor();
+                } catch (\Throwable $e) { $fileHashes = []; }
+            }
+            // `split` is the OR taken apart. It stays alongside `sql` rather than replacing it
+            // because $runQuery still needs a single clause for the cached-count path; when the
+            // split is there, the query is run as a UNION of two branches instead — see the note in
+            // $runQuery, and the same rewrite in indexSearchCatalogue() below, which is where it was
+            // measured (32.6 s -> 4.3 s on the live catalogue).
+            $inFiles = $fileHashes ? ('info_hash IN (' . implode(',', array_fill(0, count($fileHashes), '?')) . ')') : '';
+            if ($inFiles) {
+                $likeClause = ['sql' => "(name LIKE ? OR $inFiles)", 'params' => array_merge(['%' . indexLikeEscape($search) . '%'], $fileHashes),
+                               'split' => [['sql' => 'name LIKE ?', 'params' => ['%' . indexLikeEscape($search) . '%']],
+                                           ['sql' => $inFiles, 'params' => $fileHashes]]];
+            }
+            if ($ft !== '') {
+                $fulltextClause = ['sql' => '(' . $nameFt[0] . ')', 'params' => $nameFt[1]];
+                if ($inFiles) {
+                    $fulltextClause = ['sql' => '((' . $nameFt[0] . ") OR $inFiles)", 'params' => array_merge($nameFt[1], $fileHashes),
+                                       'split' => [['sql' => '(' . $nameFt[0] . ')', 'params' => $nameFt[1]],
+                                                   ['sql' => $inFiles, 'params' => $fileHashes]]];
+                }
+            }
+        }
+    }
+    $metaFilter = (string)($q['meta'] ?? '');
+    if (in_array($metaFilter, ['none', 'pending', 'fetching', 'done', 'failed'], true)) { $where[] = "meta_status = ?"; $params[] = $metaFilter; }
+    $lifeFilter = (string)($q['life'] ?? '');
+    if ($lifeFilter === 'protected') $where[] = "protected_until IS NOT NULL AND protected_until >= NOW()";
+    elseif ($lifeFilter === 'grace')  $where[] = "meta_status <> 'done' AND grace_until >= NOW()";
+    elseif ($lifeFilter === 'promoted') $where[] = "promoted_at IS NOT NULL";
+    if (($q['desc'] ?? '') === 'yes') {
+        $descClause = indexDescribedClause($db, true);
+        $where[] = $descClause[0];
+        foreach ($descClause[1] as $v) $params[] = $v;
+    }
+    $minSeeders = (int)($q['min_seeders'] ?? 0);
+    if ($minSeeders > 0) $where[] = "GREATEST(COALESCE(scrape_seeders, 0), last_seeders) >= " . $minSeeders;
+    $metaOn = in_array($metaFilter, ['none', 'pending', 'fetching', 'done', 'failed'], true);
+    $lifeOn = in_array($lifeFilter, ['protected', 'grace', 'promoted'], true);
+    $snapKey = null;
+    if ($search === '' && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0 && !($metaOn && $lifeOn)) {
+        $snapKey = $metaOn ? 'meta_' . $metaFilter : ($lifeOn ? ['protected' => 'protected', 'grace' => 'in_grace', 'promoted' => 'promoted'][$lifeFilter] : 'total');
+    }
+
+    $columns = INDEX_LIST_COLUMNS;
+    $orderClause = implode(', ', $orderParts);
+
+    $runQuery = function (?array $extra) use ($db, $where, $params, $columns, $orderClause, $perPage, $offset, $snapKey): array {
+        $w = $where; $p = $params;
+        if ($extra) { $w[] = $extra['sql']; $p = array_merge($p, $extra['params']); }
+        $whereClause = $w ? 'WHERE ' . implode(' AND ', $w) : '';
+
+        // THE SAME OR, THE SAME SPLIT. `MATCH(name) … OR info_hash IN (…)` is a disjunction over two
+        // different indexes, which MariaDB serves from neither — and with an ORDER BY on an indexed
+        // column it walks that index instead and filters as it goes. Two branches UNIONed, each
+        // served from exactly one index, and the sort applied to what they returned.
+        if ($extra && isset($extra['split'])) {
+            $wA = array_merge($where, [$extra['split'][0]['sql']]);
+            $wB = array_merge($where, [$extra['split'][1]['sql']]);
+            $pA = array_merge($params, $extra['split'][0]['params']);
+            $pB = array_merge($params, $extra['split'][1]['params']);
+            $clA = 'WHERE ' . implode(' AND ', $wA);
+            $clB = 'WHERE ' . implode(' AND ', $wB);
+            $cnt = $db->prepare("SELECT COUNT(*) FROM ((SELECT info_hash FROM index_hashes $clA)"
+                              . " UNION (SELECT info_hash FROM index_hashes $clB)) c");
+            $cnt->execute(array_merge($pA, $pB));
+            $total = (int)$cnt->fetchColumn();
+            $stmt = $db->prepare("SELECT * FROM ((SELECT $columns FROM index_hashes $clA)"
+                               . " UNION (SELECT $columns FROM index_hashes $clB)) lst"   // not `rows`: reserved word
+                               . " ORDER BY $orderClause LIMIT ? OFFSET ?");
+            $i = 1;
+            foreach (array_merge($pA, $pB) as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
+            $stmt->bindValue($i++, $perPage, PDO::PARAM_INT);
+            $stmt->bindValue($i, $offset, PDO::PARAM_INT);
+            $stmt->execute();
+            return [$total, $stmt->fetchAll()];
+        }
+        // A filtered count. The life and meta filters are a fixed vocabulary (three and five
+        // values), so their counts are cached per combination for 20 s — the page re-polls every
+        // 5 s while anything is pending and each of those counts is measured at over a second.
+        // Free-text search is not cached: its counts are already short-circuited further down and
+        // its key space is unbounded.
+        $liveCount = function () use ($db, $whereClause, $p): int {
+            $st = $db->prepare("SELECT COUNT(*) FROM index_hashes $whereClause");
+            $st->execute($p);
+            return (int)$st->fetchColumn();
+        };
+        $snap = $extra === null && $snapKey !== null ? indexSharedCount($db, $snapKey) : null;
+        if ($snap !== null) {
+            $total = $snap;
+        } elseif ($whereClause === '') {
+            $total = indexRowsEstimate($db) >= IDX_COUNTS_INLINE_ROWS ? indexRowsEstimate($db) : indexTotalCached($db);
+        } elseif (stripos($whereClause, 'LIKE') === false && stripos($whereClause, 'MATCH') === false) {
+            $ck = 'listcount_' . md5($whereClause . '|' . json_encode($p));
+            $total = (int)(indexStatusCached($db, $ck, fn() => ['n' => $liveCount()], 20)['n'] ?? 0);
+        } else {
+            $total = $liveCount();
+        }
+        $stmt = $db->prepare("SELECT $columns FROM index_hashes $whereClause ORDER BY $orderClause LIMIT ? OFFSET ?");
+        $i = 1;
+        foreach ($p as $v) $stmt->bindValue($i++, $v, PDO::PARAM_STR);
+        $stmt->bindValue($i++, $perPage, PDO::PARAM_INT);
+        $stmt->bindValue($i, $offset, PDO::PARAM_INT);
+        $stmt->execute();
+        return [$total, $stmt->fetchAll()];
+    };
+
+    $total = 0; $rows = []; $capped = false;
+    $first = explode(':', trim(explode(',', trim((string)($q['sort'] ?? 'last:desc')))[0]));
+    $catCols = ['last' => 'last_seen', 'size' => 'total_size', 'files' => 'files_count', 'name' => 'name',
+                'seeders' => 'eff_seeders', 'sseeders' => 'eff_seeders', 'leechers' => 'eff_leechers'];
+    $plain = !$metaOn && !$lifeOn && ($q['desc'] ?? '') !== 'yes' && $minSeeders <= 0;
+    $found = $nameClauses && indexCatalogReady($db, array_key_exists('catalog', $q) ? (bool)$q['catalog'] : null)
+        ? indexListCatalogHits($db, $nameClauses, INDEX_LIST_CATALOG_CAP + 1) : null;
+    if ($found !== null && count($found[0]) <= INDEX_LIST_CATALOG_CAP) {
+        [$total, $rows] = indexListByHashes($db, $where, $params, array_values(array_unique(array_merge($found[0], $fileHashes))),
+                                            $columns, $orderClause, $perPage, $offset);
+    } elseif ($found !== null && $plain && !$fileHashes && isset($catCols[$first[0] ?? ''])) {
+        [$total, $capped] = [INDEX_LIST_CATALOG_CAP, true];
+        $rows = indexListFromCatalog($db, $found[1], $catCols[$first[0]], strtolower($first[1] ?? 'asc') === 'desc', $perPage, $offset, $columns);
+    } elseif ($found !== null) {
+        throw new IndexSearchTooBroad('over ' . INDEX_LIST_CATALOG_CAP . ' matches');
+    } elseif ($fulltextClause) {
+        try { [$total, $rows] = $runQuery($fulltextClause); }
+        catch (\Throwable $e) {
+            if (indexIsStatementTimeout($e)) throw new IndexSearchTimeout($e->getMessage(), 0, $e);
+            [$total, $rows] = $runQuery($likeClause);
+        }
+    } else {
+        [$total, $rows] = $runQuery($likeClause);
+    }
+
+    $rows = indexListRowsShape($db, $rows, !empty($q['desc_flags']));
+    return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+}
+
+const INDEX_LIST_COLUMNS = "info_hash, name, first_seen, last_seen, seen_count, last_seeders, last_leechers, last_completed, peak_seeders,
+                grace_until, protected_until, promoted_at, meta_status, meta_error, total_size, files_count,
+                scrape_seeders, scrape_leechers, scrape_completed, scraped_at";
+
+function indexListRowsShape(PDO $db, array $rows, bool $descFlags): array {
+    $now = time();
+    foreach ($rows as &$row) {
+        foreach (['seen_count', 'last_seeders', 'last_leechers', 'last_completed', 'peak_seeders', 'total_size', 'files_count', 'scrape_seeders', 'scrape_leechers', 'scrape_completed'] as $k) {
+            $row[$k] = $row[$k] !== null ? (int)$row[$k] : null;
+        }
+        $row['protected'] = ($row['protected_until'] !== null && strtotime($row['protected_until']) >= $now);
+        $row['promoted'] = $row['promoted_at'] !== null;
+    }
+    unset($row);
+    if ($descFlags && $rows) {
+        $fl = indexDescFlags($db, array_column($rows, 'info_hash'), true);
+        foreach ($rows as &$row) $row['desc'] = $fl[$row['info_hash']] ?? 0;
+        unset($row);
+    }
+    return $rows;
+}
+
+final class IndexFiltersUnsupported extends \RuntimeException {}
+
+function indexListByEngine(PDO $db, array $cfg, array $q, array $flt): array {
+    $page = max(1, (int)($q['page'] ?? 1));
+    $perPage = max(1, min(200, (int)($q['per_page'] ?? ($cfg['items_per_page'] ?? 25))));
+    if (in_array((string)($q['meta'] ?? ''), ['none', 'pending', 'fetching', 'failed'], true)
+        || in_array((string)($q['life'] ?? ''), ['protected', 'grace', 'promoted'], true)) {
+        throw new IndexFiltersUnsupported('state');
+    }
+    $map = ['last' => 'last', 'size' => 'size', 'files' => 'files', 'name' => 'name', 'seeders' => 'seeders', 'sseeders' => 'seeders', 'leechers' => 'leechers'];
+    $sorts = [];
+    foreach (explode(',', trim((string)($q['sort'] ?? 'last:desc'))) as $part) {
+        $pieces = explode(':', trim($part));
+        if (($pieces[0] ?? '') === '') continue;
+        if (!isset($map[$pieces[0]])) throw new IndexFiltersUnsupported('sort');
+        $sorts[] = $map[$pieces[0]] . ':' . (strtolower($pieces[1] ?? 'asc') === 'desc' ? 'desc' : 'asc');
+    }
+    $r = indexSearchCatalogue($db, $cfg, [
+        'search' => trim((string)($q['search'] ?? '')), 'search_files' => !empty($q['search_files']) && $q['search_files'] !== '0',
+        'include_whitelist' => false, 'per_page' => $perPage, 'page' => $page, 'sort' => $sorts ? implode(',', $sorts) : 'last:desc',
+        'hash_search' => true, 'desc_only' => ($q['desc'] ?? '') === 'yes',
+    ] + $flt);
+    $hashes = array_column($r['rows'], 'info_hash');
+    $rows = [];
+    if ($hashes) {
+        $in = implode(',', array_fill(0, count($hashes), '?'));
+        $columns = INDEX_LIST_COLUMNS;
+        $st = $db->prepare("SELECT $columns FROM index_hashes WHERE info_hash IN ($in)");
+        $st->execute($hashes);
+        $byHash = [];
+        foreach ($st->fetchAll() as $row) $byHash[$row['info_hash']] = $row;
+        foreach ($hashes as $h) if (isset($byHash[$h])) $rows[] = $byHash[$h];
+    }
+    $total = (int)$r['total'];
+    return ['rows' => indexListRowsShape($db, $rows, !empty($q['desc_flags'])), 'total' => $total, 'total_capped' => !empty($r['total_capped']),
+            'page' => $page, 'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+}
+
+/**
+ * Member-facing catalogue search (?action=search): resolved index rows, optionally UNIONed with the
+ * live whitelist (whitelist.view permission — whitelisted hashes are removed from the index, so
+ * without this arm they would be unfindable). Supports a real relevance sort: the fulltext BOOLEAN
+ * MODE score of the name (InnoDB weighs rare/longer words higher and ignores stopwords, so a row
+ * matching "2008" AND "of" ranks above one matching only "2008", which ranks above only "of").
+ *
+ * $q: page, per_page, sort ('relevance:desc'|'seeders:desc'|…), search, search_files (bool),
+ *     include_whitelist (bool). Returns ['rows','total','page','pages','per_page']; each row:
+ *     info_hash, name, total_size, files_count, seeders, leechers, last_seen, src ('index'|'whitelist').
+ */
+/**
+ * How many hashes a file-list search may pull out of the file index before it stops looking.
+ * The point is not the exact number, it is that there IS one: an unbounded file match on a
+ * million-row table is what took this server off the air for twenty-four minutes.
+ */
+const INDEX_FILE_MATCH_CAP = 5000;
+
+/**
+ * What a search term has to look like to be treated as the START of an info hash. Six hex digits at
+ * least: fewer would match too much of the table to be a lookup, and a two-letter English word
+ * like "ad" or "be" is hex too. This is the SHAPE; indexIsHashPrefix() is the rule (1.75.0: a digit among
+ * the characters, or twelve of them) that the admin listing, the catalogue, the file clause and the
+ * too-short guard below all ask, so they cannot drift apart on what counts as a hash.
+ */
+const INDEX_HASH_PREFIX_RE = '/^[a-f0-9]{6,40}$/i';
+
+/**
+ * Is $search too short to be searched at all?
+ *
+ * The catalogue uses the fulltext index only from three characters up and falls back to
+ * `name LIKE '%x%'` for anything shorter — a full scan of the table, repeated by the COUNT arm.
+ * One visitor typing "a" is the shape of the twenty-four-minute outage the file cap above is
+ * named after, and the debounce in the browser sends exactly that on the first keystroke.
+ * Empty is NOT too short: it is browsing, and the empty listing is served from an index.
+ * Counted in characters, not bytes — "ąę" is two characters, whatever UTF-8 makes of it. The hash
+ * clause can never be true below three characters today; it is written out so the rule stays
+ * "a hash prefix is always allowed" even if the prefix floor ever moves.
+ */
+function indexSearchTooShort(string $search): bool {
+    $search = trim($search);
+    return $search !== '' && mb_strlen($search) < 3 && !indexIsHashPrefix($search);
+}
+
+/** A search that ran out of the database's time (max_statement_time) — the endpoint answers it as such, not as a 500. */
+final class IndexSearchTimeout extends \RuntimeException {}
+
+final class IndexSearchTooBroad extends \RuntimeException {}
+
+/**
+ * Did the database stop this statement for running too long? MariaDB 1969 (max_statement_time exceeded), MySQL 3024
+ * (max_execution_time), 1317 (interrupted — a KILL QUERY, which is how an operator stops one that ran away).
+ */
+function indexIsStatementTimeout(\Throwable $e): bool {
+    if (!$e instanceof \PDOException) return false;
+    $code = (int)($e->errorInfo[1] ?? 0);
+    return in_array($code, [1969, 3024, 1317], true) || str_contains($e->getMessage(), 'max_statement_time');
+}
+
+/**
+ * The page of the public catalogue: ['rows', 'total', 'total_capped', 'page', 'pages', 'per_page'].
+ *
+ * `total_capped` true (1.74.0, PERF-2): a search counted only as far as it had to — `total` is a floor ("1 000+"), and
+ * `pages` the pages it covers; the count is one bounded pass instead of a second full one. Throws IndexSearchTimeout
+ * when the database stopped the search for time (production 2026-10-06, five 500s): neither the fulltext pass nor the
+ * LIKE fallback behind it is retried then — the fallback is the slower of the two.
+ */
+function indexDescribedClause(PDO $db, bool $withWl): array {
+    $lim = INDEX_FILE_MATCH_CAP + 1;
+    $hashes = $db->query("SELECT info_hash FROM hash_content WHERE content_status = 'approved' AND description IS NOT NULL LIMIT $lim")->fetchAll(PDO::FETCH_COLUMN);
+    if ($withWl) {
+        $more = $db->query("SELECT info_hash FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description IS NOT NULL LIMIT $lim")->fetchAll(PDO::FETCH_COLUMN);
+        $hashes = array_values(array_unique(array_merge($hashes, $more)));
+    }
+    if (count($hashes) > INDEX_FILE_MATCH_CAP) {
+        $clause = "info_hash IN (SELECT info_hash FROM hash_content WHERE content_status = 'approved' AND description IS NOT NULL)";
+        if ($withWl) $clause = "(" . $clause . " OR info_hash IN (SELECT info_hash FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description IS NOT NULL))";
+        return [$clause, []];
+    }
+    if (!$hashes) return ['1 = 0', []];
+    return ['info_hash IN (' . implode(',', array_fill(0, count($hashes), '?')) . ')', array_map('strval', $hashes)];
+}
+
+function indexDescFlags(PDO $db, array $hashes, bool $withWl): array {
+    $hashes = array_values(array_unique(array_filter(array_map('strval', $hashes), static fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
+    if (!$hashes) return [];
+    $in = implode(',', array_fill(0, count($hashes), '?'));
+    $cols = "info_hash, 1 | ((description LIKE '%[img%' OR description LIKE '%![%' OR description LIKE '%upl-image%') << 1)
+             | ((description LIKE '%youtu%' OR description LIKE '%.mp4%' OR description LIKE '%.webm%') << 2) AS f";
+    $out = [];
+    foreach ($withWl ? ['hash_content', 'whitelist'] : ['hash_content'] as $tbl) {
+        $sql = match ($tbl) {
+            'whitelist' => "SELECT $cols FROM whitelist WHERE info_hash IN ($in) AND banned = 0 AND content_status = 'approved' AND description IS NOT NULL",
+            default     => "SELECT $cols FROM hash_content WHERE info_hash IN ($in) AND content_status = 'approved' AND description IS NOT NULL",
+        };
+        $st = $db->prepare($sql);
+        $st->execute($hashes);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) $out[(string)$r['info_hash']] = (int)$r['f'];
+    }
+    return $out;
+}
+
+function indexSearchCatalogue(PDO $db, array $cfg, array $q): array {
+    $page = max(1, (int)($q['page'] ?? 1));
+    // 200 is what the page offers and the endpoint accepts (1.75.0: this clamp said 100, so the reader who picked "200 / page"
+    // got a hundred rows and a pager that disagreed with the choice). The arms cut at offset + perPage, which stays bounded.
+    $perPage = max(1, min(200, (int)($q['per_page'] ?? 25)));
+    $offset = ($page - 1) * $perPage;
+    $withWl = !empty($q['include_whitelist']);
+    $wlOnly = $withWl && !empty($q['wl_only']);
+    $searchFiles = !empty($q['search_files']);
+    $search = trim((string)($q['search'] ?? ''));
+    // 1.74.0 (PERF-2/PERF-3): the narrow catalogue, once it has been made in full — see indexCatalogReady(). `catalog`
+    // is the tests' and the measurements' switch (true / false); the endpoint never sends it.
+    $useCat = indexCatalogReady($db, array_key_exists('catalog', $q) ? (bool)$q['catalog'] : null);
+    // `fast_path` false (1.75.0): the tests' and the measurements' switch for the all-words query in $run() — the full
+    // query only, to compare the two pages. The endpoint never sends it.
+    $useFast = !array_key_exists('fast_path', $q) || !empty($q['fast_path']);
+
+    /**
+     * Which reviewed states to show. Only the whitelist arm has a state at all — an index row is a
+     * hash somebody's tracker saw, with nobody's words attached to it.
+     *
+     * The default hides REJECTED and nothing else. A description a moderator turned down should not
+     * be the first thing a visitor reads, but the torrent behind it is still a torrent and hiding it
+     * would be using a judgement about words as a judgement about a swarm.
+     */
+    $contentFilter = (string)($q['content'] ?? 'any');
+    if (!in_array($contentFilter, ['any', 'not_rejected', 'rejected', 'approved', 'approved_or_none', 'none', 'pending'], true)) {
+        $contentFilter = 'any';
+    }
+    $descOnly = !empty($q['desc_only']);
+    $inDesc = !empty($q['search_desc']);
+    $num = static fn($v) => is_int($v) || (is_string($v) && ctype_digit($v)) ? (int)$v : null;
+    $flt = ['size_min' => $num($q['size_min'] ?? null), 'size_max' => $num($q['size_max'] ?? null),
+            'files_min' => $num($q['files_min'] ?? null), 'files_max' => $num($q['files_max'] ?? null),
+            'seeders_min' => $num($q['seeders_min'] ?? null),
+            'seen_min' => is_string($q['seen_min'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $q['seen_min']) ? $q['seen_min'] : null,
+            'seen_max' => is_string($q['seen_max'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $q['seen_max']) ? $q['seen_max'] : null,
+            'hashes' => isset($q['only_hashes']) && is_array($q['only_hashes']) ? array_values(array_map('strval', $q['only_hashes'])) : null,
+            'names' => isset($q['name_clause']) && is_array($q['name_clause']) ? $q['name_clause'] : null,
+            'conds' => isset($q['facts_conds']) && is_array($q['facts_conds']) && $q['facts_conds'] ? $q['facts_conds'] : null];
+    $filtered = count(array_filter($flt, fn($v) => $v !== null)) > 0;
+
+    // multi-column sort stack "col:dir,col:dir" (same idea as the admin tables); 'relevance'
+    // ignores its direction (best first is the only sensible order)
+    $sortCols = ['relevance' => 'score', 'seeders' => 'seeders', 'leechers' => 'leechers',
+                 'size' => 'total_size', 'last' => 'last_seen', 'name' => 'name', 'files' => 'files_count'];
+    $orderParts = [];
+    foreach (explode(',', trim((string)($q['sort'] ?? 'relevance:desc'))) as $part) {
+        $pieces = explode(':', trim($part));
+        $col = $sortCols[$pieces[0] ?? ''] ?? null;
+        if ($col === null) continue;
+        if ($col === 'score') { $orderParts['score'] = 'score DESC'; continue; }
+        $orderParts[$col] = $col . ((strtolower($pieces[1] ?? 'desc') === 'asc') ? ' ASC' : ' DESC');
+    }
+    // "Best match alone" — relevance with no column chosen — is told from "Best match + a column" HERE, before the
+    // seeders tie-break is written into the first (1.75.0): behind the ranking keys the score closes only the former.
+    $bestAlone = false;
+    if (!$orderParts) { $orderParts = ['score' => 'score DESC', 'seeders' => 'seeders DESC']; $bestAlone = true; }
+    elseif (count($orderParts) === 1 && isset($orderParts['score'])) { $orderParts['seeders'] = 'seeders DESC'; $bestAlone = true; }
+
+    // `hash_search` false (1.69.0): the caller's reader is not shown hashes (no `index.magnet`), so a
+    // hex term is searched as a NAME like any other word. Matching a prefix and then leaving the hash out
+    // of the rows let such a reader read a hash back from the counts, sixteen answers per digit — the
+    // same rule the profile's lists follow. Absent means yes: every other caller searches as before.
+    $isHash = $search !== '' && (!array_key_exists('hash_search', $q) || !empty($q['hash_search']))
+              && indexIsHashPrefix($search);
+    $ft = ($search !== '' && !$isHash && mb_strlen($search) >= 3) ? indexFulltextTerm($search) : '';
+
+    /**
+     * THE RANKING KEYS (1.75.0) — what the search sorts by BEFORE the reader's columns, from the words of the query.
+     *
+     * Until 1.74 the FT score led "Best match" and nothing led the plain search. The score is a float no two rows share,
+     * so a column clicked beside it never fired, and the plain search put a row with one of the three words among
+     * the rows with all three. Two small whole numbers now come first, and only for a query of two words or more:
+     *
+     *   words_hit — how many of the query's words (indexRankWords()) the name has: three words, then two, then one. The
+     *               words the fulltext index cannot hold — "the", "tv" — count too (1.75.1, search_count_common_words), by a
+     *               REGEXP. A number that means the same in the catalogue and in the whitelist, which the float score never did.
+     *   in_order  — Best match only: 2 the words side by side in the order typed, 1 all of them in that order, 0 else.
+     *               Built from every word, "and" and "the" too, since it reads the text and not the index.
+     *
+     *   Best match alone      words_hit, in_order, score, seeders, hash   (the score only orders the groups that lack words)
+     *   Best match + columns  words_hit, in_order, <columns>, hash        (a column now decides inside the groups)
+     *   plain                 words_hit, <columns>, hash
+     *
+     * THE SCORE (1.75.1) is a term-frequency number: a name that REPEATS the words ("Rick.and.Morty.S00E177.Rick.and.Morty.In
+     * …") outscores the real thing. So in the group that has every word it no longer orders — `CASE WHEN words_hit = <all>
+     * THEN 0 ELSE score END` — and the seeders do; the groups with fewer words keep it, where a rarer word weighing more is
+     * the point. A query of one word has no group but the one: its Best match alone is its plain search, the seeders.
+     *
+     * A key a query cannot have is left out, and a query of one word has neither. Best match + a column puts no score before
+     * the column (so the column, then the next one, decides, as it does for more words). File-name hits carry the SAME
+     * expressions (the other half of the arm's UNION must produce the same row for a hash found both ways, or it comes
+     * back twice), so a torrent only a file name found falls to the bottom by itself.
+     */
+    $rw = $ft !== '' ? indexRankWords($search, ($cfg['search_count_common_words'] ?? '1') === '1') : ['w' => [], 'c' => [], 'x' => []];
+    $bestOn = isset($orderParts['score']);
+    // The flags one execution of the search uses: 'hit'/'ord' = the key is selected and sorted by; 'top' = the value of
+    // words_hit that has every word (0 without a words_hit); 'alone' = Best match with no column. $fast: the all-words query,
+    // where words_hit is the same number on every row it can return and is left out.
+    $rankFor = static function (bool $scored, bool $fast = false) use ($rw, $bestOn, $bestAlone): array {
+        $hit = $scored && indexRankHitActive($rw);
+        $ord = $scored && $bestOn && count($rw['w']) >= 2;
+        return ['hit' => $hit && !$fast, 'ord' => $ord, 'top' => $hit ? indexRankTop($rw) : 0, 'alone' => $bestAlone];
+    };
+
+    /**
+     * The ORDER BY, written so a query plan can actually serve it.
+     *
+     * TWO THINGS HAD TO CHANGE, and both were only visible on the real table.
+     *
+     * 1. `seeders` is the alias of COALESCE(scrape_seeders, last_seeders). No index can serve an
+     *    ORDER BY over an expression, so the catalogue's own default first page — no search typed,
+     *    the state a visitor arrives in — was a full scan and a filesort of 1.9 M rows: 2 890 ms
+     *    measured on production. index_hashes now carries `eff_seeders`, a VIRTUAL column holding
+     *    exactly that expression, with an index on it. Naming the column instead of the expression
+     *    is what lets the optimiser walk the index and stop after a page: the same query is 1 ms.
+     *    The whitelist arm keeps the alias — it is a few thousand rows and has no such column.
+     *
+     * 2. With no search, `score` is the literal 0. Leading an ORDER BY with a constant sorts nothing
+     *    and stops the optimiser recognising the rest as an index order, so it is left out entirely
+     *    rather than carried along as decoration.
+     *
+     * The trailing tie-break runs in the same direction as the sort for the reason the admin listing
+     * documents: InnoDB carries the primary key inside every secondary index, so a tie-break the
+     * other way round turns an index walk back into a filesort over the whole catalogue.
+     */
+    //
+    // The keys of that order, ONE list for the three writers below (1.75.0): the ranking keys first, then the reader's.
+    // The score closes "Best match alone" and is left out behind a chosen column, for a query of one word as for more: a
+    // float nothing shares in front of the column would make the click a tie-break that never fires. It orders only the
+    // groups that lack words (1.75.1): a query with no words_hit, and the all-words query, have no score key at all.
+    // $p prefixes the three alias keys (the catalogue's outer query and the merge's halves say k. / a. / b.).
+    $orderKeys = static function (bool $scored, array $rank, string $p = '') use ($orderParts): array {
+        $keys = [];
+        if ($rank['hit']) $keys['words_hit'] = $p . 'words_hit DESC';
+        if ($rank['ord']) $keys['in_order'] = $p . 'in_order DESC';
+        foreach ($orderParts as $key => $frag) {
+            if ($key === 'score') {
+                if ($scored && $rank['alone'] && $rank['hit']) {
+                    $keys['score'] = 'CASE WHEN ' . $p . 'words_hit = ' . (int)$rank['top'] . ' THEN 0 ELSE ' . $p . 'score END DESC';
+                }
+                continue;
+            }
+            $keys[$key] = $frag;
+        }
+        return $keys;
+    };
+    $orderFor = static function (bool $wl, bool $scored, bool $union, array $rank) use ($orderKeys): string {
+        $parts = [];
+        foreach ($orderKeys($scored, $rank) as $key => $frag) {
+            // eff_seeders is the indexed generated column, and it is what makes an ordered index walk
+            // possible — but only on the base table. A union arm is a derived table whose output has
+            // no such column, and the sort there is a filesort over a handful of rows either way;
+            // `seeders` is the same value (eff_seeders IS COALESCE(scrape_seeders, last_seeders)).
+            if ($key === 'seeders' && !$wl && !$union) $frag = 'eff_' . $frag;
+            $parts[] = $frag;
+        }
+        if (!$parts) $parts[] = ($wl || $union) ? 'seeders DESC' : 'eff_seeders DESC';
+        return implode(', ', $parts) . ', info_hash '
+             . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
+    };
+    // What the outer merge orders by when there are two arms: the aliases, which both arms expose.
+    $orderMerged = static function (bool $scored, array $rank) use ($orderKeys): string {
+        $parts = array_values($orderKeys($scored, $rank));
+        if (!$parts) $parts[] = 'seeders DESC';
+        return implode(', ', $parts) . ', info_hash '
+             . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
+    };
+    // The catalogue columns that order needs. The inner query selects those and the key and nothing else, so a deep
+    // page is skipped inside the one index that serves the order — InnoDB keeps the key in every secondary index, and
+    // a row's other columns would cost a read of the row for every one of the OFFSET rows passed over (page 400 of
+    // 25: 10 000 reads for 25 rows shown).
+    $catCols = [];
+    foreach (array_keys($orderParts) as $key) {
+        if ($key !== 'score') $catCols[] = ['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers'][$key] ?? $key;
+    }
+    if (!$catCols) $catCols = ['eff_seeders'];
+    // The same order over index_catalog's own columns (1.74.0) — each a column with an index ending in the key, so the
+    // inner query of the deferred join walks one index and stops after a page. $p = 'k.' for the outer query, which
+    // keeps the order the inner one chose.
+    $orderCat = static function (bool $scored, array $rank, string $p = '') use ($orderKeys): string {
+        $parts = [];
+        foreach ($orderKeys($scored, $rank, $p) as $key => $frag) {
+            if (in_array($key, ['score', 'words_hit', 'in_order'], true)) { $parts[] = $frag; continue; }
+            $col = ['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers'][$key] ?? $key;
+            $parts[] = $p . $col . (str_ends_with($frag, ' ASC') ? ' ASC' : ' DESC');
+        }
+        if (!$parts) $parts[] = $p . 'eff_seeders DESC';
+        return implode(', ', $parts) . ', ' . $p . 'info_hash '
+             . (str_ends_with((string)end($parts), 'DESC') ? 'DESC' : 'ASC');
+    };
+
+    // ── "search inside file lists": resolve the file half FIRST, and bound it ────────────────
+    //
+    // This used to be one clause: `MATCH(name) AGAINST(?) OR info_hash IN (SELECT … FROM index_files
+    // WHERE MATCH(path) AGAINST(?))`. MariaDB cannot serve an OR of a fulltext match and a subquery
+    // from indexes — it falls back to scanning `index_hashes` end to end (2.5 million rows here) and
+    // evaluating the subquery as it goes. On this server one such search ran for 24 MINUTES at 100 %
+    // CPU, and because every request holds a php-fpm child and the pool has five, the whole site
+    // stopped answering. Each retry started another one.
+    //
+    // Two cheap indexed queries instead of one impossible plan: pull the matching hashes out of the
+    // file index first (its own FULLTEXT, ordered by nothing, hard LIMIT), then hand the main query a
+    // literal list. The cap is the point — a search for "a" must not be allowed to drag a million
+    // rows into an IN list, and a bounded answer beats an unbounded wait.
+    $fileHashes = [];
+    $fileIds = [];
+    // The path clause is indexFilePathClause()'s (1.62.0), the same one a file list opened from one
+    // of these hits asks with — so "this torrent matched" and "these are the files that matched"
+    // are one decision, not two that happen to agree today. Fulltext over `path` when the term has
+    // words for it; otherwise a LIKE with a leading wildcard, which cannot use an index either, so
+    // the cap below matters most for exactly that branch (a term too short for fulltext).
+    $pathClause = ($searchFiles && !$isHash) ? indexFilePathClause($search) : null;
+    if ($pathClause !== null) {
+        $capped = false;
+        [$clause, $clauseParams] = $pathClause;
+        $lim = INDEX_FILE_MATCH_CAP + 1;
+        try {
+            $st = $db->prepare("SELECT DISTINCT info_hash FROM index_files WHERE $clause LIMIT $lim");
+            $st->execute($clauseParams);
+            $fileHashes = $st->fetchAll(PDO::FETCH_COLUMN);
+            $st->closeCursor();
+            if (count($fileHashes) > INDEX_FILE_MATCH_CAP) { array_pop($fileHashes); $capped = true; }
+
+            if ($withWl) {
+                $st = $db->prepare("SELECT DISTINCT whitelist_id FROM whitelist_files WHERE $clause LIMIT $lim");
+                $st->execute($clauseParams);
+                $fileIds = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+                $st->closeCursor();
+                if (count($fileIds) > INDEX_FILE_MATCH_CAP) { array_pop($fileIds); $capped = true; }
+            }
+        } catch (\Throwable $e) {
+            // A file index that is missing or mid-rebuild must degrade to a name search, not a 500.
+            $fileHashes = []; $fileIds = [];
+        }
+        $q['__files_capped'] = $capped;
+    }
+    if ($inDesc && $search !== '' && !$isHash) {
+        $like = '%' . indexLikeEscape($search) . '%';
+        $lim = INDEX_FILE_MATCH_CAP;
+        try {
+            if ($withWl) {
+                $sql = "SELECT id FROM whitelist WHERE banned = 0 AND content_status = 'approved' AND description LIKE ?"
+                     . (!empty($q['desc_guest']) ? " AND NOT EXISTS (SELECT 1 FROM forum_descs f WHERE f.info_hash = whitelist.info_hash AND f.audience = 'members' AND f.import_sha IS NOT NULL)" : '')
+                     . " LIMIT $lim";
+                $st = $db->prepare($sql);
+                $st->execute([$like]);
+                $fileIds = array_values(array_unique(array_merge($fileIds, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)))));
+            }
+            $st = $db->prepare("SELECT info_hash FROM hash_content WHERE content_status = 'approved' AND description LIKE ? LIMIT $lim");
+            $st->execute([$like]);
+            $fileHashes = array_values(array_unique(array_merge($fileHashes, $st->fetchAll(PDO::FETCH_COLUMN))));
+        } catch (\Throwable $e) {
+            error_log('[index] the search inside descriptions failed: ' . $e->getMessage());
+        }
+    }
+    $descIdx = $descOnly ? indexDescribedClause($db, false) : null;
+
+    // one arm = [select SQL, params, count SQL, count params, is-it-a-union, keys SQL, keys params]; fulltext first,
+    // LIKE fallback. `$cat` (1.74.0): the index arm read from index_catalog — the same WHERE over the narrow table, whose
+    // rows ARE the named ones; its select carries the catalogue's own columns, and $run() wraps it in the deferred join
+    // that fetches the page's wide rows. The keys SQL is the arm's matching keys alone, for the capped count.
+    // What a row of each arm shows. votes_up/votes_down/score_x100 are kept ON the row by repRecount(). Aggregating them
+    // per result would be fifty extra queries for one page, which is the shape of mistake this file has already made
+    // once with a listing over a large table.
+    $colsWl = "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, 0) AS seeders, COALESCE(scrape_leechers, 0) AS leechers,
+               COALESCE(scraped_at, updated_at, created_at) AS last_seen, votes_up, votes_down, votes_count, score_x100,
+               content_status, 'whitelist' AS src";
+    $colsIndex = "info_hash, name, total_size, files_count, COALESCE(scrape_seeders, last_seeders) AS seeders, COALESCE(scrape_leechers, last_leechers) AS leechers,
+               last_seen, votes_up, votes_down, votes_count, score_x100, 'none' AS content_status, 'index' AS src";
+    // `$rank` (1.75.0) = $rankFor()'s flags for the run: the arm selects words_hit / in_order beside the score when they are
+    // on. `$fast` builds the ALL-WORDS arm instead: the same select, WHERE MATCH('+w1* +w2* …') in place of the OR and no
+    // file-name half — see $run().
+    $noRank = ['hit' => false, 'ord' => false, 'top' => 0, 'alone' => false];
+    $buildArm = function (bool $wl, bool $useFt, bool $excludeWl = false, bool $cat = false, array $rank = [], bool $fast = false) use ($search, $isHash, $ft, $rw, $searchFiles, $fileHashes, $fileIds, $contentFilter, $catCols, $colsWl, $colsIndex, $noRank, $descIdx, $inDesc, $flt, $wlOnly): array {
+        $rank = $rank ?: $noRank;
+        $cat = $cat && !$wl;
+        $tbl = $wl ? 'whitelist' : ($cat ? 'index_catalog' : 'index_hashes');
+        $cols = $wl ? $colsWl : ($cat ? 'info_hash, ' . implode(', ', $catCols) : $colsIndex);
+        // a NAMED row is searchable regardless of the queue state — a bulk re-fetch flips done →
+        // pending without touching the stored metadata, and thousands of rows must not vanish from
+        // the search until the worker gets around to re-resolving them. The catalogue holds exactly
+        // those rows (IDX_CATALOG_MEMBER), so it needs no such condition.
+        $where = $wl
+            ? ["banned = 0", "(meta_status = 'done' OR (name IS NOT NULL AND name <> ''))"]
+            : ($cat ? ['1 = 1'] : [IDX_CATALOG_MEMBER]);
+        if ($wl) {
+            // Literal fragments chosen by a key; nothing from the request reaches the SQL.
+            $contentSql = [
+                'any'              => '1 = 1',
+                'not_rejected'     => "content_status <> 'rejected'",
+                'rejected'         => "content_status = 'rejected'",
+                'approved'         => "content_status = 'approved'",
+                'approved_or_none' => "content_status IN ('approved','none')",
+                // 'pending' and 'none' used to be one bucket called "Unreviewed only", which made the
+                // review queue invisible from search: a moderator could not ask "what is waiting?"
+                // and got rows nobody had written about mixed in with rows waiting for them.
+                'pending'          => "content_status = 'pending'",
+                'none'             => "content_status = 'none'",
+            ];
+            $where[] = $contentSql[$contentFilter];
+        } elseif ($contentFilter === 'rejected' || $contentFilter === 'approved' || $contentFilter === 'pending') {
+            // An index row has no reviewed state, so a filter asking for one must exclude the whole
+            // arm rather than quietly returning rows that cannot match.
+            $where[] = '1 = 0';
+        }
+        if (!$wl && $wlOnly) $where[] = '1 = 0';
+        $params = [];
+        if ($descIdx !== null) {
+            if ($wl) {
+                $where[] = "content_status = 'approved' AND description IS NOT NULL";
+            } else {
+                $where[] = $descIdx[0];
+                foreach ($descIdx[1] as $p) $params[] = $p;
+            }
+        }
+        foreach ([['total_size', 'size_min', '>='], ['total_size', 'size_max', '<='], ['files_count', 'files_min', '>='], ['files_count', 'files_max', '<=']] as [$col, $k, $op]) {
+            if ($flt[$k] === null) continue;
+            $where[] = $col . ' ' . $op . ' ?';
+            $params[] = $flt[$k];
+        }
+        if ($flt['seeders_min'] !== null) {
+            $where[] = ($wl ? 'COALESCE(scrape_seeders, 0)' : ($cat ? 'eff_seeders' : 'COALESCE(scrape_seeders, last_seeders)')) . ' >= ?';
+            $params[] = $flt['seeders_min'];
+        }
+        foreach ([['seen_min', '>='], ['seen_max', '<=']] as [$k, $op]) {
+            if ($flt[$k] === null) continue;
+            $where[] = ($wl ? 'COALESCE(scraped_at, updated_at, created_at)' : 'last_seen') . ' ' . $op . ' ?';
+            $params[] = $flt[$k];
+        }
+        if ($flt['hashes'] !== null || $flt['names'] !== null) {
+            $parts = [];
+            if ($flt['hashes']) {
+                $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($flt['hashes']), '?')) . ')';
+                foreach ($flt['hashes'] as $p) $params[] = $p;
+            }
+            if ($flt['names'] !== null) {
+                $parts[] = str_replace('{T}', '`' . $tbl . '`', $flt['names'][0]);
+                foreach ($flt['names'][1] as $p) $params[] = $p;
+            }
+            $where[] = $parts ? '(' . implode(' OR ', $parts) . ')' : '1 = 0';
+        }
+        foreach ($flt['conds'] ?? [] as $cond) {
+            [$cHashes, $cTpl, $cArgs] = $cond;
+            $cNot = !empty($cond[3]);
+            $parts = [];
+            if ($cHashes) {
+                $parts[] = 'info_hash IN (' . implode(',', array_fill(0, count($cHashes), '?')) . ')';
+                foreach ($cHashes as $p) $params[] = $p;
+            }
+            if ($cTpl !== null) {
+                $parts[] = str_replace('{T}', '`' . $tbl . '`', $cTpl);
+                foreach ($cArgs as $p) $params[] = $p;
+            }
+            $where[] = $parts ? ($cNot ? 'NOT ' : '') . '(' . implode(' OR ', $parts) . ')' : ($cNot ? '1 = 1' : '1 = 0');
+        }
+        $scoreSql = '0';
+        $scoreParams = [];
+        $rankSel = '';          // ", <expr> AS words_hit, <expr> AS in_order" — empty for a query of one word
+        $rankParams = [];
+        // The "name matches OR one of its files matches" half, kept apart from the rest of the WHERE
+        // because it is the one clause that cannot be ANDed into an indexed plan.
+        //
+        // OR IS STILL POISON EVEN WITH A LITERAL LIST. Resolving the file half into a bounded IN list
+        // (above) fixed the 24-minute subquery, but `MATCH(name) AGAINST(…) OR info_hash IN (…)` is
+        // still a disjunction over two different indexes, and MariaDB serves it by scanning. Worse,
+        // with `ORDER BY eff_seeders` the optimiser then chooses to walk idx_index_eff_seed in order
+        // and filter as it goes: EXPLAIN said `type=index key=idx_index_eff_seed`, and the query took
+        // 32.6 s on the live catalogue for eighty-eight matching rows. php-fpm's max_execution_time
+        // is 30 s, so the reader got a 500 — intermittently, because the same search with "best match
+        // first" ticked orders by score instead and came in at 16 s.
+        //
+        // Split into two branches and UNION them. Each branch is served from one index: the fulltext
+        // one, or the primary key. Measured on the same live data, same rows out: 32.6 s -> 4.6 s.
+        // The arm is returned already wrapped in a derived table so its caller can go on appending
+        // one ORDER BY and one LIMIT to it, whichever shape it turned out to be.
+        $split = null;      // [nameClause, nameParams, filesClause, filesParams] when the OR applies
+        if ($search !== '') {
+            if ($isHash) {
+                $where[] = "info_hash LIKE ?";
+                $params[] = strtolower($search) . '%';
+            } else {
+                $keys = $wl ? $fileIds : $fileHashes;
+                $col  = $wl ? 'id' : 'info_hash';
+                if ($useFt && $ft !== '') {
+                    if ($fast) {
+                        // The all-words query: every countable word, as a prefix, required, and each of the other words
+                        // found by its REGEXP (1.75.1). No order of it reads the score (the group that has every word is
+                        // ordered by the seeders), so it is the literal 0 and the OR's MATCH — a second fulltext pass over
+                        // every name that has ANY of the words — is not run at all.
+                        [$nameSql, $nameParams] = indexRankAllWords($rw);
+                    } else {
+                        $scoreSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                        $scoreParams = [$ft];
+                        $nameSql = "MATCH(name) AGAINST(? IN BOOLEAN MODE)";
+                        $nameParams = [$ft];
+                    }
+                    $rs = indexRankSql($rw, $rank['hit'], $rank['ord']);
+                    foreach (['hit' => 'words_hit', 'ord' => 'in_order'] as $k => $as) {
+                        if ($rs[$k][0] === '') continue;
+                        $rankSel .= ', ' . $rs[$k][0] . ' AS ' . $as;
+                        $rankParams = array_merge($rankParams, $rs[$k][1]);
+                    }
+                } else {
+                    $nameSql = "name LIKE ?";
+                    $nameParams = ['%' . indexLikeEscape($search) . '%'];
+                }
+                if (!$fast && ($searchFiles || $inDesc) && $keys) {
+                    $split = [$nameSql, $nameParams,
+                              $col . ' IN (' . implode(',', array_fill(0, count($keys), '?')) . ')', array_values($keys)];
+                } else {
+                    $where[] = $nameSql;
+                    foreach ($nameParams as $p) $params[] = $p;
+                }
+            }
+        }
+        // The non-whitelist arm must not repeat a hash the whitelist arm will also return. This lives
+        // inside the arm rather than being concatenated onto its SQL afterwards, because an arm is no
+        // longer always a single SELECT — appending to a UNION would attach the condition to its last
+        // branch only.
+        if ($excludeWl) $where[] = "info_hash NOT IN (SELECT info_hash FROM whitelist WHERE banned = 0)";
+
+        $key = $wl ? 'id' : 'info_hash';
+        if ($split === null) {
+            $w = 'WHERE ' . implode(' AND ', $where);
+            return [
+                "SELECT $cols, $scoreSql AS score$rankSel FROM `$tbl` $w", array_merge($scoreParams, $rankParams, $params),
+                "SELECT COUNT(*) FROM `$tbl` $w", $params,
+                false,
+                "SELECT $key FROM `$tbl` $w", $params,
+            ];
+        }
+        [$nameSql, $nameParams, $filesSql, $filesParams] = $split;
+        $wA = 'WHERE ' . implode(' AND ', array_merge($where, [$nameSql]));
+        $wB = 'WHERE ' . implode(' AND ', array_merge($where, [$filesSql]));
+        // UNION, not UNION ALL: a row whose name matches AND whose files match is one row, which is
+        // what the OR said. The branches select identical expressions, so the de-duplication compares
+        // like with like — and that now includes words_hit and in_order (1.75.0): the files half computes the SAME
+        // expressions as the name half, never a literal 0, or a torrent found both ways would differ in a column and
+        // come back twice. A torrent only its files matched has words_hit 0 and in_order 0 by the values themselves.
+        $sel = "SELECT * FROM ((SELECT $cols, $scoreSql AS score$rankSel FROM `$tbl` $wA)"
+             . " UNION (SELECT $cols, $scoreSql AS score$rankSel FROM `$tbl` $wB)) arm";
+        $selParams = array_merge($scoreParams, $rankParams, $params, $nameParams, $scoreParams, $rankParams, $params, $filesParams);
+        $cnt = "SELECT COUNT(*) FROM ((SELECT $key FROM `$tbl` $wA) UNION (SELECT $key FROM `$tbl` $wB)) c";
+        $cntParams = array_merge($params, $nameParams, $params, $filesParams);
+        $keysSql = "SELECT $key FROM ((SELECT $key FROM `$tbl` $wA) UNION (SELECT $key FROM `$tbl` $wB)) u";
+        return [$sel, $selParams, $cnt, $cntParams, true, $keysSql, $cntParams];
+    };
+
+    // The page's wide rows for a catalogue arm alone (1.74.0): the narrow table chooses the page in its own order and
+    // stops after it — an index walk, however deep the page — and index_hashes is read by key for those rows only;
+    // the outer ORDER BY keeps the order the inner query chose. A row that stopped being a member a moment ago drops
+    // out here rather than showing without a name. (With the whitelist beside it, $run() merges keys first instead.)
+    $deferred = static function (string $inner, string $innerOrder, string $limit, string $outerOrder, array $rank): string {
+        // The ranking keys come out of the inner query like the score does, for the outer ORDER BY to sort by.
+        $rankOut = ($rank['hit'] ? ', k.words_hit AS words_hit' : '') . ($rank['ord'] ? ', k.in_order AS in_order' : '');
+        return "SELECT h.info_hash, h.name, h.total_size, h.files_count,
+                       COALESCE(h.scrape_seeders, h.last_seeders) AS seeders, COALESCE(h.scrape_leechers, h.last_leechers) AS leechers,
+                       h.last_seen, h.votes_up, h.votes_down, h.votes_count, h.score_x100, 'none' AS content_status, 'index' AS src,
+                       k.score AS score$rankOut
+                  FROM ($inner ORDER BY $innerOrder $limit) k
+                  JOIN index_hashes h ON h.info_hash = k.info_hash
+                   AND (h.meta_status = 'done' OR (h.name IS NOT NULL AND h.name <> ''))
+                 ORDER BY $outerOrder";
+    };
+
+    // How far a search counts (1.74.0, PERF-2 (1)): never past this — the first thousand, or ten pages beyond the one
+    // being read. A number past it is shown as "N+" and the pager grows as the reader goes deeper; what it saves is
+    // the second full pass a popular word cost (the count re-read every hit: 6.7 s of the 13.3 s measured).
+    $cap = max(1000, $offset + 10 * $perPage);
+
+    // The page of rows these arms give, in the order the reader asked for: [the catalogue's arm] or [that and the
+    // whitelist's], run as ONE statement (and, over the catalogue with the whitelist beside it, the wide rows read for the
+    // page alone afterwards). $rank is $rankFor()'s flags for the arms — the same ones they were built with.
+    $fetchPage = function (array $arms, array $rank, bool $scored) use ($db, $orderFor, $orderMerged, $orderCat, $deferred, $useCat, $catCols, $colsIndex, $colsWl, $perPage, $offset): array {
+        if (count($arms) === 1) {
+            if ($useCat) {
+                $sql = $deferred($arms[0][0], $orderCat($scored, $rank), 'LIMIT ? OFFSET ?', $orderCat($scored, $rank, 'k.'), $rank);
+            } else {
+                // ONE arm: no derived table. Wrapping a single SELECT in `SELECT * FROM (…) cat` forces
+                // the whole result into a temporary table before the ORDER BY can look at it, which on
+                // the empty search meant materialising 184 000 rows to return 25 of them.
+                $sql = $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4]), $rank) . ' LIMIT ? OFFSET ?';
+            }
+            $params = $arms[0][1];
+        } elseif (!$useCat) {
+            // TWO arms: the merge needs a derived table, but each arm can be ordered and cut short
+            // FIRST — no arm can contribute a row past position offset+perPage to the merged page,
+            // so nothing beyond that has to be materialised or sorted.
+            $cut = $offset + $perPage;
+            $sql = '(' . $arms[0][0] . ' ORDER BY ' . $orderFor(false, $scored, !empty($arms[0][4]), $rank) . ' LIMIT ' . (int)$cut . ')'
+                 . ' UNION ALL '
+                 . '(' . $arms[1][0] . ' ORDER BY ' . $orderFor(true, $scored, !empty($arms[1][4]), $rank) . ' LIMIT ' . (int)$cut . ')';
+            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored, $rank) . ' LIMIT ? OFFSET ?';
+            $params = array_merge($arms[0][1], $arms[1][1]);
+        } else {
+            // TWO arms over the catalogue (1.74.0): the merge runs on keys and sort values only — the catalogue's
+            // straight from the index that serves the order, the whitelist's from its rows — and the wide rows are
+            // read for the page alone, below. Reading them for every row up to the cut, as the merge above does,
+            // was a random read of index_hashes per row passed over: 1.7 s for page 400 at a small pool. The
+            // aliases are the merge's own; one this order does not sort by is NULL in the catalogue's half. The
+            // ranking keys (1.75.0) follow the score in both halves, in the same positions.
+            $cut = $offset + $perPage;
+            $alias = [];
+            foreach (['seeders' => 'eff_seeders', 'leechers' => 'eff_leechers', 'total_size' => 'total_size',
+                      'last_seen' => 'last_seen', 'name' => 'name', 'files_count' => 'files_count'] as $as => $col) {
+                $alias[] = (in_array($col, $catCols, true) ? 'a.' . $col : 'NULL') . ' AS ' . $as;
+            }
+            $rankA = ($rank['hit'] ? ', a.words_hit' : '') . ($rank['ord'] ? ', a.in_order' : '');
+            $rankB = ($rank['hit'] ? ', b.words_hit' : '') . ($rank['ord'] ? ', b.in_order' : '');
+            $sql = "(SELECT a.info_hash, 'index' AS src, " . implode(', ', $alias) . ", a.score$rankA FROM (" . $arms[0][0] . ") a"
+                 . " ORDER BY " . $orderCat($scored, $rank, 'a.') . " LIMIT " . (int)$cut . ")"
+                 . " UNION ALL "
+                 . "(SELECT b.info_hash, 'whitelist' AS src, b.seeders, b.leechers, b.total_size, b.last_seen, b.name, b.files_count, b.score$rankB"
+                 . " FROM (" . $arms[1][0] . ") b ORDER BY " . $orderFor(true, $scored, true, $rank) . " LIMIT " . (int)$cut . ")";
+            $sql = "SELECT * FROM ($sql) cat ORDER BY " . $orderMerged($scored, $rank) . ' LIMIT ? OFFSET ?';
+            $params = array_merge($arms[0][1], $arms[1][1]);
+        }
+        $st = $db->prepare($sql);
+        $i = 1;
+        foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
+        $st->bindValue($i++, $perPage, PDO::PARAM_INT);
+        $st->bindValue($i, $offset, PDO::PARAM_INT);
+        $st->execute();
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if ($useCat && count($arms) > 1) {
+            // The page's wide rows, by key — the index's from index_hashes (a row that stopped being a member a moment
+            // ago drops out, as in $deferred), the whitelist's from whitelist (info_hash is unique there) — put back
+            // in the page's order, each with the score the merge ranked it by.
+            $wide = ['index' => [], 'whitelist' => []];
+            foreach (['index' => [$colsIndex, 'index_hashes', ' AND ' . IDX_CATALOG_MEMBER], 'whitelist' => [$colsWl, 'whitelist', ' AND banned = 0']] as $src => [$wideCols, $wideTable, $wideMember]) {
+                $keys = array_values(array_unique(array_column(array_filter($rows, fn($r) => $r['src'] === $src), 'info_hash')));
+                if (!$keys) continue;
+                $in = implode(',', array_fill(0, count($keys), '?'));
+                $w = $db->prepare("SELECT $wideCols FROM `$wideTable` WHERE info_hash IN ($in)$wideMember");
+                $w->execute($keys);
+                foreach ($w->fetchAll(PDO::FETCH_ASSOC) as $r) $wide[$src][$r['info_hash']] = $r;
+            }
+            $page = [];
+            foreach ($rows as $r) {
+                $full = $wide[$r['src']][$r['info_hash']] ?? null;
+                if ($full === null) continue;
+                $full['score'] = $r['score'];
+                $page[] = $full;
+            }
+            $rows = $page;
+        }
+        return $rows;
+    };
+
+    $run = function (bool $useFt) use ($db, $buildArm, $fetchPage, $rankFor, $withWl, $wlOnly, $useCat, $useFast, $cap, $perPage, $offset, $search, $isHash, $ft, $searchFiles, $contentFilter, $descOnly, $filtered): array {
+        // Whether the relevance column is a real score or the literal 0 — see $orderFor.
+        $scored = $search !== '' && !$isHash && ($useFt && $ft !== '');
+        $rank = $rankFor($scored);
+        // a hash can sit in BOTH tables between polls — prefer the whitelist row. The exclusion is
+        // passed IN rather than appended to the finished SQL, which stopped being safe when an arm
+        // became a UNION.
+        $arms = [$buildArm(false, $useFt, $withWl, $useCat, $rank)];
+        if ($withWl) $arms[] = $buildArm(true, $useFt, false, false, $rank);
+        // [total, capped]
+        $countArms = static function () use ($db, $arms, $withWl, $wlOnly, $search, $searchFiles, $contentFilter, $useCat, $cap, $descOnly, $filtered): array {
+        $total = 0;
+        $capped = false;
+        foreach ($arms as $k => $a) {
+            // The unfiltered count is "how many rows are listable at all" — a number that moves with
+            // the index poll, not with the reader. Counting it on every page view cost 1 102 ms of
+            // full scan for an answer that was the same as a minute ago. From the catalogue (1.74.0)
+            // it is the narrow table's own, a fraction of that, under a key of its own.
+            if ($search === '' && !$searchFiles && !$descOnly && !$filtered) {
+                $count = static function () use ($db, $a): array {
+                    $c = $db->prepare($a[2]); $c->execute($a[3]);
+                    return ['n' => (int)$c->fetchColumn()];
+                };
+                if ($useCat && $k === 0) {
+                    // Browsing the catalogue (1.74.0): its rows ARE the listable ones, so the count is the table's own
+                    // — less the hashes the whitelist arm shows instead, counted from the whitelist's side (a few
+                    // hundred keys looked up) rather than by a NOT IN over every catalogue row. The same number the
+                    // arm's WHERE gives, at a fraction of the reads.
+                    $count = static function () use ($db, $withWl, $wlOnly, $contentFilter): array {
+                        if ($wlOnly || in_array($contentFilter, ['rejected', 'approved', 'pending'], true)) return ['n' => 0];
+                        $n = (int)$db->query("SELECT COUNT(*) FROM index_catalog")->fetchColumn();
+                        if ($withWl) {
+                            $n -= (int)$db->query("SELECT COUNT(*) FROM whitelist w JOIN index_catalog c ON c.info_hash = w.info_hash
+                                                    WHERE w.banned = 0")->fetchColumn();
+                        }
+                        return ['n' => max(0, $n)];
+                    };
+                }
+                // The key has to carry everything that changes the answer, or one reader's filter
+                // becomes another reader's total.
+                $key = ($useCat && $k === 0 ? 'catc_total_' : 'cat_total_') . $k . ($withWl ? '_wl' : '') . ($wlOnly && $k === 0 ? '_only' : '') . '_' . $contentFilter;
+                $total += (int)(indexStatusCached($db, $key, $count, 120)['n'] ?? 0);
+            } else {
+                // A search counts its matches only as far as $cap + 1: past that the answer is "more".
+                $c = $db->prepare("SELECT COUNT(*) FROM (" . $a[5] . " LIMIT " . ($cap + 1) . ") n");
+                $c->execute($a[6]);
+                $n = (int)$c->fetchColumn();
+                if ($n > $cap) { $capped = true; $n = $cap; }
+                $total += $n;
+            }
+        }
+        return $capped ? [max($cap, $total), true] : [$total, false];
+        };
+
+        // THE ALL-WORDS FAST PATH (1.75.0). With a words_hit the order starts with it, so the
+        // page is made of the rows that have EVERY word first, and only when those run out of the rows that have fewer.
+        // Computing words_hit for every row the OR matched is the cost of the new order (+10 … +45 % on production's
+        // medium queries, which does not fit the budget): the rows with every word are a small fraction of those
+        // (1 400 of 70 568 for "rick and morty"), and one MATCH('+rick* +and* +morty*') finds exactly them (1.75.1: plus a
+        // REGEXP for each word the index cannot hold). So that is asked first, with the same arms, the same remaining
+        // order and no words_hit key (it is the same number on every row it can return) and no file-name half (a hash
+        // only its files found has words_hit 0) — and, since 1.75.1, no score: the group that has every word is ordered by
+        // the seeders, so the OR's MATCH (a second fulltext pass over every name with ANY of the words) is not run. A FULL
+        // page of it IS the page the full query would give — the same rows in the same order — and costs 13–78 ms
+        // instead of ~1 s (650 000 names). A short one (fewer rows than that tier holds past this offset) is thrown
+        // away and the full query runs, which adds 19–242 ms to those searches. The count below is the OR's, as
+        // before; this changes which rows a page holds, never how many there are.
+        $rows = null;
+        if ($rank['hit'] && $useFast) {
+            $rankFast = $rankFor($scored, true);
+            $fast = [$buildArm(false, $useFt, $withWl, $useCat, $rankFast, true)];
+            if ($withWl) $fast[] = $buildArm(true, $useFt, false, false, $rankFast, true);
+            $rows = $fetchPage($fast, $rankFast, $scored);
+            if (count($rows) < $perPage) $rows = null;
+        }
+        if ($rows === null) $rows = $fetchPage($arms, $rank, $scored);
+
+        // COUNT LAST, AND ONLY WHEN THE ANSWER IS NOT ALREADY IN FRONT OF US.
+        //
+        // A first page that came back short means every arm was exhausted, so the number of rows IS
+        // the total — there is nothing left to count. That is the shape of most searches, and on this
+        // table the COUNT(*) it replaces is a second full-text pass costing about as much as the
+        // search itself (1 951 ms measured for a query that matched seventy rows).
+        [$total, $capped] = ($offset === 0 && count($rows) < $perPage) ? [count($rows), false] : $countArms();
+        return [$total, $rows, $capped];
+    };
+
+    // The fulltext pass first; if the fulltext index is missing, the LIKE pass. A pass the DATABASE stopped for time
+    // is neither retried nor answered as a 500 (1.74.0, production 2026-10-06: five of them, `Spider-Man 1994` with
+    // files among them): the LIKE pass is a full scan, slower than the one that just ran out — the endpoint says
+    // "took too long, narrow it" instead (IndexSearchTimeout).
+    try { [$total, $rows, $capped] = $run(true); }
+    catch (\Throwable $e) {
+        if (indexIsStatementTimeout($e)) throw new IndexSearchTimeout($e->getMessage(), 0, $e);
+        try { [$total, $rows, $capped] = $run(false); }   // fulltext index missing → LIKE
+        catch (\Throwable $e2) {
+            if (indexIsStatementTimeout($e2)) throw new IndexSearchTimeout($e2->getMessage(), 0, $e2);
+            throw $e2;
+        }
+    }
+
+    foreach ($rows as &$r) {
+        foreach (['total_size', 'files_count', 'seeders', 'leechers'] as $k) $r[$k] = $r[$k] !== null ? (int)$r[$k] : null;
+        unset($r['score'], $r['words_hit'], $r['in_order']);   // sort keys, not part of a row
+    }
+    unset($r);
+    if (!empty($q['desc_flags']) && $rows) {
+        $fl = indexDescFlags($db, array_column($rows, 'info_hash'), $withWl);
+        foreach ($rows as &$r) $r['desc'] = $fl[$r['info_hash']] ?? 0;
+        unset($r);
+    }
+    return ['rows' => $rows, 'total' => $total, 'total_capped' => $capped, 'page' => $page,
+            'pages' => max(1, (int)ceil($total / $perPage)), 'per_page' => $perPage];
+}
+
+/**
+ * How long the status card's numbers are reused, in seconds (1.74.0, PERF-4).
+ *
+ * It was 30 — the same as the card's own poll, and the timestamp is written after the numbers are
+ * computed, so in practice every other poll recomputed them: 7 s of the database per minute with the pool
+ * warm, 12–14 s cold, measured on a catalogue of production's size, for as long as ANY Index page stood
+ * open anywhere (the cache is one file for the site). These are numbers to look at — the comment above
+ * says so.
+ */
+const IDX_STATUS_TTL = 300;
+
+/**
+ * How many file entries the catalogue holds, for the status card: [count, approximate?].
+ *
+ * COUNT(*) over index_files walks a whole index of a table that is the biggest in the database (25.9 M rows
+ * on production — 1.6 s warm on a third of that). A card does not need the last digit: past 200 000 rows
+ * the number is InnoDB's own estimate (information_schema.TABLES), and the card says "about". Below that
+ * the exact count is cheap, so a small install keeps exact numbers.
+ */
+function indexFilesCountForStatus(PDO $db): array {
+    $est = (int)$db->query("SELECT COALESCE(TABLE_ROWS, 0) FROM information_schema.TABLES
+                             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'index_files'")->fetchColumn();
+    if ($est < 200000) return [(int)$db->query("SELECT COUNT(*) FROM index_files")->fetchColumn(), false];
+    return [$est, true];
+}
+
+function indexCountsCompute(PDO $db): array {
+    $c = ['total' => 0, 'in_grace' => 0, 'protected' => 0, 'promoted' => 0, 'meta_none' => 0,
+          'meta_pending' => 0, 'meta_fetching' => 0, 'meta_done' => 0, 'meta_failed' => 0, 'files' => 0,
+          'files_approx' => false, 'expiring_24h' => 0];
+    try {
+        // ONE pass for the queue states, the rows in grace and the rows whose grace ends within a day
+        // (1.74.0, PERF-4). They were three: a GROUP BY and two full scans for the two grace numbers,
+        // ~4.4 s warm on production's size; the
+        // three answers come out of the same rows, so one scan gives all of them. The total is the sum
+        // of the groups — exact, and free once the groups are counted.
+        foreach ($db->query("SELECT meta_status, COUNT(*) AS c,
+                                    SUM(grace_until >= NOW()) AS in_grace,
+                                    SUM(grace_until < NOW() + INTERVAL 1 DAY) AS expiring
+                               FROM index_hashes GROUP BY meta_status") as $r) {
+            $c['total'] += (int)$r['c'];
+            $k = 'meta_' . $r['meta_status']; if (isset($c[$k])) $c[$k] = (int)$r['c'];
+            if ($r['meta_status'] !== 'done') {
+                $c['in_grace'] += (int)$r['in_grace'];
+                $c['expiring_24h'] += (int)$r['expiring'];
+            }
+        }
+        $c['protected'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE protected_until IS NOT NULL AND protected_until >= NOW()")->fetchColumn();
+        $c['promoted'] = (int)$db->query("SELECT COUNT(*) FROM index_hashes WHERE promoted_at IS NOT NULL")->fetchColumn();
+        [$c['files'], $c['files_approx']] = indexFilesCountForStatus($db);
+    } catch (\Throwable $e) {
+        // Never zeros for five minutes (1.74.0, QUAL-26): a count that failed — max_statement_time on a big
+        // index, a lock — was cached as an EMPTY index for the whole TTL. Thrown on, nothing is cached.
+        error_log('[index] the status counts failed: ' . $e->getMessage());
+        throw $e;
+    }
+    return $c;
+}
+
+function indexFlowCompute(PDO $db): array {
+    try {
+        return ['resolved_24h' => (int)$db->query(
+            "SELECT COUNT(*) FROM index_hashes
+              WHERE meta_status = 'done' AND meta_fetched_at > NOW() - INTERVAL 1 DAY")->fetchColumn()];
+    } catch (\Throwable $e) {
+        return ['resolved_24h' => 0];
+    }
+}
+
+/** Row counts + state for the admin status card / CLI. */
+function indexStatus(PDO $db, array $cfg): array {
+    [$counts, $countsStale, $countsAt] = indexSharedCounts($db, 'counts', 'indexCountsCompute');
+    // WHY THE TABLE SHRINKS, answered on the page instead of left to be inferred.
+    //
+    // grace_until is set when a row is first inserted and is never extended: a hash that does not get
+    // its metadata resolved within index_grace_days is dropped. That is the designed lifecycle, but
+    // with a queue of millions and a worker resolving tens of thousands a day, the two numbers can be
+    // wildly mismatched — and the only visible symptom is a total that falls for days. So put both
+    // rates next to each other: what is about to expire, and what is actually being resolved.
+    // What is about to expire came out of the counts' one pass above; what was resolved is a range on
+    // idx_index_meta_done_fetched.
+    try {
+        $resolved = indexSharedCounts($db, 'flow', 'indexFlowCompute')[0];
+    } catch (\Throwable $e) {
+        $resolved = ['resolved_24h' => 0];
+    }
+    $flow = ['expiring_24h' => (int)($counts['expiring_24h'] ?? 0), 'resolved_24h' => (int)($resolved['resolved_24h'] ?? 0),
+             'days_to_cover' => null];
+    unset($counts['expiring_24h']);
+    // At the current rate, how long a full pass over the queue would take. This is the number
+    // that has to be compared against the grace window, and nothing else on the page shows it.
+    $queued = (int)($counts['meta_pending'] ?? 0) + (int)($counts['meta_fetching'] ?? 0);
+    if ($flow['resolved_24h'] > 0 && $queued > 0) {
+        $flow['days_to_cover'] = (int)ceil($queued / $flow['resolved_24h']);
+    }
+
+    // WHAT THE WORKER IS RUNNING, which is a different fact from what Settings was told to ask for.
+    //
+    // The panel already learned this once, for the parallel-fetch setting: without asking the
+    // worker, a page can only read the operator's own number back at them, which is how "set 32,
+    // gets 4" survived for a day. The concurrency and fetch-order versions of that check live in
+    // whitelistStatus() — INSIDE its `if ($mode === 'whitelist')` branch, so on an open-mode
+    // tracker, the only mode where index_files exists at all, none of them render. So the file cap
+    // answers for itself on the page it belongs to.
+    //
+    // A heartbeat that carries no max_files key is a worker started from a worker.py older than
+    // 1.38.0: it ignores this setting completely and nothing else anywhere would say so.
+    $askFiles = indexMetaMaxFiles($cfg);
+    $worker = ['heartbeat_age' => null, 'max_files' => null, 'max_files_config' => null,
+               'max_files_max' => null, 'max_files_asked' => $askFiles, 'max_files_state' => 'ok'];
+    if (function_exists('whitelistWorkerHeartbeat')) {
+        $hbw = whitelistWorkerHeartbeat($cfg);
+        $worker['heartbeat_age'] = $hbw['age'];
+        $wi = is_array($hbw['info']) ? $hbw['info'] : null;
+        if ($wi !== null) {
+            foreach (['max_files', 'max_files_config', 'max_files_max'] as $k) {
+                if (isset($wi[$k]) && is_numeric($wi[$k])) $worker[$k] = (int)$wi[$k];
+            }
+            if ($askFiles !== null) {
+                if ($worker['max_files'] === null) {
+                    $worker['max_files_state'] = 'unsupported';
+                } elseif ($worker['max_files'] !== $askFiles) {
+                    // Over this build's ceiling is a different sentence from plain disagreement: the
+                    // worker clamped on purpose and the operator is owed the reason, not a warning
+                    // that reads as a fault.
+                    $worker['max_files_state'] = ($worker['max_files_max'] !== null && $askFiles > $worker['max_files_max'])
+                        ? 'over_max' : 'mismatch';
+                }
+            }
+        }
+    }
+
+    return [
+        'flow' => $flow, 'worker' => $worker,
+        'enabled' => indexEnabled($cfg), 'source_url' => indexSourceUrl($cfg), 'poll_minutes' => indexPollMinutes($cfg),
+        'min_seeders' => indexMinSeeders($cfg), 'max_rows' => indexMaxRows($cfg), 'grace_days' => indexGraceDays($cfg),
+        'protect_days' => indexProtectDays($cfg), 'meta_daily_budget' => indexMetaDailyBudget($cfg), 'meta_auto_queue' => indexMetaAutoQueue($cfg), 'poll_budget' => indexPollBudget($cfg),
+        'counts' => $counts, 'counts_stale' => $countsStale, 'counts_at' => $countsAt, 'state' => indexStateRead(),
+    ];
+}

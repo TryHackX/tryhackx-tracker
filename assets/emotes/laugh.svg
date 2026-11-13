@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Laugh">
+  <title>Laugh</title>
+  <circle cx="32" cy="32" r="28" fill="#ffd93b"/>
+  <path d="M14 25q6-8 12 0M38 25q6-8 12 0" fill="none" stroke="#5a3b00" stroke-width="4" stroke-linecap="round"/>
+  <path d="M14 37h36a18 18 0 0 1-36 0Z" fill="#5a3b00"/>
+  <path d="M21 48q11 7 22 0Z" fill="#ff6b6b"/>
+</svg>

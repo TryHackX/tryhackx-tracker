@@ -1,0 +1,12 @@
+[Unit]
+Description=Egress priority qdisc for the OpenTracker host (tracker replies last)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tracker-egress-prio.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

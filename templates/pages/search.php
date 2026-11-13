@@ -1,0 +1,176 @@
+<?php
+// User-facing search over the observed-hash catalogue. Server-side gate mirrors api/index_search.php.
+$searchOn = indexEnabled($cfg) && ($cfg['index_search_enabled'] ?? '1') === '1';
+$canSearch = $searchOn && userCan($db, $cfg, 'index.view');
+$canFiles = $canSearch && userCan($db, $cfg, 'index.files');
+$canMagnet = $canSearch && userCan($db, $cfg, 'index.magnet');
+$canWl = $canSearch && userCan($db, $cfg, 'whitelist.view') && ($cfg['index_search_include_whitelist'] ?? '1') === '1';
+$canDesc = $canSearch && userCan($db, $cfg, 'content.view') && ($cfg['wl_allow_description'] ?? '0') === '1';
+// The Share buttons. Nothing about the view is secret — the address is built from controls the
+// reader can see — so this switch is about whether the operator wants the site handing out links,
+// not about access. The state is written into the address either way; only the buttons go.
+$canShare = $canSearch && ($cfg['search_share_enabled'] ?? '1') === '1';
+$meUser = currentUser($db);
+// Favourites: three separate answers the page hands to the script, because the star, the public list
+// and the "who has this" overlay are three switches an operator sets independently. AFTER $meUser,
+// which it reads — the first version of this line sat above it and every gate answered "not signed
+// in" for everybody.
+$favCtx = favContext($db, $cfg, $meUser);
+// The rating column, asked once. It used to be asked only in the <thead>, and the <colgroup> below
+// knew nothing about it: with ratings on, every width after the third column landed on the column
+// to its left and the actions column — the last one — was left with whatever space happened to be
+// over. One name, two uses, so the two cannot drift apart again.
+$repCol = function_exists('repEnabled') && repEnabled($cfg) && repShowInResults($cfg);
+?>
+<h1><?= _h('search.h1') ?></h1>
+
+<?php if (!$searchOn): ?>
+<p><?= __('search.disabled') ?></p>
+<?php elseif (!$canSearch): ?>
+<?php if ($meUser === null): ?>
+<p><?= _h('search.need_account') ?></p>
+<p><a class="btn" href="<?= $baseUrl ?>?action=login"><?= _h('common.sign_in') ?></a>
+<?php if (usersRegistrationEnabled($cfg)): ?> <a class="btn btn-secondary" href="<?= $baseUrl ?>?action=register"><?= _h('common.register') ?></a><?php endif; ?></p>
+<?php else: ?>
+<p><?= __('search.no_access', ['url' => sanitize($baseUrl . '?action=account')]) ?></p>
+<?php endif; ?>
+<?php else: ?>
+<p><?= __('search.intro', ['wl' => $canWl ? __('search.intro_wl') : '']) ?></p>
+<input type="hidden" id="search-csrf" value="<?= $csrfToken ?>">
+<form id="search-form" class="search-panel" novalidate
+      data-can-files="<?= $canFiles ? '1' : '0' ?>" data-can-magnet="<?= $canMagnet ? '1' : '0' ?>"
+      <?php /* Only the mode travels. The batch and the total are server rules — api/index_files.php
+               applies them and reports `capped` — and a number the browser never sees is a number
+               the browser can never be talked into ignoring. Both overlays live in this file and
+               read this attribute inside initSearch()'s closure, so they cannot drift apart. */ ?>
+      data-files-mode="<?= sanitize(indexFilesMode($cfg)) ?>"
+      data-fav="<?= $favCtx['may_use'] ? '1' : '0' ?>"
+      data-announce="<?= sanitize($cfg['announce_url'] ?? '') ?>" data-announce-https="<?= sanitize($cfg['announce_url_https'] ?? '') ?>"
+      <?php $sExtra = array_values(array_diff(function_exists('announceUrls') ? announceUrls($cfg) : [],
+                                              array_filter([(string)($cfg['announce_url'] ?? ''), (string)($cfg['announce_url_https'] ?? '')]))); ?>
+      data-announce-extra="<?= sanitize(implode(' ', $sExtra)) ?>">
+    <div class="search-toolbar">
+        <div class="search-box">
+            <?php /* The magnifier and the clearing cross are the icon library's (1.71.0), not drawings of their own
+                     that no library reaches — the cross an icon button like the rest, named for a screen reader
+                     and explained in the site's tooltip. */ ?>
+            <span class="search-box-icon" aria-hidden="true"><i class="bi bi-search" aria-hidden="true"></i></span>
+            <input type="text" id="search-input" maxlength="200" placeholder="<?= _h($canFiles ? 'search.placeholder_files' : 'search.placeholder') ?>" autocomplete="off">
+            <button type="button" class="search-clear ic-btn" id="search-clear" aria-label="<?= _h('search.clear') ?>" data-tip="<?= _h('search.clear') ?>" hidden><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        </div>
+        <label class="search-check" title="<?= _h('search.best_title') ?>"><input type="checkbox" id="search-best" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.best') ?></label>
+        <?php if ($canFiles): ?>
+        <label class="search-check" title="<?= _h('search.files_title') ?>"><input type="checkbox" id="search-files"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.files') ?></label>
+        <?php endif; ?>
+        <?php if ($canDesc): ?>
+        <label class="search-check" title="<?= _h('search.in_desc_title') ?>"><input type="checkbox" id="search-in-desc"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.in_desc') ?></label>
+        <label class="search-check" title="<?= _h('search.desc_only_title') ?>"><input type="checkbox" id="search-desc"><span class="search-check-box" aria-hidden="true"></span> <?= _h('search.desc_only') ?></label>
+        <?php endif; ?>
+        <?php
+        // WHEN THIS FILTER IS WORTH SHOWING, WHICH IS NARROWER THAN IT LOOKS.
+        //
+        // Every state it offers — reviewed and published, waiting, turned down — is `content_status`,
+        // a column on the WHITELIST table and nowhere else. So it needs three things at once, and it
+        // used to ask for one:
+        //   · whitelist rows are in this reader's results at all ($canWl) — without that, choosing
+        //     "Reviewed and published" makes indexSearchCatalogue() add `1 = 0` to the index arm and
+        //     the page goes blank, which is not a filter, it is a trap;
+        //   · the operator allows a description or a source link, or there is nothing to review;
+        //   · and the path that submits them is OPEN — api/whitelist_submit.php refuses every
+        //     submission outside whitelist mode and the schedule, so on a blacklist-mode tracker
+        //     content_status can never leave 'none' and the whole control is decoration. (Measured on
+        //     the live site: 159 whitelist rows, all 'none', zero descriptions, zero source links.)
+        $wlSubmitOpen = trackerMode($cfg) === 'whitelist'
+            || (function_exists('scheduleEnabled') && scheduleEnabled($cfg));
+        if ($canWl && $wlSubmitOpen
+            && (($cfg['wl_allow_description'] ?? '0') === '1' || ($cfg['wl_allow_source_url'] ?? '0') === '1')): ?>
+        <select id="search-content" title="<?= _h('search.content_title') ?>">
+            <option value="any"><?= _h('search.c_any') ?></option>
+            <option value="not_rejected"><?= _h('search.c_not_rejected') ?></option>
+            <option value="approved"><?= _h('search.c_approved') ?></option>
+            <option value="approved_or_none"><?= _h('search.c_approved_or_none') ?></option>
+            <option value="pending"><?= _h('search.c_pending') ?></option>
+            <option value="none"><?= _h('search.c_none') ?></option>
+            <option value="rejected"><?= _h('search.c_rejected') ?></option>
+        </select>
+        <?php endif; ?>
+        <?php $sRep = function_exists('repEnabled') && repEnabled($cfg); ?>
+        <select id="search-sortby" title="<?= _h('search.sortby_title') ?>" aria-label="<?= _h('search.sortby_title') ?>">
+            <option value=""><?= _h('search.sortby_default') ?></option>
+            <option value="year:desc"><?= _h('search.sortby_year_desc') ?></option>
+            <option value="year:asc"><?= _h('search.sortby_year_asc') ?></option>
+            <?php if ($canDesc): ?>
+            <option value="imdb:desc"><?= _h('search.sortby_imdb') ?></option>
+            <option value="filmweb:desc"><?= _h('search.sortby_filmweb') ?></option>
+            <option value="desc:desc"><?= _h('search.sortby_desc') ?></option>
+            <?php endif; ?>
+            <?php if ($sRep): ?>
+            <option value="rating:desc"><?= _h('search.sortby_rating') ?></option>
+            <option value="votes:desc"><?= _h('search.sortby_votes') ?></option>
+            <option value="steam:desc"><?= _h('search.sortby_steam') ?></option>
+            <?php endif; ?>
+        </select>
+        <select id="search-perpage" title="<?= _h('search.perpage_title') ?>">
+            <?php foreach ([15, 25, 50, 100, 200] as $sPer): ?>
+            <option value="<?= $sPer ?>"<?= $sPer === 25 ? ' selected' : '' ?>><?= _h('search.perpage', ['n' => $sPer]) ?></option>
+            <?php endforeach; ?>
+        </select>
+        <span class="search-total text-muted" id="search-total"></span>
+<?php if ($canShare): ?>
+        <button type="button" class="search-share share-btn" id="search-share" hidden
+                title="<?= _h('search.share_view_title') ?>"><?= _h('search.share') ?></button>
+<?php endif; ?>
+        <p class="search-hint text-muted" id="search-hint" hidden></p>
+    </div>
+    <?php $sFacts = $canDesc || (function_exists('factsMode') && factsMode($cfg) === 'desc_name'); ?>
+    <?php $sMe = usersEnabled($cfg) ? currentUser($db) : null;
+    $sFavs = ($sMe && $sFacts && function_exists('tagsFavList') && userCan($db, $cfg, 'tags.favourite')) ? tagsFavChips($db, tagsFavList($db, (int)$sMe['id'])) : []; ?>
+    <div class="sf-host" id="search-filters" data-facts="<?= $sFacts ? '1' : '0' ?>" data-desc="<?= $canDesc ? '1' : '0' ?>" data-rep="<?= (function_exists('repEnabled') && repEnabled($cfg)) ? '1' : '0' ?>" data-wl="<?= $canWl ? '1' : '0' ?>" data-favs="<?= sanitize(json_encode($sFavs)) ?>" data-popular="<?= function_exists('tagsPopularMax') ? tagsPopularMax($cfg) : 0 ?>" data-kinds="<?= sanitize(json_encode(function_exists('factsKinds') ? factsKinds($cfg) : [])) ?>" data-catalog="<?= sanitize(json_encode(function_exists('factsCatalog') && $sFacts ? factsCatalog($cfg, $db) : [])) ?>"></div>
+</form>
+<div id="search-alert" class="alert"></div>
+<div class="transparency-table-wrap">
+    <table class="transparency-table search-table" id="search-table" hidden>
+        <colgroup>
+            <?php /* The actions column is exactly its icons (1.72.0): the star is one more, for a reader who keeps
+                     favourites — the question app.js asks of data-fav before it draws one in a row. */ ?>
+            <col class="search-c-name"><col class="search-c-size"><col class="search-c-sl"><?= $repCol ? '<col class="search-c-rep">' : '' ?><col class="search-c-seen"><?= $canMagnet ? '<col class="search-c-actions' . ($favCtx['may_use'] ? ' search-c-actions-fav' : '') . '">' : '' ?>
+        </colgroup>
+        <?php /* Each sortable header's words are a button (1.74.0): the keyboard reaches it and Enter or Space sorts
+                 (the header hears its click); app.js says the order on the header (aria-sort). A header that only
+                 listened for a click could not be sorted without a mouse. */ ?>
+        <thead><tr>
+            <th class="search-sortable" data-sort="name"><button type="button" class="th-sort"><?= _h('search.col_name') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th>
+            <th class="search-sortable" data-sort="size"><button type="button" class="th-sort"><?= _h('search.col_size') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th>
+            <th class="search-sortable" data-sort="seeders" title="<?= _h('search.col_sl_title') ?>"><button type="button" class="th-sort"><?= _h('search.col_sl') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th>
+            <?php if ($repCol): ?>
+            <th title="<?= _h('search.col_rating_title') ?>"><?= _h('search.col_rating') ?></th>
+            <?php endif; ?>
+            <th class="search-sortable" data-sort="last"><button type="button" class="th-sort"><?= _h('search.col_last') ?> <i class="bi bi-arrow-down-up search-sort-icon" aria-hidden="true"></i></button></th><?= $canMagnet ? '<th></th>' : '' ?>
+        </tr></thead>
+        <tbody id="search-body"></tbody>
+    </table>
+</div>
+<div class="trans-pagination search-pagination" id="search-pagination"></div>
+<p class="text-muted search-note" id="search-note" hidden></p>
+<?php /* The Info panel needs what api/index_info.php needs — index.view, which $canSearch already
+         is — and NOT index.files. It used to be rendered only for readers who had the file
+         permission, which made ?action=search&hash=… a silent no-op for everybody else: the element
+         is missing, so openInfo() returns on its first line and the link does nothing at all. The
+         file list inside the panel is a separate request with its own server-side gate, and the
+         "N files" chip is only drawn where the row carries a hash.
+         The markup itself lives in a partial now — the account page and public profiles open the
+         same panel from their own lists. */ ?>
+<?php include __DIR__ . '/../partials/info_overlay.php'; ?>
+
+<?php if ($canFiles): ?>
+<div class="files-overlay" id="files-overlay" hidden>
+    <div class="files-box" role="dialog" aria-modal="true" aria-labelledby="files-title">
+        <div class="files-head">
+            <h3 id="files-title"><?= _h('search.files_head') ?></h3>
+            <button type="button" class="files-close" id="files-close" title="<?= _h('common.close') ?>" aria-label="<?= _h('common.close') ?>"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        </div>
+        <div class="files-body" id="files-body"></div>
+    </div>
+</div>
+<?php endif; ?>
+<?php endif; ?>

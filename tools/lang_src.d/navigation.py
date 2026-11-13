@@ -1,0 +1,49 @@
+# -*- coding: utf-8 -*-
+"""Navigation
+
+One area of the dictionary. Every string is an (English, Polish) pair and both lang/*.php files are
+generated from all of these together -- see tools/lang_src.py.
+"""
+
+S = {}
+
+
+def add(prefix, pairs):
+    for k, v in pairs.items():
+        key = prefix + '.' + k if prefix else k
+        assert key not in S, 'duplicate key ' + key
+        assert isinstance(v, tuple) and len(v) == 2, key
+        S[key] = v
+
+
+# ── navigation ──────────────────────────────────────────────────────────────
+add('nav', {
+    'home':         ('Home', 'Strona główna'),
+    'info':         ('Info', 'Informacje'),
+    'terms':        ('Terms', 'Regulamin'),
+    'whitelist':    ('Whitelist', 'Whitelista'),
+    'report':       ('Report', 'Zgłoszenie'),
+    'status':       ('Status', 'Status'),
+    'transparency': ('Transparency', 'Przejrzystość'),
+    'stats':        ('Stats', 'Statystyki'),
+    'search':       ('Search', 'Szukaj'),
+    'account':      ('Account', 'Konto'),
+})
+
+
+# ── 1.56.0: the note beside the account link while the browser will not let the page play ──
+add('nav', {
+    'sounds_locked': ('sounds: click to enable', 'dźwięki: kliknij, by włączyć'),
+    'sounds_locked_title': ('This browser lets the page play a sound only after a click. Click anywhere.',
+        'Ta przeglądarka pozwala stronie zagrać dopiero po kliknięciu. Kliknij gdziekolwiek.'),
+})
+
+# ── 1.60.0: the shoutbox in the bar, with a counter of its own ──────────────
+# The title says where the number goes when you press it, because there is nowhere else it clears
+# from: the mark moves when a widget is actually on the screen, so a reader on any other page can
+# watch it climb and have no way to answer it except by opening the room.
+add('nav', {
+    'shoutbox': ('Shoutbox', 'Shoutbox'),
+    'shoutbox_unread_title': ('New lines in the shoutbox — open it to clear this.',
+        'Nowe wpisy w shoutboksie — otwórz go, żeby to wyzerować.'),
+})

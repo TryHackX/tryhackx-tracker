@@ -1,0 +1,136 @@
+<?php
+requirePost();
+
+$input = readJsonBody();
+
+// CSRF
+if (empty($input['csrf_token']) || !verifyCsrfToken($input['csrf_token'])) {
+    jsonResponse(['error' => __('api.csrf.invalid')], 403);
+}
+
+// CAPTCHA (smart)
+if (isCaptchaRequired($cfg, 'report')) {
+    if (!verifyCaptcha(captchaTokenFromInput($input), $cfg)) {
+        jsonResponse(['error' => 'CAPTCHA verification failed', 'captcha_required' => true], 400);
+    }
+    onCaptchaSolved();
+}
+
+// Sanitize & validate. Every field through strInput() (1.74.0, PUB-3): an array where a string belongs is a field
+// left empty — the validation below says which — and no longer an uncaught TypeError.
+$name = sanitize(strInput($input, 'name'));
+$representative = sanitize(strInput($input, 'representative'));
+$company = sanitize(strInput($input, 'company'));
+$email = trim(strInput($input, 'email'));
+$objectTitle = sanitize(strInput($input, 'objectTitle'));
+$link = trim(strInput($input, 'link'));
+$infoHash = strtolower(trim(strInput($input, 'infoHash')));
+$rawMagnet = trim(strInput($input, 'magnet_link'));
+$rawMessage = trim(strInput($input, 'add_message'));
+
+// Required fields
+$errors = [];
+if (empty($name)) $errors[] = 'name';
+if (empty($representative)) $errors[] = 'representative';
+if (empty($company)) $errors[] = 'company';
+if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'email';
+if (empty($objectTitle)) $errors[] = 'objectTitle';
+// FILTER_VALIDATE_URL is not a safety check: it accepts `javascript://x/%0aalert(1)` and it
+// accepts a double quote inside the URL. This field is echoed into an href in the panel, so it
+// goes through the project's own validator instead -- http/s only, control characters stripped,
+// a host required (includes/richtext.php).
+$link = richtextSafeUrl($link) ?? '';
+if ($link === '') $errors[] = 'link';
+if (!isValidInfoHash($infoHash)) $errors[] = 'infoHash';
+
+// Validate magnet link (optional, but if provided must be valid and match infoHash)
+$magnetLink = null;
+$maxMagnetLen = (int)($cfg['max_magnet_link_length'] ?? 0);
+if ($rawMagnet !== '' && $maxMagnetLen > 0 && mb_strlen($rawMagnet) > $maxMagnetLen) {
+    jsonResponse(['error' => __('api.report.magnet_too_long', ['max' => $maxMagnetLen]), 'fields' => ['magnet_link']], 400);
+}
+if ($rawMagnet !== '') {
+    if (!preg_match('/^magnet:\?/', $rawMagnet) || !preg_match('/[?&]xt=urn:btih:/i', $rawMagnet)) {
+        $errors[] = 'magnet_link';
+    } else {
+        // Extract hash from magnet link (hex40 or base32)
+        $magnetHash = null;
+        if (preg_match('/urn:btih:([a-fA-F0-9]{40})/i', $rawMagnet, $m)) {
+            $magnetHash = strtolower($m[1]);
+        } elseif (preg_match('/urn:btih:([A-Z2-7]{32})/i', $rawMagnet, $m)) {
+            $decoded = @base32ToHex($m[1]);
+            if ($decoded && strlen($decoded) === 40) $magnetHash = strtolower($decoded);
+        }
+        if (!$magnetHash) {
+            $errors[] = 'magnet_link';
+        } elseif ($magnetHash !== $infoHash) {
+            $errors[] = 'magnet_link';
+        } else {
+            $magnetLink = $rawMagnet;
+        }
+    }
+}
+
+if ($errors) {
+    jsonResponse(['error' => __('api.common.validation_failed'), 'fields' => $errors], 400);
+}
+
+// Length limits (check raw input before sanitization to avoid htmlspecialchars inflation)
+$maxMsg = (int)($cfg['max_message_length'] ?? 2000);
+if (mb_strlen($name) > 255 || mb_strlen($representative) > 255 || mb_strlen($company) > 255 ||
+    mb_strlen($objectTitle) > 255 || mb_strlen($link) > 500) {
+    jsonResponse(['error' => __('api.report.field_too_long'), 'fields' => ['length']], 400);
+}
+if (mb_strlen($rawMessage) > $maxMsg) {
+    jsonResponse(['error' => __('api.report.message_too_long', ['max' => $maxMsg]), 'fields' => ['add_message']], 400);
+}
+$message = sanitize($rawMessage);
+
+$ip = getClientIp($cfg);
+$maxPerHour = (int)($cfg['rate_limit'] ?? 5);
+
+// Rate limit — the reports from this address GROUP in the last hour (checkRateLimit(): an IPv6 host's /64, 1.74.0)
+if (!checkRateLimit($db, $ip, $maxPerHour)) {
+    jsonResponse(['error' => 'rate_limit'], 429);
+}
+
+// Duplicate check
+$stmt = $db->prepare("SELECT id FROM reports WHERE infoHash = ?");
+$stmt->execute([$infoHash]);
+if ($stmt->fetch()) {
+    jsonResponse(['error' => 'duplicate'], 409);
+}
+
+// Check if hash is already blocked on the tracker (banned in whitelist mode / listed in blacklist mode)
+if (isHashBlocked($db, $cfg, $infoHash)) {
+    jsonResponse(['error' => __('api.report.already_blocked'), 'fields' => ['infoHash']], 409);
+}
+// Whitelist mode: tell the reporter whether the hash is even registered here (a report for an
+// unregistered hash is still accepted — blocking it pre-bans the hash).
+$whitelisted = trackerMode($cfg) === 'whitelist' ? (isHashWhitelisted($db, $infoHash) !== null) : null;
+
+// Insert
+$stmt = $db->prepare(
+    "INSERT INTO reports (name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NOW())"
+);
+$stmt->execute([$name, $representative, $company, $email, $objectTitle, $link, $infoHash, $magnetLink, $ip, $message]);
+$reportId = (int)$db->lastInsertId();
+
+// Send submission confirmation email (non-blocking — don't fail the response if mail fails)
+// Use output buffering to prevent any stray PHP warnings from corrupting the JSON response.
+// Only while today's site-wide count of confirmation mails is under `confirm_mail_daily_cap` (1.74.0, PUB-1:
+// the address is the sender's word, and every confirmation is a mail from this domain to it) — the report itself
+// is taken either way, and its status page answers the same.
+try {
+    if (confirmMailAllow($cfg)) {
+        ob_start();
+        @sendSubmissionConfirmation($db, $reportId, $cfg);
+        ob_end_clean();
+    }
+} catch (\Throwable $e) {
+    if (ob_get_level()) ob_end_clean();
+}
+
+addCaptchaPoints($cfg, 'report');
+jsonResponse(['success' => true, 'id' => $reportId, 'captcha_solved' => wasCaptchaJustSolved(), 'whitelisted' => $whitelisted, 'tracker_mode' => trackerMode($cfg)]);

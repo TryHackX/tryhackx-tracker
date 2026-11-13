@@ -1,0 +1,367 @@
+<?php
+/**
+ * Up or down, on one hash. Nothing in between.
+ *
+ * ── the whole problem is abuse, not counting ────────────────────────────────
+ *
+ * Tallying two numbers is trivial. What is not trivial is that a public voting button is the easiest
+ * thing on a site to automate: one loop, a thousand negatives, and the score means nothing for ever.
+ * So almost everything here is about who is allowed to vote and how often, and the counting is an
+ * afterthought.
+ *
+ * Four layers, because no single one holds:
+ *
+ *   1. **One vote per hash per identity, enforced by a UNIQUE key** — not by a SELECT in PHP. Two
+ *      requests arriving together must collide in the database, where the collision is real; a
+ *      check-then-insert in PHP is a race with a comfortable window.
+ *   2. **Rate limit** per address and per account, on the existing rate limiter.
+ *   3. **CAPTCHA on points**, using the scheme already here (`captcha_pts_*`): a vote costs points
+ *      and the CAPTCHA appears at the threshold. Not on the first vote — on the tenth.
+ *   4. **Weight**, so a fresh anonymous vote and a long-standing account do not count the same.
+ *
+ * ── about attributing votes to an IP ────────────────────────────────────────
+ *
+ * `REMOTE_ADDR` comes from the TCP connection: forging it means completing a handshake from the
+ * forged address, which over the internet means it is not forged. PHP is not "broken" here. What IS
+ * forgeable is a header, and getClientIp() already refuses to read one unless the request genuinely
+ * arrived from an address or range listed in `trusted_proxy_ips`.
+ *
+ * What no amount of care fixes: one person with a VPN, a phone, and a /64 of IPv6 has as many
+ * "addresses" as they care to use. So IPv6 is bucketed to /64 (a single customer allocation), the
+ * limits are per bucket, accounts outweigh anonymous votes, and the panel says plainly that a score
+ * built from anonymous votes is a weak signal. Pretending otherwise would be the actual failure.
+ */
+
+// How fast votes may come, and the CAPTCHA a voter meets at the top of that (1.71.0): the site's one anti-spam
+// layer, which rate_hash asks wherever it is loaded from.
+require_once __DIR__ . '/antispam.php';
+
+function repEnabled(array $cfg): bool { return ($cfg['rep_enabled'] ?? '0') === '1'; }
+
+/** 'off' | 'users' | 'all' — who may cast a vote. */
+function repWhoCanVote(array $cfg): string {
+    $v = (string)($cfg['rep_who_can_vote'] ?? 'users');
+    return in_array($v, ['off', 'users', 'all'], true) ? $v : 'users';
+}
+
+function repShowInResults(array $cfg): bool { return ($cfg['rep_show_in_results'] ?? '0') === '1'; }
+
+function repChipOn(array $cfg): bool { return repEnabled($cfg) && ($cfg['rep_chip'] ?? '1') === '1'; }
+
+function repChipFrom(array $cfg, int $count, int $scoreX100): ?array {
+    if ($count < repMinVotes($cfg)) return null;
+    return repMode($cfg) === 'stars'
+        ? ['mode' => 'stars', 'stars' => round($scoreX100 / 100, 1), 'total' => $count]
+        : ['mode' => 'thumbs', 'pct' => (int)round($scoreX100 / 100), 'total' => $count];
+}
+
+function repChipsFor(PDO $db, array $cfg, array $hashes): array {
+    $hashes = array_values(array_unique(array_filter(array_map('strtolower', array_map('strval', $hashes)), fn($h) => preg_match('/^[0-9a-f]{40}$/', $h) === 1)));
+    if (!$hashes || !repChipOn($cfg)) return [];
+    $out = [];
+    foreach (array_chunk($hashes, 500) as $chunk) {
+        $in = implode(',', array_fill(0, count($chunk), '?'));
+        foreach (['index_hashes', 'whitelist'] as $table) {
+            $st = $db->prepare("SELECT info_hash, votes_count, score_x100 FROM $table WHERE info_hash IN ($in) AND votes_count > 0");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $chip = repChipFrom($cfg, (int)$r['votes_count'], (int)$r['score_x100']);
+                if ($chip !== null) $out[strtolower((string)$r['info_hash'])] = $chip;
+            }
+        }
+    }
+    return $out;
+}
+
+/**
+ * 'thumbs' — up or down. 'stars' — five stars in half-star steps.
+ *
+ * Stars are stored as 1..10, which is what "half a star" actually means: the display rounds to five,
+ * the storage does not, and an average of 3.5 is a real value rather than something inferred from a
+ * percentage. The two modes share a table because a vote is a vote; only the reading differs.
+ */
+function repMode(array $cfg): string {
+    $m = (string)($cfg['rep_mode'] ?? 'thumbs');
+    return in_array($m, ['thumbs', 'stars'], true) ? $m : 'thumbs';
+}
+
+/** The values a vote may take in the current mode: [-1, 1] or [1..10]. */
+function repAllowedValues(array $cfg): array {
+    return repMode($cfg) === 'stars' ? range(1, 10) : [-1, 1];
+}
+
+/** Below this many votes the score is not a score, and the UI says so instead of showing a number. */
+function repMinVotes(array $cfg): int { return max(1, min(1000, (int)($cfg['rep_min_votes'] ?? 3) ?: 3)); }
+
+/** What an anonymous vote is worth against a signed-in one, in hundredths. */
+function repAnonWeight(array $cfg): int { return max(0, min(100, (int)($cfg['rep_anon_weight'] ?? 25))); }
+
+/** Votes per hour, per identity. */
+function repRatePerHour(array $cfg): int { return max(1, min(1000, (int)($cfg['rep_rate_per_hour'] ?? 30) ?: 30)); }
+
+/**
+ * Who is voting, as a stable key.
+ *
+ * A signed-in account is itself. Everyone else is their address BUCKET — IPv4 whole, IPv6 to /64,
+ * because a /64 is one customer and treating each address in it as a separate voter would be
+ * treating one person as eighteen quintillion people.
+ */
+function repVoterKey(PDO $db, array $cfg): ?array {
+    if (function_exists('currentUser')) {
+        $u = currentUser($db);
+        if ($u && !empty($u['id'])) return ['type' => 'user', 'key' => (string)(int)$u['id'], 'weight' => 100];
+    }
+    if (repWhoCanVote($cfg) !== 'all') return null;
+    $ip = function_exists('ipBucket') ? ipBucket(getClientIp($cfg)) : getClientIp($cfg);
+    if ($ip === '') return null;
+    return ['type' => 'ip', 'key' => $ip, 'weight' => repAnonWeight($cfg)];
+}
+
+/**
+ * Why this visitor may not vote right now, or null.
+ *
+ * $spend: whether this call is a vote (or a vote taken back) and pays for itself out of the hour's budget.
+ * Only repCastVote() and repRemoveVote() spend; a page asking whether to DRAW the buttons (the Info panel,
+ * rate_hash's GET) only looks (1.71.0). Every call spent before, and the Info panel asks twice per
+ * opening, so fifteen panels opened in an hour left a member (30 votes an hour) no vote at all — and each
+ * vote cost three, its own and the two of the panel it redraws.
+ */
+function repVoteRefusal(PDO $db, array $cfg, bool $spend = false): ?string {
+    if (!repEnabled($cfg)) return __('api.rep.off');
+    $who = repWhoCanVote($cfg);
+    if ($who === 'off') return __('api.rep.read_only');
+    $voter = repVoterKey($db, $cfg);
+    if ($voter === null) {
+        return $who === 'users' ? __('api.rep.sign_in') : __('api.rep.cannot_identify');
+    }
+    if ($who === 'users' && $voter['type'] !== 'user') return __('api.rep.sign_in');
+    // A group can be denied rating without being denied everything else. Anonymous voters are
+    // governed by the guest group, which is what "who can vote: anyone" really means.
+    if (function_exists('userCan') && !userCan($db, $cfg, 'rating.vote')) {
+        return $voter['type'] === 'user'
+            ? __('api.rep.no_access_account')
+            : __('api.rep.no_access_anon');
+    }
+    $bucket = $voter['type'] . ':' . $voter['key'];
+    if ($spend ? (function_exists('rateLimitAllow') && !rateLimitAllow('repvote', $bucket, repRatePerHour($cfg), 3600))
+               : (function_exists('rateLimitPeek') && !rateLimitPeek('repvote', $bucket, repRatePerHour($cfg), 3600))) {
+        return __('api.rep.rate_limited');
+    }
+    return null;
+}
+
+/**
+ * Record a vote. Returns the fresh totals, or an error.
+ *
+ * $vote is 1 or -1 (thumbs) or 1..10 (stars). Voting the same way twice is idempotent; voting the other
+ * way changes the existing vote rather than adding a second one.
+ *
+ * ── taking a vote back (1.71.0) ──────────────────────────────────────────────
+ *
+ * There used to be no "unvote", on the reasoning that a button that can be un-pressed doubles the surface
+ * for automation and buys nothing a change of mind does not cover. It does buy something: a vote cast by
+ * mistake, or on a torrent somebody no longer has an opinion about, could only be turned into the
+ * opposite opinion — and the likes on a profile and "Who has this" show every vote with a name. So a vote
+ * can be taken back, and the surface stays the size it was because removing is not a free action: it is
+ * repRemoveVote(), a separate and EXPLICIT operation (rate_hash {op: 'remove'}) behind exactly the gates a
+ * vote passes — the same refusal (switches, who may vote, rating.vote), the same hourly budget, the same
+ * CAPTCHA points — and it can only ever delete the caller's own row. The toggle lives in the button (the
+ * house rule since 1.67.0): the page knows which thumb is pressed and asks for what it wants, and the
+ * server does exactly that, so a double click repeats one request instead of casting and taking back.
+ */
+function repCastVote(PDO $db, array $cfg, string $hash, int $vote): array {
+    $hash = strtolower(trim($hash));
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['error' => __('api.common.invalid_hash')];
+    if (!in_array($vote, repAllowedValues($cfg), true)) {
+        return ['error' => repMode($cfg) === 'stars'
+            ? __('api.rep.value_stars')
+            : __('api.rep.value_thumbs')];
+    }
+    $refusal = repVoteRefusal($db, $cfg, true);
+    if ($refusal !== null) return ['error' => $refusal];
+    $voter = repVoterKey($db, $cfg);
+
+    // The UNIQUE key is what actually enforces one vote per identity. ON DUPLICATE KEY turns a
+    // second vote into a change of mind, atomically — two requests racing each other collide here,
+    // in the database, rather than both passing a SELECT that was true a millisecond ago.
+    $db->prepare(
+        "INSERT INTO hash_votes (info_hash, voter_type, voter_key, vote, scale, weight, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE vote = VALUES(vote), scale = VALUES(scale), weight = VALUES(weight), updated_at = NOW()")
+       ->execute([$hash, $voter['type'], $voter['key'], $vote, repMode($cfg), (int)$voter['weight']]);
+
+    repRecount($db, $hash, $cfg);
+    return ['success' => true] + repFor($db, $cfg, $hash);
+}
+
+/**
+ * Take this voter's vote on a hash back (1.71.0 — see "taking a vote back" above repCastVote()).
+ *
+ * The same gates as a vote, in the same order, and the same cost: a removal spends from the hour's budget
+ * like a vote does (and the endpoint adds the same CAPTCHA points). It deletes ONE row at most — the one
+ * the same identity would cast: repVoterKey(), the account, or the address bucket for an anonymous voter
+ * — so nobody's vote but the caller's can be touched, and an account's vote is never an address's. The
+ * totals are counted again in the site's mode. Idempotent: taking back a vote that is not there
+ * succeeds, with `removed` false, and changes nothing.
+ */
+function repRemoveVote(PDO $db, array $cfg, string $hash): array {
+    $hash = strtolower(trim($hash));
+    if (!preg_match('/^[0-9a-f]{40}$/', $hash)) return ['error' => __('api.common.invalid_hash')];
+    $refusal = repVoteRefusal($db, $cfg, true);
+    if ($refusal !== null) return ['error' => $refusal];
+    $voter = repVoterKey($db, $cfg);
+
+    $st = $db->prepare("DELETE FROM hash_votes WHERE info_hash = ? AND voter_type = ? AND voter_key = ?");
+    $st->execute([$hash, $voter['type'], $voter['key']]);
+    $removed = $st->rowCount() > 0;
+    if ($removed) repRecount($db, $hash, $cfg);
+    return ['success' => true, 'removed' => $removed] + repFor($db, $cfg, $hash);
+}
+
+/**
+ * Recompute the stored totals for one hash.
+ *
+ * Kept on the row rather than aggregated per listing: a search page showing a score for fifty rows
+ * would otherwise be fifty aggregate queries, and this project has already been bitten once by a
+ * listing that did per-row work over a large table.
+ */
+function repRecount(PDO $db, string $hash, ?array $cfg = null): void {
+    $mode = is_array($cfg) ? repMode($cfg) : 'thumbs';
+    // CAST(weight AS SIGNED) is not decoration. weight is SMALLINT UNSIGNED and vote is signed, so
+    // MySQL promotes the product to UNSIGNED and -1 * 100 becomes a number the size of the universe:
+    // "BIGINT UNSIGNED value is out of range". The query then fails for any hash that ever received a
+    // down-vote — which is to say, in production, on the first one.
+    $st = $db->prepare(
+        "SELECT COUNT(*) n,
+                SUM(vote = 1) up, SUM(vote = -1) down,
+                SUM(CASE WHEN vote = 1 THEN weight ELSE 0 END) wup,
+                SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown,
+                SUM(vote * CAST(weight AS SIGNED)) wsum, SUM(weight) wtot
+           FROM hash_votes WHERE info_hash = ? AND scale = ?");
+    $st->execute([$hash, $mode]);
+    $r = $st->fetch() ?: [];
+    $n    = (int)($r['n'] ?? 0);
+    $up   = (int)($r['up'] ?? 0);
+    $down = (int)($r['down'] ?? 0);
+
+    if ($mode === 'stars') {
+        // The weighted mean, in hundredths of a star: 4.5 stars is 450. Weight is what makes an
+        // account count for more than an anonymous voter, exactly as in the other mode.
+        $wsum = (int)($r['wsum'] ?? 0);
+        $wtot = (int)($r['wtot'] ?? 0);
+        // vote is 1..10 (half-star steps), so the mean is halved to land back on a five-star scale.
+        $score = $wtot > 0 ? (int)round($wsum * 100 / $wtot / 2) : 0;
+        $up = $n; $down = 0;   // meaningless here; votes_count is the number that is read
+    } else {
+        $wu = (int)($r['wup'] ?? 0);
+        $wd = (int)($r['wdown'] ?? 0);
+        $score = ($wu + $wd) > 0 ? (int)round($wu * 10000 / ($wu + $wd)) : 0;
+    }
+
+    foreach (['index_hashes', 'whitelist'] as $t) {
+        try {
+            $db->prepare("UPDATE `$t` SET votes_up = ?, votes_down = ?, votes_count = ?, score_x100 = ?
+                           WHERE info_hash = ?")
+               ->execute([$up, $down, $n, $score, $hash]);
+        } catch (\Throwable $e) { /* a table without the columns yet is not worth failing on */ }
+    }
+}
+
+/** The reputation of one hash, as the UI needs it — in whichever mode is switched on. */
+function repFor(PDO $db, array $cfg, string $hash): array {
+    $st = $db->prepare("SELECT COUNT(*) n, SUM(vote = 1) up, SUM(vote = -1) down,
+                               SUM(CASE WHEN vote = 1 THEN weight ELSE 0 END) wup,
+                               SUM(CASE WHEN vote = -1 THEN weight ELSE 0 END) wdown,
+                               SUM(vote * CAST(weight AS SIGNED)) wsum, SUM(weight) wtot
+                          FROM hash_votes WHERE info_hash = ? AND scale = ?");
+    $mode  = repMode($cfg);
+    $st->execute([strtolower($hash), $mode]);
+    $r = $st->fetch() ?: [];
+    $total = (int)($r['n'] ?? 0);
+    $min   = repMinVotes($cfg);
+    $enough = $total >= $min;
+
+    $out = [
+        'mode'      => $mode,
+        'total'     => $total,
+        'enough'    => $enough,
+        'min_votes' => $min,
+        'up'        => (int)($r['up'] ?? 0),
+        'down'      => (int)($r['down'] ?? 0),
+        'percent'   => null,
+        'stars'     => null,
+    ];
+
+    // Null, not zero, below the threshold. "0%" and "nobody has said" are different facts, and a bar
+    // or a row of stars that cannot tell them apart is worse than showing nothing.
+    if (!$enough) return $out;
+
+    if ($mode === 'stars') {
+        $wsum = (int)($r['wsum'] ?? 0);
+        $wtot = (int)($r['wtot'] ?? 0);
+        // One decimal, because that is the precision a half-star scale actually has. Rounding to a
+        // whole star would throw away the thing the mode exists for.
+        $out['stars'] = $wtot > 0 ? round($wsum / $wtot / 2, 1) : null;
+    } else {
+        $wu = (int)($r['wup'] ?? 0);
+        $wd = (int)($r['wdown'] ?? 0);
+        $out['percent'] = ($wu + $wd) > 0 ? (int)round($wu * 100 / ($wu + $wd)) : null;
+    }
+    return $out;
+}
+
+/** My own vote on this hash, so the button can show which way it went. 0 = none. */
+function repMyVote(PDO $db, array $cfg, string $hash): int {
+    $voter = repVoterKey($db, $cfg);
+    if ($voter === null) return 0;
+    $st = $db->prepare("SELECT vote FROM hash_votes WHERE info_hash = ? AND voter_type = ? AND voter_key = ? AND scale = ? LIMIT 1");
+    $st->execute([strtolower($hash), $voter['type'], $voter['key'], repMode($cfg)]);
+    return (int)($st->fetchColumn() ?: 0);
+}
+
+function repRecountAll(PDO $db, array $cfg): int {
+    $n = 0;
+    foreach ($db->query("SELECT DISTINCT info_hash FROM hash_votes")->fetchAll(PDO::FETCH_COLUMN) as $hash) {
+        repRecount($db, (string)$hash, $cfg);
+        $n++;
+    }
+    return $n;
+}
+
+// How much CAPTCHA pressure a vote adds: `captcha_pts_vote`, spent by api/rate_hash.php through the site's one points
+// scheme, addCaptchaPoints($cfg, 'vote') — somebody voting steadily is never bothered, somebody voting fifty times
+// in a minute meets a CAPTCHA.
+
+/**
+ * Wipe every vote on a hash — used when a hash is banned, so a ban does not leave a score behind.
+ *
+ * Counted again in the site's mode, like every other recount (1.71.0): it was called without $cfg on the
+ * grounds that the mode does not matter once every vote is gone, which is true of the numbers today and
+ * is exactly the kind of truth the next change to repRecount() does not know it has to keep. $cfg is
+ * required, so a caller cannot leave it out again.
+ */
+function repClear(PDO $db, array $cfg, string $hash): int {
+    $hash = strtolower($hash);
+    $st = $db->prepare("DELETE FROM hash_votes WHERE info_hash = ?");
+    $st->execute([$hash]);
+    $n = $st->rowCount();
+    if ($n) repRecount($db, $hash, $cfg);
+    return $n;
+}
+
+function repHistogram(PDO $db, string $hash): array
+{
+    $out = [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0];
+    $st = $db->prepare("SELECT vote, COUNT(*) FROM hash_votes WHERE info_hash = ? AND scale = 'stars' GROUP BY vote");
+    $st->execute([strtolower($hash)]);
+    foreach ($st->fetchAll(PDO::FETCH_NUM) as [$v, $c]) $out[max(1, min(5, (int)ceil((int)$v / 2)))] += (int)$c;
+    return $out;
+}
+
+function repLastRated(PDO $db, string $hash): ?string
+{
+    $st = $db->prepare("SELECT MAX(COALESCE(updated_at, created_at)) FROM hash_votes WHERE info_hash = ?");
+    $st->execute([strtolower($hash)]);
+    $v = $st->fetchColumn();
+    return is_string($v) && $v !== '' ? substr($v, 0, 10) : null;
+}

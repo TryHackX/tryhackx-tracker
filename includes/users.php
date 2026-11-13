@@ -1,0 +1,2161 @@
+<?php
+/**
+ * User accounts (schema v7): registration/login, groups with JSON permissions, timed memberships,
+ * in-app notifications, remember-me and password-reset tokens.
+ *
+ * Everything is OFF unless users_enabled=1. Design:
+ *   - The `guest` group holds the permissions of ANONYMOUS visitors only. A signed-in user has
+ *     exactly the union of their ACTIVE groups' permissions (expired memberships are ignored and
+ *     reaped by usersTick()) — guest is NOT inherited, so a group can be narrower than guest.
+ *   - Members of the system `admin` group pass every permission check.
+ *   - With users_enabled=0 every check falls back to today's public behaviour: the index stays
+ *     admin-only (index.* = false) and the classic public pages/stats stay visible (true). The
+ *     feature toggles that already exist (tracker_stats_enabled, whitelist_public_enabled, …)
+ *     remain master switches — permissions only ever narrow, never widen.
+ *   - The single-admin panel session (includes/auth.php) bypasses permission checks entirely.
+ *   - User sessions live in the same PHP session as everything else under their own keys
+ *     (user_id / user_login_time), so an admin can also be logged in as a user.
+ */
+
+const USER_REMEMBER_COOKIE = 'thx_remember';
+const USER_REMEMBER_DAYS   = 30;
+const USER_RESET_TTL_MIN   = 120;   // password-reset link lifetime (minutes)
+const USER_VERIFY_TTL_H    = 72;    // email-verification link lifetime (hours)
+const USER_ECHANGE_TTL_H   = 24;    // email-change confirmation links (old + new step)
+
+/** Sign-in duration choices (login form "Stay signed in for"): code => [seconds|null (forever), label]. The labels are
+ *  the dictionary's (1.73.0: they were English on every page — the live language switch check found them). */
+function userSessionChoices(): array {
+    // the English words when this file is loaded without the dictionary (a CLI tool, a test)
+    $w = fn(string $k, string $en): string => function_exists('__') ? __($k) : $en;
+    return [
+        'forever' => [null, $w('login.session_forever', 'Forever (until you sign out)')],
+        '1h'      => [3600, $w('login.session_1h', '1 hour')],
+        '1d'      => [86400, $w('login.session_1d', '1 day')],
+        '30d'     => [30 * 86400, $w('login.session_30d', '30 days')],
+    ];
+}
+
+function usersEnabled(array $cfg): bool { return (($cfg['users_enabled'] ?? '0') === '1'); }
+/** Registration requires an email + only VERIFIED accounts get their groups (unverified = guest level). */
+function userEmailVerifyRequired(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_require_email_verify'] ?? '1') === '1'); }
+function userEmailChangeCooldownDays(array $cfg): int { return max(0, min(365, (int)($cfg['users_email_change_cooldown_days'] ?? 30))); }
+function usersRegistrationEnabled(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_registration_enabled'] ?? '1') === '1'); }
+function usersLinksVisible(array $cfg): bool { return usersEnabled($cfg) && (($cfg['users_links_visible'] ?? '1') === '1'); }
+function usersDefaultGroupSlug(array $cfg): string { return trim((string)($cfg['users_default_group'] ?? 'member')) ?: 'member'; }
+function usersNotifyExpiryDays(array $cfg): int { return max(0, min(30, (int)($cfg['users_notify_expiry_days'] ?? 3))); }
+/**
+ * How often a signed-in reader's page asks for the two numbers on the account link (api/user_pulse.php).
+ * 0 = never, otherwise 10–300 s. Its own switch, separate from pm_live_seconds: an open conversation
+ * asking every few seconds and the whole site asking once a minute are different costs.
+ */
+function siteLiveSeconds(array $cfg): int {
+    $v = (int)($cfg['site_live_seconds'] ?? 60);
+    return $v <= 0 ? 0 : max(10, min(300, $v));
+}
+
+/**
+ * Registry of every permission a group can carry: id => what it allows, in the READER'S language (1.73.0) — the
+ * Groups matrix's tooltips, the group editor's boxes, the Recommended window, Settings' matrices (admin/fetch_groups).
+ *
+ * The English below is the registry's own and the dictionary's: each id has `perm.<id>` (tools/lang_src.d/
+ * permissions.py), whose English is these words exactly — tests/groups_matrix_test.php holds the two together, so a
+ * sentence changed here and not there fails. `$english` asks for these words whatever the request's language (a
+ * shell tool, a check); a process without the dictionary gets them too. Only the words change with the language:
+ * the ids, their order and their number never do.
+ */
+function userPermissionList(bool $english = false): array {
+    $list = [
+        'index.view'     => 'Search the observed-hash index (the public search page)',
+        'index.files'    => 'See file lists in index search results',
+        // The first batch comes with index.files; loading the rest of a long list — page after page
+        // — is its own grant, so a group can be shown a list without being handed 40 000 rows of it.
+        // How big a batch is and how far "the rest" goes are index_files_batch / index_files_max
+        // (2 000 and 20 000 as shipped, Settings → File list loading, 1.38.0); the grant decides
+        // WHO may page at all and is checked before any of those numbers. Both halves are tests on
+        // the ?offset= of api/index_files.php — which is why that endpoint has no keyset cursor.
+        'index.files_all' => 'Load the whole file list in index search results (beyond the first page)',
+        'info.resize'    => 'Resize the Info panel (the size is kept in their browser)',
+        'index.magnet'   => 'See info hashes / copy magnet links in index search results',
+        'whitelist.view' => 'Browse the public whitelist page (whitelisted torrents also show up in search)',
+        'whitelist.add'  => 'Register hashes on the whitelist (used when registration is set to "registered users")',
+        'whitelist.request' => 'Ask for a torrent from the index to be put on the whitelist, or support such a request',
+        // The status page's "what does this tracker know about this hash": registered (and in what
+        // state), banned, seen in the swarm, metadata, files. Answered for unknown hashes too, which
+        // is why it is a grant and not a page anyone may hammer.
+        'status.hash_check' => 'Ask the status page what this tracker knows about a hash (registered, banned, seen in the swarm, metadata, files)',
+        // A member's feature by nature: the choices live on the account (users.sound_prefs).
+        'sounds.use'     => 'Pick a sound for what arrives (notifications, messages) on the Sounds tab of the account page',
+        'stats.view'     => 'View the tracker statistics page',
+        'stats.timeline' => 'See the statistics timeline chart',
+        'home.stats'     => 'See the live stats widget on the home page',
+        // Everything below arrived with the descriptions, ratings and rewrite proposals. Shipping a
+        // feature that groups cannot govern means the only choices are "everybody" and "nobody",
+        // which is not a permission system, it is a switch.
+        'rating.vote'     => 'Rate torrents up or down (needs ratings switched on in Settings)',
+        // v75 (includes/profilevotes.php). A permission about what OTHERS may see, like
+        // favourites.public beside it: read with userIdHasGrantedPermission(), so the admin group's
+        // blanket is not consent, and the member's own users.votes_public still has to say yes.
+        'rating.public'   => 'Let their likes/ratings be shown on their public profile',
+        'content.submit'  => 'Attach a source link and a description when registering a torrent',
+        'content.propose' => 'Propose a rewrite of a description somebody else wrote',
+        // Reading them is its own grant since 1.53.0: an operator may keep the catalogue's words for
+        // signed-in readers. With accounts switched off the legacy fallback answers true for every
+        // content.* id, so nothing changes on an install that never had groups.
+        'content.view'    => 'See published descriptions and source links in the Info panel',
+        // v81 (includes/content.php). Taking words down is two authorities, like a shout's delete: your
+        // own description (as its author of record — the co-authors of an edit are credited, not owners)
+        // and anybody's published one, which is the moderator's. Both are asked of the ACCOUNT
+        // (userIdHasPermission) and are NO with accounts off, where there is nobody to be an author.
+        'content.delete_own' => 'Delete a description they are the author of',
+        'content.delete_any' => 'Delete anybody\'s published description from the Info panel',
+        // v81 (includes/profiledescs.php). About what others may SEE, like rating.public: read with
+        // userIdHasGrantedPermission(), and the member's own users.descriptions_public still says yes.
+        'content.public'  => 'Let the descriptions they wrote be listed on their public profile',
+        'content.images'  => 'Upload pictures and put them into the descriptions they write',
+        'images.public'   => 'Let the pictures they uploaded be shown as a gallery on their public profile',
+        'images.upload'   => 'Upload pictures for messages, the shoutbox, their profile and their lists, where Settings allows them there',
+        'images.link'     => 'Put a picture that is already public on this tracker (a description\'s poster) into a message, a shout, their profile or a list',
+        // ── favourites, profiles and uploads (v47) ──
+        // Four ids for four separate decisions, because "may they keep a list" and "may that list be
+        // read by a stranger" are not the same question and an operator will want to answer them
+        // differently.
+        'favourites.use'         => 'Keep a list of favourite torrents',
+        'favourites.public'      => 'Let their favourites list be shown on their public profile',
+        'favourites.view_others' => "See other people's profiles and favourite lists",
+        'uploads.public'         => 'Let their registered torrents be shown on their public profile',
+        // ── lists (v51) ──
+        // Two ids again, for the same reason: making a collection and publishing one are separate
+        // decisions. `lists.public` is what a group needs before any single list of theirs can be
+        // marked public — the site-wide switch and their own per-list choice are the other two.
+        // (1.72.0: a list shared with FRIENDS needs no grant of consent — `friends.use` below and the
+        // friends feature: includes/lists.php.)
+        'lists.use'    => 'Make lists of torrents and keep them',
+        'lists.public' => 'Let their lists be shown on their public profile',
+        // ── people reaching each other (v52) ──
+        // Sending and REPORTING are separate ids on purpose: an account that has been trusted with
+        // an inbox has not thereby been trusted to put somebody's private words in front of a
+        // moderator, and an operator may want to withdraw one without the other.
+        'pm.send'        => 'Send private messages to other members',
+        'pm.report'      => 'Report a message to the moderators',
+        'friends.use'    => 'Follow other members, accept friend requests and share lists with friends',
+        'directory.view' => 'Browse the member directory',
+        // ── the shoutbox (v63, includes/shout.php) ──
+        // Reading is its own id and is NOT given to guests by the migration: the operator's answer to
+        // "does a passer-by read the room" is no, and this is the grant that changes it. Deleting your
+        // own line and deleting somebody else's are two different authorities, so they are two ids —
+        // the second one also opens the Purge button in Settings.
+        'shout.view'     => 'Read the shoutbox',
+        'shout.post'     => 'Write in the shoutbox',
+        // From 1.66.0 for as long as `shout_delete_own_minutes` says (0 = no limit): taking back what
+        // you just said is tidying, taking back yesterday's argument is rewriting the room.
+        'shout.delete_own' => 'Delete their own shouts',
+        'shout.moderate' => 'Delete anyone\'s shouts, and clear the shoutbox',
+        // Correcting a line (1.66.0). TWO ids, and they are separate on purpose: fixing a typo in your
+        // own sentence for a few minutes (`shout_edit_minutes`) is the same kind of right as taking it
+        // back, and goes to members; changing somebody ELSE's words leaves a sentence under their name
+        // that they did not write, so it is granted deliberately — to the seeded moderator group and to
+        // nobody else — and never rides along with shout.moderate. Every such edit is marked on the
+        // line itself and written to the audit log.
+        'shout.edit_own' => 'Correct their own shouts for a while',
+        'shout.edit_any' => 'Edit anyone\'s shout',
+        // Adding a picture to a room everybody reads is not "writing in the shoutbox", so it is not
+        // part of shout.post (1.59.0). The admin group passes every check anyway; the owner uploads
+        // from Settings → Emoji & emotes (Shoutbox until 1.71.0). Give this to a group and its members may add emotes and stickers
+        // of their own, up to shout_emote_per_user each — every one of them sniffed, capped and
+        // refused unless it is really a picture.
+        // 1.65.0: NO MEMBER still gets it, and that rule has not moved. What changed is that the
+        // seeded `premium` group does — the group an operator grants by hand or a shop sells — so
+        // the id is now one an account can hold without the operator inventing a group for it.
+        'shout.upload_emote' => 'Upload emotes and stickers for the shoutbox',
+        // …and the trust to skip the queue (1.61.0). Only meaningful beside the one above, and only
+        // while `shout_emote_approval` is on: it says this group's uploads go straight into the room
+        // instead of waiting for somebody with `shout.moderate`. A SECOND id rather than a second
+        // meaning for the first, because "may add pictures" and "is trusted not to be checked" are
+        // different decisions about different people — a new member gets the first, and the person
+        // who has been drawing the tracker's emotes for a year gets both. Granted to nobody by the
+        // migration, exactly like shout.upload_emote.
+        'shout.emote_auto' => 'Add emotes that are visible at once, without a moderator',
+        // ── pictures and profile covers (v69, includes/usermedia.php) ──
+        // Two ids, because a small square beside a name and a wide photograph across the top of a
+        // profile are different amounts of the site's face, and an operator may want to hand out the
+        // first long before the second. They are about SETTING one: removing your own is never behind
+        // a permission, because taking your own face off a site is not something anybody should have
+        // to be allowed to do.
+        //
+        // v71 separates them: `profile.avatar` stays with every member, `profile.cover` moves to the
+        // `premium` group. A cover ALREADY UPLOADED is kept in the database when the permission
+        // lapses — userCoverFor() simply stops drawing it, and it reappears the moment the group
+        // comes back. Deleting somebody's picture because their month ran out would be a punishment
+        // nobody bought.
+        'profile.avatar' => 'Set their own picture',
+        'profile.cover'  => 'Set their own profile cover (drawn only while the account holds this)',
+        // ── the description on a profile (v74, includes/profilebio.php) ──
+        // Writing one AND having it shown: the text is kept when the grant lapses and simply not drawn
+        // (the same rule as the cover above), so a group taken away hides words without deleting them.
+        // Clearing your own is never behind this — the endpoint accepts an empty text from any
+        // signed-in account, grant or no grant.
+        'profile.bio'    => 'Write a description on their profile (shown only while the account holds this)',
+        // ── comments on a torrent (v83, includes/comments.php) ──
+        // Reading and writing are two ids, as for the shoutbox: an operator may open the words to guests
+        // without letting them write (and a guest who writes is signed "Guest #xxxx", behind a CAPTCHA
+        // every time, held for a moderator unless Settings says otherwise). Correcting and taking back
+        // your own are windows the operator sets; anybody's is the moderator's, with a reason the author
+        // is shown. None of them exists with accounts off (userLegacyDefault()).
+        'comment.view'       => 'Read the comments under a torrent',
+        'comment.post'       => 'Write comments under a torrent (a guest group holding this comments as "Guest", with a CAPTCHA every time)',
+        // v88 (1.72.0): answering a comment, as a reply under it — a thread as deep as comments_reply_depth says.
+        // Writing comments at all (comment.post, and everything that asks) comes first; a guest group holding this
+        // replies under every guest rule. NO with accounts off, like every comment.* id (userLegacyDefault()).
+        'comment.reply'      => 'Reply to a comment (as deep as the thread may go — comments_reply_depth)',
+        'comment.images'     => 'Put pictures into their comments, and upload them where Settings allows it',
+        'comment.edit_own'   => 'Correct their own comments for a while (comment_edit_minutes)',
+        'comment.delete_own' => 'Delete their own comments for a while (comment_delete_own_minutes)',
+        'comment.moderate'   => 'Delete or edit anybody\'s comment with a reason, and release a guest\'s held comment',
+        // ── reports of what people write in public (v84, includes/reports.php) ──
+        // ONE id for the three kinds — a comment, a torrent's description, a shout — as pm.report is one for
+        // messages: "may this account put somebody's public words in front of a moderator". A member's; an
+        // account only (a report is answered to its reporter); NO with accounts off (userLegacyDefault()).
+        'content.report'     => 'Report a comment, a description or a shout to the moderators',
+        'tags.add'           => 'Add tags to a torrent, and take back the ones they added',
+        'tags.create'        => 'Create a new tag (a moderator approves it unless Settings says otherwise)',
+        'tags.moderate'      => 'Remove anybody\'s tag or a wrong automatic one, and approve or reject new tags',
+        'tags.favourite'     => 'Keep favourite tags (My tags) for quick filters',
+        'tags.categorize'    => 'Suggest a category for a tag, or a new category',
+
+        // ── the admin panel ──
+        //
+        // Everything above is about the PUBLIC site. Everything below is about the panel, and until
+        // now the panel had no permissions at all: every one of its endpoints was gated by
+        // "is there a panel session", so the only two states were owner and stranger. That is what
+        // made a moderator impossible — there was nothing to grant.
+        //
+        // What is deliberately ABSENT matters as much as what is here. There is no id for Settings,
+        // for restoring a backup, for deleting a user, for editing groups, for API clients, for the
+        // firewall/sysctl/opentracker helpers, or for anything that changes the machine. Those stay
+        // with the owner, and having no id means they cannot be granted by accident. The password
+        // confirmation those actions require is checked against the OWNER's password, so they are
+        // structurally out of a moderator's reach anyway — this list simply agrees with that.
+        'panel.access'           => 'PANEL — open the admin panel at all (every other panel permission needs this)',
+        'panel.reports.view'     => 'PANEL — see the Reports page and the appeals list',
+        'panel.reports.status'   => 'PANEL — change a report\'s status and notes',
+        'panel.reports.block'    => 'PANEL — block and unblock reported hashes',
+        'panel.reports.email'    => 'PANEL — email a reporter and send review notifications',
+        'panel.reports.archive'  => 'PANEL — archive, restore and delete reports',
+        // The panel side of the same feature. NOT granted to anybody by the migration, not even to
+        // the seeded moderator group: reading a reported private message is a different kind of
+        // access from working the torrent-report queue, and an operator has to hand it out on
+        // purpose. `panel.messages.view` shows the queue and the two messages a report carries;
+        // `panel.messages.handle` closes a report or deletes the message it names.
+        'panel.messages.view'   => 'PANEL — see reported private messages (only the reported line and the one before it)',
+        'panel.messages.handle' => 'PANEL — close a message report, or delete the message it names',
+        // v84 (includes/reports.php): the Reports page's queues of PUBLIC words, one pair per kind — reading the
+        // queue, and acting on it (close, remove the words, warn, silence or ban the author, each silently or as
+        // a warning). Unlike the message queue these ARE the moderator's by default (the v84 grant): the words
+        // were public already. Any one `view` opens the Reports page, showing only that kind's tab.
+        'panel.reports.comments.view'       => 'PANEL — see reported comments',
+        'panel.reports.comments.handle'     => 'PANEL — act on reported comments (close, remove, warn, silence, ban the author)',
+        'panel.reports.descriptions.view'   => 'PANEL — see reported torrent descriptions',
+        'panel.reports.descriptions.handle' => 'PANEL — act on reported descriptions (close, remove, warn, silence, ban the author)',
+        'panel.reports.shouts.view'         => 'PANEL — see reported shouts',
+        'panel.reports.shouts.handle'       => 'PANEL — act on reported shouts (close, remove, warn, silence, ban the author)',
+        'panel.reports.images.view'         => 'PANEL — see reported pictures',
+        'panel.reports.images.handle'       => 'PANEL — act on reported pictures (close, remove and block the picture, warn, silence, ban the uploader)',
+        'panel.reports.torrents.view'       => 'PANEL — see torrents reported from Info',
+        'panel.reports.torrents.handle'     => 'PANEL — act on torrents reported from Info (close, ban the hash, warn the one who registered it)',
+        'panel.appeals.resolve'  => 'PANEL — resolve and restore appeals',
+        'panel.whitelist.view'   => 'PANEL — see the Whitelist and Index pages',
+        'panel.whitelist.add'    => 'PANEL — register hashes from the panel',
+        'panel.whitelist.delete' => 'PANEL — delete whitelist rows',
+        'panel.whitelist.ban'    => 'PANEL — ban and unban hashes',
+        'panel.whitelist.meta'   => 'PANEL — queue metadata fetches and refresh seeders',
+        'panel.whitelist.content'=> 'PANEL — approve or reject submitted descriptions and rewrites',
+        'panel.users.view'       => 'PANEL — see the Users page',
+        'panel.users.edit'       => 'PANEL — change a user\'s status and email verification',
+        'panel.users.notify'     => 'PANEL — send a user an in-app notification',
+        'panel.users.groups'     => 'PANEL — grant and revoke groups (never the admin group)',
+        // v94 (1.75.0, includes/moderation.php): the Moderation page. `view` reads it — who is silenced or banned right now,
+        // every warning ever given, the automatic penalties' rules and what they did; `handle` acts — lift a silence or a
+        // ban, revoke a warning, warn / silence / ban a member by hand (lifting a ban that has NO end date, the owner's from
+        // the Users page, also needs panel.users.edit); `rules` writes the automatic penalties' rules and their switch.
+        // The moderator holds the first two (the v94 grant); the rules are the Admin group's blanket and a tick.
+        'panel.moderation.view'   => 'PANEL — see the Moderation page: restricted members, the warnings log, the automatic penalties',
+        'panel.moderation.handle' => 'PANEL — lift a silence or a ban, revoke a warning, warn, silence or ban a member by hand',
+        'panel.moderation.rules'  => 'PANEL — edit the automatic penalties (the ladder of warnings → silence or ban) and switch them on',
+        'panel.images.view'       => 'PANEL — see the Images page: every picture, who added it and where it is used',
+        'panel.images.manage'     => 'PANEL — delete any picture, and retry or drop the copies waiting in the queue',
+        'panel.tags.view'         => 'PANEL — see the Tags page and approve or reject new tags',
+        'panel.tags.manage'       => 'PANEL — rename, recolour, hide, merge and delete tags',
+        // Look, but not touch. EVERY operation in api/admin/backup_action.php demands the admin
+        // password, and adminReauth() checks it against the OWNER's hash — which a moderator does
+        // not have and must not be given. So there is no "run a backup" permission: one would be a
+        // promise the code cannot keep, and a checkbox that grants nothing is worse than no checkbox.
+        'panel.backups.view'     => 'PANEL — see the Backups page and the backup list (running, restoring and deleting stay with the owner)',
+        'panel.traffic.view'     => 'PANEL — see the Traffic page (read-only; the controls stay with the owner)',
+        // Reading the log is its own permission and is NOT in the moderator seed. A moderator who can
+        // see every action of every colleague is a different job from moderating, and the operator
+        // should decide whether it is the same person.
+        'panel.audit.view'       => 'PANEL — read the audit log (who did what in the panel)',
+    ];
+    if ($english || !function_exists('__')) return $list;
+    foreach ($list as $id => $en) {
+        $key = 'perm.' . $id;
+        $said = __($key);
+        if ($said !== $key) $list[$id] = $said;   // an id without words of its own keeps the English
+    }
+    return $list;
+}
+
+/**
+ * Group presets — a starting point for the group editor, not a second registry.
+ *
+ * Each names permissions that exist in userPermissionList(); a preset naming an id that does not
+ * exist is dropped by the editor rather than granted, and tests/groups_matrix_test.php checks every
+ * id here is real (users.php claimed a test did that from 1.21.0 and none ever had). Presets are
+ * kept deliberately narrow: the operator adds to them, the preset never carries something they did
+ * not mean to hand out.
+ *
+ * A preset that shares a slug with a SEEDED group must say the same thing the seed does. The
+ * moderator's two lists disagreed from v25 to 1.64.0 — the preset had `panel.whitelist.delete` and
+ * no `panel.users.*`, the seed the exact reverse — so "apply the moderator preset" quietly rewrote a
+ * seeded moderator into a different job. The seed wins, because it is what every install already has.
+ *
+ * 1.72.0: they disagreed AGAIN, and this time the seed disagreed with itself. The moderator's INSERT text
+ * gained `index.files_all` at v42 and `favourites.use/.public/.view_others` + `uploads.public` at v47 —
+ * but an INSERT IGNORE only ever reaches a NEW install, and the grants of v42 and v47 went to member
+ * alone, so every install that already had a moderator (the owner's server among them) never got the
+ * five. "What every install already has" is the moderator WITHOUT them, and that is what the preset and
+ * the fresh seed say now: a moderator is a member as well (the default group every account gets), which
+ * is where the five come from, and two of them are consent (userConsentPermissions()), which a job does
+ * not give.
+ *
+ * The preset of a seeded group is also its RECOMMENDED set (userGroupRecommended() below): the panel's
+ * "Recommended" and tools/groups.php read these very lists, so a starting point and a recommendation can
+ * never say two things.
+ */
+function userGroupPresets(): array {
+    return [
+        'moderator' => [
+            'label' => 'Moderator',
+            'about' => 'Works the report queue and the whitelist. No settings, no backups, no log, no message queue.',
+            // EXACTLY the v25 seed plus what v63, v71, v72, v81, v83, v84, v88 and v94 added to it — see
+            // trackerSchemaDataMigrations(); what every install's moderator holds (1.72.0: without the five
+            // membership ids the fresh seed alone had — see above). Deleting whitelist rows is not here and
+            // neither is panel.users.edit / .groups: those are boxes the operator ticks on purpose.
+            // panel.messages.* stays out as well (a reported private message is a different kind of access;
+            // tests/people_test.php holds that line).
+            'perms' => ['panel.access', 'panel.reports.view', 'panel.reports.status', 'panel.reports.block',
+                        'panel.reports.email', 'panel.reports.archive', 'panel.appeals.resolve',
+                        'panel.whitelist.view', 'panel.whitelist.add',
+                        'panel.whitelist.ban', 'panel.whitelist.meta', 'panel.whitelist.content',
+                        'panel.users.view', 'panel.users.notify',
+                        'index.view', 'index.files', 'index.magnet',
+                        'whitelist.view', 'whitelist.add', 'whitelist.request', 'stats.view', 'stats.timeline', 'home.stats',
+                        'rating.vote', 'content.submit', 'content.propose',
+                        // Approving a description you are not allowed to READ is not a job (v71).
+                        'content.view',
+                        // v81: taking down anybody's published description from the Info panel.
+                        'content.delete_any',
+                        // The room is moderated from the room, not from a panel page (1.58.0), so the
+                        // reading ids come with it — see the v63 grant in includes/schema.php. Editing
+                        // anybody's line is the v72 grant, to this group alone.
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.moderate', 'shout.edit_any',
+                        // v83: comments — read, write, and take down or edit anybody's (with a reason) from
+                        // the Info panel, where the thread is; a guest's held comment is let through here too.
+                        // v88: and answer one, as a reply under it.
+                        'comment.view', 'comment.post', 'comment.moderate', 'comment.reply',
+                        // v84: the Reports page's queues of reported comments, descriptions and shouts — read
+                        // and act on each (never the message queue: panel.messages.* stays out, see above).
+                        'panel.reports.comments.view', 'panel.reports.comments.handle',
+                        'panel.reports.descriptions.view', 'panel.reports.descriptions.handle',
+                        'panel.reports.shouts.view', 'panel.reports.shouts.handle',
+                        'panel.reports.images.view', 'panel.reports.images.handle',
+                        'panel.reports.torrents.view', 'panel.reports.torrents.handle',
+                        // v94 (1.75.0): the Moderation page — read it and act on it (lift, revoke, warn by hand); the
+                        // automatic penalties' rules (panel.moderation.rules) are a tick the operator gives on purpose.
+                        'panel.moderation.view', 'panel.moderation.handle',
+                        'panel.images.view', 'panel.images.manage',
+                        'tags.add', 'tags.create', 'tags.moderate', 'panel.tags.view', 'tags.favourite', 'tags.categorize', 'images.upload', 'images.link'],
+        ],
+        'reviewer' => [
+            'label' => 'Content reviewer',
+            'about' => 'Approves or rejects descriptions and rewrites; sees the whitelist, changes nothing else.',
+            'perms' => ['panel.access', 'panel.whitelist.view', 'panel.whitelist.content'],
+        ],
+        'curator' => [
+            'label' => 'Whitelist curator',
+            'about' => 'Registers, bans and refreshes hashes. Never touches reports or users.',
+            'perms' => ['panel.access', 'panel.whitelist.view', 'panel.whitelist.add', 'panel.whitelist.delete',
+                        'panel.whitelist.ban', 'panel.whitelist.meta'],
+        ],
+        'auditor' => [
+            'label' => 'Read-only auditor',
+            'about' => 'Sees every page and the audit log, and can change nothing.',
+            'perms' => ['panel.access', 'panel.reports.view', 'panel.whitelist.view', 'panel.users.view',
+                        'panel.moderation.view', 'panel.backups.view', 'panel.traffic.view', 'panel.audit.view'],
+        ],
+        // 1.72.0: the anonymous visitor's minimum — the recommended set of the seeded `guest` group, and a
+        // starting point for any group that should see as little. Reading the public statistics, and nothing
+        // else: the whitelist page and the search are the operator's catalogue to open (a fresh install's seed
+        // opens the whitelist page, and the owner's own server does not); the descriptions and the comments
+        // are the members' words, opened to passers-by on purpose if at all (v58, v83); and anything that
+        // WRITES — a vote, a description, a rewrite (the v24 grants, which kept 1.18's behaviour on upgrade) —
+        // needs an account. "Add what is missing" never takes those away where a guest group has them.
+        'guest' => [
+            'label' => 'Guest (anonymous visitors)',
+            'about' => 'Reads the public statistics. The whitelist page, the search, the descriptions, the comments and anything that writes are the operator\'s to open.',
+            'perms' => ['stats.view', 'stats.timeline', 'home.stats'],
+        ],
+        'member' => [
+            'label' => 'Site member',
+            'about' => 'The public-site features, no panel at all.',
+            // The shipped default matrix for a signed-in account, and the same list the v71 migration
+            // writes — `profile.cover` and `shout.upload_emote` are deliberately NOT here; they are
+            // the premium extras below.
+            'perms' => ['index.view', 'index.files', 'index.files_all', 'index.magnet', 'info.resize', 'whitelist.view', 'whitelist.add', 'whitelist.request',
+                        'stats.view', 'stats.timeline', 'home.stats', 'rating.vote', 'content.submit', 'content.propose', 'content.view',
+                        'favourites.use', 'favourites.public', 'favourites.view_others', 'uploads.public',
+                        'lists.use', 'lists.public',
+                        'pm.send', 'pm.report', 'friends.use', 'directory.view', 'status.hash_check', 'sounds.use',
+                        // shout.edit_own is v72's, beside the delete it mirrors; profile.bio is v74's,
+                        // rating.public v75's; content.delete_own and content.public v81's.
+                        'shout.view', 'shout.post', 'shout.delete_own', 'shout.edit_own', 'profile.avatar', 'profile.bio',
+                        'rating.public', 'content.delete_own', 'content.public', 'content.images', 'images.public',
+                        // v83: comments on a torrent — read, write, and their own corrected or taken back
+                        // for as long as the two windows say; v88: a reply to one.
+                        'comment.view', 'comment.post', 'comment.edit_own', 'comment.delete_own', 'comment.reply',
+                        'comment.images',
+                        // v84: report a comment, a description or a shout to the moderators.
+                        'content.report', 'tags.add', 'tags.create', 'tags.favourite', 'tags.categorize', 'images.upload', 'images.link'],
+        ],
+        // v71. ONLY the extras: a premium account is a member as well (the default group is granted
+        // at registration and `v1/users/provision` puts a bought account in it), so repeating the
+        // member list here would mean a premium membership that LAPSES takes the whole site with it.
+        //
+        // `shout.emote_auto` is not here on purpose: paying for pictures is not paying past
+        // moderation, so a premium upload waits in the queue like anybody else's. No `panel.*` id
+        // either, and that is what keeps the group sellable — api/v1/users_grant.php refuses to grant
+        // any group that carries one.
+        'premium' => [
+            'label' => 'Premium',
+            'about' => 'The paid extras on top of an ordinary membership: a profile cover and emotes of their own.',
+            'perms' => ['profile.cover', 'shout.upload_emote'],
+        ],
+    ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1.72.0 — consent, capabilities, and the recommended set of every seeded group
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The CONSENT ids: permissions about what OTHER people may see of an account, not about what it may do. Each is
+ * one half of a yes whose other half is the member's own switch (fav_public, lists_public, votes_public,
+ * descriptions_public, the uploads' flag), and the code reads them with userIdHasGrantedPermission() and
+ * userGroupIdsWithPermission() (includes/favourites.php says why), where the Admin group's blanket does NOT count:
+ * an administrator appears on a public list only when their group GRANTS the id, like anybody else.
+ *
+ * ONE list, read by the group editor and the matrix (a consent box is a real choice, on the Admin group too), by
+ * the recommended sets (the Admin group's consent is written only on purpose — the panel's tick, tools/groups.php
+ * --consent), by schemaAdminGrant() (which never writes one) and by tests/groups_matrix_test.php, which holds it
+ * against every consent read in the code. `profile.cover` is read through userGroupIdsWithPermission() as well —
+ * "which groups give a cover" (templates/pages/account.php) — but it is a paid extra, not consent, and is not here.
+ */
+function userConsentPermissions(): array {
+    return ['content.public', 'favourites.public', 'lists.public', 'rating.public', 'uploads.public', 'images.public'];
+}
+
+function userIsConsentPermission(string $perm): bool { return in_array($perm, userConsentPermissions(), true); }
+
+/** Every registered CAPABILITY — the registry without the consent ids, in its order: what the Admin blanket holds. */
+function userCapabilityPermissions(): array {
+    return array_values(array_filter(array_keys(userPermissionList()), fn($p) => !userIsConsentPermission($p)));
+}
+
+/** Ids in the registry's order, each once, an unregistered one dropped: one order for every list a person reads. */
+function userPermissionsOrdered(array $ids): array {
+    $want = array_flip(array_map('strval', $ids));
+    return array_values(array_filter(array_keys(userPermissionList()), fn($k) => isset($want[$k])));
+}
+
+/** The seeded groups that have a recommended set, in the order the panel and tools/groups.php show them. */
+const USER_RECOMMENDED_SLUGS = ['guest', 'member', 'premium', 'moderator', 'admin'];
+
+/**
+ * The RECOMMENDED permission set of a seeded group — the owner's "basic default set" — or null for any other slug
+ * (a group an operator made has nothing to go back to).
+ *
+ * Not a second registry. For guest, member, premium and moderator it IS the group's preset above, so the editor's
+ * "Start from" and the panel's "Recommended" can never say two different things. For admin it is every registered
+ * id, computed, never typed out: the capabilities its members pass by the blanket anyway, and the consent ids,
+ * which are only ever written on purpose (userGroupRecommendedPlan()'s $consent).
+ *
+ * Every set is contained in what a FRESH install ships (tests/groups_matrix_test.php), so "add what is missing"
+ * changes nothing on a new install — the Admin group's consent aside, which only a deliberate choice writes. The
+ * guest's is smaller than a fresh install's guest (see its preset): a reset is where that difference shows.
+ */
+function userGroupRecommended(string $slug): ?array {
+    if (!in_array($slug, USER_RECOMMENDED_SLUGS, true)) return null;
+    if ($slug === 'admin') return array_keys(userPermissionList());
+    $p = userGroupPresets()[$slug]['perms'] ?? null;
+    return is_array($p) ? userPermissionsOrdered($p) : null;
+}
+
+/**
+ * What a person is told the set is called: the preset's label and line, or the Admin group's own — in English, as the
+ * shell prints them. The panel's window names it in the reader's language (a.users.rec_name_* / rec_about_*, whose
+ * English tests/groups_matrix_test.php holds to these words; api/admin/group_recommended.php).
+ */
+function userGroupRecommendedLabel(string $slug): array {
+    if ($slug === 'admin') {
+        return ['label' => 'Every registered permission',
+                'about' => 'Every capability, which the Admin group holds by its blanket anyway, and the consent a person has to give.'];
+    }
+    $p = userGroupPresets()[$slug] ?? [];
+    return ['label' => (string)($p['label'] ?? $slug), 'about' => (string)($p['about'] ?? '')];
+}
+
+/**
+ * What applying the recommended set would do to ONE group row (slug, permissions), without doing it: the panel's
+ * preview, `tools/groups.php diff`, and the plan userGroupApplyRecommended() writes. Null for a group without a set.
+ *   add         — recommended ids the group does not hold: exactly what "Add what is missing" writes. On the Admin
+ *                 group the consent ids are in it only when $consent says so; they are listed in `consent_add`
+ *                 either way, so a person sees what the tick would add;
+ *   remove      — ids it holds that are not recommended: what a RESET also takes away. Never a capability of the
+ *                 Admin group — its set is every id, so there is none, and userGroupApplyRecommended() refuses one
+ *                 regardless of what a plan says;
+ *   held, recommended — the registry's ids either way (userGroupPermissions()): a stored key the registry does not
+ *                 know is nobody's permission, and is neither added nor removed.
+ */
+function userGroupRecommendedPlan(array $group, bool $consent = false): ?array {
+    $slug = (string)($group['slug'] ?? '');
+    $rec = userGroupRecommended($slug);
+    if ($rec === null) return null;
+    $held = userPermissionsOrdered(array_keys(userGroupPermissions($group['permissions'] ?? null)));
+    $isAdmin = $slug === 'admin';
+    $missing = array_values(array_diff($rec, $held));
+    $consentAdd = $isAdmin ? array_values(array_filter($missing, 'userIsConsentPermission')) : [];
+    $add = ($isAdmin && !$consent) ? array_values(array_diff($missing, $consentAdd)) : $missing;
+    $remove = array_values(array_diff($held, $rec));
+    if ($isAdmin) $remove = array_values(array_filter($remove, 'userIsConsentPermission'));
+    return ['slug' => $slug, 'recommended' => $rec, 'held' => $held, 'add' => $add, 'remove' => $remove,
+            'consent_add' => $consentAdd, 'consent' => $isAdmin && $consent];
+}
+
+/**
+ * Apply the recommended set to one group: mode 'add' writes what is missing and never removes anything; 'reset'
+ * also takes away what is not recommended. The panel (api/admin/group_recommended.php) and tools/groups.php both
+ * come here, and neither writes the recommendation any other way.
+ *
+ *   * EXACTLY WHAT WAS SHOWN: with $expect — the preview's `add`, and for a reset its `remove` — a group that changed
+ *     since the preview is not touched; the answer is 'changed' with the plan as it is now. The server does exactly
+ *     what it was asked, never what a stale screen would imply (the 1.67.0 lesson);
+ *   * the write is ONE UPDATE guarded by the JSON it read, so an edit made in between is never overwritten
+ *     ('changed' again);
+ *   * idempotent: a group that already holds the set answers 'changed' => false and nothing is written;
+ *   * the Admin group never loses a capability, whatever a plan says ('admin_capability');
+ *   * the permission memo is forgotten for every account (userPermissionsForget()), so whatever follows in the same
+ *     request — a page drawn, the next group of `--all` — sees the new set.
+ * Returns ['changed' => bool, 'added' => [...], 'removed' => [...], 'plan' => the plan after, 'group' => the row
+ * after], or ['error' => 'bad_mode' | 'not_found' | 'no_recommended' | 'changed' | 'admin_capability', 'plan' => …].
+ * The audit line is the caller's (userGroupRecommendedAudit()): its actor is a panel session or the shell's user.
+ */
+function userGroupApplyRecommended(PDO $db, int $groupId, string $mode, bool $consent = false, ?array $expect = null): array {
+    if (!in_array($mode, ['add', 'reset'], true)) return ['error' => 'bad_mode'];
+    $st = $db->prepare("SELECT * FROM user_groups WHERE id = ?");
+    $st->execute([$groupId]);
+    $g = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$g) return ['error' => 'not_found'];
+    $plan = userGroupRecommendedPlan($g, $consent);
+    if ($plan === null) return ['error' => 'no_recommended'];
+    $add = $plan['add'];
+    $remove = $mode === 'reset' ? $plan['remove'] : [];
+    if ($expect !== null) {
+        $norm = function ($ids): array {
+            $ids = array_values(array_unique(array_filter(is_array($ids) ? $ids : [], 'is_string')));
+            sort($ids);
+            return $ids;
+        };
+        $sameAdd = $norm($expect['add'] ?? []) === $norm($add);
+        $sameRemove = $mode !== 'reset' || $norm($expect['remove'] ?? []) === $norm($remove);
+        if (!$sameAdd || !$sameRemove) return ['error' => 'changed', 'plan' => $plan];
+    }
+    if (!$add && !$remove) return ['changed' => false, 'added' => [], 'removed' => [], 'plan' => $plan, 'group' => $g];
+    if ((string)$g['slug'] === 'admin') {
+        foreach ($remove as $p) if (!userIsConsentPermission($p)) return ['error' => 'admin_capability', 'plan' => $plan];
+    }
+    $cur = json_decode((string)$g['permissions'], true);
+    if (!is_array($cur)) $cur = [];
+    foreach ($add as $p) $cur[$p] = true;
+    foreach ($remove as $p) unset($cur[$p]);
+    $json = $cur ? json_encode($cur, JSON_UNESCAPED_SLASHES) : '{}';
+    $up = $db->prepare("UPDATE user_groups SET permissions = ? WHERE id = ? AND permissions <=> ?");
+    $up->execute([$json, $groupId, $g['permissions']]);
+    if ($up->rowCount() !== 1) {
+        $st->execute([$groupId]);
+        $now = $st->fetch(PDO::FETCH_ASSOC);
+        return ['error' => 'changed', 'plan' => $now ? userGroupRecommendedPlan($now, $consent) : null];
+    }
+    userPermissionsForget();
+    $g['permissions'] = $json;
+    return ['changed' => true, 'added' => $add, 'removed' => $remove, 'plan' => userGroupRecommendedPlan($g, $consent), 'group' => $g];
+}
+
+/**
+ * The audit line of an applied recommended set — ONE shape for the panel and the shell, so the log reads the same
+ * whoever did it: `group.recommend` (filed under Users), the group as its target, what was added and removed. The
+ * shell appends ", from the shell" to the summary and names itself as the actor (tools/groups.php).
+ */
+function userGroupRecommendedAudit(array $group, string $mode, bool $consent, array $added, array $removed): array {
+    $slug = (string)($group['slug'] ?? '');
+    $summary = ($mode === 'reset' ? 'reset group ' . $slug . ' to its recommended set'
+                                  : 'added to group ' . $slug . ' what it was missing of its recommended set')
+             . ': +' . count($added) . ($mode === 'reset' ? ', -' . count($removed) : '')
+             . ($consent ? ' (the consent ids included)' : '');
+    return [
+        'action'      => 'group.recommend',
+        'target_type' => 'group',
+        'target_id'   => $slug,
+        'summary'     => $summary,
+        'detail'      => ['group' => $slug, 'id' => (int)($group['id'] ?? 0), 'mode' => $mode, 'consent' => $consent,
+                          'added' => array_values($added), 'removed' => array_values($removed)],
+    ];
+}
+
+/** Is this permission id one of the panel ones? */
+function userIsPanelPermission(string $perm): bool { return str_starts_with($perm, 'panel.'); }
+
+/**
+ * What the site looks like with the user system disabled: index gated, the classic pages public.
+ *
+ * The content and rating permissions ARE granted here, and that is the whole point: with accounts
+ * switched off there are no groups to grant anything, so the features' own settings (rep_who_can_vote,
+ * whitelist_submit_mode, wl_allow_description) are the only policy there is. Returning false would not
+ * be caution — it would switch those features off for every install that does not use accounts.
+ *
+ * This function is reached ONLY when the users feature is off (see userCan). With it on, an absent key
+ * means denied, which is why introducing a permission has to come with a grant in includes/schema.php.
+ */
+function userLegacyDefault(string $perm): bool {
+    // The panel is never opened by a fallback. With accounts switched off there is nobody to BE a
+    // moderator, and the final `return true` below would otherwise hand every panel permission to
+    // the whole world the moment one was registered.
+    if (userIsPanelPermission($perm)) return false;
+    // The one rating id that is not about casting a vote: rating.public (v75) is consent to a list on
+    // a PROFILE, and without accounts there is no profile and nobody to consent — so it answers no,
+    // like favourites.public, before the rule for the rest of rating.* says yes.
+    if ($perm === 'rating.public') return false;
+    // The same for the three content ids of v81: content.public is consent to a list on a profile, and
+    // deleting is an author's or a moderator's — without accounts there is neither, and the rule below
+    // would otherwise let every passer-by take any description down.
+    // content.report (v84) for the same reason: a report is filed by an account and answered to it — with
+    // accounts off there is nobody to file one or to be told what became of it.
+    if (in_array($perm, ['content.public', 'content.delete_own', 'content.delete_any', 'content.report', 'content.images', 'images.public', 'images.upload', 'images.link'], true)) return false;
+    if (str_starts_with($perm, 'rating.') || str_starts_with($perm, 'content.')) return true;
+    // The other way round from rating.* and content.*, and for the reason that decides both: those
+    // two work without accounts, so answering false would switch them off for every install that
+    // does not use the user system. Favourites and profiles do not exist without an account at all —
+    // there is nothing to be permissive about. status.* is here for the opposite reason: the hash
+    // check is a free oracle over the catalogue (includes/hashcheck.php), granted to members and
+    // withheld from guests by default — with accounts off there is no "member", so opening it would
+    // hand every passer-by the one thing the grant exists to hold back.
+    // shout.* is here for the first reason: a shout is signed with an account name, and a room where
+    // everybody is "nobody" is not a room. With the user system off there is no account to sign one
+    // with, so the whole feature is closed rather than thrown open. profile.* (v69) for the same
+    // reason: a picture and a cover belong to an account, and without accounts there is none to
+    // hang one on.
+    // comment.* (v83) for the shoutbox's reason: a comment is signed with an account (or, where the
+    // operator allows it, as a guest of a site that HAS accounts), and "accounts off" is "no comments at
+    // all" — commentsEnabled() says the same, this is the second wall. comment.reply (v88) is one of them.
+    if (str_starts_with($perm, 'favourites.') || str_starts_with($perm, 'uploads.')
+        || str_starts_with($perm, 'sounds.') || str_starts_with($perm, 'status.')
+        || str_starts_with($perm, 'shout.') || str_starts_with($perm, 'profile.')
+        || str_starts_with($perm, 'comment.') || str_starts_with($perm, 'tags.')) return false;
+    return !str_starts_with($perm, 'index.');
+}
+
+function userValidUsername(string $u): bool { return (bool)preg_match('/^[A-Za-z0-9_.-]{3,32}$/', $u); }
+function userValidEmail(string $e): bool { return $e !== '' && strlen($e) <= 190 && filter_var($e, FILTER_VALIDATE_EMAIL) !== false; }
+
+/** Human wording of the password policy — one place, reused by every endpoint's error message. */
+const USER_PASSWORD_RULES = 'at least 8 characters with a lowercase and an uppercase letter, a digit and a special character';
+
+/**
+ * Password policy (1.8.0): min 8 / max 200 chars, at least one lowercase, uppercase, digit and
+ * special character. Returns the FAILED requirement codes (empty = acceptable) — the register /
+ * account forms mirror this list as a live checklist. Applies to NEW passwords only; existing
+ * hashes keep working.
+ */
+function userPasswordIssues(string $p): array {
+    $issues = [];
+    if (strlen($p) < 8 || strlen($p) > 200) $issues[] = 'length';
+    if (!preg_match('/[a-z]/', $p)) $issues[] = 'lower';
+    if (!preg_match('/[A-Z]/', $p)) $issues[] = 'upper';
+    if (!preg_match('/[0-9]/', $p)) $issues[] = 'digit';
+    if (!preg_match('/[^a-zA-Z0-9]/', $p)) $issues[] = 'special';
+    return $issues;
+}
+function userValidPassword(string $p): bool { return userPasswordIssues($p) === []; }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lookup / create / authenticate
+// ─────────────────────────────────────────────────────────────────────────────
+
+function userFindById(PDO $db, int $id): ?array {
+    if ($id <= 0) return null;
+    $st = $db->prepare("SELECT * FROM users WHERE id = ?");
+    $st->execute([$id]);
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    return $u ?: null;
+}
+
+/** Find by username OR email (the login field accepts both). */
+function userFindByLogin(PDO $db, string $login): ?array {
+    $login = trim($login);
+    if ($login === '' || strlen($login) > 190) return null;
+    $st = $db->prepare("SELECT * FROM users WHERE username = ? OR (email IS NOT NULL AND email = ?) LIMIT 1");
+    $st->execute([$login, $login]);
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    return $u ?: null;
+}
+
+/**
+ * Create a user and grant the default group. Returns ['user'=>row] or ['error'=>code] with codes
+ * invalid_username | invalid_email | weak_password | username_taken | email_taken.
+ */
+function userCreate(PDO $db, array $cfg, string $username, string $email, string $password, string $ip = '', string $grantedBy = 'registration'): array {
+    $username = trim($username);
+    $email = trim($email);
+    if (!userValidUsername($username)) return ['error' => 'invalid_username'];
+    if ($email !== '' && !userValidEmail($email)) return ['error' => 'invalid_email'];
+    if (!userValidPassword($password)) return ['error' => 'weak_password'];
+    $hash = password_hash($password, PASSWORD_DEFAULT);
+    try {
+        $st = $db->prepare("INSERT INTO users (username, email, pass_hash, created_ip) VALUES (?, ?, ?, ?)");
+        $st->execute([$username, $email !== '' ? $email : null, $hash, $ip !== '' ? $ip : null]);
+    } catch (PDOException $e) {
+        if ((int)$e->errorInfo[1] === 1062) {   // duplicate key — which one?
+            $chk = $db->prepare("SELECT 1 FROM users WHERE username = ?");
+            $chk->execute([$username]);
+            return ['error' => $chk->fetchColumn() ? 'username_taken' : 'email_taken'];
+        }
+        throw $e;
+    }
+    $id = (int)$db->lastInsertId();
+    // default group(s): the configured slug plus anything flagged is_default
+    $slugs = [usersDefaultGroupSlug($cfg)];
+    $groups = $db->query("SELECT id, slug FROM user_groups WHERE is_default = 1")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($groups as $g) $slugs[] = $g['slug'];
+    foreach (array_unique($slugs) as $slug) {
+        if ($slug === 'guest') continue;   // guest is the implicit baseline, never a membership
+        $g = userGroupBySlug($db, $slug);
+        if ($g) userGrantGroup($db, $id, (int)$g['id'], null, $grantedBy, 'default group', false);
+    }
+    return ['user' => userFindById($db, $id)];
+}
+
+/**
+ * Is this account allowed in? 'active', or a timed ban whose date has passed. The janitor tidies the
+ * two columns afterwards (userLiftExpiredPunishments) but nothing waits for it: a ban ends when its
+ * date says so, the way a mute does (pmMutedUntil) — not a minute later, and not never when the
+ * timer is down. Everything that decides on `status` asks this.
+ */
+function userIsActive(array $u): bool {
+    $status = (string)($u['status'] ?? '');
+    if ($status === 'active') return true;
+    if ($status !== 'banned') return false;
+    $until = $u['banned_until'] ?? null;
+    return $until !== null && (string)$until !== '' && strtotime((string)$until) <= time();
+}
+
+/** Verify credentials. Returns the user row (status checked by the caller) or null. */
+function userAuthenticate(PDO $db, string $login, string $password): ?array {
+    $u = userFindByLogin($db, $login);
+    // burn ~the same time when the user does not exist — at the SAME cost the real hashes carry.
+    // PASSWORD_DEFAULT is bcrypt 12 on PHP >= 8.4; a cost-10 literal answered a nonexistent login
+    // four times faster, which is a way to tell the two apart.
+    static $dummy = null;
+    if ($dummy === null) $dummy = password_hash('this-account-does-not-exist', PASSWORD_DEFAULT);
+    $hash = $u['pass_hash'] ?? $dummy;
+    $ok = password_verify($password, $hash);
+    return ($ok && $u) ? $u : null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session + remember-me
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** $ttlSeconds bounds this sign-in (login form choice); null = no deadline ("forever"). */
+function userSessionStart(PDO $db, array $user, string $ip = '', ?int $ttlSeconds = null): void {
+    session_regenerate_id(true);
+    // A panel session that rode in on ANOTHER account does not outlive this sign-in (1.74.0): it is that account's —
+    // userCan() and panelCan() answer for it — and userMaybeOpenPanelSession() opens one for this account only when
+    // this account may have one. The owner's own session (no account behind it) is a different person's and stays.
+    if (!empty($_SESSION['admin_via_user']) && (int)$_SESSION['admin_via_user'] !== (int)$user['id']) {
+        unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+    }
+    $_SESSION['user_id'] = (int)$user['id'];
+    $_SESSION['user_login_time'] = time();
+    if ($ttlSeconds !== null && $ttlSeconds > 0) $_SESSION['user_expires_at'] = time() + $ttlSeconds;
+    else unset($_SESSION['user_expires_at']);
+    $db->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?")
+       ->execute([$ip !== '' ? $ip : null, (int)$user['id']]);
+}
+
+function userSessionLogout(PDO $db): void {
+    userRememberClear($db);
+    // The other half of two-way sign-out. The tracker makes no outbound call — it marks the link,
+    // and the partner sees it on their next v1/auth/status. A webhook to an address out of a
+    // settings field would be this server fetching whatever that field points at.
+    if (!empty($_SESSION['bridge_identity']) && function_exists('authIdentityMarkLogout')) {
+        $bcfg = $GLOBALS['cfg'] ?? [];
+        if (!function_exists('authBridgeLogoutBoth') || authBridgeLogoutBoth(is_array($bcfg) ? $bcfg : [])) {
+            try { authIdentityMarkLogout($db, (int)$_SESSION['bridge_identity']); } catch (\Throwable $e) { /* signing out must not fail */ }
+        }
+    }
+    unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at'],
+          $_SESSION['bridge_identity'], $_SESSION['bridge_login_at']);
+    // a panel session opened via the admin-group sign-in dies with the user session
+    if (!empty($_SESSION['admin_via_user'])) {
+        unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+    }
+    $GLOBALS['__current_user_cache'] = null;
+    $GLOBALS['__current_user_loaded'] = false;
+}
+
+/**
+ * Signing in on the PUBLIC site as an admin-group member also opens the ADMIN PANEL session, so
+ * the owner does not have to log in twice. The panel session keeps its OWN idle / absolute limits
+ * (admin_session_idle_minutes / admin_session_absolute_hours) — a "forever" site sign-in does NOT
+ * keep the panel open forever; after the idle window the panel asks for its login again.
+ */
+/**
+ * Bans and mutes whose moment has passed.
+ *
+ * Called from the account tick in the janitor. Nothing DEPENDS on this running — a `banned_until`
+ * in the past is already not in force, because everything that reads these columns compares them
+ * with NOW() — but a row that says "banned until last Tuesday" is a row somebody will misread, and
+ * an account that shows as banned in the panel a month after its week is over is a support mail.
+ */
+function userLiftExpiredPunishments(PDO $db): array {
+    $out = ['unbanned' => 0, 'unmuted' => 0];
+    try {
+        $st = $db->prepare("UPDATE users SET status = 'active', banned_until = NULL
+                             WHERE status = 'banned' AND banned_until IS NOT NULL AND banned_until < NOW() LIMIT 500");
+        $st->execute();
+        $out['unbanned'] = $st->rowCount();
+        $st2 = $db->prepare("UPDATE users SET pm_muted_until = NULL
+                              WHERE pm_muted_until IS NOT NULL AND pm_muted_until < NOW() LIMIT 500");
+        $st2->execute();
+        $out['unmuted'] = $st2->rowCount();
+    } catch (\Throwable $e) { /* a database that predates v55 */ }
+    return $out;
+}
+
+function userMaybeOpenPanelSession(PDO $db, array $user): void {
+    // BOTH conditions, which is what panelCan() downstream already assumes.
+    //
+    // This used to require admin-group membership, and it is the ONLY writer of
+    // $_SESSION['admin_via_user'] — so a user granted panel.access plus a handful of panel.*
+    // permissions never got a panel session, and the entire moderator permission map was
+    // unreachable by the audience it was written for. The feature existed and nobody could use it.
+    if (!userIsAdminGroup($db, (int)$user['id']) && !userHasPanelAccess($db, (int)$user['id'])) return;
+    // A second factor, where the operator has said one is required.
+    //
+    // Enforced HERE and nowhere else: the account still signs in, reads its messages and keeps its
+    // favourites — only the panel stays shut, and the account page says why and offers the switch.
+    // Refusing the sign-in itself would lock somebody out of their own account over a setting an
+    // administrator changed while they were asleep, which is how a requirement gets switched off.
+    if (function_exists('user2faRequiredFor')) {
+        $cfg2 = $GLOBALS['cfg'] ?? [];
+        $need = user2faRequiredFor($db, is_array($cfg2) ? $cfg2 : [], $user);
+        if ($need['required'] && !user2faEnabled($db, (int)$user['id'])) {
+            $_SESSION['panel_needs_2fa'] = true;
+            return;
+        }
+    }
+    // The PANEL's own second factor (Settings → Security), where the owner switched it on: a sign-in
+    // through the account must not be a way around it. An account with an armed member factor has
+    // shown one in this very sign-in; any other stays out of the panel until it arms one — the
+    // account page says so and offers the switch.
+    if (function_exists('twofaEnabled') && twofaEnabled()
+        && !(function_exists('user2faEnabled') && user2faEnabled($db, (int)$user['id']))) {
+        $_SESSION['panel_needs_2fa'] = true;
+        return;
+    }
+    unset($_SESSION['panel_needs_2fa']);
+    $_SESSION['loggedin'] = true;
+    $_SESSION['login_time'] = time();
+    $_SESSION['last_activity'] = time();
+    $_SESSION['admin_via_user'] = (int)$user['id'];
+}
+
+/**
+ * Issue a remember-me cookie (value "<id>.<64 hex>"; only the sha256 is stored). $expiresAt
+ * (unix) sets an absolute expiry — used by the login-duration choice and by token rotation
+ * (a rotated token keeps the original deadline); default = 30 days from now.
+ */
+function userRememberIssue(PDO $db, int $userId, ?int $expiresAt = null): void {
+    $expiresAt = $expiresAt ?? (time() + USER_REMEMBER_DAYS * 86400);
+    $token = bin2hex(random_bytes(32));
+    // WHERE this cookie went, so "signed in on N devices" can describe each one rather than showing
+    // a list of identical rows. Written on every rotation too, so the entry follows the cookie.
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at, ip, ua)
+                  VALUES (?, 'remember', ?, FROM_UNIXTIME(?), ?, ?)")
+       ->execute([$userId, hash('sha256', $token), $expiresAt,
+                  mb_substr((string)(function_exists('getClientIp') ? getClientIp($GLOBALS['cfg'] ?? []) : ''), 0, 45) ?: null,
+                  mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255) ?: null]);
+    // cookieBaseParams() reads $GLOBALS['cfg'] when it is not handed one — the pattern getClientIp()
+    // already uses. Deliberately NOT a new parameter on this function: its call site in
+    // userTryRememberLogin() is pinned by exact source text in tests/audit_fixes_test.php, and a
+    // fourth argument would have bought nothing but a broken suite and an edit to api/user_login.php.
+    setcookie(USER_REMEMBER_COOKIE, $userId . '.' . $token, cookieBaseParams(null, ['expires' => $expiresAt]));
+}
+
+function userRememberClear(PDO $db): void {
+    $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
+    if ($raw !== '' && preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m)) {
+        $db->prepare("DELETE FROM user_tokens WHERE type = 'remember' AND user_id = ? AND token_hash = ?")
+           ->execute([(int)$m[1], hash('sha256', $m[2])]);
+    }
+    if ($raw !== '') {
+        // The delete had NO `secure` key while the issue above set one, so the two disagreed about
+        // the cookie's attributes. Same params now, differing only in the expiry. A browser drops a
+        // Set-Cookie carrying Secure over a plain-HTTP request, so on such a request the deletion
+        // may not land — harmless, because the token row is deleted just above and what is left in
+        // the browser is a dead string.
+        setcookie(USER_REMEMBER_COOKIE, '', cookieBaseParams(null, ['expires' => time() - 3600]));
+        unset($_COOKIE[USER_REMEMBER_COOKIE]);
+    }
+}
+
+/** Try a remember-cookie login (called lazily from currentUser). Returns the user row or null. */
+function userTryRememberLogin(PDO $db): ?array {
+    $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
+    if ($raw === '' || !preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m)) return null;
+    // The token's own age is compared against the account's epoch below — a cookie issued before
+    // "sign out everywhere else" must not walk back in through this door.
+    $st = $db->prepare("SELECT user_id, UNIX_TIMESTAMP(expires_at) AS exp, UNIX_TIMESTAMP(created_at) AS born FROM user_tokens WHERE type = 'remember' AND user_id = ? AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st->execute([(int)$m[1], hash('sha256', $m[2])]);
+    $tok = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$tok) return null;
+    $u = userFindById($db, (int)$m[1]);
+    if (!$u || !userIsActive($u)) return null;
+    if ((int)($u['sessions_valid_from'] ?? 0) > (int)$tok['born']) return null;
+    // rotate: burn this token, hand out a fresh one (stolen-cookie replay shows up as a failed login)
+    $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE type = 'remember' AND user_id = ? AND token_hash = ?")
+       ->execute([(int)$m[1], hash('sha256', $m[2])]);
+    // privilege elevation — regenerate the session id exactly like the password login path does,
+    // so a pre-planted PHPSESSID (session fixation) never becomes an authenticated session
+    if (!headers_sent() && session_status() === PHP_SESSION_ACTIVE) session_regenerate_id(true);
+    $_SESSION['user_id'] = (int)$u['id'];
+    $_SESSION['user_login_time'] = time();
+    unset($_SESSION['user_expires_at']);   // the remember token's own expiry is the deadline now
+    // rotation keeps the ORIGINAL absolute expiry, so a "1 day" sign-in really ends after 1 day
+    if (!headers_sent()) userRememberIssue($db, (int)$u['id'], (int)$tok['exp']);
+    // AFTER the session id has been regenerated, or the panel flags land on the old session and are
+    // thrown away. A remember-me return is a sign-in; it must open the panel like one.
+    userMaybeOpenPanelSession($db, $u);
+    return $u;
+}
+
+/**
+ * The devices this account is signed in on, newest first.
+ *
+ * What the site actually KNOWS is remember-me tokens: one per browser that asked to be remembered,
+ * rotated on every return. A plain session with no cookie behind it leaves no row anywhere — PHP
+ * sessions are files on disk with no account in their name — so the list says what it can prove and
+ * the account page names the current browser separately rather than pretending to enumerate them.
+ *
+ * `current` marks the row this request's own cookie belongs to, because "which of these is me?" is
+ * the first question anybody asks of a list like this.
+ */
+function userSessionList(PDO $db, int $userId): array
+{
+    $mine = '';
+    $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
+    if ($raw !== '' && preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m) && (int)$m[1] === $userId) {
+        $mine = hash('sha256', $m[2]);
+    }
+    $st = $db->prepare("SELECT token_hash, ip, ua, UNIX_TIMESTAMP(created_at) AS created,
+                               UNIX_TIMESTAMP(expires_at) AS expires
+                          FROM user_tokens
+                         WHERE user_id = ? AND type = 'remember' AND used_at IS NULL AND expires_at >= NOW()
+                         ORDER BY created_at DESC LIMIT 50");
+    $st->execute([$userId]);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[] = [
+            // The hash never leaves the server: a caller that could name a token could revoke
+            // somebody else's. Rows are addressed by their position in this list instead.
+            'current' => $mine !== '' && hash_equals((string)$r['token_hash'], $mine),
+            'ip'      => $r['ip'] !== null ? (string)$r['ip'] : null,
+            'ua'      => $r['ua'] !== null ? (string)$r['ua'] : null,
+            'created' => (int)$r['created'],
+            'expires' => (int)$r['expires'],
+        ];
+    }
+    return $out;
+}
+
+/**
+ * End every session of this account except the one making the request.
+ *
+ * Two halves, and both are needed: the remember cookies go (so nothing can walk back in), and
+ * `sessions_valid_from` is stamped (so the sessions that are already open stop being honoured —
+ * see currentUser()). The current browser is kept by re-stamping its own login time afterwards and
+ * issuing it a fresh cookie, because the person doing this is not the one they are worried about.
+ *
+ * Returns how many remember tokens were destroyed.
+ */
+function userSignOutOthers(PDO $db, int $userId, bool $keepCurrent = true): int
+{
+    $keepHash = '';
+    $raw = (string)($_COOKIE[USER_REMEMBER_COOKIE] ?? '');
+    if ($keepCurrent && $raw !== '' && preg_match('/^(\d{1,10})\.([a-f0-9]{64})$/', $raw, $m) && (int)$m[1] === $userId) {
+        $keepHash = hash('sha256', $m[2]);
+    }
+    if ($keepHash !== '') {
+        $st = $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type = 'remember' AND token_hash <> ?");
+        $st->execute([$userId, $keepHash]);
+    } else {
+        $st = $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type = 'remember'");
+        $st->execute([$userId]);
+    }
+    $gone = $st->rowCount();
+    $now = time();
+    $db->prepare("UPDATE users SET sessions_valid_from = ? WHERE id = ?")->execute([$now, $userId]);
+    // This session survives its own sweep: the stamp is "everything older than now is over", and
+    // this request is now.
+    if ($keepCurrent && session_status() === PHP_SESSION_ACTIVE && (int)($_SESSION['user_id'] ?? 0) === $userId) {
+        $_SESSION['user_login_time'] = $now;
+        // The panel session this browser holds through the account survives on the same terms.
+        if ((int)($_SESSION['admin_via_user'] ?? 0) === $userId) $_SESSION['login_time'] = $now;
+    }
+    // The kept cookie was born before the stamp, and userTryRememberLogin() refuses exactly that the
+    // moment this PHP session lapses — so it is spent now and reissued with its own expiry. The
+    // browser that asked keeps walking back in; the others do not.
+    if ($keepHash !== '') {
+        $st = $db->prepare("SELECT UNIX_TIMESTAMP(expires_at) FROM user_tokens WHERE user_id = ? AND type = 'remember' AND token_hash = ?");
+        $st->execute([$userId, $keepHash]);
+        $exp = (int)($st->fetchColumn() ?: 0);
+        $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE user_id = ? AND type = 'remember' AND token_hash = ?")->execute([$userId, $keepHash]);
+        if ($exp > $now) userRememberIssue($db, $userId, $exp);
+    }
+    return $gone;
+}
+
+/** The logged-in user of this request, or null. Cached per request. */
+function currentUser(PDO $db): ?array {
+    if (!empty($GLOBALS['__current_user_loaded'])) return $GLOBALS['__current_user_cache'];
+    $GLOBALS['__current_user_loaded'] = true;
+    $GLOBALS['__current_user_cache'] = null;
+    if (session_status() !== PHP_SESSION_ACTIVE) return null;
+    $u = null;
+    if (!empty($_SESSION['user_expires_at']) && time() > (int)$_SESSION['user_expires_at']) {
+        // timed sign-in ("1 hour" / "1 day" / "30 days") ran out — drop the session, remember-me may take over
+        unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+    }
+    if (!empty($_SESSION['user_id'])) {
+        $u = userFindById($db, (int)$_SESSION['user_id']);
+        if ($u && !userIsActive($u)) { unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']); $u = null; }
+        // "Sign out everywhere else", and a password change, stamp users.sessions_valid_from. Any
+        // session that began before that instant is over — this is the only place that can end a
+        // session belonging to a browser we are not currently talking to.
+        //
+        // Both sides are unix times PHP wrote. The column is a BIGINT rather than a DATETIME for
+        // exactly that reason: a comparison between a clock the database keeps and a clock PHP keeps
+        // is a comparison this project has already got wrong once.
+        if ($u && (int)($u['sessions_valid_from'] ?? 0) > (int)($_SESSION['user_login_time'] ?? 0)) {
+            unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at']);
+            // … and the panel session that rode in on this account, when this is that browser.
+            if ((int)($_SESSION['admin_via_user'] ?? 0) === (int)$u['id']) {
+                unset($_SESSION['admin_via_user'], $_SESSION['loggedin'], $_SESSION['login_time'], $_SESSION['last_activity']);
+            }
+            $u = null;
+        }
+        // A session OPENED THROUGH THE BRIDGE ends when the far side says the person signed out
+        // over there. Only those: an ordinary sign-in on this site is not the forum's to end, and
+        // the flag is on the session, so nobody else's request grows a query for this.
+        //
+        // The remember-me fallback below is left alone deliberately. A bridged sign-in never issues
+        // a remember cookie, so for a purely bridged visitor there is nothing to fall back to; if
+        // one exists it is because this person also signed in here with their own password, and
+        // that credential is theirs, not the forum's to revoke.
+        if ($u && !empty($_SESSION['bridge_identity']) && function_exists('authBridgeSessionEnded')
+            && authBridgeSessionEnded($db)) {
+            unset($_SESSION['user_id'], $_SESSION['user_login_time'], $_SESSION['user_expires_at'],
+                  $_SESSION['bridge_identity'], $_SESSION['bridge_login_at']);
+            $u = null;
+        }
+    }
+    if ($u === null) $u = userTryRememberLogin($db);
+    $GLOBALS['__current_user_cache'] = $u;
+    return $u;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Groups + permissions
+// ─────────────────────────────────────────────────────────────────────────────
+
+function userGroupBySlug(PDO $db, string $slug): ?array {
+    $st = $db->prepare("SELECT * FROM user_groups WHERE slug = ?");
+    $st->execute([trim($slug)]);
+    $g = $st->fetch(PDO::FETCH_ASSOC);
+    return $g ?: null;
+}
+
+function userGroupPermissions(?string $json): array {
+    $p = json_decode((string)$json, true);
+    if (!is_array($p)) return [];
+    $out = [];
+    $known = userPermissionList();
+    foreach ($p as $k => $v) { if (isset($known[$k]) && $v) $out[$k] = true; }
+    return $out;
+}
+
+/**
+ * ACTIVE memberships of a user with the group rows joined (expired and not-yet-started ignored), the highest priority
+ * first.
+ *
+ * 1.74.0 (PERF-10): the columns its callers read and no others, put in order here rather than by the database — `g.*`
+ * with an ORDER BY made a temporary table of every call, on disk because of the TEXT column (2–3 ms each, eleven calls
+ * on one profile) — and kept for the rest of the request (userGroupsMemoRef()). The memo is forgotten together with the
+ * permission memo (userPermissionsForget()), which everything that changes a membership calls: userGrantGroup(),
+ * userRevokeGroup(), the janitor's expiry (usersTick()), the cascade, a group deleted.
+ */
+function userGroups(PDO $db, int $userId): array {
+    $memo = &userGroupsMemoRef();
+    if (isset($memo[$userId])) return $memo[$userId];
+    $st = $db->prepare(
+        "SELECT g.id, g.slug, g.name, g.description, g.color, g.priority, g.is_default, g.is_system, g.permissions,
+                m.granted_at, m.expires_at, m.granted_by, m.note
+         FROM user_group_members m JOIN user_groups g ON g.id = m.group_id
+         WHERE m.user_id = ? AND m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at >= NOW())");
+    $st->execute([$userId]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    // ORDER BY g.priority DESC, g.name — the name compared as the table's case-insensitive collation compares it.
+    usort($rows, static fn(array $a, array $b): int => ((int)$b['priority'] <=> (int)$a['priority'])
+        ?: strcmp(mb_strtolower((string)$a['name'], 'UTF-8'), mb_strtolower((string)$b['name'], 'UTF-8')));
+    return $memo[$userId] = $rows;
+}
+
+/** The per-request memo behind userGroups() (1.74.0) — reachable, so userPermissionsForget() can forget it. */
+function &userGroupsMemoRef(): array {
+    static $memo = [];
+    return $memo;
+}
+
+/** Every membership of a user, active or not (admin view / account page). */
+function userGroupsAll(PDO $db, int $userId): array {
+    $st = $db->prepare(
+        "SELECT g.slug, g.name, g.color, m.id AS member_id, m.group_id, m.granted_at, m.expires_at, m.granted_by, m.note,
+                (m.granted_at <= NOW() AND (m.expires_at IS NULL OR m.expires_at >= NOW())) AS active
+         FROM user_group_members m JOIN user_groups g ON g.id = m.group_id
+         WHERE m.user_id = ? ORDER BY g.priority DESC, g.name");
+    $st->execute([$userId]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as &$r) { $r['member_id'] = (int)$r['member_id']; $r['group_id'] = (int)$r['group_id']; $r['active'] = (bool)$r['active']; }
+    return $rows;
+}
+
+/**
+ * An address shortened to its network (1.74.0, PRIV-2): an IPv4 address to its /24 ("203.0.113.0/24"), an IPv6 one
+ * to its /48 ("2001:db8:1::/48"); '' stays '', and anything that is not an address becomes "—". What the panel's
+ * Users page shows the staff who may see the list but not edit accounts — enough to tell two networks apart, not
+ * enough to name a household.
+ */
+function userIpShort(?string $ip): string {
+    $ip = trim((string)$ip);
+    if ($ip === '') return '';
+    $bin = @inet_pton($ip);
+    if ($bin === false) return '—';
+    // An IPv4 address written the IPv6 way (::ffff:a.b.c.d) is the IPv4 address.
+    if (strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") $bin = substr($bin, 12);
+    if (strlen($bin) === 4) return (string)inet_ntop(substr($bin, 0, 3) . "\0") . '/24';
+    return (string)inet_ntop(substr($bin, 0, 6) . str_repeat("\0", 10)) . '/48';
+}
+
+/**
+ * Every membership of a user as a PARTNER site is told it (1.74.0, PRIV-7) — v1/users/lookup, the sign-in bridge's
+ * v1/auth/status and v1/auth/verify: which group (slug, name), from when, until when, in force or not. Never the
+ * panel's view (userGroupsAll()): the notes the operator and other partners wrote on a grant, who granted it and
+ * the rows' own ids are the panel's business — a second shop's key read the first one's notes.
+ */
+function userGroupsForPartner(PDO $db, int $userId): array {
+    return array_map(static fn(array $g): array => [
+        'slug' => (string)$g['slug'], 'name' => (string)$g['name'],
+        'granted_at' => $g['granted_at'], 'expires_at' => $g['expires_at'], 'active' => (bool)$g['active'],
+    ], userGroupsAll($db, $userId));
+}
+
+/**
+ * The per-request memo behind userEffectivePermissions(), reachable so it can be FORGOTTEN.
+ *
+ * It was a `static` inside that function, which made it unforgettable: a request that changed
+ * somebody's groups and then asked what they may do got the answer from before the change. Harmless
+ * on most panel endpoints, which answer and stop — and wrong in every place that grants and then
+ * renders, which is what v1/users/grant and api/admin/user_grant.php do.
+ */
+function &userPermCacheRef(): array {
+    static $cache = [];
+    return $cache;
+}
+
+/**
+ * Drop the memo for one account (0 = all of them). Called wherever a membership changes. The memberships themselves
+ * (userGroups(), 1.74.0) are forgotten with it — one call, so no caller can forget one and keep the other.
+ */
+function userPermissionsForget(int $userId = 0): void {
+    $cache = &userPermCacheRef();
+    $groups = &userGroupsMemoRef();
+    if ($userId <= 0) { $cache = []; $groups = []; return; }
+    unset($groups[$userId]);
+    foreach (array_keys($cache) as $k) {
+        // the key is the id, optionally followed by the verification flag: "7", "7|vt", "7|vu" — and PHP
+        // stores the plain "7" as the INTEGER key 7, so both sides are compared as strings (1.71.0: the
+        // strict `$k === '7'` never matched it, and with e-mail verification off an account's memo was
+        // never forgotten — a group changed in the request kept answering with the old permissions)
+        if ((string)$k === (string)$userId || str_starts_with((string)$k, $userId . '|')) unset($cache[$k]);
+    }
+}
+
+/**
+ * Effective permission set. Anonymous ($userId null) = the `guest` group. A signed-in user gets
+ * exactly the UNION of their active groups — guest is NOT inherited, so a logged-in user can have
+ * fewer permissions than an anonymous visitor if their groups are narrower. Membership in the
+ * system `admin` group grants every registered permission.
+ */
+function userEffectivePermissions(PDO $db, ?int $userId, ?array $cfg = null): array {
+    $cache = &userPermCacheRef();
+    $gate = $cfg !== null && userEmailVerifyRequired($cfg);
+    // the trusted flag is part of the cache key so verifying WITHIN a request (the ?action=verify
+    // page) immediately unlocks the groups — a plain per-user key would keep serving guest perms
+    $trusted = ($gate && $userId) ? userIsEmailTrusted($db, $userId) : true;
+    $key = (string)($userId ?? 0) . ($gate ? ($trusted ? '|vt' : '|vu') : '');
+    if (isset($cache[$key])) return $cache[$key];
+    $guestPerms = function () use ($db): array {
+        $guest = userGroupBySlug($db, 'guest');
+        return $guest ? userGroupPermissions($guest['permissions']) : [];
+    };
+    $perms = [];
+    if ($userId) {
+        $groups = userGroups($db, $userId);
+        $isAdmin = false;
+        foreach ($groups as $g) if ($g['slug'] === 'admin') { $isAdmin = true; break; }
+        if ($isAdmin) {   // site admins pass every check, current and future (verification gate included)
+            $perms = array_fill_keys(array_keys(userPermissionList()), true);
+        } elseif ($gate && !$trusted) {
+            // verification required but the address is missing/unconfirmed → guest level until the
+            // link in the mailbox is clicked (the account page itself stays reachable)
+            $perms = $guestPerms();
+        } else {
+            foreach ($groups as $g) $perms += userGroupPermissions($g['permissions']);
+        }
+    } else {
+        $perms = $guestPerms();
+    }
+    return $cache[$key] = $perms;
+}
+
+/** Does this user have a verified address? (used by the email-verification gate) */
+function userIsEmailTrusted(PDO $db, int $userId): bool {
+    $u = userFindById($db, $userId);
+    return $u !== null && trim((string)($u['email'] ?? '')) !== '' && (int)$u['email_verified'] === 1;
+}
+
+/**
+ * Everything that belongs to one account, removed with it.
+ *
+ * api/admin/user_delete.php used to list the tables inline, which meant every new table that holds a
+ * user_id had to be remembered THERE. It was not: `hash_votes` keeps its voter as
+ * (voter_type='user', voter_key=<id>), so a deleted account's votes stayed in the table and went on
+ * counting towards every score they had touched — a live bug, not a hypothesis, and one no test
+ * could have caught because nothing named the invariant.
+ *
+ * One function, one place to add the next table. Returns what it removed, so the caller can say.
+ *
+ * 1.73.0 checked every account column in the schema against this list, and it had missed three: the second
+ * factor (`user_twofa` — the TOTP secret and the recovery hashes stayed behind), the "…is typing" rows, and a
+ * bulk mail still QUEUED for the account (the janitor would have mailed somebody whose account was gone). The
+ * v91 migration removes what the missing lines left behind (trackerSchemaDataMigrations()). Kept ON PURPOSE,
+ * and why: the audit log (a record of what happened); a partner shop's order rows (`user_group_orders` — the
+ * shop's ledger and its replay guard: an order id must never grant twice); a moderator's stamps on other
+ * people's shouts and the uploader of an emote (raw ids compared, shout.php — a NULL uploader means "the
+ * panel's"); the address-keyed mail preferences (`email_preferences`, `unsubscribed_emails` — the address
+ * holder's choice, which report mails honour too); the whitelist rows and the descriptions, unlinked below.
+ *
+ * $cfg (1.73.0) is for the ratings: the votes go, and the totals stored on the catalogue rows are counted again
+ * in the site's mode (repRecount()) — they went on counting the deleted votes until somebody voted on that hash
+ * again. Without $cfg the settings are read here.
+ */
+function userDeleteCascade(PDO $db, int $userId, ?array $cfg = null): array {
+    $gone = [];
+    $del = function (string $sql, array $args, string $label) use ($db, &$gone) {
+        try {
+            $st = $db->prepare($sql);
+            $st->execute($args);
+            $n = $st->rowCount();
+            if ($n > 0) $gone[$label] = $n;
+        } catch (\Throwable $e) { /* a table this install does not have yet is not a failure */ }
+    };
+    $del("DELETE FROM user_group_members WHERE user_id = ?", [$userId], 'groups');
+    // the shoutbox (v63): the mentions of others in this account's lines, this account's own mentions, the lines
+    $del("DELETE FROM shout_mentions WHERE shout_id IN (SELECT id FROM shouts WHERE user_id = ?)", [$userId], 'shout mentions');
+    $del("DELETE FROM shout_mentions WHERE user_id = ?", [$userId], 'mentions');
+    $del("DELETE FROM shouts WHERE user_id = ?", [$userId], 'shouts');
+    $del("DELETE FROM user_notifications WHERE user_id = ?", [$userId], 'notifications');
+    $del("UPDATE hash_tag_log SET user_id = NULL WHERE user_id = ?", [$userId], 'tag log');
+    $del("UPDATE hash_tags SET added_by = NULL WHERE added_by = ?", [$userId], 'tags added');
+    $del("DELETE FROM tag_favourites WHERE user_id = ?", [$userId], 'favourite tags');
+    $del("DELETE FROM tag_cat_suggestions WHERE user_id = ?", [$userId], 'category suggestions');
+    $del("DELETE FROM wl_request_votes WHERE user_id = ?", [$userId], 'whitelist request votes');
+    $del("UPDATE wl_requests SET user_id = 0 WHERE user_id = ?", [$userId], 'whitelist requests');
+    // …and what it SENT that sits in other people's notifications (1.74.0, PRIV-1): a friend request or its acceptance
+    // names the account and nothing else, so it goes with it (v93 `sender_id`). What its comments said is emptied below,
+    // with the comments (commentForgetAccount()).
+    $del("DELETE FROM user_notifications WHERE sender_id = ? AND type IN ('friend_request', 'friend_accepted')", [$userId], 'notifications_sent');
+    $del("DELETE FROM user_tokens WHERE user_id = ?", [$userId], 'tokens');
+    $del("DELETE FROM user_favourites WHERE user_id = ?", [$userId], 'favourites');
+    // Lists, and the rows inside them. The items are keyed by list, not by user, so they have to go
+    // FIRST — deleting the lists first would leave orphans keyed to ids that no longer exist, and
+    // nothing would ever look at them again to notice.
+    $del("DELETE i FROM user_list_items i JOIN user_lists l ON l.id = i.list_id WHERE l.user_id = ?", [$userId], 'list_items');
+    $del("DELETE FROM user_lists WHERE user_id = ?", [$userId], 'lists');
+    // Everything that was between this account and somebody else. The messages go with the threads
+    // — a conversation with a gap where one side used to be is not a conversation anybody can read
+    // — and the reports go with the messages they point at, because a queue whose rows name a
+    // message that no longer exists is a queue nobody can work.
+    // "…is typing" (v54): the account's own rows and the other side's in its conversations — before the
+    // threads they are keyed by go. Pure state that expires in seconds, but a row of a deleted account all the same.
+    $del("DELETE FROM message_typing WHERE user_id = ?
+           OR thread_id IN (SELECT id FROM message_threads WHERE u_low = ? OR u_high = ?)", [$userId, $userId, $userId], 'typing');
+    $del("DELETE r FROM message_reports r JOIN message_threads t ON t.id = r.thread_id
+           WHERE t.u_low = ? OR t.u_high = ?", [$userId, $userId], 'message_reports');
+    $del("DELETE m FROM user_messages m JOIN message_threads t ON t.id = m.thread_id
+           WHERE t.u_low = ? OR t.u_high = ?", [$userId, $userId], 'messages');
+    $del("DELETE FROM message_threads WHERE u_low = ? OR u_high = ?", [$userId, $userId], 'threads');
+    $del("DELETE FROM user_friends WHERE user_id = ? OR friend_id = ?", [$userId, $userId], 'friends');
+    $del("DELETE FROM user_blocks WHERE user_id = ? OR blocked_id = ?", [$userId, $userId], 'blocks');
+    // The pair, not an id column: hash_votes identifies a voter as a type plus a key, because an
+    // anonymous vote is keyed by an IP bucket instead. The hashes it voted on are noted first: their stored
+    // totals (what a search listing shows) are counted again once the votes are gone (1.73.0).
+    $votedOn = [];
+    try {
+        $vs = $db->prepare("SELECT DISTINCT info_hash FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?");
+        $vs->execute([(string)$userId]);
+        $votedOn = $vs->fetchAll(PDO::FETCH_COLUMN);
+    } catch (\Throwable $e) { /* a table this install does not have yet */ }
+    $del("DELETE FROM hash_votes WHERE voter_type = 'user' AND voter_key = ?", [(string)$userId], 'votes');
+    if ($votedOn) {
+        if (!function_exists('repRecount') && is_file(__DIR__ . '/reputation.php')) require_once __DIR__ . '/reputation.php';
+        if (function_exists('repRecount')) {
+            $repCfg = $cfg ?? (function_exists('getSettings') ? getSettings($db) : []);
+            foreach ($votedOn as $vh) {
+                try { repRecount($db, (string)$vh, $repCfg); } catch (\Throwable $e) { /* the next vote counts it again */ }
+            }
+        }
+    }
+    // The bridge links and any ticket still outstanding. Leaving an identity behind would leave a
+    // partner able to open a session for an account that no longer exists — the row would point at
+    // a gap, and the next bridged sign-in for that external id would find it and fail confusingly
+    // rather than making the person a new account.
+    $del("DELETE FROM user_identities WHERE user_id = ?", [$userId], 'bridge_links');
+    $del("DELETE FROM auth_handoffs WHERE user_id = ?", [$userId], 'bridge_tickets');
+    // The picture (source and every cut size) and the cover (v69). Their addresses carry no account
+    // id, so a row left behind would go on answering at an address somebody may still have — the
+    // image of a person who asked to be removed, served by a site that says they are gone.
+    $del("DELETE FROM user_media WHERE user_id = ?", [$userId], 'pictures');
+    $del("UPDATE images SET user_id = NULL, name = '' WHERE user_id = ?", [$userId], 'images_unlinked');
+    $del("UPDATE image_removals SET user_id = NULL, name = '' WHERE user_id = ?", [$userId], 'image_removals_unlinked');
+    $del("DELETE FROM image_uploads WHERE user_id = ?", [$userId], 'image_uploads');
+    // Submissions are NOT deleted — a whitelist row is a torrent the tracker serves, and deleting an
+    // account is not a reason to stop serving it. The attribution goes, so it stops appearing on a
+    // profile that no longer exists.
+    $del("UPDATE whitelist SET submitter_id = NULL, submitter_public = 0 WHERE submitter_id = ?", [$userId], 'submissions_unlinked');
+    // Descriptions are not deleted either (1.70.0) — they are the torrent's — but the account stops
+    // being their author of record, its credits read "a deleted account", and its proposals stop naming
+    // it (includes/content.php). An id MySQL 5.7 hands out again after a restart inherits none of it.
+    if (function_exists('contentForgetAccount')) {
+        $n = contentForgetAccount($db, $userId);
+        if ($n > 0) $gone['descriptions_unlinked'] = $n;
+    }
+    // Comments (v83) ARE deleted — the person's own words in a conversation, like their shouts and
+    // messages, not the torrent's the way a description is — and every moderation stamp that names the
+    // account (a comment it edited, took down or let through) forgets it (includes/comments.php). Since
+    // v88 a comment of theirs that OTHER people replied to stays as a tombstone instead — "[deleted]", no
+    // author, no words — so the replies under it keep their place and their sense.
+    if (function_exists('commentForgetAccount')) {
+        foreach (commentForgetAccount($db, $userId, $cfg) as $label => $n) if ($n > 0) $gone[$label] = $n;
+    }
+    // Reports and warnings (v84, includes/reports.php). The reports this account FILED go — a report is its
+    // reporter's word, and it is answered to them. So do the reports ABOUT its comments and shouts, which went
+    // with it above (nothing is left to judge); a report about a description it wrote stays with the torrent's
+    // words, as the description does, and forgets whose they were. Its warnings go with it; a warning it GAVE
+    // as a moderator forgets the account and keeps the name (as the audit log does).
+    $del("DELETE FROM content_reports WHERE reporter_id = ?", [$userId], 'reports_filed');
+    $del("DELETE FROM content_reports WHERE author_id = ? AND kind IN ('comment','shout')", [$userId], 'reports_about');
+    $del("UPDATE content_reports SET author_id = NULL WHERE author_id = ?", [$userId], 'reports_unlinked');
+    $del("DELETE FROM user_warnings WHERE user_id = ?", [$userId], 'warnings');
+    $del("UPDATE user_warnings SET by_id = NULL WHERE by_id = ?", [$userId], 'warnings_given_unlinked');
+    // …and one it REVOKED (v94, 1.75.0): the same — the name stays, the account id goes.
+    $del("UPDATE user_warnings SET revoked_by_id = NULL WHERE revoked_by_id = ?", [$userId], 'warnings_revoked_unlinked');
+    // The anti-spam layer's state for the account (v85, includes/antispam.php): its pace, its last words.
+    $del("DELETE FROM antispam_state WHERE subject = ?", ['u:' . $userId], 'antispam');
+    // The second factor (v53, includes/user2fa.php): the TOTP secret and the recovery codes' hashes — the most
+    // sensitive row the schema holds. Missed until 1.73.0.
+    $del("DELETE FROM user_twofa WHERE user_id = ?", [$userId], 'second_factor');
+    // A bulk mail still waiting for this account is not sent (1.73.0): skipped, the way bulkCancelBatch()
+    // stops a batch, so the batch's counts still add up. Sent and failed rows are history the janitor prunes
+    // after a fortnight (bulkPrune()).
+    $del("UPDATE mail_queue SET status = 'skipped', last_error = 'account deleted' WHERE user_id = ? AND status = 'queued'",
+         [$userId], 'mail_skipped');
+    $del("DELETE FROM users WHERE id = ?", [$userId], 'user');
+    userPermissionsForget($userId);   // its memberships are gone: nothing in this request answers from before
+    return $gone;
+}
+
+/** Is this user an ACTIVE member of the system `admin` group? */
+function userIsAdminGroup(PDO $db, int $userId): bool {
+    foreach (userGroups($db, $userId) as $g) if ($g['slug'] === 'admin') return true;
+    return false;
+}
+
+/**
+ * Is this the ROOT admin — the panel admin mirrored into the user list (username matches the
+ * panel's admin_username)? The root admin can never be deleted, banned or stripped of the admin
+ * group from the user browser (that would lock the owner out of their own site).
+ */
+function userIsRootAdmin(array $user, array $cfg): bool {
+    $panel = trim((string)($cfg['admin_username'] ?? ''));
+    return $panel !== '' && hash_equals($panel, (string)($user['username'] ?? ''));
+}
+
+/**
+ * THE permission check. The owner's own panel session → always true. Users feature off → the legacy public
+ * behaviour. Otherwise: the guest group for anonymous visitors, the union of the signed-in user's
+ * groups for everyone else (see userEffectivePermissions).
+ *
+ * A panel session OPENED THROUGH AN ACCOUNT (`admin_via_user`, userMaybeOpenPanelSession()) is that account, on the
+ * site as in the panel (1.74.0, AUTH-1): what its groups give — the admin group's blanket included, as panelCan()
+ * reads it — and nothing more. Until 1.74.0 every panel session passed every check here, so a moderator whose group
+ * gave `panel.access` and one queue was, on the public pages, everybody: deleting anybody's emotes, reading every
+ * profile, any public permission at all — while panelCan() in the panel itself refused them.
+ */
+function userCan(PDO $db, array $cfg, string $perm): bool {
+    if (function_exists('isLoggedIn') && isLoggedIn()) {
+        $via = (int)($_SESSION['admin_via_user'] ?? 0);
+        if ($via <= 0) return true;                       // the owner's own (classic) panel session
+        if (userIsAdminGroup($db, $via)) return true;     // panelCan()'s shortcut, for the same account
+        return userIdHasPermission($db, $cfg, $via, $perm);
+    }
+    if (!usersEnabled($cfg)) return userLegacyDefault($perm);
+    $u = currentUser($db);
+    $perms = userEffectivePermissions($db, $u ? (int)$u['id'] : null, $cfg);
+    return !empty($perms[$perm]);
+}
+
+/**
+ * Does a NAMED user hold a permission — not the caller.
+ *
+ * userCan() answers about whoever is asking, which is the wrong question when a page has to decide
+ * what somebody ELSE's profile may show. A stale checkbox on a row must not outlive the group that
+ * allowed it: an operator who takes `favourites.public` away from a group means it, and a list that
+ * kept showing because a `fav_public` column still said 1 would be the checkbox overruling them.
+ */
+function userIdHasPermission(PDO $db, array $cfg, int $userId, string $perm): bool {
+    if (!usersEnabled($cfg)) return userLegacyDefault($perm);
+    if ($userId <= 0) return false;
+    $perms = userEffectivePermissions($db, $userId, $cfg);
+    return !empty($perms[$perm]);
+}
+
+/** Does this user hold panel.access through any of their active groups? */
+function userHasPanelAccess(PDO $db, int $userId): bool {
+    // With the configuration, so the e-mail verification gate applies here as it does in
+    // userIdHasPermission(): an unverified account in a panel group is a guest everywhere, not a
+    // guest on the site and a moderator in the panel.
+    $cfg = $GLOBALS['cfg'] ?? null;
+    $p = userEffectivePermissions($db, $userId, is_array($cfg) ? $cfg : null);
+    return !empty($p['panel.access']);
+}
+
+/**
+ * THE PANEL permission check. Deliberately NOT userCan().
+ *
+ * userCan() let the owner's panel session pass every check — right for the public site (the owner should see
+ * everything) and catastrophic here, where the question is which part of the PANEL a session may work. Until
+ * 1.74.0 it let ANY panel session pass, a moderator's too; since then it reads a session opened through an account
+ * as that account (AUTH-1), the same way this function does.
+ *
+ * So this asks a different question. A CLASSIC panel session — signed in with the owner's password —
+ * keeps its total bypass; there is one owner and the panel is theirs. A session opened by
+ * piggy-backing on a user sign-in resolves that user's effective permissions, and gets exactly
+ * those. Anything not granted is denied, including every id that does not exist.
+ */
+function panelCan(PDO $db, array $cfg, string $perm): bool {
+    if (empty($_SESSION['loggedin'])) return false;
+    $viaUser = (int)($_SESSION['admin_via_user'] ?? 0);
+    if ($viaUser <= 0) return true;                 // the owner's own session
+    if (userIsAdminGroup($db, $viaUser)) return true;
+    $p = userEffectivePermissions($db, $viaUser, $cfg);   // the same gate userIdHasPermission() applies
+    return !empty($p[$perm]);
+}
+
+/**
+ * ONE membership row, active or expired, or null when there is none.
+ *
+ * The shop API needs the difference between "no membership" and "a permanent membership", and
+ * fetchColumn() on expires_at cannot tell them apart — both answer NULL. So the row, and the caller
+ * asks `$row === null` rather than guessing. Expired rows are returned too: they are what a renewal
+ * extends from, and usersTick() has not necessarily swept them yet.
+ */
+function userMembership(PDO $db, int $userId, int $groupId): ?array {
+    $st = $db->prepare("SELECT id, granted_at, expires_at, granted_by, note FROM user_group_members
+                         WHERE user_id = ? AND group_id = ?");
+    $st->execute([$userId, $groupId]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * Grant (or extend) a group. $expiresAt = 'Y-m-d H:i:s' or null (permanent). On an existing
+ * membership the new expiry REPLACES the old one (callers implementing "extend by duration"
+ * compute the new date from max(now, old expiry) themselves — see userDurationExpiry()).
+ * Returns the membership summary. Sends an in-app notification unless $notify = false.
+ */
+function userGrantGroup(PDO $db, int $userId, int $groupId, ?string $expiresAt, string $grantedBy = '', string $note = '', bool $notify = true, ?string $grantedAt = null): array {
+    $db->prepare(
+        "INSERT INTO user_group_members (user_id, group_id, granted_at, expires_at, granted_by, note)
+         VALUES (?, ?, COALESCE(?, NOW()), ?, ?, ?)
+         ON DUPLICATE KEY UPDATE granted_at = VALUES(granted_at), expires_at = VALUES(expires_at),
+                                 granted_by = VALUES(granted_by), note = VALUES(note), warned_at = NULL")
+       ->execute([$userId, $groupId, $grantedAt, $expiresAt, mb_substr($grantedBy, 0, 64), mb_substr($note, 0, 255)]);
+    userPermissionsForget($userId);   // this request must not go on answering from before the grant
+    $g = $db->prepare("SELECT name, slug FROM user_groups WHERE id = ?");
+    $g->execute([$groupId]);
+    $group = $g->fetch(PDO::FETCH_ASSOC) ?: ['name' => '?', 'slug' => '?'];
+    if ($notify) {
+        // In the member's language (1.74.0, QUAL-18) — the request granting it is usually the panel's or a shop's.
+        $lang = recipientLangOf($db, null, $userId);
+        userNotify($db, $userId, 'group-granted', langFor($lang, 'notify.group_granted', ['group' => $group['name']]),
+            userGrantSentence($lang, $grantedAt, $expiresAt, $note, ' '));
+    }
+    return ['group' => $group['slug'], 'granted_at' => $grantedAt, 'expires_at' => $expiresAt];
+}
+
+/**
+ * "Access granted from … until …. Note: …" in one language (1.74.0): the notification's body above, and the body of
+ * the mail the panel and a shop may send with a grant (api/admin/user_grant.php, api/v1/users_grant.php). $glue
+ * joins the note on: a space in a notification, a new line in a mail.
+ */
+function userGrantSentence(string $lang, ?string $grantedAt, ?string $expiresAt, string $note = '', string $glue = ' '): string {
+    $key = 'notify.group_granted_' . ($grantedAt !== null ? 'from_' : '') . ($expiresAt === null ? 'permanent' : 'until');
+    $s = langFor($lang, $key, ['from' => (string)$grantedAt, 'until' => (string)$expiresAt]);
+    return $note !== '' ? $s . $glue . langFor($lang, 'notify.group_note', ['note' => $note]) : $s;
+}
+
+function userRevokeGroup(PDO $db, int $userId, int $groupId, bool $notify = true): bool {
+    $g = $db->prepare("SELECT name FROM user_groups WHERE id = ?");
+    $g->execute([$groupId]);
+    $name = (string)($g->fetchColumn() ?: '?');
+    $st = $db->prepare("DELETE FROM user_group_members WHERE user_id = ? AND group_id = ?");
+    $st->execute([$userId, $groupId]);
+    userPermissionsForget($userId);   // and not from before the revoke either
+    if ($st->rowCount() > 0 && $notify) {
+        userNotify($db, $userId, 'group-revoked', langFor(recipientLangOf($db, null, $userId), 'notify.group_revoked', ['group' => $name]));
+        return true;
+    }
+    return $st->rowCount() > 0;
+}
+
+/**
+ * Map a duration code to the new expiry, extending from the current membership when present.
+ * A membership that is already PERMANENT (expires_at NULL) stays permanent — a duration grant
+ * must never downgrade it to a timed one (repeat shop purchases would otherwise revoke access).
+ */
+function userDurationExpiry(PDO $db, int $userId, int $groupId, string $duration): ?string {
+    $map = ['1d' => 'P1D', '7d' => 'P7D', '14d' => 'P14D', '1m' => 'P1M', '3m' => 'P3M', '6m' => 'P6M', '1y' => 'P1Y'];
+    if ($duration === 'permanent') return null;
+    if (!isset($map[$duration])) return '';   // '' = invalid (distinguish from null = permanent)
+    $st = $db->prepare("SELECT expires_at FROM user_group_members WHERE user_id = ? AND group_id = ?");
+    $st->execute([$userId, $groupId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);      // fetchColumn() can't tell "no row" from "NULL expiry"
+    if ($row && $row['expires_at'] === null) return null;   // already permanent — keep it
+    $base = new DateTime();
+    if ($row && $row['expires_at'] !== null) {
+        $curDt = new DateTime((string)$row['expires_at']);
+        if ($curDt > $base) $base = $curDt;    // extend, don't restart
+    }
+    $base->add(new DateInterval($map[$duration]));
+    return $base->format('Y-m-d H:i:s');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The shop side of memberships (v71): who is being bought for, was it worth
+// anything, and has this order been seen before
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * WHICH ACCOUNT a machine-to-machine call means. Exactly one of three, and never two.
+ *
+ *   login        username or email, as v1/users/grant has always taken it
+ *   user_id      this tracker's own id, for a shop that stored it at the first sale
+ *   external_id  the id in the CALLER's system, resolved through the sign-in bridge's identity
+ *                table FOR THIS KEY — two shops numbering their customers from 1 are two people,
+ *                which is why the lookup is keyed by (client_id, external_id) and not by the id
+ *                alone.
+ *
+ * Exactly one, because "login and user_id, and they disagree" has no honest answer: picking either
+ * one means a shop's typo silently sells a month to somebody else's account.
+ *
+ * Returns ['user' => row] or ['error' => code, 'status' => http].
+ */
+function userApiTarget(PDO $db, array $client, array $payload): array {
+    $login = trim((string)($payload['login'] ?? ''));
+    $uid   = (int)($payload['user_id'] ?? 0);
+    $ext   = trim((string)($payload['external_id'] ?? ''));
+    $given = ($login !== '' ? 1 : 0) + ($uid > 0 ? 1 : 0) + ($ext !== '' ? 1 : 0);
+    if ($given === 0) return ['error' => 'identity_required', 'status' => 422];
+    if ($given > 1)   return ['error' => 'identity_ambiguous', 'status' => 422];
+    if ($login !== '') {
+        $u = userFindByLogin($db, $login);
+    } elseif ($uid > 0) {
+        $u = userFindById($db, $uid);
+    } else {
+        if (!function_exists('authIdentityFind')) return ['error' => 'bridge_unavailable', 'status' => 503];
+        $ident = authIdentityFind($db, (int)($client['id'] ?? 0), $ext);
+        $u = $ident ? userFindById($db, (int)$ident['user_id']) : null;
+    }
+    if (!$u) return ['error' => 'user_not_found', 'status' => 404];
+    return ['user' => $u];
+}
+
+/**
+ * Is a grant worth anything to this account RIGHT NOW, and if not, why?
+ *
+ * A shop needs to be able to tell its customer. Two things make a perfectly recorded grant do
+ * nothing: an account whose address is not confirmed sits at guest level whatever its groups say
+ * (userEffectivePermissions), and a banned account is not signed in at all. Both are the site's
+ * doing, both are fixable by the person, and neither is a reason to refuse the order — the
+ * membership is written either way, and starts working the moment the obstacle goes.
+ */
+function userGrantEffective(PDO $db, array $cfg, array $u): array {
+    if (!userIsActive($u)) return ['effective' => false, 'reason' => 'banned'];
+    if (userEmailVerifyRequired($cfg) && !userIsEmailTrusted($db, (int)$u['id'])) {
+        return ['effective' => false, 'reason' => 'email_unverified'];
+    }
+    return ['effective' => true, 'reason' => ''];
+}
+
+/** An order this key has already sent, whatever became of it. NULL = never seen. */
+function userOrderFind(PDO $db, int $clientId, string $orderId): ?array {
+    if ($clientId <= 0 || $orderId === '') return null;
+    $st = $db->prepare("SELECT * FROM user_group_orders WHERE client_id = ? AND order_id = ? LIMIT 1");
+    $st->execute([$clientId, $orderId]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * Claim an order id, atomically. True = this call is the first and must do the work; false = the
+ * shop is retrying and the caller replays what userOrderFind() holds.
+ *
+ * INSERT IGNORE against UNIQUE(client_id, order_id) rather than "look, then write": two retries
+ * arriving together both pass a SELECT and both grant a month. The database decides instead, and
+ * the answer is the number of rows it accepted. The computed expiry is written IN this statement,
+ * so the row a loser reads is already complete — there is no window where a retry finds a claimed
+ * order with nothing in it.
+ */
+function userOrderClaim(PDO $db, array $row): bool {
+    $ins = $db->prepare(
+        "INSERT IGNORE INTO user_group_orders
+            (client_id, order_id, user_id, group_id, action, duration, `until`, prev_member, prev_expires_at, new_expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $ins->execute([
+        (int)$row['client_id'], (string)$row['order_id'], (int)$row['user_id'], (int)$row['group_id'],
+        (string)($row['action'] ?? 'grant'), mb_substr((string)($row['duration'] ?? ''), 0, 16),
+        $row['until'] ?? null, !empty($row['prev_member']) ? 1 : 0,
+        $row['prev_expires_at'] ?? null, $row['new_expires_at'] ?? null,
+    ]);
+    return $ins->rowCount() === 1;
+}
+
+/** An order id a shop may send: printable, and short enough for the column that makes it unique. */
+function userValidOrderId(string $id): bool {
+    return $id !== '' && strlen($id) <= 64 && preg_match('/^[\x21-\x7e][\x20-\x7e]{0,62}[\x21-\x7e]$|^[\x21-\x7e]$/', $id) === 1;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * THE LANGUAGE OF WHAT AN ACCOUNT RECEIVES (1.74.0, QUAL-18 / QUAL-15) — a notification, a mail. Decided when it is
+ * written, by its RECIPIENT, never by whichever request happens to write it (includes/lang.php: "Mail sent to a user
+ * has to speak that user's language"): until 1.74.0 a friend request arrived in the sender's language and the group,
+ * password and e-mail notices and mails in English. In this order:
+ *   1. the account's own language (Account → Language), while the site still offers it;
+ *   2. when the account is the one making this request — signing up, setting its address, switching on two factors —
+ *      the language this request is in: an account that never chose one reads the site in whatever the request
+ *      resolved to (its cookie, its browser), and a welcome in another language would contradict the page under it;
+ *   3. the site's default (`default_language` — not "auto": a browser that is not here cannot be asked);
+ *   4. English.
+ * The ONE helper — comments and reports had a copy each until 1.74.0 (commentLangFor(), reportLangFor()). $user is
+ * any row with `id` and `language`; null is nobody in particular (a report's sender, who has no account): the site's.
+ */
+function recipientLang(array $cfg, ?array $user): string
+{
+    $ok = static fn(string $c): bool => $c !== '' && function_exists('langSupported') && langSupported($cfg, $c);
+    $mine = strtolower(trim((string)($user['language'] ?? '')));
+    if ($ok($mine)) return $mine;
+    $uid = (int)($user['id'] ?? 0);
+    // langInit() has run (a request with a language of its own, not the CLI) and this request is the account's own.
+    if ($uid > 0 && isset($_SESSION) && is_array($_SESSION) && (int)($_SESSION['user_id'] ?? 0) === $uid
+        && !empty($GLOBALS['__lang']['current']) && function_exists('langCurrent')) {
+        $now = strtolower(langCurrent());
+        if ($ok($now)) return $now;
+    }
+    $site = strtolower(trim((string)($cfg['default_language'] ?? '')));
+    if ($site !== 'auto' && $ok($site)) return $site;
+    return defined('LANG_FALLBACK') ? LANG_FALLBACK : 'en';
+}
+
+/** recipientLang() for an account known by its id — one narrow read. $cfg null: the request's (`$GLOBALS['cfg']`). */
+function recipientLangOf(PDO $db, ?array $cfg, int $userId): string
+{
+    $cfg = $cfg ?? (is_array($GLOBALS['cfg'] ?? null) ? $GLOBALS['cfg'] : []);
+    $row = null;
+    if ($userId > 0) {
+        try {
+            $st = $db->prepare("SELECT id, language FROM users WHERE id = ?");
+            $st->execute([$userId]);
+            $row = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+        } catch (\Throwable $e) { $row = null; }
+    }
+    return recipientLang($cfg, $row);
+}
+
+/**
+ * One notification. `$link` (v83) is where it happened, as a SITE-RELATIVE address the account page offers
+ * as a button — `?action=…` and nothing else: anything that is not one is dropped rather than stored, so
+ * this column can never carry an off-site address or a script into the page. It is written only when there
+ * is one, so every caller from before it (and a database whose migration has not run) is untouched.
+ *
+ * `$senderId` (v93, 1.74.0) is the account it is FROM, where one is — a friend request, its acceptance — so that it
+ * goes with that account (userDeleteCascade()) instead of naming a deleted person for a year, and so a second request
+ * is not announced while the first is unread (api/user_people.php). Written only when given, like the link.
+ *
+ * `$rich` / `$richFormat` (v94, 1.75.0) are words that HAVE a format — a moderator's reason or answer written in BBCode
+ * or Markdown — kept as their SOURCE beside it, up to 60 000 bytes. `$body` stays the plain text with its localized
+ * lead-ins (the count of a warning, "the moderator wrote:"), so no sentence of ours ever has to be escaped into a
+ * markup; the account page draws the rich words under it (api/user_notifications.php renders them when they are
+ * read, with our own renderer — an HTML notification goes through the sanitizer and a frame). Written only when
+ * there is something and the format is one of the three, like the link.
+ *
+ * Write the title and the body in the RECIPIENT's language (recipientLang()) — never a literal, never __(): a
+ * notification is stored as words, and the request that writes it is usually somebody else's.
+ */
+function userNotify(PDO $db, int $userId, string $type, string $title, string $body = '', ?string $link = null, ?int $senderId = null,
+                    ?string $rich = null, ?string $richFormat = null): void {
+    $link = ($link !== null && preg_match('/^\?action=[A-Za-z0-9_\-]+(?:&[A-Za-z0-9_\-]+=[A-Za-z0-9_.\-%]*)*(?:#[A-Za-z0-9_\-]+)?$/', $link)
+             && strlen($link) <= 255) ? $link : null;
+    $cols = ['user_id', 'type', 'title', 'body'];
+    $vals = [$userId, mb_substr($type, 0, 32), mb_substr($title, 0, 190), $body !== '' ? $body : null];
+    if ($link !== null) { $cols[] = 'link'; $vals[] = $link; }
+    $plainCols = $cols; $plainVals = $vals;      // without the rich words: for a database whose v94 has not run yet
+    if ($rich !== null && trim($rich) !== '' && in_array($richFormat, array_merge(function_exists('richtextRichFormats') ? richtextRichFormats() : [], ['html']), true)) {
+        $rich = trim($rich);
+        if (strlen($rich) > 60000) $rich = rtrim(mb_strcut($rich, 0, 60000, 'UTF-8'));
+        $cols[] = 'rich'; $vals[] = $rich;
+        $cols[] = 'rich_format'; $vals[] = $richFormat;
+    }
+    $insert = static function (array $cols, array $vals) use ($db): void {
+        $db->prepare("INSERT INTO user_notifications (" . implode(', ', $cols) . ") VALUES ("
+                     . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute($vals);
+    };
+    if ($senderId !== null && $senderId > 0) {
+        try {
+            $insert(array_merge($cols, ['sender_id']), array_merge($vals, [$senderId]));
+            return;
+        } catch (PDOException $e) {
+            // A database whose v93 migration has not run yet (a request served while another one migrates): the
+            // notification all the same, without its sender. Anything else is an error, as it always was.
+            if ((string)$e->getCode() !== '42S22') throw $e;
+        }
+    }
+    try {
+        $insert($cols, $vals);
+    } catch (PDOException $e) {
+        // The same window for the rich words: the notification all the same, as its plain text (the body).
+        if ((string)$e->getCode() !== '42S22' || $cols === $plainCols) throw $e;
+        $insert($plainCols, $plainVals);
+    }
+}
+
+/**
+ * Best-effort email copy of a notification (only when mail is set up and the user has an address).
+ * $opts: action_url + action_label render a CTA button with the raw link underneath; title
+ * overrides the heading.
+ *
+ * TWO KINDS OF ACCOUNT MAIL (1.73.0). `transactional` => true is the mail a member must never be able
+ * to switch off by accident: the password reset, every step of an e-mail change and its confirmations
+ * (userResetSend(), userEmailChange*(); the verification mail is userVerifySend()). It is ALWAYS sent —
+ * whatever the account page's "Account mail" says and whatever the address unsubscribed from — and it
+ * carries no unsubscribe link and no List-Unsubscribe header, because there is nothing in it to
+ * unsubscribe from. Until 1.73.0 every account mail asked the preference: switching "Account mail" off,
+ * or the unsubscribe page's master switch reached from ANY mail's footer, silently stopped the reset
+ * mail, and a member who had done that and forgot their password was locked out for good.
+ *
+ * Everything else (the default) is what the preference is for, in the account page's words: the
+ * groups — access granted, access about to end — and copies of the operator's notices. It asks
+ * isUnsubscribed($email, 'account') and carries the preferences link and the List-Unsubscribe header.
+ */
+function userNotifyMail(PDO $db, array $cfg, array $user, string $subject, string $bodyText, array $opts = []): void {
+    $email = trim((string)($user['email'] ?? ''));
+    if ($email === '' || !function_exists('sendEmail')) return;
+    $transactional = !empty($opts['transactional']);
+    if (!$transactional && function_exists('isUnsubscribed') && isUnsubscribed($db, $email, 'account')) return;
+    // The mail's own words — the greeting, the button's fallback line, the footer — in the language the caller
+    // wrote the subject and the body in: the RECIPIENT's (1.74.0, recipientLang()), unless the caller says.
+    $lang = (string)($opts['lang'] ?? recipientLang($cfg, $user));
+    try {
+        ob_start();
+        // One address for both the footer's preferences link and the List-Unsubscribe header — and none
+        // at all on a transactional mail (sendEmail() writes the header only for a non-empty address).
+        $unsub = (!$transactional && function_exists('getUnsubscribeUrl')) ? getUnsubscribeUrl($email, $cfg) : '';
+        $plain = $bodyText . (!empty($opts['action_url']) ? "\n\n" . $opts['action_url'] : '');
+        $html = buildEmailHtml([
+            'title' => $opts['title'] ?? $subject,
+            'greeting' => langFor($lang, 'mail.hello', ['name' => sanitize($user['username'] ?? '')]),
+            // `body_html` (1.75.0): the words ALREADY as safe HTML — a notice written in BBCode or Markdown, rendered for a
+            // mail by the caller (mailRichParts()), whose `$bodyText` is then the text half made from it.
+            'body' => !empty($opts['body_html']) ? (string)$opts['body_html'] : nl2br(sanitize($bodyText)),
+            'action_url' => $opts['action_url'] ?? '',
+            'action_label' => $opts['action_label'] ?? '',
+            'details' => [], 'unsubscribe_url' => $unsub, 'lang' => $lang,
+        ], $cfg);
+        @sendEmail($email, $subject, $plain, $html, $cfg, $unsub);
+        ob_end_clean();
+    } catch (\Throwable $e) { if (ob_get_level()) ob_end_clean(); }
+}
+
+function userUnreadCount(PDO $db, int $userId): int {
+    $st = $db->prepare("SELECT COUNT(*) FROM user_notifications WHERE user_id = ? AND read_at IS NULL");
+    $st->execute([$userId]);
+    return (int)$st->fetchColumn();
+}
+
+/**
+ * The navigation badges' numbers, drawn with the page (1.75.2): `badge` = notifications + messages waiting (the account
+ * link's badge), `shout` = the room's lines (null when this reader has no room badge). The badges used to come hidden and
+ * be filled by the page's first user_me a moment later, and the bar moved under the reader's pointer on every page they
+ * opened. The same counts user_pulse answers, so the first request agrees with the page; a failed read draws nothing and
+ * the script fills the badges as before.
+ */
+function navUnreadCounts(PDO $db, array $cfg, array $user, bool $shoutBadge): array {
+    $out = ['notif' => 0, 'pm' => 0, 'shout' => null];
+    try {
+        $uid = (int)$user['id'];
+        $out['notif'] = userUnreadCount($db, $uid);
+        $out['pm'] = function_exists('pmEnabled') && pmEnabled($cfg) ? pmUnreadCount($db, $uid) : 0;
+        if ($shoutBadge && function_exists('shoutUnreadCounts')) $out['shout'] = (int)(shoutUnreadCounts($db, $cfg, $user)['shout'] ?? 0);
+    } catch (\Throwable $e) {
+        return ['notif' => 0, 'pm' => 0, 'shout' => null];
+    }
+    return $out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Password reset
+// ─────────────────────────────────────────────────────────────────────────────
+
+function userResetCreate(PDO $db, int $userId): string {
+    $token = bin2hex(random_bytes(32));
+    $db->prepare("DELETE FROM user_tokens WHERE type = 'reset' AND user_id = ?")->execute([$userId]);
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'reset', ?, NOW() + INTERVAL " . USER_RESET_TTL_MIN . " MINUTE)")
+       ->execute([$userId, hash('sha256', $token)]);
+    return $token;
+}
+
+/**
+ * The password-reset mail (1.73.0: out of api/user_reset_request.php, so the endpoint and the tests send the
+ * same mail). TRANSACTIONAL — sent whatever the account's mail preferences say (see userNotifyMail()): a
+ * member who switched "Account mail" off, or unsubscribed from a report mail, must still be able to get back
+ * into their account. Returns false when there is nobody to send it to (no account, not active, no address).
+ */
+function userResetSend(PDO $db, array $cfg, ?array $u): bool {
+    if (!$u || ($u['status'] ?? '') !== 'active' || trim((string)($u['email'] ?? '')) === '') return false;
+    $reset = userResetCreate($db, (int)$u['id']);
+    $link = mailAbsoluteUrl($cfg, '?action=reset&token=' . $reset);
+    $lang = recipientLang($cfg, $u);   // the account's language, not the form's (1.74.0)
+    userNotifyMail($db, $cfg, $u, langFor($lang, 'mail.reset_subject', ['site' => $cfg['site_name'] ?? 'Tracker']),
+        langFor($lang, 'mail.reset_body', ['minutes' => USER_RESET_TTL_MIN]) . "\n" . langFor($lang, 'mail.reset_ignore'),
+        ['title' => langFor($lang, 'mail.reset_title'), 'action_url' => $link, 'action_label' => langFor($lang, 'mail.reset_button'),
+         'transactional' => true, 'lang' => $lang]);
+    return true;
+}
+
+/** Validate a reset token; returns the user id or null. $burn marks it used (do this on success only). */
+function userResetConsume(PDO $db, string $token, bool $burn): ?int {
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
+    $st = $db->prepare("SELECT id, user_id FROM user_tokens WHERE type = 'reset' AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st->execute([hash('sha256', $token)]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return null;
+    if ($burn) $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
+    return (int)$row['user_id'];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email verification
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Create (replacing any previous) an email-verification token for the user. Returns the raw token. */
+function userVerifyCreate(PDO $db, int $userId): string {
+    $token = bin2hex(random_bytes(32));
+    $db->prepare("DELETE FROM user_tokens WHERE type = 'verify' AND user_id = ?")->execute([$userId]);
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'verify', ?, NOW() + INTERVAL " . USER_VERIFY_TTL_H . " HOUR)")
+       ->execute([$userId, hash('sha256', $token)]);
+    return $token;
+}
+
+/** Consume a verification token: marks the user's email verified. Returns the user id or null. */
+function userVerifyConsume(PDO $db, string $token): ?int {
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
+    $st = $db->prepare("SELECT id, user_id FROM user_tokens WHERE type = 'verify' AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st->execute([hash('sha256', $token)]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return null;
+    $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
+    $db->prepare("UPDATE users SET email_verified = 1 WHERE id = ?")->execute([(int)$row['user_id']]);
+    userPermissionsForget((int)$row['user_id']);   // the e-mail gate opened: nothing in this request answers from before
+    return (int)$row['user_id'];
+}
+
+/**
+ * Best-effort verification mail (silent no-op when the user has no address or mail is unavailable).
+ * Called after registration-with-email and after every email change. Returns true when a mail
+ * was handed to the MTA.
+ */
+function userVerifySend(PDO $db, array $cfg, array $user): bool {
+    $email = trim((string)($user['email'] ?? ''));
+    if ($email === '' || !function_exists('sendEmail')) return false;
+    $token = userVerifyCreate($db, (int)$user['id']);
+    $link = mailAbsoluteUrl($cfg, '?action=verify&token=' . $token);
+    $site = $cfg['site_name'] ?? 'Tracker';
+    // In the account's language (1.74.0): the one it chose, else — signing up, setting a first address — the one
+    // the page it did that on was in, else the site's (recipientLang()).
+    $lang = recipientLang($cfg, $user);
+    $say = langFor($lang, 'mail.verify_body', ['site' => $site, 'hours' => USER_VERIFY_TTL_H]);
+    $text = langFor($lang, 'mail.hello', ['name' => $user['username']]) . "\n\n" . $say . "\n\n" . $link;
+    try {
+        // Transactional (1.73.0): no preferences link and no List-Unsubscribe header — there is nothing in a
+        // confirmation to unsubscribe from, and a one-click "unsubscribe" offered on it is a way to stop the
+        // mail a member must not miss (userNotifyMail() says which mail is which).
+        $html = buildEmailHtml(['title' => langFor($lang, 'mail.verify_title'),
+            'greeting' => langFor($lang, 'mail.hello', ['name' => sanitize($user['username'])]),
+            'body' => langFor($lang, 'mail.verify_body', ['site' => sanitize($site), 'hours' => USER_VERIFY_TTL_H]),
+            'action_url' => $link, 'action_label' => langFor($lang, 'mail.verify_button'),
+            'details' => [], 'unsubscribe_url' => '', 'lang' => $lang], $cfg);
+        return (bool)@sendEmail($email, langFor($lang, 'mail.verify_subject', ['site' => $site]), $text, $html, $cfg, '');
+    } catch (\Throwable $e) { return false; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email change — two-step confirmation (schema v9)
+//
+// Changing (or removing) the address is confirmed from the OLD mailbox first, then — for a change —
+// from the NEW one; only then is anything written to `email`. A cooldown
+// (users_email_change_cooldown_days, since the last COMPLETED change) blocks rapid flip-flopping,
+// so a hijacked session cannot quietly steal the mailbox and cover its tracks.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pending-change state for the account page: null, or ['pending_email','stage' ('old'|'new')]. */
+function userEmailChangeState(PDO $db, array $user): ?array {
+    if (($user['pending_email'] ?? null) === null) return null;
+    $st = $db->prepare("SELECT type FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new') AND expires_at >= NOW() AND used_at IS NULL ORDER BY id DESC LIMIT 1");
+    $st->execute([(int)$user['id']]);
+    $type = $st->fetchColumn();
+    if (!$type) return null;   // tokens expired — the pending value is dead weight
+    return ['pending_email' => (string)$user['pending_email'], 'stage' => $type === 'echange_old' ? 'old' : 'new'];
+}
+
+function userEmailChangeCancel(PDO $db, int $userId): void {
+    $db->prepare("UPDATE users SET pending_email = NULL WHERE id = ?")->execute([$userId]);
+    $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([$userId]);
+}
+
+/**
+ * An account's display time zone (v68). '' hands the account back to the site's zone (NULL in the
+ * column); anything else has to be a zone PHP knows — tzValidName(), the very test `site_timezone`
+ * is saved with, so the account page and Settings cannot accept two different ideas of a zone.
+ *
+ * Returns false and writes NOTHING for a name that is not a zone: storing it would leave a row that
+ * every reader treats as NULL anyway, while the account page went on showing the person a choice
+ * they never really made.
+ */
+function userSetTimezone(PDO $db, int $userId, string $tz): bool {
+    $tz = trim($tz);
+    if ($userId <= 0 || ($tz !== '' && !tzValidName($tz))) return false;
+    $db->prepare("UPDATE users SET timezone = ? WHERE id = ?")->execute([$tz === '' ? null : $tz, $userId]);
+    return true;
+}
+
+/**
+ * Begin a change/removal ($newEmail '' = remove). Returns ['error'=>code(,'until')] or
+ * ['stage'=>'old'|'done_direct']. A user WITHOUT an old address gets the direct path (nothing to
+ * confirm from) — the standard verification mail still guards the new address.
+ */
+function userEmailChangeStart(PDO $db, array $cfg, array $user, string $newEmail): array {
+    $newEmail = trim($newEmail);
+    if ($newEmail !== '' && !userValidEmail($newEmail)) return ['error' => 'invalid_email'];
+    $old = trim((string)($user['email'] ?? ''));
+    if ($newEmail === $old) return ['error' => 'same_email'];
+    $days = userEmailChangeCooldownDays($cfg);
+    if ($days > 0 && !empty($user['email_changed_at'])) {
+        $until = strtotime((string)$user['email_changed_at']) + $days * 86400;
+        if (time() < $until) return ['error' => 'cooldown', 'until' => date('Y-m-d H:i', $until)];
+    }
+    if ($newEmail !== '') {
+        $dup = $db->prepare("SELECT 1 FROM users WHERE email = ? AND id <> ?");
+        $dup->execute([$newEmail, (int)$user['id']]);
+        if ($dup->fetchColumn()) return ['error' => 'email_taken'];
+    }
+    if ($old === '') {
+        $db->prepare("UPDATE users SET email = ?, email_verified = 0, email_changed_at = NOW() WHERE id = ?")
+           ->execute([$newEmail === '' ? null : $newEmail, (int)$user['id']]);
+        return ['stage' => 'done_direct'];
+    }
+    $db->prepare("UPDATE users SET pending_email = ? WHERE id = ?")->execute([$newEmail, (int)$user['id']]);
+    $db->prepare("DELETE FROM user_tokens WHERE user_id = ? AND type IN ('echange_old','echange_new')")->execute([(int)$user['id']]);
+    $token = bin2hex(random_bytes(32));
+    $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_old', ?, NOW() + INTERVAL " . USER_ECHANGE_TTL_H . " HOUR)")
+       ->execute([(int)$user['id'], hash('sha256', $token)]);
+    $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $token);
+    $lang = recipientLang($cfg, $user);   // every step in the account's language (1.74.0)
+    userNotifyMail($db, $cfg, $user, langFor($lang, 'mail.echange_subject', ['site' => $cfg['site_name'] ?? 'Tracker']),
+        ($newEmail === '' ? langFor($lang, 'mail.echange_body_removal') : langFor($lang, 'mail.echange_body_to', ['email' => $newEmail]))
+        . "\n" . langFor($lang, 'mail.echange_step1', ['hours' => USER_ECHANGE_TTL_H]) . "\n" . langFor($lang, 'mail.echange_not_you'),
+        ['title' => langFor($lang, 'mail.echange_title'), 'action_url' => $link, 'action_label' => langFor($lang, 'mail.echange_button'),
+         'transactional' => true, 'lang' => $lang]);
+    return ['stage' => 'old'];
+}
+
+/** Consume one step link (?action=emailchange&token=…). Returns a status array for the page. */
+function userEmailChangeConsume(PDO $db, array $cfg, string $token): array {
+    if (!preg_match('/^[a-f0-9]{64}$/', $token)) return ['error' => 'invalid'];
+    $st = $db->prepare("SELECT id, user_id, type FROM user_tokens WHERE type IN ('echange_old','echange_new') AND token_hash = ? AND expires_at >= NOW() AND used_at IS NULL");
+    $st->execute([hash('sha256', $token)]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return ['error' => 'invalid'];
+    $u = userFindById($db, (int)$row['user_id']);
+    if (!$u || ($u['pending_email'] ?? null) === null) return ['error' => 'invalid'];
+    $db->prepare("UPDATE user_tokens SET used_at = NOW() WHERE id = ?")->execute([(int)$row['id']]);
+    $pending = (string)$u['pending_email'];
+    // Every mail and notice of the change in the ACCOUNT's language (1.74.0) — the link is opened from a mailbox,
+    // in whatever browser, and the page that opens it is not the account's own request. The mails go to an
+    // address that is not (yet, or any more) the row's `email`, so the row travels with that address in it.
+    $site = $cfg['site_name'] ?? 'Tracker';
+    $lang = recipientLang($cfg, $u);
+    if ($row['type'] === 'echange_old') {
+        if ($pending === '') {   // removal — the old mailbox has spoken, done
+            $db->prepare("UPDATE users SET email = NULL, email_verified = 0, pending_email = NULL, email_changed_at = NOW() WHERE id = ?")->execute([(int)$u['id']]);
+            userPermissionsForget((int)$u['id']);   // the address its e-mail gate is read from changed
+            userNotify($db, (int)$u['id'], 'account', langFor($lang, 'notify.email_removed'), langFor($lang, 'notify.email_removed_body'));
+            return ['stage' => 'removed'];
+        }
+        $t2 = bin2hex(random_bytes(32));
+        $db->prepare("INSERT INTO user_tokens (user_id, type, token_hash, expires_at) VALUES (?, 'echange_new', ?, NOW() + INTERVAL " . USER_ECHANGE_TTL_H . " HOUR)")
+           ->execute([(int)$u['id'], hash('sha256', $t2)]);
+        $link = mailAbsoluteUrl($cfg, '?action=emailchange&token=' . $t2);
+        userNotifyMail($db, $cfg, array_merge($u, ['email' => $pending]), langFor($lang, 'mail.echange_new_subject', ['site' => $site]),
+            langFor($lang, 'mail.echange_new_body') . "\n" . langFor($lang, 'mail.echange_step2', ['hours' => USER_ECHANGE_TTL_H]),
+            ['title' => langFor($lang, 'mail.echange_new_title'), 'action_url' => $link, 'action_label' => langFor($lang, 'mail.echange_new_button'),
+             'transactional' => true, 'lang' => $lang]);
+        return ['stage' => 'old_ok', 'pending' => $pending];
+    }
+    // echange_new — finalise (new address arrives already verified; cooldown clock restarts)
+    try {
+        $db->prepare("UPDATE users SET email = ?, email_verified = 1, pending_email = NULL, email_changed_at = NOW() WHERE id = ?")->execute([$pending, (int)$u['id']]);
+    } catch (PDOException $e) {
+        return ['error' => 'email_taken'];
+    }
+    userPermissionsForget((int)$u['id']);   // the address its e-mail gate is read from changed
+    userNotify($db, (int)$u['id'], 'account', langFor($lang, 'notify.email_changed'), langFor($lang, 'notify.email_changed_body', ['email' => $pending]));
+    // A security notice to the address that just stopped being the account's — the one mail that tells a
+    // member whose mailbox was taken over what happened — so it is transactional, like the steps before it.
+    userNotifyMail($db, $cfg, array_merge($u, ['email' => (string)$u['email']]), langFor($lang, 'mail.echange_done_old_subject', ['site' => $site]),
+        langFor($lang, 'mail.echange_done_old_body', ['email' => $pending]) . "\n" . langFor($lang, 'mail.echange_done_old_not_you'),
+        ['transactional' => true, 'lang' => $lang]);
+    // …and a written confirmation lands in the NEW mailbox too (the trail used to end with just
+    // the browser page — pkt: "na nowym tylko link, nie ma potwierdzenia")
+    userNotifyMail($db, $cfg, array_merge($u, ['email' => $pending]), langFor($lang, 'mail.echange_done_new_subject', ['site' => $site]),
+        langFor($lang, 'mail.echange_done_new_body'),
+        ['transactional' => true, 'lang' => $lang]);
+    return ['stage' => 'done', 'email' => $pending];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Janitor tick
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every-minute janitor tick: reap expired memberships (+ notification), warn before expiry, prune
+ * old notifications and dead tokens (hourly). Cheap on the indexes; never throws.
+ */
+function usersTick(PDO $db, array $cfg, ?int $now = null): array {
+    $out = ['enabled' => usersEnabled($cfg), 'expired' => 0, 'warned' => 0, 'pruned' => 0,
+            'unbanned' => 0, 'unmuted' => 0, 'error' => null];
+    if (!$out['enabled']) return $out;
+    try {
+        // Timed bans and mutes whose moment has passed. First, because the rest of this tick may
+        // notify people and a notification to somebody the site still calls banned reads oddly.
+        $lift = userLiftExpiredPunishments($db);
+        $out['unbanned'] = $lift['unbanned'];
+        $out['unmuted'] = $lift['unmuted'];
+        // expired memberships → drop + notify
+        $st = $db->query(
+            "SELECT m.id, m.user_id, g.name FROM user_group_members m JOIN user_groups g ON g.id = m.group_id
+             WHERE m.expires_at IS NOT NULL AND m.expires_at < NOW() LIMIT 500");
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
+            $db->prepare("DELETE FROM user_group_members WHERE id = ?")->execute([(int)$m['id']]);
+            userPermissionsForget((int)$m['user_id']);
+            // The janitor has no language of its own: each member is told in theirs (1.74.0).
+            userNotify($db, (int)$m['user_id'], 'group-expired',
+                       langFor(recipientLangOf($db, $cfg, (int)$m['user_id']), 'notify.group_expired', ['group' => $m['name']]));
+            $out['expired']++;
+        }
+        // expiry warnings, once per membership
+        $days = usersNotifyExpiryDays($cfg);
+        if ($days > 0) {
+            $st = $db->prepare(
+                "SELECT m.id, m.user_id, m.expires_at, g.name FROM user_group_members m JOIN user_groups g ON g.id = m.group_id
+                 WHERE m.expires_at IS NOT NULL AND m.warned_at IS NULL
+                   AND m.expires_at >= NOW() AND m.expires_at < NOW() + INTERVAL ? DAY LIMIT 500");
+            $st->execute([$days]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $m) {
+                $db->prepare("UPDATE user_group_members SET warned_at = NOW() WHERE id = ?")->execute([(int)$m['id']]);
+                $u = userFindById($db, (int)$m['user_id']);
+                $lang = recipientLang($cfg, $u);
+                userNotify($db, (int)$m['user_id'], 'group-expiring', langFor($lang, 'notify.group_expiring', ['group' => $m['name']]),
+                    langFor($lang, 'notify.group_expiring_body', ['until' => $m['expires_at']]));
+                if ($u) userNotifyMail($db, $cfg, $u, langFor($lang, 'mail.group_expiring_subject', ['site' => $cfg['site_name'] ?? 'Tracker', 'group' => $m['name']]),
+                    langFor($lang, 'mail.group_expiring_body', ['group' => $m['name'], 'until' => $m['expires_at']]), ['lang' => $lang]);
+                $out['warned']++;
+            }
+        }
+        // hourly prune: read notifications > 90 d, unread > 365 d, dead tokens
+        $stateFile = __DIR__ . '/../config/users_state.json';
+        $state = is_file($stateFile) ? (json_decode((string)@file_get_contents($stateFile), true) ?: []) : [];
+        $now = $now ?? time();
+        if ($now - (int)($state['last_prune_at'] ?? 0) >= 3600) {
+            $out['pruned'] += (int)$db->exec("DELETE FROM user_notifications WHERE read_at IS NOT NULL AND created_at < NOW() - INTERVAL 90 DAY LIMIT 5000");
+            $out['pruned'] += (int)$db->exec("DELETE FROM user_notifications WHERE created_at < NOW() - INTERVAL 365 DAY LIMIT 5000");
+            $out['pruned'] += (int)$db->exec("DELETE FROM user_tokens WHERE expires_at < NOW() OR used_at IS NOT NULL");
+            @file_put_contents($stateFile, json_encode(['last_prune_at' => $now]), LOCK_EX);
+        }
+    } catch (\Throwable $e) {
+        $out['error'] = $e->getMessage();
+        error_log('[users tick] ' . $e->getMessage());
+    }
+    return $out;
+}

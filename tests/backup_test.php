@@ -1,0 +1,721 @@
+<?php
+/**
+ * Tests for the panel-driven backups:
+ *   php tests/backup_test.php
+ *
+ * Two halves, like tests/netlimit_test.php:
+ *   1. the pure PHP of includes/backup.php — settings clamps, profile/item validation, the schedule
+ *      arithmetic that decides when a backup is due, size/retention maths and the download tokens.
+ *      No database, no network, no root.
+ *   2. the root helper tools/opentracker/tracker-backup.sh, driven end to end against a stub
+ *      Backup-serwera.sh and stub MariaDB clients in a temporary directory: the run (detached, with
+ *      a state file to poll), the built-in fallback, rotation by count / age / total size, verify,
+ *      delete, download, restore of file items, and the database restore with its safety dump.
+ *      Skipped with a visible SKIP line when the machine has no bash.
+ */
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+$root = dirname(__DIR__);
+require_once $root . '/includes/functions.php';
+require_once $root . '/includes/backup.php';
+
+$fails = 0; $n = 0; $skips = 0;
+function check(string $name, bool $ok, string $info = ''): void {
+    global $fails, $n;
+    $n++;
+    echo ($ok ? 'PASS ' : 'FAIL ') . $name . ($ok || $info === '' ? '' : '  -> ' . $info) . "\n";
+    if (!$ok) $fails++;
+}
+function skip(string $name, string $why): void {
+    global $skips;
+    $skips++;
+    echo 'SKIP ' . $name . '  -> ' . $why . "\n";
+}
+
+// ── 1. settings ──────────────────────────────────────────────────────────────
+check('backups off by default', !backupEnabled([]));
+check('enabled reads exactly "1"', backupEnabled(['backup_enabled' => '1']) && !backupEnabled(['backup_enabled' => 'yes']));
+check('default directory', backupDir([]) === BACKUP_DEFAULT_DIR);
+check('directory is trimmed and stripped of control characters', backupDir(['backup_dir' => "  /var/backups/x\n"]) === '/var/backups/x');
+check('trailing slash removed', backupDir(['backup_dir' => '/var/backups/x/']) === '/var/backups/x');
+check('root alone is not a directory we accept', backupDir(['backup_dir' => '/']) === '/');
+check('default profile', backupProfile([]) === 'tracker-lekki');
+check('unknown profile falls back', backupProfile(['backup_profile' => 'nope']) === 'tracker-lekki');
+check('known profiles kept', backupProfile(['backup_profile' => 'tracker-pelny']) === 'tracker-pelny'
+    && backupProfile(['backup_profile' => 'custom']) === 'custom');
+check('keep clamped', backupKeep(['backup_keep' => '0']) === 0 && backupKeep(['backup_keep' => '99999']) === BACKUP_KEEP_MAX);
+check('keep default', backupKeep([]) === 7);
+check('keep days default + clamp', backupKeepDays([]) === 30 && backupKeepDays(['backup_keep_days' => '99999']) === BACKUP_DAYS_MAX);
+check('max size default + clamp', backupMaxGb([]) === 20 && backupMaxGb(['backup_max_size_gb' => '99999']) === BACKUP_GB_MAX);
+check('nice default + clamp', backupNice([]) === 15 && backupNice(['backup_nice' => '-5']) === 0 && backupNice(['backup_nice' => '99']) === 19);
+check('verify-after defaults on', backupVerifyAfter([]) === true);
+check('database name default', backupDbName([]) === 'tracker');
+check('database name rejects junk', backupDbName(['backup_db_name' => 'drop; db']) === 'tracker');
+check('database name accepts a real one', backupDbName(['backup_db_name' => 'tracker_2']) === 'tracker_2');
+
+// ── 2. items and profiles ────────────────────────────────────────────────────
+$items = backupProfileItems('tracker-lekki', []);
+check('light profile skips the huge index tables', str_contains($items, 'tracker-db-lekka') && !str_contains($items, 'tracker-db,'), $items);
+check('full profile takes the whole database', str_contains(backupProfileItems('tracker-pelny', []), 'tracker-db'));
+check('both profiles include the config', str_contains($items, 'tracker-config'));
+check('custom profile uses the configured items', backupProfileItems('custom', ['backup_items' => 'tracker-db,tracker-config']) === 'tracker-db,tracker-config');
+check('custom profile with nothing configured falls back to the light profile',
+      backupProfileItems('custom', []) === backupProfileItems('tracker-lekki', []));
+check('item list is sanitised', backupSanitizeItems('tracker-db, tracker-config ;rm -rf /') === 'tracker-db,tracker-config',
+      backupSanitizeItems('tracker-db, tracker-config ;rm -rf /'));
+check('item list drops unknown names', backupSanitizeItems('tracker-db,flarum-db,nonsense') === 'tracker-db,flarum-db',
+      backupSanitizeItems('tracker-db,flarum-db,nonsense'));
+check('empty item list stays empty', backupSanitizeItems('') === '');
+check('duplicates collapse', backupSanitizeItems('tracker-db,tracker-db') === 'tracker-db');
+check('the known item list is not empty and is all lowercase',
+      count(backupKnownItems()) > 5 && count(array_filter(backupKnownItems(), fn($i) => preg_match('/^[a-z0-9-]+$/', $i))) === count(backupKnownItems()));
+
+// ── 3. path validation (the panel's own half; the helper repeats it) ─────────
+check('empty path refused', backupValidateDir('')['ok'] === false);
+check('relative path refused', backupValidateDir('relative/dir')['ok'] === false);
+check('path with .. refused', backupValidateDir('/var/backups/../etc')['ok'] === false);
+check('web root refused', backupValidateDir('/var/www/html/backups')['ok'] === false);
+check('a system directory refused', backupValidateDir('/etc')['ok'] === false);
+check('root refused', backupValidateDir('/')['ok'] === false);
+check('a directory of its own accepted', backupValidateDir('/var/backups/tracker')['ok'] === true, backupValidateDir('/var/backups/tracker')['error'] ?? '');
+// the archives hold database passwords, so anything reachable by the web server is refused outright
+$inside = dirname(__DIR__) . '/config/backups';
+check('inside the application directory refused', backupValidateDir($inside)['ok'] === false, $inside);
+
+// ── 4. the schedule ──────────────────────────────────────────────────────────
+// Reuses the weekly grid of the tracker-mode schedule, but a backup is a moment, not a window:
+// it fires once per configured day/hour and never twice in the same slot.
+check('empty schedule is never due', backupScheduleDue('', 'UTC', 0, 1800000000) === false);
+$plan = json_encode(['days' => ['mon', 'wed', 'fri'], 'time' => '04:00']);
+check('valid plan parses', backupParseSchedule($plan) !== null);
+check('garbage plan is null', backupParseSchedule('{"days":["nope"]}') === null);
+check('bad time is null', backupParseSchedule('{"days":["mon"],"time":"25:00"}') === null);
+check('empty string is an empty plan, not an error', backupParseSchedule('') === null);
+$normalised = backupParseSchedule($plan);
+check('plan normalises to days + minutes', $normalised['minutes'] === 240 && $normalised['days'] === ['mon', 'wed', 'fri'], json_encode($normalised));
+
+// Monday 2026-08-31 04:00:30 UTC
+$mon0400 = (new DateTimeImmutable('2026-08-31 04:00:30', new DateTimeZone('UTC')))->getTimestamp();
+$mon0359 = (new DateTimeImmutable('2026-08-31 03:59:00', new DateTimeZone('UTC')))->getTimestamp();
+$tue0400 = (new DateTimeImmutable('2026-09-01 04:00:30', new DateTimeZone('UTC')))->getTimestamp();
+$wed0400 = (new DateTimeImmutable('2026-09-02 04:00:30', new DateTimeZone('UTC')))->getTimestamp();
+check('due at the configured moment', backupScheduleDue($plan, 'UTC', 0, $mon0400) === true);
+check('not due a minute early', backupScheduleDue($plan, 'UTC', 0, $mon0359) === false);
+check('not due on a day that is not in the plan', backupScheduleDue($plan, 'UTC', 0, $tue0400) === false);
+// the janitor runs every minute: the same slot must fire exactly once
+check('not due again after a run in the same slot', backupScheduleDue($plan, 'UTC', $mon0400, $mon0400 + 60) === false);
+check('due again on the next configured day', backupScheduleDue($plan, 'UTC', $mon0400, $wed0400) === true);
+// a machine that was off through the window still catches up, rather than silently skipping a week
+check('a missed slot still fires later the same day',
+      backupScheduleDue($plan, 'UTC', 0, $mon0400 + 3 * 3600) === true);
+check('but not on the following day', backupScheduleDue($plan, 'UTC', 0, $mon0400 + 26 * 3600) === false);
+check('timezone is honoured',
+      backupScheduleDue($plan, 'Europe/Warsaw', 0, (new DateTimeImmutable('2026-08-31 04:00:30', new DateTimeZone('Europe/Warsaw')))->getTimestamp()) === true);
+check('invalid timezone falls back instead of throwing', backupScheduleDue($plan, 'Nowhere/Atall', 0, $mon0400) === true);
+$desc = backupScheduleDescribe($plan, 'Europe/Warsaw');
+check('schedule describes itself in words', str_contains($desc, 'Mon') && str_contains($desc, '04:00') && str_contains($desc, 'Europe/Warsaw'), $desc);
+check('an empty schedule says so', str_contains(backupScheduleDescribe('', 'UTC'), 'No automatic'));
+$next = backupScheduleNext($plan, 'UTC', $mon0400);
+check('the next run is the next configured day', $next !== null && $next === $wed0400 - 30, (string)$next);
+
+// ── 5. download tokens ───────────────────────────────────────────────────────
+// An archive holds every password on the box, so the download link is single-use, short-lived and
+// bound to the id it was minted for — and, since 1.74.0 (PANEL-1), it must have been ISSUED here:
+// knowing the HMAC secret is no longer enough to make one (the Settings page showed that secret to
+// every session that reached it, none of which had typed the owner's password).
+$tok = backupMintToken('backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000);
+check('token is opaque and long enough', strlen($tok) >= 32 && !str_contains($tok, 'backup-tryhackx'));
+check('token carries an expiry, a nonce and a signature', (bool)preg_match('/^\d+\.[0-9a-f]{32}\.[0-9a-f]{64}$/', $tok), $tok);
+check('two tokens for the same archive and moment differ (the nonce)', backupMintToken('backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) !== $tok);
+check('token verifies for its own id', backupVerifyToken($tok, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000 + 10) === true);
+check('token refused for another id', backupVerifyToken($tok, 'backup-tryhackx-20260101-000000', 'secret-hmac', 1800000000 + 10) === false);
+check('token refused with another secret', backupVerifyToken($tok, 'backup-tryhackx-20260827-010203', 'other', 1800000000 + 10) === false);
+check('token expires', backupVerifyToken($tok, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000 + BACKUP_TOKEN_TTL + 5) === false);
+check('a mangled token is refused', backupVerifyToken(substr($tok, 0, -2) . 'xx', 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000 + 10) === false);
+check('an empty token is refused', backupVerifyToken('', 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+check('… and so is one that is not a string at all (`token[]=x`)', backupVerifyToken(['x'], 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+// The verifier's PoC: a token put together OUTSIDE the panel from the secret alone, for an expiry in the year 2100.
+$far = 4102444800;
+$forgedFar = $far . '.' . str_repeat('ab', 16) . '.' . hash_hmac('sha256', 'backup-tryhackx-20260827-010203|' . $far . '|' . str_repeat('ab', 16), 'secret-hmac');
+check('a correctly signed token that expires further away than one lifetime is refused', backupVerifyToken($forgedFar, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+$oldShape = (1800000000 + 60) . '.' . hash_hmac('sha256', 'backup-tryhackx-20260827-010203|' . (1800000000 + 60), 'secret-hmac');
+check('a token of the old shape (expiry.signature, no nonce) is refused', backupVerifyToken($oldShape, 'backup-tryhackx-20260827-010203', 'secret-hmac', 1800000000) === false);
+// Issued and redeemed against the panel's own record (config/backup_state.json) — put back as it was.
+$bsFile = backupStateFile();
+$bsWas = is_file($bsFile) ? (string)file_get_contents($bsFile) : null;
+try {
+    $bid = 'backup-tryhackx-20260827-010203';
+    $now = time();
+    $forged = backupMintToken($bid, 'secret-hmac', $now);          // signed right, never recorded
+    check('a token signed with the secret but never issued passes the signature check…', backupVerifyToken($forged, $bid, 'secret-hmac', $now + 1) === true);
+    check('… and is refused at redemption: not issued here (403 at the endpoint)', backupRedeemToken($forged, $bid, $now + 1) === 'unknown');
+    $issued = backupIssueToken($bid, 'secret-hmac', $now);
+    check('an issued token is recorded by the SHA-256 of its nonce, never the token itself',
+          is_string($issued) && isset(backupStateRead()['minted_tokens'][hash('sha256', explode('.', (string)$issued)[1] ?? '')])
+          && !str_contains((string)@file_get_contents($bsFile), (string)$issued));
+    check('an issued token is redeemed once for its own archive…', backupRedeemToken((string)$issued, 'tracker-db-20260101-000000', $now + 1) === 'unknown'
+          && backupRedeemToken((string)$issued, $bid, $now + 2) === 'ok');
+    check('… and the second time says "already used" (410 at the endpoint)', backupRedeemToken((string)$issued, $bid, $now + 3) === 'used');
+    $late = backupIssueToken($bid, 'secret-hmac', $now - BACKUP_TOKEN_TTL - 10);
+    check('an issued token that has run out is no longer on the list', backupRedeemToken((string)$late, $bid, $now) === 'unknown'
+          && !isset(backupStateRead()['minted_tokens'][hash('sha256', explode('.', (string)$late)[1] ?? '')]));
+} finally {
+    if ($bsWas === null) @unlink($bsFile); else file_put_contents($bsFile, $bsWas);
+}
+
+// ── 6. ids ───────────────────────────────────────────────────────────────────
+check('a real id is accepted', backupValidId('backup-tryhackx-20260827-010203'));
+check('the built-in id shape is accepted', backupValidId('tracker-db-20260827-010203'));
+foreach (['../etc/passwd', 'backup-tryhackx-1/../x', '', '.', 'random-file', 'backup tryhackx', "backup-tryhackx-1\n"] as $bad) {
+    check('id refused: ' . str_replace("\n", '\\n', $bad === '' ? '(empty)' : $bad), !backupValidId($bad));
+}
+
+// ── 7. formatting helpers ────────────────────────────────────────────────────
+check('bytes render', backupFormatBytes(0) === '0 B' && backupFormatBytes(1536) === '1.5 KB' && backupFormatBytes(2147483648) === '2 GB',
+      backupFormatBytes(1536) . ' / ' . backupFormatBytes(2147483648));
+
+// ── 8. the database (needed by the schedule test below) ─────────────────────
+// Needs the local test database (deploy/local_bootstrap.php); everything that uses it is skipped
+// with a visible line otherwise, so the pure half above still runs on a bare checkout.
+$db = null; $cfgDb = [];
+if (is_file($root . '/config/database.php')) {
+    require_once $root . '/config/database.php';
+    require_once $root . '/includes/settings.php';
+    require_once $root . '/includes/schema.php';
+    try {
+        $db = getDb();
+        $cfgDb = getSettings($db);
+        ensureSchema($db, $cfgDb);
+    } catch (\Throwable $e) {
+        $db = null;
+        skip('storage + schedule against the database', 'no test database: ' . $e->getMessage());
+    }
+} else {
+    skip('storage + schedule against the database', 'config/database.php missing — run deploy/local_bootstrap.php first');
+}
+
+// ── 9. the helper, end to end ────────────────────────────────────────────────
+$helper = $root . '/tools/opentracker/tracker-backup.sh';
+check('helper script is in the repo', is_file($helper));
+
+$bash = null;
+foreach (['bash', '/bin/bash', '/usr/bin/bash', 'C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'] as $cand) {
+    $probe = (str_contains($cand, ' ') ? '"' . $cand . '"' : $cand) . ' -c "echo ok" 2>&1';
+    $out = []; $rc = null;
+    @exec($probe, $out, $rc);
+    if ($rc === 0 && trim(implode('', $out)) === 'ok') { $bash = $cand; break; }
+}
+
+if ($bash === null || !trackerExecAvailable()) {
+    skip('helper: end-to-end against a stub Backup-serwera.sh', 'no usable bash (or exec() disabled) — run the suite on the server for this half');
+} else {
+    $tmp = sys_get_temp_dir() . '/backup_test_' . getmypid();
+    // The helper insists on a POSIX-absolute directory, which a Windows temp path is not. Keep both
+    // spellings: bash gets /c/Users/…, PHP keeps C:/Users/… for its own file checks.
+    $posix = static function (string $p): string {
+        $p = str_replace('\\', '/', $p);
+        if (preg_match('#^([A-Za-z]):/#', $p, $m)) $p = '/' . strtolower($m[1]) . substr($p, 2);
+        return $p;
+    };
+    $native = static function (string $p): string {
+        if (DIRECTORY_SEPARATOR !== '\\') return $p;
+        if (preg_match('#^/([A-Za-z])/#', $p, $m)) $p = strtoupper($m[1]) . ':/' . substr($p, 3);
+        return str_replace('/', '\\', $p);
+    };
+    @mkdir($tmp . '/bin', 0777, true);
+    @mkdir($tmp . '/dir', 0777, true);
+
+    // Stub Backup-serwera.sh: produces an archive with the same layout the real one does
+    // (./MANIFEST.txt, ./SUMY.sha256, ./db/<name>.sql, ./pozycje/<item>.baza) and refuses to touch
+    // a database on --restore exactly like the original does without a terminal.
+    file_put_contents($tmp . '/bin/Backup-serwera.sh', <<<'STUB'
+#!/bin/bash
+set -u
+MODE=""; ITEMS=""; OUT=""; DRY=0; ARCH=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --backup) MODE=backup ;;
+    --restore) MODE=restore; shift; ARCH="${1-}" ;;
+    --items) shift; ITEMS="${1-}" ;;
+    --out) shift; OUT="${1-}" ;;
+    --dry-run) DRY=1 ;;
+    --yes|--no-gpg|--gpg|-y) : ;;
+  esac
+  shift || true
+done
+[ -n "${STUB_FAIL:-}" ] && { echo "stub: deliberate failure" >&2; exit 7; }
+if [ "$MODE" = backup ]; then
+  [ -n "${STUB_SLOW:-}" ] && sleep "${STUB_SLOW}"
+  W="$(mktemp -d)"; mkdir -p "$W/db" "$W/pozycje"
+  echo "MANIFEST for: $ITEMS" > "$W/MANIFEST.txt"
+  case "$ITEMS" in
+    *tracker-db-lekka*) echo "-- dump of tracker without the index tables" > "$W/db/tracker-bez-index.sql"
+                        echo "tracker|db/tracker-bez-index.sql" > "$W/pozycje/tracker-db-lekka.baza" ;;
+    *tracker-db*)       printf -- '-- dump of tracker\nCREATE TABLE t (id INT);\n' > "$W/db/tracker.sql"
+                        echo "tracker|db/tracker.sql" > "$W/pozycje/tracker-db.baza" ;;
+  esac
+  case "$ITEMS" in *tracker-config*) echo "app config" > "$W/pozycje/tracker-config.files" ;; esac
+  # Backup-serwera.sh 2.0 streams the dump through gzip: db/<db>.sql.gz, never a raw .sql on disk.
+  # STUB_GZ_DUMP=1 makes this stub do the same; STUB_GZ_DUMP=corrupt leaves a member that is not gzip at all.
+  if [ -n "${STUB_GZ_DUMP:-}" ] && [ -f "$W/db/tracker.sql" ]; then
+    rm -f "$W/db/tracker.sql"
+    if [ "$STUB_GZ_DUMP" = corrupt ]; then echo "this is not gzip" > "$W/db/tracker.sql.gz"
+    else printf -- '-- gz dump of tracker\nCREATE TABLE g (id INT);\n' | gzip -c > "$W/db/tracker.sql.gz"; fi
+    echo "tracker|db/tracker.sql.gz" > "$W/pozycje/tracker-db.baza"
+  fi
+  ( cd "$W" && find . -type f ! -name SUMY.sha256 -exec sha256sum {} + > SUMY.sha256 )
+  S="$(date '+%Y%m%d-%H%M%S')"
+  install -m 0600 /dev/null "$OUT/backup-tryhackx-$S.tar.gz"
+  tar -czf "$OUT/backup-tryhackx-$S.tar.gz" -C "$W" .
+  rm -rf "$W"
+  echo "archiwum: $OUT/backup-tryhackx-$S.tar.gz"
+  exit 0
+fi
+if [ "$MODE" = restore ]; then
+  [ -f "$ARCH" ] || { echo "no archive" >&2; exit 2; }
+  tar -tzf "$ARCH" >/dev/null || exit 3
+  if [ "$DRY" = "1" ]; then echo "[dry-run] would restore: $ITEMS"; else echo "restored: $ITEMS"; fi
+  case "$ITEMS" in *tracker-db*) echo "Tryb nieinteraktywny — POMIJAM odtwarzanie bazy 'tracker'." ;; esac
+  exit 0
+fi
+echo "stub: nothing to do" >&2; exit 1
+STUB);
+    // Stub MariaDB clients: the dump prints SQL, the client swallows it into a file we can inspect.
+    // records the arguments it was handed (one line per call: the light profile makes two), so a test can prove the
+    // profile reached the dump client; DUMP_FAIL_NODATA makes the structure-only call fail
+    file_put_contents($tmp . '/bin/mariadb-dump', "#!/bin/bash\nprintf '%s\\n' \"\$*\" >> \"\$DUMPARGS_TO\"\ncase \" \$* \" in *' --no-data '*) [ -n \"\${DUMP_FAIL_NODATA:-}\" ] && exit 2 ;; esac\nprintf -- '-- builtin dump of %s\\nCREATE TABLE x (id INT);\\n' \"\${!#}\"\nexit 0\n");
+    file_put_contents($tmp . '/bin/mariadb', "#!/bin/bash\nfor a in \"\$@\"; do case \"\$a\" in -e) exit 0 ;; esac; done\ncat > \"\$IMPORTED_TO\"\nexit 0\n");
+    // the helper refuses to touch anything unless it is root, which no test runner is
+    file_put_contents($tmp . '/bin/id', "#!/bin/bash\n[ \"\$1\" = \"-u\" ] && { echo 0; exit 0; }\nexec /usr/bin/id \"\$@\"\n");
+
+    // A wrapper the PANEL can call the way it calls the real helper: a bare command name found on
+    // PATH, made only of characters backupValidCommand() accepts. Without it the schedule could only
+    // be exercised against a command that fails, which proves nothing about a backup actually running.
+    $isWin = DIRECTORY_SEPARATOR === '\\';
+    $wrapperName = $isWin ? 'bktest.cmd' : 'bktest';
+    $envLines = "export BACKUP_ALLOW_ANY_DIR=1\n"
+        . 'export BACKUP_SCRIPT=' . escapeshellarg($posix($tmp . '/bin/Backup-serwera.sh')) . "\n"
+        . 'export MARIADB_DUMP_BIN=' . escapeshellarg($posix($tmp . '/bin/mariadb-dump')) . "\n"
+        . 'export MARIADB_BIN=' . escapeshellarg($posix($tmp . '/bin/mariadb')) . "\n"
+        . 'export IMPORTED_TO=' . escapeshellarg($posix($tmp . '/imported.sql')) . "\n"
+        . 'export DUMPARGS_TO=' . escapeshellarg($posix($tmp . '/dumpargs.txt')) . "\n"
+        . 'export PATH=' . escapeshellarg($posix($tmp . '/bin')) . ':$PATH' . "\n"
+        . 'exec bash ' . escapeshellarg($posix($helper)) . ' "$@"' . "\n";
+    file_put_contents($tmp . '/bin/bktest.sh', "#!/bin/bash\n" . $envLines);
+    @chmod($tmp . '/bin/bktest.sh', 0755);
+    if ($isWin) {
+        file_put_contents($tmp . '/bin/' . $wrapperName,
+            "@echo off\r\n\"" . $bash . "\" \"" . $posix($tmp . '/bin/bktest.sh') . "\" %*\r\n");
+    } else {
+        copy($tmp . '/bin/bktest.sh', $tmp . '/bin/' . $wrapperName);
+    }
+    @chmod($tmp . '/bin/' . $wrapperName, 0755);
+    foreach (['Backup-serwera.sh', 'mariadb-dump', 'mariadb', 'id'] as $f) @chmod($tmp . '/bin/' . $f, 0755);
+
+    $dir = $posix($tmp . '/dir');
+    putenv('BACKUP_ALLOW_ANY_DIR=1');           // the temp directory is not /var/backups/tracker
+    putenv('BACKUP_SCRIPT=' . $posix($tmp . '/bin/Backup-serwera.sh'));
+    putenv('MARIADB_DUMP_BIN=' . $posix($tmp . '/bin/mariadb-dump'));
+    putenv('MARIADB_BIN=' . $posix($tmp . '/bin/mariadb'));
+    putenv('IMPORTED_TO=' . $posix($tmp . '/imported.sql'));
+    putenv('DUMPARGS_TO=' . $posix($tmp . '/dumpargs.txt'));
+    $pathBefore = (string)getenv('PATH');
+    putenv('PATH=' . $tmp . DIRECTORY_SEPARATOR . 'bin' . PATH_SEPARATOR . $pathBefore);
+
+    $bashCmd = str_contains($bash, ' ') ? '"' . $bash . '"' : $bash;
+    $run = static function (string $args) use ($bashCmd, $helper, $posix): array {
+        $out = []; $rc = null;
+        @exec($bashCmd . ' ' . escapeshellarg($posix($helper)) . ' ' . $args . ' 2>&1', $out, $rc);
+        $json = null;
+        foreach (array_reverse($out) as $line) {
+            $line = trim($line);
+            if ($line !== '' && $line[0] === '{') { $json = json_decode($line, true); if (is_array($json)) break; $json = null; }
+        }
+        return ['rc' => (int)$rc, 'out' => implode("\n", $out), 'json' => $json];
+    };
+    /**
+     * Poll `status` until THIS run is finished. "idle" means the detached worker has not written its
+     * state yet, and a leftover "done" from the previous run would look finished — so the state has
+     * to say done/failed AND have started at or after the moment we kicked it off.
+     */
+    $waitDone = static function (string $dir, int $since, int $seconds = 60) use ($run): array {
+        $deadline = time() + $seconds;
+        $s = ['json' => null];
+        do {
+            $s = $run('status ' . escapeshellarg($dir));
+            $st = (string)($s['json']['state'] ?? '');
+            $started = (int)($s['json']['started_at'] ?? 0);
+            if (($st === 'done' || $st === 'failed') && $started >= $since) return $s['json'];
+            usleep(300000);
+        } while (time() < $deadline);
+        return $s['json'] ?? ['state' => 'timeout'];
+    };
+    $q = static fn(string $s): string => escapeshellarg($s);
+
+    // check / profiles
+    $r = $run('check ' . $q($dir));
+    check('helper: check finds the real tool and picks script mode',
+          ($r['json']['script'] ?? null) === true && ($r['json']['mode'] ?? '') === 'script', $r['out']);
+    check('helper: check finds a dump client', ($r['json']['mariadb_dump'] ?? null) === true);
+    $r = $run('profiles');
+    check('helper: profiles agree with the PHP side',
+          ($r['json']['profiles']['tracker-lekki'] ?? '') === backupProfileItems('tracker-lekki', []),
+          (string)($r['json']['profiles']['tracker-lekki'] ?? ''));
+
+    // argument validation — nothing runs, nothing is created
+    foreach ([['run ' . $q($dir) . ' nope', 'an unknown profile'],
+              ['run ' . $q($dir) . ' custom --items "bad;rm"', 'shell characters in the item list'],
+              ['run ' . $q($dir) . ' custom', 'a custom profile with no items'],
+              ['verify ' . $q($dir) . ' ../../etc/passwd', 'a path-traversing id'],
+              ['delete ' . $q($dir) . ' nonsense-id', 'an id we never wrote'],
+              ['run ' . $q('relative/dir') . ' tracker-lekki', 'a relative directory']] as [$args, $what]) {
+        $r = $run($args);
+        check("helper: refuses $what", $r['rc'] !== 0 && ($r['json']['ok'] ?? null) === false, $r['out']);
+    }
+
+    // ── a real run through the stub tool ──
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki --nice 19 --verify --keep 0 --keep-days 0 --max-gb 0');
+    check('helper: run starts and returns immediately', ($r['json']['started'] ?? null) === true, $r['out']);
+    $st = $waitDone($dir, $t0);
+    check('helper: the run finishes', ($st['state'] ?? '') === 'done', json_encode($st));
+    check('helper: the state names the archive it made', !empty($st['archive']) && is_file($native((string)$st['archive'])), (string)($st['archive'] ?? ''));
+    check('helper: the state carries a size', (int)($st['bytes'] ?? 0) > 0);
+    check('helper: --verify ran and passed', ($st['verified'] ?? null) === true, json_encode($st['verified'] ?? null));
+    check('helper: the log tail is handed back for the panel', !empty($st['log_tail']));
+    $id1 = (string)($st['id'] ?? '');
+    check('helper: the id looks like an archive id', backupValidId($id1), $id1);
+
+    // list + sidecar
+    $r = $run('list ' . $q($dir));
+    $archives = $r['json']['archives'] ?? [];
+    check('helper: list returns the archive', count($archives) === 1 && ($archives[0]['id'] ?? '') === $id1, json_encode($archives));
+    check('helper: list knows the profile without opening the archive', ($archives[0]['profile'] ?? '') === 'tracker-lekki');
+    check('helper: list records a checksum', strlen((string)($archives[0]['sha256'] ?? '')) === 64);
+    check('helper: list marks it unencrypted', ($archives[0]['encrypted'] ?? null) === false);
+    check('helper: list reports the verification result', ($archives[0]['verified'] ?? null) === true);
+    check('helper: list totals the bytes', (int)($r['json']['total_bytes'] ?? 0) > 0);
+
+    // verify: quick and deep
+    $r = $run('verify ' . $q($dir) . ' ' . $q($id1));
+    check('helper: quick verify passes', ($r['json']['ok'] ?? null) === true, $r['out']);
+    $r = $run('verify ' . $q($dir) . ' ' . $q($id1) . ' --deep');
+    check('helper: deep verify passes', ($r['json']['ok'] ?? null) === true && ($r['json']['deep'] ?? null) === true, $r['out']);
+    // corrupt it and make sure the checksum catches it
+    $arch = $native((string)($st['archive'] ?? ''));
+    $orig = ($arch !== '' && is_file($arch)) ? (string)file_get_contents($arch) : '';
+    check('helper: the archive is on disk before the corruption test', $orig !== '', $arch);
+    if ($orig !== '') file_put_contents($arch, $orig . 'rot');
+    $r = $run('verify ' . $q($dir) . ' ' . $q($id1));
+    check('helper: verify catches a changed archive', ($r['json']['ok'] ?? null) === false && str_contains((string)($r['json']['message'] ?? ''), 'changed'), $r['out']);
+    $r = $run('list ' . $q($dir));
+    check('helper: a failed verification is remembered', (($r['json']['archives'][0]['verified'] ?? null) === false));
+    if ($orig !== '') { file_put_contents($arch, $orig); $run('verify ' . $q($dir) . ' ' . $q($id1)); }
+
+    // download
+    $r = $run('cat ' . $q($dir) . ' ' . $q($id1));
+    check('helper: cat streams the archive', strlen($r['out']) > 100 && $r['rc'] === 0);
+
+    // ── concurrency: a second run must be refused, not queued ──
+    putenv('STUB_SLOW=3');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki');
+    check('helper: the slow run starts', ($r['json']['started'] ?? null) === true, $r['out']);
+    usleep(700000);
+    $r2 = $run('run ' . $q($dir) . ' tracker-lekki');
+    check('helper: a second run while one is in flight is refused', $r2['rc'] !== 0 && str_contains((string)($r2['json']['error'] ?? ''), 'already running'), $r2['out']);
+    putenv('STUB_SLOW');
+    $st2 = $waitDone($dir, $t0);
+    check('helper: the slow run still finished', ($st2['state'] ?? '') === 'done', json_encode($st2));
+    $id2 = (string)($st2['id'] ?? '');
+
+    // ── a worker that dies without writing its final state must not read as "running" for ever ──
+    // (OOM killer, a reboot mid-dump). status() notices the process is gone and says so.
+    file_put_contents($tmp . '/dir/.tracker-backup-state.json',
+        '{"state":"running","id":"backup-tryhackx-20200101-000000","mode":"script","profile":"tracker-lekki",'
+        . '"items":"tracker-config","started_at":1,"pid":999999,"step":"running","bytes":0,"archive":"",'
+        . '"error":"","encrypted":false,"verified":null,"log_tail":"","ts":1}');
+    $r = $run('status ' . $q($dir));
+    check('helper: a vanished worker is reported as failed, not running',
+          ($r['json']['state'] ?? '') === 'failed' && ($r['json']['running'] ?? null) === false, $r['out']);
+    check('helper: … and it says why', str_contains((string)($r['json']['error'] ?? ''), 'gone without finishing'), (string)($r['json']['error'] ?? ''));
+    @unlink($tmp . '/dir/.tracker-backup-state.json');
+
+    // ── a failing tool must leave a failed state, not a half-written archive ──
+    putenv('STUB_FAIL=1');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki');
+    check('helper: a run that will fail still starts', ($r['json']['started'] ?? null) === true);
+    $st3 = $waitDone($dir, $t0);
+    check('helper: a failing tool is reported as failed', ($st3['state'] ?? '') === 'failed', json_encode($st3));
+    check('helper: the failure says what happened', str_contains((string)($st3['error'] ?? ''), 'exited with code'), (string)($st3['error'] ?? ''));
+    putenv('STUB_FAIL');
+    $r = $run('list ' . $q($dir));
+    check('helper: the failed run left no archive behind', count($r['json']['archives'] ?? []) === 2, json_encode(array_column($r['json']['archives'] ?? [], 'id')));
+
+    // ── rotation ──
+    // three more archives, backdated, so age/count/size rules have something to chew on
+    for ($i = 0; $i < 3; $i++) {
+        $fake = $tmp . '/dir/backup-tryhackx-2026010' . $i . '-000000.tar.gz';
+        file_put_contents($fake, str_repeat('x', 4096));
+        @touch($fake, time() - (60 - $i) * 86400);
+    }
+    $r = $run('prune ' . $q($dir) . ' 0 45 0 --dry-run');
+    check('helper: prune --dry-run reports without deleting', ($r['json']['dry_run'] ?? null) === true && count($r['json']['removed'] ?? []) === 3, $r['out']);
+    check('helper: --dry-run really deleted nothing', count($run('list ' . $q($dir))['json']['archives'] ?? []) === 5);
+    $r = $run('prune ' . $q($dir) . ' 0 45 0');
+    check('helper: prune by age removes the old ones', count($r['json']['removed'] ?? []) === 3, $r['out']);
+    check('helper: and leaves the recent ones', count($run('list ' . $q($dir))['json']['archives'] ?? []) === 2);
+    $r = $run('prune ' . $q($dir) . ' 1 0 0');
+    check('helper: prune by count keeps exactly the newest', count($r['json']['removed'] ?? []) === 1
+          && count($run('list ' . $q($dir))['json']['archives'] ?? []) === 1, $r['out']);
+    // the last archive is never deleted by a size rule — an empty backup directory is worse than a full one
+    $r = $run('prune ' . $q($dir) . ' 0 0 1');
+    check('helper: prune never removes the last archive standing', count($run('list ' . $q($dir))['json']['archives'] ?? []) === 1, $r['out']);
+
+    $remaining = $run('list ' . $q($dir))['json']['archives'][0]['id'];
+
+    // ── restore ──
+    $r = $run('restore ' . $q($dir) . ' ' . $q($remaining) . ' --items tracker-config --dry-run');
+    check('helper: restore --dry-run works and changes nothing', ($r['json']['ok'] ?? null) === true
+          && str_contains((string)($r['json']['output'] ?? ''), 'dry-run'), $r['out']);
+    $r = $run('restore ' . $q($dir) . ' ' . $q($remaining) . ' --items tracker-config');
+    check('helper: restore of file items runs', ($r['json']['ok'] ?? null) === true, $r['out']);
+    $r = $run('restore ' . $q($dir) . ' ' . $q($remaining));
+    check('helper: restore without an item list is refused', $r['rc'] !== 0 && str_contains((string)($r['json']['error'] ?? ''), 'explicit'), $r['out']);
+
+    // ── database restore: the one action that overwrites live data ──
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($remaining) . ' --db tracker --confirm wrong');
+    check('helper: a mistyped database name stops everything', $r['rc'] !== 0
+          && str_contains((string)($r['json']['error'] ?? ''), 'does not match'), $r['out']);
+    check('helper: … and nothing was imported', !is_file($tmp . '/imported.sql'));
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($remaining) . ' --db "bad;name" --confirm "bad;name"');
+    check('helper: an invalid database name is refused', $r['rc'] !== 0, $r['out']);
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($remaining) . ' --db tracker --confirm tracker --dry-run');
+    check('helper: restore-db --dry-run reports the size and imports nothing',
+          ($r['json']['dry_run'] ?? null) === true && (int)($r['json']['dump_bytes'] ?? 0) > 0 && !is_file($tmp . '/imported.sql'), $r['out']);
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($remaining) . ' --db tracker --confirm tracker');
+    check('helper: restore-db imports the dump', ($r['json']['ok'] ?? null) === true, $r['out']);
+    // the light profile dumps `db/tracker-bez-index.sql`, so that is what must reach the client
+    check('helper: … the dump really reached the client', is_file($tmp . '/imported.sql')
+          && str_contains((string)@file_get_contents($tmp . '/imported.sql'), 'dump of tracker'),
+          is_file($tmp . '/imported.sql') ? substr((string)@file_get_contents($tmp . '/imported.sql'), 0, 80) : 'not written');
+    // the safety net: the state before the import must be on disk
+    $safety = (string)($r['json']['safety_dump'] ?? '');
+    check('helper: the current database was dumped BEFORE the import', $safety !== '' && is_file($native($safety)), $safety);
+    check('helper: the safety dump is not empty', $safety !== '' && is_file($native($safety)) && filesize($native($safety)) > 0);
+
+    // ── 1.75.3: Backup-serwera.sh 2.0 keeps the dump gzipped inside the archive (db/<db>.sql.gz) ──
+    // The restore used to match only db/<db>.sql, so an archive made by the new tool answered "does not contain a
+    // dump". It is checked with gzip -t first and streamed through gzip -dc into the client — no raw copy on disk.
+    putenv('STUB_GZ_DUMP=1');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-baza --db tracker');
+    $stGz = $waitDone($dir, $t0);
+    putenv('STUB_GZ_DUMP');
+    check('helper: a run whose archive carries db/<db>.sql.gz finishes', ($stGz['state'] ?? '') === 'done', json_encode($stGz));
+    $gzId = (string)($stGz['id'] ?? '');
+    // the member names, read straight out of the tar headers (512-byte blocks, the name in the first 100 bytes)
+    $gzTar = (string)@gzdecode((string)@file_get_contents($native((string)($stGz['archive'] ?? ''))));
+    $gzMembers = [];
+    for ($o = 0; $o + 512 <= strlen($gzTar); ) {
+        $nm = rtrim(substr($gzTar, $o, 100), "\0");
+        if ($nm === '') break;
+        $gzMembers[] = $nm;
+        $o += 512 + (int)(ceil(octdec(trim(substr($gzTar, $o + 124, 12), "\0 ")) / 512) * 512);
+    }
+    $gzJoined = implode("\n", $gzMembers);
+    check('helper: … and the archive really holds the dump gzipped, with no raw .sql beside it',
+          str_contains($gzJoined, 'db/tracker.sql.gz') && !preg_match('#db/tracker\.sql$#m', $gzJoined), $gzJoined);
+    @unlink($tmp . '/imported.sql');
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($gzId) . ' --db tracker --confirm tracker --dry-run');
+    check('helper: restore-db --dry-run finds the gzipped member and reports its size',
+          ($r['json']['dry_run'] ?? null) === true && (int)($r['json']['dump_bytes'] ?? 0) > 0 && ($r['json']['compressed'] ?? null) === true
+          && !is_file($tmp . '/imported.sql'), $r['out']);
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($gzId) . ' --db tracker --confirm tracker');
+    check('helper: restore-db imports the gzipped member', ($r['json']['ok'] ?? null) === true, $r['out']);
+    $imp = (string)@file_get_contents($tmp . '/imported.sql');
+    check('helper: … decompressed on the way into the client (the SQL arrives, not the gzip bytes)',
+          str_contains($imp, '-- gz dump of tracker') && str_contains($imp, 'CREATE TABLE g') && !str_starts_with($imp, "\x1f\x8b"), substr($imp, 0, 80));
+    check('helper: … after the safety dump, as always', ($r['json']['safety_dump'] ?? '') !== '' && is_file($native((string)$r['json']['safety_dump'])), $r['out']);
+    $run('delete ' . $q($dir) . ' ' . $q($gzId));
+
+    // a member that is not gzip at all is refused BEFORE anything is dumped or changed
+    putenv('STUB_GZ_DUMP=corrupt');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-baza --db tracker');
+    $stBad = $waitDone($dir, $t0);
+    putenv('STUB_GZ_DUMP');
+    $badId = (string)($stBad['id'] ?? '');
+    @unlink($tmp . '/imported.sql');
+    $before = glob($tmp . '/dir/before-restore-*') ?: [];
+    $r = $run('restore-db ' . $q($dir) . ' ' . $q($badId) . ' --db tracker --confirm tracker');
+    check('helper: a corrupt gzipped dump is refused', $r['rc'] !== 0 && ($r['json']['ok'] ?? null) === false
+          && str_contains((string)($r['json']['error'] ?? ''), 'gzip'), $r['out']);
+    check('helper: … nothing was imported and no new safety dump was written',
+          !is_file($tmp . '/imported.sql') && (glob($tmp . '/dir/before-restore-*') ?: []) === $before, $r['out']);
+    $run('delete ' . $q($dir) . ' ' . $q($badId));
+
+    // ── the built-in fallback (no Backup-serwera.sh at all) ──
+    putenv('BACKUP_SCRIPT=' . $posix($tmp . '/bin/does-not-exist.sh'));
+    $r = $run('check ' . $q($dir));
+    check('helper: without the tool it falls back to built-in mode', ($r['json']['mode'] ?? '') === 'builtin'
+          && ($r['json']['script'] ?? null) === false, $r['out']);
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-baza --db tracker');
+    check('helper: the built-in run starts', ($r['json']['started'] ?? null) === true && ($r['json']['mode'] ?? '') === 'builtin', $r['out']);
+    $st4 = $waitDone($dir, $t0);
+    check('helper: the built-in run finishes', ($st4['state'] ?? '') === 'done', json_encode($st4));
+    check('helper: it produced a gzipped dump', str_ends_with((string)($st4['archive'] ?? ''), '.sql.gz'), (string)($st4['archive'] ?? ''));
+    $r = $run('verify ' . $q($dir) . ' ' . $q((string)$st4['id']));
+    check('helper: the built-in dump verifies as a gzip stream', ($r['json']['ok'] ?? null) === true
+          && str_contains((string)($r['json']['message'] ?? ''), 'gzip'), $r['out']);
+    $args = (string)@file_get_contents($tmp . '/dumpargs.txt');
+    check('helper: the database-only profile dumps everything', !str_contains($args, '--ignore-table'), $args);
+    check('helper: … in one dump, with no structure-only second call', !str_contains($args, '--no-data'), $args);
+
+    // The profile has to mean the same thing without the toolkit as with it: "light" leaves out the
+    // two index tables, and saying so in the UI while dumping them anyway would be a lie.
+    @unlink($tmp . '/dumpargs.txt');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki --db tracker');
+    check('helper: the built-in light run starts', ($r['json']['started'] ?? null) === true, $r['out']);
+    $st5 = $waitDone($dir, $t0);
+    check('helper: the built-in light run finishes', ($st5['state'] ?? '') === 'done', json_encode($st5));
+    $args = (string)@file_get_contents($tmp . '/dumpargs.txt');
+    check('helper: the light profile skips index_hashes', str_contains($args, '--ignore-table=tracker.index_hashes'), $args);
+    check('helper: the light profile skips index_files', str_contains($args, '--ignore-table=tracker.index_files'), $args);
+    check('helper: … and says so in the log', str_contains((string)($st5['log_tail'] ?? ''), 'light profile: skipping'), (string)($st5['log_tail'] ?? ''));
+    // 1.75.3: the ROWS stay out, the STRUCTURE goes in, empty. A restore into a database without the two tables
+    // would otherwise leave them missing for good: the restored `settings` says the schema is current, so
+    // ensureSchema() never runs the migration that creates them.
+    check('helper: the light profile also dumps the two index tables without their rows',
+          str_contains($args, '--no-data tracker index_hashes index_files'), $args);
+    $lightSql = (string)@gzdecode((string)@file_get_contents($native((string)($st5['archive'] ?? ''))));
+    $posMain = strpos($lightSql, '-- builtin dump of tracker'); $posIdx = strpos($lightSql, '-- builtin dump of index_files');
+    check('helper: … and that structure is in the archive, behind the main dump',
+          $posMain !== false && $posIdx !== false && $posMain < $posIdx, substr($lightSql, 0, 200));
+    $run('delete ' . $q($dir) . ' ' . $q((string)$st5['id']));
+
+    // a structure dump that fails (a table an older schema does not have yet) must cost the dump its two empty
+    // tables, never the backup its archive — and nothing half-written may land in the dump
+    @unlink($tmp . '/dumpargs.txt');
+    putenv('DUMP_FAIL_NODATA=1');
+    $t0 = time();
+    $r = $run('run ' . $q($dir) . ' tracker-lekki --db tracker');
+    $st6 = $waitDone($dir, $t0);
+    putenv('DUMP_FAIL_NODATA');
+    check('helper: a failing structure dump does not fail the light backup', ($st6['state'] ?? '') === 'done', json_encode($st6));
+    $lightSql2 = (string)@gzdecode((string)@file_get_contents($native((string)($st6['archive'] ?? ''))));
+    check('helper: … the archive holds the main dump alone', str_contains($lightSql2, '-- builtin dump of tracker')
+          && !str_contains($lightSql2, 'index_files'), substr($lightSql2, 0, 200));
+    check('helper: … and the log says what was left out', str_contains((string)($st6['log_tail'] ?? ''), 'could not dump the structure'), (string)($st6['log_tail'] ?? ''));
+    $run('delete ' . $q($dir) . ' ' . $q((string)$st6['id']));
+    $r = $run('restore ' . $q($dir) . ' ' . $q((string)$st4['id']) . ' --items tracker-config');
+    check('helper: restoring FILES from a plain dump is refused', $r['rc'] !== 0, $r['out']);
+
+    // delete
+    $r = $run('delete ' . $q($dir) . ' ' . $q((string)$st4['id']));
+    check('helper: delete removes the archive', ($r['json']['deleted'] ?? '') === (string)$st4['id'], $r['out']);
+    check('helper: … and its sidecar', !is_file($tmp . '/dir/' . $st4['id'] . '.meta.json'));
+
+    // ── the schedule, end to end ──
+    // Everything above proves the helper works when something asks it to run. This proves the thing
+    // that actually asks: the janitor tick, deciding from the weekly plan, starting a real backup,
+    // and — the part that matters on a timer firing every minute — NOT starting a second one for the
+    // same slot.
+    if ($db === null) {
+        skip('schedule: janitor tick fires a real backup', 'no test database');
+    } else {
+        $keep = getSettings($db, true);
+        $saved = [];
+        foreach (['backup_enabled', 'backup_dir', 'backup_cmd', 'backup_script_path', 'backup_profile',
+                  'backup_schedule', 'backup_schedule_tz', 'backup_keep', 'backup_keep_days',
+                  'backup_max_size_gb', 'backup_verify_after', 'backup_db_name'] as $k) $saved[$k] = $keep[$k] ?? '';
+
+        // Wednesday 2026-09-02, backups at 04:00 UTC
+        $planTest = json_encode(['days' => ['wed'], 'time' => '04:00']);
+        setSettings($db, [
+            'backup_enabled' => '1', 'backup_dir' => $posix($tmp . '/dir'), 'backup_cmd' => $wrapperName,
+            'backup_script_path' => '', 'backup_profile' => 'tracker-lekki', 'backup_schedule' => $planTest,
+            'backup_schedule_tz' => 'UTC', 'backup_keep' => '0', 'backup_keep_days' => '0',
+            'backup_max_size_gb' => '0', 'backup_verify_after' => '1', 'backup_db_name' => 'tracker',
+        ]);
+        $cfgS2 = getSettings($db, true);
+        $stateBk = is_file(backupStateFile()) ? file_get_contents(backupStateFile()) : null;
+        @unlink(backupStateFile());
+        foreach (glob($tmp . '/dir/*') ?: [] as $f) @unlink($f);
+
+        $wed0400 = (new DateTimeImmutable('2026-09-02 04:00:20', new DateTimeZone('UTC')))->getTimestamp();
+        $wed0359 = (new DateTimeImmutable('2026-09-02 03:59:00', new DateTimeZone('UTC')))->getTimestamp();
+        $thu0400 = (new DateTimeImmutable('2026-09-03 04:00:20', new DateTimeZone('UTC')))->getTimestamp();
+        $wed2next = (new DateTimeImmutable('2026-09-09 04:00:20', new DateTimeZone('UTC')))->getTimestamp();
+
+        // the panel can reach the wrapper at all — otherwise every check below would pass vacuously
+        $probe = backupRun($cfgS2, ['check', $posix($tmp . '/dir')]);
+        check('schedule: the panel can run the helper through its configured command', $probe['ok'] === true,
+              (string)($probe['error'] ?? '') . ' | ' . substr($probe['output'], 0, 160));
+
+        if (!$probe['ok']) {
+            skip('schedule: janitor tick fires a real backup', 'the wrapper is not reachable on this machine');
+        } else {
+            $t = backupTick($db, $cfgS2, $wed0359);
+            check('schedule: a minute before the slot, nothing runs', $t['started'] === false && $t['skipped'] === 'not due', json_encode($t));
+
+            $t = backupTick($db, $cfgS2, $wed0400);
+            check('schedule: at the slot the janitor starts a backup', $t['started'] === true && !empty($t['id']), json_encode($t));
+            $st = $waitDone($posix($tmp . '/dir'), time() - 5);
+            check('schedule: … and it really finishes', ($st['state'] ?? '') === 'done', json_encode($st));
+            check('schedule: … producing an archive', !empty($st['archive']) && is_file($native((string)$st['archive'])), (string)($st['archive'] ?? ''));
+            check('schedule: … with the configured profile', ($st['profile'] ?? '') === 'tracker-lekki', (string)($st['profile'] ?? ''));
+            $after = $run('list ' . $q($posix($tmp . '/dir')));
+            check('schedule: exactly one archive so far', count($after['json']['archives'] ?? []) === 1, json_encode(array_column($after['json']['archives'] ?? [], 'id')));
+
+            // The janitor runs every minute. This is the check that matters.
+            $t = backupTick($db, $cfgS2, $wed0400 + 60);
+            check('schedule: a minute later it does NOT run again', $t['started'] === false && $t['skipped'] === 'not due', json_encode($t));
+            $t = backupTick($db, $cfgS2, $wed0400 + 3600);
+            check('schedule: nor an hour later in the same slot', $t['started'] === false, json_encode($t));
+            $t = backupTick($db, $cfgS2, $thu0400);
+            check('schedule: nor on a day the plan does not name', $t['started'] === false, json_encode($t));
+            $after = $run('list ' . $q($posix($tmp . '/dir')));
+            check('schedule: still exactly one archive', count($after['json']['archives'] ?? []) === 1, json_encode(array_column($after['json']['archives'] ?? [], 'id')));
+
+            // next week's slot fires again
+            $t = backupTick($db, $cfgS2, $wed2next);
+            check('schedule: next week it runs again', $t['started'] === true, json_encode($t));
+            $st = $waitDone($posix($tmp . '/dir'), time() - 5);
+            check('schedule: … and that one finishes too', ($st['state'] ?? '') === 'done', json_encode($st));
+            $after = $run('list ' . $q($posix($tmp . '/dir')));
+            check('schedule: now two archives', count($after['json']['archives'] ?? []) === 2, json_encode(array_column($after['json']['archives'] ?? [], 'id')));
+
+            // switching backups off stops the timer dead, whatever the plan says
+            setSettings($db, ['backup_enabled' => '0']);
+            $t = backupTick($db, getSettings($db, true), $wed2next + 7 * 86400);
+            check('schedule: with backups off the tick is inert', $t['enabled'] === false && $t['started'] === false, json_encode($t));
+
+            // an empty plan is not an error, it just never fires
+            setSettings($db, ['backup_enabled' => '1', 'backup_schedule' => '']);
+            $t = backupTick($db, getSettings($db, true), $wed2next + 7 * 86400);
+            check('schedule: an empty plan never fires', $t['started'] === false && $t['skipped'] === 'no schedule', json_encode($t));
+        }
+
+        setSettings($db, $saved);
+        getSettings($db, true);
+        @unlink(backupStateFile());
+        if ($stateBk !== null) file_put_contents(backupStateFile(), $stateBk);
+    }
+
+    // clean up
+    foreach (glob($tmp . '/dir/*') ?: [] as $f) @unlink($f);
+    @rmdir($tmp . '/dir/' . '.tracker-backup.lock.d');
+    foreach (glob($tmp . '/dir/.*') ?: [] as $f) { if (is_file($f)) @unlink($f); elseif (is_dir($f) && !in_array(basename($f), ['.', '..'], true)) { foreach (glob($f . '/*') ?: [] as $g) @unlink($g); @rmdir($f); } }
+    foreach (glob($tmp . '/bin/*') ?: [] as $f) @unlink($f);
+    @unlink($tmp . '/imported.sql');
+    @unlink($tmp . '/dumpargs.txt');
+    @rmdir($tmp . '/dir'); @rmdir($tmp . '/bin'); @rmdir($tmp);
+    putenv('PATH=' . $pathBefore);
+    foreach (['BACKUP_ALLOW_ANY_DIR', 'BACKUP_SCRIPT', 'MARIADB_DUMP_BIN', 'MARIADB_BIN', 'IMPORTED_TO', 'DUMPARGS_TO'] as $v) putenv($v);
+}
+
+echo "\n$n checks, $fails failed" . ($skips ? ", $skips skipped" : '') . "\n";
+exit($fails ? 1 : 0);

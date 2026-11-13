@@ -1,0 +1,490 @@
+<?php
+/**
+ * Server-to-server API: bearer-key authentication + strict ban policy.
+ *
+ *   Authorization: Bearer <key_id>.<secret>
+ *
+ * key_id = 16 hex chars, secret = 64 hex chars. Only sha256(secret) is stored (api_clients.secret_hash);
+ * the plain secret is shown once when the client is created. Rotation = create a new client, paste
+ * it into the consumer, disable the old one.
+ *
+ * Ban policy ("very strict"): any FAILED authentication attempt that carries an Authorization header
+ * bans the source for `api_ban_days` (default 30) — malformed header, unknown key, wrong secret.
+ * Requests WITHOUT an Authorization header get 401 and are NOT banned (scanner noise; the whole
+ * point is to punish attempts to guess/abuse keys, not to fill the table with crawler hits).
+ * A disabled key answers 403 without a ban (that is an admin action, not an attack), and IPs listed
+ * in `api_ban_exempt_ips` (seeded with this server's own addresses) are never banned nor blocked.
+ * Bans are keyed by IP bucket (IPv4 exact, IPv6 /64) so rotating inside a /64 does not help.
+ * The full offending request (headers minus secrets, body up to 256 KB) is stored for review.
+ */
+
+const API_MAX_ITEMS          = 500;        // items per submit call
+const API_MAX_BODY_BYTES     = 524288;     // 512 KB request body cap
+const API_SNAPSHOT_MAX_BODY  = 262144;     // body bytes stored in a ban snapshot
+const API_BAN_INSERTS_PER_MIN = 30;        // global throttle on new ban rows (snapshot dropped above it)
+
+/** The per-minute budget is a fixed window: cheap to count, and its end is what Retry-After names. */
+const API_RATE_WINDOW = 60;
+
+/** The one list parser (includes/functions.php), kept under its old name for the call sites. */
+function apiParseIpList(string $list): array {
+    return ipParseList($list);
+}
+
+/**
+ * Is the IP (or its bucket) in the exempt list? Accepts exact IPs and IPv4/IPv6 CIDRs.
+ *
+ * This used to carry its own packed-byte matcher, and that copy had no range check on the prefix:
+ * `$bits = (int)$bits` on an entry of "10.0.0.0/999" walked straight into ord($bin[124]) on a
+ * four-byte string. It goes through ipMatchesCidr() now — one matcher for the whole panel, and an
+ * out-of-range prefix is refused during parsing rather than indexed past the end.
+ *
+ * The empty-list early return STAYS. Dropping it looked harmless — only SERVER_ADDR is left to
+ * match — until you picture the deployment where it matters: a second front end (a tunnel, HAProxy,
+ * an Apache in front) connecting to nginx over loopback makes REMOTE_ADDR and SERVER_ADDR the same
+ * address for every visitor, so without this line an operator who deliberately EMPTIED the never-ban
+ * box would have exempted the entire internet from API bans and the API rate limit.
+ */
+function apiIpExempt(string $ip, array $cfg): bool {
+    $list = apiParseIpList((string)($cfg['api_ban_exempt_ips'] ?? ''));
+    if (!$list) return false;
+    if (ipInCidrList($ip, $list)) return true;
+    // the server's own address is exempt too — but only while the operator keeps a list at all
+    $self = $_SERVER['SERVER_ADDR'] ?? '';
+    return $self !== '' && $self === $ip;
+}
+
+function apiIsBanned(PDO $db, array $cfg, string $ip): bool {
+    if (apiIpExempt($ip, $cfg)) return false;
+    $st = $db->prepare("SELECT 1 FROM api_bans WHERE ip_bucket = ? AND lifted_at IS NULL AND expires_at > NOW() LIMIT 1");
+    $st->execute([ipBucket($ip)]);
+    return (bool)$st->fetchColumn();
+}
+
+/** Snapshot of the offending request (no cookies, secret in Authorization masked). */
+function apiRequestSnapshot(string $rawBody, string $endpoint): array {
+    $keep = ['HTTP_USER_AGENT' => 'User-Agent', 'CONTENT_TYPE' => 'Content-Type', 'CONTENT_LENGTH' => 'Content-Length',
+             'HTTP_X_FORWARDED_FOR' => 'X-Forwarded-For', 'HTTP_X_REAL_IP' => 'X-Real-IP', 'HTTP_ACCEPT' => 'Accept',
+             'HTTP_AUTHORIZATION' => 'Authorization', 'HTTP_X_TRACKER_KEY' => 'X-Tracker-Key'];
+    $headers = [];
+    foreach ($keep as $k => $name) {
+        if (!isset($_SERVER[$k])) continue;
+        $v = (string)$_SERVER[$k];
+        if ($k === 'HTTP_AUTHORIZATION' || $k === 'HTTP_X_TRACKER_KEY') {
+            // never store a credential: keep the scheme and, for a well-formed bearer token, the key id only
+            if (preg_match('/^\s*(Bearer)\s+([a-f0-9]{16})\./i', $v, $mm)) {
+                $v = $mm[1] . ' ' . strtolower($mm[2]) . '.***';
+            } elseif (preg_match('/^\s*([A-Za-z][A-Za-z0-9_-]{0,20})\s+\S/', $v, $mm)) {
+                $v = $mm[1] . ' ***';   // Basic / Digest / unknown scheme — value dropped
+            } else {
+                $v = '***';             // raw token without a scheme — dropped entirely
+            }
+        }
+        $headers[$name] = mb_substr($v, 0, 512);
+    }
+    $bodyLen = strlen($rawBody);
+    $body = $bodyLen > API_SNAPSHOT_MAX_BODY ? substr($rawBody, 0, API_SNAPSHOT_MAX_BODY) : $rawBody;
+    $body = apiRedactBody($body);
+    return [
+        'ts' => date('c'), 'ip' => getClientIp(), 'remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
+        'method' => $_SERVER['REQUEST_METHOD'] ?? '', 'endpoint' => $endpoint, 'uri' => mb_substr((string)($_SERVER['REQUEST_URI'] ?? ''), 0, 512),
+        'headers' => $headers, 'body' => $body, 'body_len' => $bodyLen, 'body_truncated' => $bodyLen > API_SNAPSHOT_MAX_BODY,
+    ];
+}
+
+/**
+ * Redact secrets out of a request body before it is stored.
+ *
+ * The headers above were already redacted; the body was not — and the body is where the secrets
+ * actually are. A failed authentication on v1/users/provision left the buyer's CLEARTEXT ACCOUNT
+ * PASSWORD in api_bans.request_snapshot, and admin/fetch_api_bans handed it back in a JSON
+ * response. An authentication failure is exactly when a wrong key, or a right key sent to the wrong
+ * host, arrives with a real payload behind it.
+ *
+ * Redacted BY THE NAME OF THE FIELD, on the same rule the audit log already uses
+ * (auditIsSecretKey) — matching on value shape would need this code to recognise every secret
+ * format the API will ever carry, and it will not.
+ *
+ * A body that is not a JSON object is not inspectable field by field, so it is dropped entirely
+ * rather than guessed at: the length and the fact that it was unparseable are kept, which is all a
+ * ban investigation actually needs from it.
+ */
+function apiRedactBody(string $body): string {
+    if (trim($body) === '') return $body;
+    $decoded = json_decode($body, true);
+    if (!is_array($decoded)) {
+        return '[not JSON — ' . strlen($body) . ' bytes, dropped rather than stored]';
+    }
+    $walk = function ($node) use (&$walk) {
+        if (!is_array($node)) return $node;
+        $out = [];
+        foreach ($node as $k => $v) {
+            if (is_string($k) && function_exists('auditIsSecretKey') && auditIsSecretKey($k)) {
+                $out[$k] = '***';
+                continue;
+            }
+            $out[$k] = is_array($v) ? $walk($v) : $v;
+        }
+        return $out;
+    };
+    $clean = json_encode($walk($decoded), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return $clean === false ? '[unencodable — dropped]' : $clean;
+}
+
+/** Insert a ban row (unless exempt / already banned). Never throws — the caller always answers 403. */
+function apiBan(PDO $db, array $cfg, string $ip, string $reason, string $detail, ?array $snapshot, ?string $keyId, string $endpoint): void {
+    try {
+        if (apiIpExempt($ip, $cfg)) return;
+        $bucket = ipBucket($ip);
+        $st = $db->prepare("SELECT 1 FROM api_bans WHERE ip_bucket = ? AND lifted_at IS NULL AND expires_at > NOW() LIMIT 1");
+        $st->execute([$bucket]);
+        if ($st->fetchColumn()) return;
+        $days = max(1, min(3650, (int)($cfg['api_ban_days'] ?? 30)));
+        // global throttle: keep the snapshot only while the insert rate is sane
+        $recent = (int)$db->query("SELECT COUNT(*) FROM api_bans WHERE created_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)")->fetchColumn();
+        $snapJson = null;
+        if ($snapshot !== null && $recent < API_BAN_INSERTS_PER_MIN) {
+            $snapJson = json_encode($snapshot, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+            if ($snapJson === false) $snapJson = null;
+        }
+        $ins = $db->prepare("INSERT INTO api_bans (ip, ip_bucket, reason, detail, key_id, endpoint, request_snapshot, expires_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))");
+        try {
+            $ins->execute([$ip, $bucket, mb_substr($reason, 0, 32), mb_substr($detail, 0, 255), $keyId !== null ? mb_substr($keyId, 0, 64) : null, mb_substr($endpoint, 0, 64), $snapJson, $days]);
+        } catch (\Throwable $e) {
+            // snapshot may be unstorable (encoding) — ban without it
+            $ins->execute([$ip, $bucket, mb_substr($reason, 0, 32), mb_substr($detail, 0, 255), $keyId !== null ? mb_substr($keyId, 0, 64) : null, mb_substr($endpoint, 0, 64), null, $days]);
+        }
+    } catch (\Throwable $e) {
+        error_log('[api ban] ' . $e->getMessage());
+    }
+}
+
+/**
+ * How long a ban row is kept after it ran out (1.73.0: a name for the 90 days whitelistJanitor() used to spell).
+ * The row holds the address, the user agent and the request as it arrived (secrets masked), and a lifted or
+ * expired ban stays readable on the API bans page this long.
+ */
+const API_BAN_KEEP_DAYS = 90;
+
+/**
+ * The janitor's half of the bans' retention (1.73.0): rows that expired more than API_BAN_KEEP_DAYS ago, $limit
+ * a pass. It used to run only inside whitelistJanitor() — in whitelist mode, on one request in fifty — so a
+ * tracker in blacklist mode kept every ban row and its request for ever. $now is for the tests (a clock passed
+ * in); the database's own clock otherwise.
+ */
+function apiBansPrune(PDO $db, ?int $now = null, int $limit = 500): int {
+    try {
+        // FROM_UNIXTIME(NULL) is NULL, so without a clock passed in the COALESCE is the database's NOW().
+        $st = $db->prepare("DELETE FROM api_bans
+                             WHERE expires_at < DATE_SUB(COALESCE(FROM_UNIXTIME(?), NOW()), INTERVAL " . API_BAN_KEEP_DAYS . " DAY)
+                             LIMIT " . max(1, $limit));
+        $st->execute([$now]);
+        return $st->rowCount();
+    } catch (\Throwable $e) {
+        return 0;   // a database that predates the table
+    }
+}
+
+/** Read the raw request body with a hard size cap. Returns null when the cap is exceeded. */
+function apiReadRawBody(int $max = API_MAX_BODY_BYTES): ?string {
+    $len = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($len > $max) return null;
+    $body = file_get_contents('php://input', false, null, 0, $max + 1);
+    if ($body === false) $body = '';
+    if (strlen($body) > $max) return null;
+    return $body;
+}
+
+/** The Authorization header (Apache may hide it behind REDIRECT_ prefixes / mod_rewrite). */
+function apiAuthorizationHeader(): ?string {
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_TRACKER_KEY'] as $k) {
+        if (!empty($_SERVER[$k])) return (string)$_SERVER[$k];
+    }
+    if (function_exists('apache_request_headers')) {
+        $h = apache_request_headers();
+        foreach ($h as $k => $v) {
+            if (strcasecmp($k, 'Authorization') === 0 || strcasecmp($k, 'X-Tracker-Key') === 0) return (string)$v;
+        }
+    }
+    return null;
+}
+
+function apiRateLimitPerMin(array $cfg): int { return max(0, min(100000, (int)($cfg['api_rate_limit_per_min'] ?? 60))); }
+function apiRateLimitBytesDay(array $cfg): int { return max(0, (int)($cfg['api_rate_limit_bytes_day'] ?? 5368709120)); }
+
+/**
+ * Per-client budgets for the server-to-server API: requests per minute and bytes per day.
+ *
+ * Until now a valid bearer was a licence to hammer the database as fast as the network allowed. The
+ * ban machinery only ever reacted to BAD authorisation, so a partner whose key was correct — or
+ * whose key had leaked — could not be slowed down at all short of disabling them by hand. A
+ * federation peer pulling pages is exactly the shape of traffic that needs a ceiling.
+ *
+ * The counters live on the client row, not on the IP: one partner pulls from one address, and an
+ * IP bucket would be shared by everyone behind the same NAT. Both budgets are windows that reset
+ * rather than rolling averages — cheap, and the reset is what Retry-After can point at honestly.
+ *
+ * Refusal is 429 with Retry-After, never a ban: going too fast is a configuration mistake between
+ * partners, not an attack, and banning would take the whole node offline for a mis-set interval.
+ * Either budget set to 0 switches that half off.
+ */
+function apiRateLimit(PDO $db, array $cfg, array $client, int $requestBytes): void {
+    $perMin   = apiRateLimitPerMin($cfg);
+    $bytesDay = apiRateLimitBytesDay($cfg);
+    if ($perMin <= 0 && $bytesDay <= 0) return;
+    // The same list that exempts an address from bans exempts it here: it exists for the operator's
+    // own integrations (the forum on this very machine), and throttling ourselves helps nobody.
+    if (apiIpExempt(getClientIp($cfg), $cfg)) return;
+
+    $id = (int)($client['id'] ?? 0);
+    if ($id <= 0) return;
+    try {
+        // One statement, so two requests arriving together cannot both read a stale count. MariaDB
+        // evaluates SET assignments left to right, so each counter is written BEFORE the column its
+        // own reset test reads — hence count before start, and bytes before day. Swapping either
+        // pair would make the window reset on every request.
+        $db->prepare(
+            "UPDATE api_clients SET
+                rl_min_count = IF(rl_min_start IS NULL OR rl_min_start <= NOW() - INTERVAL " . API_RATE_WINDOW . " SECOND, 1, rl_min_count + 1),
+                rl_min_start = IF(rl_min_start IS NULL OR rl_min_start <= NOW() - INTERVAL " . API_RATE_WINDOW . " SECOND, NOW(), rl_min_start),
+                rl_day_bytes = IF(rl_day IS NULL OR rl_day <> CURDATE(), ?, rl_day_bytes + ?),
+                rl_day = CURDATE()
+             WHERE id = ?")
+           ->execute([$requestBytes, $requestBytes, $id]);
+        $st = $db->prepare("SELECT rl_min_count, UNIX_TIMESTAMP(rl_min_start) AS rl_start, rl_day_bytes FROM api_clients WHERE id = ?");
+        $st->execute([$id]);
+        $c = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        return;   // a counter that cannot be written must never take the API down
+    }
+    if (!$c) return;
+
+    $retry = null;
+    $why = '';
+    if ($perMin > 0 && (int)$c['rl_min_count'] > $perMin) {
+        $retry = max(1, API_RATE_WINDOW - (time() - (int)$c['rl_start']));
+        $why = 'rate';
+    } elseif ($bytesDay > 0 && (int)$c['rl_day_bytes'] > $bytesDay) {
+        $retry = max(1, strtotime('tomorrow midnight') - time());
+        $why = 'bytes';
+    }
+    if ($retry === null) return;
+
+    try { $db->prepare("UPDATE api_clients SET rl_blocked_count = rl_blocked_count + 1 WHERE id = ?")->execute([$id]); }
+    catch (\Throwable $e) {
+        // Bookkeeping only: the 429 below is the answer either way — but not silently (1.74.0, QUAL-26).
+        error_log('[api] the blocked-request count of client #' . $id . ' could not be written: ' . $e->getMessage());
+    }
+    header('Retry-After: ' . (int)$retry);
+    jsonResponse([
+        'error' => 'rate_limited',
+        'detail' => $why === 'rate'
+            ? 'more than ' . $perMin . ' requests in a minute for this key'
+            : 'the daily byte budget for this key is spent',
+        'retry_after' => (int)$retry,
+    ], 429);
+}
+
+/**
+ * Charge bytes we SENT to the client's daily budget. Called by endpoints that answer with a large
+ * body (the federation export), because the request that asks for a page is tiny and the reply is
+ * the part that actually costs bandwidth. Best effort — never worth failing a served response over.
+ */
+function apiChargeBytes(PDO $db, array $client, int $bytes): void {
+    $id = (int)($client['id'] ?? 0);
+    if ($id <= 0 || $bytes <= 0) return;
+    try {
+        $db->prepare("UPDATE api_clients SET rl_day_bytes = IF(rl_day IS NULL OR rl_day <> CURDATE(), ?, rl_day_bytes + ?), rl_day = CURDATE() WHERE id = ?")
+           ->execute([$bytes, $bytes, $id]);
+    } catch (\Throwable $e) {
+        // Best effort, as said above — and said in the log, since an uncharged reply leaves the day's budget open
+        // (1.74.0, QUAL-26).
+        error_log('[api] ' . $bytes . ' bytes could not be charged to client #' . $id . ': ' . $e->getMessage());
+    }
+}
+
+/**
+ * Authenticate the request or exit with the appropriate JSON error. On success returns the client
+ * row (id, label, key_id). All failures respond with the same generic 403 body.
+ */
+function apiAuthenticate(PDO $db, array $cfg, string $endpoint, ?string $rawBody, int $maxBytes = API_MAX_BODY_BYTES): array {
+    $ip = getClientIp($cfg);
+    if (($cfg['api_enabled'] ?? '0') !== '1') jsonResponse(['error' => 'api_disabled'], 503);
+    if (apiIsBanned($db, $cfg, $ip)) jsonResponse(['error' => 'forbidden'], 403);
+
+    $auth = apiAuthorizationHeader();
+    if ($auth === null || trim($auth) === '') {
+        header('WWW-Authenticate: Bearer realm="tracker-api"');
+        jsonResponse(['error' => 'unauthorized'], 401);
+    }
+    $fail = function (string $reason, string $detail, ?string $keyId = null) use ($db, $cfg, $ip, $endpoint, $rawBody) {
+        apiBan($db, $cfg, $ip, $reason, $detail, apiRequestSnapshot((string)$rawBody, $endpoint), $keyId, $endpoint);
+        jsonResponse(['error' => 'forbidden'], 403);
+    };
+    if (!preg_match('/^\s*Bearer\s+([a-f0-9]{16})\.([a-f0-9]{64})\s*$/i', $auth, $m)) {
+        $fail('malformed', 'Authorization header is not "Bearer <key_id>.<secret>"');
+    }
+    $keyId = strtolower($m[1]); $secret = strtolower($m[2]);
+    // EVERY per-key setting the endpoints read, in this one SELECT. The list used to stop at
+    // `enabled`, so `$client['auto_approve']` and `$client['required_fields']` were simply not there
+    // when api/v1/whitelist_submit.php looked for them — and both of its `?? ` fallbacks meant
+    // "publish immediately, demand nothing". A key set to hold submissions for review published
+    // them; a key told to require a title accepted items without one. The queue itself worked, the
+    // panel showed the setting, and nothing on the way in ever read it.
+    $st = $db->prepare("SELECT id, label, key_id, secret_hash, scope, enabled, auto_approve,
+                               abuse_auto_block, required_fields, describe_mode, describe_accounts, image_domains, image_consent
+                          FROM api_clients WHERE key_id = ? LIMIT 1");
+    $st->execute([$keyId]);
+    $client = $st->fetch();
+    if (!$client) $fail('unknown_key', 'no client with this key id', $keyId);
+    if (!hash_equals((string)$client['secret_hash'], hash('sha256', $secret))) $fail('bad_secret', 'secret does not match', $keyId);
+    if ((int)$client['enabled'] !== 1) jsonResponse(['error' => 'forbidden'], 403); // admin action, no ban
+    // authenticated client, oversized payload → 413, never a ban (a big forum scan batch is not an attack)
+    if ($rawBody === null) jsonResponse(['error' => 'payload_too_large', 'max_bytes' => $maxBytes], 413);
+    try {
+        $db->prepare("UPDATE api_clients SET last_used_at = NOW(), last_used_ip = ?, requests_count = requests_count + 1 WHERE id = ?")
+           ->execute([$ip, (int)$client['id']]);
+    } catch (\Throwable $e) {
+        // The "last used" line on the key is bookkeeping; the call goes on — logged, not silent (1.74.0, QUAL-26).
+        error_log('[api] the last use of client #' . (int)$client['id'] . ' could not be recorded: ' . $e->getMessage());
+    }
+    unset($client['secret_hash']);
+    apiRateLimit($db, $cfg, $client, strlen((string)$rawBody));
+    // Name the actor for the audit log. auditActor() has read this global since the log was
+    // written; nothing ever assigned it, so the 'api' branch was dead and a v1 call that did
+    // get logged would have been attributed to nobody.
+    $GLOBALS['apiClient'] = ['id' => (int)$client['id'], 'name' => (string)($client['label'] ?? ('key ' . ($client['key_id'] ?? '')))];
+    return $client;
+}
+
+/**
+ * Valid client scopes: what family of v1 endpoints a key may call ('all' = everything).
+ *
+ * `shop` (1.65.0) is `users` with the dangerous two thirds taken out. A payment webhook needs to look
+ * an account up, sell it a month of a group and take that month back on a refund — three endpoints.
+ * The `users` scope also opens `v1/users/provision` (make accounts on this site) and the whole
+ * sign-in bridge, including `v1/auth/merge`, which attaches an outside identity to an EXISTING
+ * account: a key that can call it can be told "the person behind my user 412 is your user 1" and then
+ * open a session as them. That is not a thing a shop's webhook should be able to do, and until there
+ * was a narrower scope the only way to sell a group was to hand it that power.
+ */
+function apiClientScopes(): array { return ['whitelist', 'abuse', 'users', 'shop', 'federation', 'all']; }
+
+/**
+ * Enforce the client's scope AFTER apiAuthenticate(). A wrong scope is an admin-side configuration
+ * matter, not an attack — 403 without a ban (mirrors the disabled-key branch).
+ *
+ * Several scopes may be named: the endpoint lists every scope that opens it, and the key needs ONE
+ * of them. `v1/users/lookup|grant|revoke` are the only endpoints with two, because they are exactly
+ * the overlap between a full users key and a shop's.
+ */
+function apiRequireScope(array $client, string ...$scopes): void {
+    $s = (string)($client['scope'] ?? 'whitelist');
+    if ($s === 'all' || in_array($s, $scopes, true)) return;
+    jsonResponse(['error' => 'forbidden',
+                  'detail' => 'this key does not have the "' . implode('" or "', $scopes) . '" scope'], 403);
+}
+
+/** Create a client; returns ['id','key_id','secret'] — the secret is never retrievable again. */
+/**
+ * The field names a key may be told to demand, and nothing else.
+ *
+ * An allow-list rather than free text: this string ends up driving a check on every submitted item,
+ * and a typo in the panel would become a partner whose feed is refused for a reason nobody can
+ * spell. Three names, each of which the endpoint knows how to look for.
+ */
+const API_REQUIRED_FIELDS = ['name', 'url', 'source_id'];
+
+/**
+ * The same idea for an abuse report, and a DIFFERENT list, because it is a different claim.
+ *
+ * Registering a hash says "this exists"; reporting one says "this infringes something of mine, and
+ * I am the one who may say so". The fields an operator can demand are therefore about the work, the
+ * evidence and the person — not about which forum post the hash came from.
+ *
+ *   title         the work being infringed          (reports.objectTitle)
+ *   evidence_url  where it can be seen              (reports.link)
+ *   reason        what is actually being claimed    (reports.add_message)
+ *   reporter      who is filing it: the four identity fields the public form demands
+ *   statement     an explicit good-faith declaration, sent as `"statement": true`
+ */
+const API_ABUSE_FIELDS = ['title', 'evidence_url', 'reason', 'reporter', 'statement'];
+
+/** The field names one scope may be told to demand. 'all' can do both jobs, so it gets both lists. */
+function apiScopeFields(?string $scope): array {
+    if ($scope === 'abuse') return API_ABUSE_FIELDS;
+    if ($scope === 'whitelist') return API_REQUIRED_FIELDS;
+    // A shop key submits nothing, so there is no field it could be told to demand. Answering with
+    // the merged list would let the panel store a rule this key's endpoints will never read.
+    if ($scope === 'shop') return [];
+    return array_merge(API_REQUIRED_FIELDS, API_ABUSE_FIELDS);
+}
+
+function apiClientCleanFields($raw, ?string $scope = null): array {
+    if (is_string($raw)) $raw = explode(',', $raw);
+    if (!is_array($raw)) return [];
+    $allowed = apiScopeFields($scope);
+    $out = [];
+    foreach ($raw as $f) {
+        $f = strtolower(trim((string)$f));
+        if (in_array($f, $allowed, true) && !in_array($f, $out, true)) $out[] = $f;
+    }
+    return $out;
+}
+
+/**
+ * The site's absolute address, for a link that leaves this server.
+ *
+ * getBaseUrl() knows the request PATH and nothing else — it returns "/" on most installs, which is
+ * exactly right inside a page and useless in a mail, in a partner's redirect, or anywhere the
+ * reader is not already on this host. Same reasoning as mailAbsoluteUrl(); the configured site_url
+ * is the operator's own statement of where this site lives, and the request is the fallback.
+ */
+function apiAbsoluteBase(array $cfg): string {
+    $base = rtrim(trim((string)($cfg['site_url'] ?? '')), '/');
+    if ($base !== '') return $base;
+    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+    if ($host !== '' && preg_match('/^[A-Za-z0-9._:\[\]-]{1,255}$/', $host)) {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+              || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+        return ($https ? 'https://' : 'http://') . $host . rtrim(getBaseUrl(), '/');
+    }
+    return rtrim(getBaseUrl(), '/');
+}
+
+/**
+ * The address of the integration guide for one key.
+ *
+ * It carries the three answers the guide has to vary on and nothing else — no key, no secret, no
+ * identifier of the client row. That is what makes it safe to put in the same mail as the key
+ * without it BEING the key: somebody who finds the link learns how the public API is shaped, which
+ * is the one thing about it that was never a secret.
+ */
+function apiClientDocsUrl(string $scope, bool $autoApprove, array $fields, bool $autoBlock = false, string $describe = 'off'): string {
+    // ONE ANSWER PER CHAPTER (1.73.0). `approve=` is what happens to a REGISTRATION (the key's auto_approve) and
+    // `block=` what happens to a REPORT (abuse_auto_block — review unless somebody said otherwise), each written
+    // only for a key that has that chapter: an `all` key gets both, an abuse key only block=, a key that submits
+    // nothing (users, shop, federation) neither — the panel's live preview has always left them out there. An
+    // abuse key's address used to carry its creator's auto_approve, so a key that holds reports for review was
+    // given a guide saying they block on arrival; an `all` key's reporting chapter borrowed the registrations'
+    // answer. templates/pages/apidocs.php reads block= first (approve= stays its fallback for old links).
+    $submits = in_array($scope, ['whitelist', 'all'], true);
+    $reports = in_array($scope, ['abuse', 'all'], true);
+    // Absolute: this address is sent to somebody who is not on this site — that is its whole job.
+    return apiAbsoluteBase($GLOBALS['cfg'] ?? []) . '/?action=apidocs&scope=' . urlencode($scope)
+         . ($submits ? '&approve=' . ($autoApprove ? 'auto' : 'review') : '')
+         . ($reports ? '&block=' . ($autoBlock ? 'auto' : 'review') : '')
+         . ($submits && in_array($describe, ['queue', 'publish'], true) ? '&describe=' . $describe : '')
+         . ($fields && ($submits || $reports) ? '&fields=' . urlencode(implode(',', $fields)) : '');
+}
+
+function apiClientCreate(PDO $db, string $label, string $scope = 'whitelist'): array {
+    $label = mb_substr(trim($label), 0, 100) ?: 'client';
+    if (!in_array($scope, apiClientScopes(), true)) $scope = 'whitelist';
+    $keyId = bin2hex(random_bytes(8));
+    $secret = bin2hex(random_bytes(32));
+    $db->prepare("INSERT INTO api_clients (label, key_id, secret_hash, secret_hint, scope) VALUES (?, ?, ?, ?, ?)")
+       ->execute([$label, $keyId, hash('sha256', $secret), substr($secret, -4), $scope]);
+    return ['id' => (int)$db->lastInsertId(), 'key_id' => $keyId, 'secret' => $secret, 'label' => $label, 'scope' => $scope];
+}
