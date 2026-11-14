@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="<?= sanitize(langCurrent()) ?>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= _h('a.users.title') ?> &mdash; <?= sanitize($cfg['site_name'] ?? 'Tracker') ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <?= iconFontTag($cfg) ?>
+    <link rel="stylesheet" href="<?= $baseUrl ?>assets/css/admin.css<?= assetVer('assets/css/admin.css') ?>">
+    <link rel="icon" type="image/svg+xml" href="<?= $baseUrl ?>assets/img/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="<?= $baseUrl ?>assets/img/favicon.ico">
+    <?php /* + the recommended sets' and the presets' names and lines (the server's), found back by key so they follow
+             the live language switch (t.find(), 1.73.0); + what every permission allows (perm.<id>), which
+             admin-users.js says by the id */ ?>
+    <?= langJsBridge($baseUrl, ['js.', 'a.users.rec_', 'perm.']) ?>
+</head>
+<body class="admin-body admin-hc wl-body" data-api-base="<?= $baseUrl ?>api.php?endpoint=" data-csrf="<?= $csrfToken ?>" data-login-path="<?= sanitize(adminLoginPath($cfg)) ?>">
+    <div class="admin-container admin-wide wl-page" role="main">
+        <div class="admin-header">
+            <h1 class="admin-title"><i class="bi bi-people"></i> <?= _h('a.users.title') ?> <span class="idx-subtitle"><?= __('a.users.subtitle') ?></span></h1>
+            <?php $current = 'admin-users'; include __DIR__ . '/_header_actions.php'; ?>
+        </div>
+
+        <div class="wl-status-card">
+            <div class="wl-status-head">
+                <h6><i class="bi bi-people"></i> <?= _h('a.users.accounts_head') ?> <span class="wl-status-updated" id="us-status-note"></span></h6>
+            </div>
+            <div class="wl-status-grid" id="us-status-grid">
+                <div class="wl-status-loading"><span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> <?= _h('common.loading') ?></div>
+            </div>
+            <p class="idx-note" id="us-disabled-note" style="display:none"><?= __('a.users.disabled_note', ['url' => $baseUrl . '?action=settings#section-users']) ?></p>
+        </div>
+
+        <div class="source-tabs" id="us-tabs">
+            <button type="button" class="source-tab active" data-view="users"><i class="bi bi-person"></i> <?= _h('a.users.title') ?></button>
+            <button type="button" class="source-tab" data-view="groups"><i class="bi bi-people-fill"></i> <?= _h('a.users.groups') ?></button>
+            <button type="button" class="source-tab" data-view="write"><i class="bi bi-envelope-paper"></i> <?= _h('a.users.write_head') ?></button>
+        </div>
+
+        <!-- Users view -->
+        <div class="wl-view" id="view-users">
+            <div class="admin-toolbar-card">
+                <div class="toolbar-row">
+                    <div class="toolbar-search">
+                        <span class="toolbar-search-icon"><i class="bi bi-search"></i></span>
+                        <div class="search-input-wrap">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="us-search" placeholder="<?= _h('a.users.search_ph') ?>">
+                            <button type="button" class="search-clear-btn" id="us-search-clear" title="<?= _h('a.users.search_clear') ?>"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="us-filter-status" title="<?= _h('a.users.status') ?>">
+                            <option value=""><?= _h('a.users.all') ?></option>
+                            <option value="active"><?= _h('a.users.active') ?></option>
+                            <option value="banned"><?= _h('a.users.banned') ?></option>
+                            <?php /* 1.75.0: silenced right now, and with a warning that counts (loud, not revoked, not automatic) */ ?>
+                            <option value="muted"><?= _h('a.users.muted') ?></option>
+                            <option value="warned"><?= _h('a.users.warned') ?></option>
+                        </select>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary toolbar-status-filter" id="us-filter-group" title="<?= _h('a.users.group') ?>">
+                            <option value=""><?= _h('a.users.all_groups') ?></option>
+                        </select>
+                    </div>
+                    <div class="toolbar-right">
+                        <span id="us-total" class="text-muted wl-total"></span>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="us-add-btn">
+                            <i class="bi bi-person-plus"></i> <?= _h('a.users.add') ?>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover dash-table wl-table" id="us-table">
+                    <?php /* Pinned columns and three that share the rest (1.73.0, admin.css "The users table"): nine equal
+                             shares had cut the dates, the groups and every badge after a long name. */ ?>
+                    <colgroup>
+                        <col class="us-c-pick"><col class="dash-c-id"><col class="us-c-flex"><col class="us-c-flex"><col class="us-c-status"><col class="us-c-flex"><col class="us-c-date"><col class="us-c-date"><col class="us-c-actions">
+                    </colgroup>
+                    <thead><tr>
+                        <th class="us-c-pick"><label class="search-check" title="<?= _h('a.users.pick_all_title') ?>"><input type="checkbox" id="us-pick-all"><span class="search-check-box" aria-hidden="true"></span></label></th>
+                        <th class="sortable" data-sort="id"><button type="button" class="th-sort">ID <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="username"><button type="button" class="th-sort"><?= _h('a.users.username') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="email"><button type="button" class="th-sort"><?= _h('a.users.email') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable col-badge" data-sort="status"><button type="button" class="th-sort"><?= _h('a.users.status') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="group" title="<?= _h('a.users.sort_group_title') ?>"><button type="button" class="th-sort"><?= _h('a.users.groups') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="created"><button type="button" class="th-sort"><?= _h('a.users.created') ?> <i class="bi bi-arrow-down sort-icon active" aria-hidden="true"></i></button></th>
+                        <th class="sortable" data-sort="login"><button type="button" class="th-sort"><?= _h('a.users.last_login') ?> <i class="bi bi-arrow-down-up sort-icon" aria-hidden="true"></i></button></th>
+                        <th class="th-actions"><?= _h('a.users.actions') ?></th>
+                    </tr></thead>
+                    <tbody id="us-body"></tbody>
+                </table>
+            </div>
+            <div class="admin-pagination" id="us-pagination"></div>
+        </div>
+
+        <!-- Write to members -->
+        <div class="wl-view d-hidden" id="view-write">
+            <div class="wl-status-card">
+                <div class="wl-status-head"><h6><i class="bi bi-envelope-paper"></i> <?= _h('a.users.write_head') ?></h6></div>
+                <p class="idx-note"><?= __('a.users.write_intro') ?></p>
+                <p class="idx-note" id="bm-off-note" style="display:none"><?= __('a.users.email_off', ['url' => $baseUrl . '?action=settings#section-users']) ?></p>
+
+                <div class="row g-3 mt-1">
+                    <div class="col-md-4">
+                        <label for="bm-mode" class="form-label"><?= _h('a.users.who') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bm-mode">
+                            <option value="selected"><?= _h('a.users.who_selected') ?></option>
+                            <option value="group"><?= _h('a.users.who_group') ?></option>
+                            <option value="all"><?= _h('a.users.who_all') ?></option>
+                        </select>
+                    </div>
+                    <div class="col-md-4" id="bm-group-wrap" style="display:none">
+                        <label for="bm-group" class="form-label"><?= _h('a.users.group') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="bm-group"></select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label"><?= _h('a.users.send_as') ?></label>
+                        <div class="d-flex gap-3 pt-1" id="bm-sendas">
+                            <label class="search-check"><input type="checkbox" id="bm-notify" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.users.notification') ?></label>
+                            <label class="search-check"><input type="checkbox" id="bm-email"><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.users.email') ?></label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label for="bm-subject" class="form-label"><?= _h('a.users.subject') ?></label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="bm-subject" maxlength="200" placeholder="<?= _h('a.users.subject_ph') ?>">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="bm-body"><?= _h('a.users.message') ?></label>
+                        <?php /* The format select, the formatting buttons, the textarea and its preview are ONE component now
+                                 (assets/js/admin-common.js adminRichField(), 1.75.0), mounted here by admin-users.js. Its
+                                 preview is the WHOLE mail — frame (or none), body, footer — made by api/admin/bulk_send.php
+                                 (op: render → bulkMailParts(), the function the janitor calls) and shown in a frame with no
+                                 permissions: a campaign's HTML never reaches this page. */ ?>
+                        <div id="bm-rich"></div>
+                        <div class="d-flex flex-wrap align-items-center gap-3 mt-1">
+                            <label class="search-check" id="bm-frame-wrap" title="<?= _h('a.users.frame_title') ?>"><input type="checkbox" id="bm-frame" checked><span class="search-check-box" aria-hidden="true"></span> <?= _h('a.users.frame_label') ?></label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nl-note mt-3" id="bm-preview"><span class="text-muted"><?= _h('a.users.audience_hint') ?></span></div>
+
+                <div class="wl-status-actions mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="bm-refresh"><i class="bi bi-people"></i> <?= _h('a.users.recount') ?></button>
+                    <button type="button" class="btn btn-sm btn-outline-info" id="bm-test"><i class="bi bi-send-check"></i> <?= _h('a.users.send_test') ?></button>
+                    <button type="button" class="btn btn-sm btn-primary" id="bm-send"><i class="bi bi-send"></i> <span id="bm-send-label"><?= __('a.users.send_dots') ?></span></button>
+                </div>
+            </div>
+
+            <div class="wl-status-card mt-3">
+                <div class="wl-status-head"><h6><i class="bi bi-clock-history"></i> <?= _h('a.users.recent_head') ?> <span class="wl-status-updated" id="bm-depth"></span></h6></div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover dash-table wl-table" id="bm-table">
+                        <thead><tr><th><?= _h('a.users.col_started') ?></th><th><?= _h('a.users.subject') ?></th><th><?= _h('a.users.col_total') ?></th><th><?= _h('a.users.col_sent') ?></th><th><?= _h('a.users.col_failed') ?></th><th><?= _h('a.users.col_waiting') ?></th><th class="th-actions"><?= _h('a.users.actions') ?></th></tr></thead>
+                        <tbody id="bm-batches"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Groups view -->
+        <div class="wl-view d-hidden" id="view-groups">
+            <div class="admin-toolbar-card">
+                <div class="toolbar-row">
+                    <?php /* A note, so it is drawn as one: it sat in .toolbar-search, which is the frame of a
+                             search field — bordered and unpadded, because the field inside brings its own
+                             padding — so the text touched that frame on every side. .nl-note is the box
+                             this page's other note (Write to members, #bm-preview) is drawn in. */ ?>
+                    <p class="nl-note gr-note"><span class="text-muted"><?= __('a.users.groups_note') ?></span></p>
+                    <div class="toolbar-right">
+                        <button type="button" class="btn btn-sm btn-primary" id="btn-group-new"><i class="bi bi-plus-lg"></i> <?= _h('a.users.new_group') ?></button>
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-hover dash-table wl-table" id="gr-table">
+                    <?php // 1.72.0: pinned columns (admin.css .gr-c-*), so the actions — Edit, Recommended, Delete — are on screen. ?>
+                    <colgroup><col class="gr-c-name"><col class="gr-c-slug"><col class="gr-c-prio"><col class="gr-c-default"><col class="gr-c-members"><col class="gr-c-perms"><col class="gr-c-actions"></colgroup>
+                    <thead><tr>
+                        <th><?= _h('a.users.name') ?></th><th><?= _h('a.users.slug') ?></th><th><?= _h('a.users.priority') ?></th><th class="col-badge"><?= _h('a.users.default') ?></th><th><?= _h('a.users.members') ?></th><th><?= _h('a.users.permissions') ?></th><th class="th-actions"><?= _h('a.users.actions') ?></th>
+                    </tr></thead>
+                    <tbody id="gr-body"></tbody>
+                </table>
+            </div>
+            <?php // Groups across, permissions down. Fifteen ids over five groups is a table a person reads
+                  // in one glance; the comma-separated key list in the table above is not. ?>
+            <details class="gr-matrix-wrap mt-2">
+                <summary class="wl-small text-muted"><i class="bi bi-chevron-right gr-matrix-chev" aria-hidden="true"></i><?= _h('a.users.matrix_title') ?></summary>
+                <div class="table-responsive mt-2"><table class="table table-dark table-sm gr-matrix" id="gr-matrix"></table></div>
+                <?php // 1.72.0: what the three marks mean — a grant, the Admin group's blanket, and consent (userConsentPermissions()). ?>
+                <p class="gr-legend wl-small text-muted" id="gr-legend">
+                    <span class="gr-legend-item"><i class="bi bi-check-lg gr-legend-on" aria-hidden="true"></i> <?= _h('a.users.legend_granted') ?></span>
+                    <span class="gr-legend-item"><i class="bi bi-check-lg gr-legend-blanket" aria-hidden="true"></i> <?= _h('a.users.legend_blanket') ?></span>
+                    <span class="gr-legend-item"><span class="gr-consent-badge"><?= _h('js.users.consent_badge') ?></span> <?= _h('a.users.legend_consent') ?></span>
+                </p>
+            </details>
+        </div>
+    </div>
+
+    <!-- Add user -->
+    <div class="modal fade" id="userAddModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-person-plus"></i> <?= _h('a.users.add') ?></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger py-2 wl-small d-none" id="ua-error"></div>
+                    <div class="mb-3">
+                        <label for="ua-username" class="form-label wl-label"><?= _h('a.users.username') ?></label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-username" autocomplete="off" maxlength="32">
+                        <div class="invalid-feedback ua-msg" id="ua-username-msg"></div>
+                    <small class="text-muted wl-small"><?= __('a.users.username_hint') ?></small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ua-email" class="form-label wl-label"><?= _h('a.users.email') ?> <small class="text-muted wl-small" id="ua-email-req"><?= _h('a.users.required_paren') ?></small></label>
+                        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-email" autocomplete="off" maxlength="190">
+                    <div class="invalid-feedback ua-msg" id="ua-email-msg"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ua-password" class="form-label wl-label"><?= _h('a.users.password') ?></label>
+                        <div class="input-group">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ua-password" autocomplete="new-password">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="ua-gen" title="<?= _h('a.users.gen_title') ?>">
+                                <i class="bi bi-shuffle"></i> <?= _h('a.users.generate') ?>
+                            </button>
+                        </div>
+                        <div class="ua-reqs" id="ua-pw-reqs"></div>
+                        <small class="text-muted wl-small"><?= __('a.users.pw_clear_note') ?></small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ua-verify" class="form-label wl-label"><?= _h('a.users.verify_label') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ua-verify">
+                            <option value="auto" selected><?= __('a.users.verify_auto') ?></option>
+                            <option value="send"><?= __('a.users.verify_send') ?></option>
+                            <option value="none"><?= __('a.users.verify_none') ?></option>
+                        </select>
+                        <small class="text-muted wl-small" id="ua-verify-hint"></small>
+                    </div>
+                    <div class="mb-1">
+                        <label for="ua-status" class="form-label wl-label"><?= _h('a.users.status') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ua-status">
+                            <option value="active" selected><?= _h('a.users.active') ?></option>
+                            <option value="banned"><?= _h('a.users.banned_created') ?></option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                    <button type="button" class="btn btn-sm btn-success" id="ua-save"><i class="bi bi-person-plus"></i> <?= _h('a.users.create') ?></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User edit modal -->
+    <div class="modal fade" id="usEditModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content bg-dark">
+
+
+<div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-person-gear"></i> <?= _h('a.users.edit_title') ?> <span id="ue-name" class="text-info"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="ue-grid">
+                    <div class="ue-col">
+                    <div class="mb-2">
+                        <label for="ue-status" class="form-label wl-label"><?= _h('a.users.status') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ue-status">
+                            <option value="active"><?= _h('a.users.active') ?></option>
+                            <option value="banned"><?= _h('a.users.banned_nologin') ?></option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label for="ue-email" class="form-label wl-label"><?= _h('a.users.email') ?> <small class="text-muted"><?= _h('a.users.empty_none') ?></small></label>
+                        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email" maxlength="190">
+                        <div class="invalid-feedback"><?= _h('a.users.email_invalid') ?></div>
+                    </div>
+                    <div class="mb-2 d-hidden" id="ue-email2-wrap">
+                        <label for="ue-email2" class="form-label wl-label"><?= _h('a.users.email2') ?></label>
+                        <input type="email" class="form-control form-control-sm bg-dark text-light border-secondary" id="ue-email2" maxlength="190" autocomplete="off">
+                        <div class="invalid-feedback"><?= _h('a.users.email2_err') ?></div>
+                    </div>
+                    <div class="mb-2">
+                        <label for="ue-password" class="form-label wl-label"><?= _h('a.users.new_pass') ?> <small class="text-muted"><?= _h('a.users.new_pass_note') ?></small></label>
+                        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password" maxlength="200" autocomplete="new-password">
+                        <div class="invalid-feedback"><?= _h('a.users.pw_rule') ?></div>
+                    </div>
+                    <div class="mb-2 d-hidden" id="ue-password2-wrap">
+                        <label for="ue-password2" class="form-label wl-label"><?= _h('a.users.new_pass2') ?></label>
+                        <input type="password" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ue-password2" maxlength="200" autocomplete="new-password">
+                        <div class="invalid-feedback"><?= _h('a.users.pass2_err') ?></div>
+                    </div>
+                    <?php /* The picture and the cover (1.63.0): shown only when the account has one, and taken
+                             down at once — not part of Save, because deleting an image is not an edit that
+                             waits for the rest of the form. admin/user_media, gated like this whole modal. */ ?>
+                    <div class="mb-2" id="ue-media" hidden>
+                        <label class="form-label wl-label"><?= _h('a.users.media_label') ?></label>
+                        <div class="ue-media-row">
+                            <img class="ue-media-thumb" id="ue-media-avatar" alt="" width="40" height="40" hidden>
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="ue-remove-avatar" hidden><i class="bi bi-person-x"></i> <?= _h('a.users.media_remove_avatar') ?></button>
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="ue-remove-cover" hidden><i class="bi bi-image"></i> <?= _h('a.users.media_remove_cover') ?></button>
+                        </div>
+                        <small class="text-muted"><?= _h('a.users.media_note') ?></small>
+                    </div>
+                    <?php /* The description on their profile (1.69.0): shown as the profile shows it — the
+                             server's own rendering — and cleared at once through admin/user_bio, like the
+                             picture above. Drawn only for an account that has one. */ ?>
+                    <div class="mb-2" id="ue-bio" hidden>
+                        <label class="form-label wl-label"><?= _h('a.users.bio_label') ?></label>
+                        <div class="ue-bio-text" id="ue-bio-text" dir="auto"></div>
+                        <?php /* A div with `small`, not <small class="d-block">: Bootstrap's d-block is
+                                 display:block !important and beats the hidden attribute. */ ?>
+                        <div class="small text-warning" id="ue-bio-hidden" hidden><?= _h('a.users.bio_hidden') ?></div>
+                        <div class="ue-media-row">
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="ue-bio-clear"><i class="bi bi-eraser"></i> <?= _h('a.users.bio_clear') ?></button>
+                        </div>
+                        <small class="text-muted"><?= _h('a.users.bio_note') ?></small>
+                    </div>
+                    </div>
+                    <div class="ue-col ue-col-side">
+                    <?php /* The warnings moderators gave this member (1.71.0, includes/reports.php): how many, and
+                             the latest five — from the Reports page, silently or loudly chosen there. Read-only:
+                             a warning is given where the report is. Shown for every account, "no warnings" too. */ ?>
+                    <div class="mb-2" id="ue-warnings">
+                        <label class="form-label wl-label"><?= _h('a.users.warnings_head') ?></label>
+                        <div class="ue-warnings-text small" id="ue-warnings-text"></div>
+                        <small class="text-muted"><?= _h('a.users.warnings_hint') ?></small>
+                    </div>
+                    <?php /* Warn, silence or ban by hand, and lift (1.75.0, includes/moderation.php — the one path the report cards use):
+                             drawn for a session that holds panel.moderation.handle, and never for the owner's own account. The reason is
+                             adminRichField() (#ue-mod-rich); the buttons act at once through admin/moderation_action — they are not part
+                             of Save, which is for the address, the password and the status box above. */ ?>
+                    <div class="mb-2" id="ue-moderation" hidden>
+                        <label class="form-label wl-label" for="ue-mod-action"><?= _h('a.users.mod_head') ?></label>
+                        <div class="ue-mod-state" id="ue-mod-state"></div>
+                        <div class="ue-mod-row">
+                            <select class="form-select form-select-sm bg-dark text-light border-secondary w-auto" id="ue-mod-action">
+                                <option value="warn:0"><?= _h('a.users.mod_warn') ?></option>
+                                <optgroup label="<?= _h('a.users.mod_mute_group') ?>">
+                                    <option value="mute:1"><?= _h('js.creport.mute_1') ?></option>
+                                    <option value="mute:7"><?= _h('js.creport.mute_7') ?></option>
+                                    <option value="mute:30"><?= _h('js.creport.mute_30') ?></option>
+                                    <option value="mute:0"><?= _h('js.creport.mute_forever') ?></option>
+                                </optgroup>
+                                <optgroup label="<?= _h('a.users.mod_ban_group') ?>">
+                                    <option value="ban:7"><?= _h('js.creport.ban_7') ?></option>
+                                    <option value="ban:30"><?= _h('js.creport.ban_30') ?></option>
+                                    <option value="ban:0"><?= _h('js.creport.ban_forever') ?></option>
+                                </optgroup>
+                            </select>
+                        </div>
+                        <div id="ue-mod-rich"></div>
+                        <div class="ue-mod-go">
+                        <div class="ue-mod-modes" role="radiogroup" aria-label="<?= _h('js.creport.mode_label') ?>">
+                            <label class="msgrep-mode-opt"><input type="radio" name="ue-mod-mode" id="ue-mod-silent" value="silent" checked> <?= _h('js.creport.mode_silent') ?></label>
+                            <label class="msgrep-mode-opt"><input type="radio" name="ue-mod-mode" id="ue-mod-loud" value="loud"> <?= _h('js.creport.mode_loud') ?></label>
+                        </div>
+                        <div class="ue-mod-row">
+                            <button type="button" class="btn btn-sm btn-outline-warning" id="ue-mod-apply"><i class="bi bi-exclamation-triangle"></i> <?= _h('a.users.mod_apply') ?></button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="ue-mod-lift-mute" hidden><i class="bi bi-unlock"></i> <?= _h('js.moderation.lift_mute') ?></button>
+                            <button type="button" class="btn btn-sm btn-outline-success" id="ue-mod-lift-ban" hidden><i class="bi bi-unlock"></i> <?= _h('js.moderation.lift_ban') ?></button>
+                        </div>
+                        </div>
+                        <div class="small" id="ue-mod-msg" aria-live="polite"></div>
+                        <small class="text-muted"><?= _h('a.users.mod_hint') ?></small>
+                    </div>
+                    </div>
+                    </div>
+                    <div id="ue-alert"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                    <button type="button" class="btn btn-sm btn-primary" id="ue-save"><i class="bi bi-check-lg"></i> <?= _h('common.save') ?></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grant group modal -->
+    <div class="modal fade" id="usGrantModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-award"></i> <?= _h('a.users.grant_title') ?> <span id="ug-name" class="text-info"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label for="ug-group" class="form-label wl-label"><?= _h('a.users.group') ?></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ug-group"></select>
+                    </div>
+                    <div class="mb-2">
+                        <label for="ug-duration" class="form-label wl-label"><?= _h('a.users.duration') ?> <small class="text-muted"><?= _h('a.users.duration_note') ?></small></label>
+                        <select class="form-select form-select-sm bg-dark text-light border-secondary" id="ug-duration">
+                            <option value="1d"><?= _h('a.users.d_1d') ?></option>
+                            <option value="7d"><?= _h('a.users.d_7d') ?></option>
+                            <option value="14d"><?= _h('a.users.d_14d') ?></option>
+                            <option value="1m"><?= _h('a.users.d_1m') ?></option>
+                            <option value="3m"><?= _h('a.users.d_3m') ?></option>
+                            <option value="6m"><?= _h('a.users.d_6m') ?></option>
+                            <option value="1y"><?= _h('a.users.d_1y') ?></option>
+                            <option value="permanent" selected><?= _h('a.users.d_permanent') ?></option>
+                            <option value="custom"><?= __('a.users.d_custom') ?></option>
+                        </select>
+                    </div>
+                    <div class="row g-2 d-hidden" id="ug-custom">
+                        <div class="col-6"><label for="ug-from" class="form-label wl-label"><?= _h('a.users.from') ?> <small class="text-muted"><?= _h('a.users.from_note') ?></small></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ug-from" placeholder="YYYY-MM-DD [HH:MM]"></div>
+                        <div class="col-6"><label for="ug-to" class="form-label wl-label"><?= _h('a.users.to') ?> <small class="text-muted"><?= _h('a.users.to_note') ?></small></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ug-to" placeholder="YYYY-MM-DD [HH:MM]"></div>
+                    </div>
+                    <div class="mb-2 mt-2">
+                        <label for="ug-note" class="form-label wl-label"><?= _h('a.users.note') ?> <small class="text-muted"><?= _h('a.users.note_hint') ?></small></label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ug-note" maxlength="255" placeholder="<?= _h('a.users.note_ph') ?>">
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="ug-email">
+                        <label class="form-check-label wl-small" for="ug-email"><?= _h('a.users.also_email') ?></label>
+                    </div>
+                    <div id="ug-alert"></div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                        <button type="button" class="btn btn-sm btn-primary" id="ug-save"><i class="bi bi-check-lg"></i> <?= _h('a.users.grant') ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notify modal -->
+    <div class="modal fade" id="usNotifyModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-bell"></i> <?= _h('a.users.notify_title') ?> <span id="un-name" class="text-info"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label for="un-title" class="form-label wl-label"><?= _h('a.users.n_title') ?></label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="un-title" maxlength="190">
+                    </div>
+                    <div class="mb-2">
+                        <label for="un-body" class="form-label wl-label"><?= _h('a.users.message') ?> <small class="text-muted"><?= _h('a.users.optional') ?></small></label>
+                        <?php /* adminRichField() (assets/js/admin-common.js, 1.75.0): the format select, the buttons and the preview;
+                                 the textarea is #un-body, made by the component. */ ?>
+                        <div id="un-rich"></div>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="un-email">
+                        <label class="form-check-label wl-small" for="un-email"><?= _h('a.users.also_email_as') ?></label>
+                    </div>
+                    <div id="un-alert"></div>
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                        <button type="button" class="btn btn-sm btn-primary" id="un-send"><i class="bi bi-send"></i> <?= _h('a.users.send_btn') ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group editor modal -->
+    <div class="modal fade" id="grEditModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-people-fill"></i> <span id="ge-title"><?= _h('a.users.group') ?></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-md-4"><label for="ge-name" class="form-label wl-label"><?= _h('a.users.name') ?></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-name" maxlength="64"></div>
+                        <div class="col-md-4"><label for="ge-slug" class="form-label wl-label"><?= _h('a.users.slug') ?> <small class="text-muted">(a-z 0-9 _ -)</small></label>
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-slug" maxlength="64"></div>
+                        <div class="col-md-2"><label for="ge-color" class="form-label wl-label"><?= _h('a.users.color') ?></label>
+                            <div class="ge-color-row"><input type="color" class="form-control form-control-color form-control-sm ge-color-pick" id="ge-color-pick" value="#4a9eff" aria-label="<?= _h('a.users.color') ?>">
+                            <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary font-mono" id="ge-color" maxlength="9" placeholder="#4a9eff"></div></div>
+                        <div class="col-md-2"><label for="ge-priority" class="form-label wl-label"><?= _h('a.users.priority') ?></label>
+                            <input type="number" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-priority" min="-1000" max="1000" value="0"></div>
+                    </div>
+                    <div class="mb-2 mt-2"><label for="ge-desc" class="form-label wl-label"><?= _h('a.users.description') ?> <small class="text-muted"><?= _h('a.users.desc_note') ?></small></label>
+                        <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary" id="ge-desc" maxlength="255"></div>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="ge-default">
+                        <label class="form-check-label wl-small" for="ge-default"><?= _h('a.users.default_group') ?></label>
+                    </div>
+                    <label class="form-label wl-label"><?= _h('a.users.permissions') ?></label>
+                    <?php // Presets: a starting point, never a lock. Each fills the checkboxes below and the
+                          // operator still sees — and can change — every one of them before saving. ?>
+                    <div class="ge-presets" id="ge-presets"></div>
+                    <input type="search" class="form-control form-control-sm bg-dark text-light border-secondary ge-filter" id="ge-filter" maxlength="60" placeholder="<?= _h('a.users.perm_filter_ph') ?>" aria-label="<?= _h('a.users.perm_filter_ph') ?>">
+                    <div id="ge-perms" class="ge-perms"></div>
+                    <div id="ge-alert"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                    <button type="button" class="btn btn-sm btn-primary" id="ge-save"><i class="bi bi-check-lg"></i> <?= _h('a.users.save_group') ?></button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- A seeded group's recommended set (1.72.0): what is missing, what a reset would take away, and the two ways to
+         apply it. The body is drawn by assets/js/admin-users.js from api/admin/group_recommended. -->
+    <div class="modal fade" id="grRecModal" tabindex="-1" aria-labelledby="gr-rec-title">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-magic" aria-hidden="true"></i> <span id="gr-rec-title"><?= _h('a.users.rec_title') ?></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= _h('common.close') ?>"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="gr-rec-body" class="gr-rec-body"></div>
+                    <div id="gr-rec-alert"></div>
+                    <div class="gr-rec-acts d-flex justify-content-end flex-wrap gap-2 mt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal"><?= _h('common.cancel') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="gr-rec-reset" disabled><i class="bi bi-arrow-counterclockwise"></i> <?= _h('a.users.rec_reset') ?></button>
+                        <button type="button" class="btn btn-sm btn-primary" id="gr-rec-add" disabled><i class="bi bi-plus-circle"></i> <?= _h('a.users.rec_add') ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php $footerInPanel = true; include __DIR__ . '/../footer.php'; ?>
+
+    <?php /* What the server wrote, marked before any script of the page runs (1.73.0, assets/js/lang-swap.js). */ ?>
+    <script<?= nonceAttr() ?>>if (window.LangSwap) window.LangSwap.mark();</script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <script src="<?= $baseUrl ?>assets/js/admin-common.js<?= assetVer('assets/js/admin-common.js') ?>"></script>
+    <?php /* The picture beside every member's name (1.63.0), the same file the public pages draw with. */ ?>
+    <?= function_exists('userAvatarScriptTag') ? userAvatarScriptTag($baseUrl, $cfg) : '' ?>
+    <script src="<?= $baseUrl ?>assets/js/admin-users.js<?= assetVer('assets/js/admin-users.js') ?>"></script>
+</body>
+</html>

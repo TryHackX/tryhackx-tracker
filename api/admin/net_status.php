@@ -1,0 +1,170 @@
+<?php
+if (session_status() === PHP_SESSION_ACTIVE) session_write_close();   // polled: never hold the session lock across the read
+require_once __DIR__ . '/../../includes/procstat.php';
+/**
+ * GET — everything the "UDP traffic" card shows: whether the feature can run at all, what the
+ * firewall currently enforces, the live packets/second, the measured recommendation and the state
+ * of the automatic mode / panic window.
+ *
+ * Auth is enforced by the router (admin/*); GET, so CSRF-exempt like the other admin read
+ * endpoints. Polled every few seconds, so the helper's output is reused for NET_STATUS_TTL seconds
+ * (includes/netlimit.php) instead of forking a process per request — the router already skips the
+ * heavy janitors for this endpoint.
+ *
+ * Nothing here changes the firewall. Applying a limit is admin/net_apply (POST + admin password).
+ */
+
+$now = time();
+$cmdSet = netlimitCommand($cfg) !== '';
+$out = [
+    'ok'            => true,
+    'server_time'   => $now,
+    'configured'    => [
+        'monitor'    => netlimitMonitorEnabled($cfg),
+        'limit'      => netlimitEnabled($cfg),
+        'auto'       => netlimitAutoEnabled($cfg),
+        'pps'        => netlimitPps($cfg),
+        'burst'      => netlimitBurst($cfg),
+        'port'       => netlimitPort($cfg),
+        'sample_seconds' => netlimitSampleSeconds($cfg),
+        'keep_days'  => netlimitKeepDays($cfg),
+        'auto_min'   => netlimitAutoMin($cfg),
+        'auto_max'   => netlimitAutoMax($cfg),
+        'auto_target' => netlimitAutoTarget($cfg),
+        'auto_target_cpu' => netlimitAutoTargetCpu($cfg),
+        'cmd'        => netlimitCommand($cfg),
+        'cmd_set'    => $cmdSet,
+        // Which list the tracker serves (1.73.3). In blacklist mode almost every reply is a real announce, and the
+        // outbound budget caps only connect and "not authorized" replies — the card says so rather than push it up.
+        'tracker_mode' => function_exists('trackerMode') ? trackerMode($cfg)
+                          : ((($cfg['tracker_mode'] ?? 'blacklist') === 'whitelist') ? 'whitelist' : 'blacklist'),
+    ],
+    'exec_available' => trackerExecAvailable(),
+    'cpus'          => netlimitCpuCount(),
+    // what the machine's own processes cost right now — MariaDB, the tracker, php-fpm, the worker
+    'procs'         => procstatUsage(),
+    'load_per_core' => netlimitLoadPerCore(),
+    // Raw counters, not a percentage — the card subtracts two polls. See netlimitWorkerCpu().
+    'worker_cpu'    => netlimitWorkerCpu(),
+    'firewall'      => null,
+    'live'          => null,
+    'panic'         => null,
+    'auto_state'    => null,
+    'last_apply'    => null,
+    'error'         => null,
+];
+
+// In the reader's language (1.73.0: these three were English on every page); the card finds them back by key
+// (t.find(…, 'api.'): the traffic page's bundle carries api.net.), so they follow the live language switch.
+if (!$cmdSet) {
+    $out['error'] = __('api.net.no_helper_2');
+} elseif (!trackerExecAvailable()) {
+    $out['error'] = __('api.net.exec_disabled');
+} else {
+    $status = netlimitStatus($cfg);
+    if (empty($status['ok'])) {
+        $out['error'] = (string)($status['error'] ?? __('api.net.helper_no_answer'));
+        $out['helper_output'] = mb_substr((string)($status['output'] ?? ''), 0, 1000);
+    } else {
+        $out['firewall'] = $status;
+        // A cached status carries stale counters; recomputing a rate from them would divide a zero
+        // difference by a real span and show a dip that never happened.
+        if (empty($status['cached'])) $out['live'] = netlimitLive($status, $now);
+    }
+}
+
+$state = netlimitStateRead();
+if ($out['live'] === null) {
+    $live = (array)($state['live'] ?? []);
+    if (!empty($live['ts'])) $out['live'] = ['ts' => (int)$live['ts'], 'span' => (int)($live['span'] ?? 0),
+                                             'pps' => (array)($live['pps'] ?? []), 'epps' => (array)($live['epps'] ?? []), 'stale' => true];
+}
+$panicUntil = (int)($state['panic']['until'] ?? 0);
+if ($panicUntil > 0) {
+    $out['panic'] = ['until' => $panicUntil, 'seconds_left' => max(0, $panicUntil - $now),
+                     'restore_pps' => (int)($state['panic']['restore_pps'] ?? 0),
+                     'restore_enabled' => (int)($state['panic']['restore_enabled'] ?? 0) === 1];
+}
+$out['auto_state'] = ['over' => (int)($state['auto']['over'] ?? 0), 'under' => (int)($state['auto']['under'] ?? 0),
+                      'last_move_at' => (int)($state['auto']['last_move_at'] ?? 0),
+                      'last_move' => $state['auto']['last_move'] ?? null,
+                      'note' => (string)($state['auto']['note'] ?? ''),
+                      'hysteresis' => NET_AUTO_HYSTERESIS];
+if ((int)($state['last_apply_at'] ?? 0) > 0) {
+    // `words`: who loaded it, as the owner reads it ("when the IP lists were switched off — the janitor
+    // loaded the same limit without them"), not the code ("lists-off"); an unknown code is itself.
+    $src = (string)($state['last_apply_source'] ?? '');
+    $out['last_apply'] = ['at' => (int)$state['last_apply_at'], 'pps' => (int)($state['last_apply_pps'] ?? 0),
+                          'source' => $src, 'words' => netlimitSourceWords($src)];
+}
+// Applied but not yet written to /etc: php-fpm's mount namespace makes /etc read-only, so the
+// janitor saves it on its next tick. The card has to say so — until then a reboot undoes the
+// admin's decision without a word.
+// Where this machine started struggling, derived from the samples rather than assumed. Cheap:
+// one indexed range scan over the same rows the recommendation already reads.
+try { $out['load_curve'] = netlimitLoadCurve($db, $cfg, (int)($_GET['days'] ?? 7), $now); }
+catch (\Throwable $e) { $out['load_curve'] = null; }
+// What the provider drops OUTSIDE this machine (1.73.3): the share of TCP segments resent, which the janitor reads
+// with every sample — the newest one ({pct, level ok|warn|bad, at}) and the median of the last hour, which together
+// decide whether the advice below may ever point higher. Its own try: a failure here must not take the card with it.
+$lossHour = null;
+try { $lossHour = netlimitLossHour($db, $now); } catch (\Throwable $e) { $lossHour = null; }
+$out['outside_loss'] = netlimitOutsideLoss(is_array($state['tcp_retrans_now'] ?? null) ? $state['tcp_retrans_now'] : null,
+                                           $lossHour, $now, netlimitSampleSeconds($cfg));
+$out['persist_deferred'] = !empty($state['persist_deferred']);
+$out['last_persist_at'] = (int)($state['last_persist_at'] ?? 0);
+// A failure the helper has since recovered from is history, not news: show it only while it is
+// newer than the last clean answer. Otherwise a one-off sat on the card in red for ever.
+$lastErrAt = (int)($state['last_error_at'] ?? 0);
+$lastOkAt  = (int)($state['last_ok_at'] ?? 0);
+$out['last_error'] = $lastErrAt > $lastOkAt ? ($state['last_error'] ?? null) : null;
+$out['last_error_at'] = $lastErrAt;
+$out['last_ok_at'] = $lastOkAt;
+$out['last_tick_at'] = (int)($state['last_tick_at'] ?? 0);
+
+// The measured advice. Cheap (one indexed range scan over at most a few 10 000 rows) and it is what
+// turns "pick a number of packets per second" into a decision an admin can actually make.
+try {
+    $days = max(1, min(30, (int)($_GET['days'] ?? 7)));
+    $rec = netlimitRecommend($db, $cfg, $days, $now);
+    // "Flood" = the arrivals are far above what anything is letting through, either because the
+    // counting mode drops nothing or because somebody else's rule is doing the dropping downstream.
+    // In that state the measured peak is the swarm, not demand, and the wording has to say so.
+    $fw = $out['firewall'] ?? [];
+    $flood = is_array($fw) && (($fw['mode'] ?? '') === 'count' || !empty($fw['manual_rules']));
+    $out['recommend_days'] = $days;
+    // In a flood the number worth quoting is what is GETTING THROUGH, not what is arriving.
+    $passedNow = (int)(($out['live']['pps']['in_passed'] ?? 0));
+    // 1.73.3: never a higher limit while the machine loses packets outside it (now, or over the last hour) — ~80 % of
+    // what the limit lets through instead; and when it does not, no higher than the busiest hour of the last week it
+    // coped with (includes/netlimit.php netlimitRecommendGuard()). "Use suggested" fills whatever this leaves.
+    $limitInForce = (is_array($fw) && !empty($fw['table']) && ($fw['mode'] ?? '') !== 'count' && (int)($fw['pps'] ?? 0) > 0)
+        ? (int)$fw['pps'] : (netlimitEnabled($cfg) ? netlimitPps($cfg) : 0);
+    $lossBase = netlimitLossBase($limitInForce, $passedNow > 0 ? $passedNow : (int)($lossHour['passed'] ?? 0));
+    $safeCap = null;
+    if (empty($out['outside_loss']['guard'])) {
+        try { $safeCap = netlimitSafeHistoryCap($db, $now); } catch (\Throwable $e) { $safeCap = null; }
+    }
+    $rec = netlimitRecommendGuard($rec, $out['outside_loss'], $lossBase, $safeCap);
+    // The paragraph in the reader's language, and its sentences as keys and numbers (`parts`), which the card writes
+    // as words that keep their keys — they follow the live language switch (1.73.0).
+    $rec['parts'] = netlimitRecommendParts($rec, $flood, $passedNow);
+    $rec['text'] = netlimitSayParts($rec['parts']);
+    $rec['flood'] = $flood;
+    // A bucket too small for the limit (includes/netlimit.php netlimitBurstHintFrom()): the last hour
+    // against the burst the firewall reports, or the saved one while it has not answered.
+    // Its own try: a failure here must not take the recommendation with it.
+    try { $rec['burst_hint'] = netlimitBurstHint($db, $cfg, $now, isset($fw['burst']) && is_numeric($fw['burst']) ? (int)$fw['burst'] : null); }
+    catch (\Throwable $e) { $rec['burst_hint'] = null; }
+    $out['recommend'] = $rec;
+} catch (\Throwable $e) {
+    $out['recommend'] = null;
+    $out['recommend_error'] = $e->getMessage();
+}
+
+// Handshakes per announce from the statistics timeline: the last hour and the last day, each left out
+// when the tracker restarted inside it (includes/netlimit.php netlimitHandshakes()).
+try { $out['handshakes'] = netlimitHandshakes($db, $cfg, $now); }
+catch (\Throwable $e) { $out['handshakes'] = null; }
+
+jsonResponse($out);

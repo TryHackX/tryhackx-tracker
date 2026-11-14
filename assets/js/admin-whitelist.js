@@ -1,0 +1,1760 @@
+// === Admin › Whitelist page ===
+// Views: Whitelist | Banned hashes | API clients | API bans, plus the tracker whitelist status card.
+// All dynamic DOM is built with AdminCommon.el / textContent — names, file paths, IPs, reasons and
+// ban snapshots are attacker-controlled. Row data lives in Maps keyed by id; buttons carry data-id.
+(function () {
+    'use strict';
+    // Quick feedback (copies) goes through copyToClipboard → flashTip (tooltip on the clicked element);
+    // showToast is reserved for real outcomes (added / banned / deleted / errors).
+    const { apiCall, el, showToast, confirmAction, promptModal, promptPassword, makeSortStack, renderPagination, fmtBytes, fmtDate, fmtAgo, copyToClipboard, hashFromUrl, bindHashModal, animatedClear, bindSearchClear, buildFileTree, busyDot, snapIcons } = window.AdminCommon;
+
+    const $ = (id) => document.getElementById(id);
+    const bodyDs = document.body.dataset;
+
+    // ───────────────────────── state ─────────────────────────
+    const state = {
+        view: 'whitelist',
+        wl: { page: 1, pages: 1, search: '', searchFiles: false, source: '', meta: '', review: '', content: '', banned: 'active', ip: '', group: false, rows: new Map(), selected: new Set(), ipCounts: {}, filters: null },
+        bn: { page: 1, search: '', rows: new Map() },
+        ab: { page: 1, search: '', status: 'active', rows: new Map() },
+        cl: { rows: new Map() },
+        status: null,
+    };
+    let wlSort, bnSort, abSort;
+    let statusTimer = null;
+    let detailPollTimer = null;
+    let detailPollStart = 0;
+
+    // ───────────────────────── helpers ─────────────────────────
+    const BAN_SRC = { report: 'js.wl.ban_src_report', appeal: 'js.wl.ban_src_appeal', admin: 'js.wl.ban_src_admin', import: 'js.wl.ban_src_import' };
+    // `text` may be pieces (a list): a t.key() word among them keeps its key (1.73.0)
+    function badge(text, cls) { return Array.isArray(text) ? el('span', { className: 'wl-badge ' + (cls || '') }, text) : el('span', { className: 'wl-badge ' + (cls || ''), text }); }
+    // What the main table's Source cell knows beyond the source itself — who sent it, whether a person
+    // has looked at it yet, which forum post it came from — as the badge's tooltip, one fact a line.
+    //
+    // These used to be DRAWN after the badge: a link to the post, a review badge, "via <partner>".
+    // The column is 84–96 px wide and every cell of this table is one line that ellipsises (admin.css,
+    // "Whitelist tables"), so every row the forum bridge sent through its key read "FORUM …" and none
+    // of it could ever be read — the review badge alone is wider than the column. The cell holds the
+    // badge and nothing else now; the details panel (a click on the row) still has all of it, with the
+    // post link and the review note, in rows of their own.
+    //
+    // 'approved' and 'none' say nothing on purpose: they are the resting state of every row in the
+    // table, and a line that is on every row is a line nobody reads.
+    function sourceNote(row) {
+        const out = [];
+        const who = row.api_client_label || (row.api_client && row.api_client.label) || '';
+        if (who) out.push(t.key('js.wl.partner', { name: who }));
+        const st = row.review_status || 'none';
+        if (st === 'pending' || st === 'rejected') out.push(t.key(st === 'pending' ? 'js.wl.review_pending' : 'js.wl.review_rejected'));
+        const ref = row.source_ref || null;
+        if (ref) {
+            const parts = [];
+            if (ref.discussion_id) parts.push(t.key('js.wl.discussion_ref', { id: ref.discussion_id }));
+            if (ref.post_id) parts.push(t.key('js.wl.post_ref', { id: ref.post_id }));
+            if (parts.length) out.push(parts.join(', '));
+        }
+        return out.join('\n');
+    }
+
+    // A source's name is a word of the dictionary (js.wl.src_*), not the stored value (1.73.0).
+    const sourceWord = (src) => (src === 'web' || src === 'api' || src === 'admin' || src === 'forum') ? t.key('js.wl.src_' + src) : (src || '?');
+    function sourceBadge(src) {
+        const map = { web: 'wl-b-web', api: 'wl-b-api', admin: 'wl-b-admin', forum: 'wl-b-forum' };
+        return badge(sourceWord(src), map[src] || '');
+    }
+    function metaBadge(status) {
+        const map = { none: ['—', 'wl-b-muted'], pending: [t.key('js.wl.meta_pending'), 'wl-b-pending'], fetching: [t.key('js.wl.meta_fetching'), 'wl-b-pending'], done: [t.key('js.wl.meta_done'), 'wl-b-ok'], failed: [t.key('js.wl.meta_failed'), 'wl-b-bad'] };
+        const [txt, c] = map[status] || [status || '—', 'wl-b-muted'];
+        return badge(txt, c);
+    }
+    function isHttpUrl(u) { return typeof u === 'string' && /^https?:\/\//i.test(u); }
+    function iconBtn(icon, title, cls, onclick) {
+        return el('button', { type: 'button', className: 'btn btn-sm ' + (cls || 'btn-outline-secondary') + ' wl-act', title, onclick }, [el('i', { className: 'bi ' + icon })]);
+    }
+    function ipColor(ip) {
+        let h = 0;
+        for (let i = 0; i < ip.length; i++) h = (h * 31 + ip.charCodeAt(i)) >>> 0;
+        return `hsl(${h % 360} 60% 45%)`;
+    }
+    function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+    // Clicking a column header redraws the arrows immediately; only the fetch waits. The wait has to
+    // cover a whole DECISION, not a single click — the direction cycles desc → asc → off, so picking
+    // a column and then its direction is two or three clicks, and at 450 ms the first one had already
+    // fired a request (and, with several sort keys, a wrong one).
+    const SORT_DEBOUNCE_MS = window.AdminCommon.DEBOUNCE.sort;   // one number for every list — admin-common.js
+    function magnetFor(hash, name) {
+        let m = 'magnet:?xt=urn:btih:' + hash;
+        if (name) m += '&dn=' + encodeURIComponent(name);
+        [bodyDs.announce, bodyDs.announceHttps].forEach(u => { if (u) m += '&tr=' + encodeURIComponent(u); });
+        return m;
+    }
+
+    // ───────────────────────── status card ─────────────────────────
+    async function loadStatus() {
+        try {
+            const s = await apiCall('admin/whitelist_status');
+            if (s.error) { showToast(t.key('js.wl.status_error', {error: s.error}), 'danger'); return; }
+            state.status = s;
+            renderStatus(s);
+        } catch { showToast(t.key('js.wl.status_load_failed'), 'danger'); }
+    }
+
+    /** Ask the server what is really running, and say so out loud. */
+    async function modeTest(btn) {
+        const prev = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = t.key('js.wl.asking');
+        const r = await apiCall('admin/tracker_mode', 'POST', { op: 'status' });
+        btn.textContent = prev;
+        btn.disabled = false;
+        showToast((r && (r.message || r.error)) || t.key('js.wl.no_answer'), r && r.success ? 'success' : 'error');
+        loadStatus();
+    }
+
+    /**
+     * Switch for real: prepare the list, run the helper, restart the service, then flip the setting.
+     *
+     * The service restart is the risky part, so this takes the admin password like every other action
+     * that changes the machine. The setting is flipped only after the helper confirms — a panel that
+     * says whitelist while the blacklist build serves the swarm is not a degraded state, it is a wrong
+     * one, and it is the exact failure this whole path exists to prevent.
+     */
+    async function modeSwitch(mode) {
+        const to = mode === 'whitelist' ? t.key('js.wl.mode_whitelist') : t.key('js.wl.mode_blacklist');
+        if (!await confirmAction(t.key('js.wl.switch_title', {to}),
+            t.key('js.wl.switch_body'),
+            { after: mode === 'whitelist'
+                ? t.key('js.wl.switch_after_whitelist')
+                : t.key('js.wl.switch_after_blacklist'),
+              okLabel: t.key('js.wl.switch_ok'), danger: true })) return;
+        const pw = await promptPassword(t.key('js.wl.switch_pw_title'), t.key('js.wl.switch_pw_body'));
+        if (!pw) return;
+        const r = await apiCall('admin/tracker_mode', 'POST', { op: 'switch', mode, password: pw });
+        showToast((r && (r.message || r.error)) || t.key('js.wl.failed'), r && r.success ? 'success' : 'error');
+        loadStatus();
+    }
+
+    function kv(label, value, cls) {
+        return el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value ' + (cls || '') }, value)]);
+    }
+
+    function renderStatus(s) {
+        const grid = $('wl-status-grid');
+        grid.textContent = '';
+        const st = s.state || {};
+        const perm = s.permissions || {};
+        // Tracker mode: what the PANEL says, and what the tracker is actually running.
+        //
+        // These used to be assumed identical, and were not: the setting governs which list the panel
+        // generates and what the public pages promise, while the running mode is whichever binary and
+        // config the symlinks point at. Only the schedule ever moved those. So this tile shows both,
+        // and says plainly when they disagree instead of repeating the setting back to the operator.
+        const ag = (s.schedule && s.schedule.agreement) || null;
+        const modeParts = [badge(s.mode === 'whitelist' ? t.key('js.wl.mode_whitelist') : t.key('js.wl.mode_blacklist'),
+                                 s.mode === 'whitelist' ? 'wl-b-ok' : 'wl-b-warn')];
+        if (ag && ag.known && ag.match === false) {
+            modeParts.push(' ', badge(t.key('js.wl.tracker_running', {mode: String(ag.actual || '').toUpperCase()}), 'wl-b-bad'));
+            modeParts.push(el('div', { className: 'wl-small text-danger', text: t.key('js.wl.mode_disagree') }));
+        } else if (ag && ag.known) {
+            modeParts.push(' ', el('span', { className: 'wl-small text-muted', text: t.key('js.wl.mode_confirmed') }));
+        } else if (ag) {
+            // Unknown is not a mismatch, and must not be drawn as one.
+            modeParts.push(el('div', { className: 'wl-small text-muted' }, [t.key('js.wl.mode_unknown'), ag.error ? ': ' + ag.error : '.']));
+        }
+        const modeActs = el('div', { className: 'wl-mode-acts' });
+        const testBtn = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary',
+            title: t.key('js.wl.test_title') },
+            [el('i', { className: 'bi bi-search' }), ' ', t.key('js.wl.test_btn')]);
+        testBtn.addEventListener('click', () => modeTest(testBtn));
+        modeActs.appendChild(testBtn);
+        const other = s.mode === 'whitelist' ? 'blacklist' : 'whitelist';
+        const modeAcc = (m) => m === 'whitelist' ? t.key('js.wl.mode_whitelist_acc') : t.key('js.wl.mode_blacklist_acc');
+        const needsSwitch = ag && ag.known && ag.match === false;
+        const swBtn = el('button', { type: 'button',
+            className: 'btn btn-sm ' + (needsSwitch ? 'btn-outline-warning' : 'btn-outline-secondary'),
+            title: needsSwitch
+                ? t.key('js.wl.switch_now_title', {mode: modeAcc(s.mode)})
+                : t.key('js.wl.switch_other_title', {mode: modeAcc(other)}) },
+            [el('i', { className: 'bi bi-arrow-left-right' }),
+             ' ', needsSwitch ? t.key('js.wl.switch_now_btn') : t.key('js.wl.switch_other_btn', {mode: modeAcc(other)})]);
+        swBtn.addEventListener('click', () => modeSwitch(needsSwitch ? s.mode : other));
+        modeActs.appendChild(swBtn);
+        modeParts.push(modeActs);
+        grid.appendChild(kv(t.key('js.wl.kv_tracker_mode'), modeParts));
+        // scheduled mode (whitelist hours): off / desired + next change / last switch outcome
+        const sc = s.schedule;
+        if (sc && sc.enabled) {
+            const parts = [];
+            if (!sc.valid) {
+                parts.push(badge(t.key('js.wl.sched_invalid'), 'wl-b-bad'));
+            } else {
+                const inSync = sc.desired === s.mode;
+                parts.push(badge(t.key('js.wl.sched_wants', {mode: sc.desired === 'whitelist' ? t.key('js.wl.mode_whitelist') : t.key('js.wl.mode_blacklist')}), inSync ? 'wl-b-ok' : 'wl-b-warn'));
+                if (!inSync) parts.push(' ', badge(t.key('js.wl.sched_out_of_sync'), 'wl-b-warn'));
+                // The schedule's own day and hours in the reader's language (1.73.0: *_text; the plain keys are English).
+                parts.push(' ', el('span', { className: 'text-muted', text: sc.next_change ? t.key('js.wl.sched_next', {when: fmtDate(new Date(sc.next_change * 1000).toISOString()) + ' (' + (sc.next_change_text || sc.next_change_local || '') + ' ' + sc.tz + ')'}) : t.key('js.wl.sched_none') }));
+            }
+            parts.push(el('div', { className: 'wl-small text-muted', text: sc.describe_text || sc.describe || '' }));
+            if (sc.last_result) {
+                const okRes = sc.last_result === 'ok';
+                parts.push(el('div', { className: 'wl-small' }, [
+                    el('span', { className: 'text-muted', text: t.key('js.wl.sched_last') }), ' ',
+                    badge(okRes ? t.key('js.wl.ok') : t.key('js.wl.failed_upper'), okRes ? 'wl-b-ok' : 'wl-b-bad'), ' ',
+                    el('span', { className: 'text-muted' }, [sc.last_from && sc.last_to ? sc.last_from + ' → ' + sc.last_to + ' ' : '',   // pieces (1.73.0)
+                        sc.last_switch_at ? t.key('js.wl.ago', {ago: fmtAgo(Math.floor(s.server_time - sc.last_switch_at))}) : (sc.last_attempt_at ? t.key('js.wl.attempted_ago', {ago: fmtAgo(Math.floor(s.server_time - sc.last_attempt_at))}) : '')]),
+                ]));
+                if (!okRes && sc.last_error) parts.push(el('div', { className: 'wl-small text-danger', text: sc.last_error }));
+                if (sc.last_notes) parts.push(el('div', { className: 'wl-small text-muted', text: sc.last_notes }));
+            }
+            if (!sc.cmd_set) parts.push(el('div', { className: 'wl-small text-muted', text: t.key('js.wl.sched_no_cmd') }));
+            grid.appendChild(kv(t.key('js.wl.kv_schedule'), parts));
+        } else {
+            grid.appendChild(kv(t.key('js.wl.kv_schedule'), [badge(t.key('js.wl.off'), 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: t.key('js.wl.sched_fixed') })]));
+        }
+        grid.appendChild(kv(t.key('js.wl.kv_wl_file'), [
+            el('code', { className: 'wl-path', text: s.path || t.key('js.wl.not_configured') }), ' ',
+            perm.ok ? badge(t.key('js.wl.ok'), 'wl-b-ok') : badge(t.key('js.wl.problem'), 'wl-b-bad'),
+        ]));
+        grid.appendChild(kv(t.key('js.wl.kv_db_rows'), [
+            el('span', { text: t.key('js.wl.n_active', {n: s.counts.active}) }), ' · ',
+            el('span', { text: t.key('js.wl.n_banned_rows', {n: s.counts.banned_rows}) }), ' · ',
+            el('span', { text: t.key('js.wl.n_banned_hashes', {n: s.counts.banned_hashes}) }),
+        ]));
+        grid.appendChild(kv(t.key('js.wl.kv_meta_queue'), [
+            el('span', { text: t.key('js.wl.n_pending', {n: s.counts.pending_meta}) }), ' · ',
+            el('span', { text: t.key('js.wl.n_fetching', {n: s.counts.fetching_meta}) }),
+        ]));
+        const f = s.file || {};
+        grid.appendChild(kv(t.key('js.wl.kv_file'), f.exists
+            ? [el('span', { text: t.key('js.wl.file_lines', {n: f.lines_estimate, size: fmtBytes(f.size)}) }), ' · ', el('span', { className: 'text-muted', text: t.key('js.wl.modified', {when: f.mtime ? fmtDate(new Date(f.mtime * 1000).toISOString()) : '—'}) })]
+            : [badge(t.key('js.wl.missing'), 'wl-b-bad')]));
+        grid.appendChild(kv(t.key('js.wl.kv_last_regen'), st.generated_at ? [el('span', {}, [fmtDate(new Date(st.generated_at * 1000).toISOString()) + ' ', t.key('js.wl.regen_detail', {count: st.count, appended: st.appended_since_regen})])] : [t.key('js.wl.never')]));
+        const pend = st.pending_reload
+            ? [badge(st.urgent ? t.key('js.wl.urgent') : t.key('js.wl.pending'), st.urgent ? 'wl-b-warn' : 'wl-b-pending'), ' ', el('span', { className: 'text-muted' }, st.dirty_since ? [t.key('js.wl.pending_for', {ago: fmtAgo(Math.floor(s.server_time - st.dirty_since))}), s.next_reload_in ? t.key('js.wl.next_in', {s: s.next_reload_in}) : ''] : [])]
+            : [badge(t.key('js.wl.in_sync'), 'wl-b-ok')];
+        if (st.regen_needed) pend.push(' ', badge(t.key('js.wl.regen_needed'), 'wl-b-warn'));
+        grid.appendChild(kv(t.key('js.wl.kv_tracker_reload'), pend));
+        const lr = st.last_reload_attempt_at
+            ? [badge(st.last_reload_ok ? t.key('js.wl.ok') : t.key('js.wl.failed_upper'), st.last_reload_ok ? 'wl-b-ok' : 'wl-b-bad'), ' ', el('span', { className: 'text-muted' }, [t.key('js.wl.ago', {ago: fmtAgo(Math.floor(s.server_time - st.last_reload_attempt_at))}), st.fail_count ? t.key('js.wl.consecutive_failures', {n: st.fail_count}) : ''])]
+            : [t.key('js.wl.never')];
+        // The server's sentences (a helper's failure, a warning) found back in the page's dictionary by key (t.find(),
+        // the page's bundle carries api.helper. and api.wl.warn_ — templates/admin/whitelist.php), so they follow the
+        // live language switch with their values (1.73.0).
+        if (!st.last_reload_ok && st.last_reload_output) lr.push(el('div', { className: 'wl-small text-danger', text: t.find(st.last_reload_output, 'api.') }));
+        grid.appendChild(kv(t.key('js.wl.kv_last_reload'), lr));
+        const hb = s.worker_heartbeat_age;
+        grid.appendChild(kv(t.key('js.wl.kv_meta_worker'), hb === null || hb === undefined
+            ? [badge(t.key('js.wl.not_running'), 'wl-b-muted'), ' ', el('span', { className: 'text-muted wl-small', text: t.key('js.wl.no_heartbeat') })]
+            : [badge(hb < 120 ? t.key('js.wl.alive') : t.key('js.wl.stale'), hb < 120 ? 'wl-b-ok' : 'wl-b-warn'), ' ', el('span', { className: 'text-muted', text: t.key('js.wl.heartbeat_ago', {ago: fmtAgo(hb)}) })]));
+        grid.appendChild(kv(t.key('js.wl.kv_service'), [
+            el('code', { text: (s.service && s.service.name) || t.key('js.wl.none') }), ' ',
+            s.service && s.service.auto_reload ? badge(t.key('js.wl.auto_reload'), 'wl-b-ok') : badge(t.key('js.wl.auto_reload_off'), 'wl-b-warn'),
+            s.service && !s.service.exec ? [' ', badge(t.key('js.wl.exec_disabled'), 'wl-b-bad')] : null,
+        ].flat()));
+
+        const warn = $('wl-status-warnings');
+        warn.textContent = '';
+        const list = (s.warnings || []).slice();
+        if (!perm.ok && perm.errors && perm.errors.length && !list.some(w => w.text.startsWith('Whitelist file problem'))) {
+            list.unshift({ level: 'danger', text: perm.errors.join(' ') });
+        }
+        if (list.length) {
+            list.forEach(w => warn.appendChild(el('li', { className: 'wl-warn-' + (w.level === 'danger' ? 'danger' : 'warn') }, [el('i', { className: 'bi ' + (w.level === 'danger' ? 'bi-exclamation-octagon-fill' : 'bi-exclamation-triangle-fill') }), ' ', t.find(w.text, 'api.')])));
+            (perm.suggestions || []).forEach(sg => warn.appendChild(el('li', { className: 'wl-warn-hint', text: sg })));
+            warn.classList.remove('d-hidden');
+        } else {
+            warn.classList.add('d-hidden');
+        }
+        $('wl-status-updated').textContent = t.key('js.wl.updated_at', {time: new Date().toLocaleTimeString()});
+        $('tab-badge-whitelist').textContent = s.counts.active ? String(s.counts.active) : '';
+        $('tab-badge-banned').textContent = s.counts.banned_hashes ? String(s.counts.banned_hashes) : '';
+    }
+
+    async function regenerate() {
+        if (!await confirmAction(t.key('js.wl.regen_title'), t.key('js.wl.regen_body'), { okLabel: t.key('js.wl.regen_ok'), danger: false })) return;
+        const btn = $('btn-wl-regen');
+        btn.disabled = true;
+        try {
+            const r = await apiCall('admin/whitelist_regenerate', 'POST', { reload: true });
+            if (r.success) {
+                showToast([t.key('js.wl.regen_written', {count: r.count, size: fmtBytes(r.bytes), ms: r.ms}), r.reload ? (r.reload.ok ? t.key('js.wl.regen_reloaded') : t.key('js.wl.regen_not_reloaded', {out: r.reload.output || t.key('js.wl.see_status')})) : ''], r.reload && r.reload.ok === false ? 'warning' : 'success');
+            } else {
+                showToast([t.key('js.wl.regen_failed', {error: r.error || t.key('js.wl.unknown')}), r.suggestions && r.suggestions.length ? ' — ' + r.suggestions.join(' ') : ''], 'danger');
+            }
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        btn.disabled = false;
+        loadStatus();
+    }
+
+    async function importBlacklist() {
+        if (!await confirmAction(t.key('js.wl.import_title'), t.key('js.wl.import_body'), { okLabel: t.key('js.wl.import_ok'), danger: false })) return;
+        try {
+            const r = await apiCall('admin/whitelist_import_blacklist', 'POST', {});
+            if (r.success) showToast(t.key('js.wl.import_done', {n: r.imported, skipped: r.skipped, invalid: r.invalid}), 'success');
+            else showToast(t.key('js.wl.import_failed', {error: r.error || t.key('js.wl.unknown')}), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        loadStatus();
+        if (state.view === 'banned') loadBanned();
+    }
+
+    function initReloadModal() {
+        const modalEl = $('wlReloadModal');
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        $('btn-wl-reload').addEventListener('click', () => {
+            if (!bodyDs.service) { showToast(t.key('js.wl.reload_no_service'), 'warning'); return; }
+            $('wl-reload-alert').textContent = '';
+            $('wl-reload-password').value = '';
+            modal.show();
+            setTimeout(() => $('wl-reload-password').focus(), 300);
+        });
+        $('wl-reload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $('wl-reload-alert');
+            const pw = $('wl-reload-password').value;
+            const btn = e.target.querySelector('button[type=submit]');
+            btn.disabled = true;
+            alert.textContent = '';
+            try {
+                const r = await apiCall('admin/reload_tracker', 'POST', { password: pw });
+                if (r.success) {
+                    modal.hide();
+                    showToast(r.message || t.key('js.wl.reloaded'), 'success');
+                    loadStatus();
+                } else {
+                    alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t.key('js.wl.reload_failed') }));
+                }
+            } catch { alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: t.key('js.wl.network_error') })); }
+            btn.disabled = false;
+        });
+    }
+
+    // ───────────────────────── tabs ─────────────────────────
+    function switchView(view) {
+        state.view = view;
+        document.querySelectorAll('#wl-tabs .source-tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+        ['whitelist', 'banned', 'clients', 'bans', 'requests'].forEach(v => $('view-' + v).classList.toggle('d-hidden', v !== view));
+        if (view === 'whitelist') loadWhitelist();
+        else if (view === 'banned') loadBanned();
+        else if (view === 'clients') loadClients();
+        else if (view === 'bans') loadApiBans();
+        else if (view === 'requests') loadRequests();
+    }
+
+    const WR = { status: 'open', page: 1 };
+    async function loadRequests(badgeOnly) {
+        const r = await apiCall('admin/wl_requests&status=' + (badgeOnly ? 'open' : WR.status) + '&page=' + (badgeOnly ? 1 : WR.page));
+        if (!r || !r.success) return;
+        $('tab-badge-requests').textContent = r.open ? String(r.open) : '';
+        if (badgeOnly) return;
+        $('wr-total').textContent = t.key('js.wl.rq_total', { n: t.num(r.total) });
+        const box = $('wr-body');
+        box.textContent = '';
+        if (!r.on) box.appendChild(el('div', { className: 'wl-small text-warning mb-2', text: t.key('js.wl.rq_off') }));
+        if (!r.rows.length) {
+            box.appendChild(el('div', { className: 'wl-small text-muted py-3', text: t.key('js.wl.rq_none') }));
+            renderPagination($('wr-pagination'), { total: 0, page: 1, pages: 1, onPage: () => {} });
+            return;
+        }
+        const act = async (row, op) => {
+            let reply = '';
+            if (op === 'reject') {
+                const v = await promptModal({ title: t.key('js.wl.rq_reject_title', { name: row.name }), label: t.key('js.wl.rq_reply_label'), placeholder: t.key('js.wl.rq_reply_ph'), maxlength: 300 });
+                if (v === null || v === undefined) return;
+                reply = String(v);
+            } else if (!await confirmAction(t.key('js.wl.rq_approve'), t.key('js.wl.rq_approve_confirm', { name: row.name }))) {
+                return;
+            }
+            const j = await apiCall('admin/wl_request_act', 'POST', { id: row.id, op, reply });
+            showToast(j && j.success ? t.key('js.wl.rq_done') : ((j && j.error) || t.key('js.wl.failed')), j && j.success ? 'success' : 'danger');
+            loadRequests();
+        };
+        const tb = el('tbody', {});
+        r.rows.forEach(row => {
+            const acts = el('td', { className: 'wl-actions' });
+            if (row.status === 'open' && r.manage) {
+                acts.appendChild(iconBtn('bi-check-lg', t.key('js.wl.rq_approve'), 'btn-outline-success', () => act(row, 'approve')));
+                acts.appendChild(iconBtn('bi-x-lg', t.key('js.wl.rq_reject'), 'btn-outline-warning', () => act(row, 'reject')));
+            }
+            acts.appendChild(iconBtn('bi-box-arrow-up-right', t.key('js.wl.rq_open_info'), 'btn-outline-info', () => window.open((document.body.dataset.site || '') + '?action=search&hash=' + encodeURIComponent(row.info_hash), '_blank', 'noopener')));
+            const notes = (row.votes || []).filter(v => v.note).map(v => el('div', { className: 'wl-small' }, [el('strong', {}, [v.who || '—', ': ']), v.note]));
+            const who = (row.votes || []).map(v => v.who || '—');
+            const stats = [];
+            if (row.seeders !== null) stats.push(t.key('js.wl.rq_seeders', { n: t.num(row.seeders) }));
+            if (row.total_size) stats.push(fmtBytes(row.total_size));
+            if (row.last_seen) stats.push(t.key('js.wl.rq_seen', { date: fmtDate(row.last_seen) }));
+            if (row.seeders === null && !row.last_seen) stats.push(t.key('js.wl.rq_gone_index'));
+            const swarm = stats.flatMap((s, i) => (i ? [' · ', s] : [s]));
+            tb.appendChild(el('tr', {}, [
+                el('td', { className: 'wl-name-cell' }, [el('div', { className: 'wr-name', text: row.name || row.info_hash }),
+                    el('div', { className: 'wl-small text-muted font-mono', text: row.info_hash }), ...notes]),
+                el('td', {}, [el('span', { className: 'wl-badge wl-b-pending', title: who.join(', ') }, t.plural(row.supporters, 'js.wl.rq_people')),
+                    el('div', { className: 'wl-small text-muted', text: who.slice(0, 3).join(', ') + (who.length > 3 ? '…' : '') })]),
+                el('td', { className: 'wl-small' }, swarm),
+                el('td', { className: 'wl-small' }, [el('div', { text: fmtDate(row.created_at) }),
+                    row.decided_at ? el('div', { className: 'text-muted', text: t.key('js.wl.rq_decided', { date: fmtDate(row.decided_at), who: row.decided_name || '—' }) }) : null,
+                    row.reply ? el('div', { className: 'text-muted', text: row.reply }) : null]),
+                acts,
+            ]));
+        });
+        box.appendChild(el('div', { className: 'table-responsive' }, el('table', { className: 'table table-dark table-hover wl-table dash-table' }, [
+            el('thead', {}, el('tr', {}, [el('th', { text: t.key('js.wl.rq_col_torrent') }), el('th', { text: t.key('js.wl.rq_col_people') }),
+                el('th', { text: t.key('js.wl.rq_col_swarm') }), el('th', { text: t.key('js.wl.rq_col_when') }), el('th', { className: 'th-actions', text: t.key('js.wl.rq_col_actions') })])),
+            tb,
+        ])));
+        snapIcons(tb);
+        renderPagination($('wr-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p) => { WR.page = p; loadRequests(); } });
+    }
+
+
+    // ───────────────────────── whitelist view ─────────────────────────
+    function wlQuery() {
+        const w = state.wl;
+        const p = new URLSearchParams();
+        p.set('page', String(w.page));
+        p.set('sort', wlSort.serialize());
+        if (w.search) p.set('search', w.search);
+        if (w.searchFiles) p.set('search_files', '1');
+        if (w.source) p.set('source', w.source);
+        if (w.meta) p.set('meta', w.meta);
+        if (w.review) p.set('review', w.review);
+        if (w.content) p.set('content', w.content);
+        p.set('banned', w.banned);
+        if (w.ip) p.set('ip', w.ip);
+        if (w.group) p.set('group', 'ip');
+        if (w.filters) Object.entries(w.filters.params()).forEach(([k, v]) => p.set(k, v));
+        const pp = $('wl-perpage');
+        if (pp && pp.value !== '25') p.set('per_page', pp.value);
+        return p.toString();
+    }
+
+    let wlLoadSeq = 0;
+    async function loadWhitelist(silent = false) {
+        const body = $('wl-body');
+        const my = ++wlLoadSeq;   // rapid sort/filter clicks: only the newest response may render
+        // keep the old rows on screen: user actions dim the table, silent live-refreshes pulse the dot
+        busyDot($('wl-total'), true);
+        if (!silent) $('wl-table').classList.add('tbl-loading');
+        let r;
+        try { r = await apiCall('admin/fetch_whitelist&' + wlQuery()); } catch { r = { error: t.key('js.wl.network_error') }; }
+        if (my !== wlLoadSeq) return;
+        busyDot($('wl-total'), false);
+        $('wl-table').classList.remove('tbl-loading');
+        body.textContent = '';
+        if (r.error) {
+            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-danger py-4', text: r.error })));
+            return;
+        }
+        state.wl.rows = new Map(r.rows.map(x => [x.id, x]));
+        state.wl.pages = r.pages || 1;
+        state.wl.ipCounts = r.ip_counts || {};
+        state.wl.selected = new Set([...state.wl.selected].filter(id => state.wl.rows.has(id)));
+        $('wl-total').textContent = t.key('js.wl.entries_total', {n: r.total});
+        // The partner queue, counted over the whole table. Hidden at zero rather than showing a
+        // reassuring "0 waiting" — an operator should notice this only when it has something to say.
+        const waitChip = $('wl-waiting');
+        if (waitChip) {
+            const nWait = Number(r.review_pending || 0);
+            waitChip.hidden = nWait === 0;
+            waitChip.textContent = t.key('js.wl.n_waiting_review', { n: nWait });
+            waitChip.classList.toggle('is-on', state.wl.review === 'pending');
+        }
+        if (!r.rows.length) {
+            body.appendChild(el('tr', null, el('td', { colspan: 12, className: 'text-center text-muted py-4', text: state.wl.search || state.wl.ip ? t.key('js.wl.no_entries_match') : t.key('js.wl.whitelist_empty') })));
+        }
+        let lastIp = null;
+        r.rows.forEach(row => {
+            const tr = el('tr', { dataset: { id: String(row.id) } });
+            if (row.banned) tr.classList.add('wl-row-banned');
+            if (state.wl.group) {
+                tr.style.borderLeft = '4px solid ' + ipColor(row.ip || '');
+                if (row.ip !== lastIp) tr.classList.add('wl-group-first');
+            }
+            // A name for the row's box (1.74.0, UX-11): a screen reader said only "checkbox, not checked" per row.
+            const cb = el('input', { type: 'checkbox', className: 'form-check-input wl-row-check', dataset: { id: String(row.id) },
+                                     'aria-label': t.key('js.wl.select_row', { name: row.name || row.info_hash }) });
+            cb.checked = state.wl.selected.has(row.id);
+            tr.appendChild(el('td', null, cb));
+            tr.appendChild(el('td', { className: 'wl-id', text: String(row.id) }));
+            const hashCell = el('td', { className: 'wl-hash-cell', title: t.key('js.wl.hash_click_copy', {hash: row.info_hash}) }, [el('code', { text: row.info_hash })]);
+            hashCell.addEventListener('click', (e) => copyToClipboard(row.info_hash, e.currentTarget));
+            tr.appendChild(hashCell);
+            const nameTd = el('td', { className: 'wl-name', title: row.name || '' });
+            nameTd.appendChild(el('span', { text: row.name || '—' }));
+            [[1, 'bi-file-earmark-text', 'js.index.desc_text'], [2, 'bi-image', 'js.index.desc_pics'], [4, 'bi-play-circle', 'js.index.desc_video']].forEach(([bit, glyph, key]) => {
+                if (row.desc & bit) nameTd.appendChild(el('i', { className: 'bi ' + glyph + ' wl-desc-mark', role: 'img', title: t.key(key), 'aria-label': t.key(key) }));
+            });
+            // WHO sent it stays readable at a glance, under the name where the column has room — the
+            // narrow Source column could not hold it and ellipsised to "…" (1.63.1), and a moderator
+            // going through the waiting queue should not have to hover every row to learn the partner.
+            const partner = row.api_client_label || (row.api_client && row.api_client.label) || '';
+            // A line that ellipsises on its own with the whole of it in its title (1.73.0, admin.css `.cell-sub`): in the
+            // cell's single line it was cut mid-letter by the cell's edge, a long label with no "…" and nothing to read.
+            if (partner) nameTd.appendChild(el('div', { className: 'wl-small cell-sub', text: t.key('js.wl.partner', { name: partner }), title: t.key('js.wl.partner', { name: partner }) }));
+            if (row.facts && window.FactChips) {
+                const chips = window.FactChips.render(row.facts, state.wl.filters ? (id) => state.wl.filters.addTag(id) : null);
+                if (chips) nameTd.appendChild(chips);
+            }
+            if (row.thumb && window.ThumbSlider) {
+                const thumbBox = el('div', { className: 'search-thumb' });
+                if (window.ThumbSlider.mount(thumbBox, row.thumb)) {
+                    const nameBody = el('div', { className: 'search-name-body' }, [...nameTd.childNodes]);
+                    nameTd.appendChild(el('div', { className: 'search-name-wrap' }, [thumbBox, nameBody]));
+                    nameTd.classList.add('wl-name-thumb');
+                }
+            }
+            tr.appendChild(nameTd);
+            tr.appendChild(el('td', { className: 'wl-size', text: row.total_size ? fmtBytes(row.total_size) : '—' }));
+            tr.appendChild(el('td', { className: 'wl-files-col', text: row.files_count != null ? String(row.files_count) : '—' }));
+            // The badge alone: it fits the column for every source (sourceNote() says what went where).
+            const srcBadge = sourceBadge(row.source);
+            const srcNote = sourceNote(row);
+            if (srcNote) srcBadge.title = srcNote;
+            tr.appendChild(el('td', { className: 'wl-source col-badge' }, srcBadge));
+            const ipTd = el('td', { className: 'wl-ip', title: row.ip || '' });
+            if (row.ip) {
+                const a = el('a', { href: '#', title: t.key('js.wl.filter_by_ip', {ip: row.ip}), text: row.ip });
+                a.addEventListener('click', (e) => { e.preventDefault(); setIpFilter(row.ip); });
+                ipTd.appendChild(a);
+                if (state.wl.group && row.ip !== lastIp && state.wl.ipCounts[row.ip] > 1) {
+                    ipTd.appendChild(document.createTextNode(' '));
+                    ipTd.appendChild(el('span', { className: 'wl-ip-count', title: t.key('js.wl.entries_from_ip'), text: '×' + state.wl.ipCounts[row.ip] }));
+                }
+            } else ipTd.textContent = '—';
+            tr.appendChild(ipTd);
+            const metaTd = el('td', { className: 'wl-meta col-badge' }, metaBadge(row.meta_status));
+            if (row.meta_status === 'failed' && row.meta_error) metaTd.title = row.meta_error;
+            tr.appendChild(metaTd);
+            tr.appendChild(el('td', { className: 'wl-sl', text: row.scraped_at ? `${row.scrape_seeders ?? 0} / ${row.scrape_leechers ?? 0}` : '—', title: row.scraped_at ? t.key('js.wl.scraped_at', {date: fmtDate(row.scraped_at)}) : t.key('js.wl.not_scraped_yet') }));
+            tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(row.created_at) }));
+            const act = el('td', { className: 'wl-actions' });
+            act.appendChild(iconBtn('bi-eye', t.key('js.wl.details'), 'btn-outline-info', () => openDetails(row.id)));
+            const magOpen = el('a', { className: 'btn btn-sm btn-outline-secondary wl-act', title: t.key('js.wl.open_magnet_title'), href: magnetFor(row.info_hash, row.name) }, el('i', { className: 'bi bi-magnet' }));
+            act.appendChild(magOpen);
+            act.appendChild(iconBtn('bi-clipboard', t.key('js.wl.copy_magnet'), 'btn-outline-secondary', (e) => copyToClipboard(magnetFor(row.info_hash, row.name), e.currentTarget)));
+            if (row.banned) act.appendChild(iconBtn('bi-unlock', t.key('js.wl.unban'), 'btn-outline-success', () => unbanHash(row.info_hash)));
+            else act.appendChild(iconBtn('bi-lock', t.key('js.wl.ban'), 'btn-outline-warning', () => banRows([row.id])));
+            act.appendChild(iconBtn('bi-trash', t.key('js.wl.delete'), 'btn-outline-danger', () => deleteRows([row.id])));
+            tr.appendChild(act);
+            tr.addEventListener('click', (e) => { if (e.target.closest('button') || e.target.closest('input') || e.target.closest('a') || e.target.closest('.wl-hash-cell')) return; openDetails(row.id); });
+            body.appendChild(tr);
+            lastIp = row.ip;
+        });
+        snapIcons(body);
+        renderPagination($('wl-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p) => { state.wl.page = p; loadWhitelist(); } });
+        updateBulkBar();
+        $('wl-select-all').checked = r.rows.length > 0 && r.rows.every(x => state.wl.selected.has(x.id));
+        renderChips();
+    }
+
+    // Live view while the worker drains the queue: refresh the visible page every 5 s when the
+    // meta filter is pending/fetching OR any visible row is still pending/fetching — sort, filters,
+    // pagination and selection all survive (silent reload).
+    setInterval(() => {
+        if (document.hidden || state.view !== 'whitelist') return;
+        const busyFilter = state.wl.meta === 'pending' || state.wl.meta === 'fetching';
+        const busyRows = [...state.wl.rows.values()].some(x => x.meta_status === 'pending' || x.meta_status === 'fetching');
+        if (busyFilter || busyRows) loadWhitelist(true);
+    }, 5000);
+
+    function setIpFilter(ip) {
+        state.wl.ip = ip; state.wl.page = 1;
+        loadWhitelist();
+    }
+
+    function renderChips() {
+        const c = $('wl-chips');
+        c.textContent = '';
+        if (state.wl.ip) {
+            const chip = el('span', { className: 'wl-chip' }, [t.key('js.wl.ip_prefix'), el('code', { text: state.wl.ip }), ' ']);
+            const x = el('button', { type: 'button', className: 'wl-chip-x', title: t.key('js.wl.clear_ip_filter') }, el('i', { className: 'bi bi-x' }));
+            x.addEventListener('click', () => { state.wl.ip = ''; state.wl.page = 1; loadWhitelist(); });
+            chip.appendChild(x);
+            c.appendChild(chip);
+        }
+        c.classList.toggle('d-hidden', !c.children.length);
+    }
+
+    function updateBulkBar() {
+        const n = state.wl.selected.size;
+        $('wl-bulk').classList.toggle('d-hidden', n === 0);
+        $('wl-bulk-count').textContent = t.key('js.wl.selected_count', {n});
+    }
+
+    async function deleteRows(ids) {
+        if (!ids.length) return;
+        if (!await confirmAction(t.key('js.wl.delete_from_wl_title'), t.key(ids.length === 1 ? 'js.wl.delete_confirm_one' : 'js.wl.delete_confirm_many', {n: ids.length}), { okLabel: t.key('js.wl.delete') })) return;
+        try {
+            const r = await apiCall('admin/whitelist_delete', 'POST', { ids });
+            if (r.success) { showToast(t.key('js.wl.removed_entries', {n: r.removed}), 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
+            else showToast(r.error || t.key('js.wl.delete_failed'), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        loadWhitelist(); loadStatus();
+    }
+
+    async function banRows(ids) {
+        if (!ids.length) return;
+        const banLabel = t.key(ids.length === 1 ? 'js.wl.ban_n_one' : 'js.wl.ban_n_many', {n: ids.length});
+        const reason = await promptModal({
+            title: banLabel,
+            label: t.key('js.wl.reason_optional'),
+            placeholder: t.key('js.wl.ban_reason_placeholder'),
+            hint: t.key('js.wl.ban_hint'),
+            okLabel: banLabel,
+            danger: true,
+            multiline: true,
+            maxlength: 255,
+        });
+        if (reason === null) return;
+        try {
+            const r = await apiCall('admin/whitelist_ban', 'POST', { ids, reason: reason.trim() });
+            if (r.success) { showToast(t.key('js.wl.banned_result', {n: r.banned, affected: r.affected}), 'success'); ids.forEach(id => state.wl.selected.delete(id)); }
+            else showToast(r.error || t.key('js.wl.ban_failed'), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        loadWhitelist(); loadStatus();
+    }
+
+    async function unbanHash(hash) {
+        if (!await confirmAction(t.key('js.wl.unban_hash_title'), t.key('js.wl.unban_hash_body'),
+            { code: hash, after: t.key('js.wl.unban_hash_after'),
+              okLabel: t.key('js.wl.unban'), danger: false })) return;
+        try {
+            const r = await apiCall('admin/whitelist_unban', 'POST', { hash });
+            if (r.success) showToast(t.key('js.wl.ban_lifted'), 'success'); else showToast(r.error || t.key('js.wl.unban_failed'), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        if (state.view === 'banned') loadBanned(); else loadWhitelist();
+        loadStatus();
+    }
+
+    async function fetchMeta(ids, refresh) {
+        if (!ids.length) return;
+        try {
+            let queued = 0, hb;
+            for (let i = 0; i < ids.length; i += 500) {
+                const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids: ids.slice(i, i + 500), refresh: !!refresh });
+                if (!r.success) { showToast(r.error || t.key('js.wl.request_failed'), 'danger'); return; }
+                queued += Number(r.queued) || 0;
+                hb = r.worker_heartbeat_age;
+            }
+            let msg = t.key('js.wl.queued_of', {n: queued, total: ids.length});
+            if (hb === null || hb === undefined) msg += t.key('js.wl.worker_down_warn');
+            else if (hb > 120) msg += t.key('js.wl.worker_heartbeat_old', {age: fmtAgo(hb)});
+            showToast(msg, hb === null || hb === undefined || hb > 120 ? 'warning' : 'success');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+    }
+
+    // ── "This page" / "Near pages" helpers (near radius comes from the admin_near_pages setting) ──
+    const nearRadius = () => Math.max(1, parseInt(bodyDs.nearPages || '2', 10) || 2);
+    // index_files_admin_mode, exactly as on the Index page: 'button' (the panel's own long-standing
+    // behaviour), 'scroll' fetches the rest when the operator reaches the end of the tree, 'all'
+    // asks for the whole list on the modal's first request. The sizes are the endpoint's business.
+    const filesMode = () => (['scroll', 'button', 'all'].includes(bodyDs.filesMode) ? bodyDs.filesMode : 'button');
+    let collectingNear = false;   // shared guard: a click during collection must not start/stop a scrape
+    /**
+     * Rows of the current page plus the pages around it (same search/filters/sort), deduped by id.
+     * The scope (query string, page, rows) is SNAPSHOTTED at entry — typing in the search box or
+     * clicking pagination while the sequential fetches run must not mix two result sets.
+     */
+    async function collectNearRowsWl() {
+        const radius = nearRadius();
+        const curPage = state.wl.page, curRows = [...state.wl.rows.values()];
+        const baseQs = wlQuery();
+        const from = Math.max(1, curPage - radius), to = Math.min(state.wl.pages || 1, curPage + radius);
+        const seen = new Set(), rows = [];
+        for (let p = from; p <= to; p++) {
+            let pageRows;
+            if (p === curPage) pageRows = curRows;
+            else {
+                const qs = new URLSearchParams(baseQs);
+                qs.set('page', String(p));
+                const r = await apiCall('admin/fetch_whitelist&' + qs.toString());
+                if (r.error) throw new Error(r.error);
+                pageRows = r.rows || [];
+            }
+            for (const row of pageRows) { if (!seen.has(row.id)) { seen.add(row.id); rows.push(row); } }
+        }
+        return rows;
+    }
+    /** Queue metadata for the given rows, skipping everything that already has (or is fetching) it. */
+    async function metaRowsWl(rows, what) {
+        const ids = rows.filter(r => r.meta_status === 'none' || r.meta_status === 'failed').map(r => r.id);
+        if (!ids.length) { showToast(t.key('js.wl.nothing_to_queue_in', {what}), 'info'); return; }
+        try {
+            let queued = 0, hb;
+            for (let i = 0; i < ids.length; i += 500) {
+                const r = await apiCall('admin/whitelist_fetch_meta', 'POST', { ids: ids.slice(i, i + 500), refresh: false });
+                if (!r.success) { showToast(r.error || t.key('js.wl.request_failed'), 'danger'); return; }
+                queued += Number(r.queued) || 0;
+                hb = r.worker_heartbeat_age;
+            }
+            let msg = t.key('js.wl.queued_of_missing', {n: queued, total: ids.length, what});
+            if (hb === null || hb === undefined) msg += t.key('js.wl.worker_down_warn');
+            else if (hb > 120) msg += t.key('js.wl.worker_heartbeat_old', {age: fmtAgo(hb)});
+            showToast(msg, hb === null || hb === undefined || hb > 120 ? 'warning' : 'success');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); return; }
+        loadStatus(); loadWhitelist();
+    }
+    async function metaNearPagesWl() {
+        if (collectingNear) return;
+        collectingNear = true;
+        try { await metaRowsWl(await collectNearRowsWl(), t.key('js.wl.near_pages_what', {n: nearRadius()})); }
+        catch (e) { showToast(t.key('js.wl.near_pages_failed', {msg: e.message || t.key('js.wl.error_word')}), 'danger'); }
+        finally { collectingNear = false; }
+    }
+
+    // ───────────────────────── bulk tools (toolbar dropdowns) ─────────────────────────
+    const META_SCOPE_LABEL = { missing: t.key('js.wl.scope_missing'), failed: t.key('js.wl.scope_failed'), missing_failed: t.key('js.wl.scope_missing_failed'), all: t.key('js.wl.scope_all') };
+
+    /** Bulk "Fetch metadata": one UPDATE server-side; the worker drains the queue one hash after another. */
+    async function queueMetaScope(scope) {
+        if (!META_SCOPE_LABEL[scope]) return;
+        if (scope === 'all' && !await confirmAction(t.key('js.wl.refetch_all_title'), t.key('js.wl.refetch_all_body'), { okLabel: t.key('js.wl.queue_all'), danger: false })) return;
+        const btn = $('btn-wl-meta-bulk');
+        btn.disabled = true;
+        try {
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope });
+            if (r.success) {
+                const n = Number(r.queued) || 0;
+                let msg = n === 0
+                    ? t.key('js.wl.nothing_to_queue_scope', {scope: META_SCOPE_LABEL[scope]})
+                    : t.key(n === 1 ? 'js.wl.queued_scope_one' : 'js.wl.queued_scope_many', {n, scope: META_SCOPE_LABEL[scope]});
+                let type = n === 0 ? 'info' : 'success';
+                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += t.key('js.wl.worker_down_warn'); type = 'warning'; }
+                else if (n > 0 && r.worker_heartbeat_age > 120) { msg += t.key('js.wl.worker_heartbeat_old', {age: fmtAgo(r.worker_heartbeat_age)}); type = 'warning'; }
+                showToast(msg, type);
+            } else showToast(r.error || t.key('js.wl.request_failed'), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        btn.disabled = false;
+        loadStatus(); loadWhitelist();
+    }
+
+    /** Ask for a custom from/to (Y-m-d, `to` empty = now). Returns {from,to} or null when cancelled/invalid. */
+    async function promptDateRange() {
+        const from = await promptModal({ title: t.key('js.wl.custom_date_range'), label: t.key('js.wl.date_from_label'), placeholder: '2026-08-20' });
+        if (from === null || !from.trim()) return null;
+        const to = await promptModal({ title: t.key('js.wl.custom_date_range'), label: t.key('js.wl.date_to_label'), placeholder: '2026-08-23' });
+        if (to === null) return null;
+        return { from: from.trim(), to: (to || '').trim() };
+    }
+
+    /** Queue metadata for rows ADDED within a window (missing+failed only). hours = number | 'custom'. */
+    async function queueMetaDate(hours) {
+        const body = { scope: 'date' };
+        if (hours === 'custom') {
+            const r = await promptDateRange();
+            if (!r) return;
+            body.from = r.from; if (r.to) body.to = r.to;
+        } else body.since_hours = Number(hours);
+        const btn = $('btn-wl-meta-bulk');
+        btn.disabled = true;
+        try {
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', body);
+            if (r.success) {
+                const n = Number(r.queued) || 0;
+                let msg = n === 0 ? t.key('js.wl.nothing_to_queue_window') : t.key(n === 1 ? 'js.wl.queued_added_one' : 'js.wl.queued_added_many', {n, from: r.from, to: r.to});
+                let type = n === 0 ? 'info' : 'success';
+                if (n > 0 && (r.worker_heartbeat_age === null || r.worker_heartbeat_age === undefined)) { msg += t.key('js.wl.worker_down_warn_short'); type = 'warning'; }
+                showToast(msg, type);
+            } else showToast(r.error || t.key('js.wl.request_failed'), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        btn.disabled = false;
+    }
+
+    /** Stop the metadata backlog: every queued (pending) row goes back to `none`; active fetches finish. */
+    async function cancelMetaQueue() {
+        if (!await confirmAction(t.key('js.wl.cancel_queue_title'), t.key('js.wl.cancel_queue_body'), { okLabel: t.key('js.wl.cancel_queue'), danger: true })) return;
+        try {
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'cancel' });
+            if (r.success) showToast([t.key(r.cancelled === 1 ? 'js.wl.cancelled_one' : 'js.wl.cancelled_many', {n: r.cancelled}), r.restored ? t.key('js.wl.restored_done', {n: r.restored}) : '']);
+            else showToast(r.error || t.key('js.wl.request_failed'), 'danger');
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        loadWhitelist();
+    }
+
+    let scrapeRunning = false;
+    let scrapeStop = false;
+    /**
+     * Bulk "Refresh S/L": the server scrapes 50 hashes per tracker request within a time budget and answers
+     * truncated=true + a cursor while rows remain — loop until done, showing progress in the button label.
+     */
+    async function scrapeBulk(scope, dateBody, idList) {
+        const btn = $('btn-wl-scrape-bulk'), caret = $('btn-wl-scrape-caret'), label = $('wl-scrape-label');
+        if (scrapeRunning) { scrapeStop = true; label.textContent = t.key('js.wl.stopping'); return; }   // second click = stop
+        if (collectingNear && !idList) { showToast(t.key('js.wl.near_pages_running'), 'info'); return; }
+        const ids = scope === 'page' ? (idList || [...state.wl.rows.keys()]) : null;
+        if (scope === 'page' && !ids.length) { showToast(t.key('js.wl.no_rows_to_scrape'), 'info'); return; }
+        // the 'page' scope takes at most 500 ids per request — near pages can exceed that, so chunk
+        const chunks = ids ? Array.from({ length: Math.ceil(ids.length / 500) }, (_, i) => ids.slice(i * 500, i * 500 + 500)) : [null];
+        scrapeRunning = true; scrapeStop = false;
+        const origLabel = label.textContent;
+        const origTitle = btn.title;
+        caret.disabled = true;                       // the main button stays clickable — it is the Stop button now
+        btn.classList.add('wl-busy');
+        btn.title = t.key('js.wl.click_to_stop_batch');
+        const progress = (...pieces) => { label.replaceChildren(...pieces); };   // t.key() words in pieces keep their keys
+        let scraped = 0, requests = 0, failed = 0, rounds = 0, warning = null, aborted = false, stopped = false;
+        progress(t.key('js.wl.stop_scraping'));
+        try {
+            outer:
+            for (const chunk of chunks) {
+                let afterId = 0;
+                for (;;) {
+                    rounds++;
+                    const body = { scope, after_id: afterId };
+                    if (chunk) body.ids = chunk;
+                    if (dateBody) Object.assign(body, dateBody);
+                    const r = await apiCall('admin/whitelist_scrape_bulk', 'POST', body);
+                    if (!r.success) { showToast(r.error || t.key('js.wl.scrape_failed'), 'danger'); aborted = true; break outer; }
+                    scraped += Number(r.scraped) || 0;
+                    requests += Number(r.requests) || 0;
+                    failed += Number(r.failed) || 0;
+                    if (r.after_id) afterId = r.after_id;
+                    if (r.warning) warning = r.warning;
+                    progress(t.key('js.wl.stop_scraped', {n: scraped}), r.remaining ? t.key('js.wl.remaining_left', {n: r.remaining}) : '');
+                    if (scrapeStop) { stopped = true; break outer; }
+                    if (!r.truncated || rounds >= 200) break;
+                }
+                if (rounds >= 200) break;
+            }
+        } catch { showToast(t.key('js.wl.network_error'), 'danger'); aborted = true; }
+        if (stopped) showToast(t.key('js.wl.stopped_scraped', {n: scraped}), 'info');
+        if (!aborted && !stopped) {
+            const what = scope === 'page' ? t.key('js.wl.what_this_page') : scope === 'stale' ? t.key('js.wl.what_stale_rows') : scope === 'date' ? t.key('js.wl.what_selected_window') : t.key('js.wl.what_all_active');
+            if (scraped === 0 && warning) showToast(t.key('js.wl.scrape_warning', {what, warning}), 'warning');
+            else showToast([t.key(scraped === 1 ? 'js.wl.scraped_one' : 'js.wl.scraped_many', {n: scraped, what}), t.key(requests === 1 ? 'js.wl.in_requests_one' : 'js.wl.in_requests_many', {n: requests}),
+                            failed ? ' — ' : '', failed ? t.key(failed === 1 ? 'js.wl.no_answer_one' : 'js.wl.no_answer_many', {n: failed}) : '', warning ? ' — ' + warning : ''],
+                           failed || warning ? 'warning' : 'success');
+        }
+        label.textContent = origLabel;
+        btn.classList.remove('wl-busy');
+        btn.title = origTitle;
+        caret.disabled = false;
+        scrapeRunning = false; scrapeStop = false;
+        loadWhitelist();
+    }
+
+    // ───────────────────────── details modal ─────────────────────────
+    function stopDetailPoll() { if (detailPollTimer) { clearTimeout(detailPollTimer); detailPollTimer = null; } }
+
+    // One whitelist row, addressable: ?action=admin-whitelist&hash=<40 hex> opens this modal.
+    // A LINK NAMES THE TORRENT, NOT THE ROW NUMBER — `id` is this installation's own counter and
+    // means nothing anywhere else, so the address carries the hash and api/admin/whitelist_item.php
+    // takes either. Inside the page the table still passes ids, which are what it has.
+    let wlHashView = null;
+    const isHash = (v) => /^[0-9a-f]{40}$/i.test(String(v));
+    // Whether the details modal is still the thing the operator is looking at. NOT
+    // `classList.contains('show')`: Bootstrap adds that class a backdrop transition after
+    // modal.show() returns, so a reply that arrives quickly would find it absent and conclude the
+    // modal had been closed. Set where we open it, cleared where the browser tells us it is gone.
+    let detailShowing = false;
+
+    async function openDetails(id, isPoll = false) {
+        const modalEl = $('wlDetailsModal');
+        window.AdminCommon.resizableDialog(modalEl, 'thx-wl-detail-size');
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const body = $('wd-body');
+        const byHash = isHash(id);
+        if (!isPoll) {
+            stopDetailPoll();
+            detailPollStart = Date.now();
+            body.textContent = '';
+            body.appendChild(el('div', { className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ', t.key('js.common.loading')]));
+            $('wd-title-id').textContent = byHash ? String(id).toLowerCase().slice(0, 10) + '…' : '#' + id;
+            wlHashView = wlHashView || bindHashModal(modalEl, 'admin-whitelist');
+            if (byHash) wlHashView.show(id);
+            detailShowing = true;
+            modal.show();
+            modalEl.addEventListener('hidden.bs.modal', () => { detailShowing = false; stopDetailPoll(); }, { once: true });
+        }
+        let r;
+        const key = byHash ? '&hash=' + encodeURIComponent(String(id).toLowerCase()) : '&id=' + encodeURIComponent(id);
+        try { r = await apiCall('admin/whitelist_item' + (filesMode() === 'all' ? '&files_all=1' : '') + key); } catch { r = { error: t.key('js.wl.network_error') }; }
+        if (r.error) { body.textContent = ''; body.appendChild(el('div', { className: 'alert alert-danger', text: r.error })); return; }
+        renderDetails(r);
+        // The hash is only known once the row has arrived, which is why this is here and not above:
+        // a modal opened by id can still be shared, because by now we know what it is showing.
+        //
+        // Guarded on the modal still being open, exactly like the poll scheduler below. This request
+        // does a live scrapeOpenTracker() on every call, so Escape within the second it takes is an
+        // ordinary thing to do — and hidden.bs.modal has then already cleared the address, so a late
+        // write here would put ?hash= back with nothing left to take it away again. The next F5
+        // would reopen a modal nobody asked for.
+        if (!isPoll && r.item && r.item.info_hash && detailShowing) {
+            if (wlHashView) wlHashView.show(r.item.info_hash);
+            if (byHash) $('wd-title-id').textContent = '#' + r.item.id;
+        }
+        const ms = r.item.meta_status;
+        if ((ms === 'pending' || ms === 'fetching') && Date.now() - detailPollStart < 120000 && detailShowing) {
+            detailPollTimer = setTimeout(() => openDetails(id, true), 3000);
+        }
+    }
+
+
+    /**
+     * The submitter's source link and description, as a block for a detail panel.
+     *
+     * Sits between the key/value grid and the file list: the numbers are what the panel is for, the
+     * files are the long part, and this belongs in between. The description starts COLLAPSED — an
+     * essay that pushes the file list below the fold helps nobody who came here to look at a torrent.
+     *
+     * Returns null when there is nothing to show, so callers can append it unconditionally.
+     */
+    function contentBlock(c) {
+        if (!c) return null;
+        const hasText = !!c.description_html;
+        // A link only when it is one (1.74.0, part D — XSS-3): http or https, as the public Info panel checks it. The
+        // server allows nothing else when a source is written; a row from before, or from a restored backup, is not drawn.
+        const hasLink = !!c.source_url && /^https?:\/\//i.test(String(c.source_url));
+        if (!hasText && !hasLink) return null;
+
+        const wrap = el('div', { className: 'wl-content-block' });
+
+        if (c.content_status && c.content_status !== 'approved') {
+            wrap.appendChild(el('div', {
+                className: 'wl-badge ' + (c.content_status === 'pending' ? 'wl-b-pending' : 'wl-b-warn'),
+                text: c.content_status === 'pending'
+                    ? t.key('js.wl.waiting_review_not_public')
+                    : t.key('js.wl.rejected_not_public', {note: c.rejected_note ? ' — ' + c.rejected_note : ''}),
+            }));
+        }
+
+        if (hasLink) {
+            const row = el('div', { className: 'rt-src-row' });
+            row.appendChild(el('span', { className: 'wl-kv-label', text: t.key('js.wl.source') }));
+            const a = el('a', {
+                className: 'rt-src-url', href: c.source_url, text: c.source_url,
+                rel: 'nofollow noopener noreferrer ugc', target: '_blank',
+                title: c.source_trusted ? t.key('js.wl.src_trusted_title') : t.key('js.wl.src_offsite_title'),
+            });
+            // Not our link. The confirmation is the panel's too: an administrator clicking through a
+            // queue is exactly the person who should not open one by accident.
+            if (!c.source_trusted) a.setAttribute('data-external', '1');
+            row.appendChild(a);
+            wrap.appendChild(row);
+        }
+
+        if (hasText) {
+            const body = el('div', { className: 'rt-body' });
+            // Built on the server by includes/richtext.php from fully escaped input with a fixed tag
+            // whitelist. Everything else in this file goes through el()/textContent.
+            body.innerHTML = c.description_html;
+            wrap.appendChild(el('div', { className: 'wl-kv-label wl-desc-label', text: t.key('js.wl.description') }));
+            wrap.appendChild(window.DescFold ? window.DescFold(body, 420, 'btn btn-sm btn-outline-secondary') : body);
+        }
+        return wrap;
+    }
+
+    /**
+     * The swarm numbers, as the strip the public Info panel uses.
+     *
+     * Same classes, same file (assets/css/detail-panel.css), so the two panels describing the same
+     * torrent look like the same thing. They did not: the public panel got a redesign and the admin
+     * panels kept a flat key/value list, because the CSS lived in the public-only stylesheet.
+     */
+    function statStrip(cells) {
+        const strip = el('div', { className: 'info-strip' });
+        cells.forEach(([value, label, cls]) => {
+            if (value === null || value === undefined) return;
+            strip.appendChild(el('div', { className: 'info-stat' + (cls ? ' ' + cls : '') }, [
+                el('span', { className: 'info-stat-v', text: String(value) }),
+                el('span', { className: 'info-stat-l', text: label }),
+            ]));
+        });
+        return strip.children.length ? strip : null;
+    }
+
+    function renderDetails(r) {
+        const it = r.item;
+        const body = $('wd-body');
+        body.textContent = '';
+        const magnet = r.magnet || magnetFor(it.info_hash, it.name);
+
+        // The numbers first, the identifying facts under them. Whether anything is sharing this is
+        // the first question an admin has too; it used to be the sixth row of a flat list.
+        const idx = r.index || null;
+        const sc0 = r.scrape;
+        const strip = statStrip([
+            [sc0 ? sc0.seeders : (it.scrape_seeders != null ? it.scrape_seeders : null), t.key('js.wl.stat_seeders'), 'info-stat-seed'],
+            [sc0 ? sc0.leechers : (it.scrape_leechers != null ? it.scrape_leechers : null), t.key('js.wl.stat_leechers'), 'info-stat-leech'],
+            [sc0 ? sc0.completed : (it.scrape_completed != null ? it.scrape_completed : null), t.key('js.wl.stat_completed')],
+            [it.total_size ? fmtBytes(it.total_size) : null, t.key('js.wl.stat_size')],
+            // the word in the language's form (1.74.0): "2 pliki", "5 plików" — it said "2 plików"
+            [it.files_count != null ? it.files_count : null, it.files_count != null ? t.plural(it.files_count, 'js.wl.stat_files') : t.key('js.wl.stat_files_many')],
+            [idx && idx.peak_seeders != null ? idx.peak_seeders : null, t.key('js.wl.stat_peak_seeders')],
+        ]);
+        if (Array.isArray(r.gallery) && r.gallery.length && window.InfoGallery) body.appendChild(window.InfoGallery(r.gallery));
+        if (strip) body.appendChild(strip);
+        if (r.facts && window.FactChips) {
+            const chips = window.FactChips.render(r.facts, null, { all: true });
+            if (chips) body.appendChild(el('div', { className: 'wl-detail-tags' }, chips));
+        }
+
+        const kvBox = el('div', { className: 'wl-kv' });
+        const row = (label, valueNodes) => kvBox.appendChild(el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: label }), el('div', { className: 'wl-kv-value' }, valueNodes)]));
+        // Monospace box + aligned copy button; the copy feedback is a tooltip on that button (flashTip).
+        const copyBox = (text, title) => el('div', { className: 'wl-copybox' }, [
+            el('code', { className: 'wl-copybox-code', text }),
+            el('button', { type: 'button', className: 'btn btn-sm wl-copybox-btn', title, 'aria-label': title, onclick: (e) => copyToClipboard(text, e.currentTarget) }, el('i', { className: 'bi bi-clipboard' })),
+        ]);
+        // Copying a magnet and then finding somewhere to paste it is two steps too many when the
+        // whole point of opening this panel was to look at one torrent. The row listing already has an
+        // open button; the detail view, where somebody has deliberately stopped to read, did not.
+        const magnetBox = (text) => {
+            const box = copyBox(text, t.key('js.wl.copy_magnet'));
+            box.appendChild(el('a', {
+                className: 'btn btn-sm wl-copybox-btn', href: text,
+                title: t.key('js.wl.open_in_client'), 'aria-label': t.key('js.wl.open_magnet_in_client'),
+            }, el('i', { className: 'bi bi-magnet' })));
+            return box;
+        };
+        row(t.key('js.wl.lbl_info_hash'), [copyBox(it.info_hash, t.key('js.wl.copy_hash'))]);
+        row(t.key('js.wl.lbl_magnet'), [magnetBox(magnet)]);
+        row(t.key('js.wl.lbl_name'), [el('span', { text: it.name || '—' })]);
+        row(t.key('js.wl.lbl_size'), [el('span', {}, it.total_size ? [t.key('js.wl.size_line', { size: fmtBytes(it.total_size), n: it.files_count || 0 })].concat(it.piece_length ? [' · ', t.key('js.wl.piece_size', { size: fmtBytes(it.piece_length) })] : []) : ['—'])]);
+        const metaNodes = [metaBadge(it.meta_status)];
+        if (it.meta_status === 'failed' && it.meta_error) metaNodes.push(' ', el('span', { className: 'text-danger wl-small', text: it.meta_error }));
+        if (it.meta_fetched_at) metaNodes.push(' ', el('span', { className: 'text-muted wl-small', text: t.key('js.wl.fetched_at', { date: fmtDate(it.meta_fetched_at) }) }));
+        if (it.meta_status === 'pending' || it.meta_status === 'fetching') metaNodes.push(' ', el('span', { className: 'spinner-border spinner-border-sm text-info' }));
+        metaNodes.push(' ', el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', onclick: async () => { await fetchMeta([it.id], it.meta_status === 'done' || it.meta_status === 'failed'); openDetails(it.id); } }, [el('i', { className: 'bi bi-cloud-download' }), ' ', it.meta_status === 'done' ? t.key('js.wl.refresh_metadata') : t.key('js.wl.fetch_metadata')]));
+        row(t.key('js.wl.lbl_metadata'), metaNodes);
+        const sc = r.scrape;
+        const scrapeNodes = sc
+            ? [el('span', { text: t.key('js.wl.swarm_line', { s: sc.seeders, l: sc.leechers, c: sc.completed }) }), ' ', el('span', { className: 'text-muted wl-small' }, (sc.cached ? [t.key('js.wl.cached'), ' '] : []).concat([fmtDate(sc.scraped_at)]))]
+            : [el('span', { className: 'text-muted', text: t.key('js.wl.no_scrape_data') })];
+        scrapeNodes.push(' ', el('button', { type: 'button', className: 'btn btn-sm btn-outline-info wl-act', onclick: async (e) => { e.currentTarget.disabled = true; const s = await apiCall('admin/whitelist_scrape', 'POST', { id: it.id }); if (!s.success) showToast(s.error || t.key('js.wl.scrape_failed'), 'warning'); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-arrow-repeat' }), ' ', t.key('js.wl.scrape_now')]));
+        row(t.key('js.wl.lbl_swarm'), scrapeNodes);
+        const srcNodes = [sourceBadge(it.source)];
+        if (it.ip) { const a = el('a', { href: '#', text: it.ip, title: t.key('js.wl.filter_by_ip_2') }); a.addEventListener('click', (e) => { e.preventDefault(); bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); switchView('whitelist'); setIpFilter(it.ip); }); srcNodes.push(' ', a); if (it.ip_bucket && it.ip_bucket !== it.ip) srcNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '(' + it.ip_bucket + ')' })); }
+        if (r.api_client) srcNodes.push(' · ', el('span', { text: t.key('js.wl.api_client', { name: r.api_client.label }) }));
+        if (it.source_ref) {
+            const ref = it.source_ref;
+            const parts = [];
+            if (ref.discussion_id) parts.push(t.key('js.wl.discussion_ref', { id: ref.discussion_id }));
+            if (ref.post_id) parts.push(t.key('js.wl.post_ref', { id: ref.post_id }));
+            if (parts.length) srcNodes.push(' · ', el('span', { className: 'text-muted wl-small', text: parts.join(', ') }));
+            if (isHttpUrl(ref.url)) srcNodes.push(' ', el('a', { href: ref.url, target: '_blank', rel: 'noopener noreferrer', className: 'wl-ref-link' }, [el('i', { className: 'bi bi-box-arrow-up-right' }), ' ', t.key('js.wl.open')]));
+        }
+        row(t.key('js.wl.lbl_source'), srcNodes);
+        // The review state gets a row of its own rather than a badge tucked into Source: on a row that
+        // is waiting this is the reason the panel is open, and the note explaining a refusal has to
+        // land somewhere a person will read it.
+        if (it.review_status && it.review_status !== 'none') {
+            const cls = { approved: 'wl-b-ok', rejected: 'wl-b-bad', pending: 'wl-b-pending' }[it.review_status] || 'wl-b-muted';
+            const rvNodes = [badge(t.key('js.wl.review_' + it.review_status), cls)];
+            if (r.api_client) rvNodes.push(' ', el('span', { className: 'text-muted wl-small', text: t.key('js.wl.partner', { name: r.api_client.label }) }));
+            if (it.reviewed_at) rvNodes.push(' ', el('span', { className: 'text-muted wl-small', text: '· ' + fmtDate(it.reviewed_at) }));
+            if (it.review_note) rvNodes.push(' ', el('span', { className: 'text-warning wl-small', text: '— ' + it.review_note }));
+            row(t.key('js.wl.lbl_review'), rvNodes);
+        }
+        if (it.banned || r.banned_reason) {
+            const b = r.banned_reason || {};
+            row(t.key('js.wl.lbl_ban'), [badge(t.key('js.wl.badge_banned'), 'wl-b-bad'), ' ', el('span', { text: (b.reason || '') + (b.source ? ` (${b.source}${b.source_id ? ' #' + b.source_id : ''})` : '') }), b.created_at ? el('span', { className: 'text-muted wl-small', text: ' · ' + fmtDate(b.created_at) }) : null]);
+        }
+        // Ratings: the LIST already showed these and the detail panel did not, which is a strange
+        // place to lose information — you click a row to see MORE.
+        if (it.votes_count) {
+            const stars = r.rep_mode === 'stars';
+            const score = it.score_x100 || 0;
+            const label = stars ? [el('i', { className: 'bi bi-star-fill', 'aria-hidden': 'true' }), ' ', t.num(Math.round(score / 10) / 10)] : Math.round(score / 100) + '%';
+            row(t.key('js.wl.lbl_rating'), [
+                badge(label, score >= (stars ? 250 : 5000) ? 'wl-b-ok' : 'wl-b-warn'), ' ',
+                el('span', { className: 'text-muted wl-small' },
+                    [t.key(it.votes_count === 1 ? 'js.wl.from_rating' : 'js.wl.from_ratings', { n: it.votes_count })]
+                        .concat(it.votes_up || it.votes_down ? [' ', t.key('js.wl.up_down', { up: it.votes_up || 0, down: it.votes_down || 0 })] : [])),
+            ]);
+        }
+        // "Prove it" state, when the tracker is set to make submissions prove themselves.
+        if (it.probe_status && it.probe_status !== 'none') {
+            // enum('none','probing','passed','failed') — the names are the schema's, not invented here
+            const cls = { passed: 'wl-b-ok', failed: 'wl-b-bad', probing: 'wl-b-pending' }[it.probe_status] || 'wl-b-muted';
+            const probeNodes = [badge(it.probe_status, cls)];
+            if (it.probe_error) probeNodes.push(' ', el('span', { className: 'text-danger wl-small', text: it.probe_error }));
+            if (it.probe_started_at) probeNodes.push(' ', el('span', { className: 'text-muted wl-small', text: t.key('js.wl.started_at', { date: fmtDate(it.probe_started_at) }) }));
+            row(t.key('js.wl.lbl_proof'), probeNodes);
+        }
+        if (it.dead_since) {
+            row(t.key('js.wl.lbl_dead_since'), [el('span', { className: 'text-warning', text: fmtDate(it.dead_since) }), ' ',
+                el('span', { className: 'text-muted wl-small', text: t.key('js.wl.dead_since_hint') })]);
+        }
+        // What the CATALOGUE knows. Absent for a registered hash nobody has announced yet, which is
+        // itself worth seeing — it means the tracker has never been asked for this torrent.
+        if (idx) {
+            const seenNodes = [el('span', { text: fmtDate(idx.first_seen) + ' → ' + fmtDate(idx.last_seen) })];
+            if (idx.seen_count != null) seenNodes.push(' ', el('span', { className: 'text-muted wl-small' }, ['· ', t.key('js.wl.seen_times', { n: idx.seen_count })]));
+            row(t.key('js.wl.lbl_seen_by_tracker'), seenNodes);
+        } else {
+            row(t.key('js.wl.lbl_seen_by_tracker'), [el('span', { className: 'text-muted', text: t.key('js.wl.never_announced') })]);
+        }
+        row(t.key('js.wl.lbl_created_updated'), [el('span', { text: fmtDate(it.created_at) + ' / ' + fmtDate(it.updated_at) })]);
+        body.appendChild(kvBox);
+
+        // The submitter own words, between the numbers above and the files below.
+        const cb = contentBlock(r.content);
+        if (cb) body.appendChild(cb);
+
+        // files tree
+        const filesBox = el('div', { className: 'wl-files' });
+        // The same honesty as the Index modal: the label prints the stored list against the row's own
+        // files_count whenever the worker stopped short of it, and the missing-list sentence hangs on
+        // whether there are files — not on whether the reply was truncated, which put "single file or
+        // no list stored" underneath a perfectly complete tree.
+        const fillFiles = (files, truncated, short, capped) => {
+            const nodes = [el('div', { className: 'wl-label mb-1', text: !files.length ? t.key('js.wl.files')
+                : (short && it.files_count
+                    ? t.key('js.wl.files_n_of', { n: t.num(files.length), total: t.num(Number(it.files_count)) })
+                    : t.key('js.wl.files_n', { n: t.num(files.length), more: (truncated || capped) ? t.key('js.wl.files_truncated') : '' })) })];
+            if (files.length) nodes.push(buildFileTree(files));
+            if (files.length && short) nodes.push(el('div', { className: 'text-muted wl-small', text: t.key('js.wl.files_stored_cap', { n: t.num(files.length) }) }));
+            // Rows are waiting and no button will fetch them: this list is already as long as the
+            // panel is allowed to load (index_files_admin_max).
+            if (files.length && capped) nodes.push(el('div', { className: 'text-muted wl-small', text: t.key('js.wl.files_capped', { n: t.num(files.length) }) }));
+            if (!files.length) nodes.push(el('div', { className: 'text-muted wl-small', text: it.meta_status === 'done' ? t.key('js.wl.single_file_or_no_list') : t.key('js.wl.no_file_list_yet') }));
+            filesBox.replaceChildren(...nodes);
+        };
+        fillFiles(r.files || [], !!r.files_truncated, !!r.files_short, !!r.files_capped);
+        if (r.files_truncated) {
+            // Capped for a fast modal; the operator can ask for the whole list. Offered only when
+            // rows are actually waiting in the table — a list the worker wrote short has none, and
+            // neither has one that already reached the panel's total.
+            const all = el('button', { type: 'button', className: 'btn btn-sm btn-outline-secondary mt-2', text: t.key('js.wl.files_load_all') });
+            let asked = false;
+            const loadAll = async () => {
+                if (asked) return;
+                asked = true; all.disabled = true; all.textContent = t.key('js.common.loading');
+                try {
+                    const full = await apiCall('admin/whitelist_item&files_all=1&id=' + encodeURIComponent(id));
+                    if (full && full.files) { fillFiles(full.files, false, !!full.files_short, !!full.files_capped); return; }
+                } catch (e) { /* put the button back below */ }
+                asked = false; all.disabled = false; all.textContent = t.key('js.wl.files_load_all');
+            };
+            all.addEventListener('click', loadAll);
+            filesBox.appendChild(all);
+            if (filesMode() === 'scroll' && 'IntersectionObserver' in window) {
+                // The same sentinel as the Index modal: reach the end of the tree and the rest is
+                // fetched once, then the observer is disconnected so it cannot ask again.
+                const sentinel = el('div');
+                filesBox.appendChild(sentinel);
+                new IntersectionObserver((entries, obs) => {
+                    if (entries.some(e => e.isIntersecting)) { obs.disconnect(); loadAll(); }
+                }, { root: null, rootMargin: '200px' }).observe(sentinel);
+            }
+        }
+        body.appendChild(filesBox);
+
+        // actions
+        const actions = el('div', { className: 'd-flex justify-content-end gap-2 mt-3 flex-wrap' });
+        if (it.banned) actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-success', onclick: async () => { await unbanHash(it.info_hash); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-unlock' }), ' ', t.key('js.wl.unban')]));
+        else actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-warning', onclick: async () => { await banRows([it.id]); openDetails(it.id, true); } }, [el('i', { className: 'bi bi-lock' }), ' ', t.key('js.wl.ban')]));
+        actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-outline-danger', onclick: async () => { const before = state.wl.rows.size; await deleteRows([it.id]); if (!state.wl.rows.has(it.id) || before === 0) bootstrap.Modal.getOrCreateInstance($('wlDetailsModal')).hide(); } }, [el('i', { className: 'bi bi-trash' }), ' ', t.key('js.wl.delete')]));
+        actions.appendChild(el('button', { type: 'button', className: 'btn btn-sm btn-secondary', 'data-bs-dismiss': 'modal', text: t.key('js.wl.close') }));
+        body.appendChild(actions);
+    }
+
+    // buildFileTree lives in AdminCommon (shared with the Index modal)
+
+    // ───────────────────────── add hashes modal ─────────────────────────
+    function initAddModal() {
+        const modal = bootstrap.Modal.getOrCreateInstance($('wlAddModal'));
+        $('btn-wl-add').addEventListener('click', () => { $('wl-add-input').value = ''; $('wl-add-results').textContent = ''; modal.show(); setTimeout(() => $('wl-add-input').focus(), 300); });
+        $('wl-add-submit').addEventListener('click', async () => {
+            const btn = $('wl-add-submit');
+            const input = $('wl-add-input').value;
+            const out = $('wl-add-results');
+            out.textContent = '';
+            if (!input.trim()) return;
+            btn.disabled = true;
+            try {
+                const r = await apiCall('admin/whitelist_add', 'POST', { input });
+                if (r.success) {
+                    const s = r.summary;
+                    showToast([t.key('js.wl.add_summary', { added: s.added, exists: s.exists, banned: s.banned, invalid: s.invalid }),
+                               r.file && r.file.ok === false ? ' — ' : '', r.file && r.file.ok === false ? t.key('js.wl.add_file_failed', { error: r.file.error || '' }) : ''],
+                              r.file && r.file.ok === false ? 'danger' : 'success');
+                    renderAddResults(out, r.results);
+                    $('wl-add-input').value = '';
+                    loadWhitelist(); loadStatus();
+                } else {
+                    showToast(r.error || t.key('js.wl.add_failed'), 'danger');
+                    if (r.results) renderAddResults(out, r.results);
+                }
+            } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+            btn.disabled = false;
+        });
+    }
+
+    function renderAddResults(container, results) {
+        container.textContent = '';
+        const cls = { added: 'wl-b-ok', exists: 'wl-b-api', banned: 'wl-b-bad', invalid: 'wl-b-warn' };
+        (results || []).forEach(x => {
+            // the outcome as a word of the dictionary, not the answer's value (1.73.0)
+            container.appendChild(el('div', { className: 'wl-add-row' }, [badge(cls[x.status] ? t.key('js.wl.add_st_' + x.status) : x.status, cls[x.status] || ''), ' ', el('code', { text: x.hash || (x.input || '').slice(0, 60) }), x.error ? el('span', { className: 'text-muted wl-small', text: ' — ' + x.error }) : null]));
+        });
+    }
+
+    // ───────────────────────── banned view ─────────────────────────
+    async function loadBanned() {
+        const body = $('bn-body');
+        body.textContent = '';
+        body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ', t.key('js.common.loading')])));
+        const p = new URLSearchParams({ page: String(state.bn.page), sort: bnSort.serialize() });
+        if (state.bn.search) p.set('search', state.bn.search);
+        let r;
+        try { r = await apiCall('admin/fetch_banned&' + p.toString()); } catch { r = { error: t.key('js.wl.network_error') }; }
+        body.textContent = '';
+        if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-danger py-4', text: r.error }))); return; }
+        $('bn-total').textContent = t.key('js.wl.banned_total', { n: r.total });
+        if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 6, className: 'text-center text-muted py-4', text: t.key('js.wl.no_banned_hashes') })));
+        r.rows.forEach(row => {
+            const tr = el('tr');
+            const hc = el('td', { className: 'wl-hash-cell', title: t.key('js.wl.hash_click_to_copy', { hash: row.info_hash }) }, el('code', { text: row.info_hash }));
+            hc.addEventListener('click', (e) => copyToClipboard(row.info_hash, e.currentTarget));
+            tr.appendChild(hc);
+            tr.appendChild(el('td', { className: 'wl-name', text: row.name || '—', title: row.name || '' }));
+            tr.appendChild(el('td', { className: 'wl-reason', text: row.reason || '—', title: row.reason || '' }));
+            // where the ban came from, as a word of the dictionary (banned_hashes.source: report | appeal | admin | import)
+            tr.appendChild(el('td', { className: 'wl-source col-badge' }, badge([BAN_SRC[row.source] ? t.key(BAN_SRC[row.source]) : row.source, row.source_id ? ' #' + row.source_id : ''], 'wl-b-muted')));
+            tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(row.created_at) }));
+            const act = el('td', { className: 'wl-actions' });
+            if (row.whitelist_id) act.appendChild(iconBtn('bi-eye', t.key('js.wl.whitelist_entry_details'), 'btn-outline-info', () => openDetails(row.whitelist_id)));
+            act.appendChild(iconBtn('bi-unlock', t.key('js.wl.unban'), 'btn-outline-success', () => unbanHash(row.info_hash)));
+            tr.appendChild(act);
+            body.appendChild(tr);
+        });
+        snapIcons(body);
+        renderPagination($('bn-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p2) => { state.bn.page = p2; loadBanned(); } });
+    }
+
+    function initBanModal() {
+        const modal = bootstrap.Modal.getOrCreateInstance($('bnAddModal'));
+        $('btn-bn-add').addEventListener('click', () => { $('bn-add-input').value = ''; $('bn-add-reason').value = ''; $('bn-add-alert').textContent = ''; modal.show(); });
+        $('bn-add-submit').addEventListener('click', async () => {
+            const input = $('bn-add-input').value;
+            if (!input.trim()) return;
+            const btn = $('bn-add-submit');
+            btn.disabled = true;
+            try {
+                const r = await apiCall('admin/banned_add', 'POST', { input, reason: $('bn-add-reason').value });
+                if (r.success) { showToast(t.key('js.wl.ban_add_summary', { banned: r.banned, affected: r.affected, invalid: r.invalid }), 'success'); modal.hide(); loadBanned(); loadStatus(); }
+                else { $('bn-add-alert').textContent = ''; $('bn-add-alert').appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t.key('js.wl.ban_failed') })); }
+            } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+            btn.disabled = false;
+        });
+    }
+
+    // ───────────────────────── API clients view ─────────────────────────
+    async function loadClients() {
+        const body = $('cl-body');
+        body.textContent = '';
+        let r;
+        try { r = await apiCall('admin/fetch_api_clients'); } catch { r = { error: t.key('js.wl.network_error') }; }
+        if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-danger py-4', text: r.error }))); return; }
+        state.cl.rows = new Map(r.clients.map(c => [c.id, c]));
+        state.cl.accountKeys = r.account_keys || [];
+        $('cl-total').replaceChildren(t.key(r.clients.length === 1 ? 'js.wl.clients_one' : 'js.wl.clients_many', { n: r.clients.length }),
+            ...(r.api_enabled ? [] : [' · ', t.key('js.wl.api_disabled_in_settings')]));
+        if (!r.clients.length) body.appendChild(el('tr', null, el('td', { colspan: 10, className: 'text-center text-muted py-4', text: t.key('js.wl.no_api_clients') })));
+        r.clients.forEach(c => {
+            const tr = el('tr');
+            // "held for review" reads the setting that belongs to the scope: on a whitelist key that
+            // is auto_approve, on an abuse key it is abuse_auto_block — and on an abuse key the
+            // ALARMING state is the other one, so that is the one that gets the warning colour.
+            const chip = (icon, text, tone, title) => el('span', { className: 'wl-cl-chip' + (tone ? ' wl-cl-chip-' + tone : ''), title: title || null },
+                [el('i', { className: 'bi ' + icon, 'aria-hidden': 'true' }), text]);
+            const feats = [];
+            if ((c.scope === 'whitelist' || c.scope === 'all') && c.auto_approve === false) feats.push(chip('bi-hourglass-split', t.key('js.wl.cl_approve_rev'), 'warn'));
+            if ((c.scope === 'abuse' || c.scope === 'all') && c.abuse_auto_block === true) feats.push(chip('bi-shield-exclamation', t.key('js.wl.cl_abuse_auto_badge'), 'warn'));
+            if (c.required_fields && c.required_fields.length) feats.push(chip('bi-asterisk', c.required_fields.join(', ')));
+            if ((c.scope === 'whitelist' || c.scope === 'all') && (c.describe_mode === 'queue' || c.describe_mode === 'publish')) {
+                feats.push(chip('bi-file-earmark-text', t.key(c.describe_mode === 'publish' ? 'js.wl.cl_describe_badge_publish' : 'js.wl.cl_describe_badge_queue')));
+            }
+            if (c.image_domains && c.image_domains.length) {
+                feats.push(chip('bi-images', t.key('js.wl.cl_imgdomains_badge', { list: c.image_domains.join(', ') }), '', c.image_domains.join(', ')));
+                feats.push(chip(c.image_consent === true ? 'bi-check-circle' : 'bi-exclamation-circle',
+                    t.key(c.image_consent === true ? 'js.wl.cl_consent_yes' : (c.image_consent === false ? 'js.wl.cl_consent_no' : 'js.wl.cl_consent_none')),
+                    c.image_consent === true ? 'ok' : 'warn'));
+            }
+            if (feats.length) tr.className = 'wl-cl-has-sub';
+            tr.appendChild(el('td', { className: 'wl-cl-label', text: c.label, title: c.label }));
+            tr.appendChild(el('td', { className: 'col-badge' }, badge(c.scope || 'whitelist', c.scope === 'all' ? 'wl-b-warn' : '')));
+            tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { text: c.key_id })));
+            tr.appendChild(el('td', { className: 'wl-mono' }, el('code', { className: 'text-muted', text: '····' + (c.secret_hint || '') })));
+            const sw = el('input', { type: 'checkbox', className: 'form-check-input', role: 'switch', title: c.enabled ? t.key('js.wl.enabled_click_disable') : t.key('js.wl.disabled_click_enable') });
+            sw.checked = !!c.enabled;
+            sw.addEventListener('change', async () => {
+                const rr = await apiCall('admin/api_client_update', 'POST', { id: c.id, enabled: sw.checked ? 1 : 0 });
+                if (rr.success) showToast(sw.checked ? t.key('js.wl.client_enabled') : t.key('js.wl.client_disabled'), 'success'); else { showToast(rr.error || t.key('js.wl.update_failed'), 'danger'); sw.checked = !sw.checked; }
+            });
+            tr.appendChild(el('td', { className: 'wl-enabled' }, el('div', { className: 'form-check form-switch m-0 d-inline-block' }, sw)));
+            tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(c.created_at) }));
+            tr.appendChild(el('td', { className: 'wl-date', text: c.last_used_at ? fmtDate(c.last_used_at) : t.key('js.wl.never') }));
+            tr.appendChild(el('td', { className: 'wl-ip', text: c.last_used_ip || '—', title: c.last_used_ip || '' }));
+            tr.appendChild(el('td', { className: 'wl-num', text: String(c.requests_count) }));
+            const act = el('td', { className: 'wl-actions' });
+            // Renaming used to live here on its own. It is one of four things about a key that an
+            // operator changes, and the other three had nowhere to be changed at all.
+            act.appendChild(iconBtn('bi-sliders', t.key('js.wl.cl_settings'), 'btn-outline-secondary', async () => {
+                const v = await clientOpts({ title: t.key('js.wl.cl_opts_edit'), client: c, okLabel: t.key('js.wl.cl_save') });
+                if (!v) return;
+                // Only what this scope actually has. api_client_update treats a missing key as
+                // "leave it alone", so a federation key keeps whatever it was created with instead
+                // of being quietly rewritten by a dialog that never showed those two controls.
+                const body = { id: c.id, label: v.label, image_domains: v.image_domains };
+                if (v.auto_approve !== undefined) body.auto_approve = v.auto_approve;
+                if (v.abuse_auto_block !== undefined) body.abuse_auto_block = v.abuse_auto_block;
+                if (v.required_fields !== undefined) body.required_fields = v.required_fields;
+                if (v.describe_mode !== undefined) body.describe_mode = v.describe_mode;
+                if (v.describe_accounts !== undefined) body.describe_accounts = v.describe_accounts;
+                const rr = await apiCall('admin/api_client_update', 'POST', body);
+                if (rr.success) { showToast(t.key('js.wl.cl_saved'), 'success'); loadClients(); } else showToast(rr.error || t.key('js.wl.rename_failed'), 'danger');
+            }));
+            act.appendChild(iconBtn('bi-book', t.key('js.wl.cl_docs_copy'), 'btn-outline-secondary', (e) => copyToClipboard(c.docs_url || '', e.currentTarget)));
+            act.appendChild(iconBtn('bi-trash', t.key('js.wl.delete_client'), 'btn-outline-danger', async () => {
+                if (!await confirmAction(t.key('js.wl.delete_api_client'), t.key('js.wl.delete_client_confirm', { name: c.label }), { okLabel: t.key('js.wl.delete') })) return;
+                const rr = await apiCall('admin/api_client_delete', 'POST', { id: c.id });
+                if (rr.success) { showToast(t.key('js.wl.client_deleted'), 'success'); loadClients(); } else showToast(rr.error || t.key('js.wl.delete_failed'), 'danger');
+            }));
+            tr.appendChild(act);
+            body.appendChild(tr);
+            if (feats.length) body.appendChild(el('tr', { className: 'wl-cl-sub' }, el('td', { colspan: 10 }, el('div', { className: 'wl-cl-feats' }, feats))));
+        });
+        snapIcons(body);
+    }
+
+    // The key editor. Resolves to the four answers, or null if the operator backed out — one place,
+    // so "make a key" and "change a key" cannot drift into describing the same settings differently.
+    //
+    // The guide address under the controls is redrawn on every change. It is the thing the operator
+    // will actually send to the partner, and being able to watch it change while choosing is what
+    // makes the choices legible: you can see that holding for review and requiring a title produce a
+    // different page before you commit to either.
+    function clientOpts({ title, client, okLabel }) {
+        const modalEl = $('clOptsModal');
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        const label = $('cl-opts-label'), scope = $('cl-opts-scope'), approve = $('cl-opts-approve');
+        const abuse = $('cl-opts-abuse');
+        const imgDomains = $('cl-opts-imgdomains');
+        const describe = $('cl-opts-describe'), describeAcc = $('cl-opts-describe-accounts');
+        const describeAccField = $('cl-opts-describe-accounts-field');
+        const boxes = [...modalEl.querySelectorAll('.cl-opts-field')];
+        const aboxes = [...modalEl.querySelectorAll('.cl-opts-afield')];
+        const docs = $('cl-opts-docs'), openLink = $('cl-opts-docs-open');
+        $('cl-opts-title').textContent = title;
+        $('cl-opts-save').textContent = okLabel;
+        label.value = client ? client.label : '';
+        scope.value = client ? (client.scope || 'whitelist') : 'whitelist';
+        // The scope is what the key is allowed to touch. Widening it later would silently change what
+        // a credential somebody else already holds can do, so an existing key shows it and does not
+        // offer it.
+        scope.disabled = !!client;
+        $('cl-opts-scope-hint').textContent = client ? t.key('js.wl.cl_scope_locked') : t.key('js.wl.cl_scope_hint');
+        approve.value = client && client.auto_approve === false ? 'review' : 'auto';
+        // The other way round, deliberately: a key nobody has said anything about does NOT get to
+        // take torrents off the tracker on its own.
+        abuse.value = client && client.abuse_auto_block === true ? 'auto' : 'review';
+        const have = new Set((client && client.required_fields) || []);
+        imgDomains.value = client && Array.isArray(client.image_domains) ? client.image_domains.join('\n') : '';
+        describe.value = client && client.describe_mode ? client.describe_mode : 'off';
+        describeAcc.replaceChildren(el('option', { value: '', text: t.key('js.wl.cl_describe_acc_self') }),
+            ...(state.cl.accountKeys || []).filter(k => !client || k.id !== client.id).map(k => el('option', { value: String(k.id), text: k.label })));
+        describeAcc.value = client && client.describe_accounts ? String(client.describe_accounts) : '';
+        if (describeAcc.selectedIndex < 0) describeAcc.value = '';
+        boxes.forEach(b => { b.checked = have.has(b.value); });
+        aboxes.forEach(b => { b.checked = have.has(b.value); });
+
+        // WHICH ANSWERS THIS SCOPE ACTUALLY HAS.
+        //
+        // A federation key never creates a whitelist row, so "what happens to what they send" is a
+        // question about something that cannot happen — and a dialog that asks it anyway teaches the
+        // operator that the answers here do not mean much. The two submission settings are read, sent
+        // and stored ONLY for a scope that can submit; for the others they are not merely hidden,
+        // they are excluded from read() so nothing stale rides along to the server.
+        const canSubmit = () => scope.value === 'whitelist' || scope.value === 'all';
+        const canAbuse = () => scope.value === 'abuse' || scope.value === 'all';
+        const canUsers = () => scope.value === 'users' || scope.value === 'all';
+
+        const read = () => {
+            const v = { label: label.value.trim(), scope: scope.value, image_domains: imgDomains.value.split(/[\s,;]+/).filter(Boolean) };
+            // `required_fields` is ONE column and two vocabularies. Only the blocks this scope can
+            // actually use contribute to it, so a key can never be sent demanding a field the
+            // endpoint it may call has never heard of.
+            const fields = [];
+            if (canSubmit()) {
+                v.auto_approve = approve.value !== 'review' ? 1 : 0;
+                v.describe_mode = describe.value;
+                v.describe_accounts = describeAcc.value ? Number(describeAcc.value) : null;
+                fields.push(...boxes.filter(b => b.checked).map(b => b.value));
+            }
+            if (canAbuse()) {
+                v.abuse_auto_block = abuse.value === 'auto' ? 1 : 0;
+                fields.push(...aboxes.filter(b => b.checked).map(b => b.value));
+            }
+            if (canSubmit() || canAbuse()) v.required_fields = fields;
+            return v;
+        };
+        const paint = () => {
+            const v = read();
+            // Each chapter its own answer (1.73.0): approve= for what happens to a registration, block= for
+            // a report — an `all` key has both — as apiClientDocsUrl() (includes/api_auth.php) writes them.
+            const url = docsUrlFor(v.scope, v.auto_approve !== 0, v.required_fields || [], v.abuse_auto_block === 1, v.describe_mode);
+            describeAccField.hidden = describe.value === 'off';
+            describeAcc.options[0].textContent = t.key(canUsers() ? 'js.wl.cl_describe_acc_self' : 'js.wl.cl_describe_acc_none');
+            docs.textContent = url;
+            openLink.href = url;
+        };
+
+        // The endpoints, by scope. Named rather than described: an integrator copies these, and an
+        // operator deciding how far to trust a partner is deciding about exactly this list.
+        const ENDPOINTS = {
+            whitelist: ['v1/whitelist/submit', 'v1/whitelist/describe', 'v1/whitelist/ping'],
+            abuse: ['v1/blacklist/submit'],
+            users: ['v1/users/lookup', 'v1/users/provision', 'v1/users/grant', 'v1/users/revoke',
+                    'v1/auth/login', 'v1/auth/logout', 'v1/auth/verify', 'v1/auth/merge', 'v1/auth/status'],
+            // The shop's three. Deliberately a SUBSET of users rather than a flag on it: an operator
+            // comparing the two lists on this screen is looking at exactly what the narrower key buys.
+            shop: ['v1/users/lookup', 'v1/users/grant', 'v1/users/revoke'],
+            federation: ['v1/federation/ping', 'v1/federation/export'],
+        };
+        ENDPOINTS.all = [...ENDPOINTS.whitelist, ...ENDPOINTS.abuse, ...ENDPOINTS.users, ...ENDPOINTS.federation];
+
+        const bridgeOn = (document.body.dataset.bridgeOn || '0') === '1';
+        const submitBlock = $('cl-opts-submit-block');
+        const abuseBlock = $('cl-opts-abuse-block');
+        const bridgeNote = $('cl-opts-bridge-note');
+        const canBox = $('cl-opts-can');
+
+        const applyScope = () => {
+            submitBlock.hidden = !canSubmit();
+            abuseBlock.hidden = !canAbuse();
+            // The endpoint list is rebuilt every time, so it can never disagree with the select above it.
+            canBox.textContent = '';
+            canBox.appendChild(el('div', { className: 'cl-can-head', text: t.key('js.wl.cl_can') }));
+            const list = el('div', { className: 'cl-can-list' });
+            (ENDPOINTS[scope.value] || []).forEach(e => list.appendChild(el('code', { text: e })));
+            canBox.appendChild(list);
+            if (!canSubmit()) {
+                canBox.appendChild(el('div', { className: 'cl-hint', text: t.key('js.wl.cl_only_wl') }));
+            }
+            // A `users` key is what the sign-in bridge runs on, so its state belongs on this screen:
+            // making the key and then finding every auth call answering 503 is a wasted afternoon.
+            bridgeNote.hidden = !canUsers();
+            if (canUsers()) {
+                bridgeNote.className = 'cl-note ' + (bridgeOn ? 'cl-note-ok' : 'cl-note-warn');
+                bridgeNote.textContent = t.key(bridgeOn ? 'js.wl.cl_bridge_on' : 'js.wl.cl_bridge_off');
+            }
+            if (scope.value === 'federation') {
+                canBox.appendChild(el('div', { className: 'cl-hint', text: t.key('js.wl.cl_fed_note') }));
+            }
+            // What a shop key CANNOT do, said on the screen where the choice is made — the whole
+            // reason the scope exists is the two things missing from its list.
+            if (scope.value === 'shop') {
+                canBox.appendChild(el('div', { className: 'cl-hint', text: t.key('js.wl.cl_shop_note') }));
+            }
+            paint();
+        };
+        applyScope();
+        // The scope redraws the dialog; everything else only redraws the guide address.
+        const watched = [label, approve, abuse, describe, describeAcc, ...boxes, ...aboxes];
+        watched.forEach(c => c.addEventListener('change', paint));
+        scope.addEventListener('change', applyScope);
+
+        return new Promise(resolve => {
+            let done = null;
+            const save = () => { const v = read(); if (!v.label) { label.focus(); return; } done = v; modal.hide(); };
+            const onHide = () => {
+                $('cl-opts-save').removeEventListener('click', save);
+                modalEl.removeEventListener('hidden.bs.modal', onHide);
+                watched.forEach(c => c.removeEventListener('change', paint));
+                scope.removeEventListener('change', applyScope);
+                resolve(done);
+            };
+            $('cl-opts-save').addEventListener('click', save);
+            modalEl.addEventListener('hidden.bs.modal', onHide);
+            modal.show();
+            setTimeout(() => label.focus(), 250);
+        });
+    }
+
+    // Mirrors apiClientDocsUrl() in includes/api_auth.php — this one is only for the live preview
+    // while the operator is still deciding, before there is a row on the server to ask about. Every
+    // address the panel actually HANDS OVER (the row button, the token modal) is the server's own.
+    function docsUrlFor(scope, autoApprove, fields, autoBlock, describe) {
+        const u = new URL((document.body.dataset.apiBase || '/').replace(/api\.php\?endpoint=$/, ''), location.href);
+        u.searchParams.set('action', 'apidocs');
+        u.searchParams.set('scope', scope || 'whitelist');
+        // approve= (a registration), block= (a report) and fields= describe what a key sends. On a key that
+        // sends nothing they would be parameters the guide has to ignore, and an operator comparing the link
+        // to the dialog would find them saying something the dialog does not.
+        const submits = scope === 'whitelist' || scope === 'all';
+        const reports = scope === 'abuse' || scope === 'all';
+        if (submits) u.searchParams.set('approve', autoApprove ? 'auto' : 'review');
+        if (reports) u.searchParams.set('block', autoBlock ? 'auto' : 'review');
+        if (submits && (describe === 'queue' || describe === 'publish')) u.searchParams.set('describe', describe);
+        if ((submits || reports) && fields && fields.length) u.searchParams.set('fields', fields.join(','));
+        return u.toString();
+    }
+
+    function initClientCreate() {
+        const tokenModal = bootstrap.Modal.getOrCreateInstance($('tokenModal'));
+        $('btn-cl-create').addEventListener('click', async () => {
+            const v = await clientOpts({ title: t.key('js.wl.cl_opts_create'), client: null, okLabel: t.key('js.wl.create') });
+            if (!v) return;
+            try {
+                const r = await apiCall('admin/api_client_create', 'POST', v);
+                if (r.success) {
+                    $('token-label').textContent = r.label;
+                    $('token-keyid').textContent = r.key_id;
+                    $('token-value').textContent = r.bearer;
+                    $('token-docs').textContent = r.docs_url || '';
+                    $('token-docs-open').href = r.docs_url || '#';
+                    tokenModal.show();
+                    loadClients();
+                } else showToast(r.error || t.key('js.wl.create_failed'), 'danger');
+            } catch { showToast(t.key('js.wl.network_error'), 'danger'); }
+        });
+        $('token-copy').addEventListener('click', (e) => copyToClipboard($('token-value').textContent, e.currentTarget));
+        $('token-docs-copy').addEventListener('click', (e) => copyToClipboard($('token-docs').textContent, e.currentTarget));
+    }
+
+    // ───────────────────────── API bans view ─────────────────────────
+    async function loadApiBans() {
+        const body = $('ab-body');
+        body.textContent = '';
+        body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4' }, [el('span', { className: 'spinner-border spinner-border-sm' }), ' ', t.key('js.common.loading')])));
+        const p = new URLSearchParams({ page: String(state.ab.page), sort: abSort.serialize(), status: state.ab.status });
+        if (state.ab.search) p.set('search', state.ab.search);
+        let r;
+        try { r = await apiCall('admin/fetch_api_bans&' + p.toString()); } catch { r = { error: t.key('js.wl.network_error') }; }
+        body.textContent = '';
+        if (r.error) { body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-danger py-4', text: r.error }))); return; }
+        state.ab.rows = new Map(r.rows.map(x => [x.id, x]));
+        $('ab-total').textContent = t.key(r.total === 1 ? 'js.wl.bans_one' : 'js.wl.bans_many', { n: r.total });
+        if (!r.rows.length) body.appendChild(el('tr', null, el('td', { colspan: 9, className: 'text-center text-muted py-4', text: state.ab.status === 'active' ? t.key('js.wl.no_active_api_bans') : t.key('js.wl.no_api_bans') })));
+        r.rows.forEach(b => {
+            const tr = el('tr', { className: b.active ? '' : 'wl-row-muted' });
+            tr.appendChild(el('td', { className: 'wl-ip wl-mono', title: b.ip }, el('code', { text: b.ip })));
+            tr.appendChild(el('td', { className: 'text-muted wl-small wl-mono', text: b.ip_bucket !== b.ip ? b.ip_bucket : '', title: b.ip_bucket !== b.ip ? b.ip_bucket : '' }));
+            tr.appendChild(el('td', { className: 'wl-reason col-badge col-start', title: b.detail || b.reason || '' }, [badge(b.reason, b.reason === 'manual' ? 'wl-b-muted' : 'wl-b-bad'), b.detail ? el('div', { className: 'text-muted wl-small wl-ellipsis', text: b.detail }) : null]));
+            tr.appendChild(el('td', { className: 'wl-mono' }, b.key_id ? el('code', { text: b.key_id }) : '—'));
+            tr.appendChild(el('td', { className: 'wl-small wl-endpoint', text: b.endpoint || '—', title: b.endpoint || '' }));
+            tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(b.created_at) }));
+            tr.appendChild(el('td', { className: 'wl-date', text: fmtDate(b.expires_at) }));
+            // The date and who lifted it (a member's name, up to 32 characters): ellipsised with all of it in the title.
+            const lifted = b.lifted_at ? fmtDate(b.lifted_at) + (b.lifted_by ? ' (' + b.lifted_by + ')' : '') : (b.active ? '' : t.key('js.wl.expired'));
+            tr.appendChild(el('td', { className: 'wl-date', text: lifted, title: lifted }));
+            const act = el('td', { className: 'wl-actions' });
+            act.appendChild(iconBtn('bi-eye', b.has_snapshot ? t.key('js.wl.view_request', { size: fmtBytes(b.snapshot_len) }) : t.key('js.wl.view'), 'btn-outline-info', () => openSnapshot(b.id)));
+            if (b.active) act.appendChild(iconBtn('bi-unlock', t.key('js.wl.lift_ban'), 'btn-outline-success', () => liftBan(b.id)));
+            tr.appendChild(act);
+            body.appendChild(tr);
+        });
+        snapIcons(body);
+        renderPagination($('ab-pagination'), { total: r.total, page: r.page, pages: r.pages, onPage: (p2) => { state.ab.page = p2; loadApiBans(); } });
+    }
+
+    async function liftBan(id) {
+        if (!await confirmAction(t.key('js.wl.lift_api_ban'), t.key('js.wl.lift_ban_confirm'), { okLabel: t.key('js.wl.lift'), danger: false })) return;
+        const r = await apiCall('admin/api_ban_lift', 'POST', { id });
+        if (r.success) { showToast(t.key('js.wl.ban_lifted'), 'success'); loadApiBans(); } else showToast(r.error || t.key('js.wl.failed'), 'danger');
+    }
+
+    let currentSnapshotJson = '';
+    async function openSnapshot(id) {
+        const modal = bootstrap.Modal.getOrCreateInstance($('snapshotModal'));
+        $('snapshot-title-id').textContent = '#' + id;
+        $('snapshot-meta').textContent = '';
+        $('snapshot-pre').textContent = t.key('js.common.loading');
+        $('snapshot-lift').classList.add('d-hidden');
+        modal.show();
+        const r = await apiCall('admin/fetch_api_bans&id=' + encodeURIComponent(id));
+        if (r.error) { $('snapshot-pre').textContent = r.error; return; }
+        const b = r.ban;
+        const meta = $('snapshot-meta');
+        // `v` may be a list of pieces (1.73.0: a t.key() word among them keeps its key for the live language switch).
+        const add = (k, v) => meta.appendChild(el('div', { className: 'wl-kv-item' }, [el('div', { className: 'wl-kv-label', text: k }),
+            el('div', { className: 'wl-kv-value' }, Array.isArray(v) ? v : [v == null || v === '' ? '—' : (t.isKey(v) ? v : String(v))])]));
+        add(t.key('js.wl.snap_ip'), b.ip + (b.ip_bucket !== b.ip ? ' (' + b.ip_bucket + ')' : ''));
+        add(t.key('js.wl.snap_reason'), b.reason + (b.detail ? ' — ' + b.detail : ''));
+        add(t.key('js.wl.snap_key_id'), b.key_id);
+        add(t.key('js.wl.snap_endpoint'), b.endpoint);
+        add(t.key('js.wl.snap_created'), fmtDate(b.created_at));
+        add(t.key('js.wl.snap_expires'), [fmtDate(b.expires_at)].concat(b.active ? [' (', t.key('js.wl.active'), ')'] : []));
+        add(t.key('js.wl.snap_lifted'), b.lifted_at ? [fmtDate(b.lifted_at)].concat(b.lifted_by ? [' ', t.key('js.wl.lifted_by', { name: b.lifted_by })] : []) : '');
+        currentSnapshotJson = b.request_snapshot == null ? '' : (typeof b.request_snapshot === 'string' ? b.request_snapshot : JSON.stringify(b.request_snapshot, null, 2));
+        $('snapshot-pre').textContent = currentSnapshotJson || t.key('js.wl.no_snapshot');
+        if (b.active) {
+            const lift = $('snapshot-lift');
+            lift.classList.remove('d-hidden');
+            lift.onclick = async () => { await liftBan(b.id); modal.hide(); };
+        }
+    }
+
+    function initApiBanAdd() {
+        const modal = bootstrap.Modal.getOrCreateInstance($('abAddModal'));
+        $('btn-ab-add').addEventListener('click', () => { $('ab-add-ip').value = ''; $('ab-add-days').value = bodyDs.apiBanDays || '30'; $('ab-add-reason').value = ''; $('ab-add-alert').textContent = ''; modal.show(); });
+        $('ab-add-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alert = $('ab-add-alert');
+            alert.textContent = '';
+            const r = await apiCall('admin/api_ban_add', 'POST', { ip: $('ab-add-ip').value.trim(), days: parseInt($('ab-add-days').value, 10) || 0, reason: $('ab-add-reason').value });
+            if (r.success) { showToast(t.key('js.wl.ip_banned_for_days', { ip: $('ab-add-ip').value.trim(), n: r.days }), 'success'); modal.hide(); loadApiBans(); }
+            else alert.appendChild(el('div', { className: 'alert alert-danger py-2 wl-small', text: r.error || t.key('js.wl.failed') }));
+        });
+        $('snapshot-copy').addEventListener('click', (e) => copyToClipboard(currentSnapshotJson || '', e.currentTarget));
+    }
+
+    // ───────────────────────── init ─────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+        // Same wait on all three tabs: Banned and API bans used to fire on the click itself, which is
+        // the same complaint as a too-short debounce, only worse.
+        const loadWlDebounced = debounce(() => loadWhitelist(), SORT_DEBOUNCE_MS);
+        const loadBnDebounced = debounce(() => loadBanned(), SORT_DEBOUNCE_MS);
+        const loadAbDebounced = debounce(() => loadApiBans(), SORT_DEBOUNCE_MS);
+        wlSort = makeSortStack({ table: $('wl-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.wl.page = 1; loadWlDebounced(); } });
+        bnSort = makeSortStack({ table: $('bn-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.bn.page = 1; loadBnDebounced(); } });
+        abSort = makeSortStack({ table: $('ab-table'), defaultSort: [{ col: 'date', dir: 'desc' }], onChange: () => { state.ab.page = 1; loadAbDebounced(); } });
+        wlSort.bindHeaders(); bnSort.bindHeaders(); abSort.bindHeaders();
+
+        document.querySelectorAll('#wl-tabs .source-tab[data-view]').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+        document.querySelectorAll('#wr-status [data-status]').forEach(b => b.addEventListener('click', () => {
+            WR.status = b.dataset.status;
+            WR.page = 1;
+            document.querySelectorAll('#wr-status [data-status]').forEach(x => x.classList.toggle('active', x === b));
+            loadRequests();
+        }));
+        loadRequests(true);
+
+        $('btn-logout').addEventListener('click', async () => { await apiCall('admin/logout', 'POST', {}); window.location.href = (document.body.dataset.apiBase || '').replace('api.php?endpoint=', '') + '?action=' + (document.body.dataset.loginPath || 'admin'); });
+        $('btn-wl-regen').addEventListener('click', regenerate);
+        $('btn-wl-import').addEventListener('click', importBlacklist);
+        initReloadModal();
+        initAddModal();
+        initBanModal();
+        initClientCreate();
+        initApiBanAdd();
+
+        // whitelist toolbar
+        const searchInput = $('wl-search');
+        const doSearch = debounce(() => { state.wl.search = searchInput.value.trim(); state.wl.page = 1; loadWhitelist(); }, window.AdminCommon.DEBOUNCE.search);
+        searchInput.addEventListener('input', doSearch);
+        bindSearchClear(searchInput, $('wl-search-clear'), () => { state.wl.search = ''; state.wl.page = 1; loadWhitelist(); });
+        $('wl-search-files').addEventListener('change', (e) => { state.wl.searchFiles = e.target.checked; if (state.wl.search) loadWhitelist(); });
+        $('wl-filter-source').addEventListener('change', (e) => { state.wl.source = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const fHost = $('wl-filters');
+        if (fHost && window.SearchFilters) {
+            let catalog = [];
+            try { catalog = JSON.parse(fHost.dataset.catalog || '[]'); } catch (e) { catalog = []; }
+            state.wl.filters = window.SearchFilters.mount(fHost, { catalog, facts: fHost.dataset.facts === '1', desc: fHost.dataset.desc === '1', ui: 'panel',
+                                                                   onChange: () => { state.wl.page = 1; loadWhitelist(); } });
+        }
+        $('wl-filter-meta').addEventListener('change', (e) => { state.wl.meta = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const wlPp = $('wl-perpage');
+        if (wlPp) {
+            try { const v = localStorage.getItem('thx_wl_perpage'); if (v && [...wlPp.options].some(o => o.value === v)) wlPp.value = v; } catch (e) {}
+            wlPp.addEventListener('change', () => { try { localStorage.setItem('thx_wl_perpage', wlPp.value); } catch (e) {} state.wl.page = 1; loadWhitelist(); });
+        }
+        $('wl-filter-banned').addEventListener('change', (e) => { state.wl.banned = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const revSel = $('wl-filter-review');
+        if (revSel) revSel.addEventListener('change', (e) => { state.wl.review = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const contentSel = $('wl-filter-content');
+        if (contentSel) contentSel.addEventListener('change', (e) => { state.wl.content = e.target.value; state.wl.page = 1; loadWhitelist(); });
+        const waitBtn = $('wl-waiting');
+        if (waitBtn) waitBtn.addEventListener('click', () => {
+            // A toggle, not a one-way trip: pressing it again gives the operator their table back.
+            const on = state.wl.review === 'pending';
+            state.wl.review = on ? '' : 'pending';
+            if (revSel) revSel.value = state.wl.review;
+            state.wl.page = 1;
+            loadWhitelist();
+        });
+        // Approve / turn down whatever is selected. Behind panel.whitelist.content, the same
+        // permission as approving a description — both are "a person decided whether this belongs".
+        const partnerReviewAct = async (op) => {
+            const ids = [...state.wl.selected];
+            if (!ids.length) return;
+            const r = await apiCall('admin/whitelist_review', 'POST', { op, ids });
+            if (r.error) { showToast(r.error, 'error'); return; }
+            showToast(t.key(op === 'approve' ? 'js.wl.approved_n' : 'js.wl.rejected_n', { n: r.changed }));
+            state.wl.selected.clear();
+            loadWhitelist();
+            loadStatus();
+        };
+        const apBtn = $('wl-approve');
+        if (apBtn) apBtn.addEventListener('click', () => partnerReviewAct('approve'));
+        const rjBtn = $('wl-reject');
+        if (rjBtn) rjBtn.addEventListener('click', () => partnerReviewAct('reject'));
+        $('wl-group-ip').addEventListener('change', (e) => {
+            state.wl.group = e.target.checked; state.wl.page = 1;
+            if (state.wl.group) wlSort.set([{ col: 'ip', dir: 'asc' }, { col: 'date', dir: 'desc' }]); else wlSort.reset();
+            loadWhitelist();
+        });
+        // selection
+        $('wl-select-all').addEventListener('change', (e) => {
+            state.wl.rows.forEach((row, id) => { if (e.target.checked) state.wl.selected.add(id); else state.wl.selected.delete(id); });
+            document.querySelectorAll('.wl-row-check').forEach(cb => { cb.checked = e.target.checked; });
+            updateBulkBar();
+        });
+        $('wl-body').addEventListener('change', (e) => {
+            if (!e.target.classList.contains('wl-row-check')) return;
+            const id = parseInt(e.target.dataset.id, 10);
+            if (e.target.checked) state.wl.selected.add(id); else state.wl.selected.delete(id);
+            updateBulkBar();
+        });
+        $('btn-bulk-clear').addEventListener('click', () => { state.wl.selected.clear(); document.querySelectorAll('.wl-row-check').forEach(cb => { cb.checked = false; }); $('wl-select-all').checked = false; updateBulkBar(); });
+        $('btn-bulk-delete').addEventListener('click', () => deleteRows([...state.wl.selected]));
+        $('btn-bulk-ban').addEventListener('click', () => banRows([...state.wl.selected]));
+        $('btn-bulk-meta').addEventListener('click', () => fetchMeta([...state.wl.selected], false));
+        // toolbar bulk tools (dropdown items carry data-meta-scope / data-scrape-scope). Close the menu
+        // explicitly first: the actions disable the toggle while running, and Bootstrap skips auto-close
+        // for a disabled toggle.
+        const closeMenu = (toggleId) => { const t = $(toggleId); if (t && bootstrap.Dropdown) bootstrap.Dropdown.getOrCreateInstance(t).hide(); };
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaScope(b.dataset.metaScope); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-date]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); queueMetaDate(b.dataset.metaDate === 'custom' ? 'custom' : Number(b.dataset.metaDate)); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-cancel]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); cancelMetaQueue(); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-restore]').forEach(b => b.addEventListener('click', async () => {
+            closeMenu('btn-wl-meta-bulk');
+            const r = await apiCall('admin/whitelist_meta_queue', 'POST', { scope: 'restore' });
+            if (r.success) { showToast(r.restored ? t.key('js.wl.restored_rows', { n: r.restored }) : t.key('js.wl.nothing_to_restore'), r.restored ? 'success' : 'info'); loadWhitelist(); loadStatus(); }
+            else showToast(r.error || t.key('js.wl.rebuild_failed'), 'danger');
+        }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-page]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaRowsWl([...state.wl.rows.values()], 'this page'); }));
+        document.querySelectorAll('#wl-meta-bulk-group [data-meta-near]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-meta-bulk'); metaNearPagesWl(); }));
+        document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-scope]').forEach(b => b.addEventListener('click', () => { closeMenu('btn-wl-scrape-caret'); scrapeBulk(b.dataset.scrapeScope); }));
+        document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-near]').forEach(b => b.addEventListener('click', async () => {
+            closeMenu('btn-wl-scrape-caret');
+            if (scrapeRunning) { scrapeBulk('page'); return; }   // acts as the stop path
+            if (collectingNear) return;
+            collectingNear = true;                               // blocks other scrape starts during collection
+            const label = $('wl-scrape-label');
+            const orig = label.textContent;
+            label.textContent = t.key('js.wl.collecting');
+            let rows;
+            try { rows = await collectNearRowsWl(); }
+            catch (e) { showToast(t.key('js.wl.near_pages_failed_2', { error: e.message || t.key('js.wl.error') }), 'danger'); return; }
+            finally { collectingNear = false; label.textContent = orig; }
+            if (!rows.length) { showToast(t.key('js.wl.no_rows_near_pages'), 'info'); return; }
+            scrapeBulk('page', null, rows.map(r => r.id));
+        }));
+        document.querySelectorAll('#wl-scrape-bulk-group [data-scrape-date]').forEach(b => b.addEventListener('click', async () => {
+            closeMenu('btn-wl-scrape-caret');
+            if (b.dataset.scrapeDate === 'custom') { const r = await promptDateRange(); if (!r) return; scrapeBulk('date', r.to ? { from: r.from, to: r.to } : { from: r.from }); }
+            else scrapeBulk('date', { since_hours: Number(b.dataset.scrapeDate) });
+        }));
+        $('btn-wl-scrape-bulk').addEventListener('click', () => scrapeBulk('page'));
+
+        // banned toolbar
+        const bnSearch = $('bn-search');
+        bnSearch.addEventListener('input', debounce(() => { state.bn.search = bnSearch.value.trim(); state.bn.page = 1; loadBanned(); }, window.AdminCommon.DEBOUNCE.search));
+        $('bn-search-clear').addEventListener('click', () => { bnSearch.value = ''; state.bn.search = ''; state.bn.page = 1; loadBanned(); });
+        // api bans toolbar
+        const abSearch = $('ab-search');
+        abSearch.addEventListener('input', debounce(() => { state.ab.search = abSearch.value.trim(); state.ab.page = 1; loadApiBans(); }, window.AdminCommon.DEBOUNCE.search));
+        $('ab-search-clear').addEventListener('click', () => { abSearch.value = ''; state.ab.search = ''; state.ab.page = 1; loadApiBans(); });
+        $('ab-status').addEventListener('change', (e) => { state.ab.status = e.target.value; state.ab.page = 1; loadApiBans(); });
+
+        loadStatus();
+        statusTimer = setInterval(loadStatus, 30000);
+        loadWhitelist();
+        const linked = hashFromUrl();
+        if (linked) openDetails(linked);
+    });
+})();

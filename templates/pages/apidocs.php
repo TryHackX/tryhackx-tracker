@@ -1,0 +1,571 @@
+<?php
+/**
+ * The partner integration guide: ?action=apidocs&scope=…&approve=…&fields=…
+ *
+ * ── why it is driven by the query string ───────────────────────────────────────────────────────
+ * Every partner gets a key with different answers: this one publishes straight to the tracker, that
+ * one goes through review, a third must send a title and a link, a fourth is a forum bridging its
+ * members. A single page describing all the combinations is a page where everybody reads three
+ * paragraphs that do not apply to them and misses the one that does. So the operator hands out an
+ * address, and the address IS the configuration — the panel builds it when the key is made, next to
+ * the key itself.
+ *
+ * ── why it is unlisted rather than locked ─────────────────────────────────────────────────────
+ * Nothing here is a secret. It is the shape of a public API: the endpoint, the header, the JSON. The
+ * key is what is secret, and the key is never on this page — it goes in the same mail, from a person.
+ * Locking the documentation behind the credential it documents would mean a partner cannot read how
+ * to use the thing until they have already worked out how to use it. It carries a robots noindex
+ * because it is written for one reader, not for a search engine.
+ *
+ * Nothing here reads the database and nothing here is written by a partner: every value below is
+ * either a literal or one of a fixed set chosen by a query parameter.
+ */
+$apiOn = ($cfg['api_enabled'] ?? '0') === '1';
+
+// A fixed vocabulary, chosen by key. A query parameter that is not one of these is not an error —
+// it is somebody editing the address, and the honest response is the default page.
+// `auth` was in this list and has never been in apiClientScopes(): the bridge lives inside the
+// `users` scope, so a key could not be made with it and ?scope=auth was a page describing a key
+// nobody can hold. It is gone, and `shop` — which IS a scope from 1.65.0 — takes its place.
+$docScopes = ['whitelist' => 'v1/whitelist/submit', 'abuse' => 'v1/blacklist/submit',
+              'users' => 'v1/users/lookup', 'shop' => 'v1/users/grant',
+              'federation' => 'v1/federation/export',
+              'all' => 'v1/whitelist/submit'];
+// …but an address that once existed keeps landing where it used to. ?scope=auth opened the bridge
+// chapter, and a link to it may sit in a forum post or a partner's notes; it opens that chapter
+// still, as the `users` page it always really was, instead of falling through to the whitelist.
+$docAsked = (string)($_GET['scope'] ?? '');
+if ($docAsked === 'auth') $docAsked = 'users';
+$docScope = isset($docScopes[$docAsked]) ? $docAsked : 'whitelist';
+$docReview = ((string)($_GET['approve'] ?? 'auto')) === 'review';
+// What happens to a REPORT is a second answer (`abuse_auto_block`, review as shipped), and one
+// `approve=` cannot carry both halves of an `all` key: `block=` says it when the address has it. Without
+// it, an abuse key's page reads `approve=` as it always has (the panel's row link sends the key's
+// abuse_auto_block there), and an `all` key's reporting chapter says what a new key does — review — rather
+// than borrowing the whitelist half's answer: the page may under-promise a block, never promise a person
+// who is not there.
+$docBlockAsked = (string)($_GET['block'] ?? '');
+$docBlockReview = $docBlockAsked !== '' ? $docBlockAsked !== 'auto' : ($docScope === 'abuse' ? $docReview : true);
+$docDescribe = in_array((string)($_GET['describe'] ?? ''), ['queue', 'publish'], true) ? (string)$_GET['describe'] : 'off';
+$docDescMax = defined('FORUM_DESC_CHARS_CAP') ? FORUM_DESC_CHARS_CAP : 1000000;
+$docDescLimits = defined('FORUM_DESC_MAX_TOPICS') ? [FORUM_DESC_MAX_TOPICS, FORUM_DESC_MAX_HASHES, FORUM_DESC_MAX_BODY] : [25, 20, 4194304];
+// The numbers the rules below quote, read the way includes/api_auth.php reads them (0 = that half is off).
+$docPerMin   = function_exists('apiRateLimitPerMin') ? apiRateLimitPerMin($cfg) : 60;
+$docBytesDay = function_exists('apiRateLimitBytesDay') ? apiRateLimitBytesDay($cfg) : 5368709120;
+$docBanDays  = max(1, min(3650, (int)($cfg['api_ban_days'] ?? 30)));
+$docTtl      = function_exists('authBridgeTtl') ? authBridgeTtl($cfg) : 120;
+// Numbers as the reader writes them: "1,000" is a thousand in English and one in Polish (1.73.0). The
+// separators are the dictionary's (apidocs.num_decimal / num_thousands), and a number of days carries
+// its noun in the reader's language ("1 day", "30 dni" — pageContentDays()).
+$docDec = __('apidocs.num_decimal');
+// A count is langNumber()'s (1.73.1: the one rule of the site — Intl's grouping, "2000" and "12 000" in Polish).
+$docNum = fn($n, int $dec = 0): string => $dec === 0 ? langNumber((float)$n)
+    : number_format((float)$n, $dec, $docDec, __('apidocs.num_thousands'));
+$docBanText = function_exists('pageContentDays') ? pageContentDays($docBanDays) : $docBanDays . ' days';
+// A byte budget said the way a person reads it: 5 GB, 750 MB, 1,5 GB in Polish.
+$docBytesText = $docBytesDay >= 1073741824 ? rtrim(rtrim($docNum($docBytesDay / 1073741824, 1), '0'), $docDec) . ' GB'
+              : rtrim(rtrim($docNum($docBytesDay / 1048576, 1), '0'), $docDec) . ' MB';
+$docFields = function_exists('apiClientCleanFields') ? apiClientCleanFields($_GET['fields'] ?? [], $docScope) : [];
+// Each chapter names the fields ITS endpoint reads: an `all` key's list is both halves merged, and a
+// whitelist item is never asked for a reporter, nor a report for a link back to a post.
+$docFieldsWl = function_exists('apiClientCleanFields') ? apiClientCleanFields($docFields, 'whitelist') : [];
+$docFieldsAb = function_exists('apiClientCleanFields') ? apiClientCleanFields($docFields, 'abuse') : [];
+// ABSOLUTE. Every address on this page is copied into somebody else's code on somebody else's
+// server; "/api.php?endpoint=…" is their host, not this one.
+$docBase = function_exists('apiAbsoluteBase') ? apiAbsoluteBase($cfg) : rtrim(getBaseUrl(), '/');
+$docApi = $docBase . '/api.php?endpoint=';
+$docUrl = $docApi . $docScopes[$docScope];
+
+// Which chapters this page prints. A key scoped 'all' is one key doing several jobs, so it gets
+// every chapter; every other key gets exactly the one it can use, and no paragraph it cannot.
+//
+// The bridge belongs to the 'users' scope rather than a scope of its own — that is what
+// api/v1/auth_*.php enforces — so a users key is told about both halves of what it can do.
+$showSubmit = in_array($docScope, ['whitelist', 'all'], true);
+// The reporting half. `approve=auto` means something much heavier here than it does above, and the
+// chapter says so where somebody integrating will read it.
+$showAbuse  = in_array($docScope, ['abuse', 'all'], true);
+$showAuth   = in_array($docScope, ['users', 'all'], true);
+$showUsers  = in_array($docScope, ['users', 'shop', 'all'], true);
+// Selling a membership. A `shop` key can do nothing else, and a `users` key can do this too, so the
+// chapter is printed for both — with the endpoint list above narrowed to what each may call.
+$showShop   = in_array($docScope, ['users', 'shop', 'all'], true);
+$isShopOnly = $docScope === 'shop';
+$showFed    = in_array($docScope, ['federation', 'all'], true);
+
+// The example body, built from the same three answers the page is describing, so what a partner
+// copies is what their key will actually accept.
+$exItem = ['magnet' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'];
+if (in_array('name', $docFields, true)) $exItem['name'] = 'Example release name';
+$exRef = [];
+if (in_array('url', $docFields, true)) $exRef['url'] = 'https://partner.example.org/post/1234';
+if (in_array('source_id', $docFields, true)) $exRef['post_id'] = 1234;
+if ($exRef) $exItem['ref'] = $exRef;
+$exBody = json_encode(['items' => [$exItem], 'source' => 'api'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+// Every field api/v1/whitelist_submit.php answers with, in its order — a partner's parser is written
+// against this example, and a field it never saw here is one it will not read.
+$exReply = json_encode([
+    'ok' => true,
+    'results' => [['index' => 0, 'input' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
+                   'hash' => '0123456789abcdef0123456789abcdef01234567',
+                   'status' => $docReview ? 'pending' : 'added', 'error' => null]],
+    'summary' => $docReview ? ['added' => 0, 'exists' => 0, 'banned' => 0, 'invalid' => 0, 'pending' => 1]
+                            : ['added' => 1, 'exists' => 0, 'banned' => 0, 'invalid' => 0, 'pending' => 0],
+    'active_in_seconds' => 45,
+    'mode' => 'whitelist',
+    'auto_approve' => !$docReview,
+    'required_fields' => $docFields,
+    'server_time' => 1790000000,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exPing = json_encode(['ok' => true, 'server_time' => 1790000000, 'mode' => 'whitelist', 'whitelist_count' => 1234,
+                       'api_version' => 1, 'client' => 'Partner forum'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exDescText = '[b]Example release[/b] (2026) …';
+$exDescribe = json_encode(['topics' => [[
+    'discussion_id' => 160, 'post_id' => 162, 'url' => 'https://partner.example.org/d/160-example-release',
+    'author' => ['id' => '7', 'name' => 'kasia'], 'edited_at' => '2026-10-20T10:11:12+00:00',
+    'format' => 'flarum', 'content' => $exDescText, 'chars' => mb_strlen($exDescText),
+    'hashes' => ['0123456789abcdef0123456789abcdef01234567'], 'audience' => 'guests',
+]], 'max_chars' => 500000], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+$exDescribeReply = json_encode([
+    'ok' => true, 'mode' => $docDescribe,
+    'results' => [['topic' => 0, 'discussion_id' => 160, 'hash' => '0123456789abcdef0123456789abcdef01234567',
+                   'status' => $docDescribe === 'queue' ? 'queued' : 'created', 'detail' => null]],
+    'summary' => ['created' => $docDescribe === 'queue' ? 0 : 1, 'queued' => $docDescribe === 'queue' ? 1 : 0, 'updated' => 0,
+                  'replaced' => 0, 'proposed' => 0, 'kept' => 0, 'unchanged' => 0, 'too_long' => 0, 'invalid' => 0,
+                  'withdrawn' => 0, 'released' => 0, 'skipped' => 0, 'error' => 0],
+    'max_chars' => 500000, 'max_topics' => $docDescLimits[0], 'max_hashes' => $docDescLimits[1],
+    'max_bytes' => $docDescLimits[2], 'server_time' => 1790000000,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exWithdraw = json_encode(['topics' => [['discussion_id' => 160, 'post_id' => 162, 'visible' => false, 'gone' => true,
+    'hashes' => ['0123456789abcdef0123456789abcdef01234567']]]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+// "What happened to what I sent?" — the other half of a key that does not publish directly. The
+// example shows a row that was turned down, because that is the case the note exists for.
+$exStatusReply = json_encode([
+    'ok' => true,
+    'results' => [[
+        'index' => 0, 'hash' => '0123456789abcdef0123456789abcdef01234567',
+        'status' => $docReview ? 'rejected' : 'live', 'served' => !$docReview, 'mine' => true,
+        'name' => 'Example release name',
+        'review_note' => $docReview ? 'Duplicate of an earlier post' : null,
+        'reviewed_at' => $docReview ? '2026-09-10T11:20:00+00:00' : null,
+        'submitted_at' => '2026-09-10T09:05:00+00:00',
+    ]],
+    'summary' => ['unknown' => 0, 'pending' => 0, 'rejected' => $docReview ? 1 : 0,
+                  'live' => $docReview ? 0 : 1, 'banned' => 0, 'invalid' => 0],
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+// The abuse example, built from the same answers. Only the fields this key must send are shown:
+// an integrator copying this should be copying something their key will accept.
+$exAbuseItem = ['magnet' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'];
+if (in_array('title', $docFields, true)) $exAbuseItem['title'] = 'Example Film (2026)';
+if (in_array('evidence_url', $docFields, true)) $exAbuseItem['evidence_url'] = 'https://rightsholder.example/catalogue/1234';
+if (in_array('reason', $docFields, true)) $exAbuseItem['reason'] = 'Unlicensed copy of our film';
+$exAbuseBody = ['items' => [$exAbuseItem]];
+if (in_array('reporter', $docFields, true)) {
+    $exAbuseBody = ['reporter' => ['name' => 'Example Pictures', 'representative' => 'A. Nowak',
+                                   'company' => 'Example Anti-Piracy', 'email' => 'abuse@example.org']] + $exAbuseBody;
+}
+if (in_array('statement', $docFields, true)) $exAbuseBody['statement'] = true;
+$exAbuse = json_encode($exAbuseBody, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exAbuseReply = json_encode([
+    'ok' => true,
+    'results' => [['index' => 0, 'input' => 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
+                   'hash' => '0123456789abcdef0123456789abcdef01234567',
+                   'status' => $docBlockReview ? 'received' : 'blocked', 'report_id' => 41, 'error' => null]],
+    'summary' => $docBlockReview ? ['received' => 1, 'blocked' => 0, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0]
+                                 : ['received' => 0, 'blocked' => 1, 'duplicate' => 0, 'already_blocked' => 0, 'invalid' => 0],
+    'auto_block' => !$docBlockReview,
+    'required_fields' => $docFields,
+    'server_time' => 1790000000,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+// The shop flow, as three bodies and two replies. The retry's reply is shown beside the first one
+// on purpose: "what do I get when my webhook fires twice" is the question this chapter exists for,
+// and the answer is only convincing when both are on the screen together.
+$exGrant = json_encode(['login' => 'kasia', 'group' => 'premium', 'duration' => '1m',
+                        'order_id' => 'SHOP-2026-000412', 'note' => 'order #412'],
+                       JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exGrantReply = json_encode([
+    'ok' => true, 'user_id' => 7, 'group' => 'premium',
+    'previous_expires_at' => null, 'expires_at' => '2026-10-22 18:40:11',
+    'effective' => true, 'reason' => '',
+    'order_id' => 'SHOP-2026-000412', 'replayed' => false,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exGrantReplay = json_encode([
+    'ok' => true, 'user_id' => 7, 'group_id' => 4,
+    'previous_expires_at' => null, 'expires_at' => '2026-10-22 18:40:11',
+    'order_id' => 'SHOP-2026-000412', 'order_state' => 'grant', 'replayed' => true,
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exRefund = json_encode(['login' => 'kasia', 'group' => 'premium', 'order_id' => 'SHOP-2026-000412'],
+                        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+$exLogin = json_encode(['external_id' => '412', 'username' => 'kasia', 'email' => 'kasia@example.org'],
+                       JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+$exLoginReply = json_encode([
+    'ok' => true, 'created' => true, 'merged' => false,
+    'user' => ['id' => 7, 'username' => 'kasia', 'status' => 'active'],
+    'handoff' => ['token' => 'a1b2…', 'url' => $docBase . '/?action=bridge&token=a1b2…', 'expires_in' => 120],
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+?>
+<h1><?= _h('apidocs.h1') ?></h1>
+
+<?php if (!$apiOn): ?>
+<div class="alert alert-error show"><?= _h('apidocs.api_off') ?></div>
+<?php endif; ?>
+
+<p><?= __('apidocs.intro') ?></p>
+
+<div class="apidocs-summary">
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_endpoint') ?></span>
+        <code class="apidocs-v"><?= sanitize($docUrl) ?></code></div>
+    <?php if ($showAbuse): ?>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_blocking') ?></span>
+        <span class="apidocs-v"><?= _h($docBlockReview ? 'apidocs.block_review' : 'apidocs.block_auto') ?></span></div>
+    <?php endif; ?>
+    <?php if ($showSubmit): ?>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_approval') ?></span>
+        <span class="apidocs-v"><?= _h($docReview ? 'apidocs.approve_review' : 'apidocs.approve_auto') ?></span></div>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_required') ?></span>
+        <span class="apidocs-v"><?= $docFieldsWl ? sanitize(implode(', ', $docFieldsWl)) : _h('apidocs.required_none') ?></span></div>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h('apidocs.k_describe') ?></span>
+        <span class="apidocs-v"><?= _h($docDescribe === 'queue' ? 'apidocs.describe_queue_short' : ($docDescribe === 'publish' ? 'apidocs.describe_publish_short' : 'apidocs.describe_off_short')) ?></span></div>
+    <?php endif; ?>
+    <?php if ($showAbuse): ?>
+    <div class="apidocs-fact"><span class="apidocs-k"><?= _h($showSubmit ? 'apidocs.k_required_report' : 'apidocs.k_required') ?></span>
+        <span class="apidocs-v"><?= $docFieldsAb ? sanitize(implode(', ', $docFieldsAb)) : _h('apidocs.required_none') ?></span></div>
+    <?php endif; ?>
+</div>
+
+<h2><?= _h('apidocs.h_auth') ?></h2>
+<p><?= __('apidocs.auth_body') ?></p>
+<pre class="apidocs-pre"><code>Authorization: Bearer &lt;key_id&gt;.&lt;secret&gt;
+Content-Type: application/json</code></pre>
+<?php /* The one rule that costs a partner a month if nobody says it: a WRONG key bans the address it came
+         from (includes/api_auth.php apiBan(), `api_ban_days`), and from then on the right key is refused
+         from there too. Said here, where the header is, and again in the rules. */ ?>
+<div class="alert alert-warning show"><?= __('apidocs.auth_ban', ['days' => $docBanText]) ?></div>
+
+<?php if ($showSubmit): ?>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>POST v1/whitelist/submit</code></td><td><?= __('apidocs.ep_wl_submit') ?></td></tr>
+        <tr><td><code>GET|POST v1/whitelist/status</code></td><td><?= __('apidocs.ep_wl_status') ?></td></tr>
+        <tr><td><code>GET v1/whitelist/ping</code></td><td><?= __('apidocs.ep_wl_ping') ?></td></tr>
+        <?php if ($docDescribe !== 'off'): ?>
+        <tr><td><code>POST v1/whitelist/describe</code></td><td><?= __('apidocs.ep_wl_describe') ?></td></tr>
+        <?php endif; ?>
+    </tbody>
+</table>
+</div>
+
+<h2><?= _h('apidocs.h_request') ?></h2>
+<p><?= __('apidocs.request_body') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/submit') ?>
+
+<?= sanitize($exBody) ?></code></pre>
+
+<?php if ($docFieldsWl): ?>
+<div class="alert alert-warning show"><?= __('apidocs.required_note', ['fields' => sanitize(implode(', ', $docFieldsWl))]) ?></div>
+<?php endif; ?>
+
+<p><?= __('apidocs.images_consent') ?></p>
+
+<h2><?= _h('apidocs.h_reply') ?></h2>
+<p><?= __($docReview ? 'apidocs.reply_review' : 'apidocs.reply_auto') ?></p>
+<pre class="apidocs-pre"><code><?= sanitize($exReply) ?></code></pre>
+<p><?= __('apidocs.mode_note') ?></p>
+
+<h2><?= _h('apidocs.h_status') ?></h2>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <?php /* A key held for review never sees `added`: api/v1/whitelist_submit.php reports every new row
+                 of such a key as `pending`, so the row would describe an answer this key cannot get. */ ?>
+        <?php if (!$docReview): ?>
+        <tr><td><code>added</code></td><td><?= __('apidocs.st_added') ?></td></tr>
+        <?php else: ?>
+        <tr><td><code>pending</code></td><td><?= _h('apidocs.st_pending') ?></td></tr>
+        <?php endif; ?>
+        <tr><td><code>exists</code></td><td><?= __('apidocs.st_exists') ?></td></tr>
+        <tr><td><code>banned</code></td><td><?= _h('apidocs.st_banned') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= __('apidocs.st_invalid') ?></td></tr>
+    </tbody>
+</table>
+</div>
+
+<?php /* Asking again, later. A key that publishes directly rarely needs this; a key whose rows wait
+         for a person needs it every time, which is why the paragraph above the example changes. */ ?>
+<h2><?= _h('apidocs.h_check') ?></h2>
+<p><?= __($docReview ? 'apidocs.check_body_review' : 'apidocs.check_body_auto') ?></p>
+<pre class="apidocs-pre"><code>GET <?= sanitize($docApi . 'v1/whitelist/status') ?>&amp;hash=0123456789abcdef0123456789abcdef01234567
+
+POST <?= sanitize($docApi . 'v1/whitelist/status') ?>
+
+{"items": ["0123456789abcdef0123456789abcdef01234567"]}</code></pre>
+<pre class="apidocs-pre"><code><?= sanitize($exStatusReply) ?></code></pre>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>live</code></td><td><?= _h('apidocs.ck_live') ?></td></tr>
+        <tr><td><code>pending</code></td><td><?= _h('apidocs.ck_pending') ?></td></tr>
+        <tr><td><code>rejected</code></td><td><?= _h('apidocs.ck_rejected') ?></td></tr>
+        <tr><td><code>banned</code></td><td><?= _h('apidocs.ck_banned') ?></td></tr>
+        <tr><td><code>unknown</code></td><td><?= _h('apidocs.ck_unknown') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= __('apidocs.ck_invalid') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<p class="text-muted"><?= __('apidocs.check_note') ?></p>
+
+<?php /* The authenticated health check (api/v1/whitelist_ping.php) — what the partner forum's "Test
+         connection" calls, and the one call here that changes nothing. */ ?>
+<h2><?= _h('apidocs.h_ping') ?></h2>
+<p><?= __('apidocs.ping_body') ?></p>
+<pre class="apidocs-pre"><code>GET <?= sanitize($docApi . 'v1/whitelist/ping') ?>
+
+<?= sanitize($exPing) ?></code></pre>
+
+<?php if ($docDescribe !== 'off'): ?>
+<h2><?= _h('apidocs.h_describe') ?></h2>
+<p><?= __($docDescribe === 'queue' ? 'apidocs.describe_body_queue' : 'apidocs.describe_body_publish') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/describe') ?>
+
+<?= sanitize($exDescribe) ?></code></pre>
+<p><?= __('apidocs.describe_limits', ['cap' => $docNum($docDescMax), 'topics' => $docDescLimits[0],
+                                      'hashes' => $docDescLimits[1], 'mb' => intdiv($docDescLimits[2], 1048576)]) ?></p>
+<pre class="apidocs-pre"><code><?= sanitize($exDescribeReply) ?></code></pre>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>created</code></td><td><?= _h('apidocs.ds_created') ?></td></tr>
+        <tr><td><code>queued</code></td><td><?= _h('apidocs.ds_queued') ?></td></tr>
+        <tr><td><code>updated</code></td><td><?= _h('apidocs.ds_updated') ?></td></tr>
+        <tr><td><code>replaced</code></td><td><?= _h('apidocs.ds_replaced') ?></td></tr>
+        <tr><td><code>proposed</code></td><td><?= _h('apidocs.ds_proposed') ?></td></tr>
+        <tr><td><code>kept</code></td><td><?= _h('apidocs.ds_kept') ?></td></tr>
+        <tr><td><code>unchanged</code></td><td><?= _h('apidocs.ds_unchanged') ?></td></tr>
+        <tr><td><code>too_long</code></td><td><?= _h('apidocs.ds_too_long') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= _h('apidocs.ds_invalid') ?></td></tr>
+        <tr><td><code>not_registered</code></td><td><?= _h('apidocs.ds_not_registered') ?></td></tr>
+        <tr><td><code>registered_elsewhere</code></td><td><?= _h('apidocs.ds_registered_elsewhere') ?></td></tr>
+        <tr><td><code>banned</code></td><td><?= _h('apidocs.ds_banned') ?></td></tr>
+        <tr><td><code>other_topic</code></td><td><?= _h('apidocs.ds_other_topic') ?></td></tr>
+        <tr><td><code>stale</code></td><td><?= _h('apidocs.ds_stale') ?></td></tr>
+        <tr><td><code>removed</code></td><td><?= _h('apidocs.ds_removed') ?></td></tr>
+        <tr><td><code>declined</code></td><td><?= _h('apidocs.ds_declined') ?></td></tr>
+        <tr><td><code>withdrawn</code></td><td><?= _h('apidocs.ds_withdrawn') ?></td></tr>
+        <tr><td><code>released</code></td><td><?= _h('apidocs.ds_released') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<p><?= __('apidocs.describe_withdraw') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/whitelist/describe') ?>
+
+<?= sanitize($exWithdraw) ?></code></pre>
+<p><?= __('apidocs.describe_audience') ?></p>
+<p><?= __('apidocs.describe_restore') ?></p>
+<p class="text-muted"><?= __('apidocs.describe_off_note') ?></p>
+<?php endif; ?>
+<?php endif; ?>
+
+<?php if ($showAbuse): ?>
+<?php /* Reporting. Deliberately its own chapter with its own warning: everything above is about
+         adding a hash to a catalogue, and this is about taking a torrent away from everybody who
+         has it. A partner reading only this page should still know which one they are doing. */ ?>
+<h2><?= _h('apidocs.h_abuse') ?></h2>
+<p><?= __('apidocs.abuse_intro') ?></p>
+<div class="alert <?= $docBlockReview ? 'alert-info' : 'alert-warning' ?> show"><?= __($docBlockReview ? 'apidocs.abuse_note_review' : 'apidocs.abuse_note_auto') ?></div>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/blacklist/submit') ?>
+
+<?= sanitize($exAbuse) ?></code></pre>
+<p><?= __('apidocs.abuse_fields', ['n' => defined('API_MAX_ITEMS') ? API_MAX_ITEMS : 500]) ?></p>
+
+<?php if ($docFieldsAb): ?>
+<div class="alert alert-warning show"><?= __('apidocs.required_note_abuse', ['fields' => sanitize(implode(', ', $docFieldsAb))]) ?></div>
+<?php endif; ?>
+
+<h2><?= _h('apidocs.h_abuse_reply') ?></h2>
+<p><?= __($docBlockReview ? 'apidocs.abuse_reply_review' : 'apidocs.abuse_reply_auto') ?></p>
+<pre class="apidocs-pre"><code><?= sanitize($exAbuseReply) ?></code></pre>
+
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_status') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>received</code></td><td><?= _h('apidocs.ab_received') ?></td></tr>
+        <?php if (!$docBlockReview): ?>
+        <tr><td><code>blocked</code></td><td><?= __('apidocs.ab_blocked') ?></td></tr>
+        <?php endif; ?>
+        <tr><td><code>duplicate</code></td><td><?= _h('apidocs.ab_duplicate') ?></td></tr>
+        <tr><td><code>already_blocked</code></td><td><?= _h('apidocs.ab_already') ?></td></tr>
+        <tr><td><code>invalid</code></td><td><?= _h('apidocs.ab_invalid') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<?php endif; ?>
+
+<?php if ($showAuth): ?>
+<?php /* The bridge. Its shape is unlike everything else here — two of its five steps happen in a
+         BROWSER — so the four numbered lines are the order somebody has to build it in, and the
+         redirect is called out rather than left implied by an example. */ ?>
+<h2><?= _h('apidocs.h_bridge') ?></h2>
+<p><?= __('apidocs.bridge_intro') ?></p>
+<ol class="apidocs-rules">
+    <li><?= __('apidocs.bridge_step1') ?></li>
+    <li><?= __('apidocs.bridge_step2') ?></li>
+    <li><?= __('apidocs.bridge_step3', ['ttl' => $docTtl]) ?></li>
+    <li><?= __('apidocs.bridge_step4') ?></li>
+</ol>
+<?php if (!(function_exists('authBridgeEnabled') && authBridgeEnabled($cfg))): ?>
+<div class="alert alert-warning show"><?= __('apidocs.bridge_off') ?></div>
+<?php endif; ?>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/auth/login') ?>
+
+<?= sanitize($exLogin) ?></code></pre>
+<pre class="apidocs-pre"><code><?= sanitize($exLoginReply) ?></code></pre>
+<p><?= __('apidocs.bridge_login_rules') ?></p>
+<p><?= __('apidocs.bridge_reverse') ?></p>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>v1/auth/login</code></td><td><?= __('apidocs.ep_auth_login') ?></td></tr>
+        <tr><td><code>v1/auth/logout</code></td><td><?= __('apidocs.ep_auth_logout') ?></td></tr>
+        <tr><td><code>v1/auth/verify</code></td><td><?= __('apidocs.ep_auth_verify') ?></td></tr>
+        <tr><td><code>v1/auth/merge</code></td><td><?= __('apidocs.ep_auth_merge') ?></td></tr>
+        <tr><td><code>v1/auth/status</code></td><td><?= __('apidocs.ep_auth_status') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<div class="alert alert-warning show"><?= __('apidocs.bridge_warning') ?></div>
+<?php endif; ?>
+
+<?php if ($showUsers): ?>
+<h2><?= _h('apidocs.h_users') ?></h2>
+<p><?= __('apidocs.users_intro') ?></p>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>v1/users/lookup</code></td><td><?= __('apidocs.ep_users_lookup') ?></td></tr>
+        <?php /* A shop key cannot create accounts, so the row is not printed for one: a table listing
+                 an endpoint this key answers 403 on is a table that sends somebody debugging. */ ?>
+        <?php if (!$isShopOnly): ?>
+        <tr><td><code>v1/users/provision</code></td><td><?= __('apidocs.ep_users_provision') ?></td></tr>
+        <?php endif; ?>
+        <tr><td><code>v1/users/grant</code></td><td><?= __('apidocs.ep_users_grant') ?></td></tr>
+        <tr><td><code>v1/users/revoke</code></td><td><?= __('apidocs.ep_users_revoke') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<p><?= __('apidocs.users_identity') ?></p>
+<?php if (!$isShopOnly): ?>
+<p><?= __('apidocs.users_provision_note') ?></p>
+<?php endif; ?>
+<?php if (!usersEnabled($cfg)): ?>
+<div class="alert alert-warning show"><?= __('apidocs.users_off') ?></div>
+<?php endif; ?>
+<?php endif; ?>
+
+<?php if ($showShop): ?>
+<?php /* Selling a membership, end to end. Four steps, then the two things a shop gets wrong when
+         nobody writes them down: what a retry returns, and what to do when the grant lands on an
+         account that cannot use it yet. */ ?>
+<h2><?= _h('apidocs.h_shop') ?></h2>
+<p><?= __('apidocs.shop_intro') ?></p>
+<ol class="apidocs-rules">
+    <li><?= __('apidocs.shop_step1') ?></li>
+    <li><?= __('apidocs.shop_step2') ?></li>
+    <li><?= __('apidocs.shop_step3') ?></li>
+    <li><?= __('apidocs.shop_step4') ?></li>
+</ol>
+<p><?= __('apidocs.shop_group') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/users/grant') ?>
+
+<?= sanitize($exGrant) ?></code></pre>
+<pre class="apidocs-pre"><code><?= sanitize($exGrantReply) ?></code></pre>
+<div class="alert alert-info show"><?= __('apidocs.shop_retry') ?></div>
+<pre class="apidocs-pre"><code><?= sanitize($exGrantReplay) ?></code></pre>
+<p><?= __('apidocs.shop_effective') ?></p>
+<p><?= __('apidocs.shop_permanent') ?></p>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/users/revoke') ?>
+
+<?= sanitize($exRefund) ?></code></pre>
+<p><?= __('apidocs.shop_errors') ?></p>
+<?php endif; ?>
+
+<?php if ($showFed): ?>
+<h2><?= _h('apidocs.h_fed') ?></h2>
+<p><?= __('apidocs.fed_intro') ?></p>
+<div class="transparency-table-wrap">
+<table class="transparency-table apidocs-table">
+    <thead><tr><th><?= _h('apidocs.col_endpoint') ?></th><th><?= _h('apidocs.col_means') ?></th></tr></thead>
+    <tbody>
+        <tr><td><code>GET|POST v1/federation/ping</code></td><td><?= __('apidocs.ep_fed_ping') ?></td></tr>
+        <tr><td><code>POST v1/federation/export</code></td><td><?= __('apidocs.ep_fed_export') ?></td></tr>
+    </tbody>
+</table>
+</div>
+<?php /* The export's body and cursor, as api/v1/federation_export.php reads them. The peer's own
+         worker (worker/federation.py) already speaks this; the paragraph is for anybody else. */ ?>
+<pre class="apidocs-pre"><code>POST <?= sanitize($docApi . 'v1/federation/export') ?>
+
+{"since": 0, "after": "", "limit": 2000, "files": true, "gzip": false}</code></pre>
+<p><?= __('apidocs.fed_export_body', ['max' => $docNum(function_exists('fedExportMaxBatch') ? fedExportMaxBatch($cfg) : 2000)]) ?></p>
+<?php if (!(function_exists('fedExportEnabled') && fedExportEnabled($cfg))): ?>
+<div class="alert alert-warning show"><?= __('apidocs.fed_off') ?></div>
+<?php endif; ?>
+<?php endif; ?>
+
+<h2><?= _h('apidocs.h_rules') ?></h2>
+<ul class="apidocs-rules">
+    <?php if ($showSubmit): ?>
+    <li><?= __('apidocs.rule_idempotent') ?></li>
+    <li><?= __('apidocs.rule_additive') ?></li>
+    <?php endif; ?>
+    <?php if ($showSubmit || $showAbuse): ?>
+    <li><?= __('apidocs.rule_batch', ['n' => defined('API_MAX_ITEMS') ? API_MAX_ITEMS : 500]) ?></li>
+    <?php endif; ?>
+    <li><?= __($docPerMin > 0 || $docBytesDay > 0 ? 'apidocs.rule_limits' : 'apidocs.rule_limits_off',
+               ['per_min' => $docPerMin > 0 ? $docNum($docPerMin) : '—', 'bytes' => $docBytesDay > 0 ? $docBytesText : '—']) ?></li>
+    <li><?= __('apidocs.rule_errors', ['days' => $docBanText]) ?></li>
+</ul>
+
+<h2><?= _h('apidocs.h_curl') ?></h2>
+<?php
+// The one command that proves the key works, for the scope it actually has. A guide whose "check
+// it works" line calls an endpoint this key cannot reach is a guide that opens with a 403.
+//
+// AND IT MUST CHANGE NOTHING (1.73.0). The whitelist check used to POST the example to
+// v1/whitelist/submit — which registers the placeholder hash for good, on a tracker where
+// `rule_additive` says nothing can be taken back — and the federation one POSTed {} to the export,
+// which answers with a whole page of the catalogue. Each scope now has a call that only answers:
+// the two pings, the lookup (never the grant: "check it works" must not sell somebody a month of
+// something), and for a reporting key — which has no ping — an EMPTY batch, refused as `no_items`
+// only after the key and its scope were accepted.
+if ($showSubmit) {
+    $curlCmd = "curl -sS '" . $docApi . "v1/whitelist/ping' \\\n  -H 'Authorization: Bearer <key_id>.<secret>'";
+    $curlNote = 'apidocs.curl_note_ping';
+} elseif ($showUsers) {
+    $curlCmd = "curl -sS -X POST '" . $docApi . "v1/users/lookup' \\\n  -H 'Authorization: Bearer <key_id>.<secret>' \\\n"
+             . "  -H 'Content-Type: application/json' \\\n  --data '" . json_encode(['login' => 'kasia'], JSON_UNESCAPED_SLASHES) . "'";
+    $curlNote = 'apidocs.curl_note_lookup';
+} elseif ($showFed) {
+    $curlCmd = "curl -sS '" . $docApi . "v1/federation/ping' \\\n  -H 'Authorization: Bearer <key_id>.<secret>'";
+    $curlNote = 'apidocs.curl_note_ping';
+} else {
+    $curlCmd = "curl -sS -X POST '" . $docApi . "v1/blacklist/submit' \\\n  -H 'Authorization: Bearer <key_id>.<secret>' \\\n"
+             . "  -H 'Content-Type: application/json' \\\n  --data '{\"items\": []}'";
+    $curlNote = 'apidocs.curl_note_abuse';
+}
+?>
+<pre class="apidocs-pre"><code><?= sanitize($curlCmd) ?></code></pre>
+<p><?= __($curlNote) ?></p>
+
+<p class="text-muted apidocs-foot"><?= __('apidocs.foot') ?></p>

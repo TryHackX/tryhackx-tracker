@@ -1,0 +1,441 @@
+/**
+ * "OpenTracker — performance" card on the admin Traffic page — includes/opentracker.php on the server.
+ *
+ * The card's job is to show what is IN FORCE, which is not the same as what Settings says. A panel
+ * that prints your saved values back at you is worse than none: it tells you the machine is doing
+ * something it may not be doing. So every number here comes from `systemctl show` and opentracker's
+ * own config, and where the two disagree the card says so.
+ *
+ * The one measurement that is not a knob — the socket receive buffer — is here too, because it is
+ * what actually explains lost announces and nobody thinks to look at it. The panel reports it and
+ * gives the command; it does not write sysctls, because those are system-wide and belong to whoever
+ * owns the machine.
+ *
+ * Renders through textContent / createElement only.
+ */
+(function () {
+    'use strict';
+
+    const card = document.getElementById('ot-card');
+    if (!card || typeof window.AdminCommon === 'undefined') return;
+    const { apiCall, el, showToast } = window.AdminCommon;
+
+    const $ = (id) => document.getElementById(id);
+    const POLL_MS = 15000;      // this changes when somebody presses a button, not by itself
+    const num = (v) => (v == null || isNaN(v)) ? '—' : t.num(v);   // a count in the page's language (1.73.1)
+    const state = { pending: null, status: null, cfg: null };
+
+    /*
+     * Two samples make a measurement.
+     *
+     * The helper reports raw counters — clock ticks per thread, busy and idle ticks for the whole
+     * machine — and never a percentage, because a percentage would mean the helper sleeping inside
+     * a web request to take a second reading. This card already polls; subtracting one poll from
+     * the previous one gives the very number that decides whether a second tracker instance would help.
+     */
+    let prev = null;        // the sample the next reading is measured against
+    let lastGood = null;    // the last reading that was long enough to mean something
+
+    function measure(s) {
+        const clk = Number(s.clk_tck || 0);
+        const up = Number(s.uptime_cs || 0);
+        const now = up > 0 ? up * 10 : Date.now();
+        const cur = {
+            at: now, sampled: up > 0, clk: clk,
+            busy: Number(s.cpu_busy_ticks || 0), idle: Number(s.cpu_idle_ticks || 0),
+            drops: Number(s.socket_drops || 0),
+            threads: {},
+        };
+        (s.threads || []).forEach(t => { cur.threads[t.tid] = Number(t.ticks || 0); });
+
+        if (prev && prev.sampled !== cur.sampled) prev = null;
+        if (prev && cur.sampled && cur.at === prev.at) return lastGood;
+
+        let out = null, matched = 0, restarted = false;
+        // A restart resets every counter, so a negative delta means "different process" and the
+        // honest answer is to start again rather than to draw a chart of nonsense.
+        //
+        // MIN_WINDOW is not arbitrary. The kernel counts thread time in 10 ms ticks, so over a one
+        // second window a single tick of rounding is a ten per cent error, and two forced refreshes
+        // in quick succession can produce a thread apparently running at several hundred per cent.
+        // Three seconds puts the quantisation under half a per cent. There is no maximum: a
+        // background tab has its timers throttled to minutes, but the wall clock is still right, so
+        // a long gap gives a longer average rather than a wrong one.
+        //
+        // MAX_BASELINE is the other end: a laptop that slept for an hour would otherwise produce one
+        // reading averaged over that hour, which is true and useless.
+        const MIN_WINDOW = 3;
+        const MAX_BASELINE = 600;
+        const age = prev ? (now - prev.at) / 1000 : null;
+        if (prev && clk > 0 && age !== null && age >= MIN_WINDOW && age <= MAX_BASELINE) {
+            const secs = (now - prev.at) / 1000;
+            const cpuTicks = (cur.busy + cur.idle) - (prev.busy + prev.idle);
+            const busyTicks = cur.busy - prev.busy;
+            const threads = [];
+            let total = 0, hottest = 0;
+            (s.threads || []).forEach(t => {
+                const before = prev.threads[t.tid];
+                if (before === undefined) return;               // a thread that did not exist before
+                matched++;
+                const d = Number(t.ticks || 0) - before;
+                if (d < 0) { restarted = true; return; }
+                const pct = (d * 100) / (clk * secs);
+                total += pct;
+                if (pct > hottest) hottest = pct;
+                threads.push({ tid: t.tid, name: t.name, role: t.role || '', pct: pct });
+            });
+            const dropDelta = cur.drops - prev.drops;
+            // One thread cannot exceed one core. If it appears to, the counters and the clock
+            // disagree about something — a suspended tab, a corrected clock — and the reading is
+            // discarded rather than shown, because a bar at 600% teaches the reader nothing except
+            // to distrust the panel.
+            if (hottest > 105) restarted = true;
+            if (!restarted && threads.length) {
+                threads.sort((a, b) => b.pct - a.pct);
+                out = {
+                    secs: secs, threads: threads, total: total, hottest: hottest,
+                    machine: cpuTicks > 0 ? (busyTicks * 100) / cpuTicks : null,
+                    dropsPerSec: dropDelta >= 0 ? dropDelta / secs : null,
+                };
+            }
+        }
+        // The baseline moves when it was USED, or when it has become too old to use.
+        //
+        // Advancing it on every poll seemed tidier and was wrong: the card reloads whenever the tab
+        // becomes visible, and a window manager, a screen recorder or a user flicking between tabs
+        // can fire that every second or two. Each of those polls would have reset the baseline, the
+        // window would never have reached three seconds, and the card would have sat on "measuring"
+        // for ever while looking perfectly healthy. Keeping the old baseline means the gap simply
+        // grows until it is wide enough, whatever the polling happens to be doing.
+        if (out || !prev || age === null || age < 0 || age > MAX_BASELINE || restarted
+            || (age >= MIN_WINDOW && matched === 0)) prev = cur;
+        if (out) lastGood = out;
+        return out;
+    }
+
+    /*
+     * The verdict. The plan gates "add a second tracker instance" on measurement precisely because
+     * it is the most expensive and most dangerous thing in it — white/black switching, the schedule,
+     * the whitelist SIGHUP, the stats endpoint and the announce URL all have to learn about N
+     * instances. So the card answers the question rather than leaving it to a feeling about `top`.
+     *
+     * The threads are what decide it. A tracker whose busiest UDP worker sits at a quarter of a core
+     * is not short of tracker; it is being fed less than it could eat, and a second copy of it would
+     * change nothing at all.
+     */
+    function verdict(m, s) {
+        const cpus = Math.max(1, Number(s.cpus || 1));
+        const workers = Number(s.workers || 0);
+        const share = (m.total / (cpus * 100)) * 100;
+        const head = t.key('js.otperf.verdict_head', { total: m.total.toFixed(0), cap: cpus * 100, share: share.toFixed(0), hottest: m.hottest.toFixed(0) });
+
+        // Pieces, not one string (1.73.0): each sentence a t.key() word that keeps its key for the live language switch.
+        if (m.hottest >= 85 && workers > 0 && workers >= cpus) {
+            return { level: 'warn', text: [head, ' ', t.key('js.otperf.verdict_ceiling_second')] };
+        }
+        if (m.hottest >= 85) {
+            return { level: 'warn', text: [head, ' ', t.key('js.otperf.verdict_ceiling_workers', { workers: workers, cpus: cpus })] };
+        }
+        const why = (m.dropsPerSec !== null && m.dropsPerSec > 1) ? t.key('js.otperf.verdict_drops') : t.key('js.otperf.verdict_no_drops');
+        return { level: 'info', text: [head, ' ', t.key('js.otperf.verdict_far'), ' ', why, ' ', t.key('js.otperf.verdict_second_useless')] };
+    }
+
+    function badge(text, cls) { return el('span', { className: 'wl-badge ' + (cls || ''), text: text }); }
+    function kv(label, children) {
+        const box = el('div', { className: 'wl-kv-item' });
+        box.appendChild(el('div', { className: 'wl-kv-k', text: label }));
+        const v = el('div', { className: 'wl-kv-v' });
+        (Array.isArray(children) ? children : [children]).forEach(c => {
+            if (c == null) return;
+            v.appendChild(t.child(c));   // a t.key() word as a <span> that keeps its key (1.73.0)
+        });
+        box.appendChild(v);
+        return box;
+    }
+
+    // ── status ───────────────────────────────────────────────────────────────
+    let seq = 0, painted = 0, busy = 0, busyAt = 0, watchdog = null;
+
+    // Every call runs the helper on the server: pgrep, several systemctl reads, ss. Cheap once, not
+    // cheap thirty times a minute, and a tab whose visibility flaps would ask for exactly that.
+    const MIN_GAP_MS = 2500;
+    let lastLoadAt = 0;
+
+    async function load(force, fresh) {
+        if (busy && (Date.now() - busyAt) < 30000) return;
+        if (!force && document.hidden) return;
+        if (painted && (Date.now() - lastLoadAt) < MIN_GAP_MS) return;
+        lastLoadAt = Date.now();
+        const my = ++seq;
+        busy = my; busyAt = Date.now();
+        arm();
+        let j;
+        try {
+            j = await apiCall('admin/ot_status' + (fresh ? '&fresh=1' : ''));
+        } catch (e) {
+            if (my > painted) { painted = my; fatal(t.key('js.otperf.status_unreachable', { err: (e && e.message) || t.key('js.otperf.net_error_short') })); }
+            return;
+        } finally {
+            if (busy === my) { busy = 0; clearWd(); }
+        }
+        if (my <= painted) return;
+        painted = my;
+        if (!j || (j.error && !j.status)) { fatal(j && j.error); return; }
+        state.status = j.status;
+        state.cfg = j.configured;
+        render(j);
+    }
+
+    function arm() {
+        clearWd();
+        if (painted) return;
+        watchdog = setTimeout(() => { watchdog = null; if (!painted) fatal(t.key('js.otperf.status_timeout')); }, 15000);
+    }
+    function clearWd() { if (watchdog) { clearTimeout(watchdog); watchdog = null; } }
+
+    function fatal(msg) {
+        const g = $('ot-grid');
+        g.textContent = '';
+        g.appendChild(kv(t.key('js.otperf.service'), [badge(t.key('js.otperf.unavailable'), 'wl-b-bad'), ' ',
+            // the server's sentence found back by key (t.find(); the page's bundle carries api.helper., 1.73.0)
+            el('span', { className: 'wl-small text-muted', text: t.find(msg, 'api.') || t.key('js.otperf.helper_silent') }),
+            el('div', {}, [el('button', {
+                className: 'btn btn-sm btn-outline-secondary mt-1', type: 'button',
+                onclick: () => { painted = 0; busy = 0; load(true); },
+            }, [el('i', { className: 'bi bi-arrow-clockwise' }), ' ', t.key('js.otperf.try_again')])])]));
+        $('ot-notes').textContent = '';
+    }
+
+    function render(j) {
+        const s = j.status || {};
+        const c = j.configured || {};
+        const g = $('ot-grid');
+        g.textContent = '';
+        $('ot-updated').textContent = s.unit ? t.key('js.otperf.updated_unit', { unit: s.unit, cpus: s.cpus }) : '';
+
+        g.appendChild(kv(t.key('js.otperf.service'), [
+            badge(s.active ? t.key('js.otperf.running') : t.key('js.otperf.stopped'), s.active ? 'wl-b-ok' : 'wl-b-bad'), ' ',
+            el('span', { className: 'wl-small text-muted', text: s.unit || '' })]));
+
+        // What is loaded versus what the panel would write. Two numbers, and the gap between them
+        // is the only thing on this card worth acting on.
+        const wparts = [badge(t.key('js.otperf.threads_count', { n: num(s.workers) }), s.workers > 0 ? 'wl-b-ok' : 'wl-b-muted')];
+        if (typeof s.udp_sockets === 'number' && s.udp_sockets > 0) {
+            wparts.push(' ', el('span', { className: 'wl-small text-muted', text: t.key('js.otperf.udp_sockets', { n: num(s.udp_sockets) }) }));
+            if (s.udp_sockets === 1 && s.workers > 1) {
+                wparts.push(el('div', { className: 'wl-small text-muted', text: t.key('js.otperf.udp_shared_socket') }));
+            }
+        }
+        if (c.udp_workers && !j.workers_in_sync) {
+            wparts.push(' ', el('span', { className: 'wl-small text-warning',
+                text: t.key('js.otperf.settings_say', { n: num(c.udp_workers) }) }));
+        }
+        if (s.workers_consistent === false) {
+            wparts.push(el('div', { className: 'wl-small text-warning',
+                text: t.key('js.otperf.configs_disagree') }));
+        }
+        g.appendChild(kv(t.key('js.otperf.udp_workers'), wparts));
+
+        g.appendChild(kv(t.key('js.otperf.scheduling'), [
+            el('span', { text: 'nice ' + (s.nice === undefined ? '—' : s.nice) }),
+            el('span', { className: 'nl-unit', text: t.key('js.otperf.weight', { w: s.cpu_weight || t.key('js.otperf.default') }) }),
+            el('div', { className: 'wl-small text-muted', text: (s.cpu_affinity ? t.key('js.otperf.pinned', { cores: s.cpu_affinity }) : t.key('js.otperf.every_core')) })]));
+
+        g.appendChild(kv(t.key('js.otperf.open_files'), [el('span', { text: num(s.limit_nofile) }),
+            el('div', { className: 'wl-small text-muted', text: 'LimitNOFILE' })]));
+
+        // The panel's own file: present or not, and whether what it says is what is running.
+        const dparts = [badge(s.dropin_present ? t.key('js.otperf.written') : t.key('js.otperf.not_written'), s.dropin_present ? 'wl-b-ok' : 'wl-b-muted')];
+        if (s.dropin_present && j.in_sync === false) {
+            dparts.push(' ', el('span', { className: 'wl-small text-warning', text: t.key('js.otperf.out_of_sync') }));
+        }
+        dparts.push(el('div', { className: 'wl-small text-muted', text: s.dropin || '' }));
+        if (s.dropin_writable === false) {
+            // The old wording said Apply "would fail from here", and that is simply not what happens:
+            // the helper reports `deferred`, the panel records what was asked for, and the janitor
+            // writes the file within a minute. Saying it fails made a working feature look broken.
+            dparts.push(el('div', { className: 'wl-small text-muted',
+                text: t.key('js.otperf.dropin_readonly') }));
+        }
+        // Two columns: it is the only tile carrying a sentence, and five tiles in a three-column grid
+        // otherwise leave a hole where the sixth would be.
+        const dropTile = kv(t.key('js.otperf.panel_dropin'), dparts);
+        dropTile.classList.add('ot-dropin-tile');
+        g.appendChild(dropTile);
+
+        // Load, measured rather than guessed. Absent on the first poll: one sample is not a rate.
+        // A poll that lands too soon after the last one keeps showing the previous reading, which is
+        // a few seconds stale, rather than blanking a working display back to "measuring".
+        const m = measure(s) || lastGood;
+        if (m) {
+            const box = el('div', { className: 'wl-kv-v' });
+            box.appendChild(el('div', { className: 'wl-small text-muted' }, [   // pieces: each keeps its key (1.73.0)
+                t.key('js.otperf.over_last', { secs: Math.round(m.secs) }),
+                m.machine !== null ? t.key('js.otperf.whole_machine', { pct: m.machine.toFixed(0) }) : '']));
+            const udp = m.threads.filter(th => th.role === 'udp').sort((a, b) => a.tid - b.tid);
+            if (udp.length) {
+                const pcts = udp.map(th => th.pct);
+                box.appendChild(el('div', { className: 'wl-small text-muted' }, t.key('js.otperf.udp_summary', {
+                    n: udp.length, total: pcts.reduce((a, b) => a + b, 0).toFixed(0),
+                    min: Math.min(...pcts).toFixed(0), max: Math.max(...pcts).toFixed(0) })));
+            }
+            const rank = { udp: 0, main: 1 };
+            const rows = m.threads.slice().sort((a, b) => {
+                const ra = rank[a.role] ?? 2, rb = rank[b.role] ?? 2;
+                if (ra !== rb) return ra - rb;
+                return ra === 0 ? a.tid - b.tid : b.pct - a.pct;
+            });
+            rows.slice(0, 16).forEach(th => {
+                const label = th.role === 'udp' ? t.key('js.otperf.role_udp', { n: udp.indexOf(th) + 1 })
+                    : th.role === 'main' ? t.key('js.otperf.role_main')
+                    : th.role === 'other' ? t.key('js.otperf.role_other') : String(th.tid);
+                const row = el('div', { className: 'ot-thread' });
+                row.appendChild(el('span', { className: 'ot-thread-tid', title: 'TID ' + th.tid }, label));
+                const track = el('span', { className: 'ot-thread-track' });
+                const fill = el('span', { className: 'ot-thread-fill' });
+                fill.style.width = Math.min(100, th.pct).toFixed(1) + '%';
+                if (th.pct >= 85) fill.classList.add('ot-thread-hot');
+                track.appendChild(fill);
+                row.appendChild(track);
+                row.appendChild(el('span', { className: 'ot-thread-pct', text: th.pct.toFixed(0) + '%' }));
+                box.appendChild(row);
+            });
+            // Its own full-width tile below the others. Five small tiles and one tall one sharing an
+            // auto-fill grid leaves a hole the size of the tall one; the bar chart wants the width
+            // anyway, and the small facts want to sit together.
+            const wrap = el('div', { className: 'wl-kv-item ot-load-tile' });
+            wrap.appendChild(el('div', { className: 'wl-kv-k', text: t.key('js.otperf.load_per_thread') }));
+            wrap.appendChild(box);
+            g.appendChild(wrap);
+        } else if (s.threads) {
+            g.appendChild(kv(t.key('js.otperf.load_per_thread'), el('span', { className: 'wl-small text-muted',
+                text: t.key('js.otperf.measuring') })));
+        }
+
+        const notes = $('ot-notes');
+        notes.textContent = '';
+        if (m) {
+            const v = verdict(m, s);
+            notes.appendChild(el('div', { className: 'nl-note ' + (v.level === 'warn' ? 'nl-note-warn' : 'nl-note-info') }, v.text));
+        }
+        (j.advice || []).forEach(a => {
+            notes.appendChild(el('div', {
+                className: 'nl-note ' + (a.level === 'warn' ? 'nl-note-warn' : 'nl-note-info'),
+                text: a.text,
+            }));
+        });
+    }
+
+    // ── the operations ───────────────────────────────────────────────────────
+    const COPY = {
+        apply: {
+            title: t.key('js.otperf.apply_title'),
+            ok: t.key('js.otperf.apply_ok'), okClass: 'btn-outline-success',
+            text: () => t.key('js.otperf.apply_text'),
+            undo: () => t.key('js.otperf.apply_undo'),
+        },
+        workers: {
+            title: t.key('js.otperf.workers_title'),
+            ok: t.key('js.otperf.workers_ok'), okClass: 'btn-outline-warning',
+            text: () => t.key('js.otperf.workers_text'),
+            undo: () => t.key('js.otperf.workers_undo'),
+        },
+        reset: {
+            title: t.key('js.otperf.reset_title'),
+            ok: t.key('js.otperf.reset_ok'), okClass: 'btn-outline-secondary',
+            text: () => t.key('js.otperf.reset_text'),
+            undo: () => t.key('js.otperf.reset_undo'),
+        },
+        restart: {
+            title: t.key('js.otperf.restart_title'),
+            ok: t.key('js.otperf.restart_ok'), okClass: 'btn-outline-danger',
+            text: () => t.key('js.otperf.restart_text'),
+            undo: () => t.key('js.otperf.restart_undo'),
+        },
+    };
+
+    function ask(op) {
+        const copy = COPY[op];
+        if (!copy) return;
+        state.pending = op;
+        $('ot-modal-title').textContent = copy.title;
+        $('ot-modal-text').textContent = copy.text();
+        const undo = $('ot-modal-undo');
+        undo.textContent = '';
+        undo.appendChild(el('div', { className: 'wl-small text-muted', text: copy.undo() }));
+        $('ot-workers-row').classList.toggle('d-hidden', op !== 'workers');
+        if (op === 'workers') {
+            const s = state.status || {};
+            $('ot-workers-input').value = (state.cfg && state.cfg.udp_workers) || s.workers || 4;
+            $('ot-workers-input').max = String(Math.max(8, (s.cpus || 4) * 4));
+        }
+        const okBtn = $('ot-confirm-ok');
+        okBtn.className = 'btn btn-sm ' + copy.okClass;
+        okBtn.textContent = '';
+        okBtn.appendChild(el('i', { className: 'bi bi-check-lg' }));
+        okBtn.appendChild(document.createTextNode(' ' + copy.ok));
+        $('ot-confirm-alert').textContent = '';
+        $('ot-confirm-password').value = '';
+        bootstrap.Modal.getOrCreateInstance($('otConfirmModal')).show();
+        setTimeout(() => $('ot-confirm-password').focus(), 300);
+    }
+
+    async function run(e) {
+        e.preventDefault();
+        const op = state.pending;
+        if (!op) return;
+        const alert = $('ot-confirm-alert');
+        const btn = $('ot-confirm-ok');
+        const orig = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ' + t.html('js.otperf.working');
+        alert.textContent = '';
+        const body = { op: op, password: $('ot-confirm-password').value };
+        if (op === 'workers') body.workers = parseInt($('ot-workers-input').value, 10) || 4;
+        try {
+            const r = await apiCall('admin/ot_apply', 'POST', body);
+            if (r.success) {
+                bootstrap.Modal.getInstance($('otConfirmModal')).hide();
+                showToast(r.message || t.key('js.otperf.done'), 'success');
+                painted = 0;
+                load(true);
+            } else {
+                alert.textContent = '';
+                alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: r.error || t.key('js.otperf.failed') }));
+                if (r.output) alert.appendChild(el('pre', { className: 'nl-preview mt-1', text: String(r.output).slice(0, 600) }));
+            }
+        } catch (err) {
+            alert.textContent = '';
+            alert.appendChild(el('div', { className: 'nl-note nl-note-bad', text: t.key('js.otperf.network_error') }));
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = orig;
+        }
+    }
+
+    async function preview() {
+        try {
+            const r = await apiCall('admin/ot_apply', 'POST', { op: 'preview' });
+            $('ot-preview-title').textContent = r.file || t.key('js.otperf.preview_title');
+            $('ot-preview-body').textContent = r.content || r.error || t.key('js.otperf.nothing');
+            bootstrap.Modal.getOrCreateInstance($('otPreviewModal')).show();
+        } catch (e) { showToast(t.key('js.otperf.network_error_toast'), 'error'); }
+    }
+
+    function init() {
+        $('btn-ot-apply').addEventListener('click', () => ask('apply'));
+        $('btn-ot-workers').addEventListener('click', () => ask('workers'));
+        $('btn-ot-reset').addEventListener('click', () => ask('reset'));
+        $('btn-ot-restart').addEventListener('click', () => ask('restart'));
+        $('btn-ot-preview').addEventListener('click', preview);
+        $('ot-confirm-form').addEventListener('submit', run);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) load(true); });
+        load(true);
+        // The second reading is what turns counters into a rate, so take it soon rather than after a
+        // full polling interval — otherwise the most useful row on the card is blank for 15 seconds.
+        setTimeout(() => load(true, true), 4000);
+        setInterval(load, POLL_MS);
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();

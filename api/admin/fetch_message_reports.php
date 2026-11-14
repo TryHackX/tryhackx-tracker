@@ -1,0 +1,151 @@
+<?php
+/**
+ * The reported-messages queue.
+ *
+ *   GET admin/fetch_message_reports[&status=open|closed|all][&search=][&page=]
+ *
+ * ── what a moderator is shown, and what they are not ───────────────────────────────────────────
+ *
+ * The reported message, and the one before it so the line can be read as an answer to something.
+ * NOT the conversation. Two people's correspondence is not evidence in bulk, and somebody deciding
+ * about one line does not need the rest of it — which is why `message_reports` stores exactly two
+ * ids, why this query joins exactly those two rows, and why there is no endpoint anywhere that
+ * takes a thread id and returns its contents to the panel.
+ *
+ * Behind `panel.messages.view`, which the migration grants to NOBODY: reading somebody's private
+ * message is a different kind of access from working the torrent-report queue, and an operator has
+ * to hand it out on purpose.
+ */
+if (!panelCan($db, $cfg, 'panel.messages.view')) jsonResponse(['error' => 'no_permission'], 403);
+if (!pmEnabled($cfg)) jsonResponse(['error' => 'pm_disabled'], 404);
+
+$status  = (string)($_GET['status'] ?? 'open');
+if (!in_array($status, ['open', 'closed', 'all'], true)) $status = 'open';
+$search  = trim((string)($_GET['search'] ?? ''));
+$page    = max(1, (int)($_GET['page'] ?? 1));
+$perPage = max(1, min(100, (int)($cfg['items_per_page'] ?? 25)));
+
+$where  = [];
+$params = [];
+if ($status !== 'all') { $where[] = 'r.status = ?'; $params[] = $status; }
+if ($search !== '') {
+    $where[] = '(reporter.username LIKE ? OR reported.username LIKE ? OR r.reason LIKE ?)';
+    $like = '%' . str_replace(['%', '_'], ['\%', '\_'], $search) . '%';
+    array_push($params, $like, $like, $like);
+}
+$w = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+$base = "FROM message_reports r
+          JOIN users reporter ON reporter.id = r.reporter_id
+          JOIN users reported ON reported.id = r.reported_user_id";
+
+$cnt = $db->prepare("SELECT COUNT(*) $base $w");
+$cnt->execute($params);
+$total = (int)$cnt->fetchColumn();
+$pages = max(1, (int)ceil($total / $perPage));
+$page  = min($page, $pages);
+
+// The two message rows come with the report, by id, and no query here can widen that: `m` is the
+// reported message and `c` is its context, both LEFT JOINed by the ids the report itself carries.
+$sql = "SELECT r.*, reporter.username AS reporter_name, reported.username AS reported_name,
+               reporter.avatar_sha AS reporter_avatar_sha, reported.avatar_sha AS reported_avatar_sha,
+               m.body AS msg_body, m.body_format AS msg_format, m.created_at AS msg_at, m.id AS msg_id,
+               c.body AS ctx_body, c.body_format AS ctx_format, c.created_at AS ctx_at,
+               c.sender_id AS ctx_sender
+          $base
+          LEFT JOIN user_messages m ON m.id = r.message_id
+          LEFT JOIN user_messages c ON c.id = r.context_id
+          $w ORDER BY r.created_at DESC LIMIT ? OFFSET ?";
+$st = $db->prepare($sql);
+$i = 1;
+foreach ($params as $v) $st->bindValue($i++, $v, PDO::PARAM_STR);
+$st->bindValue($i++, $perPage, PDO::PARAM_INT);
+$st->bindValue($i, ($page - 1) * $perPage, PDO::PARAM_INT);
+$st->execute();
+
+$rows = [];
+// The picture beside each of the two names (1.63.0), from the two joins above: an ADDRESS, and '' while
+// pictures are switched off.
+$base = getBaseUrl();
+$face = static fn(string $name, $sha): string => function_exists('userAvatarField')
+    ? userAvatarField(['username' => $name, 'avatar_sha' => $sha], 20, $base, $cfg) : '';
+foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+    $reporterAv = $face((string)$r['reporter_name'], $r['reporter_avatar_sha']);
+    $reportedAv = $face((string)$r['reported_name'], $r['reported_avatar_sha']);
+    $ctxMine = (int)$r['ctx_sender'] === (int)$r['reported_user_id'];
+    $rows[] = [
+        'id'         => (int)$r['id'],
+        'status'     => (string)$r['status'],
+        'reason'     => (string)$r['reason'],
+        'note'       => (string)($r['note'] ?? ''),
+        'reply'      => (string)($r['reply'] ?? ''),
+        // the answer's format and, for BBCode / Markdown, the answer rendered (1.75.0); a plain one is text
+        'reply_format' => (string)($r['reply_format'] ?? 'plain'),
+        'reply_html' => (($r['reply_format'] ?? 'plain') !== 'plain' && (string)($r['reply'] ?? '') !== '')
+            ? reportTextHtml((string)$r['reply'], (string)$r['reply_format'], $cfg) : '',
+        'reporter'   => (string)$r['reporter_name'],
+        'reported'   => (string)$r['reported_name'],
+        'reporter_avatar' => $reporterAv,
+        'reported_avatar' => $reportedAv,
+        'created_at' => (string)$r['created_at'],
+        'handled_by' => (string)$r['handled_by'],
+        'handled_at' => $r['handled_at'] ? (string)$r['handled_at'] : null,
+        // The message itself is rendered here rather than shipped raw: the panel displays it, and
+        // the sanitizer that decides what may be displayed is the same one the public side uses.
+        'message'    => $r['msg_id'] ? [
+            'id'   => (int)$r['msg_id'],
+            'html' => pmRenderBody((string)$r['msg_body'], (string)$r['msg_format'], $cfg, true, $db),
+            'at'   => (string)$r['msg_at'],
+        ] : null,
+        'context'    => $r['ctx_at'] ? [
+            'html' => pmRenderBody((string)$r['ctx_body'], (string)$r['ctx_format'], $cfg, true, $db),
+            'at'   => (string)$r['ctx_at'],
+            // Whose line the context was, by NAME — a moderator reading two lines needs to know
+            // which of the two people said which, and nothing else about either of them.
+            'from' => $ctxMine ? (string)$r['reported_name'] : (string)$r['reporter_name'],
+            'from_avatar' => $ctxMine ? $reportedAv : $reporterAv,
+        ] : null,
+    ];
+}
+
+/* What the reported accounts already ARE — one query for the whole page, not one per card.
+ *
+ * A moderator deciding what to do about a line needs two facts the report itself cannot carry: how
+ * many times this account has been reported before, and whether somebody has already answered one
+ * of those. Without them every report reads like a first offence. */
+$state = [];
+$names = array_values(array_unique(array_map(static fn($r) => $r['reported'], $rows)));
+if ($names) {
+    $ph = implode(',', array_fill(0, count($names), '?'));
+    $q = $db->prepare("SELECT u.id, u.username, u.status, u.pm_muted_until, u.banned_until,
+                              (SELECT COUNT(*) FROM message_reports mr WHERE mr.reported_user_id = u.id) AS reports
+                         FROM users u WHERE u.username IN ($ph)");
+    $q->execute($names);
+    $people = $q->fetchAll(PDO::FETCH_ASSOC);
+    // …and the warnings they have had (1.71.0, includes/reports.php): how many, and the latest few.
+    $warned = function_exists('userWarningsSummary') ? userWarningsSummary($db, array_map(fn($u) => (int)$u['id'], $people)) : [];
+    foreach ($people as $u) {
+        $state[(string)$u['username']] = [
+            'warnings'        => (int)($warned[(int)$u['id']]['count'] ?? 0),
+            'latest_warnings' => $warned[(int)$u['id']]['latest'] ?? [],
+            'banned'       => (string)$u['status'] === 'banned',
+            'banned_until' => $u['banned_until'] ? (string)$u['banned_until'] : null,
+            'muted_until'  => ($u['pm_muted_until'] !== null && strtotime((string)$u['pm_muted_until']) > time())
+                              ? (string)$u['pm_muted_until'] : null,
+            'reports'      => (int)$u['reports'],
+            // A moderator may not be punished from this card, so the card must not offer it.
+            'staff'        => moderationIsStaff($db, (int)$u['id']),
+        ];
+    }
+}
+foreach ($rows as $i => $r) $rows[$i]['state'] = $state[$r['reported']] ?? null;
+
+$open = (int)$db->query("SELECT COUNT(*) FROM message_reports WHERE status = 'open'")->fetchColumn();
+jsonResponse([
+    'reports' => $rows,
+    'total'   => $total,
+    'page'    => $page,
+    'pages'   => $pages,
+    'open'    => $open,
+    'may_handle' => panelCan($db, $cfg, 'panel.messages.handle'),
+]);

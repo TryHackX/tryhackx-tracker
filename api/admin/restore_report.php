@@ -1,0 +1,71 @@
+<?php
+requirePost();
+
+$input = readJsonBody();
+$id = (int)($input['id'] ?? 0);
+
+if ($id < 1) {
+    jsonResponse(['error' => __('api.report.invalid_id')], 400);
+}
+
+$stmt = $db->prepare("SELECT * FROM archives WHERE id = ?");
+$stmt->execute([$id]);
+$report = $stmt->fetch();
+
+if (!$report) {
+    jsonResponse(['error' => __('api.report.archived_not_found')], 404);
+}
+
+// Move back to reports
+$stmt = $db->prepare(
+    // …including api_client_id: a restored report that has forgotten which partner filed it is a
+    // report the queue cannot label, and this is the same round trip that archived it.
+    "INSERT INTO reports (id, name, representative, company, email, objectTitle, link, infoHash, magnet_link, ip, add_message, checked, blocked, api_client_id, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+);
+$stmt->execute([
+    $report['id'], $report['name'], $report['representative'], $report['company'],
+    $report['email'], $report['objectTitle'], $report['link'], $report['infoHash'],
+    $report['magnet_link'] ?? null, $report['ip'], $report['add_message'], $report['checked'], 0,
+    isset($report['api_client_id']) && $report['api_client_id'] !== null ? (int)$report['api_client_id'] : null,
+    $report['timestamp']
+]);
+
+// Delete from archives
+$stmt = $db->prepare("DELETE FROM archives WHERE id = ?");
+$stmt->execute([$id]);
+
+// The report is restored as ACTIVE and UNBLOCKED (blocked forced to 0 above). If it was blocked in
+// the archive and nothing else keeps this hash blocked, drop it from the blacklist file too —
+// otherwise the DB (unblocked) and the tracker (still blocking) drift apart. This removal path was
+// previously missing, so a "Restore to active" left the hash blocked at the tracker.
+$blacklistChanged = false;
+if (!empty($report['blocked'])) {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM reports WHERE infoHash = ? AND blocked = 1 AND id != ?");
+    $stmt->execute([$report['infoHash'], $id]);
+    $otherBlockedReports = (int)$stmt->fetchColumn();
+
+    $stmt = $db->prepare("SELECT COUNT(*) FROM archives WHERE infoHash = ? AND blocked = 1");
+    $stmt->execute([$report['infoHash']]);
+    $otherBlockedArchives = (int)$stmt->fetchColumn();
+
+    if ($otherBlockedReports === 0 && $otherBlockedArchives === 0) {
+        $unblock = trackerUnblockHash($db, $cfg, $report['infoHash']);
+        $blacklistChanged = $unblock['file_ok'];
+        $reload = $unblock['reload'] ?? null;
+    }
+}
+
+// Send restoration notification email
+try {
+    sendStatusNotification($db, $id, 'restored', $cfg);
+} catch (Exception $e) {
+    // Non-blocking — report is already restored
+}
+
+$reload = $reload ?? null;
+
+$response = ['success' => true, 'message' => __('api.report.restored')];
+if ($blacklistChanged) $response['blacklist_updated'] = true;
+if ($reload) $response['reload'] = $reload;
+jsonResponse($response);

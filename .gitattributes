@@ -1,0 +1,37 @@
+# Normalize line endings: store as LF in the repo, check out native on each OS.
+# Prevents CRLF noise when committing from Windows/WAMP.
+* text=auto
+
+# Explicit text types (kept LF)
+*.php   text
+*.js    text
+*.css   text
+*.html  text
+*.md    text
+*.json  text
+*.sql   text
+*.svg   text
+.htaccess text
+
+# Binary assets — never touch
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.woff  binary
+*.woff2 binary
+
+# The opentracker builds. They have no extension, so `text=auto` would be left guessing from the
+# content -- and a wrong guess here means git rewriting line endings inside an ELF executable and
+# handing out a binary that will not run.
+tools/opentracker/bin/* binary
+
+# Patches must keep LF whatever the checkout does: `patch` counts bytes, and CRLF in a hunk makes
+# every line fail to match on a Linux source tree.
+*.patch text eol=lf
+
+# Sounds (1.56.0): shipped clips — never line-ending-normalised
+*.mp3   binary
+*.ogg   binary
+*.wav   binary

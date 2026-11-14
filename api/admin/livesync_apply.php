@@ -1,0 +1,56 @@
+<?php
+/**
+ * POST admin/livesync_apply — arm or disarm live peer sync.
+ *
+ *   {"op":"status"} | {"op":"plan"} | {"op":"apply","password":"…"} | {"op":"revert","password":"…"}
+ *
+ * Arming restarts the tracker, so it asks for the password. Disarming restarts it too and asks for
+ * the same reason — but note the asymmetry that matters: if you are ever unsure, disarm. An
+ * unauthenticated port left open is worse than a minute of no peer sync.
+ */
+requirePost();
+$input = readJsonBody();
+$op = (string)($input['op'] ?? '');
+if (!in_array($op, ['status', 'plan', 'apply', 'revert'], true)) {
+    jsonResponse(['error' => __('api.admin.unknown_op')], 400);
+}
+// The two reads — the status and the plan the helper would carry out — write nothing to the audit log
+// (1.69.0), not even when the feature is off: the router logged both as `livesync.apply`, as if
+// something had been applied (or had failed to be).
+if ($op === 'status' || $op === 'plan') auditSuppress();
+if (!livesyncEnabled($cfg)) {
+    jsonResponse(['error' => __('api.livesync.off')], 409);
+}
+
+if ($op === 'status') {
+    jsonResponse(['success' => true, 'status' => livesyncStatus($cfg, true),
+                  'warnings' => livesyncWarnings($cfg)]);
+}
+
+$problems = livesyncValidate($cfg);
+if ($problems && $op !== 'revert') {
+    jsonResponse(['error' => $problems[0], 'problems' => $problems], 400);
+}
+
+if ($op === 'plan') {
+    $r = livesyncRun($cfg, ['plan', livesyncBindIp($cfg), (string)livesyncPort($cfg), livesyncPeerIp($cfg)]);
+    if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.livesync.helper_refused')], 400);
+    jsonResponse(['success' => true] + (array)$r['json']);
+}
+
+requireAdminReauth((string)($input['password'] ?? ''), $cfg);
+
+if ($op === 'revert') {
+    $r = livesyncRun($cfg, ['revert'], 60);
+    if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.livesync.helper_refused')], 500);
+    livesyncStatus($cfg, true);
+    jsonResponse(['success' => true, 'message' => __('api.livesync.reverted')] + (array)$r['json']);
+}
+
+// apply — the helper verifies the port is actually listening, and on the tunnel address only. If it
+// is not, the helper undoes its own change before answering, so a failure here leaves nothing armed.
+$r = livesyncRun($cfg, ['apply', livesyncBindIp($cfg), (string)livesyncPort($cfg), livesyncPeerIp($cfg)], 90);
+if (!$r['ok']) jsonResponse(['error' => $r['error'] ?? __('api.livesync.helper_refused')], 500);
+livesyncStatus($cfg, true);
+jsonResponse(['success' => true,
+              'message' => __('api.livesync.armed')] + (array)$r['json']);

@@ -1,0 +1,727 @@
+/**
+ * Settings page: group sub-menu + ranked search.
+ *
+ * The page is one long form of ~150 settings. This adds two ways through it:
+ *   · a sub-menu of groups (Site & pages, Security & CAPTCHA, …) that shows one group at a time;
+ *   · a search box that ranks whole SECTIONS whose name matches first, then INDIVIDUAL settings
+ *     (their section shown with only the matching fields), and finally the remaining sections of
+ *     any group the query names ("security", "federation") under a divider.
+ *
+ * The index is built from what is on the page (labels, hints, field names, and for blocks that are
+ * not plain fields — the peer table, the donation rows — their text) merged with the hidden keyword
+ * list served by api.php?endpoint=admin/settings_catalog (includes/settings_catalog.php): synonyms
+ * an admin might type that no label contains ("bot", "smtp", "cron", "hidden url"). Those words are
+ * never rendered, so the page stays clean and screen readers do not read them out. A control that
+ * carries no name of its own (the timeline range checkboxes, the donation rows) can opt into the
+ * index with data-setting="<setting key>".
+ *
+ * Everything here is presentation only: nothing changes what the form submits (hidden inputs are
+ * still submitted — only their visibility is touched, and the filter is lifted for the moment the
+ * browser validates the form), and with JavaScript off the page is exactly the old single scroll.
+ */
+(function () {
+    'use strict';
+
+    const toolbar = document.getElementById('settings-toolbar');
+    const form = document.getElementById('settings-form');
+    if (!toolbar || !form) return;
+
+    const input = document.getElementById('settings-search');
+    const clearBtn = document.getElementById('settings-search-clear');
+    const countEl = document.getElementById('settings-search-count');
+    const emptyEl = document.getElementById('settings-empty');
+    const emptyQ = document.getElementById('settings-empty-q');
+    const groupBar = document.getElementById('settings-groups');
+    const saveRow = document.getElementById('settings-save-row');
+    const alertRow = document.getElementById('settings-alert');
+    const rule = document.getElementById('settings-rule');
+
+    const norm = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const textOf = (el) => norm(el ? el.textContent : '');
+    const show = (el, on) => { if (el) el.classList.toggle('d-hidden', !on); };
+
+    /**
+     * A byte-valued setting shown as a number plus a unit.
+     *
+     * "5368709120" is a true statement about a limit and an unreadable one. The stored value stays
+     * bytes — every consumer of these settings expects bytes and none of them are changing — so the
+     * hidden input keeps the setting's real name and its real value, and this pair only edits it.
+     * If this function never runs (a JS error earlier in the file, an old cached bundle), the form
+     * still posts the value it was rendered with. A visible field carrying the real name would
+     * instead post "5" and silently cut the budget by a factor of a billion.
+     *
+     * The unit chosen on load is the largest one that divides the value exactly, so 5368709120 shows
+     * as 5 GiB and 5368709121 shows as 5242880.0009765625 KiB — no, as bytes: a value that is not a
+     * whole number of any larger unit is shown in bytes rather than rounded into a lie.
+     */
+    function bindSizeFields() {
+        const UNITS = [1099511627776, 1073741824, 1048576, 1024, 1];
+        [...document.querySelectorAll('input[type="hidden"][id$="-raw"][data-size-max]')].forEach(raw => {
+            const num = document.getElementById(raw.id.replace(/-raw$/, '-num'));
+            const unit = document.getElementById(raw.id.replace(/-raw$/, '-unit'));
+            if (!num || !unit) return;
+            const lo = Number(raw.dataset.sizeMin || 0);
+            const hi = Number(raw.dataset.sizeMax || 0);
+
+            const load = () => {
+                const v = Math.max(0, Number(raw.value) || 0);
+                const u = UNITS.find(x => v !== 0 && v % x === 0) || 1;
+                unit.value = String(u);
+                num.value = String(v / u);
+            };
+            const store = () => {
+                const u = Number(unit.value) || 1;
+                let v = Math.round((Number(num.value) || 0) * u);
+                // Clamped here as well as on the server, so the reader sees the value that will
+                // actually be saved instead of finding out after a reload.
+                if (hi && v > hi) v = hi;
+                if (lo && v < lo && v !== 0) v = lo;
+                raw.value = String(v);
+                if (Math.round((Number(num.value) || 0) * u) !== v) load();
+            };
+            load();
+            num.addEventListener('input', store);
+            unit.addEventListener('change', () => {
+                // Changing the unit re-reads the stored bytes rather than reinterpreting the number:
+                // switching MiB to GiB must not silently multiply the limit by 1024.
+                const bytes = Number(raw.value) || 0;
+                const u = Number(unit.value) || 1;
+                num.value = String(bytes / u);
+            });
+        });
+    }
+    bindSizeFields();
+
+    // The search box is rendered readonly (see settings.php) so the browser's profile autofill
+    // leaves it alone; it becomes editable the moment anyone reaches for it.
+    // The toolbar's language switcher: a clone of the header's, shown only while the header is
+    // out of view. The header is the source of truth (same links, same active state); the clone is
+    // rebuilt from it once, and an IntersectionObserver on the header decides which one you see.
+    (function () {
+        const slot = document.getElementById('tb-lang');
+        const src = document.querySelector('.admin-header-actions .admin-lang');
+        const header = document.querySelector('.admin-header-actions');
+        if (!slot || !src || !header || !('IntersectionObserver' in window)) return;
+        slot.appendChild(src.cloneNode(true));
+        slot.removeAttribute('aria-hidden');
+        // After a live language switch the clone is taken again from the header, which the switch has translated
+        // where it stands (1.73.0: the clone is a script's copy and kept the old words — its aria-label).
+        document.addEventListener('langswap', () => { slot.replaceChildren(src.cloneNode(true)); });
+        new IntersectionObserver((entries) => {
+            const headerVisible = entries.some(e => e.isIntersecting);
+            slot.classList.toggle('show', !headerVisible);
+        }, { root: null, threshold: 0 }).observe(header);
+    })();
+
+    document.querySelectorAll('[data-unlock-on-focus]').forEach(el => {
+        const unlock = () => el.removeAttribute('readonly');
+        el.addEventListener('focus', unlock, { once: true });
+        el.addEventListener('pointerdown', unlock, { once: true });
+    });
+
+    // ── model ───────────────────────────────────────────────────────────────
+    // Every section is a list of "items": one per settings cell (.row > div) plus one per block that
+    // is not a plain cell (donation rows, the schedule table, the federation peer card). Indexing the
+    // blocks too is what makes searching "peer" or "wallet" find them instead of hiding them.
+    function makeItem(el) {
+        const controls = [...el.querySelectorAll('input, select, textarea')];
+        const names = controls.map(c => norm(c.name || c.id || '')).filter(Boolean);
+        if (el.dataset.setting) names.push(norm(el.dataset.setting));
+        return {
+            el, names,
+            label: textOf(el.querySelector('label, .form-label, h6')),
+            hint: textOf(el).slice(0, 600),
+            keywords: '',
+            score: 0,
+        };
+    }
+
+    const sections = [...document.querySelectorAll('.settings-section')].map((el, i) => {
+        const anchor = document.createComment('settings-section');
+        el.parentNode.insertBefore(anchor, el);
+        const cells = [...el.querySelectorAll('.row > div')].map(makeItem);
+        const extras = [...el.children]
+            .filter(c => c.tagName !== 'H5' && !c.classList.contains('row'))
+            .map(makeItem);
+        return {
+            el, i, anchor,
+            items: cells.concat(extras),
+            rows: [...el.querySelectorAll('.row')],
+            group: el.dataset.group || '',
+            title: norm(el.dataset.title || textOf(el.querySelector('h5'))),
+            // The title as WRITTEN, for showing back to the reader. `title` above is lower-cased and
+            // stripped for matching, which is the wrong thing to put in front of a person.
+            label: (el.dataset.title || textOf(el.querySelector('h5')) || '').trim(),
+            groupText: '',
+            inForm: anchor.parentNode === form,
+        };
+    });
+
+    // ── catalogue (hidden keywords + group keywords) ────────────────────────
+    const apiBase = document.body.dataset.apiBase || 'api.php?endpoint=';
+    // The last answer, kept for a live language switch: its keywords are the same in every language, and the one
+    // translated thing in it — a group's title — is read off the group's button, which the switch translates
+    // (1.73.0: the catalogue used to be asked for again on every switch).
+    let lastCat = null;
+    const chipTitle = (id) => {
+        const b = groupBar && groupBar.querySelector('.settings-group-btn[data-group="' + id + '"]');
+        if (!b) return '';
+        const c = b.cloneNode(true);
+        c.querySelectorAll('.settings-group-count').forEach(x => x.remove());
+        return (c.textContent || '').trim();
+    };
+    function applyCatalogue(cat) {
+        if (cat) lastCat = cat;
+        const kw = (cat && cat.keywords) || {};
+        const groupKw = {};
+        ((cat && cat.groups) || []).forEach(g => { groupKw[g.id] = norm((chipTitle(g.id) || g.title) + ' ' + (g.keywords || '')); });
+        sections.forEach(sec => {
+            sec.groupText = groupKw[sec.group] || '';
+            sec.items.forEach(item => { item.keywords = norm(item.names.map(n => kw[n] || '').join(' ')); });
+        });
+    }
+    // index what is on the page immediately: the search works even if the catalogue never answers
+    applyCatalogue(null);
+    fetch(apiBase + 'admin/settings_catalog', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+        .then(r => r.json())
+        .then(j => { if (j && j.success) { applyCatalogue(j); if (norm(input.value)) runSearch(); } })
+        .catch(() => { /* labels + hints only — still useful */ });
+
+    // ── scoring ─────────────────────────────────────────────────────────────
+    // Every token must be found somewhere in the setting; the score decides the order.
+    const rxSafe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    function itemScore(item, tokens) {
+        let total = 0;
+        for (const t of tokens) {
+            let best = 0;
+            for (const n of item.names) {
+                if (n === t) best = Math.max(best, 130);
+                else if (n.indexOf(t) !== -1) best = Math.max(best, 70);
+            }
+            if (item.label.indexOf(t) === 0) best = Math.max(best, 60);
+            else if (new RegExp('\\b' + rxSafe(t)).test(item.label)) best = Math.max(best, 45);
+            else if (item.label.indexOf(t) !== -1) best = Math.max(best, 30);
+            if (item.keywords.indexOf(t) !== -1) best = Math.max(best, 22);
+            if (item.hint.indexOf(t) !== -1) best = Math.max(best, 8);
+            if (!best) return 0;            // one missing token → not a match at all
+            total += best;
+        }
+        return total;
+    }
+    const TITLE_BONUS = 1000;   // "captcha" must open the CAPTCHA section, not a field that mentions it
+    const GROUP_BONUS = 1;      // a group-name hit is the weakest reason to show a section
+
+    // ── view state ──────────────────────────────────────────────────────────
+    let group = 'all';
+
+    // The divider that separates precise hits from "everything else in a matching group".
+    const divider = document.createElement('div');
+    divider.className = 'settings-divider d-hidden';
+    divider.id = 'settings-divider';
+
+    /**
+     * Where a search hit LIVES, said on the hit itself.
+     *
+     * Searching pulls a field out of a page of a hundred and shows it on its own — and then the
+     * reader has what they were looking for and no idea where it came from. Clearing the search puts
+     * the page back the way it was and the setting disappears again. So every visible section gets a
+     * line naming its group and its own title, with a button that clears the search and takes you to
+     * the section in place.
+     */
+    function groupTitle(id) {
+        const btn = groupBar && groupBar.querySelector('.settings-group-btn[data-group="' + id + '"]');
+        if (!btn) return id;
+        // The button carries a count badge; the group's name is the text before it.
+        return (btn.textContent || id).replace(/\s*\d+\s*$/, '').trim();
+    }
+
+    function breadcrumbFor(sec) {
+        let bc = sec.el.querySelector(':scope > .settings-where');
+        if (bc) return bc;
+        bc = document.createElement('div');
+        bc.className = 'settings-where d-hidden';
+        const path = document.createElement('span');
+        path.className = 'settings-where-path';
+        const jump = document.createElement('button');
+        jump.type = 'button';
+        jump.className = 'btn btn-sm btn-outline-secondary settings-where-jump';
+        jump.textContent = t.key('js.settings.show_me_where');
+        jump.addEventListener('click', () => {
+            // Clear the search, switch to the section's own group, and scroll it into view with the
+            // same highlight the #hash links use. This is the "…and now where was it?" button.
+            input.value = '';
+            group = sec.group || 'all';
+            applyGroup();
+            sec.el.scrollIntoView({ block: 'center' });
+            sec.el.classList.add('settings-section-hit');
+            setTimeout(() => sec.el.classList.remove('settings-section-hit'), 2500);
+        });
+        bc.appendChild(path);
+        bc.appendChild(jump);
+        sec.el.insertBefore(bc, sec.el.firstChild);
+        return bc;
+    }
+
+    function showWhere(sec, on) {
+        const bc = breadcrumbFor(sec);
+        bc.classList.toggle('d-hidden', !on);
+        // A hidden breadcrumb keeps no words: they are written when it shows, in the language of that moment (1.73.0 —
+        // a hidden one kept the language it was last drawn in through a live switch).
+        if (!on) bc.querySelector('.settings-where-path').textContent = '';
+        if (on) {
+            // Group, a chevron (an icon since 1.68.0), section.
+            const chev = document.createElement('i');
+            chev.className = 'bi bi-chevron-right settings-where-sep';
+            chev.setAttribute('aria-hidden', 'true');
+            bc.querySelector('.settings-where-path').replaceChildren(groupTitle(sec.group), chev, sec.label || sec.title);
+        }
+    }
+
+    function resetSection(sec, visible) {
+        sec.items.forEach(it => it.el.classList.remove('d-hidden', 'settings-hit'));
+        sec.rows.forEach(r => r.classList.remove('d-hidden'));
+        sec.el.classList.remove('settings-section-hit');
+        showWhere(sec, false);
+        show(sec.el, visible);
+    }
+    /**
+     * A .row whose every cell the search hid must be hidden itself.
+     *
+     * Bootstrap builds the gutter out of a negative margin on .row and a matching padding on its
+     * cells. Hide all the cells and the padding goes with them, but the negative margin stays — so an
+     * emptied row does not merely collapse, it pulls everything after it a gutter's width UPWARDS.
+     * Three emptied rows in a section (Backups does this on most queries) pulled the next row 48 px
+     * up, straight over the rows above it. That is the "two things drawn on top of each other".
+     */
+    function syncRows(sec) {
+        sec.rows.forEach(row => {
+            // `display:none` counts as hidden too: a cell a *feature* hid (the fetch-order mix,
+            // shown only in mix mode) is as invisible as one the search hid, and a row left
+            // standing for it keeps Bootstrap's negative gutter with no padding to balance it.
+            const anyVisible = [...row.children].some(c =>
+                !c.classList.contains('d-hidden') && c.style.display !== 'none');
+            row.classList.toggle('d-hidden', !anyVisible);
+        });
+    }
+    /** Put the sections back in their original document order (search reorders them). */
+    function restoreOrder() {
+        sections.forEach(sec => { if (sec.anchor.nextSibling !== sec.el) sec.anchor.parentNode.insertBefore(sec.el, sec.anchor.nextSibling); });
+    }
+    /** The Save row belongs to the form: hide it when the filter left no section to save. */
+    function syncChrome() {
+        const formVisible = sections.some(s => s.inForm && !s.el.classList.contains('d-hidden'));
+        show(saveRow, formVisible);
+        show(alertRow, formVisible);
+        const credVisible = sections.some(s => !s.inForm && !s.el.classList.contains('d-hidden'));
+        show(rule, credVisible);
+    }
+
+    function applyGroup() {
+        restoreOrder();
+        show(divider, false);
+        groupBar.classList.remove('settings-groups-muted');
+        sections.forEach(sec => resetSection(sec, group === 'all' || sec.group === group));
+        // ALL SETTINGS IS THE OTHER PLACE THE BREADCRUMB EARNS ITS KEEP.
+        //
+        // Inside a category the heading above already says which category you are in, so a line
+        // repeating it is noise. In All settings every section of the panel is on one page in one
+        // column, and "which group is this one in" has no other answer — which is exactly the
+        // question the breadcrumb was added for. So: All settings, or a search. Not categories.
+        if (group === 'all') sections.forEach(sec => showWhere(sec, true));
+        show(emptyEl, false);
+        countEl.textContent = '';
+        [...groupBar.querySelectorAll('.settings-group-btn')].forEach(b => {
+            const on = b.dataset.group === group;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        syncChrome();
+    }
+
+    function runSearch() {
+        const q = norm(input.value);
+        show(clearBtn, q !== '');
+        if (q === '') { applyGroup(); return; }
+
+        const tokens = q.split(' ').filter(Boolean);
+        const ranked = [];
+        let fields = 0;
+
+        sections.forEach(sec => {
+            const titleHit = tokens.every(t => sec.title.indexOf(t) !== -1);
+            const groupHit = tokens.every(t => sec.groupText.indexOf(t) !== -1);
+            let best = 0, matched = 0;
+            sec.items.forEach(item => {
+                item.score = itemScore(item, tokens);
+                if (item.score > best) best = item.score;
+                if (item.score > 0) matched++;
+            });
+            const score = (titleHit ? TITLE_BONUS : 0) + best + (groupHit ? GROUP_BONUS : 0);
+            if (!score) return;
+            // whole section for a name/group hit; otherwise just the fields that matched
+            ranked.push({ sec, score, whole: titleHit || best === 0 });
+            if (best > 0) fields += matched;
+        });
+
+        ranked.sort((a, b) => (b.score - a.score) || (a.sec.i - b.sec.i));
+        const visible = new Set(ranked.map(r => r.sec));
+        sections.forEach(sec => resetSection(sec, visible.has(sec)));
+        // Shown while a SEARCH is running, and only then.
+        //
+        // The first attempt tied this to `group === 'all'`, which was wrong twice over: a search
+        // ignores the group filter entirely — it always ranks every section — so `group` says
+        // nothing about what is on screen, and it is also set behind the reader's back by
+        // openHash() when the page is opened at a #section anchor. The result was breadcrumbs
+        // appearing under a category and missing under All settings, which is the opposite of the
+        // ask. Whether a search is running is the actual question: that is when fields have been
+        // pulled out of everywhere and "where was this" has no other answer. With no search,
+        // applyGroup() has already hidden them.
+        ranked.forEach(({ sec, whole }) => {
+            showWhere(sec, true);
+            if (whole) { sec.el.classList.add('settings-section-hit'); return; }
+            sec.items.forEach(item => {
+                // An item can sit inside another one (the donation rows inside the donation list, the
+                // add-peer row inside the federation card). Those inner cells carry no name of their
+                // own and always score 0 — hiding them would blank out the very block that matched.
+                const hit = item.score > 0;
+                const inHit = !hit && sec.items.some(o => o.score > 0 && o.el !== item.el && o.el.contains(item.el));
+                item.el.classList.toggle('d-hidden', !hit && !inHit);
+                item.el.classList.toggle('settings-hit', hit);
+            });
+            syncRows(sec);
+        });
+
+        // best matches first (only inside the form — the credentials block is its own <form> and
+        // must never be moved into it), with a divider before the group-only leftovers
+        const first = sections.find(s => s.inForm);
+        if (first) {
+            const mark = first.anchor;
+            let dividerPlaced = false;
+            ranked.forEach(({ sec, score }) => {
+                if (!sec.inForm) return;
+                if (!dividerPlaced && score <= GROUP_BONUS && ranked.some(r => r.score > GROUP_BONUS)) {
+                    divider.textContent = t.key('js.settings.other_sections');
+                    show(divider, true);
+                    mark.parentNode.insertBefore(divider, mark);
+                    dividerPlaced = true;
+                }
+                mark.parentNode.insertBefore(sec.el, mark);
+            });
+            if (!dividerPlaced) show(divider, false);
+        }
+
+        const groups = new Set(ranked.map(r => r.sec.group));
+        // pieces, each t.key() word keeping its key for the live language switch (1.73.0)
+        countEl.replaceChildren(...(ranked.length
+            ? [fields ? t.key(fields === 1 ? 'js.settings.n_setting' : 'js.settings.n_settings', {n: fields}) : '', fields ? ' · ' : '',
+               t.key(ranked.length === 1 ? 'js.settings.n_section' : 'js.settings.n_sections', {n: ranked.length}),
+               ' ', t.key(groups.size === 1 ? 'js.settings.in_n_group' : 'js.settings.in_n_groups', {n: groups.size})]
+            : []));
+        emptyQ.textContent = input.value.trim();
+        show(emptyEl, ranked.length === 0);
+        [...groupBar.querySelectorAll('.settings-group-btn')].forEach(b => {
+            b.classList.toggle('active', b.dataset.group === 'all');
+            b.setAttribute('aria-pressed', b.dataset.group === 'all' ? 'true' : 'false');
+        });
+        groupBar.classList.add('settings-groups-muted');
+        syncChrome();
+    }
+
+    // ── wiring ──────────────────────────────────────────────────────────────
+    let timer = null;
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(runSearch, 120); });
+    // Escape clears the query exactly like the × button — including keeping the selected group.
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { input.value = ''; runSearch(); }
+    });
+    clearBtn.addEventListener('click', () => { input.value = ''; input.focus(); runSearch(); });
+    groupBar.addEventListener('click', (e) => {
+        const b = e.target.closest('.settings-group-btn');
+        if (!b) return;
+        group = b.dataset.group || 'all';
+        input.value = '';
+        show(clearBtn, false);
+        applyGroup();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+    // "/" or Ctrl+K from anywhere on the page jumps into the search — but never out of a dialog
+    // (Bootstrap focuses the modal element itself, which is not a form control, so the tag check
+    // alone would let the shortcut steal focus from the password confirmation).
+    document.addEventListener('keydown', (e) => {
+        const tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'select' || tag === 'textarea' || e.target.isContentEditable) return;
+        if (document.querySelector('.modal.show')) return;
+        if (e.key === '/' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) {
+            e.preventDefault();
+            input.focus();
+            input.select();
+        }
+    });
+
+    // Saving while filtered.
+    //
+    // The browser validates a form BEFORE its submit event, and a control that fails validation
+    // inside a display:none section cannot be focused — Chrome then aborts the submit with only a
+    // console warning ("not focusable"), so the button looks dead. That is a real problem and this
+    // code exists for it.
+    //
+    // The first version solved it by lifting the WHOLE filter on every submit click and putting it
+    // back in a setTimeout. Two things were wrong with that. The restore landed in a separate task,
+    // so the browser got a rendering opportunity in between and painted all 27 sections at once —
+    // the flash. And when validation actually failed the submit event never fired, so the restore
+    // never ran and the admin lost their group and their query for good.
+    //
+    // So: touch nothing unless the form is genuinely invalid, and then unhide only what the browser
+    // needs to be able to focus. A valid save — which is nearly every save — now does no DOM work at
+    // all, so there is nothing to paint and nothing to restore. Bound at document level in the
+    // capture phase because the page has TWO forms: the settings form and the Security & Credentials
+    // one, whose own fields can be filtered away just as easily.
+    function revealFor(el) {
+        const sec = el.closest('.settings-section');
+        for (let n = el; n && n !== sec; n = n.parentElement) n.classList.remove('d-hidden');
+        if (sec) { sec.classList.remove('d-hidden'); sec.scrollIntoView({ block: 'center' }); }
+        syncChrome();
+    }
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest && e.target.closest('button[type="submit"], input[type="submit"]');
+        if (!btn || !btn.form) return;
+        if (btn.form.noValidate || btn.hasAttribute('formnovalidate')) return;
+        // .validity.valid rather than .checkValidity(), which would fire an `invalid` event as a
+        // side effect of merely asking.
+        const bad = [...btn.form.elements].find(el => el.willValidate && !el.validity.valid);
+        if (!bad) return;                       // the common case: not one class is touched
+        revealFor(bad);
+    }, true);
+
+    // group counts in the sub-menu
+    const counts = {};
+    sections.forEach(s => { counts[s.group] = (counts[s.group] || 0) + 1; });
+    [...groupBar.querySelectorAll('[data-count-for]')].forEach(el => {
+        const n = counts[el.dataset.countFor] || 0;
+        if (n) el.textContent = n;
+    });
+
+    /**
+     * #section-… links (e.g. from the Traffic page's "Timeline settings" button) still work — and from
+     * 1.71.0 a link to anything INSIDE a section too: a sub-heading (#section-shout-nav), or a block that
+     * moved into a section of its own (#admin-emotes and #admin-shout-emoji were blocks of Shoutbox until
+     * the emoji and the emotes got their own group). The section round it is opened under its own chip
+     * and marked, and the page scrolls to the element itself.
+     */
+    function openHash() {
+        let id = (location.hash || '').replace('#', '');
+        try { id = decodeURIComponent(id); } catch (e) { /* a malformed escape: the id as written */ }
+        // A PLAIN LOAD IS "ALL SETTINGS", AND HAS TO GO THROUGH THE SAME PASS AS CLICKING IT.
+        //
+        // Without this the page was left exactly as PHP rendered it and applyGroup() never ran on
+        // startup, so the breadcrumbs appeared the moment you clicked "All settings" and not when
+        // you arrived on it — the same view behaving two different ways depending on how you got
+        // there.
+        if (!id) { applyGroup(); return; }
+        const target = document.getElementById(id);
+        const sec = sections.find(s => s.el.id === id) || (target ? sections.find(s => s.el.contains(target)) : null);
+        if (!sec) { applyGroup(); return; }
+        group = sec.group;
+        input.value = '';
+        applyGroup();
+        (target && target !== sec.el && sec.el.contains(target) ? target : sec.el).scrollIntoView({ block: 'start' });
+        sec.el.classList.add('settings-section-hit');
+        setTimeout(() => sec.el.classList.remove('settings-section-hit'), 2500);
+    }
+    window.addEventListener('hashchange', openHash);
+    openHash();
+
+    // REINDEXING, NOT RESTARTING, AFTER AN IN-PLACE LANGUAGE SWITCH.
+    //
+    // makeItem() copies each setting's label and hint into STRINGS when the page starts. After
+    // lang-swap.js rewrites the document those copies still hold the old language, so searching
+    // for a Polish word would find nothing while the Polish words are on the screen. Restarting
+    // this module instead would be worse: `sections` holds comment anchors placed in the document
+    // and a second set of them would leave the first behind, and every listener would be bound
+    // twice. So: re-read the text of the elements we already know about, index the catalogue again from
+    // the answer it gave (its keywords are one list for every language; the groups' titles are read off
+    // their buttons, which the switch has just translated — 1.73.0, no second request), and re-run whatever
+    // search is on screen. The breadcrumb and its "show me where" button are this file's: their words are
+    // t.key() words that keep their keys (assets/js/i18n.js) and the switch says them again itself.
+    document.addEventListener('langswap', () => {
+        sections.forEach(sec => {
+            sec.title = norm(sec.el.dataset.title || textOf(sec.el.querySelector('h5')));
+            sec.label = (sec.el.dataset.title || textOf(sec.el.querySelector('h5')) || '').trim();
+            sec.items.forEach(item => {
+                item.label = textOf(item.el.querySelector('label, .form-label, h6'));
+                item.hint = textOf(item.el).slice(0, 600);
+            });
+        });
+        applyCatalogue(lastCat);
+        if (norm(input.value)) runSearch(); else applyGroup();
+    });
+})();
+
+/* ── the metadata fetch-order mix ────────────────────────────────────────────
+ *
+ * Seven shares that must add up to 100. The rule that makes this usable rather than a puzzle: you
+ * edit ONE number and the others absorb the difference in proportion to what they already had, so
+ * the total is never wrong and you are never asked to do arithmetic to make a change stick.
+ *
+ * The note under each field is the point of the whole control. A share is not meaningful in the
+ * abstract -- it is meaningful relative to how many hashes the worker fetches at once. At 32
+ * parallel fetches a 15 % share is roughly five of every wave; at 4 it is one wave in two. Rather
+ * than forbid a small number, the panel says what it will actually do, and calls out the case where
+ * it rounds to "less than one per wave" -- which is the shape of the "1 % means never" trap.
+ */
+(function () {
+    const mode = document.getElementById('meta-order-mode');
+    const wrap = document.getElementById('meta-order-mix');
+    if (!mode || !wrap) return;
+    const fields = Array.from(document.querySelectorAll('.meta-order-share'));
+    const notes = Array.from(document.querySelectorAll('.meta-order-note'));
+    const sumEl = document.getElementById('meta-order-sum');
+    const liveEl = document.getElementById('meta-order-live');
+    const conc = document.querySelector('input[name="meta_worker_concurrency"]');
+    const DEFAULTS = { whitelist: 0, seeders: 70, newest: 15, seen: 0, completed: 0, random: 15, oldest: 0 };
+
+    /* Which index each ordering rides on — the same table as includes/meta_order.php and
+     * worker/worker.py. Shown so a mode reads as a query plan rather than a preference. */
+    const PLAN = {
+        oldest:    ['idx_index_meta', 'meta_priority DESC, meta_requested_at ASC'],
+        newest:    ['idx_index_meta', 'meta_priority DESC, meta_requested_at DESC'],
+        seeders:   ['idx_index_meta_seed', 'meta_priority DESC, last_seeders DESC'],
+        seen:      ['idx_index_meta_seen', 'meta_priority DESC, seen_count DESC'],
+        completed: ['idx_index_meta_completed', 'meta_priority DESC, last_completed DESC'],
+        random:    ['PRIMARY', 'info_hash >= (random point), ORDER BY info_hash'],
+        whitelist: ['—', t.key('js.settings.plan_whitelist')],
+    };
+
+    const val = f => Math.max(0, Math.min(100, parseInt(f.value, 10) || 0));
+    const showMix = () => { wrap.style.display = mode.value === 'mix' ? '' : 'none'; };
+
+    /** How many parallel fetches the worker will really run: the panel override, else its own
+     *  config, which the panel does not know. 8 is the placeholder shown in that field. */
+    function concurrency() {
+        const raw = conc ? parseInt(conc.value, 10) : NaN;
+        return raw > 0 ? Math.min(64, raw) : 8;
+    }
+
+    function paintLive() {
+        if (!liveEl) return;
+        if (mode.value === 'mix') {
+            const live = fields.filter(f => val(f) > 0)
+                .sort((a, b) => val(b) - val(a))
+                .map(f => val(f) + '% ' + f.dataset.share);
+            // The words as keyed markup (t.html(), 1.73.0): the live language switch says them again where they stand.
+            liveEl.innerHTML = '<span class="settings-hint">' + t.html('js.settings.rotating_over') + ' <strong>' +
+                (live.length ? live.join(' · ') : t.html('js.settings.no_share_set')) + '</strong>. ' +
+                t.html('js.settings.slot_falls_through') + '</span>';
+            return;
+        }
+        const p = PLAN[mode.value] || ['—', '—'];
+        liveEl.innerHTML = '<span class="settings-hint">' + t.html('js.settings.runs_on') + ' <code>' + p[0] + '</code> ' + t.html('js.settings.runs_as') + ' ' +
+            '<code>' + (t.isKey(p[1]) ? t.html(p[1]) : p[1]) + '</code>. ' + t.html('js.settings.whitelist_still_first') + '</span>';
+    }
+
+    function paint() {
+        const c = concurrency();
+        let total = 0;
+        fields.forEach(f => { total += val(f); });
+        if (sumEl) {
+            sumEl.textContent = total === 100 ? t.key('js.settings.adds_up_ok') : t.key('js.settings.adds_up_bad', {n: total});
+            sumEl.classList.toggle('text-warning', total !== 100);
+        }
+        notes.forEach(n => {
+            const f = fields.find(x => x.dataset.share === n.dataset.note);
+            if (!f) return;
+            const p = val(f);
+            f.classList.remove('is-thin');
+            if (p === 0) {
+                // Zero means two different things, and saying which one matters: for the whitelist
+                // it is not "never" but "absolute priority", which is the default and the safe case.
+                n.textContent = f.dataset.share === 'whitelist' ? t.key('js.settings.whitelist_drains_default') : t.key('js.settings.share_off');
+                n.classList.remove('text-warning');
+                return;
+            }
+            const perWave = (p * c) / 100;
+            if (perWave >= 1) {
+                n.textContent = t.key('js.settings.per_wave', {n: (perWave >= 10 ? Math.round(perWave) : perWave.toFixed(1)), c: c});
+                n.classList.remove('text-warning');
+            } else {
+                // Not forbidden — but this is the case worth naming out loud.
+                n.textContent = t.key('js.settings.thin_share', {n: Math.round(1 / perWave), c: c});
+                n.classList.add('text-warning');
+                f.classList.add('is-thin');
+            }
+        });
+        paintLive();
+    }
+
+    /** Keep the total at 100 by moving the difference into the OTHER shares, proportionally.
+     *  When the others are all zero there is nothing to take from, so the remainder goes to the
+     *  first of them — otherwise a single field could never be lowered. */
+    function rebalance(changed) {
+        const others = fields.filter(f => f !== changed);
+        let want = val(changed);
+        const pool = 100 - want;
+        let have = 0;
+        others.forEach(f => { have += val(f); });
+        if (have <= 0) {
+            others.forEach((f, i) => { f.value = i === 0 ? pool : 0; });
+        } else {
+            let given = 0;
+            others.forEach((f, i) => {
+                const share = i === others.length - 1 ? pool - given : Math.round(val(f) * pool / have);
+                f.value = Math.max(0, share);
+                given += Math.max(0, share);
+            });
+        }
+        changed.value = want;
+        paint();
+    }
+
+    fields.forEach(f => {
+        f.addEventListener('change', () => rebalance(f));
+        // Clamped on the way in, not only on change: a number left at 150 inside a container the
+        // mode has since hidden fails HTML validation on a field the operator cannot see, and the
+        // browser then refuses to submit the form without saying where.
+        f.addEventListener('input', () => {
+            const v = parseInt(f.value, 10);
+            if (v > 100) f.value = 100;
+            if (v < 0) f.value = 0;
+            paint();
+        });
+    });
+    if (conc) conc.addEventListener('input', paint);
+    mode.addEventListener('change', () => { showMix(); paint(); });
+    const reset = document.getElementById('meta-order-reset');
+    if (reset) reset.addEventListener('click', () => {
+        fields.forEach(f => { f.value = DEFAULTS[f.dataset.share] ?? 0; });
+        paint();
+    });
+    showMix();
+    paint();
+})();
+
+/* ── the poll's time budget, and how many polls a pass takes at it ────────────
+ *
+ * The line under Index → Poll time budget is measured on the server (includes/index.php
+ * indexPollEstimate(): the newest complete pass's pace against the tracker's current count). The pace
+ * does not move with the budget — only how many polls walking the scrape takes — so this redoes that
+ * last clause as the operator types, from the numbers the server left on the element, with the same
+ * clamp the save applies (the field's min / max).
+ */
+(function () {
+    const line = document.getElementById('idx-budget-estimate');
+    const field = document.querySelector('input[name="index_poll_budget"]');
+    if (!line || !field || !line.dataset.needs) return;
+    const needs = parseInt(line.dataset.needs, 10) || 0;
+    const lo = parseInt(field.min, 10) || 5, hi = parseInt(field.max, 10) || 300;
+    function paint() {
+        const raw = parseInt(field.value, 10);
+        if (!needs || isNaN(raw)) return;
+        const budget = Math.max(lo, Math.min(hi, raw));
+        const polls = Math.max(1, Math.ceil(needs / budget));
+        // the counts in the page's language (t.num(), 1.73.1), from the numbers the element carries
+        line.textContent = t.key(polls > 1 ? 'js.settings.poll_estimate_many' : 'js.settings.poll_estimate_one', {
+            rate: t.num(Number(line.dataset.rate)), scrape: t.num(Number(line.dataset.scrape)), needs: t.num(needs), budget: budget, polls: polls,
+        });
+    }
+    field.addEventListener('input', paint);
+})();

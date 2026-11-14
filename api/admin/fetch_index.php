@@ -1,0 +1,56 @@
+<?php
+// Observed-hash index list: pagination, sorting, hash/name/file search, meta filter.
+// The query builder lives in includes/index.php (indexListSelect) — shared with the public search.
+$perPage = (int)($_GET['per_page'] ?? 0);
+if (!in_array($perPage, [15, 25, 50, 100, 200], true)) $perPage = (int)($cfg['items_per_page'] ?? 25);
+$flt = factsEngineFilters($db, $cfg, factsRequest($_GET), true, true);
+try {
+    $q = [
+        'page'         => $_GET['page'] ?? 1,
+        'per_page'     => $perPage,
+        'sort'         => $_GET['sort'] ?? 'last:desc',
+        'search'       => $_GET['search'] ?? '',
+        'search_files' => ($_GET['search_files'] ?? '') === '1',
+        'meta'         => $_GET['meta'] ?? '',
+        'life'         => $_GET['life'] ?? '',
+        'desc'         => $_GET['desc'] ?? '',
+        'desc_flags'   => true,
+    ];
+    $res = $flt ? indexListByEngine($db, $cfg, $q, $flt) : indexListSelect($db, $cfg, $q);
+} catch (\Throwable $e) {
+    if ($e instanceof IndexFiltersUnsupported) {
+        jsonResponse(['success' => false, 'error' => __($e->getMessage() === 'sort' ? 'api.index.filters_sort' : 'api.index.filters_state'), 'code' => 'filters_unsupported'], 422);
+    }
+    if ($e instanceof IndexSearchTooBroad) {
+        jsonResponse(['success' => false, 'error' => __('api.index.too_broad', ['n' => langNumber(INDEX_LIST_CATALOG_CAP)]), 'code' => 'too_broad'], 422);
+    }
+    if (!$e instanceof IndexSearchTimeout && !indexIsStatementTimeout($e)) throw $e;
+    error_log('[admin] fetch_index: stopped for time: ' . mb_substr((string)($_GET['search'] ?? ''), 0, 80) . ' sort=' . (string)($_GET['sort'] ?? '') . ' — ' . $e->getMessage());
+    header('Retry-After: 30');
+    jsonResponse(['success' => false, 'error' => __('api.search.timeout'), 'code' => 'search_timeout'], 503);
+}
+
+$counts = ['total' => 0, 'protected' => 0, 'pending_meta' => 0];
+try {
+    $c = indexSharedCounts($db, 'counts', 'indexCountsCompute')[0];
+    $counts = ['total' => (int)$c['total'], 'protected' => (int)$c['protected'],
+               'pending_meta' => (int)$c['meta_pending'] + (int)$c['meta_fetching']];
+} catch (\Throwable $e) {
+    // Unknown, not zero (1.74.0, QUAL-26): full-table counts that can run into max_statement_time on a big index must
+    // not take the list with them, so the rows go out and the counts say null — and the log says why.
+    error_log('[admin] fetch_index: the list counts failed: ' . $e->getMessage());
+    $counts = ['total' => null, 'protected' => null, 'pending_meta' => null];
+}
+
+$factsMap = function_exists('factsChipsFor') ? factsChipsFor($db, array_column($res['rows'], 'info_hash'), true) : [];
+$tagMap = factsChipsOn($cfg, 'panel') ? tagsForHashes($db, array_column($res['rows'], 'info_hash'), null, true) : [];
+$thumbMap = (function_exists('thumbsFor') && thumbsOn($cfg, 'panel')) ? thumbsFor($db, $cfg, array_column($res['rows'], 'info_hash'), true) : [];
+foreach ($res['rows'] as &$row) {
+    $chips = tagsMergeChips(factsRowChips($factsMap[strtolower((string)$row['info_hash'])] ?? null, (string)($row['name'] ?? ''), $cfg, 'panel'),
+                            $tagMap[strtolower((string)$row['info_hash'])] ?? null, $cfg);
+    if ($chips !== null) $row['facts'] = $chips;
+    if (isset($thumbMap[strtolower((string)$row['info_hash'])])) $row['thumb'] = $thumbMap[strtolower((string)$row['info_hash'])];
+}
+unset($row);
+jsonResponse(['rows' => $res['rows'], 'total' => $res['total'], 'total_capped' => !empty($res['total_capped']), 'page' => $res['page'], 'pages' => $res['pages'],
+              'counts' => $counts, 'enabled' => indexEnabled($cfg)]);

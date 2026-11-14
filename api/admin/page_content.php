@@ -1,0 +1,157 @@
+<?php
+/**
+ * GET/POST — the Terms and Info pages, as text the operator can edit, ONE VERSION PER LANGUAGE.
+ *
+ * GET  ?page=tos|info[&lang=xx][&format=bbcode|markdown]
+ *      Returns the stored version for that language (if any), the shipped default in the requested
+ *      format AND language, and which languages already have a version.
+ *
+ * POST {"op": "save"|"reset"|"preview", "page": …, "lang": …, "format": …, "body": …, "enabled": bool}
+ *
+ * Not in the permission map, so this is owner-only — the same class of control as Settings itself.
+ * A page here is served to every visitor, signed in or not; that is not a moderator's decision.
+ */
+
+require_once __DIR__ . '/../../includes/pagecontent.php';
+require_once __DIR__ . '/../../includes/homeblocks.php';
+
+$input = $_SERVER['REQUEST_METHOD'] === 'POST' ? readJsonBody() : [];
+
+$page = (string)($_GET['page'] ?? '');
+if ($input) $page = (string)($input['page'] ?? $page);
+if (!pageContentPageKnown($page, $cfg)) {
+    jsonResponse(['error' => __('api.pages.unknown_page')], 400);
+}
+$isHome = str_starts_with($page, 'home:');
+
+// Any INSTALLED language may be edited, not merely an enabled one: a translation is written before
+// it is switched on, and an editor that refused would make that impossible.
+$lang = strtolower(trim((string)($input['lang'] ?? $_GET['lang'] ?? '')));
+if ($lang === '' || !langInstalled($lang)) {
+    $lang = langInstalled((string)($cfg['default_language'] ?? '')) ? (string)$cfg['default_language'] : LANG_FALLBACK;
+}
+
+$catalog = pageContentCatalog();
+$baseUrl = getBaseUrl();
+
+/** Which languages are editable here, with what each already has. */
+function pageContentLangs(PDO $db, array $cfg, string $page): array {
+    $all = pageContentAll($db)[$page] ?? [];
+    $out = [];
+    foreach (langAvailable() as $code => $name) {
+        $r = $all[$code] ?? null;
+        $out[] = [
+            'code'    => $code,
+            'name'    => $name,
+            'stored'  => $r !== null,
+            'enabled' => $r !== null && $r['enabled'],
+            'updated_at' => $r['updated_at'] ?? null,
+        ];
+    }
+    return $out;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $stored = pageContentGet($db, $page, $lang);
+    $format = (string)($_GET['format'] ?? ($stored['format'] ?? 'markdown'));
+    $pageFormats = richtextFormats($cfg, 'page');
+    if (!in_array($format, $pageFormats, true)) $format = in_array('markdown', $pageFormats, true) ? 'markdown' : $pageFormats[0];
+    $body = $stored ? (string)$stored['body'] : pageContentDefault($cfg, $page, $format, $baseUrl, $lang);
+    // Which version a visitor in THIS language is served right now — the chain in
+    // pageContentLangChain() means it may well be a version written for another language.
+    $active = pageContentActive($db, $page, $cfg, $lang);
+    jsonResponse([
+        'success'  => true,
+        'page'     => $page,
+        'lang'     => $lang,
+        'label'    => pageContentLabel($page, $cfg),
+        'route'    => $isHome ? 'home' : $catalog[$page]['route'],
+        // What a home section may paste in. Terms and Info have none: they are prose.
+        'placeholders' => $isHome ? array_map(fn($k, $v) => ['name' => $k, 'what' => $v],
+                                              array_keys(homePlaceholderList()), homePlaceholderList()) : [],
+        'stored'   => $stored !== null,
+        'enabled'  => $stored['enabled'] ?? false,
+        'format'   => $stored['format'] ?? $format,
+        'body'     => $body,
+        // The default in BOTH formats, so switching the picker in the editor does not need a
+        // round-trip and cannot lose what the operator has typed by fetching over it.
+        'default'  => [
+            'markdown' => pageContentDefault($cfg, $page, 'markdown', $baseUrl, $lang),
+            'bbcode'   => pageContentDefault($cfg, $page, 'bbcode', $baseUrl, $lang),
+        ],
+        'updated_at' => $stored['updated_at'] ?? null,
+        'updated_by' => $stored['updated_by'] ?? null,
+        'languages'  => pageContentLangs($db, $cfg, $page),
+        'serving'    => $active ? $active['lang'] : null,
+        'max'      => PAGECONTENT_MAX,
+        'formats'  => $pageFormats,
+        // Every condition a page may test, with its state right now — the editor lists them.
+        'markers'  => array_map(fn($k, $v) => ['name' => $k, 'on' => (bool)$v[0], 'what' => $v[1]],
+                                array_keys(pageContentConditions($cfg, $db)), pageContentConditions($cfg, $db)),
+        'note'     => __('settings.pc_markers_note'),
+    ]);
+}
+
+requirePost();
+$op = strtolower(trim((string)($input['op'] ?? '')));
+if (!in_array($op, ['save', 'reset', 'preview'], true)) {
+    jsonResponse(['error' => __('api.pages.unknown_op_save_reset_preview')], 400);
+}
+
+$format = (string)($input['format'] ?? 'markdown');
+if (!in_array($format, richtextRichFormats(), true)) $format = 'markdown';
+$body = (string)($input['body'] ?? '');
+
+if ($op === 'preview') {
+    // Rendered exactly as the page will be, including the signed-in state of whoever is looking —
+    // a preview that hides what a [hide] block does would be a preview of a different page.
+    if (strlen($body) > PAGECONTENT_MAX) {
+        jsonResponse(['error' => __('api.pages.body_too_long', ['max' => langNumber(PAGECONTENT_MAX)])], 400);
+    }
+    // The rules saving applies (pageContentSave()): a page is not held to a description's length, so
+    // the preview of the built-in Info (19 000 characters) does not warn about a limit the save ignores.
+    $err = trim($body) === '' ? null : pageContentValidate($body, $format, $cfg);
+    // Resolved the way the public page resolves them, so the preview is the page. A marker nobody
+    // knows is worth saying out loud: it is far more likely a typo than a request to show nothing.
+    $unknown = [];
+    $resolved = pageContentResolveMarkers($body, $cfg, $db, $unknown);
+    if ($unknown && $err === null) {
+        $err = __(count($unknown) === 1 ? 'api.pages.unknown_marker' : 'api.pages.unknown_markers',
+                  ['list' => implode(', ', $unknown), 'known' => implode(', ', array_keys(pageContentConditions($cfg, $db)))]);
+    }
+    $html = richtextRender($resolved, $format, $cfg, true);
+    if ($isHome) {
+        // The same bodies the page builds, pasted the same way — the preview IS the page.
+        $unknownPh = [];
+        $html = homeApplyPlaceholders($html, homePlaceholders($db, $cfg, $baseUrl), $unknownPh);
+        if ($unknownPh && $err === null) {
+            $err = __(count($unknownPh) === 1 ? 'api.pages.unknown_placeholder' : 'api.pages.unknown_placeholders',
+                      ['list' => implode(', ', $unknownPh), 'known' => implode(', ', array_keys(homePlaceholderList()))]);
+        }
+        $html = '<div class="rt-home">' . $html . '</div>';
+    }
+    jsonResponse(['success' => true, 'html' => $html, 'warning' => $err, 'chars' => strlen($body)]);
+}
+
+if ($op === 'reset') {
+    // This language only. "Restore" while editing Polish must not delete an English page somebody
+    // spent an afternoon writing.
+    if (!pageContentReset($db, $page, $lang)) jsonResponse(['error' => __('api.pages.restore_failed')], 500);
+    // the audit log in English whoever reads it (pageContentLabel()'s $english); the answer in the reader's language
+    auditNote(['target_id' => $page . '/' . $lang,
+               'summary' => 'restored the built-in ' . pageContentLabel($page, $cfg, true) . ' (' . strtoupper($lang) . ')']);
+    jsonResponse(['success' => true, 'stored' => false, 'enabled' => false, 'lang' => $lang,
+                  'body' => pageContentDefault($cfg, $page, $format, $baseUrl, $lang),
+                  'message' => __('api.pages.page_restored', ['page' => pageContentLabel($page, $cfg), 'lang' => strtoupper($lang)])]);
+}
+
+$who = (string)($_SESSION['admin_user'] ?? $_SESSION['username'] ?? 'owner');
+$r = pageContentSave($db, $cfg, $page, $lang, $format, $body, !empty($input['enabled']), $who);
+if (isset($r['error'])) jsonResponse(['error' => $r['error']], 400);
+auditNote(['target_id' => $page . '/' . $lang,
+           'summary' => (!empty($input['enabled']) ? 'published' : 'saved a draft of')
+                      . ' ' . pageContentLabel($page, $cfg, true) . ' (' . strtoupper($lang) . ')']);
+jsonResponse(['success' => true, 'stored' => true, 'enabled' => !empty($input['enabled']), 'lang' => $lang,
+              'message' => !empty($input['enabled'])
+                  ? __('api.pages.page_published', ['page' => pageContentLabel($page, $cfg), 'lang' => strtoupper($lang)])
+                  : __($isHome ? 'api.pages.draft_saved_section' : 'api.pages.draft_saved_page')]);

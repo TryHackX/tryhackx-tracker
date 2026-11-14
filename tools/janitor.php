@@ -1,0 +1,424 @@
+<?php
+/**
+ * CLI janitor for the whitelist service — run it from a systemd timer (or cron) as the web user:
+ *
+ *   sudo -u www-data php /var/www/tracker/tools/janitor.php
+ *
+ * It first applies the scheduled tracker mode (whitelist hours → blacklist/whitelist switch via the
+ * configured root helper; see includes/schedule.php — this is the ONLY place the switch runs, never a
+ * web request), then fires any due whitelist file regeneration / tracker reload (SIGHUP) that the
+ * request-driven janitor could not run because nobody visited the site, and removes stale temp files
+ * (old API bans are pruned by the retention step near the end, in every mode — includes/retention.php).
+ * Then the statistics timeline tick (includes/stats_timeline.php): one sample per
+ * configured interval (from the shared stats cache when fresh, otherwise from the tracker), 5-minute /
+ * hourly roll-ups and retention. Then the observed-hash index, the inbound UDP traffic sample
+ * (includes/netlimit.php — also where an expired "throttle hard" window is undone and where the
+ * automatic limit moves), any due scheduled backup (includes/backup.php — this is the only place a
+ * backup starts on a timer, never a web request) and the user-account tick. Safe to run every
+ * minute; exits 0 always. See README "Whitelist mode".
+ */
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+
+$root = dirname(__DIR__);
+if (!file_exists($root . '/config/installed.lock')) { fwrite(STDERR, "not installed\n"); exit(0); }
+require_once $root . '/config/app.php';
+require_once $root . '/config/database.php';
+require_once $root . '/includes/settings.php';
+require_once $root . '/includes/functions.php';
+require_once $root . '/includes/schema.php';
+require_once $root . '/includes/whitelist.php';
+require_once $root . '/includes/schedule.php';
+require_once $root . '/includes/stats_timeline.php';
+require_once $root . '/includes/index.php';
+require_once $root . '/includes/mail.php';
+require_once $root . '/includes/users.php';
+require_once $root . '/includes/netlimit.php';
+require_once $root . '/includes/iplist.php';
+require_once $root . '/includes/opentracker.php';
+require_once $root . '/includes/sysctl.php';
+require_once $root . '/includes/dbmem.php';
+require_once $root . '/includes/cluster.php';
+require_once $root . '/includes/backup.php';
+require_once $root . '/includes/bulkmail.php';
+require_once $root . '/includes/richtext.php';
+require_once $root . '/includes/audit.php';
+require_once $root . '/includes/tuner.php';
+require_once $root . '/includes/livesync.php';
+require_once $root . '/includes/reputation.php';
+require_once $root . '/includes/wlmaint.php';
+require_once $root . '/includes/wlprobe.php';
+require_once $root . '/includes/digest.php';
+require_once $root . '/includes/people.php';
+require_once $root . '/includes/shout.php';
+require_once $root . '/includes/antispam.php';
+require_once $root . '/includes/retention.php';
+require_once $root . '/includes/images.php';
+require_once $root . '/includes/facts.php';
+require_once $root . '/includes/tags.php';
+require_once $root . '/includes/wlrequests.php';
+require_once $root . '/includes/thumbs.php';
+
+/**
+ * The slow half. The index poll walks a scrape of a million and a half torrents (a hundred seconds
+ * on production) and the whitelist upkeep scrapes and probes with network timeouts. Inside the
+ * minute tick those were minutes without a timeline sample and without a netlimit sample: the
+ * timer does not start a second instance while one is running, so every long run drew a gap in
+ * every chart — two of them each half hour, growing with the catalogue.
+ *
+ * So this half runs as a transient unit of its own (tracker-janitor-heavy, started through the
+ * root helper the stability probe already uses, as the same user, at the same lowered priority),
+ * and inline as before on a machine that cannot do that. One heavy run at a time: the helper
+ * refuses while the previous one is still going, and the tick simply comes back a minute later.
+ */
+function janitorHeavy(PDO $db, array $cfg, array $argv): void
+{
+    // observed-hash index: poll (if due) / meta budget / prune (no-op when disabled)
+    $ix = indexTick($db, $cfg);
+    if ($ix['enabled'] && ($ix['error'] !== null || $ix['polled'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[index] polled=%s%s meta_queued=%d%s%s', $ix['polled'] ? 'yes' : 'no',
+            $ix['poll'] ? ' (entries=' . (int)$ix['poll']['entries'] . ' kept=' . (int)$ix['poll']['kept'] . ($ix['poll']['truncated'] ? ' TRUNCATED' : '') . ' ms=' . (int)$ix['poll']['ms'] . ')' : '',
+            (int)$ix['meta_queued'], $ix['prune'] ? ' pruned=' . (int)$ix['prune']['expired'] . '/' . (int)$ix['prune']['capped'] : '',
+            $ix['error'] !== null ? ' error=' . $ix['error'] : ''), "\n";
+    }
+
+    // the public catalogue's narrow table (1.74.0, includes/index.php indexCatalogTick()): what the metadata worker and
+    // federation resolved since the last run, then a stretch of the rolling walk — the walk that fills it the first time
+    // (up to IDX_CATALOG_FILL_SECONDS a run) and keeps putting it right after that. After the poll and the prune, so it
+    // walks what they left; only while the index is on, like everything above.
+    if ($ix['enabled']) {
+        $ct = indexCatalogTick($db);
+        $cw = $ct['walk'] ?? null;
+        if ($ct['error'] !== null || ($cw && $cw['passed']) || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[catalog] recent=%d walked=%d written=%d removed=%d%s ms=%d%s', (int)$ct['recent'],
+                (int)($cw['rows'] ?? 0), (int)($cw['written'] ?? 0), (int)($cw['removed'] ?? 0),
+                ($cw && $cw['passed']) ? ' PASS-COMPLETE' : '', (int)($cw['ms'] ?? 0),
+                $ct['error'] !== null ? ' error=' . $ct['error'] : ''), "\n";
+        }
+    }
+
+    if ($ix['enabled'] && indexCountsTick($db) && in_array('-v', $argv ?? [], true)) echo "[index] the shared counts were refreshed\n";
+
+    if (function_exists('forumDescLimitsBackfill') && ($fl = forumDescLimitsBackfill($db, $cfg)) > 0) echo "[forumdescs] record limits counted for $fl imported descriptions\n";
+
+    // whitelist upkeep: refresh stale swarm counts, and the dead-row pass on its own schedule
+    // submissions proving themselves: metadata in, at least one peer, or give up with a reason
+    $wp = wlProbeTick($db, $cfg);
+    if ($wp['passed'] || $wp['failed']) {
+        echo sprintf('[wlprobe] checked=%d passed=%d failed=%d deleted=%d',
+            $wp['checked'], $wp['passed'], $wp['failed'], $wp['deleted']), "
+";
+    }
+
+    $wm = wlMaintTick($db, $cfg);
+    if (($wm['refresh']['ran'] ?? false) || ($wm['dead']['ran'] ?? false) || $wm['error']) {
+        echo sprintf('[wlmaint] scraped=%d dead_matched=%d marked=%d deleted=%d%s',
+            (int)($wm['refresh']['scraped'] ?? 0), (int)($wm['dead']['matched'] ?? 0),
+            (int)($wm['dead']['marked'] ?? 0), (int)($wm['dead']['deleted'] ?? 0),
+            $wm['error'] ? ' error=' . $wm['error'] : ''), "
+";
+    }
+
+    if (function_exists('imagesRemoteTick')) {
+        $ir = imagesRemoteTick($db, $cfg);
+        if ($ir['copied'] || $ir['failed'] || $ir['repaired'] || $ir['changed'] || $ir['error'] !== null || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[images] hosts=%d queued=%d copied=%d failed=%d rewritten=%d repaired=%d rechecked=%d changed=%d%s', $ir['hosts'], $ir['queued'],
+                $ir['copied'], $ir['failed'], $ir['rewritten'], $ir['repaired'], $ir['rechecked'], $ir['changed'],
+                $ir['error'] !== null ? ' error=' . $ir['error'] : ''), "\n";
+        }
+    }
+
+    // "…is writing" rows whose moment has passed. Tiny, and it keeps a table that is pure state
+    // from growing a history nobody asked for.
+}
+
+function janitorHeavyDispatch(PDO $db, array $cfg, array $argv): void
+{
+    $verbose = in_array('-v', $argv, true);
+    if (function_exists('netlimitRun') && function_exists('netlimitCommand') && netlimitCommand($cfg) !== ''
+        && function_exists('trackerExecAvailable') && trackerExecAvailable()) {
+        $r = netlimitRun($cfg, ['janitor-heavy-start', __FILE__]);
+        if (!empty($r['ok'])) { if ($verbose) echo "[heavy] started as its own unit\n"; return; }
+        if (!empty($r['json']['active'])) { if ($verbose) echo "[heavy] the previous run is still going\n"; return; }
+        // A helper from before this verb ("unknown action"), a machine without systemd-run, or an
+        // exec that failed: the slow half runs here, as it always did.
+        if ($verbose) echo '[heavy] inline: ' . (string)($r['error'] ?? 'helper unavailable') . "\n";
+    }
+    janitorHeavy($db, $cfg, $argv);
+}
+
+try {
+    $db  = getDb();
+    $cfg = getSettings($db);
+    ensureSchema($db, $cfg);
+    // Publish which zone the panel's database session runs in, so the metadata worker can match it
+    // rather than guess. See includes/db_clock.php for what guessing cost.
+    require_once __DIR__ . '/../includes/db_clock.php';
+    dbClockPublish($db);
+    $GLOBALS['db'] = $db; $GLOBALS['cfg'] = $cfg;
+    // --heavy: this process IS the slow half (see janitorHeavy); nothing of the minute tick runs here.
+    if (in_array('--heavy', $argv ?? [], true)) { janitorHeavy($db, $cfg, $argv ?? []); exit(0); }
+    $before = whitelistStateRead();
+    // scheduled mode first: it may flip tracker_mode (in $cfg too), which the whitelist janitor honours
+    $sched = scheduleApply($db, $cfg);
+    if ($sched['changed'] || !$sched['ok']) {
+        echo sprintf('[schedule] %s %s→%s%s%s', $sched['ok'] ? 'switched' : 'FAILED', $sched['from'], $sched['to'] ?? '?',
+            $sched['error'] ? ' error=' . $sched['error'] : '', $sched['notes'] ? ' notes=' . implode(' | ', $sched['notes']) : ''), "\n";
+    }
+    // Ask the helper what mode is REALLY running and cache it, so the panel's status card reads a warm
+    // answer instead of forking a sudo on every poll — and so a panel/tracker disagreement is noticed
+    // within a minute rather than whenever somebody happens to look.
+    if (function_exists('scheduleModeAgreement')) {
+        $agree = scheduleModeAgreement($cfg, true);
+        if ($agree['known'] && $agree['match'] === false) {
+            echo sprintf("[mode] MISMATCH: the panel says %s, the tracker is running %s
+", $agree['panel'], $agree['actual']);
+        } elseif (!$agree['known'] && $agree['error'] !== null && in_array('-v', $argv ?? [], true)) {
+            echo '[mode] could not read the running mode: ' . $agree['error'] . "
+";
+        }
+    }
+    if (function_exists('auditPrune')) {
+        $pruned = auditPrune($db, $cfg);
+        if ($pruned > 0 && in_array('-v', $argv ?? [], true)) echo "[audit] pruned $pruned rows\n";
+    }
+    // Content-Security-Policy violations: keep the newest csp_report_keep_rows KINDS. The report
+    // endpoint already refuses to INSERT past that ceiling (so a hostile client cannot grow the
+    // table by choosing new blocked origins), which makes this the tidier of the two bounds rather
+    // than the load-bearing one — it is what shrinks the table after the operator lowers the limit
+    // or turns collection off, and what removes the oldest kinds once the ceiling is reached.
+    if (function_exists('cspPrune')) {
+        $cspGone = cspPrune($db, $cfg);
+        if ($cspGone > 0 && in_array('-v', $argv ?? [], true)) echo "[csp] pruned $cspGone violation rows\n";
+    }
+    if (function_exists('richtextMagnetClicksPrune')) richtextMagnetClicksPrune($db);
+    if (function_exists('richtextCachePrune')) {
+        $rcGone = richtextCachePrune($db);
+        if ($rcGone > 0 && in_array('-v', $argv ?? [], true)) echo "[richtext] pruned $rcGone cached descriptions\n";
+    }
+    if (function_exists('imagesSweep')) {
+        $imgGone = imagesSweep($db, $cfg);
+        if ($imgGone > 0 && in_array('-v', $argv ?? [], true)) echo "[images] removed $imgGone unused pictures\n";
+    }
+    if (function_exists('factsNameTick') && factsMode($cfg) === 'desc_name') {
+        if (($cfg['name_facts_cursor'] ?? '') !== 'done' || ($cfg['name_facts_ver'] ?? '1') !== (string)FACTS_NAME_VERSION) {
+            $nameRead = factsNameTick($db, $cfg);
+            if ($nameRead['read'] > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read {$nameRead['read']} names\n";
+        } elseif (time() - (int)($cfg['name_facts_wl_at'] ?? 0) >= 600) {
+            factsNameWhitelist($db);
+        }
+    }
+    if (function_exists('factsTick') && time() - (int)($cfg['facts_ticked_at'] ?? 0) >= 600) {
+        $db->prepare("REPLACE INTO settings (`key`, `value`) VALUES ('facts_ticked_at', ?)")->execute([(string)time()]);
+        $factsRead = factsTick($db);
+        if ($factsRead > 0 && in_array('-v', $argv ?? [], true)) echo "[facts] read $factsRead descriptions\n";
+        factsCountsTick($db, $cfg);
+        tagsUsesTick($db);
+        tagsForumReconcile($db, $cfg);
+        wlReqTick($db);
+    }
+    if (function_exists('thumbsTick')) {
+        $thumbsRun = thumbsTick($db, $cfg);
+        if (($thumbsRun['read'] > 0 || $thumbsRun['gone'] > 0 || $thumbsRun['made'] > 0) && in_array('-v', $argv ?? [], true)) echo "[thumbs] read {$thumbsRun['read']} descriptions, made {$thumbsRun['made']} lost files again, removed {$thumbsRun['gone']}\n";
+    }
+    // The stability probe: start one that was asked for, and restore one whose process has died.
+    // The reap is the important half — a tuner that is killed must not leave the machine on the limit
+    // it happened to be testing.
+    if (function_exists('tunerSpawn')) {
+        $reap = tunerReap($cfg);
+        if (!empty($reap['reaped'])) echo "[tuner] a run had stopped without restoring; settings put back\n";
+        $sp = tunerSpawn($cfg);
+        if (!empty($sp['started'])) echo "[tuner] started a requested run\n";
+    }
+    whitelistJanitor($db, $cfg);
+    // statistics timeline: sample / roll up / prune (no-op when disabled)
+    $tl = statsTimelineTick($db, $cfg);
+    if ($tl['enabled'] && ($tl['error'] !== null || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[timeline] sampled=%s source=%s rollup5m=%d rollup1h=%d%s%s', $tl['sampled'] ? 'yes' : 'no', $tl['source'] ?? '-',
+            (int)($tl['rollup']['5m'] ?? 0), (int)($tl['rollup']['1h'] ?? 0),
+            $tl['prune'] ? ' pruned=' . (int)$tl['prune']['raw'] . '/' . (int)$tl['prune']['5m'] : '',
+            $tl['error'] !== null ? ' error=' . $tl['error'] : ''), "\n";
+    }
+    // the slow half — its own unit when the machine can do that, inline otherwise (see janitorHeavy)
+    janitorHeavyDispatch($db, $cfg, $argv ?? []);
+    // inbound UDP traffic: sample the nftables counters, expire a panic window, move the automatic
+    // limit (no-op — not even a fork — while the monitor and the automatic mode are both off)
+    $nl = netlimitTick($db, $cfg);
+    if ($nl['enabled'] && ($nl['error'] !== null || $nl['auto'] !== null || $nl['panic'] !== null || $nl['persisted'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[netlimit] sampled=%s%s%s%s pruned=%d%s', $nl['sampled'] ? 'yes' : 'no',
+            $nl['auto'] ? ' auto=' . $nl['auto']['action'] . '→' . (int)$nl['auto']['pps'] . 'pps (' . $nl['auto']['reason'] . ')' : '',
+            $nl['panic'] ? ' panic=restored' : '',
+            $nl['persisted'] ? ' saved=ruleset' : '', (int)$nl['pruned'],
+            $nl['error'] !== null ? ' error=' . $nl['error'] : ''), "\n";
+    }
+    // Address lists: re-download the URL ones whose cache has expired, and push the result to the
+    // firewall if anything actually changed. A country zone that stops being downloadable changes
+    // nothing — the last good copy stays loaded and the failure is shown on the Traffic page.
+    // WRITTEN WHETHER THE SWITCH IS ON OR OFF, and that is the whole point: with the switch off
+    // ipListWriteSetsFile() writes an EMPTY file, which is how the helper is told to clear the sets.
+    // While this call sat inside the guard below, turning the lists off in Settings changed nothing
+    // at the firewall -- the last full file stayed on disk and every later apply passed --sets= with
+    // it. The panel said "off" and the machine went on dropping.
+    $sets = ipListWriteSetsFile($db, $cfg);
+    if (($cfg['net_lists_enabled'] ?? '0') === '1') {
+        $il = ipListTick($db);
+        $sets = ipListWriteSetsFile($db, $cfg);   // again, now that a tick may have refreshed a list
+        // Only re-apply when the file's content moved. The helper would notice anyway (it compares a
+        // fingerprint), but calling it every minute for nothing means a fork and an nft syntax check
+        // every minute for nothing.
+        $stamp = $sets['written'] ? md5_file($sets['path']) : '';
+        $prev = (string)($cfg['net_lists_stamp'] ?? '');
+        if ($stamp !== '' && $stamp !== $prev && netlimitEnabled($cfg)) {
+            $r = netlimitApply($cfg, netlimitPps($cfg), netlimitBurst($cfg), netlimitPort($cfg), false, 'lists');
+            if (!empty($r['ok'])) setSettings($db, ['net_lists_stamp' => $stamp]);
+            echo sprintf('[iplists] refreshed=%d failed=%d entries=%d reloaded=%s%s', (int)$il['refreshed'],
+                (int)$il['failed'], (int)$sets['lines'], !empty($r['ok']) ? 'yes' : 'no',
+                empty($r['ok']) ? ' error=' . ($r['error'] ?? '?') : ''), "
+";
+        } elseif ($il['refreshed'] || $il['failed'] || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[iplists] refreshed=%d failed=%d entries=%d reloaded=no',
+                (int)$il['refreshed'], (int)$il['failed'], (int)$sets['lines']), "
+";
+        }
+    } else {
+        // The switch is OFF. The empty file above says so; this is what makes the firewall agree.
+        // Same stamp rule as the on-path, so this fires once after the switch is flipped and then
+        // costs nothing every minute afterwards.
+        $stamp = $sets['written'] ? md5_file($sets['path']) : '';
+        $prev = (string)($cfg['net_lists_stamp'] ?? '');
+        if ($stamp !== '' && $stamp !== $prev && netlimitEnabled($cfg)) {
+            $r = netlimitApply($cfg, netlimitPps($cfg), netlimitBurst($cfg), netlimitPort($cfg), false, 'lists-off');
+            if (!empty($r['ok'])) setSettings($db, ['net_lists_stamp' => $stamp]);
+            echo sprintf('[iplists] switched off — sets cleared=%s%s', !empty($r['ok']) ? 'yes' : 'no',
+                empty($r['ok']) ? ' error=' . ($r['error'] ?? '?') : ''), "
+";
+        }
+    }
+    // an OpenTracker drop-in the panel could not write itself (php-fpm cannot write /etc)
+    $ot = otTick($cfg);
+    if ($ot['pending'] || $ot['error'] !== null) {
+        echo sprintf('[opentracker] pending=yes applied=%s%s', $ot['applied'] ? 'yes' : 'no',
+            $ot['error'] !== null ? ' error=' . $ot['error'] : ''), "
+";
+    }
+    // Kernel network buffers. This is the ONLY place on the machine that can write one: php-fpm
+    // runs with ProtectKernelTunables=yes, so /proc/sys is read-only inside its mount namespace --
+    // for root too, because it is a namespace and not a permission bit. The panel records what was
+    // asked for; this performs it, and puts it back when an armed change was never confirmed.
+    $sy = sysctlTick($cfg);
+    if ($sy['did'] !== null) {
+        echo sprintf('[sysctl] %s ok=%s%s%s', $sy['did'], $sy['ok'] ? 'yes' : 'no',
+            $sy['reverted'] ? ' reverted=yes' : '',
+            $sy['error'] !== null ? ' error=' . $sy['error'] : ''), "
+";
+    }
+
+    // Database memory: a drop-in the web request could not write (ProtectSystem=full) is owed to
+    // this process, the same way the kernel buffers are.
+    $dm = dbmemTick($cfg);
+    if ($dm['did'] !== null) {
+        echo sprintf('[dbmem] %s ok=%s%s', $dm['did'], $dm['ok'] ? 'yes' : 'no', $dm['error'] !== null ? ' error=' . $dm['error'] : ''), "\n";
+    }
+
+    // Extra opentracker instances: SIGHUP them when the accesslist has changed under them.
+    //
+    // Driven by the file's modification time rather than by hooking into whitelistJanitor(), for two
+    // reasons. That function runs on EVERY API request by design, so a loop of `systemctl reload` in
+    // it would let one visitor stall five php-fpm children. And it returns immediately in blacklist
+    // mode -- where an extra would otherwise keep serving a hash that was banned an hour ago, which
+    // on a takedown tracker is the failure with legal weight.
+    $cl = otClusterTick($cfg);
+    if ($cl['did'] !== null) {
+        echo sprintf('[cluster] %s reloaded=%d failed=%d%s', $cl['did'], $cl['reloaded'], $cl['failed'],
+            $cl['error'] !== null ? ' error=' . $cl['error'] : ''), "\n";
+    }
+    // scheduled backups: fire when a slot is due (no-op — not even a fork — while backups are off)
+    $bk = backupTick($db, $cfg);
+    if ($bk['enabled'] && ($bk['error'] !== null || $bk['started'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[backup] started=%s%s%s', $bk['started'] ? 'yes' : 'no',
+            $bk['id'] ? ' id=' . $bk['id'] : '', $bk['error'] !== null ? ' error=' . $bk['error'] : ''), "\n";
+    }
+    // user accounts: expire/warn timed group memberships, prune notifications + tokens (no-op when disabled)
+    $us = usersTick($db, $cfg);
+    if ($us['enabled'] && ($us['error'] !== null || $us['expired'] || $us['warned'] || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[users] expired=%d warned=%d pruned=%d%s', (int)$us['expired'], (int)$us['warned'], (int)$us['pruned'],
+            $us['error'] !== null ? ' error=' . $us['error'] : ''), "\n";
+    }
+    // bulk mail: a few messages a minute, and nothing at all while the feature is off. This is the
+    // only place they are sent — the panel writes rows and stops, because a burst of mail from a
+    // domain that normally sends a handful a day is what costs the password-reset messages.
+    $bm = bulkTick($db, $cfg);
+    if ($bm['sent'] || $bm['failed'] || in_array('-v', $argv ?? [], true)) {
+        echo sprintf('[bulkmail] sent=%d failed=%d left=%d', $bm['sent'], $bm['failed'], $bm['left']), "
+";
+    }
+    bulkPrune($db);
+
+    if (function_exists('pmTypingPrune')) {
+        $tp = pmTypingPrune($db);
+        if ($tp > 0 && in_array('-v', $argv ?? [], true)) echo "[pm] pruned $tp stale typing rows\n";
+    }
+
+    // The messages' Trash (1.73.0, includes/people.php): a conversation that has been there pm_trash_days is
+    // deleted for good for the member who put it there — their watermark moves over it; the other side's copy and
+    // every row stay. A bounded pass (per side one UPDATE a batch, oldest first by its key); logged when it did
+    // something, because a member asking "where did my conversation go" deserves a line in the journal.
+    if (function_exists('pmTrashPurgeExpired')) {
+        $pt = pmTrashPurgeExpired($db, $cfg);
+        if ($pt['purged'] > 0 || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[pm] trash purged=%d (older than %d days, %d statements)', $pt['purged'], pmTrashDays($cfg), $pt['batches']), "\n";
+        }
+    }
+
+    // The anti-spam layer's state (1.71.0, includes/antispam.php): a row nobody touched for two days holds
+    // nothing any rule still reads — every ladder has reset and every window has closed long before.
+    if (function_exists('antispamPrune')) {
+        $ap = antispamPrune($db);
+        if ($ap > 0 && in_array('-v', $argv ?? [], true)) echo "[antispam] pruned $ap idle rows\n";
+    }
+
+    // The retention of what nothing else comes back to (1.73.0, includes/retention.php): API bans expired 90 days
+    // ago, the sign-in bridge's spent and expired tickets, the panel's failed sign-ins past the lockout window and
+    // the forms' limits past the longest window — in every tracker mode (the bans were pruned only in whitelist
+    // mode, by one request in fifty; the rest only when the same address or action came back). Bounded; the two
+    // files under their own locks. Routine, so a line only with -v or when a step failed.
+    if (function_exists('retentionTick')) {
+        $rt = retentionTick($db, $cfg);
+        if ($rt['errors'] || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[retention] api_bans=%d bridge_tickets=%d login_attempts=%d rate_limits=%d%s',
+                $rt['api_bans'], $rt['bridge_tickets'], $rt['login_attempts'], $rt['rate_limits'],
+                $rt['errors'] ? ' errors=' . implode(' | ', array_map(fn($k, $v) => $k . ': ' . $v,
+                    array_keys($rt['errors']), $rt['errors'])) : ''), "\n";
+        }
+    }
+
+    // The shoutbox's retention, both halves at once: older than shout_keep_days, and beyond
+    // shout_keep_rows. A thousand rows a tick by primary key — the room is small and this is the
+    // only thing that keeps it that way. A no-op (one indexed lookup) while the feature is off.
+    if (function_exists('shoutPrune')) {
+        $sh = shoutPrune($db, $cfg);
+        if ($sh['by_age'] || $sh['by_count'] || in_array('-v', $argv ?? [], true)) {
+            echo sprintf('[shout] pruned=%d/%d', (int)$sh['by_age'], (int)$sh['by_count']), "\n";
+        }
+    }
+
+    // The operator's digest, LAST of the queue-changing work above so the numbers it reports are the
+    // ones a person would see if they opened the panel now. It only counts; it changes no queue.
+    $dg = digestTick($db, $cfg);
+    if ($dg['enabled'] && ($dg['sent'] || ($dg['skipped'] !== null && $dg['skipped'] !== 'not_due') || in_array('-v', $argv ?? [], true))) {
+        echo sprintf('[digest] sent=%s waiting=%d%s', $dg['sent'] ? 'yes' : 'no', (int)$dg['total'],
+            $dg['skipped'] !== null ? ' skipped=' . $dg['skipped'] : ''), "\n";
+    }
+
+    // live peer sync: refresh the cached view so the panel never forks a root script from a poll
+    livesyncTick($cfg);
+
+    $after = whitelistStateRead();
+    $msg = sprintf('mode=%s schedule=%s pending_reload=%s regen_needed=%s last_reload_ok=%s fail_count=%d count=%d',
+        trackerMode($cfg), scheduleEnabled($cfg) ? ('on desired=' . (scheduleDesiredMode($cfg) ?? 'invalid')) : 'off',
+        $after['pending_reload'] ? 'yes' : 'no', $after['regen_needed'] ? 'yes' : 'no',
+        $after['last_reload_ok'] === null ? 'n/a' : ($after['last_reload_ok'] ? 'yes' : 'no'), (int)$after['fail_count'], (int)$after['count']);
+    if (in_array('-v', $argv ?? [], true) || $before['pending_reload'] || $before['regen_needed'] || $sched['changed']) echo $msg, "\n";
+} catch (\Throwable $e) {
+    fwrite(STDERR, '[janitor] ' . $e->getMessage() . "\n");
+}
+exit(0);
